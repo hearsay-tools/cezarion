@@ -114,6 +114,34 @@ function originOf(url: string | undefined): string {
   }
 }
 
+/** Builds the CDP parameters without changing the input defaults. */
+export function mouseEventParams(msg: Extract<PreviewClientMessage, { t: 'mouse' }>) {
+  return {
+    type: msg.type,
+    x: msg.x,
+    y: msg.y,
+    button: msg.button ?? 'none',
+    buttons: msg.buttons ?? 0,
+    clickCount: msg.clickCount ?? 0,
+    deltaX: msg.deltaX ?? 0,
+    deltaY: msg.deltaY ?? 0,
+    modifiers: msg.modifiers ?? 0,
+  };
+}
+
+/** Builds the CDP parameters without changing the input defaults. */
+export function keyEventParams(msg: Extract<PreviewClientMessage, { t: 'key' }>) {
+  return {
+    type: msg.type,
+    key: msg.key ?? '',
+    code: msg.code ?? '',
+    ...(msg.type === 'keyUp' ? {} : { text: msg.text ?? '' }),
+    modifiers: msg.modifiers ?? 0,
+    windowsVirtualKeyCode: msg.vk ?? 0,
+    ...(msg.commands ? { commands: msg.commands } : {}),
+  };
+}
+
 export class PreviewSession {
   /** The page's current top-level URL, as Chromium last reported it. */
   url?: string;
@@ -272,66 +300,72 @@ export class PreviewSession {
     switch (msg.t) {
       case 'resize':
         return this.setViewport(msg.w, msg.h, msg.dpr);
-      case 'ack': {
-        if (this.pending === undefined) return;
-        const acked = this.pending;
-        this.pending = undefined;
-        const held = this.held;
-        this.held = undefined;
-        if (held) this.sendFrame(held);
-        return this.ackFrame(acked);
-      }
+      case 'ack':
+        return this.handleAck();
       case 'mouse':
         if (ACTIVE_MOUSE.has(msg.type)) this.expectFrame();
-        await this.cdp.send('Input.dispatchMouseEvent', {
-          type: msg.type,
-          x: msg.x,
-          y: msg.y,
-          button: msg.button ?? 'none',
-          buttons: msg.buttons ?? 0,
-          clickCount: msg.clickCount ?? 0,
-          deltaX: msg.deltaX ?? 0,
-          deltaY: msg.deltaY ?? 0,
-          modifiers: msg.modifiers ?? 0,
-        });
-        return;
+        return this.handleMouse(msg);
       case 'key':
         if (msg.type !== 'keyUp') this.expectFrame();
-        await this.cdp.send('Input.dispatchKeyEvent', {
-          type: msg.type,
-          key: msg.key ?? '',
-          code: msg.code ?? '',
-          ...(msg.type === 'keyUp' ? {} : { text: msg.text ?? '' }),
-          modifiers: msg.modifiers ?? 0,
-          windowsVirtualKeyCode: msg.vk ?? 0,
-          ...(msg.commands ? { commands: msg.commands } : {}),
-        });
-        return;
+        return this.handleKey(msg);
       case 'insertText':
         this.expectFrame();
-        await this.cdp.send('Input.insertText', { text: msg.text });
-        return;
+        return this.handleInsertText(msg);
       case 'nav':
-        return this.navigate(normalizePreviewUrl(msg.url));
+        return this.handleNav(msg);
       case 'reload':
         this.expectFrame();
-        await this.cdp.send('Page.reload', { ignoreCache: msg.ignoreCache ?? false });
-        return;
+        return this.handleReload(msg);
       case 'back':
-      case 'forward': {
+      case 'forward':
         this.expectFrame();
-        const { currentIndex, entries } = await this.cdp.send<{ currentIndex: number; entries: Array<{ id: number }> }>('Page.getNavigationHistory');
-        const entry = entries[currentIndex + (msg.t === 'back' ? -1 : 1)];
-        if (entry) await this.cdp.send('Page.navigateToHistoryEntry', { entryId: entry.id });
-        return;
-      }
+        return this.handleHistory(msg);
       case 'dialogResult':
-        await this.cdp.send('Page.handleJavaScriptDialog', { accept: msg.accept, promptText: msg.text ?? '' });
-        return;
+        return this.handleDialog(msg);
       default:
         // Server and lifecycle messages belong to the host.
         return;
     }
+  }
+
+  private handleAck(): Promise<void> | undefined {
+    if (this.pending === undefined) return;
+    const acked = this.pending;
+    this.pending = undefined;
+    const held = this.held;
+    this.held = undefined;
+    if (held) this.sendFrame(held);
+    return this.ackFrame(acked);
+  }
+
+  private async handleMouse(msg: Extract<PreviewClientMessage, { t: 'mouse' }>): Promise<void> {
+    await this.cdp.send('Input.dispatchMouseEvent', mouseEventParams(msg));
+  }
+
+  private async handleKey(msg: Extract<PreviewClientMessage, { t: 'key' }>): Promise<void> {
+    await this.cdp.send('Input.dispatchKeyEvent', keyEventParams(msg));
+  }
+
+  private async handleInsertText(msg: Extract<PreviewClientMessage, { t: 'insertText' }>): Promise<void> {
+    await this.cdp.send('Input.insertText', { text: msg.text });
+  }
+
+  private handleNav(msg: Extract<PreviewClientMessage, { t: 'nav' }>): Promise<void> {
+    return this.navigate(normalizePreviewUrl(msg.url));
+  }
+
+  private async handleReload(msg: Extract<PreviewClientMessage, { t: 'reload' }>): Promise<void> {
+    await this.cdp.send('Page.reload', { ignoreCache: msg.ignoreCache ?? false });
+  }
+
+  private async handleHistory(msg: Extract<PreviewClientMessage, { t: 'back' | 'forward' }>): Promise<void> {
+    const { currentIndex, entries } = await this.cdp.send<{ currentIndex: number; entries: Array<{ id: number }> }>('Page.getNavigationHistory');
+    const entry = entries[currentIndex + (msg.t === 'back' ? -1 : 1)];
+    if (entry) await this.cdp.send('Page.navigateToHistoryEntry', { entryId: entry.id });
+  }
+
+  private async handleDialog(msg: Extract<PreviewClientMessage, { t: 'dialogResult' }>): Promise<void> {
+    await this.cdp.send('Page.handleJavaScriptDialog', { accept: msg.accept, promptText: msg.text ?? '' });
   }
 
   private enqueue(job: () => Promise<void>): Promise<void> {

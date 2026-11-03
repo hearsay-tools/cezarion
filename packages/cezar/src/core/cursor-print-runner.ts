@@ -302,22 +302,7 @@ class CursorPrintSession implements AgentSession {
     if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return;
     const native = frame as Record<string, unknown>;
     if (native.type === 'system' && native.subtype === 'init') {
-      if (typeof native.session_id !== 'string' || !NATIVE_ID_RE.test(native.session_id)) {
-        this.fail('Cursor print returned an invalid session id'); return;
-      }
-      if (this.nativeId && native.session_id !== this.nativeId) {
-        this.fail('Cursor print returned a different session id on resume'); return;
-      }
-      if (!this.nativeId) {
-        this.nativeId = native.session_id;
-      }
-      // A separate Continue creates a new managed step even with the same native ID.
-      // Emit once for that logical session so its step has corroborating evidence.
-      if (!this.sessionEventEmitted) {
-        this.sessionEventEmitted = true;
-        this.emit({ type: 'session', sessionId: native.session_id });
-      }
-      active.initSeen = true;
+      if (!this.acceptSessionInit(native, active)) return;
     }
     if (native.type === 'result') {
       if (!this.nativeId || native.session_id !== this.nativeId) {
@@ -337,6 +322,30 @@ class CursorPrintSession implements AgentSession {
         active.receipt.resolve();
       }
     }
+    this.mapFrameEvents(frame, active);
+  }
+
+  private acceptSessionInit(native: Record<string, unknown>, active: ActiveTurn): boolean {
+    if (typeof native.session_id !== 'string' || !NATIVE_ID_RE.test(native.session_id)) {
+      this.fail('Cursor print returned an invalid session id'); return false;
+    }
+    if (this.nativeId && native.session_id !== this.nativeId) {
+      this.fail('Cursor print returned a different session id on resume'); return false;
+    }
+    if (!this.nativeId) {
+      this.nativeId = native.session_id;
+    }
+    // A separate Continue creates a new managed step even with the same native ID.
+    // Emit once for that logical session so its step has corroborating evidence.
+    if (!this.sessionEventEmitted) {
+      this.sessionEventEmitted = true;
+      this.emit({ type: 'session', sessionId: native.session_id });
+    }
+    active.initSeen = true;
+    return true;
+  }
+
+  private mapFrameEvents(frame: unknown, active: ActiveTurn): void {
     const mapped = mapCursorPrintMessage(frame, this.uiState);
     this.uiState = mapped.state;
     for (const event of mapped.events) this.opts.onUiEvent?.(event);
@@ -364,6 +373,11 @@ class CursorPrintSession implements AgentSession {
     this.active = undefined;
     if (this.noProgress) clearTimeout(this.noProgress);
     this.noProgress = undefined;
+    if (this.retryModelAdmission(active, exitCode, signal, spawnError)) return;
+    this.settleTurn(active, exitCode, signal, spawnError);
+  }
+
+  private retryModelAdmission(active: ActiveTurn, exitCode: number | null, signal: NodeJS.Signals | null, spawnError: boolean): boolean {
     // This native rejection is before inference. Cursor's per-process parameter catalog
     // may be unavailable even though account-scoped preflight validated the exact selection.
     // One fresh process gets another chance; any init/work/result, signal, cancellation or
@@ -374,9 +388,13 @@ class CursorPrintSession implements AgentSession {
       // A consumer can stop the session while handling the note.
       if (!this.closing && this.isOpen) {
         this.launchTurn(active.args, active.prompt, active.receipt, true, active.env, active.heldHuman);
-        return;
+        return true;
       }
     }
+    return false;
+  }
+
+  private settleTurn(active: ActiveTurn, exitCode: number | null, signal: NodeJS.Signals | null, spawnError: boolean): void {
     if (active.receipt && !active.receipt.settled) {
       active.receipt.settled = true;
       if (active.resultSeen && !spawnError && exitCode === 0) active.receipt.resolve();
@@ -387,6 +405,10 @@ class CursorPrintSession implements AgentSession {
     // turn-end. Admit it at this boundary, after the old process settled.
     if (completedTurn && !this.errorReported) this.busy = false;
     if (completedTurn) this.emit({ type: 'turn-end' });
+    this.settleTerminalStatus(active, exitCode, signal, spawnError);
+  }
+
+  private settleTerminalStatus(active: ActiveTurn, exitCode: number | null, signal: NodeJS.Signals | null, spawnError: boolean): void {
     if (this.closing) { this.finish(); return; }
     if (spawnError) { this.fail('Cursor print process failed to start'); return; }
     if (exitCode !== 0 || signal !== null) {

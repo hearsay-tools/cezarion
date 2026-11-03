@@ -68,25 +68,32 @@ function stub(opts: Stub = {}) {
     const path = String(input).replace('?archived=recent', '')
     sent.push(path)
     const method = init.method ?? 'GET'
-    if (method === 'GET' && path.includes('/run-summaries/archived')) return json({ runs: [], nextCursor: null, total: 0 })
-    if (method === 'GET' && path.endsWith('/run-summaries')) return opts.runs === 'error' ? json({ error: 'boom' }, 400) : json(opts.runs ?? [])
-    if (method === 'GET' && path.includes('/github/search')) {
-      const q = decodeURIComponent((new URL(path, 'http://x').searchParams.get('q') ?? '').replace(/\+/g, ' '))
-      const out = opts.search?.(q) ?? { available: true, items: [] }
-      return out instanceof Response ? out : json(out)
-    }
-    if (method === 'GET' && path.startsWith('/api/v1/github/checks')) return json({ available: true, checks: {} })
-    if (method === 'GET' && path.startsWith('/api/v1/github/comments/')) return json({ available: true, comments: [] })
-    if (method === 'GET' && (path === '/api/v1/github' || path.startsWith('/api/v1/github?'))) return json(opts.gh ?? GITHUB)
-    if (method === 'GET' && path === '/api/v1/ui-state') return json(opts.uiState ?? {})
-    if (method === 'GET' && path === '/api/v1/workflows') return json({ workflows: [] })
-    if (method === 'GET' && path === '/api/v1/skills') return json([])
-    if (method === 'GET' && path === '/api/v1/providers/status') return json({ providers: [] })
-    if (method === 'GET' && path === '/api/v1/health') return json(HEALTH)
-    if (method === 'GET' && path.startsWith('/api/v1/models')) return json({ runner: 'claude', models: [], source: 'unavailable', stale: false })
-    return json({})
+    if (method !== 'GET') return json({})
+    return githubResponse(path, opts) ?? cockpitResponse(path, opts) ?? json({})
   }))
   return sent
+}
+
+function githubResponse(path: string, opts: Stub): Response | undefined {
+  if (path.includes('/run-summaries/archived')) return json({ runs: [], nextCursor: null, total: 0 })
+  if (path.endsWith('/run-summaries')) return opts.runs === 'error' ? json({ error: 'boom' }, 400) : json(opts.runs ?? [])
+  if (path.includes('/github/search')) {
+    const q = decodeURIComponent((new URL(path, 'http://x').searchParams.get('q') ?? '').replace(/\+/g, ' '))
+    const out = opts.search?.(q) ?? { available: true, items: [] }
+    return out instanceof Response ? out : json(out)
+  }
+  if (path.startsWith('/api/v1/github/checks')) return json({ available: true, checks: {} })
+  if (path.startsWith('/api/v1/github/comments/')) return json({ available: true, comments: [] })
+  if (path === '/api/v1/github' || path.startsWith('/api/v1/github?')) return json(opts.gh ?? GITHUB)
+}
+
+function cockpitResponse(path: string, opts: Stub): Response | undefined {
+  if (path === '/api/v1/ui-state') return json(opts.uiState ?? {})
+  if (path === '/api/v1/workflows') return json({ workflows: [] })
+  if (path === '/api/v1/skills') return json([])
+  if (path === '/api/v1/providers/status') return json({ providers: [] })
+  if (path === '/api/v1/health') return json(HEALTH)
+  if (path.startsWith('/api/v1/models')) return json({ runner: 'claude', models: [], source: 'unavailable', stale: false })
 }
 
 function Where() {

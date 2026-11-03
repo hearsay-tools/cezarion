@@ -1,6 +1,5 @@
 import { SHORT_BOUND_MS } from './test-wait-discipline.ts';
 import { wordEndingAt, skipSpaceBack, skipSpaceForward } from './blank.ts';
-import { pollDeadline } from './server-wait-deadlines.ts';
 
 /** The bracket matching the `(`, `[` or `{` at `open`, in blanked code; the end of the source when unbalanced. */
 export function closeOf(code: string, open: number): number {

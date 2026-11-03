@@ -1,6 +1,6 @@
-import type { AwaitExpression, BinaryExpression, BlockStatement, CallExpression, Comment, DoWhileStatement, File, ForStatement, Identifier, MemberExpression, Node, ObjectExpression, UnaryExpression, WhileStatement } from '@babel/types';
+import type { BinaryExpression, CallExpression, MemberExpression, Node, ObjectExpression, UnaryExpression } from '@babel/types';
 import { VITEST_DEFAULT_MS, walk, isFunction, targetNames, namesWritten, type Ctx, type Where } from './unit-wait-discipline.ts';
-import { type Bound, isPath, isLimit, compares, isNamed, latest } from './unit-wait-deadlines.ts';
+import { type Bound, isPath, isLimit, isNamed } from './unit-wait-deadlines.ts';
 
 /** A name's value where it is read, or undefined when the scan cannot say. */
 export type Read = (name: string) => number | undefined

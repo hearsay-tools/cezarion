@@ -1,6 +1,11 @@
+import { checkWorkspaceResolution } from './scripts/check-workspace-resolution.mjs'
+import { availableParallelism } from 'node:os'
+import { defaultMaxWorkers } from './.github/scripts/vitest-worker-count.cjs'
 import { defineConfig } from 'vitest/config'
 import CiTestSequencer from './.github/scripts/ci-test-sequencer.mjs'
 import KeepTestFilesInCoverage, { coverageRequested } from './.github/scripts/vitest-coverage-tests.mjs'
+
+checkWorkspaceResolution()
 
 // Four unit packages, one `npm test`. Each owns its own vitest config — this file only names
 // them, so `npm test -w <pkg>` and the whole-repo run execute the identical setup:
@@ -12,6 +17,7 @@ import KeepTestFilesInCoverage, { coverageRequested } from './.github/scripts/vi
 // the four unit projects; `npm run test:e2e` selects the browser config after bootstrap.
 export default defineConfig({
   test: {
+    maxWorkers: defaultMaxWorkers(process.availableMemory(), availableParallelism()),
     // The suites are still being grown; a project that currently matches no file must not
     // fail the validation gate. Root-level only — vitest rejects this inside a project.
     passWithNoTests: true,

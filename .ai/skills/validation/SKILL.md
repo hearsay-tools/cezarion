@@ -5,7 +5,7 @@ description: Run or choose tests in this repo (Squeal verdicts, Vitest through n
 
 # Validation
 
-In a fresh task worktree (`.ai/cezar/worktrees/<runId>`), run `pnpm install --frozen-lockfile` unless `worktreeSetup` already did. Without local `node_modules`, Node resolves `@open-mercato/*` in the main checkout, so typecheck/tests use its sources.
+In a fresh task worktree (`.ai/cezar/worktrees/<runId>`), run `pnpm install --frozen-lockfile` unless `worktreeSetup` already did.
 
 Before adding a YAML, shell or Markdown reader, read [Script readers](../../../docs/sdlc/script-readers.md).
 
@@ -105,9 +105,7 @@ CI's final gate.
 them, with or without its daemon. Run `npm run build` from the repo root after
 relevant source changes; then, from `packages/cezar`, run
 `node --import ../../scripts/test-git-env.mjs --import tsx --test <files>` with
-paths relative to that directory (e.g. `test/e2e/task-cli.test.ts`). Pass packaged
-paths to `node --test`, never to `squeal status`: it gives them no result and no
-warning (hearsay-tools/squeal#83). In an unbuilt worktree they fail with a
+paths relative to that directory (e.g. `test/e2e/task-cli.test.ts`). In an unbuilt worktree they fail with a
 `Cannot find module` error naming a missing `dist/` module; an assertion failure
 is a real failure that needs investigation.
 
@@ -135,38 +133,7 @@ To check a UI change by hand in a real browser, run `node .ai/scripts/qa-fixture
 (hearsay-tools/cezarion#1406); `packages/web/e2e/README.md` § Checking a UI change by hand
 says what it serves and how it stops.
 
-**Typecheck.** For web-only verification, use `npm run typecheck:web` or
-`npm run typecheck -w @open-mercato/cezar-web`. Both rebuild server declarations
-from this worktree before checking web sources; direct `tsc --noEmit` does not.
-The full root typecheck runs web first, preparing declarations once for all four
-workspace checks.
-
-To typecheck without rebuilding `packages/cezar/dist`, for example while Squeal
-is validating, run the three server configs from `packages/cezar`. The root
-`npm run typecheck` rebuilds `dist` first, and Squeal then marks dozens of
-passing checks UNKNOWN (hearsay-tools/squeal#33).
-
-```bash
-./node_modules/.bin/tsc --noEmit -p tsconfig.json          # shipped sources only
-./node_modules/.bin/tsc --noEmit -p tsconfig.test.json     # adds every test file
-./node_modules/.bin/tsc --noEmit -p tsconfig.scripts.json  # .ai/scripts/*.ts probes
-```
-
-The `.ai/scripts/*.ts` probes import server internals and CI never runs them,
-so `tsconfig.scripts.json` is their only check (hearsay-tools/cezarion#1702).
-
-`tsconfig.json` leaves out every test file: on hearsay-tools/cezarion#1291 a
-TS2353 in `src/runs/waits-store.test.ts` passed it and failed CI.
-`tsconfig.test.json` sets `rootDir` to `.`, so only `tsconfig.json` reports a
-shipped file that imports from outside `src/`. `tsconfig.test.json` also
-compiles the `test/e2e/` imports of `../../dist/`, so in a worktree that was
-never built it fails with TS2307: run `npm run build -w @wjarka/cezarion` once
-first. For contract edits, also run `npm run typecheck:contract` from the repo
-root. It checks `packages/contract/tsconfig.test.json`, because that package's
-`tsconfig.json` leaves out its tests too. Run the root `npm run typecheck` once
-before a PR when declarations matter: a cockpit edit, or a server change that
-the cockpit reads through `AppType` or that a `test/e2e/` file imports from
-`dist`. Expect the UNKNOWN burst then.
+**Typecheck.** Run `npm run typecheck`; it checks all workspaces without building or writing `dist`. After `npm run build`, run `npm run typecheck:package` to check packaged tests.
 
 **In a unit test, a timeout is a hang guard, never the thing the test waits on.**
 Wait for the product's own signal: an event, a callback, a store write, a file
@@ -196,9 +163,7 @@ gate, `squeal run --all`, or the full Vitest or browser suite just to finish a
 task, commit, open a PR, or complete a review. Run a full local suite only when
 explicitly requested or needed to investigate a CI failure. A full local Vitest
 run is CI's four shards: `npm test -- --shard=N/4 --maxWorkers=4`,
-for N=1..4, one after another. An unsharded `npm test`
-is not the local full gate: on a host with about 30 GiB free it can be OOM-killed
-(exit 137). Squeal's `baseline.onStart: "lookup-then-run-missing"` reuses cached
+for N=1..4, one after another. Squeal's `baseline.onStart: "lookup-then-run-missing"` reuses cached
 results and runs missing tests at startup; Stop requires neither a full nor a slow suite.
 Record the tested revision (or uncommitted diff), commands or Squeal status,
 outcomes, and subsequent edits in the handoff. After later code changes, rerun
@@ -209,7 +174,7 @@ in `.github/workflows/ci.yml`; check its required aggregate before merge.
 CI's final gate covers:
 
 ```bash
-npm run typecheck   # refresh server declarations, then check all four workspaces
+npm run typecheck   # check all four workspaces without building
 npm test -- --shard=N/4 --maxWorkers=4  # vitest, N=1..4 — server + cockpit unit suites
 npm run test:unit   # node:test — fast core-module coverage (packages/cezar/test/unit/)
 npm run build       # tsc → dist/, vite → packages/cezar/web/dist/, then the check:pack tarball gate
@@ -227,24 +192,3 @@ Read [`docs/sdlc/ci.md`](../../../docs/sdlc/ci.md) before you:
 - edit `ci.yml` or a workflow it calls (§ Proving a `ci.yml` change);
 - add or split a Vitest unit test file that takes longer than about one minute
   on CI (the duration manifest, after the Vitest sequencer paragraph).
-
-
-<a id="parity-suites"></a>
-
-## Parity suites before a PR
-
-
-Before opening a PR that changes wait,
-turn-end, failure or step-settlement paths in `packages/cezar/src/workflows/run.ts` or
-`workflows/run/`, verify every suite matching
-`packages/cezar/src/core/*-parity.test.ts` and
-`packages/cezar/src/workflows/*-parity.test.ts`: with Squeal, run
-`squeal status --wait 60000 packages/cezar/src/core/*-parity.test.ts packages/cezar/src/workflows/*-parity.test.ts`
-and require a passing verdict for every selected file that gets one. Repeat the
-wait only for files that are still pending. When a file gets no verdict, follow
-[the bound on a Squeal wait](#squeal-wait-bound): run the parity cells that the
-change affects with `npm test -- <file> -t '<name>'`, record them in the PR's
-Verification, and let CI's Vitest shards give the file's full verdict. Without
-Squeal, run
-`npm test -- packages/cezar/src/core/*-parity.test.ts packages/cezar/src/workflows/*-parity.test.ts`.
-

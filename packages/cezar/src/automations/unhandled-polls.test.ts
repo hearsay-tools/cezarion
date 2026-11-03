@@ -8,11 +8,16 @@ import { AutomationStore } from './store.ts';
 import type { GithubAutomationDefinition } from './types.ts';
 
 const dirs: string[] = [];
-// Keep fixture events inside the seven-day history window as the host date changes.
-beforeEach(() => vi.useFakeTimers({ now: Date.parse('2026-10-28T00:00:00Z'), toFake: ['Date'] }));
-afterEach(() => vi.useRealTimers());
-afterEach(async () => Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true }))));
+afterEach(async () => {
+  vi.useRealTimers();
+  await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true })));
+});
 const epoch = Date.parse('2026-10-27T00:00:00Z');
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  // Keep the fixture events inside the history window and before its upper bound.
+  vi.setSystemTime(epoch + 86_400_000);
+});
 const at = (seconds: number) => new Date(epoch + seconds * 1000).toISOString();
 const issue = (number: number) => ({
   node_id: `I_${number}`, number, title: 'Issue', html_url: `https://github.com/acme/demo/issues/${number}`,

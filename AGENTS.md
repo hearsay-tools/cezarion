@@ -115,8 +115,7 @@ tests, lint, typechecks, browser or packaged E2E, or choosing a Squeal or unit-t
 
 1. Finish the reader sweep for every shared name, value or default the change alters.
 2. For a change to wait, turn-end, failure or step-settlement paths in
-   `packages/cezar/src/workflows/run.ts` or `workflows/run/`, verify the parity suites
-   ([validation skill](.ai/skills/validation/SKILL.md#parity-suites)).
+   `packages/cezar/src/workflows/run.ts` or `workflows/run/`, run `npm run test:parity`.
 3. Before the first push of a `packages/**` source or test change, require `npm run lint`
    to pass. If a pinned source shrinks, first run `FILE_LENGTH_UPDATE=1 npm run lint`.
 4. Run the root `npm run typecheck` once when declarations matter.

@@ -1,11 +1,11 @@
-import { execFile } from 'node:child_process';
+import { execFile, type ExecFileOptions } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { AgentRunSpec } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { CORE_CURSOR_PRINT_TOOLS } from './cursor-print-tool-catalog.ts';
 import { cursorArgs, noteCursorAutoUpdateFlagRejected, rejectsCursorAutoUpdateFlag,
   usesCursorAutoUpdateFlag } from './cursor-cli-flags.ts';
-import { discoverCursorParameterizedModels, parseCursorModels } from './cursor-model-catalog.ts';
+import { discoverCursorParameterizedModels, parseCursorModels, type CursorParameterizedModel } from './cursor-model-catalog.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
 
 const execute = promisify(execFile);
@@ -24,20 +24,9 @@ function buildDate(version: string): number | undefined {
   return match ? Number(`${match[1]}${match[2]}${match[3]}`) : undefined;
 }
 
-/** Bounded, pre-inference checks that the installed build can run print sessions: a dated
- * build no older than the baseline, the strict native tool validator, and the core tools. */
-export async function inspectCursorPrintCapabilities(
-  bin: string,
-  spec: AgentRunSpec,
-  signal?: AbortSignal,
-): Promise<CursorPrintCapabilityResult> {
-  const options = {
-    cwd: spec.cwd,
-    env: buildChildEnv({ backend: 'cursor', extraEnv: spec.env }),
-    timeout: 5_000,
-    maxBuffer: 64 * 1024,
-    signal,
-  };
+type ProbeOptions = ExecFileOptions & { encoding?: 'utf8' };
+
+async function inspectBuildVersion(bin: string, options: ProbeOptions): Promise<CursorPrintCapabilityResult> {
   let version: string;
   try { version = (await execute(bin, cursorArgs(bin, ['--version']), options)).stdout.trim(); }
   catch (error) {
@@ -50,6 +39,10 @@ export async function inspectCursorPrintCapabilities(
   if (date === undefined || date < buildDate(QUALIFIED_BASELINE)!) {
     return { supported: false, reason: `Cursor print marketplace support needs a build from ${QUALIFIED_BASELINE} or newer; installed build is not qualified` };
   }
+  return { supported: true };
+}
+
+async function inspectNativeTools(bin: string, options: ProbeOptions): Promise<CursorPrintCapabilityResult> {
   const probe = async (): Promise<string> => {
     try {
       // Match the trusted headless invocation. In a new task worktree Cursor
@@ -76,7 +69,34 @@ export async function inspectCursorPrintCapabilities(
   if (missing.length) {
     return { supported: false, reason: `Cursor native tool catalog lacks core print tools: ${missing.join(', ')}` };
   }
+  return { supported: true };
+}
+
+/** Bounded, pre-inference checks that the installed build can run print sessions: a dated
+ * build no older than the baseline, the strict native tool validator, and the core tools. */
+export async function inspectCursorPrintCapabilities(
+  bin: string,
+  spec: AgentRunSpec,
+  signal?: AbortSignal,
+): Promise<CursorPrintCapabilityResult> {
+  const options = {
+    cwd: spec.cwd,
+    env: buildChildEnv({ backend: 'cursor', extraEnv: spec.env }),
+    timeout: 5_000,
+    maxBuffer: 64 * 1024,
+    signal,
+  };
+  const version = await inspectBuildVersion(bin, options);
+  if (!version.supported) return version;
+  const tools = await inspectNativeTools(bin, options);
+  if (!tools.supported) return tools;
   if (!spec.model && !spec.effort) return { supported: true };
+  return resolveSelectedModel(bin, spec, options, signal);
+}
+
+async function resolveSelectedModel(
+  bin: string, spec: AgentRunSpec, options: ProbeOptions, signal?: AbortSignal,
+): Promise<CursorPrintCapabilityResult> {
   let models: ModelOption[];
   try { models = parseCursorModels((await execute(bin, cursorArgs(bin, ['--list-models']), options)).stdout); }
   catch { throw new Error('Cursor print capability preflight could not read selected-account models'); }
@@ -90,41 +110,67 @@ export async function inspectCursorPrintCapabilities(
     catch { throw new Error('Cursor print capability preflight could not read selected-account model parameters'); }
     const selected = catalog.find(option => option.value === model);
     if (!selected) throw new Error('Cursor print requested model is not advertised for the selected account');
-    let resolvedModel = model;
-    if (spec.effort) {
-      const parameters = (selected.configOptions ?? []).filter(option => option.type === 'select');
-      const effort = parameters.find(option => ['effort', 'reasoning', 'reasoning_effort'].includes(option.id) &&
-        option.options?.some(value => value.value === spec.effort));
-      if (!effort) throw new Error('Cursor print requested effort is not advertised for the selected account');
-      const selection = /^([^[\]]+)(?:\[([^[\]]+)\])?$/.exec(model);
-      if (!selection) throw new Error('Cursor print cannot verify the requested model parameters');
-      const embedded = new Map<string, string>();
-      for (const entry of selection[2]?.split(',') ?? []) {
-        const pair = /^([a-zA-Z0-9_]+)=([a-zA-Z0-9_.-]+)$/.exec(entry);
-        if (!pair || embedded.has(pair[1]!)) throw new Error('Cursor print cannot verify the requested model parameters');
-        embedded.set(pair[1]!, pair[2]!);
-      }
-      const values = parameters.map(option => ({ id: option.id,
-        value: option === effort ? spec.effort! : embedded.get(option.id) ?? option.currentValue }));
-      if (values.some((option, index) => !option.value || !/^[a-zA-Z0-9_.-]+$/.test(option.value) ||
-        !/^[a-zA-Z0-9_]+$/.test(option.id) ||
-        !parameters[index]!.options?.some(value => value.value === option.value))) {
-        throw new Error('Cursor print cannot verify the requested model parameters');
-      }
-      // This qualified build accepts complete variant selections, not partial
-      // overrides. Preserve embedded selections, filling advertised defaults.
-      for (const option of values) embedded.set(option.id, option.value!);
-      resolvedModel = `${selection[1]}[${[...embedded].sort(([a], [b]) => a.localeCompare(b))
-        .map(([id, value]) => `${id}=${value}`).join(',')}]`;
-    }
+    const resolvedModel = resolveParameterizedEffort(model, selected, spec.effort);
     return { supported: true, model, resolvedModel };
   }
-  if (spec.effort) {
+  verifyLegacyEffort(model, models, spec.effort);
+  return { supported: true, models, model };
+}
+
+function resolveParameterizedEffort(
+  model: string, selected: CursorParameterizedModel, requestedEffort: AgentRunSpec['effort'],
+): string {
+  if (!requestedEffort) return model;
+  const parameters = (selected.configOptions ?? []).filter(option => option.type === 'select');
+  const effort = parameters.find(option => ['effort', 'reasoning', 'reasoning_effort'].includes(option.id) &&
+    option.options?.some(value => value.value === requestedEffort));
+  if (!effort) throw new Error('Cursor print requested effort is not advertised for the selected account');
+  const { selection, embedded } = parseModelSelection(model);
+  const values = resolveParameterValues(parameters, effort, requestedEffort, embedded);
+  // This qualified build accepts complete variant selections, not partial
+  // overrides. Preserve embedded selections, filling advertised defaults.
+  for (const option of values) embedded.set(option.id, option.value!);
+  return `${selection[1]}[${[...embedded].sort(([a], [b]) => a.localeCompare(b))
+    .map(([id, value]) => `${id}=${value}`).join(',')}]`;
+}
+
+function verifyLegacyEffort(
+  model: string, models: ModelOption[], requestedEffort: AgentRunSpec['effort'],
+): void {
+  if (requestedEffort) {
     const base = model.replace(/-(?:none|low|medium|high|xhigh|extra-high|max)$/, '');
-    const suffixes = spec.effort === 'xhigh' ? ['xhigh', 'extra-high'] : [spec.effort];
+    const suffixes = requestedEffort === 'xhigh' ? ['xhigh', 'extra-high'] : [requestedEffort];
     if (!suffixes.some(suffix => models.some(option => option.id === `${base}-${suffix}`))) {
       throw new Error('Cursor print requested effort is not advertised for the selected account');
     }
   }
-  return { supported: true, models, model };
+}
+
+function parseModelSelection(model: string) {
+  const selection = /^([^[\]]+)(?:\[([^[\]]+)\])?$/.exec(model);
+  if (!selection) throw new Error('Cursor print cannot verify the requested model parameters');
+  const embedded = new Map<string, string>();
+  for (const entry of selection[2]?.split(',') ?? []) addEmbeddedParameter(embedded, entry);
+  return { selection, embedded };
+}
+
+function addEmbeddedParameter(embedded: Map<string, string>, entry: string): void {
+  const pair = /^([a-zA-Z0-9_]+)=([a-zA-Z0-9_.-]+)$/.exec(entry);
+  if (!pair || embedded.has(pair[1]!)) throw new Error('Cursor print cannot verify the requested model parameters');
+  embedded.set(pair[1]!, pair[2]!);
+}
+
+type ModelParameter = NonNullable<CursorParameterizedModel['configOptions']>[number];
+
+function resolveParameterValues(
+  parameters: ModelParameter[], effort: ModelParameter, requestedEffort: string, embedded: Map<string, string>,
+) {
+  const values = parameters.map(option => ({ id: option.id,
+    value: option === effort ? requestedEffort : embedded.get(option.id) ?? option.currentValue }));
+  if (values.some((option, index) => !option.value || !/^[a-zA-Z0-9_.-]+$/.test(option.value) ||
+    !/^[a-zA-Z0-9_]+$/.test(option.id) ||
+    !parameters[index]!.options?.some(value => value.value === option.value))) {
+    throw new Error('Cursor print cannot verify the requested model parameters');
+  }
+  return values;
 }

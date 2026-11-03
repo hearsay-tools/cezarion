@@ -7,6 +7,7 @@ import {
   CANCEL,
   PreflightError,
   type InstallContext,
+  type InstallStep,
   type PlatformStrategy,
   type Runner,
   type ServerState,
@@ -138,6 +139,102 @@ async function withdrawRemoteSettings(ctx: InstallContext, port: number, why: st
   ctx.ui.info(`Withdrew the remote settings grant for port ${port} (${why}). \`cez remote-settings enable --port ${port}\` grants it again.`);
 }
 
+function setupInstallRecord(state: ServerState, strategy: PlatformStrategy, opts: RunOptions): boolean {
+  if (state.platform && state.platform !== strategy.id) {
+    throw new PreflightError(
+      `this host already has a ${state.platform} install recorded — run \`server-uninstall\` first to switch platforms`,
+    );
+  }
+  state.platform = strategy.id;
+  // Record instance identity so the file is self-describing and later
+  // uninstall/deploy runs (and `server-instances/` listings) agree on it.
+  state.instance = opts.instance ?? state.instance ?? 'default';
+  if (opts.domain) state.domain = opts.domain;
+  // Proxy mode + bind host are recorded before `steps(ctx)` runs, because the
+  // platform selects its step list from them (external proxy ⇒ no nginx/SSL).
+  if (opts.externalProxy !== undefined) state.externalProxy = opts.externalProxy;
+  if (opts.bindHost) state.bindHost = opts.bindHost;
+  // A caller-supplied port wins (a new named instance auto-picks a free one);
+  // otherwise keep whatever the resumed record already carries.
+  if (opts.port) state.primaryPort = opts.port;
+  // Only a re-run of a completed real install keeps a grant; a dry-run preview record does not count.
+  const freshInstall = state.installed !== true;
+  state.createdAt ??= opts.now;
+  state.updatedAt = opts.now;
+  return freshInstall;
+}
+
+async function runInstallStep(step: InstallStep, ctx: InstallContext, opts: RunOptions): Promise<RunStatus | undefined> {
+  const { state } = ctx;
+  // `--reinstall` forces every step; `--reconfigure` forces the named ones.
+  const forced = opts.reinstall === true || opts.reconfigure.has(step.id);
+  if (!forced && isResolved(state.steps[step.id])) {
+    ctx.ui.info(`= ${step.title} (already done)`);
+    return;
+  }
+  // Already satisfied on the box (fresh install, nothing recorded yet)?
+  if (!forced && (await step.check(ctx))) {
+    state.steps[step.id] = { status: 'done', created: state.steps[step.id]?.created ?? null };
+    await ctx.save();
+    ctx.ui.info(`= ${step.title} (already present)`);
+    return;
+  }
+
+  if (step.optional) {
+    // `--yes` = accept safe defaults, and the safe default for an optional
+    // step (SSL against a real domain, autostart) is to SKIP it — never run
+    // it non-interactively against placeholder input.
+    if (ctx.assumeYes) {
+      recordOutcome(state, step.id, 'skipped');
+      await ctx.save();
+      ctx.ui.info(`— ${step.title} (skipped: --yes)`);
+      return;
+    }
+    const proceed = await ctx.ui.confirm({ message: `Set up ${step.title}?`, initialValue: true });
+    if (proceed === CANCEL) {
+      recordOutcome(state, step.id, 'pending');
+      await ctx.save();
+      ctx.ui.warn(`Cancelled at "${step.title}". Progress saved — re-run to resume.`);
+      return 'cancelled';
+    }
+    if (proceed !== true) {
+      recordOutcome(state, step.id, 'skipped');
+      await ctx.save();
+      ctx.ui.info(`— ${step.title} (skipped)`);
+      return;
+    }
+  }
+
+  try {
+    const created = await step.run(ctx);
+    state.steps[step.id] = { status: 'done', created };
+    state.updatedAt = opts.now;
+    await ctx.save();
+  } catch (err) {
+    if (err instanceof StepSkipped) {
+      recordOutcome(state, step.id, 'skipped');
+      await ctx.save();
+      ctx.ui.info(`— ${step.title} (skipped: ${err.message})`);
+      return;
+    }
+    if (err instanceof StepCancelled) {
+      recordOutcome(state, step.id, 'pending');
+      await ctx.save();
+      ctx.ui.warn(`Cancelled at "${step.title}". Progress saved — re-run to resume.`);
+      return 'cancelled';
+    }
+    if (err instanceof StepAborted) {
+      recordOutcome(state, step.id, 'failed');
+      await ctx.save();
+      ctx.ui.error(`Stopped at "${step.title}": ${err.message}`);
+      return 'failed';
+    }
+    recordOutcome(state, step.id, 'failed');
+    await ctx.save();
+    throw err;
+  }
+}
+
 export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): Promise<RunResult> {
   const release = acquireLock(opts.instance);
   try {
@@ -145,27 +242,7 @@ export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): 
     // buildContext reconciles dry-run records first, so a preview of platform A
     // never blocks a real install of platform B (the reset clears `platform`).
     const ctx = buildContext(state, opts);
-    if (state.platform && state.platform !== strategy.id) {
-      throw new PreflightError(
-        `this host already has a ${state.platform} install recorded — run \`server-uninstall\` first to switch platforms`,
-      );
-    }
-    state.platform = strategy.id;
-    // Record instance identity so the file is self-describing and later
-    // uninstall/deploy runs (and `server-instances/` listings) agree on it.
-    state.instance = opts.instance ?? state.instance ?? 'default';
-    if (opts.domain) state.domain = opts.domain;
-    // Proxy mode + bind host are recorded before `steps(ctx)` runs, because the
-    // platform selects its step list from them (external proxy ⇒ no nginx/SSL).
-    if (opts.externalProxy !== undefined) state.externalProxy = opts.externalProxy;
-    if (opts.bindHost) state.bindHost = opts.bindHost;
-    // A caller-supplied port wins (a new named instance auto-picks a free one);
-    // otherwise keep whatever the resumed record already carries.
-    if (opts.port) state.primaryPort = opts.port;
-    // Only a re-run of a completed real install keeps a grant; a dry-run preview record does not count.
-    const freshInstall = state.installed !== true;
-    state.createdAt ??= opts.now;
-    state.updatedAt = opts.now;
+    const freshInstall = setupInstallRecord(state, strategy, opts);
 
     await strategy.preflight(ctx); // throws PreflightError to refuse politely
     // A grant left on this port belongs to a cockpit that is gone; a completed install keeps its own.
@@ -190,73 +267,8 @@ export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): 
     }
 
     for (const step of steps) {
-      // `--reinstall` forces every step; `--reconfigure` forces the named ones.
-      const forced = opts.reinstall === true || opts.reconfigure.has(step.id);
-      if (!forced && isResolved(state.steps[step.id])) {
-        ctx.ui.info(`= ${step.title} (already done)`);
-        continue;
-      }
-      // Already satisfied on the box (fresh install, nothing recorded yet)?
-      if (!forced && (await step.check(ctx))) {
-        state.steps[step.id] = { status: 'done', created: state.steps[step.id]?.created ?? null };
-        await ctx.save();
-        ctx.ui.info(`= ${step.title} (already present)`);
-        continue;
-      }
-
-      if (step.optional) {
-        // `--yes` = accept safe defaults, and the safe default for an optional
-        // step (SSL against a real domain, autostart) is to SKIP it — never run
-        // it non-interactively against placeholder input.
-        if (ctx.assumeYes) {
-          recordOutcome(state, step.id, 'skipped');
-          await ctx.save();
-          ctx.ui.info(`— ${step.title} (skipped: --yes)`);
-          continue;
-        }
-        const proceed = await ctx.ui.confirm({ message: `Set up ${step.title}?`, initialValue: true });
-        if (proceed === CANCEL) {
-          recordOutcome(state, step.id, 'pending');
-          await ctx.save();
-          ctx.ui.warn(`Cancelled at "${step.title}". Progress saved — re-run to resume.`);
-          return { status: 'cancelled', state };
-        }
-        if (proceed !== true) {
-          recordOutcome(state, step.id, 'skipped');
-          await ctx.save();
-          ctx.ui.info(`— ${step.title} (skipped)`);
-          continue;
-        }
-      }
-
-      try {
-        const created = await step.run(ctx);
-        state.steps[step.id] = { status: 'done', created };
-        state.updatedAt = opts.now;
-        await ctx.save();
-      } catch (err) {
-        if (err instanceof StepSkipped) {
-          recordOutcome(state, step.id, 'skipped');
-          await ctx.save();
-          ctx.ui.info(`— ${step.title} (skipped: ${err.message})`);
-          continue;
-        }
-        if (err instanceof StepCancelled) {
-          recordOutcome(state, step.id, 'pending');
-          await ctx.save();
-          ctx.ui.warn(`Cancelled at "${step.title}". Progress saved — re-run to resume.`);
-          return { status: 'cancelled', state };
-        }
-        if (err instanceof StepAborted) {
-          recordOutcome(state, step.id, 'failed');
-          await ctx.save();
-          ctx.ui.error(`Stopped at "${step.title}": ${err.message}`);
-          return { status: 'failed', state };
-        }
-        recordOutcome(state, step.id, 'failed');
-        await ctx.save();
-        throw err;
-      }
+      const status = await runInstallStep(step, ctx, opts);
+      if (status) return { status, state };
     }
 
     const requiredAllDone = steps

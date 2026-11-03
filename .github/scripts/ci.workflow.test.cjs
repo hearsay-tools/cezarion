@@ -396,8 +396,22 @@ test('verification bindings keep the final gate in CI and reserve local full bro
   assert.match(row[1], /npm run test:package/);
   assert.match(row[1], /Full gate in CI:.*`npm run test:e2e`/);
   assert.match(agents.match(/^\| Verification \|([^|]+)\|/m)?.[1] ?? '', /Full gate in CI:.*`npm run test:e2e`/);
-  const validation = fs.readFileSync(path.join(repoRoot, '.ai/skills/validation/SKILL.md'), 'utf8');
-  assert.match(validation, /npm run test:e2e:local\s+# explicitly requested full local browser run/);
+  const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+  assert.equal(typeof manifest.scripts['test:e2e:local'], 'string');
+  assert.ok(manifest.scripts['test:e2e:local'].trim(), 'expected a local full browser script');
+  const entryPoint = manifest.scripts['test:e2e:local'].match(/(?:^|\s)(\S+\.mjs)(?:\s|$)/)?.[1];
+  assert.ok(entryPoint, 'expected the local full browser script to name its .mjs entry point');
+  const workflowsDir = path.join(repoRoot, '.github/workflows');
+  for (const name of fs.readdirSync(workflowsDir).filter((name) => /\.ya?ml$/.test(name))) {
+    const ci = yaml.parse(fs.readFileSync(path.join(workflowsDir, name), 'utf8'));
+    for (const job of Object.values(ci.jobs ?? {})) {
+      for (const step of job.steps ?? []) {
+        assert.doesNotMatch(step.run ?? '', /test:e2e:local/, `${name} must not run the local full browser script`);
+        assert.ok(!(step.run ?? '').includes(entryPoint),
+          `${name} must not run the local full browser entry point`);
+      }
+    }
+  }
   const ciDocs = fs.readFileSync(path.join(repoRoot, 'docs/sdlc/ci.md'), 'utf8');
   assert.match(ciDocs, /npm run test:e2e:local/);
 });
@@ -413,6 +427,19 @@ test('verification bindings keep the final gate in CI and reserve local full bro
   assert.doesNotMatch(JSON.stringify(prepare), /secrets\.|id-token|pull-requests: write/);
   assert.match(stepsText(prepare), /--pack-only/);
   assert.ok(prepare.steps.some(s => s.uses?.startsWith('actions/upload-artifact@')));
+});
+
+test('packaged tests stay typechecked after the application build', () => {
+  const ci = workflow();
+  const job = ci.jobs['build-and-package'];
+  assert.deepEqual(job.needs, ['queue-proof', 'preflight', 'review-result']);
+  assert.doesNotMatch(job.if, /change-surface|bump_pr/);
+  const steps = job.steps;
+  const build = steps.findIndex(step => step.run === 'npm run build');
+  const check = steps.findIndex(step => step.run === 'npm run typecheck:package');
+  const tests = steps.findIndex(step => step.run === 'npm run test:package');
+  assert.ok(build >= 0 && check > build && tests > check);
+  assert.equal(steps[check].if, undefined, 'every build checks packaged test types');
 });
 
 test('build and package verifies the engines minimum without a second full unit run', () => {

@@ -1,3 +1,4 @@
+import { checkWorkspaceResolution } from '../../../scripts/check-workspace-resolution.mjs'
 import { execFile } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
@@ -6,6 +7,8 @@ import { promisify } from 'node:util'
 import { acquireTestEnvLease } from '../../../.ai/scripts/test-env-lease.mjs'
 import { setup as pinWorkspaceRegistry } from './workspace-registry.ts'
 import { tmpdirExceedsSocketBudget } from '../../../.ai/scripts/resolve-browser-launch.mjs'
+
+checkWorkspaceResolution()
 
 const exec = promisify(execFile)
 const root = resolve(import.meta.dirname, '../../..')

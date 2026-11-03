@@ -119,6 +119,74 @@ export const DESIGN_RULES: Rule[] = [
   },
 ]
 
+interface CommentScanner {
+  out: string
+  mode: 'code' | 'line' | 'block' | 'single' | 'double' | 'template'
+  i: number
+}
+
+function scanCode(state: CommentScanner, c: string, n: string | undefined, lineComments: boolean): void {
+  if (lineComments && c === '/' && n === '/') {
+    state.mode = 'line'
+    state.out += '  '
+    state.i += 2
+    return
+  }
+  if (c === '/' && n === '*') {
+    state.mode = 'block'
+    state.out += '  '
+    state.i += 2
+    return
+  }
+  if (c === "'") state.mode = 'single'
+  else if (c === '"') state.mode = 'double'
+  else if (c === '`') state.mode = 'template'
+  state.out += c
+  state.i += 1
+}
+
+function scanComment(state: CommentScanner, c: string, n: string | undefined): void {
+  if (state.mode === 'line') {
+    if (c === '\n') {
+      state.mode = 'code'
+      state.out += c
+    } else {
+      state.out += ' '
+    }
+    state.i += 1
+    return
+  }
+  if (state.mode === 'block') {
+    if (c === '*' && n === '/') {
+      state.mode = 'code'
+      state.out += '  '
+      state.i += 2
+      return
+    }
+    state.out += c === '\n' ? c : ' '
+    state.i += 1
+  }
+}
+
+function scanString(state: CommentScanner, c: string, n: string | undefined): void {
+  // String modes: honor escapes, close on the matching quote (or, for ' and ", a newline —
+  // an unterminated string must not swallow the rest of the file).
+  if (c === '\\') {
+    state.out += c + (n ?? '')
+    state.i += 2
+    return
+  }
+  if (
+    (state.mode === 'single' && (c === "'" || c === '\n')) ||
+    (state.mode === 'double' && (c === '"' || c === '\n')) ||
+    (state.mode === 'template' && c === '`')
+  ) {
+    state.mode = 'code'
+  }
+  state.out += c
+  state.i += 1
+}
+
 /**
  * Blanks out comments while preserving the file's shape (every non-newline comment char
  * becomes a space). Tracks string state so comment openers inside literals are ignored.
@@ -126,74 +194,16 @@ export const DESIGN_RULES: Rule[] = [
  * of a line — acceptable for a guardian (it can only under-report on that one line).
  */
 export function stripComments(source: string, lineComments: boolean): string {
-  let out = ''
-  let mode: 'code' | 'line' | 'block' | 'single' | 'double' | 'template' = 'code'
-  let i = 0
-  while (i < source.length) {
-    const c = source[i]!
-    const n = source[i + 1]
-    if (mode === 'code') {
-      if (lineComments && c === '/' && n === '/') {
-        mode = 'line'
-        out += '  '
-        i += 2
-        continue
-      }
-      if (c === '/' && n === '*') {
-        mode = 'block'
-        out += '  '
-        i += 2
-        continue
-      }
-      if (c === "'") mode = 'single'
-      else if (c === '"') mode = 'double'
-      else if (c === '`') mode = 'template'
-      out += c
-      i += 1
-      continue
-    }
-    if (mode === 'line') {
-      if (c === '\n') {
-        mode = 'code'
-        out += c
-      } else {
-        out += ' '
-      }
-      i += 1
-      continue
-    }
-    if (mode === 'block') {
-      if (c === '*' && n === '/') {
-        mode = 'code'
-        out += '  '
-        i += 2
-        continue
-      }
-      out += c === '\n' ? c : ' '
-      i += 1
-      continue
-    }
-    // String modes: honor escapes, close on the matching quote (or, for ' and ", a newline —
-    // an unterminated string must not swallow the rest of the file).
-    if (c === '\\') {
-      out += c + (n ?? '')
-      i += 2
-      continue
-    }
-    if (
-      (mode === 'single' && (c === "'" || c === '\n')) ||
-      (mode === 'double' && (c === '"' || c === '\n')) ||
-      (mode === 'template' && c === '`')
-    ) {
-      mode = 'code'
-    }
-    out += c
-    i += 1
-    continue
+  const state: CommentScanner = { out: '', mode: 'code', i: 0 }
+  while (state.i < source.length) {
+    const c = source[state.i]!
+    const n = source[state.i + 1]
+    if (state.mode === 'code') scanCode(state, c, n, lineComments)
+    else if (state.mode === 'line' || state.mode === 'block') scanComment(state, c, n)
+    else scanString(state, c, n)
   }
-  return out
+  return state.out
 }
-
 
 /** Adapt only the path and source; keep the guardian's scope and line-based matching. */
 export function guardianFile(file: string, source: string): SourceFile | undefined {

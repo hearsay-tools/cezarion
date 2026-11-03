@@ -1,5 +1,8 @@
+import { checkWorkspaceResolution } from '../../../../scripts/check-workspace-resolution.mjs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
+
+checkWorkspaceResolution()
 
 import e2e from '../vitest.config.ts'
 

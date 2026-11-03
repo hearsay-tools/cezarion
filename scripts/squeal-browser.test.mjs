@@ -42,6 +42,13 @@ function bootstrap(t, { installed = true, bootExit = 0, tmp, registryFailure, bo
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
   mkdirSync(join(fixture, 'packages/web/e2e'), { recursive: true });
   mkdirSync(join(fixture, '.ai/scripts'), { recursive: true });
+  // This fixture exercises bootstrap without workspace packages. Keep its local
+  // install boundary real so the shared resolution guard runs here too.
+  mkdirSync(join(fixture, 'node_modules'));
+  mkdirSync(join(fixture, 'scripts'));
+  writeFileSync(join(fixture, 'package.json'), JSON.stringify({ type: 'module', workspaces: [] }));
+  copyFileSync(new URL('./check-workspace-resolution.mjs', import.meta.url),
+    join(fixture, 'scripts/check-workspace-resolution.mjs'));
   const modulePath = join(fixture, 'packages/web/e2e/environment.ts');
   copyFileSync(source, modulePath);
   copyFileSync(new URL('../.ai/scripts/test-env-lease.mjs', import.meta.url),

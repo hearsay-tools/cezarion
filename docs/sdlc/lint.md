@@ -9,8 +9,8 @@ command, it fails closed, and it does not depend on which tests a change selects
 `file:line:column rule: reason → owner`:
 
 1. **oxlint** with the `cez` JS plugin (`packages/cezar/src/lint/plugin.ts`) over `packages/`.
-   `.oxlintrc.json` turns every oxlint category off and turns on only the `cez` rules, so lint
-   adds no policy of its own.
+   `.oxlintrc.json` keeps every category off and explicitly enables all `cez` rules and 93
+   built-in correctness rules. The `typescript`, `unicorn` and `oxc` plugins are enabled.
 2. **ast-grep** with the rules in `.ai/ast-grep/rules`, each against its shrink-only baseline.
    [`.ai/ast-grep/README.md`](../../.ai/ast-grep/README.md) says how to write one.
 3. **Stale entries**: an exemption, a reader-list entry or a baseline entry that no longer names
@@ -34,7 +34,8 @@ command, it fails closed, and it does not depend on which tests a change selects
    The web host test separately pins `asyncUtilTimeout` in `vitest.setup.ts`.
 
 A non-zero tool exit, unreadable tool output, a plugin that does not load, a config that turns on
-another number of rules than the plugin defines, and a file that does not parse are failures,
+a category on, a missing built-in plugin, another rule count than all cez rules plus enabled
+built-in entries, and a file that does not parse are failures,
 never a pass.
 
 ## Where it runs
@@ -42,7 +43,7 @@ never a pass.
 | Where | How |
 | --- | --- |
 | CI | The required `Typecheck` job's `Lint` step. The job runs on every change surface, docs-only included, so no test selection skips lint |
-| Squeal | The bridge test `packages/cezar/src/lint/lint.test.ts` runs the whole lint after an edit, until Squeal runs oxlint itself (hearsay-tools/cezarion#2426) |
+| Squeal | Edit-time oxlint diagnostics require Squeal 0.1.392 or later; its provider loads `.oxlintrc.json` and the `cez` JS plugin. Older Squeal reports `lint.tools` as unknown and keeps validating through `packages/cezar/src/lint/lint-runner.test.ts`: ast-grep and runner checks only. `npm run lint` before the first push of a package change and CI’s required Lint step remain the gate (hearsay-tools/cezarion#2426) |
 | By hand | `npm run lint` from the repository root, about 5 s on an idle host |
 
 ## The `cez` rules
@@ -116,10 +117,33 @@ looped case). **Moved** cases now run in `npm run lint`; the scanner's fixture c
 | AGENTS.md byte budget (M12) | `.github/scripts/agents-md-budget.test.cjs` | A document budget, not a source rule; it costs under a millisecond in `node:test` |
 | Run-search readers (M13) | `packages/cezar/src/run-search-readers.test.ts` | Required-presence checks: a dead `matchesRunSearch(…)` call satisfies them, so they are not proof enough for a hard rule |
 
-### Not adopted
+### Adopted built-in correctness rules
 
-Oxlint's built-in categories stay off. `correctness` reports 527 findings on this tree; adopting
-it is hearsay-tools/cezarion#2425.
+hearsay-tools/cezarion#2425 adopts these 93 rules. Each entry is explicit, at severity `error`;
+an oxlint upgrade cannot enable another rule through a category default.
+
+| Plugin | Rules (prefix omitted) |
+| --- | --- |
+| `eslint` (56) | `constructor-super`, `for-direction`, `getter-return`, `no-async-promise-executor`, `no-caller`, `no-class-assign`, `no-compare-neg-zero`, `no-cond-assign`, `no-const-assign`, `no-constant-binary-expression`, `no-constant-condition`, `no-debugger`, `no-delete-var`, `no-dupe-class-members`, `no-dupe-else-if`, `no-dupe-keys`, `no-duplicate-case`, `no-empty-character-class`, `no-empty-pattern`, `no-empty-static-block`, `no-eval`, `no-ex-assign`, `no-extra-boolean-cast`, `no-func-assign`, `no-global-assign`, `no-import-assign`, `no-invalid-regexp`, `no-irregular-whitespace`, `no-iterator`, `no-loss-of-precision`, `no-misleading-character-class`, `no-new-native-nonconstructor`, `no-nonoctal-decimal-escape`, `no-obj-calls`, `no-self-assign`, `no-setter-return`, `no-shadow-restricted-names`, `no-sparse-arrays`, `no-this-before-super`, `no-unassigned-vars`, `no-unreachable`, `no-unsafe-finally`, `no-unsafe-negation`, `no-unsafe-optional-chaining`, `no-unused-expressions`, `no-unused-labels`, `no-unused-private-class-members`, `no-unused-vars`, `no-useless-backreference`, `no-useless-catch`, `no-useless-escape`, `no-useless-rename`, `no-with`, `require-yield`, `use-isnan`, `valid-typeof` |
+| `oxc` (14) | `bad-array-method-on-arguments`, `bad-char-at-comparison`, `bad-comparison-sequence`, `bad-match-all-arg`, `bad-min-max-func`, `bad-object-literal-comparison`, `bad-replace-all-arg`, `const-comparisons`, `double-comparisons`, `erasing-op`, `missing-throw`, `number-arg-out-of-range`, `only-used-in-recursion`, `uninvoked-array-callback` |
+| `typescript` (11) | `no-duplicate-enum-values`, `no-extra-non-null-assertion`, `no-misused-new`, `no-non-null-asserted-optional-chain`, `no-unnecessary-parameter-property-assignment`, `no-unsafe-declaration-merging`, `no-useless-empty-export`, `no-wrapper-object-types`, `prefer-as-const`, `prefer-namespace-keyword`, `triple-slash-reference` |
+| `unicorn` (12) | `no-await-in-promise-methods`, `no-empty-file`, `no-invalid-fetch-options`, `no-invalid-remove-event-listener`, `no-new-array`, `no-single-promise-in-promise-methods`, `no-thenable`, `no-unnecessary-await`, `no-useless-fallback-in-spread`, `no-useless-length-check`, `prefer-set-size`, `prefer-string-starts-ends-with` |
+
+`no-unused-vars` ignores arguments, variables and caught errors whose names start with `_`, and
+ignores rest siblings. The `**/mock-*.mjs` override also ignores arguments: the mock scenario
+handlers keep uniform signatures. No built-in rule has a baseline.
+
+Two deliberate cases have reasoned inline disables: `no-empty-pattern` for Vitest 4's required
+fixture destructuring parameter, and `unicorn/no-thenable` for a test that observes an await.
+
+| Rule left off | Reason |
+| --- | --- |
+| `no-control-regex` | Control-character patterns strip ANSI output and refuse unsafe paths and environment values. Every finding was deliberate sanitization. |
+| `unicorn/no-useless-spread` | Snapshot copies protect iteration while collections mutate. The dangerous autofix removes that protection, and the rule cannot allow these snapshots. |
+| `typescript/no-this-alias` | The getter facade and instance captures in mocks need the alias. They do not use the obsolete `self = this` pattern the rule targets. |
+
+The 15 type-aware TypeScript correctness rules remain off and outside this adoption. They require
+`--type-aware`; adopting them needs a separate review: `await-thenable`, `no-array-delete`, `no-base-to-string`, `no-duplicate-type-constituents`, `no-floating-promises`, `no-for-in-array`, `no-implied-eval`, `no-meaningless-void-operator`, `no-misused-spread`, `no-redundant-type-constituents`, `no-unsafe-unary-minus`, `no-useless-default-assignment`, `require-array-sort-compare`, `restrict-template-expressions`, `unbound-method`. Other built-in categories remain off.
 
 ### Design guardian (M09)
 

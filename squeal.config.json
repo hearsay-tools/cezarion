@@ -11,6 +11,16 @@
   "baseline": {
     "onStart": "lookup-then-run-missing"
   },
+  "lint": {
+    "enabled": true,
+    "tools": [
+      "oxlint"
+    ],
+    "include": [
+      "packages/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"
+    ],
+    "exclude": []
+  },
   "complexity": {
     "enabled": true
   },
@@ -26,8 +36,7 @@
       "packages/contract/src/**/*.ts",
       "packages/api-client/src/contract/**/*.ts"
     ],
-    "packages/cezar/src/lint/lint.test.ts": [
-      ".oxlintrc.json",
+    "packages/cezar/src/lint/lint-runner.test.ts": [
       ".env.example",
       "sgconfig.yml",
       ".ai/ast-grep/**",

@@ -339,38 +339,32 @@ function mapItemLifecycle(
 ): CodexUiMapping {
   const raw = isRecord(params.item) ? params.item : undefined;
   if (!raw || typeof raw.type !== 'string') return { events: [], state };
-  const type = raw.type;
+  const mapper = ITEM_FAMILY_MAPPERS.get(raw.type) ?? mapIdentifiedItem;
+  return mapper(raw, state, params, eventType, raw.type);
+}
 
-  // `plan` / `todoList` items never render as items — they ARE the plan
-  // (full-replacement semantics on every lifecycle phase, §7.1).
-  //
-  // `plan` is the plan-MODE item (`{type:'plan', id, text}`, streamed via
-  // `item/plan/delta`) — prose, not a checklist, and mutually exclusive with
-  // `update_plan` (codex rejects that tool in plan mode). It becomes the single
-  // entry the agent is executing.
-  //
-  // `todoList` is NOT an app-server item type — the v2 `ThreadItem` union has no
-  // todo variant, so this arm is dead on the transport cezar spawns. It is kept
-  // as cheap tolerance: these types are marked EXPERIMENTAL upstream, codex's
-  // exec transport does emit a `todo_list` item, and a stray snapshot is better
-  // rendered than dropped. The real plan channel is `turn/plan/updated`.
-  //
-  // That makes this the SECOND writer of `plan.updated`, so it yields to the
-  // first: once the notification has delivered a real checklist, a prose `plan`
-  // item must not flatten it back into a single entry. Upstream says the two are
-  // mutually exclusive (codex rejects `update_plan` in plan mode) — this does not
-  // depend on that holding.
-  if (type === 'todoList' || type === 'todo_list' || type === 'plan') {
-    if (state.planFromNotification) return { events: [], state };
-    const entries = planEntriesOf(raw);
-    if (!entries) return { events: [], state };
-    return { events: [{ type: 'plan.updated', entries }], state };
-  }
+type ItemFamilyMapper = (
+  raw: Record<string, unknown>, state: CodexUiMapperState,
+  params: Record<string, unknown>, eventType: ItemEventType, type: string,
+) => CodexUiMapping;
 
-  // The user's own message echoed back — the client already rendered what it
-  // sent, so it maps to zero events (matching the claude mapper).
-  if (type === 'userMessage') return { events: [], state };
+const ITEM_FAMILY_MAPPERS: ReadonlyMap<string, ItemFamilyMapper> = new Map([
+  ['todoList', mapPlanItem],
+  ['todo_list', mapPlanItem],
+  ['plan', mapPlanItem],
+  ['userMessage', mapUserMessage],
+]);
 
+// The user's own message echoed back — the client already rendered what it
+// sent, so it maps to zero events (matching the claude mapper).
+function mapUserMessage(_raw: Record<string, unknown>, state: CodexUiMapperState): CodexUiMapping {
+  return { events: [], state };
+}
+
+function mapIdentifiedItem(
+  raw: Record<string, unknown>, state: CodexUiMapperState,
+  params: Record<string, unknown>, eventType: ItemEventType, type: string,
+): CodexUiMapping {
   const id = str(raw.id);
   if (id === undefined) return { events: [], state };
 
@@ -385,6 +379,40 @@ function mapItemLifecycle(
   // by `interacted` bookkeeping as control returns between threads.
   if (type === 'subAgentActivity') return mapSubAgentActivity(raw, id, collabParentItemId(params, state), state);
 
+  return mapGenericItem(params, raw, id, type, eventType, state);
+}
+
+// `plan` / `todoList` items never render as items — they ARE the plan
+// (full-replacement semantics on every lifecycle phase, §7.1).
+//
+// `plan` is the plan-MODE item (`{type:'plan', id, text}`, streamed via
+// `item/plan/delta`) — prose, not a checklist, and mutually exclusive with
+// `update_plan` (codex rejects that tool in plan mode). It becomes the single
+// entry the agent is executing.
+//
+// `todoList` is NOT an app-server item type — the v2 `ThreadItem` union has no
+// todo variant, so this arm is dead on the transport cezar spawns. It is kept
+// as cheap tolerance: these types are marked EXPERIMENTAL upstream, codex's
+// exec transport does emit a `todo_list` item, and a stray snapshot is better
+// rendered than dropped. The real plan channel is `turn/plan/updated`.
+//
+// That makes this the SECOND writer of `plan.updated`, so it yields to the
+// first: once the notification has delivered a real checklist, a prose `plan`
+// item must not flatten it back into a single entry. Upstream says the two are
+// mutually exclusive (codex rejects `update_plan` in plan mode) — this does not
+// depend on that holding.
+function mapPlanItem(raw: Record<string, unknown>, state: CodexUiMapperState): CodexUiMapping {
+  if (state.planFromNotification) return { events: [], state };
+  const entries = planEntriesOf(raw);
+  if (!entries) return { events: [], state };
+  return { events: [{ type: 'plan.updated', entries }], state };
+}
+
+function mapGenericItem(
+  params: Record<string, unknown>,
+  raw: Record<string, unknown>, id: string, type: string,
+  eventType: ItemEventType, state: CodexUiMapperState,
+): CodexUiMapping {
   const item =
     type === 'agentMessage'
       ? messageItem(raw, id)

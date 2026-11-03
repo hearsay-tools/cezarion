@@ -27,15 +27,13 @@ current-head review admission. The owner accepted automatic review because
 CodeRabbit is free for this open-source repository. Both required checks still
 gate merge.
 
-Local typechecking starts with `pnpm install --frozen-lockfile` in the checkout being verified, including
-nested task worktrees. Both `npm run typecheck:web` and
-`npm run typecheck -w @open-mercato/cezar-web` use the web workspace's
-`pretypecheck` hook to rebuild the local server declarations before checking web
-sources. This prevents missing or stale local declarations from falling back to
-an older parent checkout. The full `npm run typecheck` checks web first, then
-contract, API client, and server, so it builds declarations once. Direct
-`tsc --noEmit` calls bypass preparation; use the npm commands for verification.
-The nested-worktree regression runs with `npm run test:unit`.
+Local typechecking starts with `pnpm install --frozen-lockfile` in the checkout being verified,
+including nested task worktrees. `npm run typecheck` checks all four workspaces without
+writing build output. The web config resolves the server route types from local source,
+so missing or stale declarations cannot select an older parent checkout. The
+nested-worktree regression runs with `npm run test:unit`. Packaged CLI tests import
+built modules; the build/package job checks them with `npm run typecheck:package`
+after the application build.
 
 ### Local iteration versus final verification
 
@@ -86,9 +84,12 @@ counts are diagnostic only: splitting a clone can count a boundary line twice.
 This uses jscpd's detected pairs, not an exhaustive comparison of all file pairs.
 Moving duplication within one pair can pass within its token ceiling.
 
-Cross-package clones always fail, including inherited copies. Within one file,
-the existing fingerprint rule still rejects new fragments. Scan/report errors
-fail the gate. The comparison saves a temporary fingerprint baseline during the
+Cross-package clones always fail, including inherited copies, except for the
+named file pair in the checker's exception list. Within one file, the sum of
+reported same-file clone tokens has its own merge-base ceiling. Equal or smaller
+totals pass, including re-cut fragments; an increase or a new same-file total
+fails. A file cannot borrow allowance from another file or cross-file pair.
+Scan/report errors fail the gate. The comparison saves a temporary fingerprint baseline during the
 first scan and removes all temporary inputs and reports on exit; it adds no
 persistent baseline file or migration.
 
@@ -135,7 +136,7 @@ exactly the `engines.node` minimum (Node 24.21.0):
 
 - Four Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/4 --maxWorkers=4` for N=1..4.
 - The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs pinned workflow lint, issue-citation checking and `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It keeps the minimum-Node setup and its bounded retry.
-- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It builds server declarations, then runs Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing. The explicit server build preserves the preparation that typecheck supplied before the split. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
+- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It builds server declarations, then runs Node unit tests, the full application build, packaged CLI E2E typecheck and tests, and release-package dry-run packing. The explicit server build preserves the preparation that typecheck supplied before the split. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
 - Four cockpit browser E2E shards on `ubicloud-standard-2` (2 vCPU, 8 GB RAM, Ubuntu 24.04 x64) each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
 The Ubicloud trial moves only the four browser CI shards to the lowest x64 tier,
@@ -144,6 +145,16 @@ The Ubicloud trial moves only the four browser CI shards to the lowest x64 tier,
 Ubuntu. Compare browser job times after the switch before changing shard counts
 or worker limits. Other jobs, including nightly verification, keep their existing
 runners. The trial changes no test command, worker count, timeout or required check.
+
+An independent, optional `Warm Ubicloud dependency cache` job installs dependencies
+on Ubicloud on every push to `main`, even when queue proof skips verification.
+Ubicloud's cache is separate from GitHub's and restores only from the current
+branch or the default branch. Seeding `main` lets task and merge-queue branches
+reuse its pnpm cache while keeping cache branch protection enabled. The job uses
+the browser shards' Node and pnpm setup, skips install scripts, and runs no tests.
+It also runs on a bare manual CI dispatch to prove workflow changes; a dispatch
+from a feature branch populates only that branch's cache. Cache warming does not
+gate verification or snapshot publication.
 
 The separate typecheck uses Blacksmith's 3,000 monthly x64 2-vCPU equivalent
 minutes. A seven-day sample projects about 2,833 PR/dispatch typecheck jobs per
@@ -254,6 +265,11 @@ sequencer's balancing-only role and median fallback for unlisted files.
 The push-only `.github/workflows/ci-benchmark.yml` workflow runs controlled experiments on `bench/156-*` branches. It uses a fixed application baseline, records failures and resource usage, and performs publication experiments only as dry runs. Reproduction instructions and retained results are in [the issue 156 benchmark report](../benchmarks/ci-performance-156.md). Automated review remains enabled throughout.
 
 CodeRabbit starts automatic reviews on push, including drafts and incremental changes. `.coderabbit.yaml` clears label filtering and sets `auto_pause_after_reviewed_commits: 0`. The used keys were checked against the live [v2 schema](https://www.coderabbit.ai/integrations/schema.v2.json) on 2026-11-02. The owner removed the custom round/spend cap because this open-source integration is free. Automatic provider execution now starts before preflight; the native admission gate still follows cheap preflight. No review model keys, commands, provider output artifacts, posting schema or PAT fallback remain. Issue intake keeps its independent model integration.
+
+The native gate requires trusted classification and applicable baseline, complexity and
+clone checks, plus typecheck, workflow lint and citations. Typecheck reads local
+source without building. The build/package job checks packaged test types after
+the application build.
 
 The protected **Automated Code Review** check retains its name and native Actions provenance. `review-result` runs trusted base scripts after successful preflight. It requires the newest `CodeRabbit` execution from App `347564` / slug `coderabbitai` on the exact live PR head to be completed/success, plus zero unresolved review threads of any author. Outdated threads still block. Skipped/neutral, missing/pending, failed/spoofed/stale executions and malformed/truncated/changing API pages fail closed. An empty provider `pull_requests` array is allowed; formal review objects never prove execution. The reader rechecks the provider and live head before admitting. Requests have 10-second limits within a 60-second read deadline; it does not poll a pending provider forever.
 

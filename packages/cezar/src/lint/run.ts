@@ -3,7 +3,7 @@ import { serverWaitProblems, unitWaitProblems } from './wait-discipline-runner.t
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import {
   baselinePath as astGrepBaselinePath,
@@ -66,9 +66,35 @@ interface OxlintDiagnostic {
   labels?: Array<{ span: { line: number; column: number } }>;
 }
 
+interface OxlintConfig {
+  categories?: Record<string, string | number>;
+  plugins?: string[];
+  rules?: Record<string, string | number | [string | number, ...unknown[]]>;
+}
+
+/** Categories stay off so an oxlint upgrade cannot silently add policy. */
+function configuredRules(cwd: string, config: string): { builtIns: number; problems: string[] } {
+  const settings = JSON.parse(readFileSync(resolve(cwd, config), 'utf8')) as OxlintConfig;
+  const problems: string[] = [];
+  for (const [category, severity] of Object.entries(settings.categories ?? {})) {
+    if (severity !== 'off') problems.push(`${config}: category ${category} must be off; list built-in rules explicitly`);
+  }
+  let builtIns = 0;
+  for (const [rule, entry] of Object.entries(settings.rules ?? {})) {
+    const severity = Array.isArray(entry) ? entry[0] : entry;
+    if (rule.startsWith('cez/') || severity === 'off' || severity === 0) continue;
+    builtIns += 1;
+    const plugin = rule.includes('/') ? rule.split('/')[0] : 'eslint';
+    if (plugin !== 'eslint' && !settings.plugins?.includes(plugin!)) {
+      problems.push(`${config}: built-in rule ${rule} requires plugin ${plugin} in plugins`);
+    }
+  }
+  return { builtIns, problems };
+}
+
 /**
  * Oxlint's findings in `cwd`, one line each. Exit 0 or 1 with a JSON report is a result; anything
- * else, or a report that ran another number of rules than the plugin defines, is a tool failure.
+ * else, or a report that ran another number of rules than configured, is a tool failure.
  */
 export async function oxlintProblems(cwd: string, paths: string[], config = '.oxlintrc.json'): Promise<string[]> {
   const result = await run(process.execPath, [oxlintBin(), '-c', config, '-f', 'json', ...paths], cwd);
@@ -86,8 +112,11 @@ export async function oxlintProblems(cwd: string, paths: string[], config = '.ox
     // A diagnostic without a rule code is oxlint's own: a parse error or a plugin failure.
     return `${d.filename}${at ? `:${at.line}:${at.column}` : ''} ${d.code ?? 'oxlint'}: ${d.message}`;
   });
-  if (report.number_of_rules !== RULES.length) {
-    problems.push(`oxlint ran ${report.number_of_rules ?? 'no'} rules, but the cez plugin defines ${RULES.length}: enable exactly the cez rules in ${config}`);
+  const configured = configuredRules(cwd, config);
+  problems.push(...configured.problems);
+  const expected = RULES.length + configured.builtIns;
+  if (report.number_of_rules !== expected) {
+    problems.push(`oxlint ran ${report.number_of_rules ?? 'no'} rules, but ${config} turns on ${expected} (${RULES.length} cez + ${configured.builtIns} built-in)`);
   }
   if (result.code === 1 && problems.length === 0) problems.push(`oxlint exited 1 without a finding: ${result.stderr.trim()}`);
   return problems;
@@ -171,8 +200,17 @@ export function staleHistoryReaders(root = repoRoot): string[] {
 
 /** Every problem `npm run lint` reports, in one list. */
 export async function lint(): Promise<string[]> {
+  return lintProblems(true);
+}
+
+/** Repository checks outside oxlint, retained for Squeal edit-time feedback. */
+export async function lintWithoutOxlint(): Promise<string[]> {
+  return lintProblems(false);
+}
+
+async function lintProblems(withOxlint: boolean): Promise<string[]> {
   const waits = [...serverWaitProblems(), ...unitWaitProblems()];
-  const [oxlint, astGrep] = await Promise.all([oxlintProblems(repoRoot, LINT_PATHS), astGrepProblems()]);
+  const [oxlint, astGrep] = await Promise.all([withOxlint ? oxlintProblems(repoRoot, LINT_PATHS) : [], astGrepProblems()]);
   return [...waits, ...oxlint, ...astGrep, ...staleEntries(), ...fileLengthProblems(), ...guardianCssProblems()];
 }
 

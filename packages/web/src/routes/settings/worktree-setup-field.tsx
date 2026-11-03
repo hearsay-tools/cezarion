@@ -5,17 +5,17 @@ import { ApiError, putConfig } from '@/api/client'
 import { queryKeys, useHealth } from '@/api/queries'
 import {
   WORKTREE_SETUP_DEFAULT_TIMEOUT_SECONDS,
-  WORKTREE_SETUP_MAX_COMMAND_LENGTH,
-  WORKTREE_SETUP_MAX_COMMANDS,
   WORKTREE_SETUP_MAX_TIMEOUT_SECONDS,
   type ConfigResponse,
   type SetConfigInput,
 } from '@open-mercato/cezar-api-client/contract/workspace'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
+import { WorktreeSetupStatus } from './worktree-setup-status'
+import { parseWorktreeSetupInput } from './worktree-setup-input'
 import { SettingsField } from './settings-field'
 import { useActiveProjectRoot } from './project-location'
-import { REMOTE_SETTINGS_ENABLE_COMMAND, RemoteSettingsNotice, useSettingsAdminRefresh } from './remote-settings-notice'
+import { RemoteSettingsNotice, useSettingsAdminRefresh } from './remote-settings-notice'
 
 /**
  * Project settings → Worktrees → "Prepare new worktrees" (hearsay-tools/cezarion#917, spec
@@ -40,19 +40,7 @@ export function WorktreeSetupField({ config }: { config: ConfigResponse }) {
   const [text, setText] = useState(savedCommands.join('\n'))
   const [timeoutText, setTimeoutText] = useState(String(savedTimeout))
 
-  const commands = text.split('\n').map((line) => line.trim()).filter((line) => line !== '')
-  const timeoutSeconds = Number(timeoutText)
-  const invalid =
-    commands.length > WORKTREE_SETUP_MAX_COMMANDS
-      ? `Enter at most ${WORKTREE_SETUP_MAX_COMMANDS} commands.`
-      : commands.some((command) => command.length > WORKTREE_SETUP_MAX_COMMAND_LENGTH)
-        ? `Keep each command under ${WORKTREE_SETUP_MAX_COMMAND_LENGTH.toLocaleString('en-US')} characters.`
-        : timeoutText.trim() === '' ||
-            !Number.isInteger(timeoutSeconds) ||
-            timeoutSeconds < 1 ||
-            timeoutSeconds > WORKTREE_SETUP_MAX_TIMEOUT_SECONDS
-          ? `Enter a whole number of seconds from 1 to ${WORKTREE_SETUP_MAX_TIMEOUT_SECONDS}.`
-          : null
+  const { commands, timeoutSeconds, invalid } = parseWorktreeSetupInput(text, timeoutText)
   // An invalid value on disk is a change to make even when the box matches "nothing saved".
   const unchanged =
     config.worktreeSetupIssue === null &&
@@ -94,79 +82,60 @@ export function WorktreeSetupField({ config }: { config: ConfigResponse }) {
       hint="Runs in every new task and worker worktree before the agent starts, in order, stopping at the first failure. Leave commands empty to skip setup."
     >
       <RemoteSettingsNotice risk="These commands run on the machine running Cezarion" />
-      {savedCommands.length === 0 && config.worktreeSetupIssue === null ? (
-        <p data-slot="worktree-setup-empty" className="text-sm text-foreground">
-          No setup commands configured. No commands will run in new worktrees.
+      <WorktreeSetupStatus
+        savedCommandCount={savedCommands.length}
+        settingsAdmin={health.data?.capabilities?.settingsAdmin}
+        configPath={configPath}
+        issue={config.worktreeSetupIssue}
+        invalid={invalid}
+      >
+        <textarea
+          data-slot="worktree-setup-commands"
+          aria-label="Worktree setup commands, one per line"
+          rows={4}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          value={text}
+          readOnly={!editable}
+          disabled={save.isPending}
+          onChange={(event) => setText(event.target.value)}
+          className={`${control} min-h-24 w-full resize-y font-mono text-[13px] leading-relaxed`}
+        />
+        <p className="text-xs text-soft-foreground">
+          Example only: <code>npm ci</code>. Commands run only after they are saved.
         </p>
-      ) : null}
-      <textarea
-        data-slot="worktree-setup-commands"
-        aria-label="Worktree setup commands, one per line"
-        rows={4}
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
-        value={text}
-        readOnly={!editable}
-        disabled={save.isPending}
-        onChange={(event) => setText(event.target.value)}
-        className={`${control} min-h-24 w-full resize-y font-mono text-[13px] leading-relaxed`}
-      />
-      <p className="text-xs text-soft-foreground">
-        Example only: <code>npm ci</code>. Commands run only after they are saved.
-      </p>
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-2 text-xs text-soft-foreground">
-          <span>Timeout per command</span>
-          <input
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={WORKTREE_SETUP_MAX_TIMEOUT_SECONDS}
-            step={1}
-            data-slot="worktree-setup-timeout"
-            value={timeoutText}
-            readOnly={!editable}
-            disabled={save.isPending}
-            onChange={(event) => setTimeoutText(event.target.value)}
-            className={`${control} min-h-11 w-28 md:min-h-0`}
-          />
-          <span>seconds</span>
-        </label>
-        <Button
-          type="button"
-          variant="primary"
-          size="sm"
-          className="min-h-11 self-start md:min-h-0"
-          data-action="worktree-setup-save"
-          disabled={!editable || unchanged || invalid !== null || save.isPending}
-          onClick={submit}
-        >
-          Save setup
-        </Button>
-      </div>
-      {health.data?.capabilities?.settingsAdmin === false ? (
-        <p data-slot="worktree-setup-readonly" className="text-xs text-foreground">
-          Edit <code>worktreeSetup.commands</code> in{' '}
-          {configPath === null ? (
-            <>the project’s <code>.ai/cezar/config.json</code></>
-          ) : (
-            <code className="break-all">{configPath}</code>
-          )}{' '}
-          on the machine running Cezarion. Valid file edits apply to new worktrees; no restart is needed. To edit
-          here, the host operator runs <code>{REMOTE_SETTINGS_ENABLE_COMMAND}</code>.
-        </p>
-      ) : null}
-      {config.worktreeSetupIssue !== null ? (
-        <p data-slot="worktree-setup-issue" className="text-[11px] text-danger">
-          config.json has an invalid worktreeSetup ({config.worktreeSetupIssue}) — saving replaces it.
-        </p>
-      ) : null}
-      {invalid !== null ? (
-        <p data-slot="worktree-setup-invalid" className="text-[11px] text-danger">
-          {invalid}
-        </p>
-      ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 text-xs text-soft-foreground">
+            <span>Timeout per command</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={WORKTREE_SETUP_MAX_TIMEOUT_SECONDS}
+              step={1}
+              data-slot="worktree-setup-timeout"
+              value={timeoutText}
+              readOnly={!editable}
+              disabled={save.isPending}
+              onChange={(event) => setTimeoutText(event.target.value)}
+              className={`${control} min-h-11 w-28 md:min-h-0`}
+            />
+            <span>seconds</span>
+          </label>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            className="min-h-11 self-start md:min-h-0"
+            data-action="worktree-setup-save"
+            disabled={!editable || unchanged || invalid !== null || save.isPending}
+            onClick={submit}
+          >
+            Save setup
+          </Button>
+        </div>
+      </WorktreeSetupStatus>
     </SettingsField>
   )
 }
