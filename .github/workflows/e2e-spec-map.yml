@@ -94,6 +94,17 @@ jobs:
             --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/spec-map/results.json"
           echo "The browser suite exited $?."
 
+      - name: Report served-server peak memory
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const { app: { pid } } = JSON.parse(readFileSync('.ai/qa/test-env.json', 'utf8'));
+          const status = readFileSync(`/proc/${pid}/status`, 'utf8');
+          const peak = status.match(/^VmHWM:\s+(\d+) kB$/m)?.[1];
+          if (!peak) throw new Error('the served server has no peak RSS measurement');
+          console.log(`Served server peak RSS: ${peak} KiB`);
+          NODE
+
       - name: Build the cockpit again with source maps
         run: |
           NODE_ENV=production VITE_CEZ_E2E=1 npm run build -w @open-mercato/cezar-web -- \
