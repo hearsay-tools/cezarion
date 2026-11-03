@@ -15,7 +15,8 @@ on:
         type: number
 permissions: {}
 # Discovery validates the event and supplies reliable PR numbers before locking.
-# Every admitted automatic event discovers all open same-repository main PRs.
+# Independent events select at most four associated PRs; empty provider
+# associations use bounded inventory lookup for matching current heads only.
 jobs:
   discover:
     runs-on: ubuntu-latest

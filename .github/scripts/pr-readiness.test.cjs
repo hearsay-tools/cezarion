@@ -325,6 +325,7 @@ test('the readiness workflow runs trusted code with the least permissions that c
   assert.deepEqual(workflow.permissions, {});
   assert.equal(workflow.concurrency, undefined, 'discovery cannot coalesce different PRs');
   const discovery = workflow.jobs.discover;
+  assert.equal(discovery.concurrency, undefined, 'each event discovers independently');
   assert.deepEqual(discovery.permissions, { actions: 'read', checks: 'read', contents: 'read', 'pull-requests': 'read' });
   assert.deepEqual(discovery.outputs, { numbers: '${{ steps.discover.outputs.numbers }}' });
   assert.equal(discovery.steps[0].with.ref, '${{ github.event.repository.default_branch }}');
@@ -515,29 +516,28 @@ test('a stale human flip uses live failed proof instead of its ready payload', a
 
 // bound: B's mutation is the signal that independent PR work progressed while A
 // was held; the timeout detects accidental repository-wide serialization.
-test('automatic discovery gives coalesced PR A and B independent readiness jobs', { timeout: 10000 }, async () => {
-  const github = fakeGithub({ pulls: [pullFixture(), pullFixture({ number: 8, node_id: 'PR_8' })] });
+test('independent automatic A and B events keep separate discovery and production PR queues', { timeout: 10000 }, async () => {
+  const a = fakeGithub(), b = fakeGithub({ pulls: [pullFixture({ number: 8, node_id: 'PR_8' })] });
+  a.state.checks[0].pull_requests = structuredClone(a.state.run.pull_requests);
+  b.state.checks[0].pull_requests = structuredClone(b.state.run.pull_requests);
   const held = barrier(), release = barrier(), bReady = barrier();
-  const get = github.rest.pulls.get, graphql = github.graphql;
-  github.rest.pulls.get = async args => {
-    if (args.pull_number === 7) { held.resolve(); await release.promise; }
-    return get(args);
-  };
-  github.graphql = async (query, vars) => {
+  const get = a.rest.pulls.get, graphql = b.graphql;
+  a.rest.pulls.get = async args => { held.resolve(); await release.promise; return get(args); };
+  b.graphql = async (query, vars) => {
     const result = await graphql(query, vars);
     if (vars.id === 'PR_8') bReady.resolve();
     return result;
   };
   const enqueue = await workflowQueue();
-  const work = enqueue({ github, eventName: 'check_run', payload: {} });
+  const first = enqueue({ github: a, eventName: 'check_run', payload: {} });
   await held.promise;
+  const second = enqueue({ github: b, eventName: 'check_run', payload: {} });
   await bReady.promise;
-  assert.equal(github.state.pulls[1].draft, false);
+  assert.equal(b.state.pulls[0].draft, false);
   release.resolve();
-  await work;
-  assert.equal(github.state.pulls[0].draft, false);
+  await Promise.all([first, second]);
+  assert.equal(a.state.pulls[0].draft, false);
 });
-
 
 // bound: explicit read/queue barriers control replacement, not elapsed time.
 test('a human wake replacing a pending revoker still revokes failed admission', { timeout: 10000 }, async () => {
@@ -631,4 +631,17 @@ test('a human wake replacing pending promotion still promotes current admitted p
   await Promise.all([older, promotion, human]);
   assert.equal(github.state.pulls[0].draft, false, 'fresh admitted proof must survive replacement of pending promotion');
   assert.equal(board.data.repository.pullRequest.projectItems.nodes[0].fieldValueByName.name, 'In review');
+});
+
+for (const event of ['CI', 'provider']) test(`readiness ${event} discovery bounds proof work with 63 unrelated PRs`, async () => {
+  const github = fakeGithub();
+  github.state.pulls.push(...Array.from({ length: 63 }, (_, i) => pullFixture({ number: i + 100, node_id: `PR_${i + 100}`,
+    head: { sha: 'b'.repeat(40), ref: 'other', repo: { full_name: 'o/r' } } })));
+  github.state.checks[0].pull_requests = structuredClone(github.state.run.pull_requests);
+  const input = eventArgs({ github, eventName: event === 'CI' ? 'workflow_run' : 'check_run', payload: event === 'CI' ? workflowRun() : {} });
+  const result = await discoverReadiness(input);
+  assert.deepEqual(result, { numbers: [7] });
+  assert.equal(github.calls.some(([name, route]) => name === 'pulls.list' || route === 'GET /repos/{owner}/{repo}/pulls'), false);
+  await Promise.all(result.numbers.map(pullNumber => refreshReadiness({ ...input, pullNumber })));
+  assert.deepEqual(flips(github), [['markPullRequestReadyForReview', 'PR_7']]);
 });

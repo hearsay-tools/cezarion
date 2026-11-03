@@ -86,7 +86,10 @@ Local checks validate fixtures and static workflow structure. They do not prove
 postmerge external event delivery or exact-once rerun execution. A bounded acceptance
 observation reduces retry races but is not durable cross-execution deduplication.
 
-## Confirmed review corrections (2026-11-02)
+## Confirmed review corrections (2026-11-02, historical)
+
+The all-open discovery design below is superseded by **Bounded event targets**.
+Its validation evidence remains a record of the earlier implementation.
 
 Proof base: `b71de1afc9dff86036634948b83a5ab2074def0d`. Preserve the original
 implementation and the parent's docs policy correction. One commit per finding.
@@ -267,7 +270,10 @@ Published task snapshots: incremental quality
 `1e55f546-ba31-4106-9f74-8df2a9dce71a`.
 
 
-## Readiness cross-event serialization (2026-11-03)
+## Readiness cross-event serialization (2026-11-03, historical)
+
+The all-open discovery scope below is superseded by **Bounded event targets**.
+The same-PR serialization and fresh-evidence guarantees remain active.
 
 Confirmed finding `4448988392` on `hearsay-tools/cezarion#2501`.
 Regression `proof_base`: `a5559af6217316b802aa83b7c7f7b77e4e1b9579`.
@@ -371,3 +377,117 @@ Published task snapshots: affected quality
 `ec52a7d1-d8ce-4a54-949b-55e7a32bef5d`, full source-hash/coverage report JSON
 `b79c0bb0-2db6-4e2b-822b-4af07292b6e5`, red/green proof
 `29992b96-8406-46b1-91be-cdd8f8a18296`.
+
+
+## Bounded event targets (2026-11-03)
+
+Findings `4449194844` and `4449194858`, `hearsay-tools/cezarion#2501`.
+Proof base: `95619b966d0170fe7f5d029dab0da30a3ed9f282`.
+This section supersedes the earlier all-open automatic discovery design and its
+cross-PR sweep tests. The earlier sections retain historical validation evidence.
+
+The all-open scan compensated for a former repository-wide pending slot: A's
+surviving event had to recover B's replaced event. Neither current workflow has a
+shared discovery queue. Each event gets independent trusted discovery, then PR
+number job locks isolate A and B. A same-PR pending replacement still reads fresh
+proof at the lock head. Replace automatic proof of unrelated PRs with event-owned
+targets; explicit `pr_number` dispatch recovers eventless or dropped events.
+No repository-wide recovery sweep, queue storage, schedule or new setting is needed.
+
+Native CI uses bounded PR numbers from the authoritative run's official
+`pull_requests` association, never `workflow_run.head_sha` as a live PR filter.
+Signals retain the validated `signalTarget.number`. Provider checks use their
+verified official associations when nonempty; only an empty array permits a
+bounded open-main listing and selects eligible current heads equal to the verified
+check head. Malformed association data cannot trigger that fallback. Old associated
+events wake their PR and prove its current head/run/attempt, not historical state.
+
+Use a fixed four-target limit per event, including official association rows and
+fallback head matches. Dedupe valid associations; reject malformed/oversized lists
+and excess matches with manual `pr_number` recovery instead of truncating. Existing
+open-inventory pagination stays two pages (at most 199 rows, otherwise fail closed).
+Every target is re-read and checked for live eligibility before its matrix job and
+again at the lock head. Discovery performs no native/provider proof on unrelated
+PRs. Each selected job keeps its own 120-second deadline and existing bounded
+readers. Each workflow independently applies this cap; readiness and reconciliation
+can both handle the same event. CI/associated-check discovery uses at most five
+REST reads, signal discovery three, and empty-check fallback seven, before the
+selected matrix jobs. These counts exclude the selected jobs' bounded proof/read
+work and optional board synchronization. Four-way parallelism bounds concurrency only; this design does not enforce
+a repository-wide hourly GitHub API limit across unrelated events/workflows.
+
+| Input / transition | Target selection | Guarantee / recovery |
+| --- | --- | --- |
+| Valid CI with 63+ unrelated open PRs | Official associated numbers only, live eligibility | No open inventory or unrelated proof |
+| CI run SHA differs from live PR head | Same associated PR number | Prove newest live native/provider state at queue head |
+| Valid signal with merge SHA | Validated signal PR number | Never use merge SHA as PR-head filter |
+| Associated provider event, old or current head | Official associated numbers, live eligibility | Old event cannot select historical proof |
+| Provider with empty association | Two-page open-main listing; exact current head matches only | No unrelated proof; several matches allowed up to four |
+| Empty-association provider with stale head/no match | No targets | Current synchronize/CI/provider wake or manual dispatch recovers |
+| Malformed/missing CI/check association or more than four rows/targets | Fail closed; no output jobs | Dispatch either workflow with `pr_number` |
+| A and B receive independent automatic events | Independent discovery and PR-number jobs | Holding A cannot drop or block B; no global discovery lock |
+| Same-PR mixed-kind pending replacement | One PR lock; surviving job reads live evidence | Existing promotion/revocation coalescing tests remain |
+| Fork, closed or non-main live PR | Skip | Fork author retains draft state; no targeted rerun |
+| Missing native proof or ambiguous targeted write | Existing per-PR failure / observation behavior | No blind POST retry; other independent PR jobs continue |
+| Manual dispatch | Requested positive PR number only | Bounded recovery without repository sweep |
+
+Record this replacement before changing old coalesced-all-PR test expectations.
+The paired findings share one cause and one shared discovery fix consumed by both
+readiness and reconciliation; keep that policy/runtime change in one logical commit.
+
+
+### Bounded-target validation evidence
+
+The parent merged source `95619b966` is the regression base. Final measured
+JavaScript/tests are the working changes after that SHA. No package source or
+public declarations changed; build/typecheck/package verification remains in CI.
+
+- Disposable scratch, own frozen pnpm installation, unchanged regression tests:
+  **29 selected tests fail** on `95619b966` by intended target-list assertions or
+  missing expected rejection. There are no setup/import errors, cancellations,
+  empty test selections or timeout failures. Copy only fixed
+  `coderabbit-reconcile.cjs`: **122/122 affected tests pass** across reconciliation,
+  readiness and workflow tests. This includes independent A/B discovery/queues
+  linked to both production YAML files, old associated CI/provider events proving
+  current heads, bounded/malformed associations, stale empty-association no-op,
+  fallback pagination/target overflow and 63-unrelated-PR cases for both consumers.
+  Prior same-PR pending replacement promotion/revocation tests still pass.
+- Mandatory bundled affected quality against `95619b966`: **67/67 changed
+  functions**, four files, **122 tests pass**, max complexity **16**, CRAP **16**.
+  Current full-PR measurement pins fetched merged main
+  `4068a24fd3d03f191e2999a69565dfbf60905a43`: **340/340 changed functions** across
+  21 files, **366 selected tests pass**, max complexity **20**, CRAP **20.231481**.
+  Both use bundled `check.mjs --runner node --node-import scripts/test-git-env.mjs`
+  with affected tests; full-PR also selects every changed script test and the
+  PR-test-proof consumer. All 21 measured source hashes match final files.
+- Lint, pinned actionlint/shellcheck with CI warning severity, citations and
+  `git diff --check` pass. The parent/native read-only safety review is clean.
+  No workflow concurrency or mutation permissions change; only a comment changes
+  in the reconcile workflow. Readiness runtime is unchanged and uses the shared
+  bounded discovery fix. No unrelated UI/test cleanup is consumed or edited.
+- Squeal returned current passing results for the three selected files at revision
+  **27**, after 21.7 seconds. At that capture no worktree failures were known;
+  474 other files / 7143 tests remained queued. Final global state is reported
+  separately to the parent; no full/slow-suite result is inferred from this pass.
+- Reader sweep corrected the CI guide and workflow all-open promises. Earlier
+  all-open plan sections are explicitly historical and superseded. A/B recovery
+  now comes from independent event discovery and PR queues, with manual bounded
+  recovery for dropped/eventless events. No repository-hourly rate limit or
+  lossless delivery claim is made. Fork, board, Done and targeted-write behavior
+  remains unchanged. Existing Squeal friction is tracked in
+  `hearsay-tools/squeal#138`; no distinct new friction was found.
+
+Measured SHA-256:
+
+| File | SHA-256 |
+| --- | --- |
+| `.github/scripts/coderabbit-reconcile.cjs` | `b375b211fa0226ebaadc1823b4dfa76b0d401b8b8b457df6b107e954367120f7` |
+| `.github/scripts/coderabbit-reconcile.test.cjs` | `024dcb716678adbe0a2db51ee9c54b828c555b821215cdd1b042fec47715b836` |
+| `.github/scripts/coderabbit.workflow.test.cjs` | `1cfecad88b655861893d1a35aaf40ab39fd269a07f0561875b1cd263605943ac` |
+| `.github/scripts/pr-readiness.test.cjs` | `bf58c1abd02e4ca056ff33624e914d6aee5db8674c911fec1693b83603971b14` |
+
+Published task snapshots: affected quality
+`0ea10c91-e22c-41d2-ac2a-3b539c1c2d94`, full-PR Markdown
+`ca36741b-db18-4090-9caa-acf76d292b28`, full source-hash/coverage JSON
+`b4f15089-3c59-4914-bbf0-d6ce81a21fca`, red/green proof
+`c939212b-0dae-4b60-b63d-9da5bc5a302a`.

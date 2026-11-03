@@ -6,6 +6,15 @@ const { reader, positive, validSha, REVIEW, successfulJobs } = require('./queue-
 const { readCodeRabbitAdmission, trustedCheck } = require('./coderabbit-admission.cjs');
 const { readNativeReview } = require('./native-review-proof.cjs');
 const { signalTarget } = require('./review-signal.cjs');
+const TARGET_LIMIT = 4;
+const recovery = reason => new Error(`${reason}; dispatch with pr_number for manual recovery`);
+function associationNumbers(pulls) {
+  if (!Array.isArray(pulls) || pulls.length > TARGET_LIMIT
+    || pulls.some(pr => !positive(pr?.number) || !validSha(pr.head?.sha) || typeof pr.base?.ref !== 'string')) {
+    throw recovery('Malformed or oversized PR association');
+  }
+  return [...new Set(pulls.map(pr => pr.number))];
+}
 async function openPulls(read) {
   const pulls = [];
   for (let page = 1; page <= 2; page++) {
@@ -14,14 +23,15 @@ async function openPulls(read) {
     pulls.push(...rows);
     if (rows.length < 100) return pulls;
   }
-  throw new Error('Open PR pagination limit; reduce the open main PR inventory before retrying');
+  throw recovery('Open PR pagination limit');
 }
 async function checkTarget(read, payload) {
   if (!['created', 'completed'].includes(payload.action) || !trustedCheck(payload.check_run)
     || !positive(payload.check_run.id) || !validSha(payload.check_run.head_sha)) return null;
   const check = await read('GET /repos/{owner}/{repo}/check-runs/{check_run_id}', { check_run_id: payload.check_run.id });
   if (!trustedCheck(check) || check.id !== payload.check_run.id || check.head_sha !== payload.check_run.head_sha) return null;
-  return { head: check.head_sha };
+  const numbers = associationNumbers(check.pull_requests);
+  return numbers.length ? { numbers } : { head: check.head_sha };
 }
 async function workflowTarget(read, payload, fullName) {
   const source = payload.workflow_run;
@@ -31,18 +41,23 @@ async function workflowTarget(read, payload, fullName) {
   if (run.id !== source.id || run.run_attempt !== source.run_attempt || run.status !== 'completed'
     || run.event !== 'pull_request_target' || run.path !== '.github/workflows/ci.yml'
     || run.repository?.full_name !== fullName || run.head_sha !== source.head_sha) return null;
-  return { head: run.head_sha };
+  const numbers = associationNumbers(run.pull_requests);
+  if (!numbers.length) throw recovery('Missing native CI PR association');
+  return { numbers };
 }
 async function eventTarget(read, eventName, payload, fullName) {
   if (payload.repository?.full_name !== fullName) throw new Error('Foreign event');
   if (eventName === 'workflow_dispatch') {
     const number = Number(payload.inputs?.pr_number);
     if (!positive(number)) throw new Error('pr_number must be a positive integer');
-    return { number };
+    return { numbers: [number] };
   }
   if (eventName === 'check_run') return checkTarget(read, payload);
-  if (eventName === 'workflow_run') return payload.workflow_run?.name === 'CodeRabbit review signal'
-    ? signalTarget(read, payload, fullName) : workflowTarget(read, payload, fullName);
+  if (eventName === 'workflow_run') {
+    if (payload.workflow_run?.name !== 'CodeRabbit review signal') return workflowTarget(read, payload, fullName);
+    const signal = await signalTarget(read, payload, fullName);
+    return signal ? { numbers: [signal.number] } : null;
+  }
   return null;
 }
 async function observeRerun(read, run, now, sleep, deadline) {
@@ -144,18 +159,20 @@ async function discover({ github, owner, repo, eventName, payload, now = Date.no
   const deadline = now() + 120000, read = reader(github, owner, repo, deadline, now);
   const target = await eventTarget(read, eventName, payload, `${owner}/${repo}`);
   if (!target) return { numbers: [] };
-  // Trusted discovery supplies a reliable PR number before job concurrency is
-  // selected. Automatic triggers cover coalesced events for other PRs too.
-  const pulls = eventName === 'workflow_dispatch'
-    ? [await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: target.number })]
-    : await openPulls(read);
+  // Discovery runs independently for each event. Carry only associated stable
+  // numbers; old events never select a historical head or native proof.
+  const fullName = `${owner}/${repo}`;
+  const candidates = target.numbers ?? [...new Set((await openPulls(read))
+    .filter(pr => eligiblePull(pr, fullName) && pr.head.sha === target.head).map(pr => pr.number))];
+  if (candidates.length > TARGET_LIMIT) throw recovery('Too many matching PR targets');
   const numbers = [];
-  for (const pr of pulls) {
-    if (!eligiblePull(pr, `${owner}/${repo}`)) {
-      log('Skipped ineligible or malformed PR; forks require a maintainer native review rerun.');
+  for (const number of candidates) {
+    const pr = await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: number });
+    if (pr?.number !== number || !eligiblePull(pr, fullName) || (target.head && pr.head.sha !== target.head)) {
+      log('Skipped changed or ineligible PR; forks require a maintainer native review rerun.');
       continue;
     }
-    if (!numbers.includes(pr.number)) numbers.push(pr.number);
+    numbers.push(number);
   }
   return { numbers };
 }

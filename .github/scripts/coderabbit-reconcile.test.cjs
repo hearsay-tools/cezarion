@@ -151,17 +151,19 @@ function twoPulls() {
   } };
   return { ...a, github, a, b };
 }
-for (const event of ['check_run', 'workflow_run', 'signal']) test(`coalesced B event is recovered by A's surviving ${event} event`, async () => {
+for (const event of ['check_run', 'workflow_run', 'signal']) test(`independent ${event} events target A and B without unrelated proof`, async () => {
   const h = twoPulls();
   const payload = event === 'check_run' ? checkEvent(h.a) : event === 'signal' ? signal(h.a) : ciEvent(h.a);
-  assert.deepEqual(await run(h, event === 'check_run' ? event : 'workflow_run', payload), ['rerun-requested', 'rerun-requested']);
-  assert.deepEqual(h.a.s.writes, [30]); assert.deepEqual(h.b.s.writes, [40]);
+  assert.deepEqual(await run(h, event === 'check_run' ? event : 'workflow_run', payload), ['rerun-requested']);
+  assert.deepEqual(h.a.s.writes, [30]); assert.deepEqual(h.b.s.writes, []);
+  assert.deepEqual(await run(h, 'workflow_run', ciEvent(h.b)), ['rerun-requested']);
+  assert.deepEqual(h.b.s.writes, [40]);
 });
 test('manual dispatch scopes one PR without a repository-wide queue', async () => {
   const h = twoPulls();
   assert.deepEqual(await run(h), ['rerun-requested']); assert.deepEqual(h.b.s.writes, []);
 });
-for (const change of ['newer run', 'newer attempt']) test(`valid old source with ${change} reconciles newest native proof for both PRs`, async () => {
+for (const change of ['newer run', 'newer attempt']) test(`valid old source with ${change} reconciles newest native proof for its associated PR`, async () => {
   const h = twoPulls(), payload = ciEvent(h.a), request = h.github.request;
   const source = structuredClone(h.a.s.run);
   if (change === 'newer run') h.a.s.run.id = 22;
@@ -174,14 +176,14 @@ for (const change of ['newer run', 'newer attempt']) test(`valid old source with
     }
     return request(route, args);
   };
-  assert.deepEqual(await run(h, 'workflow_run', payload), ['rerun-requested', 'rerun-requested']);
-  assert.deepEqual(h.a.s.writes, [30]); assert.deepEqual(h.b.s.writes, [40]);
+  assert.deepEqual(await run(h, 'workflow_run', payload), ['rerun-requested']);
+  assert.deepEqual(h.a.s.writes, [30]); assert.deepEqual(h.b.s.writes, []);
 });
 for (const change of ['head', 'run', 'attempt']) test(`late old signal replaces newer pending event: read latest ${change} at PR lock head`, async () => {
   const h = twoPulls(), args = { ...h, owner: 'o', repo: 'r' };
   const payload = { repository: { full_name: 'o/r' }, ...signal(h.a) };
   const { numbers } = await discover({ ...args, eventName: 'workflow_run', payload });
-  assert.deepEqual(numbers, [7, 8]);
+  assert.deepEqual(numbers, [7]);
   if (change === 'head') {
     h.a.s.pr.head.sha = 'd'.repeat(40); h.a.s.checks[0].head_sha = h.a.s.pr.head.sha;
     h.a.s.run.head_sha = h.a.s.pr.head.sha; h.a.s.run.pull_requests[0].head.sha = h.a.s.pr.head.sha;
@@ -189,20 +191,21 @@ for (const change of ['head', 'run', 'attempt']) test(`late old signal replaces 
   else h.a.s.run.run_attempt = 2;
   const latest = { id: h.a.s.run.id, attempt: h.a.s.run.run_attempt, head: h.a.s.pr.head.sha };
   assert.deepEqual(await Promise.all(numbers.map(pullNumber => reconcile({ ...args, pullNumber }))),
-    ['rerun-requested', 'rerun-requested']);
+    ['rerun-requested']);
   assert.ok(h.a.s.calls.some(([route, params]) => route.endsWith('/runs/{run_id}') && params.run_id === latest.id));
   assert.ok(h.a.s.calls.some(([route, params]) => route.endsWith('/workflows/{workflow_id}/runs') && params.head_sha === latest.head));
   assert.equal(h.a.s.run.run_attempt, latest.attempt + 1);
-  assert.deepEqual(h.a.s.writes, [30]); assert.deepEqual(h.b.s.writes, [40]);
+  assert.deepEqual(h.a.s.writes, [30]); assert.deepEqual(h.b.s.writes, []);
 });
 for (const malformed of [null, { number: 9 }, { number: 9, head: null }]) test('malformed PR listing row does not block valid PRs', async () => {
   const h = twoPulls(); h.a.s.pulls = [malformed, h.b.s.pr];
-  assert.deepEqual(await run(h, 'check_run', checkEvent(h.a)), ['rerun-requested']);
+  assert.deepEqual(await run(h, 'check_run', checkEvent(h.b)), ['rerun-requested']);
   assert.deepEqual(h.b.s.writes, [40]);
 });
 test('missing native CI for A does not block B', async () => {
   const h = twoPulls(); h.a.s.runs = [];
-  assert.deepEqual(await run(h, 'check_run', checkEvent(h.a)), ['native-evidence-unavailable', 'rerun-requested']);
+  assert.deepEqual(await run(h, 'check_run', checkEvent(h.a)), ['native-evidence-unavailable']);
+  assert.deepEqual(await run(h, 'check_run', checkEvent(h.b)), ['rerun-requested']);
   assert.deepEqual(h.a.s.writes, []); assert.deepEqual(h.b.s.writes, [40]);
 });
 test('invalid event cannot start discovery or writes for any PR', async () => {
@@ -213,7 +216,9 @@ test('invalid event cannot start discovery or writes for any PR', async () => {
 test('each matrix job has a new deadline even after another PR exhausts its budget', async () => {
   const h = twoPulls(), args = { ...h, owner: 'o', repo: 'r' };
   const discovery = await discover({ ...args, eventName: 'check_run', payload: { repository: { full_name: 'o/r' }, ...checkEvent(h.a) } });
-  assert.deepEqual(discovery.numbers, [7, 8]);
+  assert.deepEqual(discovery.numbers, [7]);
+  const second = await discover({ ...args, eventName: 'workflow_run', payload: { repository: { full_name: 'o/r' }, ...ciEvent(h.b) } });
+  assert.deepEqual(second.numbers, [8]);
   h.a.s.onRead = route => { if (route.endsWith('/pulls/{pull_number}')) h.a.s.clock += 120001; };
   await assert.rejects(() => reconcile({ ...args, pullNumber: 7 }), /deadline/);
   assert.equal(await reconcile({ ...args, pullNumber: 8 }), 'rerun-requested');
@@ -222,6 +227,7 @@ test('each matrix job has a new deadline even after another PR exhausts its budg
 test('one PR ambiguous write fails independently while another PR completes', async () => {
   const h = twoPulls(), args = { ...h, owner: 'o', repo: 'r' };
   h.a.s.writeError = true;
+  h.a.s.checks[0].pull_requests = [...h.a.s.run.pull_requests, ...h.b.s.run.pull_requests];
   const { numbers } = await discover({ ...args, eventName: 'check_run', payload: { repository: { full_name: 'o/r' }, ...checkEvent(h.a) } });
   const results = await Promise.allSettled(numbers.map(pullNumber => reconcile({ ...args, pullNumber })));
   assert.equal(results[0].status, 'rejected'); assert.match(results[0].reason.message, /acceptance not yet visible/);
@@ -234,4 +240,100 @@ test('valid old signal association wakes the current head without authorizing hi
   h.s.signal.pull_requests[0].head.sha = BASE;
   assert.deepEqual(await run(h, 'workflow_run', payload), ['rerun-requested']);
   assert.deepEqual(h.s.writes, [30]);
+});
+
+const discoverEvent = (h, eventName, payload) => discover({ ...h, owner: 'o', repo: 'r', eventName,
+  payload: { repository: { full_name: 'o/r' }, ...payload } });
+const association = number => ({ number, head: { sha: HEAD }, base: { ref: 'main' } });
+function crowdedInventory(h) {
+  h.s.pulls = [h.s.pr, ...Array.from({ length: 63 }, (_, i) => ({ ...structuredClone(h.s.pr), number: 100 + i,
+    head: { ...h.s.pr.head, sha: BASE } }))];
+}
+for (const event of ['CI', 'signal', 'associated check']) test(`${event} discovery targets only its associated PR among 63 unrelated PRs`, async () => {
+  const h = fixture(); crowdedInventory(h);
+  h.s.checks[0].pull_requests = [association(7)];
+  const payload = event === 'CI' ? ciEvent(h) : event === 'signal' ? signal(h) : checkEvent(h);
+  assert.deepEqual(await discoverEvent(h, event === 'associated check' ? 'check_run' : 'workflow_run', payload), { numbers: [7] });
+  assert.equal(h.s.calls.some(([route]) => route === 'GET /repos/{owner}/{repo}/pulls'), false, 'associated event must not scan inventory');
+  assert.equal(h.s.calls.some(([route]) => route.endsWith('/commits/{ref}/check-runs') || route.endsWith('/workflows/{workflow_id}/runs')), false);
+});
+
+test('unassociated provider fallback selects only live matching heads and dedupes them', async () => {
+  const h = fixture(); crowdedInventory(h);
+  const second = { ...structuredClone(h.s.pr), number: 8 };
+  h.s.pulls.push(second, second);
+  const request = h.github.request;
+  h.github.request = async (route, args) => args.pull_number === 8 ? { data: structuredClone(second) } : request(route, args);
+  assert.deepEqual(await discoverEvent(h, 'check_run', checkEvent(h)), { numbers: [7, 8] });
+  assert.equal(h.s.calls.filter(([route]) => route === 'GET /repos/{owner}/{repo}/pulls').length, 1);
+});
+
+test('unassociated stale provider head with no current match is a no-op', async () => {
+  const h = fixture(); h.s.pr.head.sha = BASE;
+  assert.deepEqual(await discoverEvent(h, 'check_run', checkEvent(h)), { numbers: [] });
+  assert.deepEqual(h.s.writes, []);
+});
+
+test('unassociated provider fallback rechecks its head match after inventory selection', async () => {
+  const h = fixture();
+  h.s.onRead = route => { if (route.endsWith('/pulls/{pull_number}')) h.s.pr.head.sha = BASE; };
+  assert.deepEqual(await discoverEvent(h, 'check_run', checkEvent(h)), { numbers: [] });
+});
+
+for (const event of ['CI', 'check']) {
+  for (const associations of [undefined, null, {}, [null], [{ number: 7 }], [association(-1)],
+    Array.from({ length: 5 }, (_, i) => association(i + 7))]) {
+    test(`${event} malformed or oversized official association fails closed: ${JSON.stringify(associations)}`, async () => {
+      const h = fixture();
+      (event === 'CI' ? h.s.run : h.s.checks[0]).pull_requests = associations;
+      await assert.rejects(() => discoverEvent(h, event === 'CI' ? 'workflow_run' : 'check_run', event === 'CI' ? ciEvent(h) : checkEvent(h)), /association.*pr_number/);
+      assert.equal(h.s.calls.some(([route]) => route === 'GET /repos/{owner}/{repo}/pulls'), false, 'malformed data cannot widen discovery');
+      assert.deepEqual(h.s.writes, []);
+    });
+  }
+}
+
+test('missing CI association fails closed with manual recovery instead of inventory fanout', async () => {
+  const h = fixture(); h.s.run.pull_requests = [];
+  await assert.rejects(() => discoverEvent(h, 'workflow_run', ciEvent(h)), /association.*pr_number/);
+  assert.equal(h.s.calls.some(([route]) => route === 'GET /repos/{owner}/{repo}/pulls'), false);
+});
+
+for (const event of ['CI', 'check']) test(`${event} multiple official associations are deduped and live eligibility filters forks`, async () => {
+  const h = fixture();
+  (event === 'CI' ? h.s.run : h.s.checks[0]).pull_requests = [association(7), association(8), association(7), association(9)];
+  const request = h.github.request;
+  h.github.request = async (route, args) => args.pull_number === 8 ? { data: { ...structuredClone(h.s.pr), number: 8 } }
+    : args.pull_number === 9 ? { data: { ...structuredClone(h.s.pr), number: 9, head: { ...h.s.pr.head, repo: { full_name: 'fork/r' } } } }
+      : request(route, args);
+  assert.deepEqual(await discoverEvent(h, event === 'CI' ? 'workflow_run' : 'check_run', event === 'CI' ? ciEvent(h) : checkEvent(h)), { numbers: [7, 8] });
+});
+
+test('too many eligible head matches fail closed with manual recovery', async () => {
+  const h = fixture(); h.s.pulls = Array.from({ length: 5 }, (_, i) => ({ ...structuredClone(h.s.pr), number: i + 7 }));
+  await assert.rejects(() => discoverEvent(h, 'check_run', checkEvent(h)), /matching PR targets.*pr_number/);
+});
+
+test('full provider fallback inventory fails closed after two pages instead of silent truncation', async () => {
+  const h = fixture(); h.s.pulls = Array.from({ length: 100 }, (_, i) => ({ ...structuredClone(h.s.pr), number: i + 7 }));
+  await assert.rejects(() => discoverEvent(h, 'check_run', checkEvent(h)), /pagination limit.*pr_number/);
+  assert.equal(h.s.calls.filter(([route]) => route === 'GET /repos/{owner}/{repo}/pulls').length, 2);
+});
+
+test('old associated CI with a different source SHA wakes its PR and proves the newest head', async () => {
+  const h = fixture(), source = structuredClone(h.s.run);
+  source.id = 19; source.head_sha = BASE; source.pull_requests[0].head.sha = BASE;
+  const request = h.github.request;
+  h.github.request = async (route, args) => args.run_id === 19 && route.endsWith('/runs/{run_id}')
+    ? { data: structuredClone(source) } : request(route, args);
+  assert.deepEqual(await run(h, 'workflow_run', { action: 'completed', workflow_run: source }), ['rerun-requested']);
+  assert.ok(h.s.calls.some(([route, args]) => route.endsWith('/workflows/{workflow_id}/runs') && args.head_sha === HEAD));
+});
+
+test('old associated provider check wakes its current PR without an event-head filter', async () => {
+  const h = fixture(), source = structuredClone(h.s.checks[0]);
+  source.id = 99; source.head_sha = BASE; source.pull_requests = [association(7)];
+  const request = h.github.request;
+  h.github.request = async (route, args) => args.check_run_id === 99 ? { data: structuredClone(source) } : request(route, args);
+  assert.deepEqual(await run(h, 'check_run', { action: 'completed', check_run: source }), ['rerun-requested']);
 });
