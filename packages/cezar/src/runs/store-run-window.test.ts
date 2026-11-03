@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,7 +28,7 @@ const open = () => {
 const at = (n: number) => new Date(Date.UTC(2026, 8, 1) + n * 60_000).toISOString();
 
 const root = (id: string, n: number, over: Record<string, unknown> = {}) => ({
-  id, title: `run ${id}`, workflow: 'quick-task', task: `task ${id}`, status: 'done', createdAt: at(n),
+  id, title: `run ${id}`, workflow: 'quick-task', task: `task ${id}`, status: RUN_STATUS.done, createdAt: at(n),
   finishedAt: at(n), tokensUsed: 0, archived: true, steps: [], ...over,
 });
 
@@ -45,9 +46,9 @@ const worker = (id: string, parentRunId: string, n: number, over: Record<string,
 /** The incident's shape: an old waiting root behind many newer archived roots and workers. */
 function seedIncident(archivedRoots = 250) {
   const records: unknown[] = [
-    root('old-waiting', 0, { status: 'waiting', archived: false, finishedAt: undefined, hasPendingHumanAsk: true }),
+    root('old-waiting', 0, { status: RUN_STATUS.waiting, archived: false, finishedAt: undefined, hasPendingHumanAsk: true }),
   ];
-  for (let i = 1; i <= 4; i++) records.push(root(`live-${i}`, 10_000 + i, { status: 'done', archived: false }));
+  for (let i = 1; i <= 4; i++) records.push(root(`live-${i}`, 10_000 + i, { status: RUN_STATUS.done, archived: false }));
   records.push(worker('w-live-1', 'live-1', 10_010, { archived: false }));
   records.push(worker('w-live-2', 'live-2', 10_011, { archived: false }));
   for (let i = 1; i <= archivedRoots; i++) records.push(root(`arch-${i}`, 100 + i * 2));
@@ -122,8 +123,8 @@ describe('RunStore.listRunSummaries({ archivedWindow })', () => {
     const parent = randomUUID();
     const heldWorker = randomUUID();
     seedRuns(dataDir, [
-      root(parent, 1, { status: 'running', archived: false, finishedAt: undefined }),
-      worker(heldWorker, parent, 2, { status: 'running', archived: true, finishedAt: undefined }),
+      root(parent, 1, { status: RUN_STATUS.running, archived: false, finishedAt: undefined }),
+      worker(heldWorker, parent, 2, { status: RUN_STATUS.running, archived: true, finishedAt: undefined }),
     ]);
     const store = open();
     expect(store.getRun(heldWorker)?.delegation?.role).toBe('worker');
@@ -140,8 +141,8 @@ describe('RunStore.listRunSummaries({ archivedWindow })', () => {
     store.close();
     stores.splice(0);
     seedRuns(dataDir, [
-      root(parent, 20_000, { status: 'running', archived: false, finishedAt: undefined }),
-      worker(heldWorker, parent, 20_001, { status: 'running', archived: false, finishedAt: undefined }),
+      root(parent, 20_000, { status: RUN_STATUS.running, archived: false, finishedAt: undefined }),
+      worker(heldWorker, parent, 20_001, { status: RUN_STATUS.running, archived: false, finishedAt: undefined }),
       root('active', 1, { archived: false }),
       worker('w-active', 'active', 2, { archived: false }),
     ]);
@@ -176,7 +177,7 @@ it('archived search retains summaries whose only match is a PR in the collection
  */
 describe('RunStore.listArchivedRuns', () => {
   /** A step status the record schema rejects: the row's stored summary is valid, its record is not. */
-  const unreadableSteps = [{ id: 's', name: 's', kind: 'agent', status: 'bogus', iterations: 1, tokensUsed: 0 }];
+  const unreadableSteps = [{ id: 's', name: 's', kind: STEP_KIND.agent, status: 'bogus', iterations: 1, tokensUsed: 0 }];
 
   const list = (store: RunStore, options: Parameters<RunStore['listArchivedRuns']>[0]) => {
     const found = store.listArchivedRuns(options);
@@ -325,8 +326,8 @@ describe('RunStore.listArchivedRuns', () => {
     const heldWorker = randomUUID();
     seedRuns(dataDir, [
       root('a1', 1),
-      root(parent, 2, { status: 'running', archived: false, finishedAt: undefined }),
-      worker(heldWorker, parent, 3, { status: 'running', archived: true, finishedAt: undefined }),
+      root(parent, 2, { status: RUN_STATUS.running, archived: false, finishedAt: undefined }),
+      worker(heldWorker, parent, 3, { status: RUN_STATUS.running, archived: true, finishedAt: undefined }),
     ]);
     const store = open();
     expect(store.heldIds()).toContain(heldWorker);

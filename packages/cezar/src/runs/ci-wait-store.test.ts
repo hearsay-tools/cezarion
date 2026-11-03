@@ -1,3 +1,4 @@
+import { RUN_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { openTestRunStore, runPersistence } from './run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -20,7 +21,7 @@ describe('atomic CI wait checkpoints', () => {
     directory = mkdtempSync(join(tmpdir(), 'cez-ci-store-'));
     store = openTestRunStore(directory, { keepLive: true });
     id = store.createRun({ title: 'CI', workflow: 'quick-task', task: 'wait', steps: [] }).id;
-    store.updateRun(id, { status: 'running' });
+    store.updateRun(id, { status: RUN_STATUS.running });
     wait = { id: randomUUID(), generation: 'session', turnId: 'turn', prUrl: 'https://github.com/acme/repo/pull/12',
       repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40), registeredAt: new Date().toISOString(),
       deadline: new Date(Date.now() + 30_000).toISOString(), timeoutSeconds: 30, until: 'checks' as const, wakeOnConflict: true, phase: 'registered' };
@@ -46,7 +47,7 @@ describe('atomic CI wait checkpoints', () => {
     store.commitCiWait(id, settled, input(id, wait.id));
     store.commitCiWait(id, settled, input(id, wait.id));
     const reopened = RunStore.open(directory, { keepLive: true });
-    expect(reopened.getRun(id)?.waits).toEqual([expect.objectContaining({ id: wait.id, kind: 'pr', phase: 'resolved', result: expect.objectContaining({ outcome: 'deadline' }) })]);
+    expect(reopened.getRun(id)?.waits).toEqual([expect.objectContaining({ id: wait.id, kind: WAIT_KIND.pr, phase: WAIT_PHASE.resolved, result: expect.objectContaining({ outcome: 'deadline' }) })]);
     expect(reopened.getRun(id)?.agentInputs).toHaveLength(1);
   });
 
@@ -56,7 +57,7 @@ describe('atomic CI wait checkpoints', () => {
     const record = openTestRunStore(directory, { keepLive: true }).getRun(id);
     expect(store.getRun(id)?.waits).toBeUndefined();
     expect(record?.waits).toBeUndefined();
-    expect(record?.lastWaits).toEqual([expect.objectContaining({ id: wait.id, phase: 'delivered' })]);
+    expect(record?.lastWaits).toEqual([expect.objectContaining({ id: wait.id, phase: WAIT_PHASE.delivered })]);
     expect(record?.agentInputs?.[0]?.deliveredAt).toBe(record?.lastWaits?.[0]?.deliveredAt);
   });
 
@@ -72,7 +73,7 @@ describe('atomic CI wait checkpoints', () => {
     expect(indexed).toHaveLength(1);
     const reopened = RunStore.open(directory, { keepLive: true });
     expect(runIds(reopened)).toHaveLength(1);
-    expect(reopened.getRun(id)).toMatchObject({ status: 'waiting', lastWaitsError: expect.stringContaining('unreadable') });
+    expect(reopened.getRun(id)).toMatchObject({ status: RUN_STATUS.waiting, lastWaitsError: expect.stringContaining('unreadable') });
     expect(reopened.getRun(id)?.error).toBeUndefined();
     expect(reopened.getRun(id)?.waits).toBeUndefined();
     expect(reopened.getRun(id)).not.toHaveProperty('ciWait');
@@ -82,7 +83,7 @@ describe('atomic CI wait checkpoints', () => {
     // The reopen below is a restart: this store goes first, or it still owns the running run.
     store.updateRun(id, { status }); store.close();
     const records = readPersistedRuns(directory);
-    records[0].lastCiWait = { ...wait, phase: 'delivered', result: { outcome: 'passed' } };
+    records[0].lastCiWait = { ...wait, phase: WAIT_PHASE.delivered, result: { outcome: 'passed' } };
     seedRuns(directory, records);
     const reopened = RunStore.open(directory, { keepLive: true });
     expect(reopened.getRun(id)?.status).toBe(status);

@@ -1,3 +1,10 @@
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,7 +26,7 @@ import { RUN_IN_USE_ELSEWHERE, RunStore, RunWriteRefusedError, type RunRecord } 
  */
 
 const record = (id: string, over: Partial<RunRecord> = {}): RunRecord => ({
-  id, title: `run ${id}`, workflow: 'quick-task', task: `task ${id}`, status: 'done',
+  id, title: `run ${id}`, workflow: 'quick-task', task: `task ${id}`, status: RUN_STATUS.done,
   createdAt: `2026-09-0${id.length % 9}T00:00:00.000Z`, tokensUsed: 0, archived: false, steps: [],
   ...over,
 });
@@ -72,12 +79,12 @@ describe('open leaves another live store\'s runs alone', () => {
     // turn serve's parked run into `failed` for good once serve restarted.
     const serve = open({ keepLive: true });
     const parked = serve.createRun({ title: 'parked', workflow: 'w', task: 't', steps: [] });
-    serve.updateRun(parked.id, { status: 'waiting' });
+    serve.updateRun(parked.id, { status: RUN_STATUS.waiting });
     const monitoring = serve.createRun({ title: 'monitoring', workflow: 'w', task: 't', steps: [] });
     // A monitoring park as store schema 4 writes it: waiting, with an open timer.
-    serve.updateRun(monitoring.id, { status: 'waiting' });
-    serve.commitWait(monitoring.id, { id: '33333333-3333-4333-8333-333333333333', kind: 'timer', source: 'agent', via: 'monitoring-line',
-      registeredAt: '2026-10-05T11:55:00.000Z', deadline: '2026-10-05T12:00:00.000Z', phase: 'open', turnId: 'turn', seconds: 300 });
+    serve.updateRun(monitoring.id, { status: RUN_STATUS.waiting });
+    serve.commitWait(monitoring.id, { id: '33333333-3333-4333-8333-333333333333', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA['monitoring-line'],
+      registeredAt: '2026-10-05T11:55:00.000Z', deadline: '2026-10-05T12:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn', seconds: 300 });
     serve.flush();
 
     const headless = open();
@@ -86,21 +93,21 @@ describe('open leaves another live store\'s runs alone', () => {
     expect(headless.listRunSummaries().runs.map((run) => run.id).sort()).toEqual([parked.id, monitoring.id].sort());
     headless.close();
 
-    expect(persisted(parked.id)).toMatchObject({ status: 'waiting' });
-    expect(persisted(monitoring.id)).toMatchObject({ status: 'waiting', waits: [{ kind: 'timer', phase: 'open' }] });
+    expect(persisted(parked.id)).toMatchObject({ status: RUN_STATUS.waiting });
+    expect(persisted(monitoring.id)).toMatchObject({ status: RUN_STATUS.waiting, waits: [{ kind: WAIT_KIND.timer, phase: WAIT_PHASE.open }] });
     expect(heldThere).toEqual([]);
     serve.close();
     const restarted = open({ keepLive: true });
     expect(restarted.getRun(parked.id)?.status).toBe('waiting');
-    expect(restarted.getRun(monitoring.id)).toMatchObject({ status: 'waiting', waits: [{ kind: 'timer', phase: 'open' }] });
+    expect(restarted.getRun(monitoring.id)).toMatchObject({ status: RUN_STATUS.waiting, waits: [{ kind: WAIT_KIND.timer, phase: WAIT_PHASE.open }] });
   });
 
   it('still settles a live run nobody alive owns, as a headless open always has', () => {
-    seedRuns(dataDir, [record('left-running', { status: 'running' })]);
+    seedRuns(dataDir, [record('left-running', { status: RUN_STATUS.running })]);
     const headless = open();
-    expect(headless.getRun('left-running')).toMatchObject({ status: 'failed', error: expect.stringContaining('interrupted') });
+    expect(headless.getRun('left-running')).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('interrupted') });
     headless.close();
-    expect(persisted('left-running')).toMatchObject({ status: 'failed' });
+    expect(persisted('left-running')).toMatchObject({ status: RUN_STATUS.failed });
   });
 });
 
@@ -134,7 +141,7 @@ describe('another store\'s runs are readable and refuse writes', () => {
   it('sweeps skip another store\'s finished runs until it lets them go', () => {
     const owner = open({ keepLive: true });
     const run = owner.createRun({ title: 'done there', workflow: 'w', task: 't', steps: [] });
-    owner.updateRun(run.id, { status: 'done', finishedAt: '2026-10-05T10:00:00.000Z' });
+    owner.updateRun(run.id, { status: RUN_STATUS.done, finishedAt: '2026-10-05T10:00:00.000Z' });
     owner.pin(run.id, 'active'); // still settling there
     owner.flush();
     const other = open({ keepLive: true });
@@ -364,7 +371,7 @@ describe('a run nobody alive owns', () => {
   it('a live row without a live owner is orphaned: writes leave it alone until it is adopted', () => {
     const gone = open({ keepLive: true });
     const run = gone.createRun({ title: 'left running', workflow: 'w', task: 't', steps: [] });
-    gone.updateRun(run.id, { status: 'running' });
+    gone.updateRun(run.id, { status: RUN_STATUS.running });
     gone.flush();
     const store = open({ keepLive: true });
     expect(store.runOwnership(run.id)).toBe('foreign');
@@ -376,7 +383,7 @@ describe('a run nobody alive owns', () => {
     expect(store.adoptFamily(run.id)).toBe(run.id);
     expect(store.runOwnership(run.id)).toBe('held');
     // Adopted for a control, it is settled, never kept running for recovery to resume.
-    expect(store.getRun(run.id)).toMatchObject({ status: 'failed', error: expect.stringContaining('interrupted') });
+    expect(store.getRun(run.id)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('interrupted') });
     expect(store.updateRun(run.id, { title: 'mine' })?.title).toBe('mine');
   });
 
@@ -403,7 +410,7 @@ describe('a run nobody alive owns', () => {
   it('keeps another live process\'s agent scratch when it sweeps for orphans', () => {
     const owner = open({ keepLive: true });
     const run = owner.createRun({ title: 'theirs', workflow: 'w', task: 't', steps: [] });
-    owner.updateRun(run.id, { status: 'running' });
+    owner.updateRun(run.id, { status: RUN_STATUS.running });
     owner.flush();
     const scratch = agentTmpDir(dataDir, run.id);
     mkdirSync(scratch, { recursive: true });

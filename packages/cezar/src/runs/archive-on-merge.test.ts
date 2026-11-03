@@ -1,3 +1,10 @@
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { readHistoryText, historyPaths } from './history-file.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
@@ -28,7 +35,7 @@ const dirs: string[] = [];
 const stores: RunStore[] = [];
 function setup(overrides: Partial<RunRecord> = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'cez-autoarchive-')); dirs.push(dir);
-  const run = { id: randomUUID(), title: 'task', task: 'task', workflow: 'quick-task', status: 'done', createdAt: '2026-01-01T00:00:00.000Z', tokensUsed: 0, archived: false, steps: [], pullRequests: [pr], ...overrides };
+  const run = { id: randomUUID(), title: 'task', task: 'task', workflow: 'quick-task', status: RUN_STATUS.done, createdAt: '2026-01-01T00:00:00.000Z', tokensUsed: 0, archived: false, steps: [], pullRequests: [pr], ...overrides };
   seedRuns(dir, [run]);
   const store = RunStore.open(dir, { keepLive: true }); stores.push(store);
   return { dir, store, id: run.id };
@@ -75,8 +82,8 @@ describe('guarded automatic archive', () => {
     const fresh = store.archiveOnMergeSnapshot(id, repo)!;
     expect(store.archiveAfterMerge(fresh, observations(fresh), repo)).toBe(false);
   });
-  it.each([{ status: 'waiting' }, { activity: 'monitoring' }, { waits: [{ id: '22222222-2222-4222-8222-222222222222', kind: 'timer', source: 'agent', via: 'cezar_wait',
-    registeredAt: '2026-12-31T23:55:00.000Z', deadline: '2027-01-01T00:00:00.000Z', phase: 'open', turnId: 'turn', seconds: 300 }] }, { waits: [{ id: '33333333-3333-4333-8333-333333333333', kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: '2026-12-31T23:55:00.000Z', phase: 'open', turnId: 'turn' }] }, { hasPendingPermission: true }, { delegation: { role: 'invalid', reason: 'bad' } }])('defers live/uncertain evidence %j', overrides => {
+  it.each([{ status: RUN_STATUS.waiting }, { activity: 'monitoring' }, { waits: [{ id: '22222222-2222-4222-8222-222222222222', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
+    registeredAt: '2026-12-31T23:55:00.000Z', deadline: '2027-01-01T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn', seconds: 300 }] }, { waits: [{ id: '33333333-3333-4333-8333-333333333333', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask, registeredAt: '2026-12-31T23:55:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn' }] }, { hasPendingPermission: true }, { delegation: { role: 'invalid', reason: 'bad' } }])('defers live/uncertain evidence %j', overrides => {
     const { store, id } = setup(overrides as Partial<RunRecord>);
     expect(store.archiveOnMergeSnapshot(id, repo)).toBeUndefined();
   });

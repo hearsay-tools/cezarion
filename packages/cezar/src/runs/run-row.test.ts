@@ -1,3 +1,4 @@
+import { RUN_STATUS, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
 
 import { branchFor } from '../git-worktree.ts';
@@ -8,7 +9,7 @@ const ID = '0123abcd-0000-4000-8000-000000000000';
 
 function record(overrides: Partial<RunRecord> = {}): RunRecord {
   return {
-    id: ID, title: 't', workflow: 'quick-task', task: 'do it', status: 'done', createdAt: '2026-10-05T00:00:00.000Z',
+    id: ID, title: 't', workflow: 'quick-task', task: 'do it', status: RUN_STATUS.done, createdAt: '2026-10-05T00:00:00.000Z',
     tokensUsed: 0, archived: false, steps: [], ...overrides,
   } as RunRecord;
 }
@@ -38,22 +39,22 @@ describe('isLiveRecord', () => {
 
   // One case per clause: drop any clause from the predicate and its case goes false.
   it.each([
-    ['queued', { status: 'queued' }],
-    ['running', { status: 'running' }],
-    ['waiting', { status: 'waiting' }],
+    ['queued', { status: RUN_STATUS.queued }],
+    ['running', { status: RUN_STATUS.running }],
+    ['waiting', { status: RUN_STATUS.waiting }],
     // A wait counts until it is delivered or cancelled (unified waits: `lastWaits` holds those).
-    ['an open wait', { waits: [{ id: 'w', phase: 'open' }] }],
-    ['a resolved wait not yet delivered', { waits: [{ id: 'w', phase: 'resolved' }] }],
-    ['a pending usage-limit resume', { status: 'failed', autoResumeAt: '2026-10-06T00:00:00.000Z' }],
+    ['an open wait', { waits: [{ id: 'w', phase: WAIT_PHASE.open }] }],
+    ['a resolved wait not yet delivered', { waits: [{ id: 'w', phase: WAIT_PHASE.resolved }] }],
+    ['a pending usage-limit resume', { status: RUN_STATUS.failed, autoResumeAt: '2026-10-06T00:00:00.000Z' }],
     ['a worker whose destroy is still owed', { delegation: worker({ destroy: { phase: 'requested' } }) }],
-    ['a root whose Finish has not settled', { status: 'cancelled', delegation: { role: 'root', finishRequestedAt: '2026-10-05T00:00:00.000Z' } }],
+    ['a root whose Finish has not settled', { status: RUN_STATUS.cancelled, delegation: { role: 'root', finishRequestedAt: '2026-10-05T00:00:00.000Z' } }],
     ['an accepted Stop not yet settled', { stopping: { requestedAt: '2026-10-05T00:00:00.000Z' } }],
   ])('is true for %s', (_name, overrides) => {
     expect(isLiveRecord(record(overrides as Partial<RunRecord>))).toBe(true);
   });
 
   it('lets a run go once its waits are delivered or cancelled', () => {
-    expect(isLiveRecord(record({ lastWaits: [{ id: 'w', phase: 'delivered' }, { id: 'x', phase: 'cancelled' }] } as unknown as Partial<RunRecord>))).toBe(false);
+    expect(isLiveRecord(record({ lastWaits: [{ id: 'w', phase: WAIT_PHASE.delivered }, { id: 'x', phase: WAIT_PHASE.cancelled }] } as unknown as Partial<RunRecord>))).toBe(false);
   });
 
   it('lets a worker go once its destroy completed', () => {
@@ -75,8 +76,8 @@ describe('isLiveRecord', () => {
 describe('encodeRunRow', () => {
   it('stores the live predicate as the live column', () => {
     expect(encodeRunRow(record()).live).toBe(false);
-    expect(encodeRunRow(record({ status: 'running' })).live).toBe(true);
-    expect(encodeRunRow(record({ waits: [{ id: 'w', phase: 'open' }] as unknown as RunRecord['waits'] })).live).toBe(true);
+    expect(encodeRunRow(record({ status: RUN_STATUS.running })).live).toBe(true);
+    expect(encodeRunRow(record({ waits: [{ id: 'w', phase: WAIT_PHASE.open }] as unknown as RunRecord['waits'] })).live).toBe(true);
   });
 
   it('copies the query columns off the record', () => {

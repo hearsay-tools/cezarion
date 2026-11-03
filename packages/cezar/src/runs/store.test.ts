@@ -10,7 +10,15 @@ import { readRunIndexFromDisk } from './run-index.ts';
 import { RUNS_DB_FILE, RunDatabase } from './run-database.ts';
 import { RunStore, runRecordSchema } from './store.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText, seedRuns } from './run-store.testkit.ts';
-import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
+import {
+  STEP_KIND,
+  RUN_STATUS,
+  STEP_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 
 import type { RunRecord } from './store.ts';
 
@@ -21,7 +29,7 @@ const LEGACY_RUN = {
   title: 'fix the login bug',
   workflow: 'quick-task',
   task: 'fix the login bug',
-  status: 'done',
+  status: RUN_STATUS.done,
   createdAt: '2026-01-01T00:00:00.000Z',
   tokensUsed: 0,
   archived: false,
@@ -76,7 +84,7 @@ describe('RunStore save lifecycle (#124)', () => {
       ...LEGACY_RUN,
       id: oldestId,
       title: 'keep me',
-      status: 'done',
+      status: RUN_STATUS.done,
       tokensUsed: 42,
       costUsd: 1.25,
       pullRequestUrl: 'https://github.com/o/r/pull/42',
@@ -261,7 +269,7 @@ describe('RunStore — directional usage persistence', () => {
       title: 'metered task',
       workflow: 'quick-task',
       task: 'metered task',
-      steps: [{ id: 'task', name: 'Do the task', kind: 'agent' }],
+      steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent }],
     });
     store.updateStep(run.id, 'task', {
       iterations: 1,
@@ -293,11 +301,11 @@ describe('RunStore — directional usage persistence', () => {
     const store = RunStore.open(dataDir);
     const reported = store.createRun({
       title: 'reported free turn', workflow: 'quick-task', task: 'reported free turn',
-      steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
     });
     const unreported = store.createRun({
       title: 'unreported turn', workflow: 'quick-task', task: 'unreported turn',
-      steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
     });
     store.updateStep(reported.id, 'task', { costUsd: 0 });
     store.flush();
@@ -316,7 +324,7 @@ describe('RunStore — directional usage persistence', () => {
       title: 'partial task',
       workflow: 'quick-task',
       task: 'partial task',
-      steps: [{ id: 'task', name: 'Do the task', kind: 'agent' }],
+      steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent }],
     });
     store.updateStep(run.id, 'task', {
       iterations: 1,
@@ -350,7 +358,7 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
       title: 'fix the login bug',
       workflow: 'quick-task',
       task: 'fix the login bug',
-      steps: [{ id: 'task', name: 'Do the task', kind: 'agent' }],
+      steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent }],
     });
     store.updateRun(run.id, {
       titleSummary: 'Catch AuthError in the login handler',
@@ -418,7 +426,7 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
   it("reads a stored activity:'monitoring' as a waiting park (#490, store schema 4)", () => {
     const store = RunStore.open(dataDir);
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
     store.close();
     // An older cezar stored the park as `activity` (phase 4b dropped it from the schema).
     seedRuns(dataDir, readPersistedRuns(dataDir).map((row) => ({ ...row, activity: 'monitoring' })));
@@ -426,7 +434,7 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     // Schema 4 no longer keeps `activity`: a stored monitoring park reads as `waiting`, with no
     // open wait when it named no wake deadline (unified waits, hearsay-tools/cezarion#1233).
     const reopened = RunStore.open(dataDir, { keepLive: true });
-    expect(reopened.getRun(run.id)).toMatchObject({ status: 'waiting' });
+    expect(reopened.getRun(run.id)).toMatchObject({ status: RUN_STATUS.waiting });
     expect(reopened.getRun(run.id)?.waits).toBeUndefined();
     reopened.close();
     expect(readPersistedRuns(dataDir).find((row) => row.id === run.id)).not.toHaveProperty('activity');
@@ -435,17 +443,17 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
   it('leaves open waits for RunManager to cancel on terminal writes', () => {
     const store = RunStore.open(dataDir);
     const run = store.createRun({ title: 'monitor', task: 'monitor', workflow: 'quick-task', steps: [] });
-    store.updateRun(run.id, { status: 'running' });
-    store.commitWait(run.id, { id: '44444444-4444-4444-8444-444444444444', kind: 'timer', source: 'agent', via: 'cezar_wait',
-      registeredAt: '2026-07-25T10:10:00.000Z', deadline: '2026-07-25T10:15:00.000Z', phase: 'open', turnId: 'turn', seconds: 300 });
-    store.updateRun(run.id, { status: 'done' });
-    expect(store.getRun(run.id)).toMatchObject({ status: 'done', waits: [{ phase: 'open' }] });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
+    store.commitWait(run.id, { id: '44444444-4444-4444-8444-444444444444', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
+      registeredAt: '2026-07-25T10:10:00.000Z', deadline: '2026-07-25T10:15:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn', seconds: 300 });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
+    expect(store.getRun(run.id)).toMatchObject({ status: RUN_STATUS.done, waits: [{ phase: WAIT_PHASE.open }] });
   });
 
   it('drops the legacy wake-cap flag when records reopen (store schema 4)', () => {
     seedRuns(dataDir, [{ ...LEGACY_RUN, monitoringWakeCapReached: true }]);
     const reopened = RunStore.open(dataDir, { keepLive: true }).getRun(LEGACY_RUN.id);
-    expect(reopened).toMatchObject({ status: 'done' });
+    expect(reopened).toMatchObject({ status: RUN_STATUS.done });
     expect(reopened).not.toHaveProperty('monitoringWakeCapReached');
   });
 
@@ -467,7 +475,7 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
   });
 
   it('never lets an unknown activity value through the schema boundary (#490)', () => {
-    seedRuns(dataDir, [{ ...LEGACY_RUN, id: 'bad-activity', status: 'running', activity: 'bogus' }]);
+    seedRuns(dataDir, [{ ...LEGACY_RUN, id: 'bad-activity', status: RUN_STATUS.running, activity: 'bogus' }]);
     // A corrupt/unknown activity must not smuggle a run in with an invalid value. Store schema 4
     // reads `activity` only to upgrade a monitoring park and drops the key on every read, so the
     // run loads without it instead of being dropped whole.
@@ -886,7 +894,7 @@ describe('RunStore — secret redaction before persistence (#427)', () => {
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     store.updateRun(run.id, {
       titleSummary: 'Catch AuthError in the login handler',
-      status: 'done',
+      status: RUN_STATUS.done,
       diffStat: { adds: 1, dels: 2, files: 3 },
     });
     const loaded = store.getRun(run.id);
@@ -910,11 +918,11 @@ describe('RunStore — secret redaction before persistence (#427)', () => {
       title: 't',
       workflow: 'quick-task',
       task: 'task',
-      steps: [{ id: 'task', name: 'Do the task', kind: 'agent' }],
+      steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent }],
     });
     // Exactly what run.ts does on a failed step: raw err.message straight in.
     store.updateStep(run.id, 'task', {
-      status: 'failed',
+      status: STEP_STATUS.failed,
       error: 'auth failed for gho_thisisarealsecrettoken123456',
     });
     store.flush();
@@ -935,9 +943,9 @@ describe('RunStore — secret redaction before persistence (#427)', () => {
       title: 't',
       workflow: 'quick-task',
       task: 'task',
-      steps: [{ id: 'task', name: 'Do the task', kind: 'agent' }],
+      steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent }],
     });
-    store.updateStep(run.id, 'task', { status: 'done', sessionId: 'sess-123', backend: 'codex', tokensUsed: 42 });
+    store.updateStep(run.id, 'task', { status: STEP_STATUS.done, sessionId: 'sess-123', backend: 'codex', tokensUsed: 42 });
     const step = store.getRun(run.id)?.steps[0];
     expect(step?.status).toBe('done');
     expect(step?.sessionId).toBe('sess-123');
@@ -953,7 +961,7 @@ describe('RunStore — secret redaction before persistence (#427)', () => {
       title: 't',
       workflow: 'quick-task',
       task: 'task',
-      steps: [{ id: 'task', name: 'Do the task', kind: 'agent' }],
+      steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent }],
     });
     store.updateStep(run.id, 'task', { error: 'gho_thisisarealsecrettoken123456' });
     expect(store.getRun(run.id)?.steps[0]?.error).toBe('gho_thisisarealsecrettoken123456');
@@ -1473,7 +1481,7 @@ describe('RunStore — referenced-issue discovery (spec 2026-07-21-report-ref-di
 
   it('does not decode normalized issue history on repeated store opens', () => {
     const { store, run } = freshRun('Fix issue #1200');
-    store.updateRun(run.id, { status: 'done', issueNumber: 1200 });
+    store.updateRun(run.id, { status: RUN_STATUS.done, issueNumber: 1200 });
     store.applyMarkerRefs(run.id, { issue: 1216 });
     store.close();
     const scan = vi.spyOn(RunDatabase.prototype, 'listWhere');
@@ -2472,7 +2480,7 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
     const limited = () => {
       const id = finishedRun(store, 'failed');
       store.updateRun(id, {
-        status: 'waiting',
+        status: RUN_STATUS.waiting,
         autoResumeAt: '2026-08-03T18:41:48.000Z',
         autoResumeAttempts: 2,
       });
@@ -2519,7 +2527,7 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
     // task the UI never presented as unread, and reported a count larger than the badge showed.
     const store = RunStore.open(dataDir);
     const scheduled = finishedRun(store, 'failed');
-    store.updateRun(scheduled, { status: 'waiting', autoResumeAt: '2026-08-03T18:41:48.000Z', autoResumeAttempts: 1 });
+    store.updateRun(scheduled, { status: RUN_STATUS.waiting, autoResumeAt: '2026-08-03T18:41:48.000Z', autoResumeAttempts: 1 });
     const ordinary = finishedRun(store, 'done');
 
     // The count is the badge's number: one, not two.
@@ -2533,14 +2541,14 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
     // status retires the appointment, so a failed run never carries one.
     const store = RunStore.open(dataDir);
     const id = finishedRun(store, 'failed');
-    store.updateRun(id, { status: 'waiting', autoResumeAt: '2026-08-03T18:41:48.000Z' });
+    store.updateRun(id, { status: RUN_STATUS.waiting, autoResumeAt: '2026-08-03T18:41:48.000Z' });
     expect(store.getRun(id)?.autoResumeAt).toBe('2026-08-03T18:41:48.000Z');
-    store.updateRun(id, { status: 'failed' });
+    store.updateRun(id, { status: RUN_STATUS.failed });
     expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
     store.updateRun(id, { autoResumeAt: '2026-08-03T18:41:48.000Z' });
     expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
-    store.updateRun(id, { status: 'waiting', autoResumeAt: '2026-08-03T18:41:48.000Z' });
-    store.updateRun(id, { status: 'running' });
+    store.updateRun(id, { status: RUN_STATUS.waiting, autoResumeAt: '2026-08-03T18:41:48.000Z' });
+    store.updateRun(id, { status: RUN_STATUS.running });
     expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
     expect(store.markAllRead()).toBe(0);
   });
@@ -2566,8 +2574,8 @@ describe('RunStore — the legacy `claude-cli` runner id (#547)', () => {
             {
               id: 'task',
               name: 'Do the task',
-              kind: 'agent',
-              status: 'done',
+              kind: STEP_KIND.agent,
+              status: STEP_STATUS.done,
               iterations: 1,
               tokensUsed: 0,
               sessionId: 'sess-1',
@@ -2622,8 +2630,8 @@ describe('RunStore — the legacy `claude-cli` runner id (#547)', () => {
             {
               id: 'task',
               name: 'Do the task',
-              kind: 'agent',
-              status: 'done',
+              kind: STEP_KIND.agent,
+              status: STEP_STATUS.done,
               iterations: 1,
               tokensUsed: 0,
               sessionId: 'pi-sess-1',
@@ -2694,7 +2702,7 @@ describe('RunStore — pinned tasks (#935)', () => {
   it('is idempotent and unconditional — every status can be pinned', () => {
     const store = RunStore.open(dataDir);
     const id = newRun(store);
-    store.updateRun(id, { status: 'running' });
+    store.updateRun(id, { status: RUN_STATUS.running });
     expect(store.setPinned(id, true)?.pinned).toBe(true);
     expect(store.setPinned(id, true)?.pinned).toBe(true);
     // Unpinning something that was never pinned is legal too, and changes nothing.
@@ -2734,7 +2742,7 @@ describe('RunStore — pinned tasks (#935)', () => {
     expect(store.getRun(one)?.pinnedAt).toBeUndefined();
 
     const swept = newRun(store);
-    store.updateRun(swept, { status: 'done', finishedAt: '2026-08-29T10:00:00.000Z' });
+    store.updateRun(swept, { status: RUN_STATUS.done, finishedAt: '2026-08-29T10:00:00.000Z' });
     store.setPinned(swept, true);
     expect(store.archiveFinished().archived).toBeGreaterThanOrEqual(1);
     expect(store.getRun(swept)?.archived).toBe(true);
@@ -2771,10 +2779,10 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
   function parentWithWorker(store: RunStore, workerStatus: RunRecord['status'] = 'running') {
     const parent = store.createRun({
       title: 'parent', task: 'parent', workflow: 'quick-task',
-      steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+      steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
     store.updateRun(parent.id, {
-      status: 'done',
+      status: RUN_STATUS.done,
       finishedAt: '2020-01-01T00:00:00.000Z',
       delegation: { role: 'root', permissions: ['spawn'], receipts: [] },
     });
@@ -2782,7 +2790,7 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
     const worker = store.createOwnedRun(
       {
         title: 'worker', task: 'worker', workflow: 'quick-task', runner: 'claude',
-        steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+        steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
       },
       parent.id,
       randomUUID(),
@@ -2810,7 +2818,7 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
     const { parent, worker } = parentWithWorker(store, 'running');
     store.setPinned(worker.id, true);
     store.updateRun(worker.id, {
-      status: 'waiting',
+      status: RUN_STATUS.waiting,
       autoResumeAt: '2026-08-03T18:41:48.000Z',
       autoResumeAttempts: 1,
     });
@@ -2890,14 +2898,14 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
       const pinnedRunning = mk('running');
       store.setPinned(pinnedRunning, true);
       const scheduled = mk('failed');
-      store.updateRun(scheduled, { status: 'waiting', autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
+      store.updateRun(scheduled, { status: RUN_STATUS.waiting, autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
       const scheduledPinned = mk('failed');
-      store.updateRun(scheduledPinned, { status: 'waiting', autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
+      store.updateRun(scheduledPinned, { status: RUN_STATUS.waiting, autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
       store.setPinned(scheduledPinned, true);
       const running = mk('running');
       const { parent, worker } = parentWithWorker(store, 'running');
       const lone = parentWithWorker(store, 'done');
-      store.updateRun(lone.parent.id, { status: 'running', finishedAt: undefined });
+      store.updateRun(lone.parent.id, { status: RUN_STATUS.running, finishedAt: undefined });
       return { unpinned, pinnedDone, pinnedRunning, scheduled, scheduledPinned, running, parent, worker, lone };
     }
 

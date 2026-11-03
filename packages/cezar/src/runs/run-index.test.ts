@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -15,7 +16,7 @@ const foreignPr = 'https://github.com/foreign/repo/pull/42';
 const foreignIssue = 'https://github.com/foreign/repo/issues/43';
 const localPr = 'https://github.com/local/repo/pull/44';
 const record = (over: Record<string, unknown> = {}) => ({
-  id: 'cold', title: 'Research', workflow: 'build', task: 'research', status: 'done',
+  id: 'cold', title: 'Research', workflow: 'build', task: 'research', status: RUN_STATUS.done,
   createdAt: '2026-09-01T00:00:00Z', tokensUsed: 0, archived: false, steps: [],
   referencedPullRequestUrl: foreignPr, referencedIssueUrl: foreignIssue,
   referencedPrCandidates: [foreignPr], referencedIssueCandidates: [foreignIssue],
@@ -123,8 +124,8 @@ describe.each(Object.entries(sources))('repository scoping of cold disk records 
   });
 
   it('reads a run a crashed process left live as interrupted, never as running', () => {
-    seed({ status: 'running', activity: 'monitoring', steps: [{ id: 's', name: 'S', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0 }] });
-    expect(first()).toMatchObject({ status: 'failed', error: expect.stringContaining('interrupted') });
+    seed({ status: RUN_STATUS.running, activity: 'monitoring', steps: [{ id: 's', name: 'S', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0 }] });
+    expect(first()).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('interrupted') });
     expect(first()).not.toHaveProperty('activity');
   });
 
@@ -175,7 +176,7 @@ describe.each(Object.entries(sources))('the run that owns a checkout (%s)', (_, 
 describe('the cold window agrees with the store', () => {
   it('lists the same rows in the same order, with the same truncated', () => {
     const records = [
-      record({ id: 'live-old', status: 'done', createdAt: '2026-01-01T00:00:00Z' }),
+      record({ id: 'live-old', status: RUN_STATUS.done, createdAt: '2026-01-01T00:00:00Z' }),
       ...Array.from({ length: 6 }, (_, i) => record({ id: `arch-${i}`, createdAt: `2026-09-0${i + 1}T00:00:00Z`, archived: true })),
       record({ id: 'w', createdAt: '2026-09-09T00:00:00Z', archived: true, delegation: workerOf('arch-5') }),
       record({ id: 'w-live', createdAt: '2026-09-10T00:00:00Z', delegation: workerOf('live-old') }),
@@ -265,8 +266,8 @@ describe('cold reads of runs.db', () => {
 
   it('leaves out a row it had to decode and could not, and says so once per project', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const steps = [{ id: 's', name: 's', kind: 'agent', status: 'bogus', iterations: 1, tokensUsed: 0 }];
-    seedRuns(dir, [record({ id: 'ok', referencedPullRequestUrl: undefined, referencedIssueUrl: undefined }), record({ id: 'live', status: 'running', steps })]);
+    const steps = [{ id: 's', name: 's', kind: STEP_KIND.agent, status: 'bogus', iterations: 1, tokensUsed: 0 }];
+    seedRuns(dir, [record({ id: 'ok', referencedPullRequestUrl: undefined, referencedIssueUrl: undefined }), record({ id: 'live', status: RUN_STATUS.running, steps })]);
     expect(readRunIndexFromDisk(dir).runs.map((run) => run.id)).toEqual(['ok']);
     expect(readRunIndexFromDisk(dir).runs.map((run) => run.id)).toEqual(['ok']);
     expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(`1 run(s) in ${join(dir, RUNS_DB_FILE)} could not be read`));
@@ -313,7 +314,7 @@ describe('cold reads of runs.db', () => {
     it('reads through a writer\'s WAL, creating nothing', () => {
       const store = RunStore.open(dir);
       const run = store.createRun({ title: 'live writer', workflow: 'w', task: 't', steps: [] });
-      store.updateRun(run.id, { status: 'done' });
+      store.updateRun(run.id, { status: RUN_STATUS.done });
       store.flush();
       const before = readdirSync(dir).sort();
       chmodSync(dir, 0o555);

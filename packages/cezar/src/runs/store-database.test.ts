@@ -1,3 +1,11 @@
+import {
+  RUN_STATUS,
+  STEP_KIND,
+  STEP_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { openTestRunStore, runPersistence } from './run-store.testkit.ts';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,7 +22,7 @@ import { LEGACY_INDEX_BACKUP_FILE, RunStore, type RunRecord } from './store.ts';
 /** RunStore on `runs.db` (#779): import, failure ordering, dirty-only saves, disposal. */
 
 const record = (id: string, over: Partial<RunRecord> = {}): RunRecord => ({
-  id, title: `run ${id}`, workflow: 'quick-task', task: `task ${id}`, status: 'done',
+  id, title: `run ${id}`, workflow: 'quick-task', task: `task ${id}`, status: RUN_STATUS.done,
   createdAt: `2026-09-0${id.length}T00:00:00.000Z`, tokensUsed: 0, archived: false, steps: [],
   ...over,
 });
@@ -60,7 +68,7 @@ afterEach(() => {
 
 describe('importing runs.json', () => {
   it('imports every record, keeps the exact bytes beside it and never writes runs.json again', () => {
-    const bytes = JSON.stringify([record('a'), record('bb', { status: 'review' })], null, 2);
+    const bytes = JSON.stringify([record('a'), record('bb', { status: RUN_STATUS.review })], null, 2);
     writeFileSync(join(dataDir, 'runs.json'), bytes);
 
     const store = open();
@@ -118,7 +126,7 @@ describe('importing runs.json', () => {
 
   it('imports every record that parses, skips the rest, says how many once, and keeps the bytes', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bytes = JSON.stringify([record('a'), { id: 'broken' }, 'not a run', record('bb', { status: 'review' })]);
+    const bytes = JSON.stringify([record('a'), { id: 'broken' }, 'not a run', record('bb', { status: RUN_STATUS.review })]);
     writeFileSync(join(dataDir, 'runs.json'), bytes);
     const store = open();
     expect(runIds(store)).toEqual(['bb', 'a']);
@@ -180,8 +188,8 @@ describe('a database with an unreadable row', () => {
     // Open decodes the live rows only, so the unreadable live row is the one it reports; the
     // unreadable finished row is skipped wherever it is read.
     seedRuns(dataDir, [
-      record('a'), { id: 'broken', status: 'running', createdAt: '2026-09-09T00:00:00.000Z' },
-      { id: 'broken-done', status: 'done', createdAt: '2026-09-08T00:00:00.000Z' }, record('bb'),
+      record('a'), { id: 'broken', status: RUN_STATUS.running, createdAt: '2026-09-09T00:00:00.000Z' },
+      { id: 'broken-done', status: RUN_STATUS.done, createdAt: '2026-09-08T00:00:00.000Z' }, record('bb'),
     ]);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const store = open();
@@ -195,8 +203,8 @@ describe('a database with an unreadable row', () => {
 
   it('drops a row it found unreadable from its list rows, as the cold reader does: a live one at open, any other once a read fails', () => {
     // Every stored summary is valid: only decoding the record finds the step status it rejects.
-    const steps = [{ id: 's', name: 's', kind: 'agent', status: 'bogus', iterations: 1, tokensUsed: 0 }] as unknown as RunRecord['steps'];
-    seedRuns(dataDir, [record('a'), record('live', { status: 'running', steps }), record('done', { steps })]);
+    const steps = [{ id: 's', name: 's', kind: STEP_KIND.agent, status: 'bogus', iterations: 1, tokensUsed: 0 }] as unknown as RunRecord['steps'];
+    seedRuns(dataDir, [record('a'), record('live', { status: RUN_STATUS.running, steps }), record('done', { steps })]);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const store = open();
     // A finished row nobody has decoded is served from its summary, by both readers alike.
@@ -357,48 +365,48 @@ describe('debounced saves write only what changed', () => {
 
   it('stores the record, its toRunSummary projection and the query columns', () => {
     const store = open();
-    const run = store.createRun({ title: 'summary', workflow: '(planned)', task: 't', steps: [{ id: 's', name: 'Planner', kind: 'agent' }] });
-    store.updateRun(run.id, { status: 'waiting', autoResumeAt: '2026-10-06T00:00:00.000Z', error: 'usage limit' });
+    const run = store.createRun({ title: 'summary', workflow: '(planned)', task: 't', steps: [{ id: 's', name: 'Planner', kind: STEP_KIND.agent }] });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting, autoResumeAt: '2026-10-06T00:00:00.000Z', error: 'usage limit' });
     store.setArchived(run.id, false);
     store.flush();
     const saved = row(run.id)!;
     expect(JSON.parse(saved.data)).toEqual(JSON.parse(JSON.stringify(store.getRun(run.id))));
     expect(JSON.parse(saved.summary)).toEqual(JSON.parse(JSON.stringify(toRunSummary(store.getRun(run.id)!))));
     expect(saved).toMatchObject({
-      status: 'waiting', archived: false, finishedAt: null, live: true, parentRunId: null,
+      status: RUN_STATUS.waiting, archived: false, finishedAt: null, live: true, parentRunId: null,
     });
   });
 });
 
 describe('loading normalizes and saves exactly the rows it changed', () => {
-  const steps = [{ id: 's', name: 'S', kind: 'agent' as const, status: 'running' as const, iterations: 1, tokensUsed: 0 }];
+  const steps = [{ id: 's', name: 'S', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0 }];
   // One case per field `loadNormalizedFields` watches; the control row must not be rewritten.
   const cases: Array<[string, RunRecord, boolean | undefined, (run: RunRecord) => void]> = [
-    ['an accepted stop', record('stop', { status: 'running', stopping: true, steps }), true, (run) => expect(run).toMatchObject({ status: 'cancelled', steps: [{ status: 'cancelled' }] })],
-    ['an interrupted live run', record('live', { status: 'running', steps }), undefined, (run) => expect(run).toMatchObject({ status: 'failed', error: expect.stringContaining('interrupted'), steps: [{ status: 'failed' }] })],
+    ['an accepted stop', record('stop', { status: RUN_STATUS.running, stopping: true, steps }), true, (run) => expect(run).toMatchObject({ status: RUN_STATUS.cancelled, steps: [{ status: STEP_STATUS.cancelled }] })],
+    ['an interrupted live run', record('live', { status: RUN_STATUS.running, steps }), undefined, (run) => expect(run).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('interrupted'), steps: [{ status: STEP_STATUS.failed }] })],
     // Schema-3 wait fields are read into the wait list on load (store schema 4), which rewrites the row.
     ['stale monitoring on a finished run', record('mon', { activity: 'monitoring', monitoringWakeAt: '2026-10-06T00:00:00.000Z' } as Partial<RunRecord>), true, (run) => {
       expect(run).not.toHaveProperty('activity');
       expect(run).not.toHaveProperty('monitoringWakeAt');
     }],
-    ['a schema-3 CI park', record('ci', { status: 'running', activity: 'monitoring', steps, ciWait: {
+    ['a schema-3 CI park', record('ci', { status: RUN_STATUS.running, activity: 'monitoring', steps, ciWait: {
       id: '55555555-5555-4555-8555-555555555555', generation: 'g', turnId: 't', prUrl: 'https://github.com/o/r/pull/9', repository: 'o/r', prNumber: 9,
       headSha: 'a'.repeat(40), timeoutSeconds: 1800, registeredAt: '2026-10-05T00:00:00.000Z', deadline: '2026-10-05T00:30:00.000Z', phase: 'parked',
     } } as Partial<RunRecord>), true, (run) => {
-      expect(run).toMatchObject({ status: 'waiting', steps: [{ status: 'waiting' }], waits: [{ id: '55555555-5555-4555-8555-555555555555', kind: 'pr', phase: 'open' }] });
+      expect(run).toMatchObject({ status: RUN_STATUS.waiting, steps: [{ status: STEP_STATUS.waiting }], waits: [{ id: '55555555-5555-4555-8555-555555555555', kind: WAIT_KIND.pr, phase: WAIT_PHASE.open }] });
       expect(run).not.toHaveProperty('ciWait');
       expect(run).not.toHaveProperty('activity');
     }],
     ['a usage-limit resume on a run that is not waiting', record('auto', { autoResumeAt: '2026-10-06T00:00:00.000Z' }), true, (run) => expect(run).not.toHaveProperty('autoResumeAt')],
     // Phase 4a (hearsay-tools/cezarion#1236): a usage-limited run is waiting, kept with its error.
-    ['an old failed usage-limit row', record('limit', { status: 'failed', error: 'usage limit', finishedAt: '2026-10-05T00:00:00.000Z', autoResumeAt: '2026-10-06T00:00:00.000Z' }), true, (run) => {
-      expect(run).toMatchObject({ status: 'waiting', error: 'usage limit', autoResumeAt: '2026-10-06T00:00:00.000Z' });
+    ['an old failed usage-limit row', record('limit', { status: RUN_STATUS.failed, error: 'usage limit', finishedAt: '2026-10-05T00:00:00.000Z', autoResumeAt: '2026-10-06T00:00:00.000Z' }), true, (run) => {
+      expect(run).toMatchObject({ status: RUN_STATUS.waiting, error: 'usage limit', autoResumeAt: '2026-10-06T00:00:00.000Z' });
       expect(run).not.toHaveProperty('finishedAt');
     }],
-    ['an old failed usage-limit row opened without live runs', record('limit-cold', { status: 'failed', error: 'usage limit', autoResumeAt: '2026-10-06T00:00:00.000Z' }), undefined, (run) => {
-      expect(run).toMatchObject({ status: 'waiting', autoResumeAt: '2026-10-06T00:00:00.000Z' });
+    ['an old failed usage-limit row opened without live runs', record('limit-cold', { status: RUN_STATUS.failed, error: 'usage limit', autoResumeAt: '2026-10-06T00:00:00.000Z' }), undefined, (run) => {
+      expect(run).toMatchObject({ status: RUN_STATUS.waiting, autoResumeAt: '2026-10-06T00:00:00.000Z' });
     }],
-    ['an exhausted wake cap from the previous process', record('cap', { status: 'running', monitoringWakeCapReached: true } as Partial<RunRecord>), true, (run) => expect(run).not.toHaveProperty('monitoringWakeCapReached')],
+    ['an exhausted wake cap from the previous process', record('cap', { status: RUN_STATUS.running, monitoringWakeCapReached: true } as Partial<RunRecord>), true, (run) => expect(run).not.toHaveProperty('monitoringWakeCapReached')],
     ['a referenced PR the created-PR declaration used to erase', record('heal', {
       markerRefs: { pr: 9 }, pullRequestUrl: 'https://github.com/o/r/pull/9', referencedPrCandidates: ['https://github.com/o/r/pull/4'],
     }), true, (run) => expect(run.referencedPullRequestUrl).toBe('https://github.com/o/r/pull/4')],
@@ -415,14 +423,14 @@ describe('loading normalizes and saves exactly the rows it changed', () => {
   });
 
   it('a stored pending-question summary read into a human wait', () => {
-    seedRuns(dataDir, [record('root', { status: 'waiting', hasPendingHumanAsk: true } as Partial<RunRecord>), record('control')]);
+    seedRuns(dataDir, [record('root', { status: RUN_STATUS.waiting, hasPendingHumanAsk: true } as Partial<RunRecord>), record('control')]);
     const store = open({ keepLive: true });
     const seen = writes(store);
     store.flush();
     expect(seen).toEqual([{ upserts: ['root'], deletes: [] }]);
     const row = readPersistedRuns(dataDir).find((run) => run.id === 'root');
     expect(row).not.toHaveProperty('hasPendingHumanAsk');
-    expect(row?.waits).toEqual([expect.objectContaining({ kind: 'human', via: 'ask-line', phase: 'open' })]);
+    expect(row?.waits).toEqual([expect.objectContaining({ kind: WAIT_KIND.human, via: WAIT_VIA['ask-line'], phase: WAIT_PHASE.open })]);
   });
 
   it('a summary stored before it carried automation origin (#1332)', () => {
@@ -465,7 +473,7 @@ describe('loading normalizes and saves exactly the rows it changed', () => {
   });
 
   it('a store with nothing to normalize writes nothing', () => {
-    seedRuns(dataDir, [record('a'), record('bb', { status: 'review' })]);
+    seedRuns(dataDir, [record('a'), record('bb', { status: RUN_STATUS.review })]);
     const store = open();
     const seen = writes(store);
     store.flush();

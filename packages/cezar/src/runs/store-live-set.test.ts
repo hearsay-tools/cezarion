@@ -1,3 +1,10 @@
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { commitStagedRuns } from './run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -28,7 +35,7 @@ let clock = 0;
 const record = (over: Partial<RunRecord> = {}): RunRecord => {
   clock++;
   return {
-    id: randomUUID(), title: `run ${clock}`, workflow: 'quick-task', task: 'task', status: 'done',
+    id: randomUUID(), title: `run ${clock}`, workflow: 'quick-task', task: 'task', status: RUN_STATUS.done,
     createdAt: new Date(Date.UTC(2026, 8, 1, 0, clock)).toISOString(), finishedAt: new Date(Date.UTC(2026, 8, 1, 1, clock)).toISOString(),
     tokensUsed: 0, archived: false, steps: [], ...over,
   };
@@ -63,10 +70,10 @@ afterEach(() => {
 describe('open', () => {
   it('holds exactly the live runs and their delegation families', () => {
     const live = [
-      record({ status: 'queued' }), record({ status: 'running' }), record({ status: 'waiting' }),
-      record({ status: 'failed', autoResumeAt: '2099-01-01T00:00:00.000Z' }),
+      record({ status: RUN_STATUS.queued }), record({ status: RUN_STATUS.running }), record({ status: RUN_STATUS.waiting }),
+      record({ status: RUN_STATUS.failed, autoResumeAt: '2099-01-01T00:00:00.000Z' }),
     ];
-    const finished = [record(), record({ status: 'review' }), record({ status: 'failed' }), record({ status: 'cancelled', archived: true })];
+    const finished = [record(), record({ status: RUN_STATUS.review }), record({ status: RUN_STATUS.failed }), record({ status: RUN_STATUS.cancelled, archived: true })];
     // A finished root whose one running worker keeps the whole family in memory…
     const liveFamily = family('done', ['done', 'running', 'failed']);
     // …and a family with nobody live, which stays on disk.
@@ -83,7 +90,7 @@ describe('open', () => {
 
   it('decodes no finished row it does not hold', () => {
     const finished = Array.from({ length: 5 }, () => record());
-    const running = record({ status: 'running' });
+    const running = record({ status: RUN_STATUS.running });
     seedRuns(dataDir, [...finished, running]);
     const decoded = vi.spyOn(JSON, 'parse');
     open({ keepLive: true });
@@ -126,7 +133,7 @@ describe('reading a finished run', () => {
   });
 
   it('answers the held object for a live run, so a commit installs into what the caller holds', () => {
-    const running = record({ status: 'running' });
+    const running = record({ status: RUN_STATUS.running });
     seedRuns(dataDir, [running]);
     const store = open({ keepLive: true });
     const heldRecord = store.getRun(running.id)!;
@@ -173,8 +180,8 @@ describe('writing a finished run', () => {
   });
 
   it('never evicts a run inside a pending durable commit, even when a listener saves mid-commit', () => {
-    const first = record({ status: 'queued', delegation: rootDelegation() });
-    const second = record({ status: 'review' });
+    const first = record({ status: RUN_STATUS.queued, delegation: rootDelegation() });
+    const second = record({ status: RUN_STATUS.review });
     seedRuns(dataDir, [first, second]);
     const store = open({ keepLive: true });
     const events: string[] = [];
@@ -215,14 +222,14 @@ describe('pins', () => {
 
 describe('the live set stays in memory', () => {
   it.each([
-    ['a parked run', { status: 'waiting' as const }],
+    ['a parked run', { status: RUN_STATUS.waiting }],
     // Store schema 4: a monitoring park is `waiting` with an open timer (unified waits).
-    ['a monitoring run', { status: 'waiting' as const, waits: [{ id: '66666666-6666-4666-8666-666666666666', kind: 'timer' as const, source: 'agent' as const,
-      via: 'monitoring-line' as const, registeredAt: '2099-01-01T00:00:00.000Z', deadline: '2099-01-01T00:05:00.000Z', phase: 'open' as const, turnId: 'turn', seconds: 300 }] }],
-    ['a finished run whose wake is still owed', { status: 'done' as const, waits: [{ id: '77777777-7777-4777-8777-777777777777', kind: 'timer' as const, source: 'agent' as const,
-      via: 'cezar_wait' as const, registeredAt: '2099-01-01T00:00:00.000Z', deadline: '2099-01-01T00:05:00.000Z', phase: 'resolved' as const,
+    ['a monitoring run', { status: RUN_STATUS.waiting, waits: [{ id: '66666666-6666-4666-8666-666666666666', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent,
+      via: WAIT_VIA['monitoring-line'], registeredAt: '2099-01-01T00:00:00.000Z', deadline: '2099-01-01T00:05:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn', seconds: 300 }] }],
+    ['a finished run whose wake is still owed', { status: RUN_STATUS.done, waits: [{ id: '77777777-7777-4777-8777-777777777777', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent,
+      via: WAIT_VIA.cezar_wait, registeredAt: '2099-01-01T00:00:00.000Z', deadline: '2099-01-01T00:05:00.000Z', phase: WAIT_PHASE.resolved,
       resolvedAt: '2099-01-01T00:05:00.000Z', turnId: 'turn', seconds: 300 }] }],
-    ['a run waiting out a usage limit', { status: 'failed' as const, autoResumeAt: '2099-01-01T00:00:00.000Z' }],
+    ['a run waiting out a usage limit', { status: RUN_STATUS.failed, autoResumeAt: '2099-01-01T00:00:00.000Z' }],
   ])('%s', (_name, over) => {
     const run = record(over);
     seedRuns(dataDir, [run]);
@@ -234,10 +241,10 @@ describe('the live set stays in memory', () => {
   });
 
   it('lets a run go once it finishes and its last write settles', () => {
-    const run = record({ status: 'running' });
+    const run = record({ status: RUN_STATUS.running });
     seedRuns(dataDir, [run]);
     const store = open({ keepLive: true });
-    store.updateRun(run.id, { status: 'done', finishedAt: new Date().toISOString() });
+    store.updateRun(run.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
     expect(held(store)).toEqual([run.id]);
     store.flush();
     expect(held(store)).toEqual([]);
@@ -251,7 +258,7 @@ describe('the live set stays in memory', () => {
     const store = open({ keepLive: true });
     expect(held(store)).toEqual(ids([root!, ...workers, ...others]));
     const live = workers[1]!;
-    store.updateRun(live.id, { status: 'done', finishedAt: new Date().toISOString() });
+    store.updateRun(live.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
     store.flush();
     expect(held(store)).toEqual(ids(others));
   });
@@ -274,7 +281,7 @@ describe('the live set stays in memory', () => {
 describe('list rows', () => {
   it('lay memory over the stored summary: unsaved changes, new runs and pending deletions', () => {
     vi.useFakeTimers();
-    const kept = record({ title: 'stored title', status: 'running' });
+    const kept = record({ title: 'stored title', status: RUN_STATUS.running });
     const gone = record();
     seedRuns(dataDir, [kept, gone, record()]);
     const store = open({ keepLive: true });
@@ -314,8 +321,8 @@ describe('list rows', () => {
   });
 
   it('list only the live set from listRuns', () => {
-    const running = record({ status: 'running' });
-    seedRuns(dataDir, [running, record(), record({ status: 'review' })]);
+    const running = record({ status: RUN_STATUS.running });
+    seedRuns(dataDir, [running, record(), record({ status: RUN_STATUS.review })]);
     expect(open({ keepLive: true }).listRuns().map((run) => run.id)).toEqual([running.id]);
   });
 });
@@ -335,11 +342,11 @@ describe('indexed queries reach runs not in memory', () => {
     expect(store.findRunByClientRequestId('client-2')).toBeUndefined();
     expect(store.listRunsWithWorktree().map((run) => run.id)).toEqual([tree.id]);
     expect(store.listBranchOwners().find((owner) => owner.id === tree.id)).toEqual({
-      id: tree.id, title: tree.title, status: 'done', archived: false, createdAt: tree.createdAt, branch: 'cez/t', baseBranch: 'main',
+      id: tree.id, title: tree.title, status: RUN_STATUS.done, archived: false, createdAt: tree.createdAt, branch: 'cez/t', baseBranch: 'main',
       pullRequestUrl: 'https://github.com/o/r/pull/1',
     });
     expect(store.listBranchOwners().find((owner) => owner.id === prOnly.id)).toEqual({
-      id: prOnly.id, title: prOnly.title, status: 'done', archived: false, createdAt: prOnly.createdAt, pullRequestUrl: 'https://github.com/o/r/pull/9',
+      id: prOnly.id, title: prOnly.title, status: RUN_STATUS.done, archived: false, createdAt: prOnly.createdAt, pullRequestUrl: 'https://github.com/o/r/pull/9',
     });
     expect(store.listBranchOwners().map((owner) => owner.id)).not.toContain(variantA.id);
     expect(held(store)).toEqual([]);
@@ -356,9 +363,9 @@ describe('indexed queries reach runs not in memory', () => {
 
   it('let archive-finished narrow to automation tasks or to the rest, held or not (#1332)', () => {
     const origin = { automationId: 'auto-1', automationRevision: 1, receiptId: 'r', trigger: 'schedule' as const, occurrenceAt: '2026-10-05T00:00:00.000Z' };
-    const manual = record({ status: 'done' });
-    const nightly = record({ status: 'done', automationTrigger: origin });
-    const github = record({ status: 'done', automation: { automationId: 'auto-2', automationRevision: 1, receiptId: 'g', event: 'issue.opened', githubUrl: 'https://github.com/o/r/issues/1' } });
+    const manual = record({ status: RUN_STATUS.done });
+    const nightly = record({ status: RUN_STATUS.done, automationTrigger: origin });
+    const github = record({ status: RUN_STATUS.done, automation: { automationId: 'auto-2', automationRevision: 1, receiptId: 'g', event: 'issue.opened', githubUrl: 'https://github.com/o/r/issues/1' } });
     seedRuns(dataDir, [manual, nightly, github]);
     const store = open();
     // One of each side in memory, so the held branch and the stored-summary branch both decide.
@@ -370,9 +377,9 @@ describe('indexed queries reach runs not in memory', () => {
   });
 
   it('let archive-finished and mark-all-read reach every finished run', () => {
-    const unread = record({ status: 'done' });
-    const read = record({ status: 'done', seenAt: '2099-01-01T00:00:00.000Z' });
-    const scheduled = record({ status: 'failed', autoResumeAt: '2099-01-01T00:00:00.000Z' });
+    const unread = record({ status: RUN_STATUS.done });
+    const read = record({ status: RUN_STATUS.done, seenAt: '2099-01-01T00:00:00.000Z' });
+    const scheduled = record({ status: RUN_STATUS.failed, autoResumeAt: '2099-01-01T00:00:00.000Z' });
     seedRuns(dataDir, [unread, read, scheduled]);
     const store = open({ keepLive: true });
     expect(store.markAllRead()).toBe(1);

@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -70,7 +71,7 @@ function openStore(existing?: string): { dir: string; store: RunStore } {
 }
 
 function finish(store: RunStore, id: string): void {
-  store.updateRun(id, { status: 'done', finishedAt: new Date().toISOString() });
+  store.updateRun(id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
 }
 
 function br(data: string | Buffer): Buffer {
@@ -124,7 +125,7 @@ describe('RunStore history compression', () => {
     const { dir, store } = openStore();
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     store.appendEvent(run.id, { type: 'note', message: 'live' });
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
     store.setArchived(run.id, true);
     await store.historyIdle();
     const { plain, compressed } = historyPaths(dir, run.id);
@@ -198,11 +199,11 @@ describe('RunStore history compression', () => {
     managers.push(manager);
     const run = store.createRun({
       title: 'task', task: 'task', workflow: 'original', worktree: false,
-      steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+      steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
-    store.updateStep(run.id, 'work', { status: 'done', sessionId: 'old-session' });
+    store.updateStep(run.id, 'work', { status: STEP_STATUS.done, sessionId: 'old-session' });
     const first = store.appendEvent(run.id, { type: 'note', message: 'before' });
-    store.updateRun(run.id, { status: 'done', finishedAt: new Date().toISOString() });
+    store.updateRun(run.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
     store.setArchived(run.id, true);
     await store.historyIdle();
     const { plain, compressed } = historyPaths(join(root, '.ai/cezar'), run.id);
@@ -302,7 +303,7 @@ describe('RunStore history compression', () => {
     const { dir, store } = openStore();
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     store.appendEvent(run.id, { type: 'note', message: 'live' });
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
     store.setArchived(run.id, true);
     await store.historyIdle();
     const { plain, compressed } = historyPaths(dir, run.id);
@@ -383,7 +384,7 @@ describe('RunStore history compression', () => {
       throw new Error('restore failed');
     });
     try {
-      expect(() => store.updateRun(run.id, { archived: false, status: 'queued' })).toThrow(/restore failed/);
+      expect(() => store.updateRun(run.id, { archived: false, status: RUN_STATUS.queued })).toThrow(/restore failed/);
       const after = store.getRun(run.id)!;
       expect(after.status).toBe(before.status);
       expect(after.archived).toBe(true);
@@ -469,14 +470,14 @@ describe('RunStore history compression', () => {
     const { dir, store } = openStore();
     const parent = store.createRun({ title: 'parent', workflow: 'w', task: 'parent', steps: [] });
     store.updateRun(parent.id, {
-      status: 'waiting',
+      status: RUN_STATUS.waiting,
       delegation: { role: 'root', permissions: ['spawn'], receipts: [] },
     });
     const workerId = randomUUID();
     const worker = store.createOwnedRun(
       {
         title: 'worker', task: 'worker', workflow: 'quick-task', runner: 'claude',
-        steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+        steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
       },
       parent.id,
       randomUUID(),
@@ -496,13 +497,13 @@ describe('RunStore history compression', () => {
       'a'.repeat(64),
     );
     store.appendEvent(worker.id, { type: 'note', message: 'old' });
-    store.updateStep(worker.id, 'task', { status: 'done', sessionId: 'old-session' });
-    store.updateRun(worker.id, { status: 'done' });
+    store.updateStep(worker.id, 'task', { status: STEP_STATUS.done, sessionId: 'old-session' });
+    store.updateRun(worker.id, { status: RUN_STATUS.done });
     store.setArchived(worker.id, true);
     await store.historyIdle();
     const { plain, compressed } = historyPaths(dir, worker.id);
     expect(existsSync(compressed)).toBe(true);
-    store.commitWorkerContinuation(worker.id, { archived: false, status: 'queued' });
+    store.commitWorkerContinuation(worker.id, { archived: false, status: RUN_STATUS.queued });
     expect(existsSync(plain)).toBe(true);
     expect(existsSync(compressed)).toBe(false);
     expect(readHistoryText(dir, worker.id)).toContain('old');

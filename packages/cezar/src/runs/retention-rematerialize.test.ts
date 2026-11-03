@@ -62,7 +62,7 @@ describe('rematerializeReclaimedWorktree (#483)', () => {
     await removeWorktree(repo, wt.path);
     const record = {
       id: runId,
-      status: 'review',
+      status: RUN_STATUS.review,
       createdAt: '2026-07-01T00:00:00.000Z',
       finishedAt: '2026-07-01T00:00:00.000Z',
       worktreePath: wt.path,
@@ -114,7 +114,7 @@ describe('rematerializeReclaimedWorktree (#483)', () => {
     const wt = await createWorktree(repo, runId, 'main');
     const record = {
       id: runId,
-      status: 'done',
+      status: RUN_STATUS.done,
       createdAt: '2026-07-01T00:00:00.000Z',
       worktreePath: wt.path,
       branch: wt.branch,
@@ -130,7 +130,7 @@ describe('rematerializeReclaimedWorktree (#483)', () => {
     const runId = '33333333-3333-4333-8333-333333333333';
     const record = {
       id: runId,
-      status: 'done',
+      status: RUN_STATUS.done,
       createdAt: '2026-07-01T00:00:00.000Z',
       steps: [],
     } as unknown as RunRecord;
