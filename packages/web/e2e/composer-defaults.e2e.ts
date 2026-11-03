@@ -88,6 +88,9 @@ describe('configurable composer run defaults', () => {
     await putDefaults(null, null)
     try {
       browser.goto(`${baseUrl}/p/${bootProject}/new`)
+      browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea') !== null`)
+      browser.evaluate(`localStorage.removeItem('cez-new-task-draft')`)
+      browser.goto(`${baseUrl}/p/${bootProject}/new`)
       // A cold composer picks nothing: the source pill is the empty invitation, and the run it
       // would start is the plain built-in quick-task. Wait on the LABEL, not on the kind — an
       // unpicked pill reports `none` while it is still showing its loading ellipsis.

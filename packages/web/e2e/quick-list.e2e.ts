@@ -191,7 +191,7 @@ afterAll(async () => {
 })
 
 describe('task quick-list', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     browser.goto(`${baseUrl}${scoped('/')}`)
     // The list is async — it renders once `/api/v1/runs` answers.
     browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
@@ -382,14 +382,10 @@ describe('tasks table overview', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="tasks-table"]').getBoundingClientRect().width > 0`)
   }
   beforeEach(() => {
-    if (browser.evaluate('innerWidth >= 768') && browser.count('[data-slot="task-columns-trigger"]')) showResourceTable()
-  })
-
-
-  beforeAll(() => {
     browser.setViewport(1440, 900)
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+    showResourceTable()
   })
 
   it('paints a done pill with the status key — a visible green dot, no teal chip — on every task list (#617)', () => {
@@ -741,12 +737,22 @@ describe('the tasks table under worst-case row content', () => {
     )
     worstUrl = await waitForFixtureServer(worstServer)
     worstProject = await bootProjectId(worstUrl)
+  }, 90_000)
 
+  beforeEach(async () => {
+    const response = await fetch(`${worstUrl}/api/v1/workspace/ui-state`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taskTable: { expandedColumns: {} } }),
+    })
+    expect(response.ok).toBe(true)
     browser.setViewport(1440, 900)
     browser.goto(`${worstUrl}/p/${worstProject}/`)
     browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
+    browser.evaluate(`localStorage.removeItem('cez-sidebar-width')`)
+    browser.goto(`${worstUrl}/p/${worstProject}/`)
+    browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
     showResourceTable()
-  }, 90_000)
+  })
 
   afterAll(async () => {
     browser.evaluate(`(() => {
@@ -1469,6 +1475,11 @@ describe('archive from the sidebar (#780)', () => {
   beforeEach(() => {
     browser.setViewport(1440, 900)
     browser.goto(`${archiveUrl}${archiveScoped('/')}`)
+    browser.evaluate(`(() => {
+      localStorage.removeItem('cez-sidebar-sections-collapsed')
+      localStorage.removeItem('cez-task-list-folds')
+    })()`)
+    browser.goto(`${archiveUrl}${archiveScoped('/')}`)
     browser.waitForFunction(`document.querySelector('${rowSel('arc-a')}') !== null`)
   })
 
@@ -1690,8 +1701,17 @@ describe('swipe to archive on touch (#780 §7)', () => {
     if (swipeRoot) rmSync(swipeRoot, { recursive: true, force: true })
   })
 
-  beforeEach(() => {
+  beforeEach(async () => {
     browser.setViewport(1440, 900)
+    const url = browser.url()
+    await browser.withCdp(async request => {
+      const { targetInfos } = await request('Target.getTargets')
+      const target = targetInfos.find((target: { type: string; url: string }) => target.type === 'page' && target.url === url)
+      const { sessionId } = await request('Target.attachToTarget', { targetId: target.targetId, flatten: true })
+      await request('Emulation.setEmulatedMedia', {
+        features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+      }, sessionId)
+    })
     browser.goto(`${swipeUrl}/p/${swipeProject}/`)
     browser.waitForFunction(`document.querySelector('${SWIPE} > ${rowSel('sw-0')}') !== null`)
   })
@@ -1804,7 +1824,6 @@ describe('swipe to archive on touch (#780 §7)', () => {
     }
   })
 
-  // Last: the emulated preference stays on this browser for the rest of the describe.
   it('snaps over 200ms, and not at all under prefers-reduced-motion', () => {
     const duration = `getComputedStyle(document.querySelector('${rowSel('sw-5')}')).transitionDuration`
     expect(browser.waitForValue(duration)).toBe('0.2s')

@@ -202,14 +202,25 @@ it('scrolls an anchor inside the report without requesting the cockpit or an aut
   })
 })
 
-it.each([['with', false], ['without', true]])('goes to the conversation on Back after a cold flat link, %s the Navigation API', (_label, removeNavigation) => {
-  // A fresh tab: the flat link is its first entry, and the legacy redirect replaces it.
-  browser.switchTab(browser.newTab())
-  browser.goto(`${baseUrl}/tasks/${runId}/report?artifact=${publication.id}`)
-  browser.waitForFunction(`document.querySelector(${JSON.stringify(FRAME)}) !== null && location.pathname === ${JSON.stringify(readerPath())}`)
-  if (removeNavigation) browser.evaluate(`Object.defineProperty(window, 'navigation', { value: undefined, configurable: true }) === window`)
-  browser.click('[data-slot="report-bar"] button[aria-label="Back"]')
-  browser.waitForFunction(`location.pathname === ${JSON.stringify(threadPath())} && document.querySelector(${JSON.stringify(LINK)}) !== null`)
+it.each([['with', false], ['without', true]])('goes to the conversation on Back after a cold flat link, %s the Navigation API', async (_label, removeNavigation) => {
+  const originalUrl = browser.url()
+  await browser.withCdp(async request => {
+    const { targetInfos } = await request('Target.getTargets')
+    const original = targetInfos.find((target: { type: string; url: string }) => target.type === 'page' && target.url === originalUrl)
+    // A fresh tab: the flat link is its first entry, and the legacy redirect replaces it.
+    const fresh = browser.newTab()
+    try {
+      browser.switchTab(fresh)
+      browser.goto(`${baseUrl}/tasks/${runId}/report?artifact=${publication.id}`)
+      browser.waitForFunction(`document.querySelector(${JSON.stringify(FRAME)}) !== null && location.pathname === ${JSON.stringify(readerPath())}`)
+      if (removeNavigation) browser.evaluate(`Object.defineProperty(window, 'navigation', { value: undefined, configurable: true }) === window`)
+      browser.click('[data-slot="report-bar"] button[aria-label="Back"]')
+      browser.waitForFunction(`location.pathname === ${JSON.stringify(threadPath())} && document.querySelector(${JSON.stringify(LINK)}) !== null`)
+    } finally {
+      browser.switchTab(original.targetId)
+      await request('Target.closeTarget', { targetId: fresh })
+    }
+  })
 })
 
 it('blocks scripts, navigation and storage by the sandbox alone, on unprepared HTML', () => {

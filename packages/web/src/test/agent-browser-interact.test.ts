@@ -4,21 +4,25 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { AgentBrowser, configureFailureCapture, OPEN_OVERLAY_PROBE } from '../../e2e/agent-browser'
+import { resetBrowserPage } from '../../e2e/browser-page'
 
 /**
  * A stand-in `agent-browser` that records every invocation and answers `{ success: true }`.
  * Only the seam runs — no Chrome, no daemon — so what these prove is the command sequence the
  * seam emits per operation, which is the whole of the auto-wait contract (#405).
  */
-function fakeBrowser(opts: { waitFails?: boolean; tabTarget?: unknown; evalResult?: unknown } = {}) {
+function fakeBrowser(opts: { waitFails?: boolean; tabTarget?: unknown; evalResult?: unknown; resolvedUrl?: string } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'cez-fake-agent-browser-'))
   const log = join(dir, 'calls.ndjson')
   const script = join(dir, 'fake.mjs')
   writeFileSync(script, `
-    import { appendFileSync, writeFileSync } from 'node:fs'
+    import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
     const args = process.argv.slice(2)
     appendFileSync(process.env.FAKE_LOG, JSON.stringify(args) + '\\n')
-    if (process.env.FAKE_WAIT_FAILS === '1' && args[2] === 'wait') {
+    if (args[2] === 'open') writeFileSync(process.env.FAKE_LOG + '.url', args[3])
+    if (args[2] === 'get' && args[3] === 'url') {
+      process.stdout.write(JSON.stringify({ success: true, data: { url: ${JSON.stringify(opts.resolvedUrl)} ?? readFileSync(process.env.FAKE_LOG + '.url', 'utf8') } }))
+    } else if (process.env.FAKE_WAIT_FAILS === '1' && args[2] === 'wait') {
       process.stdout.write(JSON.stringify({ success: false, error: 'Wait timed out after 25000ms' }))
     } else if (args[2] === 'tab' && args[3] === 'new') {
       process.stdout.write(JSON.stringify({ success: true, data: { targetId: ${JSON.stringify(opts.tabTarget === undefined ? 'target-two' : opts.tabTarget)} } }))
@@ -60,13 +64,72 @@ afterEach(() => {
   for (const fake of fakes.splice(0)) fake.dispose()
   configureFailureCapture({ root: undefined })
 })
-function open(opts?: { waitFails?: boolean; tabTarget?: unknown; evalResult?: unknown }) {
+function open(opts?: { waitFails?: boolean; tabTarget?: unknown; evalResult?: unknown; resolvedUrl?: string }) {
   const fake = fakeBrowser(opts)
   fakes.push(fake)
   return fake
 }
 
 describe('AgentBrowser auto-wait (#405)', () => {
+  it('restores the setup route and viewport after a case visits another page', () => {
+    const { browser, commands } = open({ evalResult: { width: 1440, height: 900 } })
+    browser.goto('http://fixture.test/p/example/tasks')
+    resetBrowserPage(browser)
+    browser.goto('http://fixture.test/p/example/settings')
+    resetBrowserPage(browser)
+    expect(commands().filter(args => args[0] === 'open')).toEqual([
+      ['open', 'http://fixture.test/p/example/tasks'],
+      ['open', 'about:blank'],
+      ['open', 'http://fixture.test/p/example/tasks'],
+      ['open', 'http://fixture.test/p/example/settings'],
+      ['open', 'about:blank'],
+      ['open', 'http://fixture.test/p/example/tasks'],
+    ])
+    expect(commands().filter(args => args[0] === 'set')).toEqual([
+      ['set', 'viewport', '1440', '900'], ['set', 'viewport', '1440', '900'],
+    ])
+    expect(commands().filter(args => args[1] === 'window.scrollTo(0, 0)')).toHaveLength(2)
+  })
+
+  it('freezes the resolved scoped route after setup visits bare root', () => {
+    const { browser, commands } = open({
+      evalResult: { width: 1440, height: 900 },
+      resolvedUrl: 'http://fixture.test/p/example',
+    })
+    browser.goto('http://fixture.test/')
+    resetBrowserPage(browser)
+    browser.goto('http://fixture.test/p/example/skills')
+    resetBrowserPage(browser)
+    expect(commands().filter(args => args[0] === 'get')).toEqual([['get', 'url']])
+    expect(commands().filter(args => args[0] === 'open').slice(-2)).toEqual([
+      ['open', 'about:blank'], ['open', 'http://fixture.test/p/example'],
+    ])
+  })
+
+  it('keeps the setup mobile viewport, scale and route readiness predicate', () => {
+    const { browser, commands } = open({ evalResult: { width: 390, height: 844 } })
+    browser.setViewport(390, 844, 2)
+    browser.goto('http://fixture.test/p/mobile/tasks')
+    browser.waitForFunction('document.querySelector("[data-route=tasks]") !== null')
+    browser.waitForFunction('document.activeElement.tagName === "BUTTON"')
+    resetBrowserPage(browser)
+    expect(commands().filter(args => args[0] === 'set')).toEqual([
+      ['set', 'viewport', '390', '844', '2'], ['set', 'viewport', '390', '844', '2'],
+    ])
+    expect(commands().filter(args => args[0] === 'wait')).toEqual([
+      ['wait', '--fn', 'document.querySelector("[data-route=tasks]") !== null'],
+      ['wait', '--fn', 'document.activeElement.tagName === "BUTTON"'],
+      ['wait', '--fn', 'document.querySelector("[data-route=tasks]") !== null'],
+    ])
+  })
+
+  it('can restore the default motion preference after enabling reduced motion', () => {
+    const { browser, commands } = open()
+    browser.setReducedMotion()
+    browser.setReducedMotion(false)
+    expect(commands()).toEqual([['set', 'media', 'reduced-motion'], ['set', 'media']])
+  })
+
   it('creates a tab through the provider lifecycle and returns its CDP target', () => {
     const { browser, commands } = open()
     expect(browser.newTab()).toBe('target-two')

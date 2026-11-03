@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, readTestEnv, servedRoot } from './agent-browser'
 import { waitForConfig } from './poll'
@@ -50,6 +50,15 @@ const gotoResources = () => {
   browser.waitForFunction(`document.querySelector('[data-slot="worktrees-section"]') !== null`)
 }
 
+beforeEach(async () => {
+  const saved = await fetch(`${baseUrl}/api/v1/config`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ worktreeRetention: 10 }),
+  })
+  expect(saved.ok).toBe(true)
+  gotoResources()
+})
+
 describe('project settings → worktrees: retention against the live dry-run server', () => {
   it('renders only configuration: the retention field and a link to Git → Cleanup, where the panel lives', () => {
     gotoResources()
@@ -80,8 +89,6 @@ describe('project settings → worktrees: retention against the live dry-run ser
   })
 
   it('a cold load renders the persisted count — the field is a view of config.json', async () => {
-    // The previous API write can precede its UI mutation settlement.
-    browser.waitForFunction(`document.querySelector('[data-slot="resources-worktree-retention"]').value === '0'`)
     // Set a distinctive value, then reload from scratch.
     browser.waitForFunction(`document.querySelector('[data-slot="resources-worktree-retention"]:not([disabled])') !== null && document.querySelector('[data-action="resources-save-retention"]:disabled') !== null`)
     browser.fill('[data-slot="resources-worktree-retention"]', '7')

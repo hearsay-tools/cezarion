@@ -91,23 +91,13 @@ function buildFixtureRepo(dir: string): void {
   for (let index = 0; index < FIXTURE_FILES; index += 1) write(index, 'after')
 }
 
-/** Which mode is currently loaded, so the virtual-mode tests can share one page load. */
-let loaded: 'flat' | 'virtual' | null = null
-
-/**
- * Load /git/changes in a forced mode and wait until the diff has rendered in that mode — and skip the
- * navigation entirely when that mode is already up. Re-loading is the expensive part of this
- * spec (flat mode paints ~1,900 highlighted rows, which is precisely the cost being measured),
- * so the three virtual-mode assertions below deliberately share a single load and run in order.
- */
+/** Load the requested mode and wait for its rendered diff. */
 function openChanges(mode: 'flat' | 'virtual') {
-  if (loaded === mode) return
   browser.goto(`${baseUrl}/git/changes?diff=${mode}`)
   browser.waitForFunction(
     `document.querySelector('[data-slot="diff-files"]')?.dataset.virtualized === '${mode === 'virtual'}'`,
   )
   browser.waitForFunction(`document.querySelector('[data-slot="diff-file"]') !== null`)
-  loaded = mode
 }
 
 beforeAll(async () => {
@@ -132,20 +122,19 @@ afterAll(async () => {
 })
 
 describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, () => {
-  let flatLines = 0
-  let flatDom = 0
-
   it('force-flat renders every file and every line (the before measurement)', () => {
     openChanges('flat')
 
     expect(browser.count('[data-slot="diff-file"]')).toBe(changedFiles)
-    flatLines = lineCount()
-    flatDom = domSize()
+    const flatLines = lineCount()
     // Every line of every file: ~2 rows per changed line (a del and an add).
     expect(flatLines).toBeGreaterThan(FIXTURE_FILES * LINES_PER_FILE)
   }, 120_000)
 
   it('force-virtual holds a viewport window instead of the whole changeset', () => {
+    openChanges('flat')
+    const flatLines = lineCount()
+    const flatDom = domSize()
     openChanges('virtual')
 
     const virtualLines = lineCount()
@@ -239,8 +228,20 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
    * broken: the pane was `sticky` but unbounded, so it grew the page instead of scrolling, and
    * the last file could only be reached by dragging `main` — the diff — to the bottom.
    */
-  it('scrolls the file tree independently of the diff', () => {
+  it('scrolls the file tree independently of the diff with the tree pane stuck', () => {
     openChanges('virtual')
+    browser.evaluate(`(() => {
+      const pane = document.querySelector('[data-slot="changes-tree-pane"]')
+      const main = ${MAIN}
+      const stickyTop = main.getBoundingClientRect().top + parseFloat(getComputedStyle(pane).top)
+      main.scrollTop += pane.getBoundingClientRect().top - stickyTop
+    })()`)
+    browser.waitForFunction(`(() => {
+      const pane = document.querySelector('[data-slot="changes-tree-pane"]')
+      const main = ${MAIN}
+      const stickyTop = main.getBoundingClientRect().top + parseFloat(getComputedStyle(pane).top)
+      return Math.abs(pane.getBoundingClientRect().top - stickyTop) < 1
+    })()`)
 
     const pane = waitForSettledSample(browser, `(() => {
       const pane = document.querySelector('[data-slot="changes-tree-pane"]')
@@ -272,8 +273,7 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
     expect(pane!.paneBottom, 'the tree pane hangs below the fold').toBeLessThanOrEqual(pane!.scrollerBottom)
 
     // The claim itself: the tree runs to its end while the diff stays exactly where it was.
-    // Compared against the offset measured a moment ago, not against 0 — the specs above share
-    // this page load and leave `main` scrolled, and where it sits is not this test's business.
+    // Compare against the main offset that holds the tree pane at its sticky position.
     //
     // This is a scripted scroll, so it proves the pane is its OWN scroller and that reaching the
     // last file no longer moves `main`. It says nothing about `overscroll-contain`: a scripted

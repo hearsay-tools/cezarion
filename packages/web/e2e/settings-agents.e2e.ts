@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, readTestEnv, servedRoot } from './agent-browser'
 import { waitForConfig } from './poll'
@@ -84,6 +84,12 @@ const gotoAgents = () => {
   browser.waitForFunction(`document.querySelector('[data-slot="agents-section"]') !== null`)
 }
 
+beforeEach(() => {
+  if (previousConfig === null) rmSync(configFile, { force: true })
+  else writeFileSync(configFile, previousConfig, 'utf8')
+  gotoAgents()
+})
+
 describe('settings → agents against the live dry-run server', () => {
   it('renders every knob, agent-agnostically named', () => {
     gotoAgents()
@@ -141,6 +147,11 @@ describe('settings → agents against the live dry-run server', () => {
   })
 
   it('a cold load renders the persisted knobs — the form is a view of config.json', async () => {
+    const saved = await fetch(`${baseUrl}/api/v1/config`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ defaultRunner: 'codex', defaultModels: { claude: 'opus' }, systemPrompt: 'Always add tests. (e2e)' }),
+    })
+    expect(saved.ok).toBe(true)
     gotoAgents()
     expect(browser.count('[data-slot="agents-runner"] [data-value="codex"][aria-checked="true"]')).toBe(1)
     waitForSettingsControl(browser, '[data-slot="agents-model"][data-runner="claude"]', { enabled: false })

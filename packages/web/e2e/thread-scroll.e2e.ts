@@ -211,21 +211,20 @@ afterAll(async () => {
 })
 
 describe('thread virtualization on a 1,000-row transcript', () => {
-  let flatRows = 0
-  let flatDom = 0
-  let flatAssistantWidth = 0
-
   it('force-flat renders every row (the before measurement)', () => {
     openThread('?thread=flat')
     expect(browser.evaluate(`document.querySelector('[data-slot="thread-rows"]').dataset.virtualized`)).toBe('false')
-    flatRows = rowCount()
-    flatDom = domSize()
-    flatAssistantWidth = assistantWidth()
+    const flatRows = rowCount()
+    const flatAssistantWidth = assistantWidth()
     expect(flatRows).toBe(ROWS) // the generator's own arithmetic, end to end
     expect(flatAssistantWidth).toBeGreaterThan(200)
   }, 90_000)
 
   it('auto mode virtualizes past the threshold and keeps the DOM bounded', () => {
+    openThread('?thread=flat')
+    const flatRows = rowCount()
+    const flatDom = domSize()
+    const flatAssistantWidth = assistantWidth()
     openThread()
     expect(browser.evaluate(`document.querySelector('[data-slot="thread-rows"]').dataset.virtualized`)).toBe('true')
 
@@ -250,6 +249,7 @@ describe('thread virtualization on a 1,000-row transcript', () => {
   }, 90_000)
 
   it('arrives pinned to the live tail (bottom-anchored), with no jump pill', () => {
+    openThread()
     browser.waitForFunction(`${nearBottom} && document.querySelector('[data-slot="jump-to-latest"]') === null`)
     expect(browser.evaluate(nearBottom)).toBe(true)
     expect(browser.count('[data-slot="jump-to-latest"]')).toBe(0)
@@ -257,6 +257,7 @@ describe('thread virtualization on a 1,000-row transcript', () => {
   })
 
   it('scrolling up shows the jump pill; clicking it returns to the tail', () => {
+    openThread()
     parkAt('0')
     browser.waitForFunction(`document.querySelector('[data-slot="jump-to-latest"]') !== null`)
     // Viewport shot: full-page capture scroll-stitches 48k px and re-pins the thread,
@@ -273,14 +274,14 @@ describe('thread virtualization on a 1,000-row transcript', () => {
     }
     browser.waitForFunction(nearBottom)
     browser.waitForFunction(`document.querySelector('[data-slot="jump-to-latest"]') === null`)
-    // Let the pin LAND, not merely enter the near-bottom slack — the next test parks
-    // mid-thread, and a still-settling tail write would carry its park away.
+    // Let the pin land fully, beyond the near-bottom slack.
     browser.waitForFunction(
       `(() => { const m = ${MAIN}; return Math.abs(m.scrollHeight - m.clientHeight - m.scrollTop) < 2 })()`,
     )
   })
 
   it('restores the scroll position across a client-side leave and return', () => {
+    openThread()
     // Park mid-thread (a position the arrival logic would never pick on its own).
     parkAt(`Math.round((m.scrollHeight - m.clientHeight) / 2)`)
     const parkSamples = browser.evaluate(`new Promise(resolve => {
@@ -429,6 +430,11 @@ describe('Activity folds while reading up (#1601)', () => {
   }, 90_000)
 
   it('keeps a manual unfold open for the rest of the reading session', () => {
+    browser.setViewport(1280, 900)
+    openThread()
+    toggle('true')
+    readTo('m.scrollHeight - m.clientHeight - 3000', -120)
+    browser.waitForFunction(`${expanded} === 'false'`)
     expect(browser.waitForValue(`${expanded} ?? null`)).toBe('false')
     toggle('true')
     readTo('m.scrollTop - 600', -120)
@@ -446,6 +452,11 @@ describe('Activity folds while reading up (#1601)', () => {
   }, 90_000)
 
   it('keeps a card folded before the read folded on the way back down', () => {
+    browser.setViewport(1280, 900)
+    openThread()
+    toggle('true')
+    readTo('m.scrollHeight - m.clientHeight - 3000', -120)
+    browser.waitForFunction(`${expanded} === 'false'`)
     readTo('m.scrollTop + 600', 120)
     browser.waitForFunction(`${expanded} === 'true'`)
     toggle('false')

@@ -1,8 +1,13 @@
 import { checkWorkspaceResolution } from '../../../scripts/check-workspace-resolution.mjs'
 import { defineConfig } from 'vitest/config'
-import CockpitTestSequencer from '../../../.github/scripts/cockpit-test-sequencer.mjs'
+import CockpitTestSequencer, { fileShuffleRequested } from '../../../.github/scripts/cockpit-test-sequencer.mjs'
 
 checkWorkspaceResolution()
+
+const shuffleFiles = fileShuffleRequested()
+class CliCockpitTestSequencer extends CockpitTestSequencer {
+  shuffleFiles = shuffleFiles
+}
 
 /**
  * The root configuration exposes this project to Squeal's slow tier. `npm test` selects
@@ -24,7 +29,7 @@ export default defineConfig({
     include: ['**/*.e2e.ts'],
     // One browser session, one server: parallel specs would fight over both.
     fileParallelism: false,
-    sequence: { sequencer: CockpitTestSequencer },
+    sequence: { sequencer: CliCockpitTestSequencer },
     // Pins the shared env's workspace registry to the single-project shape before any spec runs,
     // and restores it afterwards — otherwise whatever the operator last registered in the
     // gitignored `.ai/qa/cez-home` decides whether the sidebar renders its flat or its grouped

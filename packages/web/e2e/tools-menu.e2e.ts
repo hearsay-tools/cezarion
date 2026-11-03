@@ -126,7 +126,8 @@ describe('tools menu', () => {
   })
 
   it('routes the cog row to Settings → Agents and closes the menu', () => {
-    // Still open from the previous test — the cog row is its footer.
+    browser.click(TRIGGER)
+    browser.waitForFunction(`document.querySelector('${MENU}') !== null`)
     expect(
       browser.evaluate(`document.querySelector('${MENU} [data-slot="tools-settings"]').getAttribute('href')`)
     ).toBe(scoped('/settings/agents'))

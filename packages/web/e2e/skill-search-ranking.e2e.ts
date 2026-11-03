@@ -119,18 +119,21 @@ describe('#484 skill search ranks the (almost-)exact match first', () => {
   })
 
   it('multi-keyword search still matches across name + description (#411 preserved)', () => {
+    browser.goto(`${baseUrl}/new`)
+    browser.waitForFunction(`document.querySelector('[data-slot="source-pill"]') !== null && !document.querySelector('[data-slot="source-pill"]').textContent.includes('…')`)
     // Both rare tokens live only in auto-review-pr's description — the ranker must keep the
     // multi-word "every word must match somewhere" rule (a query missing either word drops it).
     searchPicker('zebratoken quokkatoken', 'auto-review-pr')
     const fixtureRefs = pickerSkillRefs().filter(ref => ['auto-review-pr', 'review', 'ship'].includes(ref))
     expect(fixtureRefs).toEqual(['auto-review-pr'])
 
-    // Close the picker so it does not overlay the composer in the next spec.
     browser.press('Escape')
     browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') === null`)
   })
 
   it('the composer `/` autocomplete ranks the exact match first too', () => {
+    browser.goto(`${baseUrl}/new`)
+    browser.waitForFunction(`document.querySelector('[data-slot="source-pill"]') !== null && !document.querySelector('[data-slot="source-pill"]').textContent.includes('…')`)
     browser.click('[data-slot="composer"] textarea')
     browser.fill('[data-slot="composer"] textarea', '/review')
     browser.waitForFunction(

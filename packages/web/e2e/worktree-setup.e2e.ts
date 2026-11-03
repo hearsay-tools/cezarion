@@ -62,6 +62,11 @@ afterAll(async () => {
 
 describe('worktree setup from Settings to the task thread', () => {
   it('saves setup commands through Settings → Worktrees', async () => {
+    const cleared = await fetch(`${baseUrl}/api/v1/config`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ worktreeSetup: null }),
+    })
+    expect(cleared.ok).toBe(true)
     browser.goto(`${baseUrl}/settings/worktrees`)
     // Editable once health confirms a local cockpit: the field is read-only until then.
     browser.waitForFunction(
@@ -81,6 +86,7 @@ describe('worktree setup from Settings to the task thread', () => {
 
   it('reads well on a 360px phone', () => {
     browser.setViewport(360, 640)
+    browser.goto(`${baseUrl}/settings/worktrees`)
     browser.waitForFunction(`document.querySelector('[data-slot="worktree-setup-commands"]') !== null`)
     const fits = browser.waitForValue(
       `(() => { const box = document.querySelector('[data-slot="worktree-setup-commands"]').getBoundingClientRect(); const save = document.querySelector('[data-action="worktree-setup-save"]').getBoundingClientRect(); return box.right <= innerWidth && save.height >= 44 ? { right: box.right, saveHeight: save.height } : null })()`,
@@ -92,6 +98,11 @@ describe('worktree setup from Settings to the task thread', () => {
   })
 
   it('runs the commands before the first agent turn and shows them in the thread', async () => {
+    const saved = await fetch(`${baseUrl}/api/v1/config`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ worktreeSetup: { commands: [command], timeoutSeconds: 900 } }),
+    })
+    expect(saved.ok).toBe(true)
     const created = (await (
       await fetch(`${baseUrl}/api/v1/runs`, {
         method: 'POST',
