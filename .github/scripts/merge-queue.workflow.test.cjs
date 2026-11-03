@@ -72,7 +72,9 @@ test('queue always runs the complete immutable combined revision and no paid rev
     const output = path.join(temp, 'output');
     assert.equal(shell(classifier.run, { GITHUB_OUTPUT: output }).status, 0);
     assert.equal(fs.readFileSync(output, 'utf8'), 'bump_pr=false\n');
-    assert.equal(shell(ci.jobs['change-surface'].steps.find(s => s.id === 'classify').run, { GITHUB_OUTPUT: output }).status, 0);
+    // Actions passes an absent event field as an empty string.
+    assert.equal(shell(ci.jobs['change-surface'].steps.find(s => s.id === 'classify').run,
+      { GITHUB_OUTPUT: output, GROUP_BASE_SHA: '', GROUP_HEAD_SHA: '' }).status, 0);
     assert.match(fs.readFileSync(output, 'utf8'), /surface=full-matrix/);
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 });
@@ -92,13 +94,28 @@ test('failed probe or absent proof runs full main fallback then permits successf
     assert.equal(evaluate(ci.jobs['publish-snapshot'].steps[0].with.ref, ctx), ctx.github.sha);
   }
 });
-test('queue aggregate rejects failures and skips even if classifier offers exemptions', () => {
+test('queue aggregate rejects failures, and skips beyond the docs-only and infra-only suite skip', () => {
   const command = workflow().jobs.verify.steps[0].run;
-  for (const key of ['TYPECHECK_RESULT', 'BUILD_AND_PACKAGE_RESULT', 'VITEST_RESULT', 'COCKPIT_BROWSER_RESULT', 'CLASSIFY_RESULT', 'SURFACE_RESULT']) {
+  const suites = ['VITEST_RESULT', 'COCKPIT_BROWSER_RESULT'];
+  for (const key of ['TYPECHECK_RESULT', 'BUILD_AND_PACKAGE_RESULT', ...suites, 'CLASSIFY_RESULT', 'SURFACE_RESULT']) {
     for (const result of ['failure', 'skipped', 'cancelled']) {
-      assert.notEqual(shell(command, { [key]: result, CHANGE_SURFACE: 'docs-only', BUMP_PR: 'true' }).status, 0, `${key} ${result}`);
+      // The bump-PR shape never exempts a queue entry.
+      assert.notEqual(shell(command, { [key]: result, CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'true' }).status, 0, `${key} ${result} bump`);
+      for (const surface of ['docs-only', 'infra-only']) {
+        const status = shell(command, { [key]: result, CHANGE_SURFACE: surface, BUMP_PR: 'true' }).status;
+        assert.equal(status === 0, result === 'skipped' && suites.includes(key), `${key} ${result} ${surface}`);
+      }
     }
   }
+});
+test('the main probe accepts exactly the job names GitHub gives skipped queue suites', () => {
+  const { SKIPPED_SUITE_JOBS } = require('./queue-ci-proof.cjs');
+  const ci = workflow();
+  assert.deepEqual(SKIPPED_SUITE_JOBS, [ci.jobs.vitest.name, ci.jobs['cockpit-browser'].name]);
+  const proof = ci.jobs['queue-proof'];
+  assert.equal(proof.steps[0].with['fetch-depth'], 2, 'the checkout holds the parent whose classifier judges the commit');
+  assert.match(proof.steps.find(s => s.id === 'proof').with.script,
+    /surfaceOf: base => mainCommitSurface\(\{ sha: context\.sha, base, tmpDir: process\.env\.RUNNER_TEMP \}\)/);
 });
 test('required review name cannot pass from a skipped model call on a queue event', () => {
   const ci = workflow(), ctx = context(); const j = ci.jobs['queue-review-result'];

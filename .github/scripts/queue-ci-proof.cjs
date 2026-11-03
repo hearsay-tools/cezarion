@@ -1,4 +1,7 @@
 'use strict';
+const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
 const CI_PATH = '.github/workflows/ci.yml';
 const VERIFY = 'Unit, build, E2E, and package';
@@ -9,6 +12,13 @@ const REQUIRED_QUEUE_JOBS = [
   ...[1, 2, 3, 4].map(n => `Vitest shard ${n}/4`),
   ...[1, 2, 3, 4].map(n => `Cockpit browser E2E shard ${n}/4`), VERIFY, REVIEW, 'Validate reviewed queue entry',
 ];
+// A matrix job that its `if` skipped is listed once, under its unexpanded name.
+const SUITES = ['Vitest shard', 'Cockpit browser E2E shard'].map(prefix => ({
+  shards: [1, 2, 3, 4].map(n => `${prefix} ${n}/4`), skipped: `${prefix} \${{ matrix.shard }}/4` }));
+const SUITE_JOBS = SUITES.flatMap(suite => suite.shards);
+const SKIPPED_SUITE_JOBS = SUITES.map(suite => suite.skipped);
+const SKIPPABLE_SURFACES = ['docs-only', 'infra-only'];
+const QUEUE_BASE = /^gh-readonly-queue\/main\/pr-[1-9][0-9]*-([a-f0-9]{40})$/;
 const validSha = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
 const positive = value => Number.isSafeInteger(value) && value > 0;
 function reader(github, owner, repo, deadline, now) {
@@ -50,6 +60,41 @@ function successfulJobs(jobs, names) {
       && matching[0].status === 'completed' && matching[0].conclusion === 'success';
   });
 }
+function skippedSuite(jobs, suite) {
+  const matching = jobs.filter(job => job.name === suite.skipped);
+  return matching.length === 1 && positive(matching[0].id) && matching[0].status === 'completed'
+    && matching[0].conclusion === 'skipped' && !jobs.some(job => suite.shards.includes(job.name));
+}
+// 'ran' or 'skipped' when the gate is complete, null otherwise. Skipped suites
+// count only for a docs-only or infra-only queued commit, as its queue run's
+// verify accepted them.
+async function completeGate(jobs, run, surfaceOf) {
+  if (!successfulJobs(jobs, REQUIRED_QUEUE_JOBS.filter(name => !SUITE_JOBS.includes(name)))) return null;
+  const notRun = SUITES.filter(suite => !successfulJobs(jobs, suite.shards));
+  if (notRun.length === 0) return 'ran';
+  if (!notRun.every(suite => skippedSuite(jobs, suite))) return null;
+  const base = QUEUE_BASE.exec(run.head_branch)?.[1];
+  return base && surfaceOf && SKIPPABLE_SURFACES.includes(await surfaceOf(base)) ? 'skipped' : null;
+}
+// The surface of the queued commit, from a main checkout that holds it and its
+// parent. Its own parent diff is the group diff only when its first parent is
+// the group base, so any other parent, and any failure, is full-matrix. The
+// classifier comes from that base: the queued commit cannot vouch for itself.
+function mainCommitSurface({ sha, base, cwd = process.cwd(), tmpDir }) {
+  try {
+    if (!validSha(sha) || !validSha(base)) return 'full-matrix';
+    const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    if (git('rev-parse', '--verify', '--end-of-options', `${sha}^1`).trim() !== base) return 'full-matrix';
+    const classifier = path.join(fs.mkdtempSync(path.join(tmpDir, 'queue-proof-')), 'change-surface.cjs');
+    fs.writeFileSync(classifier, git('show', `${base}:.github/scripts/change-surface.cjs`));
+    const paths = git('diff', '--name-only', '--no-renames', '-z', base, sha).split('\0').filter(Boolean);
+    const surface = execFileSync(process.execPath, [classifier], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'],
+      input: paths.map(file => `${JSON.stringify(file)}\n`).join('') }).trim();
+    return SKIPPABLE_SURFACES.includes(surface) ? surface : 'full-matrix';
+  } catch {
+    return 'full-matrix';
+  }
+}
 const newest = runs => runs.reduce((latest, run) => {
   if (!positive(run?.id)) throw new Error('invalid-run');
   return !latest || run.id > latest.id ? run : latest;
@@ -60,7 +105,7 @@ function queueRun(run, fullName, workflowId, sha) {
     && run.head_sha === sha && run.event === 'merge_group'
     && typeof run.head_branch === 'string' && run.head_branch.startsWith('gh-readonly-queue/main/');
 }
-async function queueCiProof({ github, owner, repo, eventName, ref, sha, now = Date.now, sleep = delay }) {
+async function queueCiProof({ github, owner, repo, eventName, ref, sha, now = Date.now, sleep = delay, surfaceOf }) {
   const fallback = reason => ({ verified: false, reason });
   if (eventName !== 'push' || ref !== 'refs/heads/main' || !validSha(sha)) return fallback('not-main-push');
   const deadline = now() + 60000;
@@ -81,14 +126,15 @@ async function queueCiProof({ github, owner, repo, eventName, ref, sha, now = Da
       }
       if (run.conclusion !== 'success') return fallback('source-not-successful');
       const jobs = await readCiJobs(read, run.id);
-      if (!successfulJobs(jobs, REQUIRED_QUEUE_JOBS)) return fallback('incomplete-gate');
+      const suites = await completeGate(jobs, run, surfaceOf);
+      if (!suites) return fallback('incomplete-gate');
       const final = await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: run.id });
       const authoritative = newest(await readCiRuns(read, workflow.id, sha, 'merge_group'));
       if (!queueRun(final, fullName, workflow.id, sha) || final.id !== run.id || final.run_attempt !== run.run_attempt
         || final.status !== 'completed' || final.conclusion !== 'success'
         || !queueRun(authoritative, fullName, workflow.id, sha) || authoritative?.id !== run.id || authoritative.run_attempt !== run.run_attempt
         || authoritative.status !== 'completed' || authoritative.conclusion !== 'success') return fallback('source-changed');
-      return { verified: true, runId: run.id, attempt: run.run_attempt, sha,
+      return { verified: true, runId: run.id, attempt: run.run_attempt, sha, suites,
         url: `https://github.com/${fullName}/actions/runs/${run.id}/attempts/${run.run_attempt}` };
     }
     return fallback('source-pending');
@@ -97,5 +143,5 @@ async function queueCiProof({ github, owner, repo, eventName, ref, sha, now = Da
     return fallback('proof-unavailable');
   }
 }
-module.exports = { queueCiProof, REQUIRED_QUEUE_JOBS, VERIFY, REVIEW, CI_PATH, validSha, positive,
-  reader, pages, readCiRuns, readCiJobs, successfulJobs, newest };
+module.exports = { queueCiProof, mainCommitSurface, REQUIRED_QUEUE_JOBS, SKIPPED_SUITE_JOBS, VERIFY, REVIEW, CI_PATH,
+  validSha, positive, reader, pages, readCiRuns, readCiJobs, successfulJobs, newest };

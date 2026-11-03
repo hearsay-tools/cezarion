@@ -686,6 +686,21 @@ Node tests and packaged CLI tests always run on that commit. The four Vitest
 and four browser jobs can reuse native PR suites for one unchanged queue entry.
 Queue runs have no model keys, npm credentials, publishing jobs or OIDC permission.
 
+### Docs-only queue entries
+
+A merge group classifies its own diff, as native PR CI classifies a PR.
+`Classify pull request change surface` checks out the group's `base_sha`, fetches
+`head_sha` as Git data, and passes `git diff --name-only --no-renames` between them to
+the base's `change-surface.cjs`. A `docs-only` or `infra-only` entry skips the four
+Vitest and four browser jobs, and the aggregate accepts those skips. Typecheck,
+workflow lint, citations, complexity, clones, build, Node tests (including
+`agents-md-budget.test.cjs` and the ledger checks) and packaged CLI tests still run
+on the combined commit. The bump-PR skip stays off in the queue.
+
+A malformed SHA, a base checkout that is not `base_sha`, a failed fetch or diff, an
+empty diff, a classifier failure or an unknown verdict classifies the entry
+`full-matrix`.
+
 Native PR test matrices resolve their input once to an immutable merge commit.
 For a same-repository PR that contains the trusted workflow's base and whose
 head and merge trees match, they test the immutable head instead. Only both
@@ -724,6 +739,15 @@ at most 10 seconds; at most seven pending reads; complete lists limited to 200
 records). It reuses only the newest same-repository queue run's latest successful
 attempt for the **exact pushed SHA**, after every classifier, verification leaf (including a verified native-suite
 reuse receipt), aggregate and review admission job succeeds. A final reread checks for races.
+A queue run of a docs-only entry lists each skipped suite once, under its unexpanded
+name (`Vitest shard ${{ matrix.shard }}/4`). The probe accepts those two skipped jobs in
+place of the eight shards only when the pushed commit is docs-only or infra-only by
+this check: the queue ref (`gh-readonly-queue/main/pr-<N>-<base SHA>`) names the group
+base, the pushed commit's first parent is that base, and the base's `change-surface.cjs`,
+run on the diff between them, says `docs-only` or `infra-only`. The checkout fetches
+depth 2 for the parent. The pushed commit never supplies the classifier. Any other
+parent, a missing base SHA or a classifier failure requires all eight shards, so main
+runs its full verification.
 Equal trees, ancestors, PR runs, dispatches, artifacts and an older success behind
 a newer failure are not proof. Unknown evidence or probe infrastructure failure
 runs full main CI. The aggregate records the source run and attempt when it reuses
@@ -760,7 +784,7 @@ Normal eligible merges replace main's full matrix with queue verification
 before merge plus a metadata probe. An eligible single-entry queue reuses the
 native PR's unit/browser suites and runs the remaining checks fresh. This is a
 cost goal, not a guarantee. Rebuilds,
-failed groups, retries, docs-only entries and fallback add work. Measure queue
+failed groups, retries and fallback add work. Measure queue
 wait, verification job-seconds, source attempts, reuse hits and fallback reasons.
 If squash does not preserve the SHA, keep full fallback and return to design
 review. Do not accept tree equivalence to make the metric pass.

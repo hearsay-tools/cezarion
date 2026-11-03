@@ -24,7 +24,7 @@ function classify(jobName, { pr = prFixture(), number = '42', apiFails = false, 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-dispatch-'));
   fs.writeFileSync(path.join(dir, 'package.json'), '{"type":"commonjs"}');
   const context = { needs: { 'pr-test-input': { outputs: { sha: '' } }, 'pr-test-proof': { result: 'skipped', outputs: { verified: 'false' } } }, github: { event_name: 'workflow_dispatch', sha: HEAD,
-    repository: 'owner/repo', token: '', head_ref: '', event: { pull_request: { head: {}, base: {}, user: {} } } },
+    repository: 'owner/repo', token: '', head_ref: '', event: { pull_request: { head: {}, base: {}, user: {} }, merge_group: {} } },
     vars: { RELEASE_APP_BOT_LOGIN: appLogin }, inputs: { pr_number: number }, steps: {}, format: (s, n) => s.replace('{0}', n) };
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, GITHUB_WORKSPACE: dir,
     GITHUB_REPOSITORY: 'owner/repo', GITHUB_SHA: HEAD, FIXTURE: JSON.stringify({ pr, files, after, apiFails }) };

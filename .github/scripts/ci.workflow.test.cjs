@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const yaml = require('yaml');
+const { gitRepo, FAILING_CLASSIFIER } = require('./queue-surface.testkit.cjs');
 
 const repoRoot = path.join(__dirname, '..', '..');
 const workflowPath = path.join(__dirname, '..', 'workflows', 'ci.yml');
@@ -46,9 +47,9 @@ test('dispatched verification checks out the attributed SHA even after its branc
   }
 });
 
-function runShell(command, env = {}) {
+function runShell(command, env = {}, cwd = repoRoot) {
   return spawnSync('bash', ['-e', '-c', command], {
-    cwd: repoRoot,
+    cwd,
     encoding: 'utf8',
     env: { ...process.env, CANCELLED: 'false', PREFLIGHT_RESULT: 'success', BASE_REF: 'main', REVIEW_RESULT: 'success', TYPECHECK_RESULT: 'success', CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', CLONE_GATE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success', EVENT_NAME: 'pull_request_target', ...env },
   });
@@ -138,8 +139,8 @@ test('CI classifies pull request changes from a trusted base checkout', () => {
   assert.equal(job.outputs.surface, '${{ steps.classify.outputs.surface }}');
   const checkout = job.steps.find((step) => step.uses?.startsWith('actions/checkout@'));
   assert.ok(checkout, 'expected a checkout step');
-  assert.equal(checkout.if, "github.event_name == 'pull_request_target' || steps['resolve-dispatch'].outputs.valid == 'true'");
-  assert.equal(checkout.with.ref, "${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha }}");
+  assert.equal(checkout.if, "github.event_name == 'pull_request_target' || github.event_name == 'merge_group' || steps['resolve-dispatch'].outputs.valid == 'true'");
+  assert.equal(checkout.with.ref, "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || steps['resolve-dispatch'].outputs.base_sha }}");
   assert.equal(checkout.with['persist-credentials'], false);
   const classify = job.steps.find((step) => step.id === 'classify');
   assert.ok(classify, 'expected an output-producing classify step');
@@ -207,6 +208,69 @@ test('change-surface fails closed when the API or classifier fails', () => {
   assert.equal(push.result.status, 0, push.result.stderr);
   assert.equal(push.output, 'surface=full-matrix\n');
   assert.equal(push.apiCalled, false);
+});
+
+// The change-surface step in a merge group, run in a repository whose HEAD is
+// the group base, as the trusted base checkout leaves it.
+function runQueueClassification({ files, classifier, headSha, checkout } = {}) {
+  const repo = gitRepo(classifier ? { classifier } : {});
+  const output = path.join(repo.dir, '.git', 'github-output');
+  try {
+    const head = repo.commit(files ?? { 'docs/guide.md': 'x\n' });
+    repo.git('checkout', '-q', '--detach', checkout ?? repo.base);
+    repo.git('remote', 'add', 'origin', repo.dir);
+    const step = workflow().jobs['change-surface'].steps.find((item) => item.id === 'classify');
+    const result = runShell(step.run, {
+      EVENT_NAME: 'merge_group', GITHUB_OUTPUT: output, GITHUB_WORKSPACE: repo.dir,
+      GROUP_BASE_SHA: repo.base, GROUP_HEAD_SHA: headSha ?? head,
+    }, repo.dir);
+    return { result, output: fs.existsSync(output) ? fs.readFileSync(output, 'utf8') : '' };
+  } finally {
+    repo.cleanup();
+  }
+}
+
+test('a merge group classifies its own diff and fails closed to the full matrix', () => {
+  const cases = [
+    [{ files: { 'docs/a b.md': 'x\n', 'README.md': 'docs\n', '.ai/specs/2026-11-03-x.md': 'x\n' } }, 'docs-only'],
+    [{ files: { '.github/workflows/sweep-ci-failures.yml': 'x\n' } }, 'infra-only'],
+    [{ files: { 'README.md': 'docs\n', 'src/app.ts': 'code\n' } }, 'full-matrix'],
+    [{ files: { 'src/old.ts': null, 'docs/old.md': 'old\n' } }, 'full-matrix'],
+    [{ files: { '.github/workflows/ci.yml': 'x\n' } }, 'full-matrix'],
+    // A docs-only entry whose classifier fails runs the full matrix.
+    [{ classifier: FAILING_CLASSIFIER }, 'full-matrix'],
+    [{ headSha: 'c'.repeat(40) }, 'full-matrix'],
+    [{ headSha: 'not-a-sha' }, 'full-matrix'],
+    // The classifier must come from the base, not the queued commit.
+    [{ checkout: 'main' }, 'full-matrix'],
+  ];
+  for (const [input, surface] of cases) {
+    const { result, output } = runQueueClassification(input);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(output, `surface=${surface}\n`, JSON.stringify(input));
+  }
+});
+
+test('a docs-only or infra-only merge group may skip the suites; a bump PR shape may not', () => {
+  const { runInNewContext } = require('node:vm');
+  const ci = workflow();
+  const gate = ci.jobs.verify.steps.find(step => step.name === 'Require every verification job');
+  const queue = (env) => runShell(gate.run, { EVENT_NAME: 'merge_group', BASE_REF: '', REVIEW_RESULT: 'skipped',
+    BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'skipped', COCKPIT_BROWSER_RESULT: 'skipped', BUMP_PR: 'false', ...env });
+  for (const surface of ['docs-only', 'infra-only']) {
+    assert.equal(queue({ CHANGE_SURFACE: surface }).status, 0, surface);
+    for (const name of ['vitest', 'cockpit-browser']) {
+      const condition = ci.jobs[name].if.replace(/needs\.([a-z]+-[a-z]+)/g, "needs['$1']");
+      assert.equal(runInNewContext(condition, { github: { event_name: 'merge_group', event: {} }, cancelled: () => false, needs: {
+        'queue-proof': { result: 'success', outputs: { verified: 'false' } }, preflight: { result: 'success' }, 'review-result': { result: 'skipped' },
+        'change-surface': { outputs: { surface } }, 'classify-pr': { outputs: { bump_pr: 'false' } }, 'pr-test-input': { result: 'skipped' },
+      } }), false, `${name} ${surface}`);
+    }
+  }
+  assert.notEqual(queue({ CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'true' }).status, 0, 'bump-PR skip stays off in merge_group');
+  assert.notEqual(queue({ CHANGE_SURFACE: 'full-matrix' }).status, 0);
+  assert.notEqual(queue({ CHANGE_SURFACE: 'docs-only', BUILD_AND_PACKAGE_RESULT: 'skipped' }).status, 0);
+  assert.notEqual(queue({ CHANGE_SURFACE: 'docs-only', VITEST_RESULT: 'failure' }).status, 0);
 });
 
 test('ledger-only PRs skip both matrices but cannot bypass the required build and ledger validation', () => {
