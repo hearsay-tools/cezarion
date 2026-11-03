@@ -1,4 +1,9 @@
-import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WORKER_OUTCOME_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WORKER_OUTCOME_STATUS,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerWaitRequestSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';

@@ -1,4 +1,11 @@
-import { RUN_STATUS, STEP_KIND, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import {
+  RUN_STATUS,
+  STEP_KIND,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { handleRunnerUiEvent, makeUiSink } from './run/session-events.ts';
 import { clearIdleTimer } from './run/input-timers.ts';
 import { runInternals } from './run-internals.testkit.ts';

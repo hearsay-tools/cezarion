@@ -1,4 +1,12 @@
-import { RUN_STATUS, STEP_KIND, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA, WORKER_OUTCOME_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import {
+  RUN_STATUS,
+  STEP_KIND,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+  WORKER_OUTCOME_STATUS,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, fixtureWorkSettled, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
