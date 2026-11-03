@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { MONITORING_PARTITIONS, expectedMonitoringCells, monitoringCells, monitoringTurnFiles } from './monitoring-turn-partitions.testkit.ts';
 
 it('registers every monitoring runner/mode/criterion exactly once across semantic files', () => {
-  const files = readdirSync(new URL('.', import.meta.url)).filter(file => /^monitoring-turn-.*\.test\.ts$/.test(file) && file !== 'monitoring-turn-coverage-parity.test.ts');
+  const files = readdirSync(new URL('.', import.meta.url)).filter(file => /^monitoring-turn-.*\.test\.ts$/.test(file) && file !== 'monitoring-turn-coverage.test.ts');
   expect(files.sort()).toEqual([...monitoringTurnFiles].sort());
   const registrations = monitoringTurnFiles.flatMap(file => {
     const source = readFileSync(new URL(file, import.meta.url), 'utf8');

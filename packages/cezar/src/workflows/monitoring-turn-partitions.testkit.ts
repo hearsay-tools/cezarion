@@ -371,7 +371,7 @@ export const MONITORING_PARTITIONS = {
   }
 } as const satisfies Record<string, MonitoringPartition>;
 export type MonitoringPartitionName = keyof typeof MONITORING_PARTITIONS;
-export const monitoringTurnFiles = Object.keys(MONITORING_PARTITIONS).map(name => `monitoring-turn-${name}-parity.test.ts`);
+export const monitoringTurnFiles = Object.keys(MONITORING_PARTITIONS).map(name => `monitoring-turn-${name}.test.ts`);
 export function monitoringCells(partitions: readonly MonitoringPartition[]): string[] {
   return partitions.flatMap(partition => partition.runners.flatMap(runner => partition.modes.flatMap(mode => partition.rows.map(row => `${runner}/${mode}/${row}`))));
 }
