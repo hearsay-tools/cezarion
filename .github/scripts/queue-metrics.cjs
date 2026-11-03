@@ -337,7 +337,7 @@ function formatReport(m) {
 }
 
 const USAGE = `Usage: node .github/scripts/queue-metrics.cjs [--from DATE] [--to DATE] [--repo OWNER/REPO] [--json]
-Prints the merge-queue pilot metrics for a UTC window. It only reads, through gh api.
+Prints the merge-queue pilot metrics for a UTC window. It only reads, through gh api and gh repo view.
 DATE is YYYY-MM-DD (--to includes that whole day) or YYYY-MM-DDTHH:MM:SSZ.
 Defaults: the 7 days before now, in the current gh repository.
 `;

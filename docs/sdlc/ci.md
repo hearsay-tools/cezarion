@@ -550,7 +550,8 @@ node .github/scripts/queue-metrics.cjs                    # the 7 days before no
 node .github/scripts/queue-metrics.cjs --from 2026-11-01 --to 2026-11-03 --json
 ```
 
-It only reads, through authenticated `gh api` calls, and needs no configuration.
+It only reads, through authenticated `gh api` GET and GraphQL query calls, and needs
+no configuration. Without `--repo`, it reads the repository name with `gh repo view`.
 A date covers its whole UTC day. A `YYYY-MM-DDTHH:MM:SSZ` time is an exact bound.
 Each runs and search query covers one UTC day, because GitHub returns at most
 1,000 results per query.
