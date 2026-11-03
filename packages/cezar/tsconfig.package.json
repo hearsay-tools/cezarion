@@ -1,0 +1,6 @@
+{
+  // Packaged tests import built modules. CI checks them after the application build.
+  "extends": "./tsconfig.test.json",
+  "include": ["test/e2e/**/*.ts"],
+  "exclude": []
+}

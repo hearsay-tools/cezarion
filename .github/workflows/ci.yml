@@ -667,6 +667,9 @@ jobs:
       - name: Build application
         run: npm run build
 
+      - name: Typecheck packaged CLI E2E tests
+        run: npm run typecheck:package
+
       - name: Run packaged CLI E2E tests
         run: npm run test:package
 
@@ -739,7 +742,7 @@ jobs:
         if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (hashFiles('pnpm-lock.yaml') != '')
         run: pnpm install --frozen-lockfile
 
-      # TypeScript test imports resolve through the server build, as in the web workspace pretypecheck hook.
+      # Unit fixtures exercise built server modules; retain their server build.
       - name: Build server dependencies
         run: npm run build:server
         if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')

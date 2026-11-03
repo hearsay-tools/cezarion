@@ -1674,8 +1674,8 @@ npm run dev          # server (API :4321) + Vite dev server, opens the cockpit i
 npm run dev:server   # tsx packages/cezar/src/index.ts — the API server alone
 npm run dev:web      # Vite dev server alone (proxies /api to :4321)
 npm run build        # tsc → packages/cezar/dist/, vite build → packages/cezar/web/dist/, then the pack gate
-npm run typecheck    # refresh server declarations, then check all four workspaces
-npm run typecheck:web # refresh server declarations, then check web sources
+npm run typecheck    # check all four workspaces without building
+npm run typecheck:web # check web sources without building
 npm test             # vitest — server + cockpit unit suites
 npm run test:changed # iteration only: tests related to branch + working-tree changes
 pnpm metrics <file> # function complexity; add --test <test-file> for coverage and CRAP
@@ -1753,12 +1753,11 @@ falls back to full Vitest on shared/configuration/unknown input or missing Git
 history. It is not a substitute for final verification. See `.ai/skills/validation/SKILL.md`
 for targeted browser commands and the final-gate/evidence-reuse policy.
 
-Both `npm run typecheck:web` and
-`npm run typecheck -w @open-mercato/cezar-web` rebuild server declarations from
-the current checkout before checking web sources. Run `pnpm install --frozen-lockfile` in each new
-worktree first. The full `npm run typecheck` starts with the web check, so it
-prepares declarations once before checking the remaining workspaces. Calling
-`tsc --noEmit` directly skips this preparation and can consume stale declarations.
+`npm run typecheck` checks all four workspaces from source without writing build
+output. `npm run typecheck:web` checks the cockpit and reads the server route types
+from this checkout. Run `pnpm install --frozen-lockfile` in each new worktree first.
+Packaged CLI tests import built modules; CI checks them with
+`npm run typecheck:package` after `npm run build`.
 
 CI runs four duration-balanced Vitest shards alongside the build and package checks.
 See [CI verification](docs/sdlc/ci.md) for the job graph and local commands.
