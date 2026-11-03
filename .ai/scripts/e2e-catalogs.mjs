@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process';
 // The browser harness owns these catalogs; checkout catalogs never seed the server.
+import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -392,8 +392,8 @@ Seeded NDJSON transcripts must go through `seedTranscript` from `seed-transcript
 
 ## Fixed project catalogs
 
-Fresh served clones, reused clones and local lanes replace all seven project skill
-directories from `SKILL_DIRS` and `.ai/cezar/workflows` with
+Fresh served clones, reused clones and local lanes replace every project skill
+directory in `SKILL_DIRS` and `.ai/cezar/workflows` with
 `packages/web/e2e/fixtures/catalogs`: two project skills and one workflow.
 Checkout catalog additions, edits and deletions do not change the served catalogs.
 Specs may add entries under `servedRoot()` and remove their entries in `afterAll`.
