@@ -1,7 +1,7 @@
 import { basename } from 'node:path'
 import { beforeAll, beforeEach } from 'vitest'
 
-import { beginFailureSpec, beginFailureTest, configureFailureCapture, lastAttachedBrowser } from './agent-browser'
+import { beginFailureSpec, beginFailureTest, configureFailureCapture, lastAttachedBrowser, resetBrowserPages } from './agent-browser'
 
 /**
  * Failure bundles for every spec (#408), registered once here rather than in each file.
@@ -40,4 +40,5 @@ beforeEach((context) => {
     const bundle = browser.captureTestFailure(task.result?.errors ?? [])
     if (bundle) console.error(`cezar e2e: "${task.name}" (failure bundle: ${bundle})`)
   })
+  resetBrowserPages()
 })

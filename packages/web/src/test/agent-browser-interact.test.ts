@@ -67,6 +67,26 @@ function open(opts?: { waitFails?: boolean; tabTarget?: unknown; evalResult?: un
 }
 
 describe('AgentBrowser auto-wait (#405)', () => {
+  it('restores the setup route and viewport after a case visits another page', () => {
+    const { browser, commands } = open({ evalResult: { width: 1440, height: 900 } })
+    browser.goto('http://fixture.test/p/example/tasks')
+    browser.resetPage()
+    browser.goto('http://fixture.test/p/example/settings')
+    browser.resetPage()
+    expect(commands().filter(args => args[0] === 'open')).toEqual([
+      ['open', 'http://fixture.test/p/example/tasks'],
+      ['open', 'about:blank'],
+      ['open', 'http://fixture.test/p/example/tasks'],
+      ['open', 'http://fixture.test/p/example/settings'],
+      ['open', 'about:blank'],
+      ['open', 'http://fixture.test/p/example/tasks'],
+    ])
+    expect(commands().filter(args => args[0] === 'set')).toEqual([
+      ['set', 'viewport', '1440', '900'], ['set', 'viewport', '1440', '900'],
+    ])
+    expect(commands().filter(args => args[1] === 'window.scrollTo(0, 0)')).toHaveLength(2)
+  })
+
   it('creates a tab through the provider lifecycle and returns its CDP target', () => {
     const { browser, commands } = open()
     expect(browser.newTab()).toBe('target-two')

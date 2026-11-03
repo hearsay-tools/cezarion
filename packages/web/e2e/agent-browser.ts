@@ -513,6 +513,13 @@ export async function bootProjectId(baseUrl: string): Promise<string> {
   return bootProject
 }
 
+/** Restore every session a spec keeps open; fixture servers retain their own route. */
+export function resetBrowserPages(): void {
+  for (const browser of attached) browser.resetPage()
+}
+
+const CASE_VIEWPORT = { width: 1440, height: 900 }
+
 export class AgentBrowser {
   // A unique session per run, per the descriptor's rules — never attach to a user's profile.
   private constructor(
@@ -641,8 +648,21 @@ export class AgentBrowser {
     return (parsed.data ?? {}) as Record<string, unknown>
   }
 
+  private setupRoute = 'about:blank'
+  private caseRoute: string | undefined
+
+  /** Freeze the route prepared by beforeAll, then discard the previous case's document. */
+  resetPage(): void {
+    this.caseRoute ??= this.setupRoute
+    this.goto('about:blank')
+    this.setViewport(CASE_VIEWPORT.width, CASE_VIEWPORT.height)
+    if (this.caseRoute !== 'about:blank') this.goto(this.caseRoute)
+    this.evaluate('window.scrollTo(0, 0)')
+  }
+
   /** operation: open */
   goto(url: string): void {
+    if (this.caseRoute === undefined) this.setupRoute = url
     this.settleFontsBeforeLeaving()
     this.run(['open', url])
   }

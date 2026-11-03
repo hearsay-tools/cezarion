@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const hooks = vi.hoisted(() => ({ beforeAll: vi.fn(), beforeEach: vi.fn() }))
 const capture = vi.hoisted(() => ({
   beginFailureSpec: vi.fn(), beginFailureTest: vi.fn(), configureFailureCapture: vi.fn(),
-  lastAttachedBrowser: vi.fn(),
+  lastAttachedBrowser: vi.fn(), resetBrowserPages: vi.fn(),
 }))
 vi.mock('vitest', async (original) => ({ ...await original<typeof import('vitest')>(), ...hooks }))
 vi.mock('../../e2e/agent-browser', () => capture)
@@ -24,6 +24,7 @@ describe('failure setup hooks', () => {
     const context = { task: { name: 'layout', file: { filepath: '/specs/task-thread.e2e.ts' } }, onTestFailed }
     beforeTest(context)
     beforeTest(context)
+    expect(capture.resetBrowserPages).toHaveBeenCalledTimes(2)
     expect(capture.beginFailureSpec).toHaveBeenCalledTimes(1)
     expect(capture.beginFailureTest).toHaveBeenCalledTimes(2)
     expect(capture.beginFailureTest).toHaveBeenCalledWith({ spec: 'task-thread', test: 'layout' })

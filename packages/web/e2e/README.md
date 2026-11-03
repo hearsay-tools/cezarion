@@ -91,6 +91,10 @@ coordinates to integers: agent-browser's `mouse move` rejects decimals with
 
 ## The rules the ratchet enforces
 
+Before each case, the shared setup restores every open browser to 1440×900,
+zero document scroll, and the last route set by `beforeAll` (or `about:blank`).
+It loads a fresh document. Each case prepares the UI and task state it needs.
+
 `packages/web/src/test/e2e-wait-discipline.test.ts` scans every `.ts` file here (the seam and
 the vitest config excepted) on every `npm test` and compares what it finds with
 `e2e-wait-discipline.baseline.json`. The baseline holds the sites that existed when the ratchet
