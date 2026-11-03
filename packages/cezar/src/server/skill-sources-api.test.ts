@@ -68,9 +68,13 @@ describe('the team skill sources API', () => {
       method,
       ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
     });
-  const sources = async () => (await (await send('GET', '/skills/sources')).json()) as TeamSkillSourcesResponse;
-  const teamNames = async (path = '/skills') =>
-    ((await (await send('GET', path)).json()) as Skill[]).filter((skill) => skill.source === 'team').map((skill) => skill.name);
+  const sources = async () => {
+    return (await (await send('GET', '/skills/sources')).json()) as TeamSkillSourcesResponse;
+  };
+  const teamNames = async (path = '/skills') => {
+    const skills = (await (await send('GET', path)).json()) as Skill[];
+    return skills.filter((skill) => skill.source === 'team').map((skill) => skill.name);
+  };
   // The route answers before its background fetch ends; the team load it started is the signal.
   const add = async (body: { repo: string; ref?: string }) => {
     const res = await send('POST', '/skills/sources', body);
