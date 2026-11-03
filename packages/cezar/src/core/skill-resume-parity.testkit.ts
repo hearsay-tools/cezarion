@@ -135,15 +135,44 @@ function systemFromPrepended(text: string): string {
   return at >= 0 ? text.slice(0, at) : text;
 }
 
+function appendedSystemPrompts(rows: unknown[]): string[] {
+  return rows.flatMap((row) => {
+    if (!Array.isArray(row)) return [];
+    const index = row.indexOf('--append-system-prompt');
+    return index >= 0 && typeof row[index + 1] === 'string' ? [row[index + 1]] : [];
+  });
+}
+
+function cursorSystemPrompt(rec: Record<string, unknown>): string | undefined {
+  if (rec.method === 'session/prompt') {
+    const prompt = (rec.params as { prompt?: Array<{ type?: string; text?: string }> } | undefined)?.prompt;
+    const text = prompt?.find((part) => typeof part.text === 'string')?.text;
+    if (typeof text === 'string') return systemFromPrepended(text);
+  }
+  if (rec.method === 'cursor-print/stdin' && typeof rec.prompt === 'string') {
+    return systemFromPrepended(rec.prompt);
+  }
+  return undefined;
+}
+
+function recordedSystemPrompt(backend: RunnerId, rec: Record<string, unknown>): string | undefined {
+  if (backend === 'codex' && rec.method === 'turn/start') {
+    const input = (rec.params as { input?: Array<{ text?: string }> } | undefined)?.input;
+    const text = input?.[0]?.text;
+    if (typeof text === 'string') return systemFromPrepended(text);
+  }
+  if (backend === 'cursor') return cursorSystemPrompt(rec);
+  if (backend === 'opencode' && typeof rec.url === 'string' && rec.url.includes('prompt_async')) {
+    const parts = (rec.body as { parts?: Array<{ type?: string; text?: string }> } | undefined)?.parts;
+    const text = parts?.[0]?.text;
+    if (typeof text === 'string') return systemFromPrepended(text);
+  }
+  return undefined;
+}
+
 function systemPromptsFrom(backend: RunnerId, recording: string): string[] {
   const rows = parsedLines(recording);
-  if (backend === 'claude' || backend === 'pi' || backend === 'omp') {
-    return rows.flatMap((row) => {
-      if (!Array.isArray(row)) return [];
-      const index = row.indexOf('--append-system-prompt');
-      return index >= 0 && typeof row[index + 1] === 'string' ? [row[index + 1]] : [];
-    });
-  }
+  if (backend === 'claude' || backend === 'pi' || backend === 'omp') return appendedSystemPrompts(rows);
   const texts: string[] = [];
   for (const row of rows) {
     if (backend === 'cursor' && Array.isArray(row)) {
@@ -152,25 +181,8 @@ function systemPromptsFrom(backend: RunnerId, recording: string): string[] {
       continue;
     }
     if (!row || typeof row !== 'object') continue;
-    const rec = row as Record<string, unknown>;
-    if (backend === 'codex' && rec.method === 'turn/start') {
-      const input = (rec.params as { input?: Array<{ text?: string }> } | undefined)?.input;
-      const text = input?.[0]?.text;
-      if (typeof text === 'string') texts.push(systemFromPrepended(text));
-    }
-    if (backend === 'cursor' && rec.method === 'session/prompt') {
-      const prompt = (rec.params as { prompt?: Array<{ type?: string; text?: string }> } | undefined)?.prompt;
-      const text = prompt?.find((part) => typeof part.text === 'string')?.text;
-      if (typeof text === 'string') texts.push(systemFromPrepended(text));
-    }
-    if (backend === 'cursor' && rec.method === 'cursor-print/stdin' && typeof rec.prompt === 'string') {
-      texts.push(systemFromPrepended(rec.prompt));
-    }
-    if (backend === 'opencode' && typeof rec.url === 'string' && rec.url.includes('prompt_async')) {
-      const parts = (rec.body as { parts?: Array<{ type?: string; text?: string }> } | undefined)?.parts;
-      const text = parts?.[0]?.text;
-      if (typeof text === 'string') texts.push(systemFromPrepended(text));
-    }
+    const text = recordedSystemPrompt(backend, row as Record<string, unknown>);
+    if (text !== undefined) texts.push(text);
   }
   return texts;
 }
