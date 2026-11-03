@@ -919,10 +919,11 @@ const RETIREMENTS = [
   { id: 'P4', scenario: 'approval-turn-end', text: 'Turn ended with the approval still pending.' },
 ] as const;
 
-export type HarnessParityPart = 'session' | 'run' | 'ownership' | 'settlement' | 'provider' | 'owned-input';
+export type HarnessParityPart = 'session' | 'run' | 'ownership' | 'settlement' | 'provider' | 'owned-input' | 'startup';
 
 // Adjacent semantic families; every group below belongs to exactly one part.
 export const HARNESS_PARITY_GROUPS: Readonly<Record<HarnessParityPart, readonly string[]>> = {
+  startup: ['startup'],
   provider: ['provider'],
   session: ['seam', 'session', 'input', 'governed', 'native-message', 'spec', 'tools', 'cdp', 'tool-grants'],
   run: ['run', 'diagnostics', 'child', 'hooks', 'answer', 'monitoring', 'prs'],
@@ -1009,14 +1010,15 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
     }
   };
 
-  describeRunners('seam', 'harness parity — seam tier', () => {
+  const seamRows = (criteria: readonly SeamCriterion[]): void => {
     for (const backend of runners) {
-      for (const criterion of SEAM_CRITERIA) {
+      for (const criterion of criteria) {
         parityRow(backend, criterion, () => driveSeam(backend, criterion.scenario));
       }
     }
-  });
-
+  };
+  describeRunners('startup', 'harness parity — missing executable', () => seamRows(SEAM_CRITERIA.filter(row => row.id === 'S20')));
+  describeRunners('seam', 'harness parity — seam tier', () => seamRows(SEAM_CRITERIA.filter(row => row.id !== 'S20')));
   // hearsay-tools/cezarion#1810: the Tool-list kinds case table, one cell per case and runner.
   describeRunners('tool-grants', 'harness parity — tool grants', () => {
     registration.toolGrants(scope === 'once' ? 'once' : scope.runner);
