@@ -194,7 +194,7 @@ export const WORKFLOW_ASK_CRITERIA = [
   { id: 'Q10', scenario: 'cezar-ask', name: 'an unanswered clean session close stays resumable without success' },
 ] as const;
 
-/** hearsay-tools/cezarion#1620: workflow-step-completion-parity.test.ts, every native wire. An
+/** hearsay-tools/cezarion#1620: workflow-step-completion-parity.testkit.ts, every native wire. An
  *  earlier agent step completes only on an accepted done; the tail never starts without one. */
 export const STEP_COMPLETION_CRITERIA = [
   { id: 'C1', scenario: 'baseline', name: 'an earlier step without done is nudged once, then waits for the user; a reply with done runs the tail' },
@@ -205,7 +205,7 @@ export const STEP_COMPLETION_CRITERIA = [
   { id: 'C6', scenario: 'autonomous', name: 'an autonomous earlier step is nudged to its done, then the tail runs' },
 ] as const;
 
-/** #470: exercised in workflow-timeout-parity.test.ts against every native wire. */
+/** #470: exercised in workflow-timeout-parity.testkit.ts against every native wire. */
 // T1, T2 and T5 hold their turn and then signal done, which an earlier step needs
 // since hearsay-tools/cezarion#1620.
 export const WORKFLOW_TIMEOUT_CRITERIA = [
@@ -237,7 +237,7 @@ export const FOLLOWUP_CRITERIA = [
   { id: 'H5', scenario: 'hold-gated', name: 'does not park before a late-acknowledged steer that runs after the turn' },
 ] as const;
 
-/** #426: workflow-autonomous-parity.test.ts, real native wires on both turn-end paths. */
+/** #426: workflow-autonomous-parity.testkit.ts, real native wires on both turn-end paths. */
 export const AUTONOMOUS_CRITERIA = [
   { id: 'A1', scenario: 'autonomous', name: 'nudges fresh markerless turns to completion' },
   { id: 'A2', scenario: 'autonomous', name: 'hydrates autonomous Continue sessions' },
