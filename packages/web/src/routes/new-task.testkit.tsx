@@ -86,14 +86,14 @@ export const WORKFLOWS: WorkflowsResponse = {
   issues: [],
 }
 
-export const REPO: RepoResponse = {
+export const REPO = {
   info: { root: '/repo', branch: 'main' },
   status: [],
   log: [],
   branches: ['main', 'develop'],
   baseBranch: null,
   tracking: null,
-}
+} satisfies RepoResponse
 
 export const REPO_NO_GIT: RepoResponse = { info: null, status: [], log: [], branches: [], baseBranch: null, tracking: null }
 
