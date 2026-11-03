@@ -126,6 +126,15 @@ jobs:
             --sourcemaps "$RUNNER_TEMP/spec-map/sourcemaps" \
             --results "$RUNNER_TEMP/spec-map/results.json" \
             --out "$RUNNER_TEMP/spec-map/partial/shard-$SHARD.json"
+          node --input-type=module <<'NODE'
+          import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+          import { join, basename } from 'node:path';
+          const root = process.env.E2E_SPEC_MAP_NODE_DIR;
+          const records = readdirSync(root, { recursive: true, encoding: 'utf8' })
+            .filter(file => /^(?:control|ambiguous-task-.*|expected|expected-server-.*|[0-9]+)\.json$/.test(basename(file)))
+            .map(file => ({ file, ...JSON.parse(readFileSync(join(root, file), 'utf8')) }));
+          writeFileSync(`${process.env.RUNNER_TEMP}/spec-map/partial/capture-${process.env.SHARD}.txt`, JSON.stringify({ records, files: readdirSync(root, { recursive: true, encoding: 'utf8' }) }));
+          NODE
 
       - name: Upload the evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

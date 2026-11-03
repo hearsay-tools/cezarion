@@ -9,7 +9,7 @@ async function command(socket: string, action: string, spec: string): Promise<vo
     const connection = createConnection(socket)
     let result = ''
     // bound: a dead capture endpoint must fail within the existing 60-second hook budget.
-    connection.setTimeout(10_000, () => connection.destroy(new Error('Node coverage endpoint did not answer')))
+    connection.setTimeout(10_000, () => connection.destroy(new Error(`Node coverage endpoint did not answer: ${action} ${spec} at ${socket}`)))
     connection.on('connect', () => connection.write(`${JSON.stringify({ action, spec })}\n`))
     connection.on('data', chunk => { result += chunk })
     connection.on('error', reject)
@@ -34,7 +34,7 @@ async function servers(root: string, action: string, spec: string): Promise<void
   const directory = join(root, 'servers')
   for (const file of readdirSync(directory).filter(file => file.endsWith('.json'))) {
     const manifest = JSON.parse(readFileSync(join(directory, file), 'utf8')) as Manifest
-    if (manifest.socket === shared.socket || !existsSync(manifest.socket)) continue
+    if (manifest.socket === shared.socket || manifest.spec !== spec || !existsSync(manifest.socket)) continue
     try { await command(manifest.socket, action, spec) }
     catch (error) {
       if (!['ENOENT', 'ECONNREFUSED'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error

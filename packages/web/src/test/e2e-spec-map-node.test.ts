@@ -4,6 +4,7 @@ import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirS
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
+import { nodeCaptureComplete } from '../../e2e/spec-map/node-evidence.ts'
 import { beginNodeCapture, endNodeCapture } from '../../e2e/spec-map/node-control.ts'
 
 const preload = resolve(import.meta.dirname, '../../e2e/spec-map/node-preload.mjs')
@@ -229,4 +230,18 @@ test('retains shared startup function execution across later spec resets', async
   const later = results(join(directory, 'boot-second', 'node'))
     .flatMap(script => script.functions.filter(fn => fn.functionName === 'boot'))
   expect(later.every(fn => fn.ranges.every(range => range.count === 0))).toBe(true)
+})
+
+
+test('attributes a seeded task to its private server spec without invalidating shared evidence', async () => {
+  const { directory } = await fixture()
+  const spec = 'packages/web/e2e/seeded.e2e.ts'
+  await beginNodeCapture(directory, spec)
+  const { child } = await fixture({ directory, spec })
+  const ready = once(child.stdout, 'data')
+  child.stdin.write('seeded-task\n')
+  await ready
+  await endNodeCapture(directory, spec)
+  expect(nodeCaptureComplete(directory, spec)).toBe(true)
+  expect(readdirSync(directory).filter(name => name.startsWith('ambiguous-task-'))).toEqual([])
 })

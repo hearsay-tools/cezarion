@@ -19,7 +19,8 @@ async function install(root, owner) {
   mkdirSync(join(root, 'servers'), { recursive: true });
   const socket = join(process.platform === 'win32' ? tmpdir() : '/tmp', `cez-map-${createHash('sha256').update(root).digest('hex').slice(0, 12)}-${process.pid}.sock`);
   const session = new Session();
-  let active = owner ? undefined : process.env.E2E_SPEC_MAP_SPEC;
+  const privateSpec = owner ? undefined : process.env.E2E_SPEC_MAP_SPEC;
+  let active = privateSpec;
   const shared = !owner && !process.env.E2E_SPEC_MAP_SPEC;
   let startupSaved = false;
   let sequence = 0;
@@ -56,7 +57,7 @@ async function install(root, owner) {
     server.once('error', reject);
     server.listen(socket, () => {
       server.unref();
-      const manifest = { socket, pid: process.pid, spec: owner, taskId: process.env.CEZ_TASK_ID };
+      const manifest = { socket, pid: process.pid, spec: owner ?? privateSpec, taskId: process.env.CEZ_TASK_ID };
       writeRecord(join(root, owner ? 'processes' : 'servers', `${process.pid}.json`), manifest);
       if (!owner && !process.env.E2E_SPEC_MAP_SPEC) writeRecord(join(root, 'control.json'), manifest);
       resolve();
@@ -112,6 +113,7 @@ async function install(root, owner) {
       const task = opts?.env?.CEZ_TASK_ID;
       const childArgs = Array.isArray(args) ? args : [];
       const isMock = [command, ...childArgs].some(arg => /[/\\]mock-[^/\\]+\.mjs$/.test(arg));
+      if (task && isMock && privateSpec && !owners.has(task)) owners.set(task, privateSpec);
       if (task && isMock && !owners.has(task)) {
         writeRecord(join(root, `ambiguous-task-${task}.json`), { taskId: task });
         if (active) owners.set(task, active);
