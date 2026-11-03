@@ -3,7 +3,15 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readdirSync, readlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import { join, resolve } from 'node:path';
-import { makeHumanWait, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import {
+  makeHumanWait,
+  RUN_STATUS,
+  STEP_KIND,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { apiRunSchema, runStatusSchema } from '@open-mercato/cezar-contract/runs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunStore } from '../runs/store.ts';
@@ -19,8 +27,8 @@ import { RUNNER_IDS } from '../core/agent-runner.ts';
 /** `cez task` against a real cockpit app on a real socket (#504). */
 /** The agent's open timer: the monitoring park since hearsay-tools/cezarion#1301. */
 const openTimer = () => ({
-  kind: 'timer' as const, id: randomUUID(), source: 'agent' as const, via: 'monitoring-line' as const,
-  registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 600_000).toISOString(), phase: 'open' as const, turnId: 'turn-1', seconds: 600,
+  kind: WAIT_KIND.timer, id: randomUUID(), source: WAIT_SOURCE.agent, via: WAIT_VIA['monitoring-line'],
+  registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 600_000).toISOString(), phase: WAIT_PHASE.open, turnId: 'turn-1', seconds: 600,
 });
 
 /** Reload module initializers while Stryker's selected flag-table mutant is active. */
@@ -71,7 +79,7 @@ describe('cez task', () => {
     const workerId = randomUUID();
     if (!store.getRun(parentId)?.delegation) store.updateRun(parentId, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     return store.createOwnedRun(
-      { title: 'worker', task: 'worker', workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', name: 'Task', kind: 'agent' }] },
+      { title: 'worker', task: 'worker', workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] },
       parentId,
       randomUUID(),
       {
@@ -122,7 +130,7 @@ describe('cez task', () => {
           method: operation === 'stop' ? 'POST' : 'GET',
         }]);
         if (operation === 'list') expect(last().runs).toMatchObject([{ id }]);
-        else if (operation === 'status') expect(last()).toMatchObject({ id, status: 'queued' });
+        else if (operation === 'status') expect(last()).toMatchObject({ id, status: RUN_STATUS.queued });
         else {
           expect(last()).toEqual({ id, cancelled: true });
           expect(store.getRun(id)?.status).toBe('cancelled');
@@ -188,7 +196,7 @@ describe('cez task', () => {
     it('creates a queued run in the cockpit and prints its thread url', async () => {
       expect(await run(['start', 'do the thing'])).toBe(0);
       const printed = last();
-      expect(printed).toMatchObject({ status: 'queued', created: true });
+      expect(printed).toMatchObject({ status: RUN_STATUS.queued, created: true });
       expect(printed.url).toBe(`${cockpit.origin}/p/default/tasks/${printed.id as string}`);
       expect(store.getRun(printed.id as string)?.task).toBe('do the thing');
       expect(store.getRun(printed.id as string)?.archiveWhenDone).not.toBe(true);
@@ -473,7 +481,7 @@ describe('cez task', () => {
       expect(Object.keys(printed).sort()).toEqual(
         ['id', 'title', 'status', 'attention', 'attentionLabel', 'tokensUsed', 'url', 'handoffUrl'].sort(),
       );
-      expect(printed).toMatchObject({ id, status: 'queued', attention: 'none', attentionLabel: 'queued' });
+      expect(printed).toMatchObject({ id, status: RUN_STATUS.queued, attention: 'none', attentionLabel: 'queued' });
     });
 
     // #609: the operator who cleared on a false pending-question flag read the wrong field. The
@@ -482,12 +490,12 @@ describe('cez task', () => {
     // attention (the monitoring park is a timer wait since hearsay-tools/cezarion#1301).
     it('carries the cockpit attention bucket and label, from the shared function', async () => {
       const id = await start();
-      store.updateRun(id, { status: 'waiting' });
+      store.updateRun(id, { status: RUN_STATUS.waiting });
       expect(await run(['status', id])).toBe(0);
-      expect(last()).toMatchObject({ status: 'waiting', attention: 'waiting', attentionLabel: 'needs you' });
+      expect(last()).toMatchObject({ status: RUN_STATUS.waiting, attention: 'waiting', attentionLabel: 'needs you' });
       store.commitWait(id, openTimer());
       expect(await run(['status', id])).toBe(0);
-      expect(last()).toMatchObject({ status: 'waiting', attention: 'running', attentionLabel: 'monitoring' });
+      expect(last()).toMatchObject({ status: RUN_STATUS.waiting, attention: 'running', attentionLabel: 'monitoring' });
     });
 
     it('prints the contract ApiRun with --full, without the derived attention fields', async () => {
@@ -509,13 +517,13 @@ describe('cez task', () => {
       // Each task is valid at the API boundary; only the aggregate exceeds 3 MiB.
       const runs = Array.from({ length: 32 }, (_, index) => {
         const run = store.createRun({ title: `task ${index}`, workflow: 'quick-task', task: 'x'.repeat(100_000), steps: [] });
-        store.updateRun(run.id, { status: 'done' });
+        store.updateRun(run.id, { status: RUN_STATUS.done });
         return run;
       });
       expect(await run(['list', '--limit', '100'])).toBe(0);
       expect(last().runs).toHaveLength(32);
       expect(await run(['wait', runs[0]!.id, '--timeout-seconds', '10'])).toBe(0);
-      expect(last()).toMatchObject({ timedOut: false, runs: [{ id: runs[0]!.id, status: 'done' }] });
+      expect(last()).toMatchObject({ timedOut: false, runs: [{ id: runs[0]!.id, status: RUN_STATUS.done }] });
     });
 
     it('reads the run summaries, and only --full reads every full record (#817)', async () => {
@@ -543,7 +551,7 @@ describe('cez task', () => {
       expect((last().runs as Array<{ id: string }>).map((row) => row.id).sort()).toEqual([a, b].sort());
       expect(await run(['list', '--all', '--limit', '1'])).toBe(0);
       expect(last().runs).toHaveLength(1);
-      store.updateRun(b, { status: 'done' });
+      store.updateRun(b, { status: RUN_STATUS.done });
       expect(await run(['list', '--status', 'done'])).toBe(0);
       const rows = last().runs as Array<Record<string, unknown>>;
       expect(rows.map((row) => row.id)).toEqual([b]);
@@ -554,13 +562,13 @@ describe('cez task', () => {
     it('carries attention + attentionLabel on default rows only, never on --full rows (#609)', async () => {
       const a = await start('a');
       const b = await start('b');
-      store.updateRun(a, { status: 'waiting' });
-      store.updateRun(b, { status: 'waiting' });
+      store.updateRun(a, { status: RUN_STATUS.waiting });
+      store.updateRun(b, { status: RUN_STATUS.waiting });
       store.commitWait(b, openTimer());
       expect(await run(['list'])).toBe(0);
       const rows = last().runs as Array<Record<string, unknown>>;
-      expect(rows.find((row) => row.id === a)).toMatchObject({ status: 'waiting', attention: 'waiting', attentionLabel: 'needs you' });
-      expect(rows.find((row) => row.id === b)).toMatchObject({ status: 'waiting', attention: 'running', attentionLabel: 'monitoring' });
+      expect(rows.find((row) => row.id === a)).toMatchObject({ status: RUN_STATUS.waiting, attention: 'waiting', attentionLabel: 'needs you' });
+      expect(rows.find((row) => row.id === b)).toMatchObject({ status: RUN_STATUS.waiting, attention: 'running', attentionLabel: 'monitoring' });
       expect(await run(['list', '--full'])).toBe(0);
       for (const row of last().runs as Array<Record<string, unknown>>) {
         expect(apiRunSchema.safeParse(row).success).toBe(true);
@@ -613,7 +621,7 @@ describe('cez task', () => {
       ['long first line', `${'x'.repeat(200)}\nsecond line`, `${'x'.repeat(199)}…`],
     ])('caps list errors: %s; keeps status and --full errors intact', async (_label, error, expected) => {
       const id = await start();
-      store.updateRun(id, { status: 'failed', error });
+      store.updateRun(id, { status: RUN_STATUS.failed, error });
       expect(await run(['list'])).toBe(0);
       expect((last().runs as Array<Record<string, unknown>>)[0]?.error).toBe(expected);
       expect(await run(['status', id])).toBe(0);
@@ -735,7 +743,7 @@ describe('cez task', () => {
     it('archives finished tasks and reports the count', async () => {
       const finished = await start('finished');
       const active = await start('active');
-      store.updateRun(finished, { status: 'done' });
+      store.updateRun(finished, { status: RUN_STATUS.done });
       expect(await run(['archive-finished'])).toBe(0);
       expect(last()).toEqual({ archived: 1, ids: [finished], pinnedIds: [] });
       expect(store.getRun(finished)?.archived).toBe(true);

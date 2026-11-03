@@ -1,3 +1,10 @@
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunStore } from '../runs/store.ts';
@@ -38,15 +45,15 @@ describe('cez task status — the pending question', () => {
     expect(await runTaskCommand(['start', 'do the thing'], {}, io())).toBe(0);
     const id = (JSON.parse(out.at(-1)!) as { id: string }).id;
     for (const event of events) store.appendEvent(id, { type: 'ask.requested', ...event });
-    store.commitWait(id, { id: randomUUID(), kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: new Date().toISOString(), phase: 'open', turnId: 'turn-1' });
-    store.updateRun(id, { status: 'waiting' });
+    store.commitWait(id, { id: randomUUID(), kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask, registeredAt: new Date().toISOString(), phase: WAIT_PHASE.open, turnId: 'turn-1' });
+    store.updateRun(id, { status: RUN_STATUS.waiting });
     return id;
   };
 
   it('prints the questions and their context', async () => {
     const id = await waitingOn([{ requestId: 'ask-1', context: '## Findings', questions: choice }]);
     const printed = await status(id);
-    expect(printed).toMatchObject({ status: 'waiting', attention: 'waiting', question: choice, questionContext: '## Findings' });
+    expect(printed).toMatchObject({ status: RUN_STATUS.waiting, attention: 'waiting', question: choice, questionContext: '## Findings' });
   });
 
   it('leaves questionContext off an ask without one', async () => {
