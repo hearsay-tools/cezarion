@@ -1796,7 +1796,7 @@ records `worktreeSetup.status === 'done'`, and the paragraph saying what ran rea
 message on each runner's own wire. The note is appended in `workflows/run.ts` before the
 runner seam, so no runner can lose it on the way. No runner is exempt.
 
-**R92–R96** (hearsay-tools/cezarion#1408), in `core/skill-provision-parity.test.ts`, drive every
+**R92–R96** (hearsay-tools/cezarion#1408), in `core/skill-provision-parity.testkit.ts`, drive every
 `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire on a skill-driven task in its
 own worktree. The selected skill names a companion. R92: Start installs both in `.claude`,
 `.agents` and `.cursor` `skills/`, and nothing under them shows in `git status`. R93: an
