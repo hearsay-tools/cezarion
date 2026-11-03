@@ -50,7 +50,7 @@ export function checkParityRegistration(
   const actual: string[] = [];
   const entryImport = `import { ${register.name} } from './${family}.testkit.ts';`;
   const files = readdirSync(new URL('.', import.meta.url)).filter(file =>
-    file.endsWith('.test.ts') && !file.endsWith('-registration.test.ts') &&
+    file.endsWith('.test.ts') && !file.endsWith('-registration-parity.test.ts') &&
     readFileSync(new URL(file, import.meta.url), 'utf8').includes(entryImport));
   expect(files.length).toBeGreaterThan(1);
   for (const file of files) {
