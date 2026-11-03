@@ -2232,7 +2232,7 @@ A queued workflow remainder
 waits behind the same hold; confirmed cleanup wakes the scheduler. A warning or
 Stop never grants permission for another writer or signals unrelated cwd holders.
 
-R61–R66 (hearsay-tools/cezarion#934, `core/harness-autosave-settlement.test.ts`) drive
+R61–R66 (hearsay-tools/cezarion#934, `core/harness-autosave-settlement.testkit.ts`) drive
 provider failure, Stop during final autosave, and successful Finish through every
 `HARNESS_ADAPTERS` native wire, both fresh and on Continue. A real detached Git
 descendant, in a session of its own, remains alive after Git exits: execution
