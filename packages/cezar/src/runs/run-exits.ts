@@ -4,8 +4,9 @@
  * rows in `workflows/run-states.ts` name the exit they take; this module imports nothing from
  * `workflows/`.
  *
- * The store writes every run status by applying an exit: `RunStore.move`, or the `exit` of
- * `commitOutcome` and `commitWorkerContinuation`. Each checks the status of the record its write
+ * The store writes every run status by applying an exit: `RunStore.move`, `applyExit` on a record
+ * it reconciles at load or stages for archive, or the `exit` of `commitOutcome` and
+ * `commitWorkerContinuation`. Each checks the status of the record its write
  * changes against the exit's `from` (`exitStatus`). An exit with a `settle` is a guarded exit
  * (Decision 5): `RunStore.move` commits it at once, with the record `settle` returns, only when
  * its `guard` passes. An undeclared transition is written as before and reported as a violation;
@@ -89,6 +90,9 @@ export const RUN_EXITS = {
   'succeed-root': { from: ['waiting'], to: 'done', guard: rootFinishWaiting, settle: settleRootFinish },
   'succeed-root-review': { from: ['waiting'], to: 'review', guard: rootFinishWaiting, settle: settleRootFinish },
   'accept-review': { from: ['review'], to: 'done' },
+  // Draft PR (`POST /runs/:id/pr`): the cockpit offers it on review and on settled runs, so a
+  // settled run that is published reads done too. A usage-limit hold is not declared (spec B13).
+  'draft-pr': { from: ['review', 'done', 'failed', 'cancelled'], to: 'done' },
   'fail-start': { from: ['queued', 'running'], to: 'failed' },
   fail: { from: ['running', 'waiting'], to: 'failed' },
   // settleFailedContinuation alone: a worker Stop can record cancelled before it settles.
@@ -107,6 +111,8 @@ export const RUN_EXITS = {
   // Must hit disk before queued no-start evidence authorizes cleanup.
   'stop-worker': { from: ['queued', 'running', 'waiting', 'review', 'done', 'failed'], to: 'cancelled',
     guard: run => run.delegation?.role === 'worker', refused: 'Worker not found', settle: (run, { now }) => ({ ...run, finishedAt: now }) },
+  // A Stop that lands after the run settled. A Stop accepted before an exit (`stopping` on load)
+  // can meet any status, as the engine's late Stop can.
   'cancel-late': { from: ['queued', 'running', 'waiting', 'done', 'review', 'failed'], to: 'cancelled' },
 } as const satisfies Record<string, RunExitSpec>;
 export type RunExitId = keyof typeof RUN_EXITS;
@@ -143,6 +149,19 @@ function checkFrom(exit: RunExitId, from: RunStatus | undefined): void {
   const spec = RUN_EXITS[exit];
   if (from === undefined || from === spec.to || (spec.from as readonly RunStatus[]).includes(from)) return;
   violate(`undeclared run transition: exit ${exit} from ${from} (declare it in runs/run-exits.ts)`);
+}
+
+/** The fields a write that applies `exit` writes: `extras` and the exit's status. */
+export type ExitWrite<E extends RunExitId> = Omit<RunPatch, 'status'> & { status: (typeof RUN_EXITS)[E]['to'] };
+
+/**
+ * Apply `exit` to `run`, a record in hand: check its status against the exit's `from` and return
+ * the fields to write, `extras` with the exit's status. It neither runs a guard nor settles: a
+ * caller of a guarded exit checks its guard itself. `RunStore.move` writes through it, and the
+ * store's load-time and archive writers assign its result onto the record they change.
+ */
+export function applyExit<E extends RunExitId>(run: Pick<RunRecord, 'status'>, exit: E, extras: RunPatch = {}): ExitWrite<E> {
+  return { ...extras, status: exitStatus(exit, run.status) };
 }
 
 /**

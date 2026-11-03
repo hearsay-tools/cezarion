@@ -4050,11 +4050,7 @@ export function createApp(deps: ServerDeps) {
         if (!outcome.ok) {
           return c.json({ error: outcome.error, manual: `git merge ${run.branch}` }, 409);
         }
-        store.updateRun(id, {
-          pullRequestUrl: outcome.url,
-          status: 'done',
-          finishedAt: run.finishedAt ?? new Date().toISOString(),
-        });
+        store.move(id, 'draft-pr', { pullRequestUrl: outcome.url, finishedAt: run.finishedAt ?? new Date().toISOString() });
         store.appendEvent(id, {
           type: 'note',
           message: `draft PR created: ${outcome.url}${outcome.dryRun ? ' (dry run — no real PR)' : ''}`,

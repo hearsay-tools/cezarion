@@ -91,7 +91,8 @@ touches a turn-end, wait or settlement path.
 | S1 | Move `RUN_EXITS` to `runs/run-exits.ts`; Decision 3 | the throw in the write path | tests only: an undeclared transition now writes, then fails the test |
 | S2 | `RunStore.move(id, exit, extras)`. `RunManager.move` and the five `status: transition(…)` patches call it; `commitOutcome` and `commitWorkerContinuation` take an exit instead of a status. `status` leaves the patch types of `move`'s extras, `commitWorkerContinuation` and `commitOutcome`'s dependency patch | direct status in the five patches; `transition()` | none |
 | S3 | Decision 5 | `transitionVia`, five commits | none |
-| S4 | Decision 6, including `setLiveStatus` and the Draft PR route. `status` leaves `updateRun`'s patch type; test fixtures that set a status move to a `setRunStatus` testkit helper | status rule and baseline | none |
+| S4a | Decision 6: every writer in Table C applies an exit. The store's load-time and archive writers use `applyExit` (`runs/run-exits.ts`) on the record in hand, and `move` writes through it. The Draft PR route takes its own exit, `draft-pr` (review, done, failed, cancelled → done); a Stop on load takes `cancel-late` | the status rule's baseline entries | none |
+| S4b | `status` leaves `updateRun`'s patch type; test fixtures that set a status move to a `setRunStatus` testkit helper | status rule and baseline | none |
 | S5 | Each exit settles the fields all its sites agree on (Table A). A site that does more passes an explicit extra; a site that does less uses a named variant of the exit | hand-written clears in 66 sites | none |
 | S6 | Decision 4 | `WRITE_PATH_RULES` path lists, `UpdateHooks` | none |
 | S7 | Normalize Table B, one commit per row, each with a red test where it fixes a bug | the S5 extras and variants | yes, per row (§ Table B targets) |
@@ -117,17 +118,18 @@ adds for every exit whose status is `failed`. Durability: D debounced, C commit.
 | resume | waiting → running | 4 | nothing | none | D by exit; C by enclosing commit (`commitOutcome` at `sendAgentInput`) |
 | succeed, succeed-review | running, waiting → done, review | 1 (`commitOrdinarySuccess`) | SRF, `finishedAt` = now, `currentStepId` and `autoResumeAttempts` cleared | none | D by exit; `succeed` only: C by record (completion option), since only `done` takes the record rule |
 | succeed-root, succeed-root-review | waiting → done, review | 1 (`settleSuccessWork`) | as succeed, plus the Finish intent retired, `activity` cleared, running or waiting steps done (`finishedAt ??= now`), in one commit | root with a pending Finish intent; else no write, returns false | C by exit |
-| accept-review | review → done | 1 + `review.draft-pr` | nothing in common | none | D by exit; C by record |
+| accept-review | review → done | 1 | nothing | none | D by exit; C by record |
+| draft-pr | review, done, failed, cancelled → done | 1 | `pullRequestUrl`, `finishedAt ??= now` | none | D by exit; C by record |
 | fail-start | queued, running → failed | 7 | `error`, `finishedAt` = now, SRF | none | D |
 | fail | running, waiting → failed | 4 | `error`, `finishedAt` = now, `currentStepId` cleared, SRF | none | D |
 | fail-continue | running, waiting, cancelled → failed | 1 | as fail | none | D |
 | fail-interrupted | queued, running, waiting → failed | 1 + `live.read-only` | fixed `error`, `finishedAt` | none | D |
 | fail-crash | queued, running, waiting → failed | 2 | `error`, `finishedAt` = now, SRF | none | D |
 | withdraw-hold | waiting → failed | 1 + `hold.archive` | `autoResumeAt`, `autoResumeAttempts` cleared | usage-limit hold | C |
-| cancel | queued, running, waiting → cancelled | 10 + `live.stopping` + `queued.orphaned` | `finishedAt` set | none | D by exit |
+| cancel | queued, running, waiting → cancelled | 10 + `queued.orphaned` | `finishedAt` set | none | D by exit |
 | cancel-root | waiting, cancelled → cancelled | 2 (`cancel`, `reconcileFamilyPass` repair) | Finish intent retired, `finishedAt ??= now`, in one commit | root with a pending Finish intent; else no write, returns false | C by exit |
 | stop-worker | all but cancelled → cancelled | 2 | `finishedAt` = now (overwrites) | role worker | C |
-| cancel-late | queued, running, waiting, done, review, failed → cancelled | 1 | `finishedAt`, `currentStepId` cleared | none | D |
+| cancel-late | queued, running, waiting, done, review, failed → cancelled | 1 + `live.stopping`, `settled.stopping` | `finishedAt` set; the load-time Stop keeps `currentStepId` | none | D |
 
 Every exit also passes the store's status-driven rules: the stale-resume rule clears
 `autoResumeAt` off a run that is not `waiting`, and a completion action is retired off a run that
@@ -142,28 +144,44 @@ S5 keeps every row as it is (owner, 2026-11-03). S7 normalizes them. "Today" is 
 | B1 | fail-start | 4 of 7 sites clear `currentStepId`; 3 leave it | leave: `checkpointQueuedWorker`, `reviveQueuedRun`, `reviveQueuedWorker` |
 | B2 | fail-crash | neither site clears `currentStepId` | `failCrashedContinuation`, `launchQueuedRun` |
 | B3 | cancel | 5 of 10 `move` sites leave `currentStepId`; no `move` site retires the Finish intent (`reconcileFamilyPass` repairs it later) | leave: `cancelQueuedRun`, `cancelRunWithoutSession`, `settleStoppedContinuation`, both in `startExecution` |
-| B4 | `finishedAt` on a settling exit | overwritten with now: `commitWorkerCancellation`, `commitAutoResumeWithdrawal`, `commitRootFinishSuccess`, every `move`; kept (`??=`): `commitRootFinishCancellation`, every store load-time writer, Draft PR | as listed |
+| B4 | `finishedAt` on a settling exit | overwritten with now: `commitWorkerCancellation`, `commitAutoResumeWithdrawal`, `commitRootFinishSuccess`, every `move` but Draft PR; kept (`??=`): `commitRootFinishCancellation`, every store load-time writer, Draft PR | as listed |
 | B5 | succeed | `commitRootFinishSuccess` clears `activity` and settles steps in its commit; `commitOrdinarySuccess` does neither in its patch (steps by side calls) | both |
-| B6 | accept-review | Finish sets no `finishedAt` and retires the intent; Draft PR sets `finishedAt ??= now` and no SRF | `finish`, `POST /runs/:id/pr` |
+| B6 | accept-review, draft-pr | Finish sets no `finishedAt` and retires the intent; Draft PR (its own exit since S4a) sets `finishedAt ??= now` and no SRF | `finish`, `POST /runs/:id/pr` |
 | B7 | continue-line | the usage-limit Continue writes it twice: `acceptResumedContinuation`, then `dispatchAcceptedContinuation` | both |
 | B8 | park | step → waiting is in the commit at one site (`parkOnWaits` without a slot), a side call at five, set earlier at two (`settleIdleClosedRun`, `settleIncompleteStep`), absent at six | side calls: `completionGate`, `handlePermissionRequested`, `handleNativeAskRequested`, `parkForUser`, `parkOnWaits` with a slot |
 | B9 | requeue, park, continue-line, cancel | four requeue sites, six park sites, `acceptUntouchedContinuation` and `cancelQueuedRun` call `store.flush()` right after a debounced write: a second save, not atomic with the write | as listed |
+| B13 | draft-pr | the route accepts a usage-limit hold no `RunManager` holds and writes waiting → done, an undeclared transition; the cockpit never offers it there | `POST /runs/:id/pr` |
 
 ### Table C: writers outside the table
 
 | Writer | Writes | Condition | Exit | Trigger row |
 |---|---|---|---|---|
 | `store.ts:clearPendingAutoResume` | failed, `finishedAt ??= now` | archiving a usage-limit hold | withdraw-hold | `hold.archive` |
-| `store.ts:settleLoadedStop` | cancelled, steps cancelled | `run.stopping` on load, **no status check** | cancel (only from a live status) | `live.stopping` |
+| `store.ts:settleLoadedStop` | cancelled, steps cancelled | `run.stopping` on load, **no status check** | cancel-late | `live.stopping`, `settled.stopping` |
 | `store.ts:restoreLoadedUsageLimitHold` | waiting, `finishedAt` cleared | schema-7 row: failed with `autoResumeAt` | hold | `failed.legacy-hold` |
 | `store.ts:failLoadedInterruptedRun` | failed, fixed error, steps failed | store opened without `keepLive`, engine-owned row | fail-interrupted | `live.read-only` |
 | `store.ts:settleOrphanedRun` | cancelled | untouched queued run whose process is gone | cancel | `queued.orphaned` |
 | `store.ts:setLiveStatus` | running→waiting, waiting→running | legacy wait rows (`upgradeLegacyWaits`) | park, resume | `running.legacy`, `plain.legacy` |
-| `server.ts` `POST /runs/:id/pr` | done, `finishedAt ??= now`, `pullRequestUrl` | publish succeeded; **no status check in the route** | accept-review (only from review) | `review.draft-pr` |
+| `server.ts` `POST /runs/:id/pr` | done, `finishedAt ??= now`, `pullRequestUrl` | publish succeeded; **no status check in the route** | draft-pr | `review.draft-pr`, `settled.draft-pr` |
 
 Two rows have no status check today: `settleLoadedStop` and the Draft PR route. S4 must show the
 status each can meet. A status outside the exit's `from` becomes a recorded violation under
-Decision 3, not a refusal.
+Decision 3, not a refusal. S4a found:
+
+- **`settleLoadedStop` meets every status.** `stopping` is set while the engine still holds the
+  run (`cancelActiveRun`, a starting run in `cancelRunWithoutSession`, `settleOrphanedRun`), and
+  it is cleared only after the run leaves the active set. A Stop accepted during a Continue's final
+  autosave meets review, done or failed (`settled.late-stop`, `failed.late-stop`), and a worker
+  Stop records cancelled first (`stop-worker`). A process exit in that window leaves `stopping` on
+  any status, so the writer takes `cancel-late`, whose `from` is every status but cancelled
+  (cancelled to cancelled is a repeated write).
+- **Draft PR meets review, done, failed and cancelled.** Task changes offers Create PR on every
+  status but queued, running and waiting. Not landed offers Create draft PR on a done, failed or
+  cancelled run's branch, and reclaimed rows are done. Both treat a usage-limit hold as live and
+  do not offer it there. The exit is `draft-pr` (review, done, failed, cancelled → done). The route
+  itself refuses only a run `RunManager.isActive` holds, so a raw `POST /runs/:id/pr` on a hold,
+  which no `RunManager` holds, writes waiting → done. That write is not declared and records a
+  violation under Decision 3, on purpose (B13).
 
 ### Transitions out
 
@@ -179,10 +197,11 @@ state has an automatic exit or a recorded human-only reason.
 | B1, B2, B3 | Every settling exit (one that writes done, review, failed or cancelled) clears `currentStepId` and retires the root's Finish intent. `review` is not final (it has `accept-review` and Continue exits); `succeed-review` already does both | A settled run points at no step; a Finish intent has no meaning once the run settled. The family reconciler stops being the repair path for cancel |
 | B4 | A settling exit keeps an existing `finishedAt` (`??=`); `continue-*` and `hold` clear it | The first settlement time is the fact; a later writer on a settled run only repairs |
 | B5 | Both success paths clear `activity` and settle running or waiting steps in the same write | One exit, one result |
-| B6 | accept-review sets `finishedAt ??= now` and retires the Finish intent on both paths | As B3 and B4 |
+| B6 | accept-review and draft-pr set `finishedAt ??= now` and retire the Finish intent | As B3 and B4 |
 | B7 | The usage-limit Continue writes `continue-line` once | The second write repeats the first |
 | B8 | `park` settles the current step to waiting in the same write | As B5 |
 | B9 | Kept; recorded only. The follow-up `flush()` stays until S6 gives each exit its durability | S6 decides it |
+| B13 | S7 decides whether the Draft PR route refuses a usage-limit hold, or `draft-pr` declares it | Until then the raw route records a violation; the cockpit offers no Draft PR on a hold |
 
 ## Open decisions
 

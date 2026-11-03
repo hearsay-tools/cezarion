@@ -69,9 +69,9 @@ describe('run states and their exits (hearsay-tools/cezarion#1804)', () => {
   });
 
   it('names only functions that exist', () => {
-    const files = { run: runSources().map(blanked).join('\n'), store: blanked('runs/store.ts'), server: blanked('server/server.ts') };
+    const files = { run: runSources().map(blanked).join('\n'), store: blanked('runs/store.ts'), server: blanked('server/server.ts'), exits: blanked('runs/run-exits.ts') };
     const missing = [...new Set(RUN_TRIGGERS.flatMap((row) => row.via))].filter((name) => {
-      const [file, fn] = name.includes(':') ? name.split(':') as ['store' | 'server', string] : ['run' as const, name];
+      const [file, fn] = name.includes(':') ? name.split(':') as ['store' | 'server' | 'exits', string] : ['run' as const, name];
       const defined = file === 'server'
         ? new RegExp(`\\b${fn}\\(`)
         : new RegExp(`^\\s*(?:export\\s+)?(?:function\\s+|(?:private|public|protected|static|async|readonly)\\s+)*${fn}\\s*[(<]`, 'm');
@@ -81,9 +81,10 @@ describe('run states and their exits (hearsay-tools/cezarion#1804)', () => {
   });
 
   // Each exit is a write the run implementation makes through the store's move(), commitOutcome()
-  // or commitWorkerContinuation(), or one the store applies itself (commitAutoResumeWithdrawal).
-  it('writes every exit in the run implementation or the store', () => {
-    const source = [...runSources(), 'runs/store.ts'].map((file) => readFileSync(resolve(src, file), 'utf8')).join('\n');
+  // or commitWorkerContinuation(), one the store applies itself (commitAutoResumeWithdrawal, its
+  // load-time writers), or the Draft PR route's.
+  it('writes every exit in the run implementation, the store or the server', () => {
+    const source = [...runSources(), 'runs/store.ts', 'server/server.ts'].map((file) => readFileSync(resolve(src, file), 'utf8')).join('\n');
     expect(Object.keys(RUN_EXITS).filter((exit) => !source.includes(`'${exit}'`))).toEqual([]);
   });
 
