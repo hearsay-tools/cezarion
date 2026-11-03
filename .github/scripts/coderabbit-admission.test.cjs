@@ -6,6 +6,40 @@ const { listReviewThreads } = require('./review-threads.cjs');
 const { fixture, HEAD, BASE } = require('./coderabbit.testkit.cjs');
 const admission = h => readCodeRabbitAdmission({ github: h.github, owner: 'o', repo: 'r', pullNumber: 7, head: HEAD, now: h.now,
   releaseAppBotLogin: 'release-app[bot]' });
+test('authenticated no-files skip has a specific blocked recovery reason', async () => {
+  const h = fixture(); h.s.checks[0].conclusion = 'skipped';
+  h.s.checks[0].output = { title: 'No files to review' };
+  const result = await admission(h);
+  assert.equal(result.admitted, false);
+  assert.equal(result.reason, 'provider-no-files');
+  assert.equal(result.recoveryEligible, true);
+  assert.match(result.action, /inspect the recovery claim/);
+});
+for (const [state, status, conclusion] of [
+  ['pending', 'queued', null], ['pending', 'in_progress', null], ['skipped', 'completed', 'skipped'],
+  ['neutral', 'completed', 'neutral'], ['failure', 'completed', 'failure'], ['cancelled', 'completed', 'cancelled'],
+  ['timed_out', 'completed', 'timed_out'], ['action_required', 'completed', 'action_required'],
+  ['unknown', 'completed', null], ['unknown', 'invented', 'success'],
+]) test(`classifies provider ${status}/${conclusion} without recovery`, async () => {
+  const h = fixture(); Object.assign(h.s.checks[0], { status, conclusion });
+  const result = await admission(h);
+  assert.equal(result.providerState, state); assert.equal(result.admitted, false);
+  assert.equal(result.recoveryEligible, false); assert.ok(result.action.length);
+});
+test('no-files recovery requires exact title on the newest trusted skipped execution', async () => {
+  const h = fixture(); Object.assign(h.s.checks[0], { conclusion: 'neutral', output: { title: 'No files to review' } });
+  assert.equal((await admission(h)).recoveryEligible, false);
+  h.s.checks[0].conclusion = 'skipped'; h.s.checks[0].output.title += '!';
+  assert.equal((await admission(h)).recoveryEligible, false);
+  h.s.checks[0].output.title = 'No files to review'; h.s.checks.push({ ...h.s.checks[0], id: 101, status: 'queued' });
+  assert.equal((await admission(h)).recoveryEligible, false);
+});
+test('a changed no-files title during reread fails closed', async () => {
+  const h = fixture(); Object.assign(h.s.checks[0], { conclusion: 'skipped', output: { title: 'No files to review' } });
+  let reads = 0;
+  h.s.onRead = route => { if (route.endsWith('/commits/{ref}/check-runs') && ++reads === 2) h.s.checks[0].output.title = 'Other skip'; };
+  await assert.rejects(() => admission(h), /changed/);
+});
 test('exact latest App execution and all resolved threads admit without review objects or check PR associations', async () => {
   const h = fixture(); h.s.threads = [{ id: 'outdated-resolved', isResolved: true, isOutdated: true }];
   assert.equal((await admission(h)).admitted, true);

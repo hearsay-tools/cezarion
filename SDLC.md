@@ -47,7 +47,10 @@ human draft or ready changes. CodeRabbit reviews drafts and incremental pushes
 automatically, without a label filter or auto-pause. After preflight, the native
 `Automated Code Review` gate requires successful current-head execution from the
 trusted CodeRabbit App and resolved review threads before heavy verification.
-Readiness and queue admission also read that evidence. After manually reopening
+Readiness and queue admission also read that evidence. An authenticated no-files
+skip remains blocked while trusted recovery can request one full review per PR
+and head, using the existing release App when available. Recovery claims and
+commands never grant admission. After manually reopening
 or resolving a thread, dispatch **Reconcile CodeRabbit admission** with
 `pr_number`, then **PR Readiness** if draft state needs refreshing. Manual thread
 changes do not emit a workflow event. Fork PRs retain their author's draft state

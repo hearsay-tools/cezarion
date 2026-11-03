@@ -60,17 +60,33 @@ async function providerCheck(read, head) {
   return newest(candidates);
 }
 const fingerprint = check => JSON.stringify(check && [check.id, check.head_sha, check.status, check.conclusion,
-  check.started_at, check.completed_at, check.app.id, check.app.slug, check.name]);
+  check.started_at, check.completed_at, check.app.id, check.app.slug, check.name, check.output?.title]);
 function stablePull(pr, final, fullName, pullNumber, head) {
   return validPull(final, fullName, pullNumber, head) && final.base.sha === pr.base.sha
     && final.changed_files === pr.changed_files && final.head.ref === pr.head.ref && final.user?.login === pr.user?.login
     && final.head.repo.full_name === pr.head.repo.full_name;
 }
+function providerState(check) {
+  if (!check) return 'missing';
+  if (['queued', 'in_progress'].includes(check.status)) return 'pending';
+  if (check.status !== 'completed') return 'unknown';
+  if (check.conclusion === 'skipped' && check.output?.title === 'No files to review') return 'no-files';
+  return ['success', 'skipped', 'neutral', 'failure', 'cancelled', 'timed_out', 'action_required', 'stale']
+    .includes(check.conclusion) ? check.conclusion : 'unknown';
+}
+function providerAction(state) {
+  if (state === 'success') return 'Resolve every open review thread.';
+  if (state === 'pending') return 'Wait for the current CodeRabbit execution to complete.';
+  if (state === 'no-files') return 'Bounded full-review recovery may request @coderabbitai full review; inspect the recovery claim before any manual retry.';
+  return 'Inspect the trusted CodeRabbit check and App installation; repair the provider or request @coderabbitai full review manually.';
+}
 function admissionResult(check, exception, threads, head) {
   const openThreads = threads.filter(t => !t.isResolved).length;
   const executed = exception || (check?.status === 'completed' && check.conclusion === 'success');
+  const state = exception ? 'exception' : providerState(check);
   return { admitted: Boolean(executed && openThreads === 0), head, checkId: check?.id ?? null, exception,
-    reason: openThreads ? 'unresolved-threads' : executed ? 'admitted' : check ? 'provider-not-successful' : 'provider-missing' };
+    providerState: state, recoveryEligible: state === 'no-files', action: providerAction(state),
+    reason: openThreads ? 'unresolved-threads' : executed ? 'admitted' : `provider-${state}` };
 }
 async function readCodeRabbitAdmission({ github, owner, repo, pullNumber, head, releaseAppBotLogin,
   now = Date.now, deadline = now() + 60000 }) {
