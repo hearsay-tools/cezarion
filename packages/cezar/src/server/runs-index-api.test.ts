@@ -1,3 +1,12 @@
+import {
+  RUN_STATUS,
+  STEP_KIND,
+  STEP_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,11 +44,11 @@ function storedRun(over: Record<string, unknown> & { id: string; title: string }
   return {
     workflow: 'build',
     task: 'do the thing',
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: '2026-07-14T10:00:00Z',
     tokensUsed: 0,
     archived: false,
-    steps: [{ id: 's1', name: 'work', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }],
+    steps: [{ id: 's1', name: 'work', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0 }],
     ...over,
   };
 }
@@ -114,11 +123,11 @@ describe('workspace runs index API', () => {
     onTestFinished(() => warn.mockRestore());
     await registerProject(repoRoot);
     // Valid summaries, records this schema rejects: only decoding finds out.
-    const steps = [{ id: 's1', name: 'work', kind: 'agent', status: 'bogus', iterations: 1, tokensUsed: 0 }];
+    const steps = [{ id: 's1', name: 'work', kind: STEP_KIND.agent, status: 'bogus', iterations: 1, tokensUsed: 0 }];
     store.close();
     seedRuns(join(repoRoot, '.ai/cezar'), [
       storedRun({ id: 'ok', title: 'Readable' }),
-      storedRun({ id: 'live-bad', title: 'Live', status: 'running', steps }),
+      storedRun({ id: 'live-bad', title: 'Live', status: RUN_STATUS.running, steps }),
       storedRun({ id: 'done-bad', title: 'Done', steps }),
     ]);
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
@@ -225,7 +234,7 @@ describe('workspace runs index API', () => {
       title: 'raw title',
       titleSummary: 'Nice summary',
       titleOrigin: 'auto',
-      status: 'done',
+      status: RUN_STATUS.done,
       createdAt: '2026-07-14T10:00:00Z',
       finishedAt: '2026-07-14T11:00:00Z',
       // The read receipt and the archive flag ride along so the palette can compute `isUnread`
@@ -364,7 +373,7 @@ describe('workspace runs index API', () => {
     const workerId = '10000000-0000-4000-8000-000000000002';
     const live = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
     const wait = { id: workerId, workerIds: [workerId], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked' as const, outcomes: [] };
-    store.updateRun(live.id, { status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [], wait } });
+    store.updateRun(live.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: [], receipts: [], wait } });
     seedColdProject(otherRoot, [storedRun({ id: workerId, title: 'Worker', delegation: { role: 'worker', permissions: [], parentRunId: live.id, wait: { ...wait, workerIds: [], requestIds: [workerId] }, workspace: { kind: 'owned-isolated', ownerRunId: workerId, resourceId: workerId, path: '/managed/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) } } }), storedRun({ id: 'ordinary', title: 'Ordinary' })]);
     const body = await getIndex();
     expect(body.runs.find(run => run.id === live.id)).toHaveProperty('delegation', { role: 'root', wait: { phase: 'parked', workerIds: [workerId], outcomes: [] } });
@@ -386,12 +395,12 @@ describe('workspace runs index API', () => {
     const live = store.createRun({ title: 'Hot question', workflow: 'quick-task', task: 'task', steps: [] });
     const delegation = { role: 'root' as const, permissions: [], receipts: [], wait: { id: live.id, workerIds: [live.id], deadline: '2026-09-09T00:00:00.000Z', phase: 'parked' as const, outcomes: [] } };
     const question = { type: 'ask.requested', requestId: 'question', questions: [{ header: 'Choice', question: 'Which option?', options: [{ label: 'First' }, { label: 'Second' }] }] };
-    store.updateRun(live.id, { status: 'waiting', delegation });
+    store.updateRun(live.id, { status: RUN_STATUS.waiting, delegation });
     store.appendEvent(live.id, question);
     // Every ask opens a human wait (phase 2); a cold row an older cezar stored keeps the summary,
     // which the read upgrades into one (phase 4b, hearsay-tools/cezarion#1236).
-    store.commitWait(live.id, { id: '00000000-0000-4000-8000-0000000000ac', kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: '2026-09-05T00:00:00.000Z', phase: 'open', turnId: 'turn-1' });
-    seedColdProject(otherRoot, [storedRun({ id: 'cold-question', title: 'Cold question', status: 'waiting', delegation, hasPendingHumanAsk: true })]);
+    store.commitWait(live.id, { id: '00000000-0000-4000-8000-0000000000ac', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask, registeredAt: '2026-09-05T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1' });
+    seedColdProject(otherRoot, [storedRun({ id: 'cold-question', title: 'Cold question', status: RUN_STATUS.waiting, delegation, hasPendingHumanAsk: true })]);
     mkdirSync(join(otherRoot, '.ai/cezar/runs'));
     writeFileSync(join(otherRoot, '.ai/cezar/runs/cold-question.ndjson'), JSON.stringify({ ...question, seq: 1, ts: new Date().toISOString() }) + '\n');
     const before = readPersistedText(join(otherRoot, '.ai/cezar'));
@@ -401,11 +410,11 @@ describe('workspace runs index API', () => {
       const body = runsIndexResponseSchema.parse(await (await apiRequest(app, '/api/v1/workspace/runs-index')).json());
       for (const id of [live.id, 'cold-question']) {
         const row = body.runs.find(run => run.id === id);
-        expect(row?.waitingOn).toEqual({ kind: 'human' });
+        expect(row?.waitingOn).toEqual({ kind: WAIT_KIND.human });
         expect(row).not.toHaveProperty('hasPendingHumanAsk');
       }
       const full = await (await apiRequest(app, `/api/v1/runs/${live.id}`)).json() as { waits?: unknown };
-      expect(full.waits).toEqual([expect.objectContaining({ kind: 'human', phase: 'open' })]);
+      expect(full.waits).toEqual([expect.objectContaining({ kind: WAIT_KIND.human, phase: WAIT_PHASE.open })]);
       expect(full).not.toHaveProperty('hasPendingHumanAsk');
       expect(contexts.peek(other.id)).toBeUndefined();
       expect(readPersistedText(join(otherRoot, '.ai/cezar'))).toBe(before);
@@ -419,7 +428,7 @@ describe('workspace runs index API', () => {
       storedRun({
         id: 'parked',
         title: 'Waiting out the limit',
-        status: 'failed',
+        status: RUN_STATUS.failed,
         finishedAt: '2026-07-14T11:00:00Z',
         autoResumeAt: '2026-07-14T15:00:00Z',
       }),
@@ -433,7 +442,7 @@ describe('workspace runs index API', () => {
     // (hearsay-tools/cezarion#1236).
     expect(body.runs[0]).toMatchObject({
       id: 'parked',
-      status: 'waiting',
+      status: RUN_STATUS.waiting,
       autoResumeAt: '2026-07-14T15:00:00Z',
     });
   });
@@ -441,7 +450,7 @@ describe('workspace runs index API', () => {
   it('reads a crashed process’s `running` row as interrupted, exactly as opening it would', async () => {
     await registerProject(repoRoot);
     await registerProject(otherRoot);
-    seedColdProject(otherRoot, [storedRun({ id: 'ghost', title: 'Ghost', status: 'running' })]);
+    seedColdProject(otherRoot, [storedRun({ id: 'ghost', title: 'Ghost', status: RUN_STATUS.running })]);
 
     const body = await getIndex();
 
@@ -537,7 +546,7 @@ describe('workspace runs index API', () => {
       workspace: { ownerRunId: id, resourceId: id, kind: 'owned-isolated', path: `/managed/${id}`, branch: `cez/${id}`, baselineSha: '0'.repeat(40) },
     });
     const incident = () => [
-      storedRun({ id: 'old-waiting', title: 'File an issue', status: 'waiting', hasPendingHumanAsk: true, createdAt: at(0) }),
+      storedRun({ id: 'old-waiting', title: 'File an issue', status: RUN_STATUS.waiting, hasPendingHumanAsk: true, createdAt: at(0) }),
       ...Array.from({ length: 250 }, (_, i) => storedRun({ id: `arch-${i}`, title: `Archived ${i}`, archived: true, createdAt: at(10 + i * 2) })),
       ...Array.from({ length: 300 }, (_, i) => {
         const id = `10000000-0000-4000-8000-${String(i).padStart(12, '0')}`;

@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { WorkerDestroy } from '@open-mercato/cezar-contract';
@@ -13,7 +14,7 @@ function receipt(workerId: string, deletion?: 'pending' | 'complete'): Receipt {
     ...(deletion ? { deletion: { phase: deletion, revision: 0, resourceId: randomUUID(), generation: randomUUID() } } : {}) };
 }
 function parent(receipts: Receipt[]): RunRecord {
-  return runRecordSchema.parse({ id: parentId, title: 'parent', task: 'task', workflow: 'quick-task', status: 'running',
+  return runRecordSchema.parse({ id: parentId, title: 'parent', task: 'task', workflow: 'quick-task', status: RUN_STATUS.running,
     createdAt: now, tokensUsed: 0, steps: [], delegation: { role: 'root', permissions: ['spawn'], receipts } });
 }
 function worker(id: string, status: RunRecord['status'], destroy?: WorkerDestroy): RunRecord {

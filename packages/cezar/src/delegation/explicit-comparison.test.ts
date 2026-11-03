@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -22,7 +23,7 @@ it('keeps owned-worker comparison explicit from spawn through collection, integr
     writeFileSync(join(workspace.path, 'approach.txt'), approach);
     git(workspace.path, 'add', 'approach.txt');
     git(workspace.path, 'commit', '-qm', approach);
-    f.store.updateRun(worker.id, { status: 'done', finishedAt: new Date().toISOString() });
+    f.store.updateRun(worker.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
     expect(f.store.commitWorkerExecutionComplete(worker.id, generation)).toBe(true);
     workers.push({ id: worker.id, path: workspace.path, approach });
   }

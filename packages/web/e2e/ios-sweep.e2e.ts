@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
-import { AgentBrowser, readTestEnv, servedRoot } from './agent-browser'
+import { AgentBrowser, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
 import { waitForStatus } from './poll'
 
 /**
@@ -156,7 +156,10 @@ function sweep(slug: string, path: string, ready: string, chrome: 'list' | 'push
 }
 
 describe('iOS sweep — every primary view at 390×844', () => {
-  it('/ (tasks overview)', () => {
+  it('/ (tasks overview)', async () => {
+    browser.goto(`${baseUrl}/p/${await bootProjectId(baseUrl)}`)
+    browser.waitForFunction(`document.querySelector('[data-route="tasks"]') !== null`)
+    browser.evaluate(`localStorage.removeItem('cez-last-location')`)
     // Ready = the overview answered /api/v1/runs: the cards/table for a filled list, the empty
     // state otherwise — both are real content, either settles the view.
     sweep('tasks', '/', '[data-slot="tasks-table"], [data-slot="task-cards"], [data-slot="tasks-empty"]')

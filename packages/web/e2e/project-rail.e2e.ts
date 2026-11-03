@@ -4,9 +4,10 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
 import { normalizeColorSample } from './contrast'
+
 import { waitForSettledSample } from './visual-ready'
 import { expandedRailSampleExpression } from './project-rail-ready'
 import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
@@ -110,6 +111,12 @@ function gotoRail(theme: 'dark' | 'light' = 'dark'): void {
 
 const style = (selector: string, prop: string) =>
   String(normalizeColorSample(browser, browser.evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(selector)}))[${JSON.stringify(prop)}]`)))
+
+beforeEach(() => {
+  browser.setReducedMotion(false)
+  browser.goto(baseUrl + `/p/${bootProject}/`)
+  browser.evaluate(`localStorage.removeItem('cez-project-locations'); localStorage.removeItem('cez-project-rail-expanded')`)
+})
 
 describe('project rail', () => {
   it('lights the top pill of a non-current project with a needs-review run', () => {
@@ -394,7 +401,6 @@ describe('expandable project rail (#711)', () => {
     })
   }
 
-  // Last: reduced motion cannot be switched back off in this session.
   it('does not animate the width under reduced motion', () => {
     browser.setReducedMotion()
     gotoRail()

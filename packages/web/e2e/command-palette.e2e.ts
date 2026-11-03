@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 
@@ -29,6 +29,11 @@ beforeAll(async () => {
 
 afterAll(() => {
   browser?.close()
+})
+
+beforeEach(() => {
+  browser.goto(baseUrl + '/')
+  browser.waitForFunction(`document.querySelector('[data-slot="sidebar"]') !== null`)
 })
 
 describe('command palette', () => {

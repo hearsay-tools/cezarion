@@ -2,9 +2,10 @@ import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+import { revealControl } from './control-ready'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForStatus } from './poll'
 // fixture-server starts: 1
@@ -51,6 +52,17 @@ beforeAll(async () => {
   )
   baseUrl = await waitForFixtureServer(server)
 
+  browser = AgentBrowser.open(sessionId)
+  browser.setViewport(1440, 900)
+}, 180_000)
+
+afterAll(async () => {
+  browser?.close()
+  await stopFixtureServer(server)
+  if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
+})
+
+beforeEach(async () => {
   const created = (await (
     await fetch(`${baseUrl}/api/v1/runs`, {
       method: 'POST',
@@ -67,17 +79,15 @@ beforeAll(async () => {
   const parked = await waitForStatus(baseUrl, runId, ['review', 'done'])
   if (parked !== 'review') throw new Error('cezar e2e: the dry run settled as done — no diff to review?')
 
-  browser = AgentBrowser.open(sessionId)
-  browser.setViewport(1440, 900)
   browser.goto(`${baseUrl}/tasks/${runId}`)
   browser.waitForFunction(`document.querySelector('[data-slot="review-panel"]') !== null`)
 }, 180_000)
 
-afterAll(async () => {
-  browser?.close()
-  await stopFixtureServer(server)
-  if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
-})
+function revealReviewAction(slot: string): void {
+  const selector = `[data-slot="${slot}"]`
+  browser.waitForFunction(`document.querySelector('[data-slot="diff-file"]') !== null`)
+  revealControl(browser, selector)
+}
 
 describe('the review gate against a live parked run', () => {
   it('shows the banner and the real worktree diff as per-file sections', () => {
@@ -116,6 +126,7 @@ describe('the review gate against a live parked run', () => {
 
   it('Send back delivers the notes into the SAME session — the transcript grows', async () => {
     browser.fill('[data-slot="review-notes"]', 'Please also mention the port in the notes.')
+    revealReviewAction('review-send-back')
     browser.click('[data-slot="review-send-back"]')
 
     // The run leaves review and works again (legacy continue semantics)…
@@ -131,6 +142,10 @@ describe('the review gate against a live parked run', () => {
   }, 90_000)
 
   it('the run gates again after the follow-up turn, with a fresh diff', async () => {
+    browser.fill('[data-slot="review-notes"]', 'Please also mention the port in the notes.')
+    revealReviewAction('review-send-back')
+    browser.click('[data-slot="review-send-back"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="review-panel"]') === null`)
     const deadline = Date.now() + 110_000
     await waitForStatus(baseUrl, runId, ['waiting'], { deadline })
     await fetch(`${baseUrl}/api/v1/runs/${runId}/finish`, { method: 'POST' })
@@ -151,12 +166,7 @@ describe('the review gate against a live parked run', () => {
       }).observe(document.body, { childList: true, subtree: true })
       return true
     })()`)
-    // Since 2.4 the thread is a pinned chat surface: content that is merely NEAR the bottom
-    // can sit in the band the sticky composer dock floats over. Scroll fully down so the
-    // accept row is clear of it, like a reader would.
-    browser.evaluate(
-      `(() => { const m = document.querySelector('[data-slot="main"]'); m.scrollTop = m.scrollHeight })()`,
-    )
+    revealReviewAction('review-accept')
     browser.click('[data-slot="review-accept"]')
 
     await waitForStatus(baseUrl, runId, ['done'])

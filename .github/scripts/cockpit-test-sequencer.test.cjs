@@ -29,8 +29,22 @@ test('cockpit config separates heavy suites and covers every discovered spec det
     assert.equal(shards.flat().length, specs.length);
     assert.deepEqual(new Set(shards.flat()), new Set(specs));
     assert.deepEqual(await partition([...specs].reverse()), shards);
-    // Only allocation changes: local and within-shard execution keep Vitest's sort.
-    assert.equal(Sequencer.prototype.sort, BaseSequencer.prototype.sort);
+    // Default execution keeps Vitest's order; shuffle retains the same shard members.
+    assert.deepEqual(await new Sequencer(ctx).sort(specs), await new BaseSequencer(ctx).sort(specs));
+    const shuffled = (input, seed) => {
+      const sequencer = new Sequencer(Object.create(ctx, {
+        config: { value: { ...ctx.config, sequence: { ...ctx.config.sequence, shuffle: true, seed } } },
+      }));
+      sequencer.shuffleFiles = true;
+      return sequencer.sort(input);
+    };
+    const first = await shuffled(specs, 2511001);
+    assert.deepEqual((await shuffled([...specs].reverse(), 2511001)).map(s => s.moduleId), first.map(s => s.moduleId));
+    assert.notDeepEqual((await shuffled(specs, 2511002)).map(s => s.moduleId), first.map(s => s.moduleId));
+    assert.deepEqual(new Set(first), new Set(specs));
+    for (const shard of shards) {
+      assert.deepEqual(new Set(await shuffled(shard, 2511001)), new Set(shard));
+    }
     assert.equal(ctx.config.fileParallelism, false);
     assert.ok(ctx.config.setupFiles.some((file) => path.basename(file) === 'fetch-setup.mjs'));
 
@@ -44,3 +58,35 @@ test('cockpit config separates heavy suites and covers every discovered spec det
     await ctx.close();
   }
 });
+
+for (const [flag, files] of [
+  ['--sequence.shuffle', true],
+  ['--sequence.shuffle.files', true],
+  ['--sequence.shuffle.tests', false],
+]) {
+  test(`cockpit config preserves file shuffle intent for ${flag}`, async () => {
+    const { createVitest, BaseSequencer, parseCLI } = await import('vitest/node');
+    const previous = process.argv;
+    process.argv = [previous[0], 'vitest', flag, '--sequence.seed=123'];
+    let ctx;
+    try {
+      const { options } = parseCLI(['vitest', flag, '--sequence.seed=123']);
+      ctx = await createVitest('test', {
+        ...options,
+        config: path.resolve(__dirname, '../../packages/web/e2e/vitest.config.ts'),
+      });
+      const specs = await ctx.globTestSpecifications();
+      const sequencer = new ctx.config.sequence.sequencer(ctx);
+      assert.equal(sequencer.shuffleFiles, files);
+      const result = await sequencer.sort(specs);
+      if (files) {
+        assert.deepEqual((await sequencer.sort([...specs].reverse())).map(s => s.moduleId), result.map(s => s.moduleId));
+      } else {
+        assert.deepEqual(result.map(s => s.moduleId), (await new BaseSequencer(ctx).sort(specs)).map(s => s.moduleId));
+      }
+    } finally {
+      process.argv = previous;
+      await ctx?.close();
+    }
+  });
+}

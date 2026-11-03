@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
+
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { artifactsDir } from './github-fixture'
@@ -128,6 +129,16 @@ afterAll(async () => {
   browser?.close()
   await stopFixtureServer(server)
   for (const dir of [root, rootB]) if (dir) rmSync(dir, { recursive: true, force: true })
+})
+
+const branchHeads = new Map<string, string>()
+beforeEach(() => {
+  for (const branch of ['cez/orphan1', 'cez/merged1']) {
+    if (!branchHeads.has(branch)) {
+      branchHeads.set(branch, execFileSync('git', ['-C', root, 'rev-parse', branch], { encoding: 'utf8' }).trim())
+    }
+    execFileSync('git', ['-C', root, 'update-ref', `refs/heads/${branch}`, branchHeads.get(branch)!])
+  }
 })
 
 /** The section rows as the user sees them: label, count, target, and whether the row is lit. */
@@ -397,10 +408,12 @@ describe('Git → Not landed and the branch cleanup (issue 08 §C)', () => {
 
 describe('the phone Git screen (issue 06 §3)', () => {
   it('opens the checkout block and the sections as 48px rows with chevrons; a section pushes its screen', () => {
+    for (const branch of ['cez/orphan1', 'cez/merged1']) {
+      execFileSync('git', ['-C', root, 'branch', '-D', branch])
+    }
     browser.setViewport(PHONE.width, PHONE.height)
     browser.goto(`${base}${scoped('/git')}`)
     const rows = browser.waitForValue<SectionRow[]>(sectionsJs(SCREEN), (value) => Array.isArray(value) && value[1]?.count !== null && value[2]?.count !== null)
-    // The earlier specs deleted the orphan and the merged branch: one not landed, three branches.
     expect(rows.map(({ section, label, count, href, height }) => ({ section, label, count, href, height }))).toEqual([
       { section: 'main', label: 'Recently on main', count: '3 today', href: `${scoped('/git')}?view=repo`, height: 48 },
       { section: 'not-landed', label: 'Not landed', count: '1', href: scoped('/git/not-landed'), height: 48 },

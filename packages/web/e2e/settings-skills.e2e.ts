@@ -319,6 +319,8 @@ describe('settings → skills against the live dry-run server', () => {
   })
 
   it('refresh keeps the selection and the list scroll position (#384)', () => {
+    browser.goto(`${baseUrl}${scoped('/skills')}`)
+    browser.waitForFunction(`document.querySelector('${row(BETA)}') !== null`)
     browser.click(row(BETA))
     browser.waitForFunction(
       `document.querySelector('[data-slot="skills-detail"] [data-slot="skill-detail"] h2')?.textContent === '${BETA}'`,
@@ -352,6 +354,8 @@ describe('settings → skills against the live dry-run server', () => {
   })
 
   it('the pinned bookmarklet panel generates javascript: launchers against /new', () => {
+    browser.goto(`${baseUrl}${scoped('/skills')}`)
+    browser.waitForFunction(`document.querySelector('${row(BETA)}') !== null`)
     // The pinned row sits at the bottom of the (viewport-tall) list column, which a long
     // skill detail can push past the fold — scroll it in before the click, as a user would.
     browser.evaluate(

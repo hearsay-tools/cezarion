@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { runIds } from '../runs/run-store.testkit.ts';
 import { syncBuiltinESMExports } from 'node:module';
@@ -35,7 +36,7 @@ describe('delegation service durable authority', () => {
     const [a, b] = await Promise.all([f.service.spawn(f.caller, request), f.service.spawn(f.caller, request)]);
     expect(a).toEqual(b); expect(a.baselineSha).toBe(f.sha);
     const worker = f.store.getRun(a.workerId)!;
-    expect(worker).toMatchObject({ status: 'queued', runner: 'claude', model: 'opus', effort: 'high', delegation: { role: 'worker', permissions: [], parentRunId: f.parent.id } });
+    expect(worker).toMatchObject({ status: RUN_STATUS.queued, runner: 'claude', model: 'opus', effort: 'high', delegation: { role: 'worker', permissions: [], parentRunId: f.parent.id } });
     if (worker.delegation?.role !== 'worker') throw Error('worker');
     expect(existsSync(worker.delegation.workspace.path)).toBe(false);
     const proof = f.store.readWorkerExecution(worker.id);
@@ -145,11 +146,11 @@ describe('delegation service durable authority', () => {
       f.store.updateRun(workerId, { workflowDef: { ...workflow, steps: [{ ...workflow.steps[0]!, skill: 'injected' }] } });
       expect(() => f.manager.enqueueOwnedRun(workerId)).toThrow('Accepted worker workflow definition is unavailable or changed');
       // Preserve the root's human attention during recovery so it does not cancel the child.
-      f.store.updateRun(f.parent.id, { status: 'waiting' });
+      f.store.updateRun(f.parent.id, { status: RUN_STATUS.waiting });
       f.manager.dispose();
       const recovered = createFixtureManager(f.store, f.root);
       try { await recovered.recover(); } finally { recovered.dispose(); }
-      expect(f.store.getRun(workerId)).toMatchObject({ status: 'failed', error: expect.stringContaining('Accepted worker workflow definition is unavailable or changed') });
+      expect(f.store.getRun(workerId)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('Accepted worker workflow definition is unavailable or changed') });
     });
   });
   describe('catalog workflow on spawn (#451)', () => {
@@ -168,7 +169,7 @@ describe('delegation service durable authority', () => {
       const worker = f.store.getRun(workerId)!;
       expect(worker.workflow).toBe('review');
       expect(worker.steps.map(step => ({ id: step.id, kind: step.kind, name: step.name }))).toEqual([
-        { id: 'inspect', kind: 'agent', name: 'Inspect' }, { id: 'verify', kind: 'check', name: 'verify' },
+        { id: 'inspect', kind: STEP_KIND.agent, name: 'Inspect' }, { id: 'verify', kind: STEP_KIND.check, name: 'verify' },
       ]);
       expect(worker.workflowDef).toMatchObject({ name: 'review', source: 'file', steps: [
         { id: 'inspect', prompt: 'Review: {{task}}', runner: 'claude', model: 'opus' },
@@ -348,7 +349,7 @@ describe('delegation service durable authority', () => {
     const { workerId } = await f.service.spawn(f.caller, input());
     f.store.commitWorkerExecutionStart(workerId);
     const workspace = await ensureOwnedWorkspace(f.root, f.store.getRun(workerId)!);
-    f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
+    f.store.updateRun(workerId, { status: RUN_STATUS.review, worktreePath: workspace.path, branch: workspace.branch });
     expect(f.store.commitWorkerExecutionComplete(workerId, f.store.readWorkerExecution(workerId)!.generation)).toBe(true);
     const released: Array<{ runId: string; checkoutExisted: boolean }> = [];
     const host = { stopPreview: async () => ({ ok: false, code: 'unavailable' as const, message: 'Unavailable', hint: 'Retry.' }), portOwner: () => undefined, probe: async () => false, release: async (runId: string) => { released.push({ runId, checkoutExisted: existsSync(workspace.path) }); }, replaced: async () => undefined };
@@ -365,7 +366,7 @@ describe('delegation service durable authority', () => {
     f.store.commitWorkerExecutionStart(workerId);
     const worker = f.store.getRun(workerId)!;
     const workspace = await ensureOwnedWorkspace(f.root, worker);
-    f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
+    f.store.updateRun(workerId, { status: RUN_STATUS.review, worktreePath: workspace.path, branch: workspace.branch });
     const termination = vi.spyOn(f.manager, 'awaitRunTermination').mockResolvedValue(false);
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
     expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'incomplete' } });
@@ -381,7 +382,7 @@ describe('delegation service durable authority', () => {
     const worker = f.store.getRun(workerId)!;
     const generation = f.store.commitWorkerExecutionStart(workerId);
     const workspace = await ensureOwnedWorkspace(f.root, worker);
-    f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
+    f.store.updateRun(workerId, { status: RUN_STATUS.review, worktreePath: workspace.path, branch: workspace.branch });
     expect(f.store.commitWorkerExecutionComplete(workerId, generation)).toBe(true);
     const current = f.store.getRun(workerId)!;
     if (current.delegation?.role !== 'worker') throw Error('worker');
@@ -422,7 +423,7 @@ describe('delegation service durable authority', () => {
     const worker = f.store.getRun(workerId)!;
     const generation = f.store.commitWorkerExecutionStart(workerId);
     const workspace = await ensureOwnedWorkspace(f.root, worker);
-    f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
+    f.store.updateRun(workerId, { status: RUN_STATUS.review, worktreePath: workspace.path, branch: workspace.branch });
     expect(f.store.commitWorkerExecutionComplete(workerId, generation)).toBe(true);
     const current = f.store.getRun(workerId)!;
     if (current.delegation?.role !== 'worker') throw Error('worker');
@@ -454,7 +455,7 @@ describe('delegation service durable authority', () => {
     const worker = f.store.getRun(workerId)!;
     const generation = f.store.commitWorkerExecutionStart(workerId);
     const workspace = await ensureOwnedWorkspace(f.root, worker);
-    f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
+    f.store.updateRun(workerId, { status: RUN_STATUS.review, worktreePath: workspace.path, branch: workspace.branch });
     expect(f.store.commitWorkerExecutionComplete(workerId, generation)).toBe(true);
 
     const bin = join(f.root, 'git-shim');
@@ -583,7 +584,7 @@ describe('delegation service durable authority', () => {
     return { workerId, waitId: seedWorkerWait(f.store, f.parent.id, [workerId]) };
   }
   it('cancels a queued parent wait without stopping its worker or authorizing new work', async () => {
-    const { workerId, waitId } = await cancellableWait(); f.store.updateRun(f.parent.id, { status: 'queued' });
+    const { workerId, waitId } = await cancellableWait(); f.store.updateRun(f.parent.id, { status: RUN_STATUS.queued });
     expect(await f.service.cancelWait(f.caller, { waitId })).toMatchObject({ wait: { id: waitId, phase: 'wake-pending', reason: 'cancelled' } });
     expect(f.store.getRun(workerId)?.status).toBe('queued');
     await expect(f.service.wait(f.caller, { workerIds: [workerId], timeoutSeconds: 600 })).rejects.toMatchObject({ code: 'incompatible_state' });
@@ -600,7 +601,7 @@ describe('delegation service durable authority', () => {
   it('collect settles a worker whose crashed generation left no live process (#469)', { timeout: 15_000 }, async () => {
     const { workerId } = await f.service.spawn(f.caller, input());
     const generation = f.store.commitWorkerExecutionStart(workerId);
-    f.store.updateRun(workerId, { status: 'failed', finishedAt: new Date().toISOString() });
+    f.store.updateRun(workerId, { status: RUN_STATUS.failed, finishedAt: new Date().toISOString() });
     const record = join(f.root, '.ai/cezar/runs', `${workerId}.processes.json`);
     const dead = spawn(process.execPath, ['-e', '']); await new Promise(resolve => dead.once('exit', resolve));
     writeFileSync(record, JSON.stringify({ ...JSON.parse(readFileSync(record, 'utf8')), controller: { pid: dead.pid, startToken: '1' } }));
@@ -620,10 +621,10 @@ describe('delegation service durable authority', () => {
   it('returns only the retained old cancellation while a queued parent has a newer wait', async () => {
     const { workerId, waitId } = await cancellableWait(); const old = await f.service.cancelWait(f.caller, { waitId });
     const next = { id: seedWorkerWait(f.store, f.parent.id, [workerId]) };
-    f.store.updateRun(f.parent.id, { status: 'queued' });
+    f.store.updateRun(f.parent.id, { status: RUN_STATUS.queued });
     expect(await f.service.cancelWait(f.caller, { waitId })).toEqual(old);
     await expect(f.service.cancelWait(f.caller, { waitId: randomUUID() })).rejects.toMatchObject({ code: 'incompatible_state' });
-    expect(f.store.getRun(f.parent.id)?.waits).toEqual([expect.objectContaining({ id: next.id, kind: 'worker', phase: 'open' })]);
+    expect(f.store.getRun(f.parent.id)?.waits).toEqual([expect.objectContaining({ id: next.id, kind: WAIT_KIND.worker, phase: WAIT_PHASE.open })]);
   });
 
 });
@@ -646,7 +647,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     const { workerId } = await f.service.spawn(f.caller, input());
     const generation = f.store.commitWorkerExecutionStart(workerId);
     const workspace = await ensureOwnedWorkspace(f.root, f.store.getRun(workerId)!);
-    f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
+    f.store.updateRun(workerId, { status: RUN_STATUS.review, worktreePath: workspace.path, branch: workspace.branch });
     expect(f.store.commitWorkerExecutionComplete(workerId, generation)).toBe(true);
     const holder = hold ? await readableHolder(workspace.path) : undefined;
     if (holder) onTestFinished(() => holder.close());

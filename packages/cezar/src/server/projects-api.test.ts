@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import {
   mkdirSync,
   mkdtempSync,
@@ -535,7 +536,7 @@ describe('workspace projects API', () => {
 
       // Settle the run and the same call succeeds — the 409 is about live work, not about the
       // project having history.
-      ctx!.store.updateRun(run.id, { status: 'done' });
+      ctx!.store.updateRun(run.id, { status: RUN_STATUS.done });
       const allowed = await del(other.id, { contexts });
       expect(allowed.status).toBe(200);
       // The store/manager handles are dropped with the entry (step 2.1's dispose).

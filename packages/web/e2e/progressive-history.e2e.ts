@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { seedRuns, recordedRun } from './seed-runs'
 import { seedTranscript } from './seed-transcript'
 import { captureFixtureServer, spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
@@ -13,6 +13,7 @@ import { largeThreadEvents } from './fixtures/make-large-thread'
 import recordJson from './fixtures/thread-run.record.json'
 import { waitForStatus } from './poll'
 import { settleVisual, waitForSettledSample } from './visual-ready'
+import { openSessionActivity } from './session-activity'
 import { HISTORY_BOUNDARY_SLACK_PX, isNearHistoryStart } from '../src/routes/task-thread/thread-scroll'
 // fixture-server starts: 1
 const record = recordedRun(recordJson)
@@ -291,6 +292,22 @@ beforeAll(async () => {
   bootProject = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(1440, 900)
+  // This stored running fixture is recovered through a real dry-run continuation. Query
+  // idle can be true before that continuation publishes its waiting/PR update, which rewrites
+  // the header pill and the Session activity card's status and Workspace rows
+  // (hearsay-tools/cezarion#1333); establish that completed layout before measuring a paging
+  // anchor, including when the preceding tail-paint test is filtered out.
+  await waitForStatus(baseUrl, RUN_ID, ['waiting'])
+}, 120_000)
+
+afterAll(async () => {
+  browser?.close()
+  await stopFixtureServer(server)
+  if (serverDiagnostics) retainServerDiagnostics()
+  if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
+})
+
+beforeEach(() => {
   browser.goto(`${baseUrl}/p/${bootProject}/tasks/${RUN_ID}`)
   browser.waitForFunction(
     `document.querySelector('[data-route="task-thread"]') !== null &&
@@ -300,28 +317,12 @@ beforeAll(async () => {
     `document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '1' &&
      document.querySelector('[data-slot="history-boundary"] button:not([disabled])') !== null`,
   )
-  // This stored running fixture is recovered through a real dry-run continuation. Query
-  // idle can be true before that continuation publishes its waiting/PR update, which rewrites
-  // the header pill and the Session activity card's status and Workspace rows
-  // (hearsay-tools/cezarion#1333); establish that completed layout before measuring a paging
-  // anchor, including when the preceding tail-paint test is filtered out.
-  await waitForStatus(baseUrl, RUN_ID, ['waiting'])
-  // The card starts folded (hearsay-tools/cezarion#1601). A programmatic toggle, for the same
-  // reason as the plan toggle below: the thread is still settling into follow-tail.
-  browser.waitForFunction(`document.querySelector('[data-slot="run-activity-dock"] > button') !== null`)
-  browser.evaluate(`document.querySelector('[data-slot="run-activity-dock"] > button[aria-expanded="false"]')?.click()`)
+  openSessionActivity(browser)
   browser.waitForFunction(`document.querySelector('[data-slot="run-activity-workspace"]') !== null &&
     !/^(Running|Queued)/.test(document.querySelector('[data-slot="run-header"] [data-slot="pill"]')?.textContent ?? 'Running')`)
   waitUntilCockpitIdle()
   settleVisual(browser, '[data-slot="run-header"]', { idle: true })
   settleVisual(browser, '[data-slot="run-activity-dock"]', { idle: true })
-}, 120_000)
-
-afterAll(async () => {
-  browser?.close()
-  await stopFixtureServer(server)
-  if (serverDiagnostics) retainServerDiagnostics()
-  if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
 describe('progressive long-session history', () => {
@@ -444,8 +445,8 @@ describe('progressive long-session history', () => {
   })
 
   it('switches between cached and live-tail threads without a near-zero destination frame', () => {
-    // The preceding paging case deliberately visited the archive boundary. Establish the first
-    // run's departure state as an explicit live-tail cache entry before warming the second run.
+    // Establish the first run's departure state as a live-tail cache entry before warming
+    // the second run.
     browser.evaluate(`(() => {
       const main = document.querySelector('[data-slot="main"]')
       main.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true }))

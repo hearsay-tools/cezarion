@@ -2,9 +2,10 @@ import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+import { revealControl } from './control-ready'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForStatus, pollFor, pollJson } from './poll'
 // fixture-server starts: 1
@@ -51,6 +52,7 @@ let server: ChildProcess
 let dataRoot: string
 let baseUrl: string
 let queuedId: string
+let blockerId: string
 
 beforeAll(async () => {
   const deadline = Date.now() + 140_000
@@ -78,22 +80,8 @@ beforeAll(async () => {
     { deadline })
   baseUrl = await waitForFixtureServer(server)
 
-  // Hold the only slot with a slow turn, then queue the run under test behind it.
-  //
-  // 160 attempts, not the shared 120: this spec chose a longer budget than the other
-  // `waitForStatus` callers before the helpers were folded into `poll.ts`, because these two
-  // waits sit behind a fresh serve boot AND an agent spawn rather than behind a settled server.
-  // Each wait keeps its 80 s cap; the shared setup deadline reserves browser time inside
-  // the hook instead of letting sequential probes overrun it.
-  const blockerId = await startRun(baseUrl, 'mock:slow occupy the only agent slot')
-  await waitForStatus(baseUrl, blockerId, ['running'], { tries: 160, deadline })
-  queuedId = await startRun(baseUrl, 'mock:cezar-done the original prompt')
-  await waitForStatus(baseUrl, queuedId, ['queued'], { tries: 160, deadline })
-
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(1440, 900)
-  browser.goto(`${baseUrl}/tasks/${queuedId}`)
-  browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea') !== null`)
 }, 180_000)
 
 afterAll(async () => {
@@ -101,6 +89,38 @@ afterAll(async () => {
   await stopFixtureServer(server)
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
+
+beforeEach(async () => {
+  const deadline = Date.now() + 140_000
+  // Hold the only slot with a slow turn, then queue the run under test behind it.
+  //
+  // 160 attempts, not the shared 120: this spec chose a longer budget than the other
+  // `waitForStatus` callers before the helpers were folded into `poll.ts`, because these two
+  // waits sit behind a fresh serve boot AND an agent spawn rather than behind a settled server.
+  // Each wait keeps its 80 s cap; the shared setup deadline reserves browser time inside
+  // the hook instead of letting sequential probes overrun it.
+  blockerId = await startRun(baseUrl, 'mock:slow occupy the only agent slot')
+  await waitForStatus(baseUrl, blockerId, ['running'], { tries: 160, deadline })
+  queuedId = await startRun(baseUrl, 'mock:cezar-done the original prompt')
+  await waitForStatus(baseUrl, queuedId, ['queued'], { tries: 160, deadline })
+
+  browser.goto(`${baseUrl}/tasks/${queuedId}`)
+  browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea') !== null`)
+}, 180_000)
+
+afterEach(async () => {
+  for (const id of [queuedId, blockerId]) {
+    if (!id) continue
+    await fetch(`${baseUrl}/api/v1/runs/${id}/cancel`, { method: 'POST' })
+    await waitForStatus(baseUrl, id, ['cancelled', 'done', 'review', 'failed'])
+  }
+})
+
+function stackMessage(text: string): void {
+  browser.fill('[data-slot="composer"] textarea', text)
+  browser.click('[data-slot="composer"] [aria-label="Send"]')
+  browser.waitForFunction(`document.querySelectorAll('[data-slot="user-bubble"]').length >= 2`)
+}
 
 describe('a queued run’s prompt is amendable (#472)', () => {
   it('queued state: the composer is ENABLED with the queue placeholder and hint', () => {
@@ -138,9 +158,12 @@ describe('a queued run’s prompt is amendable (#472)', () => {
   })
 
   it('edits the stacked message in place', async () => {
+    stackMessage('also update the changelog')
+    revealControl(browser, '[aria-label="Remove message"], [aria-label="Edit message"]')
     browser.click('[aria-label="Remove message"], [aria-label="Edit message"]')
     browser.fill('[aria-label="Edit the message"]', 'also update the changelog and the README')
     browser.screenshot(`${artifactsDir}/queued-editing.png`)
+    revealControl(browser, '[data-slot="user-bubble"][data-editing="true"] button:last-of-type')
     browser.click('[data-slot="user-bubble"][data-editing="true"] button:last-of-type')
 
     browser.waitForFunction(
@@ -155,6 +178,8 @@ describe('a queued run’s prompt is amendable (#472)', () => {
   })
 
   it('removes the stacked message', async () => {
+    stackMessage('also update the changelog and the README')
+    revealControl(browser, '[aria-label="Remove message"]')
     browser.click('[aria-label="Remove message"]')
     browser.waitForFunction(`document.querySelectorAll('[data-slot="user-bubble"]').length === 1`)
 

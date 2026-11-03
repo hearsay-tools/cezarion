@@ -2,7 +2,7 @@ import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
@@ -59,6 +59,17 @@ beforeAll(async () => {
   )
   baseUrl = await waitForFixtureServer(server)
 
+  browser = AgentBrowser.open(sessionId)
+  browser.setViewport(1440, 900)
+}, 180_000)
+
+afterAll(async () => {
+  browser?.close()
+  await stopFixtureServer(server)
+  if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
+})
+
+beforeEach(async () => {
   // Boot the run the composer will talk to. The mock makes no cezar_done call, so after
   // its first turn and the no-wait nudge the session stays open and the run parks at `waiting`.
   const created = (await (
@@ -71,17 +82,24 @@ beforeAll(async () => {
   runId = created.id
   await waitForStatus(baseUrl, runId, ['waiting'])
 
-  browser = AgentBrowser.open(sessionId)
-  browser.setViewport(1440, 900)
   browser.goto(`${baseUrl}/tasks/${runId}`)
   browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea') !== null`)
 }, 180_000)
 
-afterAll(async () => {
-  browser?.close()
-  await stopFixtureServer(server)
-  if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
-})
+function startDictation() {
+  // Replace the page's Web Speech global with a scriptable stand-in (see the header note).
+  browser.evaluate(`(() => {
+    class FakeRecognition {
+      start() { window.__cezRecognition = this }
+      stop() {} abort() {}
+    }
+    window.SpeechRecognition = FakeRecognition
+    window.webkitSpeechRecognition = FakeRecognition
+    return true
+  })()`)
+  browser.click('[aria-label="Start dictation"]')
+  browser.waitForFunction(`document.querySelector('[data-slot="dictation-overlay"]') !== null`)
+}
 
 describe('the thread composer against a live waiting session', () => {
   it('waiting state: paused hint pulses above an enabled composer with the reply placeholder', () => {
@@ -116,6 +134,8 @@ describe('the thread composer against a live waiting session', () => {
   })
 
   it('Enter inserts /lint-fix at the caret and closes the menu', () => {
+    browser.fill('[data-slot="composer"] textarea', 'Please run /lin')
+    browser.waitForFunction(`document.querySelector('[data-slot="composer-menu-item"]') !== null`)
     // `press` targets the focused element — make sure that is still the textarea.
     browser.evaluate(`document.querySelector('[data-slot="composer"] textarea').focus() ?? true`)
     browser.press('Enter')
@@ -127,6 +147,7 @@ describe('the thread composer against a live waiting session', () => {
   })
 
   it('send delivers the reply — the transcript grows with the new user bubble over SSE', () => {
+    browser.fill('[data-slot="composer"] textarea', 'Please run /lint-fix ')
     const bubblesBefore = browser.count('[data-slot="user-bubble"]')
     browser.click('[aria-label="Send"]')
     // The optimistic clear is immediate…
@@ -142,6 +163,9 @@ describe('the thread composer against a live waiting session', () => {
   })
 
   it('the mock answers the reply and the run parks at waiting again', async () => {
+    browser.fill('[data-slot="composer"] textarea', 'Please run /lint-fix ')
+    browser.click('[aria-label="Send"]')
+    browser.waitForFunction(`document.querySelectorAll('[data-slot="user-bubble"]').length === 2`)
     await waitForStatus(baseUrl, runId, ['waiting'])
     // The agent's answer to our message rendered — the round trip is complete.
     browser.waitForFunction(`document.querySelector('[data-slot="paused-hint"]') !== null`)
@@ -151,18 +175,7 @@ describe('the thread composer against a live waiting session', () => {
   }, 90_000)
 
   it('dictation: recording swaps the footer for the overlay — timer, partial transcript', () => {
-    // Replace the page's Web Speech global with a scriptable stand-in (see the header note).
-    browser.evaluate(`(() => {
-      class FakeRecognition {
-        start() { window.__cezRecognition = this }
-        stop() {} abort() {}
-      }
-      window.SpeechRecognition = FakeRecognition
-      window.webkitSpeechRecognition = FakeRecognition
-      return true
-    })()`)
-    browser.click('[aria-label="Start dictation"]')
-    browser.waitForFunction(`document.querySelector('[data-slot="dictation-overlay"]') !== null`)
+    startDictation()
     expect(browser.text('[data-slot="dictation-timer"]')).toMatch(/^\d+:\d{2}$/)
     expect(browser.text('[data-slot="dictation-transcript"]')).toContain('Listening…')
 
@@ -185,17 +198,18 @@ describe('the thread composer against a live waiting session', () => {
   })
 
   it('insert puts the transcript into the textarea and restores the footer', () => {
+    startDictation()
     browser.evaluate(`window.__cezRecognition.onresult({
       resultIndex: 0,
       results: [{ isFinal: true, 0: { transcript: 'summarize what you did' } }],
     }) ?? true`)
+    browser.waitForFunction(`document.querySelector('[data-slot="dictation-transcript"]')?.textContent === 'summarize what you did'`)
     browser.click('[aria-label="Insert transcription"]')
     browser.waitForFunction(
       `document.querySelector('[data-slot="composer"] textarea').value === 'summarize what you did'`,
     )
     expect(browser.count('[data-slot="dictation-overlay"]')).toBe(0)
     expect(browser.isVisible('[aria-label="Send"]')).toBe(true)
-    // Leave the draft box clean for the closed-state spec below.
     browser.fill('[data-slot="composer"] textarea', '')
   })
 

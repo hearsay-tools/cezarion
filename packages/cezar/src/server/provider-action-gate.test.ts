@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { providerForActiveRun } from '@open-mercato/cezar-contract/active-provider';
 import { describe, expect, it } from 'vitest';
 import type { RunRecord } from '../runs/store.ts';
@@ -13,7 +14,7 @@ const run = (overrides: Partial<RunRecord> = {}): RunRecord => ({
   title: 'Task',
   workflow: 'quick-task',
   task: 'Task',
-  status: 'done',
+  status: RUN_STATUS.done,
   createdAt: '2026-07-24T00:00:00.000Z',
   tokensUsed: 0,
   archived: false,
@@ -71,8 +72,8 @@ describe('provider action gate', () => {
     expect(providerForExistingRun(run({
       runner: 'claude',
       steps: [
-        { id: 'first', name: 'First', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, backend: 'claude' },
-        { id: 'last', name: 'Last', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, backend: 'codex' },
+        { id: 'first', name: 'First', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, backend: 'claude' },
+        { id: 'last', name: 'Last', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, backend: 'codex' },
       ],
     }), 'opencode')).toBe('opencode');
   });
@@ -81,8 +82,8 @@ describe('provider action gate', () => {
     expect(providerForExistingRun(run({
       runner: 'claude',
       steps: [
-        { id: 'first', name: 'First', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, backend: 'claude' },
-        { id: 'last', name: 'Last', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, backend: 'codex' },
+        { id: 'first', name: 'First', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, backend: 'claude' },
+        { id: 'last', name: 'Last', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, backend: 'codex' },
       ],
     }))).toBe('claude');
   });
@@ -97,8 +98,8 @@ describe('provider action gate', () => {
       runner: 'claude',
       currentStepId: 'retry',
       steps: [
-        { id: 'retry', name: 'Retry', kind: 'agent', status: 'running', iterations: 2, tokensUsed: 0, backend: 'claude' },
-        { id: 'later', name: 'Later', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, backend: 'codex' },
+        { id: 'retry', name: 'Retry', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 2, tokensUsed: 0, backend: 'claude' },
+        { id: 'later', name: 'Later', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, backend: 'codex' },
       ],
     }))).toBe('claude');
   });
@@ -107,10 +108,10 @@ describe('provider action gate', () => {
     expect(providerForActiveRun(run({
       runner: 'opencode',
       currentStepId: 'active',
-      steps: [{ id: 'active', name: 'Active', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0 }],
+      steps: [{ id: 'active', name: 'Active', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0 }],
     }))).toBe('opencode');
     expect(providerForActiveRun(run({
-      steps: [{ id: 'previous', name: 'Previous', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, backend: 'codex' }],
+      steps: [{ id: 'previous', name: 'Previous', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, backend: 'codex' }],
     }))).toBe('codex');
     expect(providerForActiveRun(run())).toBe('claude');
   });

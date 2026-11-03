@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -66,14 +67,14 @@ describe('provider action gating', () => {
       workflow: 'quick-task',
       task: 'Existing task',
       runner: 'claude',
-      steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
     });
     if (backend) {
       // A persisted active backend belongs to a live run. Keeping the record queued would
       // model the prompt-authoring window, where provider availability deliberately does not
       // gate mutations of the existing task.
-      store.updateRun(run.id, { status: 'running', currentStepId: 'task' });
-      store.updateStep(run.id, 'task', { backend, status: 'running' });
+      store.updateRun(run.id, { status: RUN_STATUS.running, currentStepId: 'task' });
+      store.updateStep(run.id, 'task', { backend, status: STEP_STATUS.running });
     }
     return run;
   };
@@ -213,9 +214,9 @@ describe('provider action gating', () => {
     writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ defaultRunner: fallback }));
     const run = store.createRun({ title: 'Untouched', task: 'Task', workflow: 'original',
       workflowDef: { name: 'original', source: 'built-in', steps },
-      steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
     });
-    store.updateRun(run.id, { status: 'cancelled' });
+    store.updateRun(run.id, { status: RUN_STATUS.cancelled });
     const response = await apiRequest(app, `/api/v1/runs/${run.id}/continue`, { method: 'POST' });
     await expectDisabled(response);
     expect(continueRun).not.toHaveBeenCalled();
@@ -228,9 +229,9 @@ describe('provider action gating', () => {
     writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ defaultRunner: source === 'config' ? 'codex' : 'claude' }));
     const run = store.createRun({ title: 'Untouched', task: 'Task', workflow: 'original',
       workflowDef: { name: 'original', source: 'built-in', steps: [{ id: 'task', prompt: '{{task}}', ...(source === 'step' ? { runner: 'codex' as const } : {}) }] },
-      steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
     });
-    store.updateRun(run.id, { status: 'cancelled' });
+    store.updateRun(run.id, { status: RUN_STATUS.cancelled });
     const response = await apiRequest(app, `/api/v1/runs/${run.id}/continue`, { method: 'POST' });
     expect(response.status).toBe(200);
     expect(continueRun).toHaveBeenCalledOnce();
@@ -246,14 +247,14 @@ describe('provider action gating', () => {
       });
       const run = store.createRun({ title: 'Untouched', task: 'Task', workflow: 'original', agentProfile: 'saved-codex-account',
         workflowDef: { name: 'original', source: 'built-in', steps: [{ id: 'task', prompt: '{{task}}' }] },
-        steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+        steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
       });
-      store.updateRun(run.id, { status: 'cancelled' });
+      store.updateRun(run.id, { status: RUN_STATUS.cancelled });
       const response = await apiRequest(app, `/api/v1/runs/${run.id}/continue`, { method: 'POST',
         headers: { 'content-type': 'application/json' }, body: JSON.stringify(switchProvider ? { runner: 'claude' } : {}),
       });
       expect(response.status).toBe(200);
-      expect(store.getRun(run.id)).toMatchObject({ status: 'queued', runner: switchProvider ? 'claude' : 'codex' });
+      expect(store.getRun(run.id)).toMatchObject({ status: RUN_STATUS.queued, runner: switchProvider ? 'claude' : 'codex' });
       expect(store.getRun(run.id)?.agentProfile).toBe(switchProvider ? undefined : 'saved-codex-account');
     } finally { manager.dispose(); }
   });
@@ -277,13 +278,13 @@ describe('provider action gating', () => {
       task: 'Retrying task',
       runner: 'claude',
       steps: [
-        { id: 'retry', name: 'Retry', kind: 'agent' },
-        { id: 'later', name: 'Later', kind: 'agent' },
+        { id: 'retry', name: 'Retry', kind: STEP_KIND.agent },
+        { id: 'later', name: 'Later', kind: STEP_KIND.agent },
       ],
     });
     store.updateRun(run.id, { currentStepId: 'retry' });
-    store.updateStep(run.id, 'retry', { backend: 'claude', status: 'running' });
-    store.updateStep(run.id, 'later', { backend: 'codex', status: 'done' });
+    store.updateStep(run.id, 'retry', { backend: 'claude', status: STEP_STATUS.running });
+    store.updateStep(run.id, 'later', { backend: 'codex', status: STEP_STATUS.done });
 
     const response = await apiRequest(app, `/api/v1/runs/${run.id}/messages`, {
       method: 'POST',
@@ -512,8 +513,8 @@ describe('provider availability preserves existing execution', () => {
 
     const current = store.getRun(run.id);
     expect(current?.steps.map((step) => ({ id: step.id, status: step.status, backend: step.backend }))).toEqual([
-      { id: 'claude', status: 'done', backend: 'claude' },
-      { id: 'codex', status: 'waiting', backend: 'codex' },
+      { id: 'claude', status: STEP_STATUS.done, backend: 'claude' },
+      { id: 'codex', status: STEP_STATUS.waiting, backend: 'codex' },
     ]);
   }, 30_000);
 });

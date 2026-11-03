@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -47,7 +48,7 @@ describe('run summaries API', () => {
   it('answers the same runs in the same order as GET /runs, archived included, without detail fields', async () => {
     const planned = store.createRun({
       title: 'Planned', workflow: '(planned)', task: 'a long prompt',
-      steps: [{ id: 'a', name: 'Fix bug', kind: 'agent' }],
+      steps: [{ id: 'a', name: 'Fix bug', kind: STEP_KIND.agent }],
     });
     store.updateRun(planned.id, { createdAt: '2026-10-01T10:00:00Z', systemPrompt: 'be brief' });
     const archived = store.createRun({ title: 'Old', workflow: 'quick-task', task: 't', steps: [] });
@@ -73,7 +74,7 @@ describe('run summaries API', () => {
     /** Minute `n` after a fixed start, so a larger `n` is newer. */
     const at = (n: number) => new Date(Date.UTC(2026, 8, 1) + n * 60_000).toISOString();
     const run = (id: string, n: number, over: Record<string, unknown> = {}) => ({
-      id, title: `run ${id}`, workflow: 'quick-task', task: 't', status: 'done', createdAt: at(n),
+      id, title: `run ${id}`, workflow: 'quick-task', task: 't', status: RUN_STATUS.done, createdAt: at(n),
       finishedAt: at(n), tokensUsed: 0, archived: true, steps: [], ...over,
     });
 

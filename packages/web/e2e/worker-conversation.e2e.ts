@@ -9,6 +9,7 @@ import { seedTranscript } from './seed-transcript'
 import { settleVisual, waitForSettledSample } from './visual-ready'
 import { messageClockExpression } from './transcript-measurements'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+import { revealControl } from './control-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
 import recordJson from './fixtures/thread-run.record.json'
@@ -266,9 +267,11 @@ describe('chronological worker conversation', () => {
       // After collapsing the request, render and settle the reply row before pointer clicks.
       hoverVisiblePoint(browser, `${replyCard} [data-slot="conversation-body-toggle"]`)
       settleVisual(browser, replyCard)
+      revealControl(browser, `${replyCard} [data-slot="conversation-body-toggle"]`)
       browser.click(`${replyCard} [data-slot="conversation-body-toggle"]`)
       expect(browser.waitForValue<string>(`document.querySelector('${replyCard} [data-slot="conversation-body"]').textContent`, value => value.includes(reply.text))).toContain(reply.text)
       settleVisual(browser, replyCard)
+      revealControl(browser, `${replyCard} [data-slot="conversation-body-toggle"]`)
       browser.click(`${replyCard} [data-slot="conversation-body-toggle"]`)
       browser.waitForFunction(`document.querySelector('${replyCard} [data-slot="conversation-body-toggle"]').getAttribute('aria-expanded') === 'false'`)
       focusWithKeyboard(browser, `${replyCard} ${connector}`)
@@ -279,6 +282,7 @@ describe('chronological worker conversation', () => {
       browser.press('Enter')
       waitForFocusedCard(replyCard)
       browser.screenshot(join(artifacts, `${variant.id}-reply.png`), { viewport: true })
+      revealControl(browser, `${replyCard} [data-slot="collapsible-trigger"]`)
       browser.click(`${replyCard} [data-slot="collapsible-trigger"]`)
       browser.waitForFunction(`document.querySelector('${replyCard}').textContent.includes('${reply.id}')`)
     })

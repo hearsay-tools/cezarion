@@ -26,12 +26,10 @@ import {
 const run = (over: Partial<AttentionInput> & { status: RunStatus }): AttentionInput => ({ ...over });
 
 /** An open human wait; `shown` once the user sees its card (`askSeq`). */
-const humanWait = (shown = false) => {
-  return ({
-    kind: WAIT_KIND.human, id: '33333333-3333-4333-8333-333333333334', source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask,
-    registeredAt: '2026-10-21T14:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', ...(shown ? { askSeq: 7 } : {}),
-  }) as unknown as NonNullable<AttentionInput['waits']>[number];
-};
+const humanWait = (shown = false) => ({
+  kind: WAIT_KIND.human, id: '33333333-3333-4333-8333-333333333334', source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask,
+  registeredAt: '2026-10-21T14:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', ...(shown ? { askSeq: 7 } : {}),
+}) as unknown as NonNullable<AttentionInput['waits']>[number];
 
 /** Every `RunStatus`, spelled out: a new status must get an explicit answer, not the chain's last `return`. */
 const ALL_STATUSES: readonly RunStatus[] = ['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled'];

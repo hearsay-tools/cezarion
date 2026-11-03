@@ -102,6 +102,16 @@ async function nativeTap(selector: string, effect?: string) {
   browser.waitForValue(`!!(${effect!})`)
 }
 
+async function withTouchBrowser(session: string, body: () => Promise<void>): Promise<void> {
+  const desktop = browser
+  browser = AgentBrowser.open(session)
+  try { await body() }
+  finally {
+    browser.close()
+    browser = desktop
+  }
+}
+
 describe('complete task PR collection', () => {
   it('opens all five item tabs, including items behind header overflow', () => {
     browser.setViewport(1280, 900)
@@ -169,36 +179,36 @@ describe('complete task PR collection', () => {
   })
 
   it('searches every hidden PR and opens global overflow at 320px and 360px', async () => {
-    browser.close()
-    browser = AgentBrowser.open(`pr-collection-mobile-${process.pid}`)
-    for (const width of [320, 360]) {
-      browser.setViewport(width, 640)
-      browser.goto(`${base}/tasks`)
-      const search = (query: string, matches: boolean, legacy = false) => {
-        browser.fill('input[aria-label="Search tasks across projects"]', query)
-        // The row also exists before search. Wait for the debounced URL and its results.
-        expect(browser.waitForValue(`(() => {
-          return new URLSearchParams(location.search).get('q') === ${JSON.stringify(query)} &&
-            document.querySelector('input[aria-label="Search tasks across projects"]')?.value === ${JSON.stringify(query)} &&
-            !!document.querySelector('${globalRow}') === ${matches} &&
-            !!document.querySelector('[data-slot="global-task-row"][data-run-id="legacy"]') === ${legacy} &&
-            !document.querySelector('[data-slot="global-task-row"][data-run-id="long"]')
-        })()`)).toBe(true)
+    await withTouchBrowser(`pr-collection-mobile-${process.pid}`, async () => {
+      for (const width of [320, 360]) {
+        browser.setViewport(width, 640)
+        browser.goto(`${base}/tasks`)
+        const search = (query: string, matches: boolean, legacy = false) => {
+          browser.fill('input[aria-label="Search tasks across projects"]', query)
+          // The row also exists before search. Wait for the debounced URL and its results.
+          expect(browser.waitForValue(`(() => {
+            return new URLSearchParams(location.search).get('q') === ${JSON.stringify(query)} &&
+              document.querySelector('input[aria-label="Search tasks across projects"]')?.value === ${JSON.stringify(query)} &&
+              !!document.querySelector('${globalRow}') === ${matches} &&
+              !!document.querySelector('[data-slot="global-task-row"][data-run-id="legacy"]') === ${legacy} &&
+              !document.querySelector('[data-slot="global-task-row"][data-run-id="long"]')
+          })()`)).toBe(true)
+        }
+        search('#999999', false)
+        for (const number of numbers) {
+          search(`#${number}`, true, number === 128)
+        }
+        const trigger = `${globalRow} [data-slot="reference-overflow"]`
+        await nativeTap(trigger, `document.querySelector('${panel}') !== null`)
+        assertDestinations()
+        expect(browser.waitForValue(`location.pathname`)).toBe('/tasks')
+        dismissWithEscape(browser, { content: panel, focus: trigger })
+        await nativeTap(trigger, `document.querySelector('${panel}') !== null`)
+        await nativeTap(`${panel} a[href$="/pr/132"]`, `location.pathname === '${taskPath(132)}'`)
+        expect(browser.waitForValue(`location.pathname === '${taskPath(132)}'`)).toBe(true)
+        browser.screenshot(join(artifacts, `mobile-${width}.png`), { viewport: true })
       }
-      search('#999999', false)
-      for (const number of numbers) {
-        search(`#${number}`, true, number === 128)
-      }
-      const trigger = `${globalRow} [data-slot="reference-overflow"]`
-      await nativeTap(trigger, `document.querySelector('${panel}') !== null`)
-      assertDestinations()
-      expect(browser.waitForValue(`location.pathname`)).toBe('/tasks')
-      dismissWithEscape(browser, { content: panel, focus: trigger })
-      await nativeTap(trigger, `document.querySelector('${panel}') !== null`)
-      await nativeTap(`${panel} a[href$="/pr/132"]`, `location.pathname === '${taskPath(132)}'`)
-      expect(browser.waitForValue(`location.pathname === '${taskPath(132)}'`)).toBe(true)
-      browser.screenshot(join(artifacts, `mobile-${width}.png`), { viewport: true })
-    }
+    })
   })
 
   it('scrolls a long collection inside a small touch viewport', async () => {
@@ -221,21 +231,21 @@ describe('complete task PR collection', () => {
   })
 
   it('touch overflow opens without navigating', async () => {
-    browser.close()
-    browser = AgentBrowser.open(`pr-collection-touch-${process.pid}`)
-    browser.setViewport(1280, 900)
-    browser.goto(`${base}/p/${project}`)
-    const single = `${row} [data-slot="reference-overflow"]`
-    const hitArea = waitForSettledSample<number>(browser, `(() => {
-      const el = document.querySelector('${single}'); if (!el) return null
-      let top = el.getBoundingClientRect().top, bottom = el.getBoundingClientRect().bottom
-      for (let parent = el.parentElement; parent; parent = parent.parentElement) {
-        if (getComputedStyle(parent).overflowY === 'hidden') { const r = parent.getBoundingClientRect(); top = Math.max(top, r.top); bottom = Math.min(bottom, r.bottom) }
-      }
-      return bottom - top
-    })()`)
-    expect(hitArea).toBeGreaterThanOrEqual(44)
-    await nativeTap(single, `document.querySelector('${panel}') !== null`)
-    expect(browser.waitForValue(`document.querySelector('${panel}') ? location.pathname : null`)).toBe(`/p/${project}`)
+    await withTouchBrowser(`pr-collection-touch-${process.pid}`, async () => {
+      browser.setViewport(1280, 900)
+      browser.goto(`${base}/p/${project}`)
+      const single = `${row} [data-slot="reference-overflow"]`
+      const hitArea = waitForSettledSample<number>(browser, `(() => {
+        const el = document.querySelector('${single}'); if (!el) return null
+        let top = el.getBoundingClientRect().top, bottom = el.getBoundingClientRect().bottom
+        for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+          if (getComputedStyle(parent).overflowY === 'hidden') { const r = parent.getBoundingClientRect(); top = Math.max(top, r.top); bottom = Math.min(bottom, r.bottom) }
+        }
+        return bottom - top
+      })()`)
+      expect(hitArea).toBeGreaterThanOrEqual(44)
+      await nativeTap(single, `document.querySelector('${panel}') !== null`)
+      expect(browser.waitForValue(`document.querySelector('${panel}') ? location.pathname : null`)).toBe(`/p/${project}`)
+    })
   })
 })

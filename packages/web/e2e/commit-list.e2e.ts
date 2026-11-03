@@ -3,8 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { seedRuns, recordedRun } from './seed-runs'
+
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import recordJson from './fixtures/thread-run.record.json'
@@ -126,10 +127,6 @@ beforeAll(async () => {
 
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(1440, 900)
-  // ONE page load for the whole file. Every agent-browser operation is a separate CLI process
-  // and each SPA load costs seconds, so a goto per test dominated this spec's runtime; the
-  // assertions below are ordered to share a single load instead.
-  openCommits()
 }, 180_000)
 
 afterAll(async () => {
@@ -137,6 +134,8 @@ afterAll(async () => {
   await stopFixtureServer(server)
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
+
+beforeEach(() => { openCommits() })
 
 describe(`the task Commits tab on a ${COMMITS}-commit branch`, () => {
   it('serves every commit from the API — the list really is unbounded', async () => {

@@ -1,3 +1,4 @@
+import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -287,7 +288,7 @@ describe('GET /api/v1/workspace/events', () => {
         workflow: 'quick-task',
         task: 'work',
         runner: 'opencode',
-        steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+        steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
       });
       other.store.updateStep(run.id, 'work', { backend: 'opencode' });
       other.store.appendEvent(run.id, {

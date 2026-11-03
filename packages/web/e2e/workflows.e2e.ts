@@ -69,6 +69,49 @@ const palettePill = (name: string) => `[data-slot="wb-skill"][data-skill="${name
 const addButton = (name: string) => `${palettePill(name)} [data-slot="wb-skill-add"]`
 const stepIdsJs = `[...document.querySelectorAll('[data-slot="wb-step"]')].map((s) => s.dataset.id).join(',')`
 
+function openEmptyWorkflow(): void {
+  browser.goto(`${baseUrl}/workflows`)
+  browser.waitForFunction(`document.querySelector('${palettePill(ALPHA)}') !== null`)
+  browser.click('[data-slot="wb-new"]')
+  browser.waitForFunction(`document.querySelectorAll('[data-slot="wb-step"]').length === 0`)
+}
+
+function prepareWorkflow(skills: string[], saved = false): void {
+  openEmptyWorkflow()
+  for (const skill of skills) browser.click(addButton(skill))
+  browser.waitForFunction(`${stepIdsJs} === '${skills.join(',')}'`)
+  browser.click('[data-slot="wb-yaml-toggle"]')
+  if (!saved) return
+  rmSync(savedFlowPath, { force: true })
+  browser.fill('[data-slot="wb-name"]', FLOW)
+  browser.click('[data-slot="wb-save"]')
+  browser.waitForFunction(`document.querySelector('[data-slot="wb-delete"]') !== null`)
+}
+
+function importWorkflow(): void {
+  const pasted = [
+    `name: ${FLOW}-imported`,
+    'steps:',
+    '  - id: fix',
+    `    skill: ${ALPHA}`,
+    "    prompt: '{{task}}'",
+    '  - id: tests',
+    '    command: npm test',
+    '    onFail:',
+    '      retry: fix',
+    '      max: 2',
+  ].join('\n')
+  openEmptyWorkflow()
+  browser.click('[data-slot="wb-yaml-toggle"]')
+  browser.click('[data-slot="wb-import"]')
+  browser.fill('[data-slot="wb-import-text"]', pasted)
+  // The expanded import card can place its actions below the nested page viewport.
+  browser.evaluate(`document.querySelector('[data-slot="wb-import-run"]').scrollIntoView({ block: 'center' })`)
+  browser.click('[data-slot="wb-import-run"]')
+  browser.waitForFunction(`${stepIdsJs} === 'fix,tests'`)
+  browser.waitForFunction(`document.querySelector('[data-slot="dialog-overlay"]') === null`)
+}
+
 describe('workflow builder against the live dry-run server', () => {
   it('builds a small workflow from the palette and previews the portable YAML', () => {
     browser.goto(`${baseUrl}/workflows`)
@@ -95,6 +138,7 @@ describe('workflow builder against the live dry-run server', () => {
   })
 
   it('reorders steps with the keyboard (dnd-kit defaults: Space lifts, arrows move, Space drops)', () => {
+    prepareWorkflow([ALPHA, BETA])
     // Each phase gets an explicit sync point — pressing before the previous phase settled is a
     // race the sensor loses silently (the lift needs focus; the move needs the lift's measuring
     // pass). dnd-kit marks the activator with aria-pressed="true" for the duration of the drag.
@@ -123,12 +167,11 @@ describe('workflow builder against the live dry-run server', () => {
     expect(browser.text('[data-slot="wb-yaml"]').indexOf(BETA)).toBeLessThan(
       browser.text('[data-slot="wb-yaml"]').indexOf(ALPHA),
     )
-    // dnd-kit's keyboard auto-scroll can leave the toolbar underneath the sticky app header.
-    // Return to the top before the next test operates that toolbar, as a user would.
-    browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
   })
 
   it('Save writes a real portable workflow file the server round-trips', () => {
+    prepareWorkflow([BETA, ALPHA])
+    rmSync(savedFlowPath, { force: true })
     browser.fill('[data-slot="wb-name"]', FLOW)
     browser.click('[data-slot="wb-save"]')
     browser.waitForFunction(
@@ -146,6 +189,7 @@ describe('workflow builder against the live dry-run server', () => {
   })
 
   it('keeps action hierarchy and readable summaries across viewport, theme, and density', () => {
+    prepareWorkflow([BETA, ALPHA], true)
     for (const [width, height] of [[360, 640], [1440, 900]] as const) {
       for (const density of ['comfortable', 'compact', 'ultra']) {
         for (const theme of ['light', 'dark']) {
@@ -257,6 +301,7 @@ describe('workflow builder against the live dry-run server', () => {
   }, 60_000)
 
   it('keeps workflow actions reachable and visibly focused under reduced motion', () => {
+    prepareWorkflow([BETA, ALPHA], true)
     browser.setReducedMotion()
     for (const [width, height, density, theme] of [
       [360, 640, 'ultra', 'dark'],
@@ -314,25 +359,7 @@ describe('workflow builder against the live dry-run server', () => {
   })
 
   it('Import parses pasted YAML through the server and renders richer flows as full steps', () => {
-    const pasted = [
-      `name: ${FLOW}-imported`,
-      'steps:',
-      '  - id: fix',
-      `    skill: ${ALPHA}`,
-      "    prompt: '{{task}}'",
-      '  - id: tests',
-      '    command: npm test',
-      '    onFail:',
-      '      retry: fix',
-      '      max: 2',
-    ].join('\n')
-    // The case before this one leaves the page scrolled; how far depends on the catalog's length.
-    browser.evaluate(`document.querySelector('[data-slot="wb-import"]').scrollIntoView({ block: 'center' })`)
-    browser.click('[data-slot="wb-import"]')
-    browser.fill('[data-slot="wb-import-text"]', pasted)
-    // The expanded import card can place its actions below the nested page viewport.
-    browser.evaluate(`document.querySelector('[data-slot="wb-import-run"]').scrollIntoView({ block: 'center' })`)
-    browser.click('[data-slot="wb-import-run"]')
+    importWorkflow()
 
     browser.waitForFunction(`${stepIdsJs} === 'fix,tests' || document.querySelector('[data-slot="wb-import-error"]') !== null`)
     expect(browser.evaluate(`document.querySelector('[data-slot="wb-import-error"]')?.textContent ?? ''`)).toBe('')
@@ -355,6 +382,7 @@ describe('workflow builder against the live dry-run server', () => {
   })
 
   it('refuses the 9th step with the legacy limit message', () => {
+    importWorkflow()
     // 2 imported steps on the canvas — fill up to the server's cap of 8, then one more.
     for (let i = 0; i < 6; i++) browser.click(addButton(ALPHA))
     browser.waitForFunction(`document.querySelectorAll('[data-slot="wb-step"]').length === 8`)

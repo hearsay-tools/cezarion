@@ -2,7 +2,7 @@ import { execFileSync, type ChildProcess } from 'node:child_process'
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { settleVisual, waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
@@ -81,6 +81,31 @@ async function clickStepControl(selector: string, expected: string): Promise<voi
   expect(now).toBe(expected)
 }
 
+beforeEach(() => {
+  browser.goto(`${baseUrl}${scoped('/')}`)
+  browser.evaluate(`(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (key === 'cez-new-task-draft' || key.startsWith('cez-new-task-draft:')) localStorage.removeItem(key)
+    }
+  })()`)
+})
+
+function proposePlan() {
+  browser.goto(`${baseUrl}${scoped('/new')}`)
+  browser.waitForFunction(`(() => {
+    const source = document.querySelector('[data-slot="source-pill"]')
+    const input = document.querySelector('[data-slot="composer"] textarea')
+    return source !== null && !source.textContent.includes('…') && input !== null && !input.disabled
+  })()`)
+  settleVisual(browser, '[data-slot="mode-plan"]', { idle: true })
+  browser.click('[data-slot="mode-plan"]')
+  browser.waitForFunction(`document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked') === 'true'`)
+  browser.fill('[data-slot="composer"] textarea', 'Tighten the flaky suite end to end.')
+  browser.waitForFunction(`document.querySelector('[aria-label="Plan task"]:not(:disabled)') !== null`)
+  browser.click('[aria-label="Plan task"]')
+  browser.waitForFunction(`document.querySelector('[data-slot="plan-review"]') !== null`)
+}
+
 describe('plan mode against a live dry-run server', () => {
   it('Plan first selects visibly (#383) and submit produces the review overlay, not a run', () => {
     browser.goto(`${baseUrl}${scoped('/')}`)
@@ -154,6 +179,7 @@ describe('plan mode against a live dry-run server', () => {
   }, 90_000)
 
   it('keeps proposed steps and their actions readable on both phone widths and themes', () => {
+    proposePlan()
     for (const width of [1440, 402, 360]) for (const theme of ['light', 'dark']) {
       browser.setViewport(width, 1100)
       browser.evaluate(`document.documentElement.classList.toggle('light', '${theme}' === 'light'); document.documentElement.classList.toggle('dark', '${theme}' === 'dark')`)
@@ -167,6 +193,7 @@ describe('plan mode against a live dry-run server', () => {
   })
 
   it('save as chain lands in /api/v1/workflows; saving again asks before overwriting', async () => {
+    proposePlan()
     browser.click('[data-slot="plan-save"]')
     browser.waitForFunction(`document.querySelector('[data-slot="plan-save-dialog"]') !== null`)
     browser.fill('[aria-label="Chain name"]', 'e2e planned chain')
@@ -198,6 +225,7 @@ describe('plan mode against a live dry-run server', () => {
   }, 90_000)
 
   it('on an iPhone the sheet sits below the mobile shell and the ↑/↓ buttons still reorder', async () => {
+    proposePlan()
     browser.setViewport(390, 844)
     // The reflow must LAND before anything measures or clicks: a click computed against the
     // pre-resize layout dispatches into the gap between cards and silently does nothing.
@@ -210,11 +238,6 @@ describe('plan mode against a live dry-run server', () => {
     expect(rect.x).toBe(0)
     expect(rect.y).toBe(57)
     expect(rect.w).toBe(390)
-
-    // The previous spec's "saved" toast sits over the step cards at this width — 360px of
-    // pointer-events-auto across a 390px viewport. It expires on its own; the reorder below
-    // clicks exactly where it lands, so wait it out rather than click through it.
-    browser.waitForFunction(`document.querySelector('[data-slot="toast"]') === null`)
 
     // Touch-honest reorder: buttons, not drag.
     await clickStepControl(
@@ -231,6 +254,7 @@ describe('plan mode against a live dry-run server', () => {
   })
 
   it('remove + reorder shape the chain; ▶ Start posts those EXACT inline steps and opens the thread', async () => {
+    proposePlan()
     // Desktop again — restored HERE (not at the end of the mobile spec) so a mid-spec failure
     // there can never strand the rest of the file on a phone viewport. The overlay re-centering
     // (x > 0) is the proof the desktop reflow landed — clicks against the stale mobile layout
@@ -269,6 +293,11 @@ describe('plan mode against a live dry-run server', () => {
   }, 90_000)
 
   it('back on /new: plan mode stuck (draft store) and the spent draft text is gone', () => {
+    proposePlan()
+    browser.click('[data-slot="plan-step"]:nth-of-type(2) [data-slot="plan-step-remove"]')
+    browser.waitForFunction(`document.querySelectorAll('[data-slot="plan-step"]').length === 2`)
+    browser.click('[data-slot="plan-start"]')
+    browser.waitForFunction(`location.pathname.startsWith('${scoped('/tasks/')}')`)
     browser.click(`[data-slot="sidebar"] a[href="${scoped('/new')}"]`)
     browser.waitForFunction(`document.querySelector('[data-slot="mode-plan"]') !== null`)
     expect(

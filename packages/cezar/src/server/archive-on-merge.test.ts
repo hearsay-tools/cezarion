@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { ArchivePullRequestIdentity } from '@open-mercato/cezar-contract';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,7 +15,7 @@ afterEach(() => { stores.splice(0).forEach(s => s.close()); dirs.splice(0).forEa
 function fixture(families = 1, prs = 1) {
   const root = mkdtempSync(join(tmpdir(), 'cez-archive-coordinator-')); dirs.push(root);
   const ids = Array.from({ length: families }, () => randomUUID()); const id = ids[0]!; const dataDir = join(root, '.ai/cezar');
-  seedRuns(dataDir, ids.map(id => ({ id, task: 'task', title: 'task', workflow: 'quick-task', status: 'review', steps: [], createdAt: '2026-01-01T00:00:00.000Z', archived: false, tokensUsed: 0, pullRequests: Array.from({ length: prs }, (_, i) => ({ number: 42 + i, source: 'declared' })) })));
+  seedRuns(dataDir, ids.map(id => ({ id, task: 'task', title: 'task', workflow: 'quick-task', status: RUN_STATUS.review, steps: [], createdAt: '2026-01-01T00:00:00.000Z', archived: false, tokensUsed: 0, pullRequests: Array.from({ length: prs }, (_, i) => ({ number: 42 + i, source: 'declared' })) })));
   const store = RunStore.open(dataDir, { keepLive: true, maintenance: true }); stores.push(store);
   let enabled = true;
   const lookup = vi.fn(async (_root: string, identities: ArchivePullRequestIdentity[]) => identities.map(pr => ({ ...pr, mergedAt: '2026-01-02T00:00:00.000Z' })));
@@ -38,7 +39,7 @@ it.each(['disable', 'restore', 'stop', 'continue'] as const)('invalidates late n
   f.lookup.mockImplementationOnce(async (_root: string, identities: ArchivePullRequestIdentity[]) => {
     if (action === 'disable') f.disable();
     if (action === 'restore') { f.store.setArchived(f.id, true); f.store.setArchived(f.id, false); }
-    if (action === 'continue') f.store.updateRun(f.id, { status: 'running' });
+    if (action === 'continue') f.store.updateRun(f.id, { status: RUN_STATUS.running });
     if (action === 'stop') f.coordinator.stop();
     return identities.map(pr => ({ ...pr, mergedAt: '2026-01-02T00:00:00.000Z' }));
   });

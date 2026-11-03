@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -106,9 +107,9 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(json().code).toBe('incompatible_state');
     f.manager.cancel(workerId);
     await f.manager.awaitRunTermination(workerId, 10_000);
-    f.store.updateStep(workerId, 'task', { status: 'done', sessionId: 'previous-session', backend: 'claude' });
+    f.store.updateStep(workerId, 'task', { status: STEP_STATUS.done, sessionId: 'previous-session', backend: 'claude' });
     const generation = f.store.commitWorkerExecutionStart(workerId);
-    f.store.updateRun(workerId, { status: 'done' });
+    f.store.updateRun(workerId, { status: RUN_STATUS.done });
     f.store.commitWorkerExecutionComplete(workerId, generation);
     expect(await runWorkerCommand(['resume', ...args.slice(1)], env)).toBe(0);
     const sent = json();
@@ -233,7 +234,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
   });
   it('can replay the same stable message after an unacknowledged receipt expires', async () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
-    f.store.updateRun(workerId, { status: 'running' });
+    f.store.updateRun(workerId, { status: RUN_STATUS.running });
     const worker = f.credentials.authenticate(f.credentials.issue('project', workerId, randomUUID()))!;
     const id = randomUUID();
     await f.service.send(worker, { id, recipientRunId: f.parent.id, kind: 'progress', text: 'Replay me', timeoutSeconds: 600 });
@@ -312,7 +313,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'review.yaml'), 'name: review\nsteps:\n  - id: inspect\n    prompt: "{{task}}"\n  - id: verify\n    command: "true"\n');
     expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--workflow', 'review', 'work'], env)).toBe(0);
-    expect(f.store.getRun(json().workerId)).toMatchObject({ workflow: 'review', steps: [{ id: 'inspect', kind: 'agent' }, { id: 'verify', kind: 'check' }] });
+    expect(f.store.getRun(json().workerId)).toMatchObject({ workflow: 'review', steps: [{ id: 'inspect', kind: STEP_KIND.agent }, { id: 'verify', kind: STEP_KIND.check }] });
     expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--workflow', '', 'work'], env)).toBe(1);
     expect(json()).toMatchObject({ code: 'invalid_input', error: 'spawn has invalid --workflow' });
     expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--workflow', 'missing', 'work'], env)).toBe(1);

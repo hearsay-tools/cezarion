@@ -78,6 +78,10 @@ const box = (selector: string) => waitForSettledSample(browser, `(() => {
 
 describe('Hand off to webhook', () => {
   it('hands a task off from the desktop dialog with a note', async () => {
+    const reset = await fetch(`${baseUrl}/api/v1/p/${project}/runs/desktop/notify`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ notify: false }),
+    })
+    expect(reset.ok).toBe(true)
     browser.setViewport(1280, 800)
     openThread('desktop')
     browser.click(handoff)
@@ -219,6 +223,10 @@ describe('Hand off to webhook', () => {
   })
 
   it('keeps AA contrast on the dialog text in light and dark', () => {
+    browser.setViewport(360, 640)
+    openThread('mobile')
+    browser.click(handoff)
+    browser.waitForFunction(`document.querySelector(${JSON.stringify(dialog)}) !== null`)
     for (const theme of ['dark', 'light'] as const) {
       applyContrastQaVariant(browser, { id: `mobile-${theme}`, theme, density: 'comfortable', viewport: { width: 360, height: 640 } })
       // `DialogContent` carries `duration-200` with the initial `transition-property: all`, so its
