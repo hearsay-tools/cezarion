@@ -1,7 +1,8 @@
+import { STEP_KIND, STEP_STATUS } from './test-factories.testkit.ts';
 import { describe, expect, it } from 'vitest';
 import { stepStateSchema } from './runs.ts';
 
-const step = { id: 'work', name: 'Work', kind: 'agent', status: 'waiting', iterations: 1, tokensUsed: 0 };
+const step = { id: 'work', name: 'Work', kind: STEP_KIND.agent, status: STEP_STATUS.waiting, iterations: 1, tokensUsed: 0 };
 
 describe('step session transport', () => {
   it('keeps legacy records without a transport tag', () => {

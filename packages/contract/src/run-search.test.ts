@@ -1,3 +1,4 @@
+import { RUN_STATUS } from './test-factories.testkit.ts';
 import { describe, expect, it, vi } from 'vitest';
 import {
   RUN_SEARCH_FIELDS, matchesRunSearch, refNumberFromUrl, searchTokens, sqlPrefilterTokens,
@@ -9,7 +10,7 @@ function summary(over: Partial<RunSummary> = {}): RunSummary {
   return {
     id: '998ad06a-d0ca-44c5-baa3-796cdc700652',
     title: 'Fix the login bug',
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: '2026-10-03T21:09:02.000Z',
     archived: true,
     workflow: '(planned)',
