@@ -2211,7 +2211,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
       });
 
       it('uses no skipped or pending cell — an inapplicable one is a declared exemption', () => {
-        for (const url of [new URL(import.meta.url), new URL('../workflows/worker-parent-attention.test.ts', import.meta.url), new URL('../workflows/monitoring-turn.test.ts', import.meta.url), new URL('./skill-resume-parity.test.ts', import.meta.url)]) {
+        for (const url of [new URL(import.meta.url), new URL('../workflows/worker-parent-attention.testkit.ts', import.meta.url), new URL('../workflows/monitoring-turn.test.ts', import.meta.url), new URL('./skill-resume-parity.test.ts', import.meta.url)]) {
           const source = readFileSync(url, 'utf8');
           expect(source).not.toMatch(/\b(?:it|test|describe)\s*\.\s*(?:skip|todo)\s*\(/);
         }
