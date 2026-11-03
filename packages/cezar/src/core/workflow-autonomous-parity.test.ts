@@ -8,7 +8,7 @@ import { handoffPath } from '../handoff.ts';
 import { MAX_AUTO_CONTINUES } from '../workflows/run.ts';
 import { hasPendingAsk, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { watchTurnOutcomes } from '../workflows/turn-outcomes.testkit.ts';
-import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { WAIT_KIND, WAIT_PHASE, RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 // The settle budget for the row cells below. OpenCode's A5, A11 and A12 cells run
 // MAX_AUTO_CONTINUES turns and take 4.6-4.8 s alone and 5.4-5.9 s in an idle full
@@ -103,8 +103,8 @@ describe('autonomous turn-end parity — #426', () => {
               expect(store.getRun(runId)?.steps.at(-1)?.status).toBe('waiting');
               if (retainedAck) {
                 expect(readPersistedRuns(manager['dataDir'])).toEqual(expect.arrayContaining([
-                  expect.objectContaining({ id: runId, status: 'waiting', steps: expect.arrayContaining([
-                    expect.objectContaining({ id: stepId, status: 'waiting' }),
+                  expect.objectContaining({ id: runId, status: RUN_STATUS.waiting, steps: expect.arrayContaining([
+                    expect.objectContaining({ id: stepId, status: STEP_STATUS.waiting }),
                   ]) }),
                 ]));
                 // The lifecycle event below is the idle close's record; the handoff gets no line (hearsay-tools/cezarion#1809).
