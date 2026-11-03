@@ -1,5 +1,5 @@
 import { reportsIndex, type ReportsIndex } from '../artifacts/reports-index.ts';
-import { stageCommit, stageLoaded, stageDurableUpdate, stageDebouncedUpdate, stageConversation, stageArchiveFields, stagePullRequests, stageStepUpdate, redactPatch, redactText } from './record-write-rules.ts';
+import { stageCommit, stageLoaded, stageDurableUpdate, stageDebouncedUpdate, stageConversation, stageArchiveFields, stagePullRequests, stageStepUpdate, redactPatch, redactText, clearPin } from './record-write-rules.ts';
 import { workerDeletionProof } from './worker-deletion-proof.ts';
 import { listPeerTaskSummaries, parseStoredSummary, type PeerTaskPageOptions } from './run-summary-page.ts';
 export { parseStoredSummary } from './run-summary-page.ts';
@@ -62,6 +62,7 @@ import { extractTaskRefs, isRepoScopedRef, MAX_REF, promptNamesRepo, refUrlRepo 
 import { workflowDefSchema } from '../workflows/types.ts';
 
 import { applyOutcomes, type OutcomeDependencies, type OutcomeReceipt, type RunOutcome } from './outcome-commit.ts';
+import { exitStatus, type RunExitId, type RunPatch } from './run-exits.ts';
 import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
 export { ConversationIdInUseError } from './conversation-identity.ts';
 
@@ -554,22 +555,6 @@ function clearPendingAutoResume(run: RunRecord): void {
   }
   run.autoResumeAt = undefined;
   run.autoResumeAttempts = undefined;
-}
-
-/**
- * Archiving is resigning from a task, so it retires the pin too (#935) — a pin on a task the
- * user has filed away is stale by definition, and the archived view collapses into one bucket
- * anyway, so a surviving pin would be invisible state waiting to surprise whoever unarchives.
- *
- * Here rather than in the pin route for the same reason `clearPendingAutoResume` is here: the
- * bulk "Archive finished" sweep never goes through a route, and it has to obey the rule too.
- *
- * Deleted, not set to `false`: absent is what every reader treats as unpinned, and it is the
- * shape a cezar that has never heard of pins already writes.
- */
-function clearPin(run: RunRecord): void {
-  delete run.pinned;
-  delete run.pinnedAt;
 }
 
 function eventTextFragments(event: Record<string, unknown>): string[] {
@@ -2594,7 +2579,7 @@ export class RunStore extends EventEmitter {
   }
 
   /** Accepted execution revision is public lifecycle identity, separate from process generations. */
-  commitWorkerContinuation(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps' | 'delegation'>>, step?: Pick<StepState, 'id' | 'name' | 'kind' | 'synthetic'>,
+  commitWorkerContinuation(id: string, exit: RunExitId, patch: Omit<RunPatch, 'delegation'> = {}, step?: Pick<StepState, 'id' | 'name' | 'kind' | 'synthetic'>,
     conversation?: { rootId: string; state: ConversationState; input: AgentInput }): void {
     const run = this.peek(id);
     if (run?.delegation?.role !== 'worker') throw new Error('missing worker continuation target');
@@ -2603,7 +2588,7 @@ export class RunStore extends EventEmitter {
       executionStartSeq: this.transcriptFacts(id).lastSeq,
     });
     const staged = new Map<string, RunRecord>();
-    const next: RunRecord = { ...run, ...this.redactPatch(patch), delegation,
+    const next: RunRecord = { ...run, ...this.redactPatch(patch), status: exitStatus(exit, run.status), delegation,
       ...(step ? { steps: [...run.steps, { ...step, status: 'pending' as const, iterations: 0, tokensUsed: 0 }] } : {}),
     };
     staged.set(id, next);
@@ -2907,6 +2892,13 @@ export class RunStore extends EventEmitter {
       const run = this.held.get(id);
       if (run && !this.isAnchor(id, run)) { this.scheduleSave(); return; }
     }
+  }
+
+  /** Move run `id` by `exit` (ADR 0056): its status and `extras` in one `updateRun` write, checked
+   *  against the record that write changes. A run this store cannot write is neither checked nor written. */
+  move(id: string, exit: RunExitId, extras: RunPatch = {}): RunRecord | undefined {
+    const run = this.record(id);
+    return run && this.updateRun(id, { ...extras, status: exitStatus(exit, run.status) });
   }
 
   updateRun(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>): RunRecord | undefined {

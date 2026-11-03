@@ -323,7 +323,7 @@ describe('wait checkpoints', () => {
     store.commitWait(runId, resolved, { ...input(resolved.id), parentRunId: runId });
     store.commitParked(runId, stepId);
     const commits = vi.spyOn(runPersistence(store), 'persist');
-    store.commitOutcome(runId, { kind: 'delivered', inputIds: [resolved.id], at: iso(1_000) }, { patch: { status: RUN_STATUS.running }, resumeStepId: stepId });
+    store.commitOutcome(runId, { kind: 'delivered', inputIds: [resolved.id], at: iso(1_000) }, { exit: 'resume', resumeStepId: stepId });
     expect(commits).toHaveBeenCalledTimes(1);
     const before = store.getRun(runId)!;
     reopen();

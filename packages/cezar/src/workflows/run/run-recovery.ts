@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { HumanWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { hasLiveInboxClaim } from '../../delegation/input.ts';
-import { transition, type RunExitId } from '../../runs/run-exits.ts';
+import type { RunExitId } from '../../runs/run-exits.ts';
 import { holdsOwedResults, isCezarHumanWait, openWaits } from '../waits.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import type { WorkerScratchCleanup } from '../../delegation/scratch-cleanup.ts';
@@ -176,8 +176,8 @@ export class RunRecovery {
       if (!this.host.isActive(run.id) && run.hasPendingPermission) {
         // A permission wait interrupted an unfinished native turn. Route it
         // through interrupted-turn recovery, never the settled-worker fallback.
-        this.context.store.updateRun(run.id, { hasPendingPermission: false,
-          ...(run.status === 'waiting' && !run.stopping && !this.host.workerExecutionStopped(run.id) ? { status: transition('resume', () => this.context.store.getRun(run.id)) } : {}) });
+        if (run.status === 'waiting' && !run.stopping && !this.host.workerExecutionStopped(run.id)) this.context.store.move(run.id, 'resume', { hasPendingPermission: false });
+        else this.context.store.updateRun(run.id, { hasPendingPermission: false });
       }
       this.context.store.clearExpiredInboxClaims(run.id, new Date().toISOString());
       this.host.inboxClaims.armInboxClaimExpiry(run.id);

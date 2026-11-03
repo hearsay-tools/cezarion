@@ -51,7 +51,7 @@ import { AutoResumeScheduler } from './auto-resume.ts';
 import type { RunModuleContext } from './types.ts';
 import * as launchContext from './launch-context.ts';
 import { clearUnreadInputTimer, clearHeldHumanInputTimer } from './input-timers.ts';
-import { type RunExitId } from '../../runs/run-exits.ts';
+import type { RunExitId } from '../../runs/run-exits.ts';
 import { type PreviewHostLike } from '../../preview/registration.ts';
 import { acquireCiResources } from '../../ci-wait/resources.ts';
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
@@ -150,7 +150,7 @@ export interface FacadeHost {
   sendMessage(runId: string, content: PastedContent[], messageId?: string): boolean;
   canClaimInboxInput(runId: string, id: string): boolean;
   builtinSkills(): Skill[];
-  continueRun(runId: string, opts?: ContinueRunOptions, deferForCapacity?: boolean, conversation?: Parameters<RunStore['commitWorkerContinuation']>[3]): { ok: boolean; error?: string };
+  continueRun(runId: string, opts?: ContinueRunOptions, deferForCapacity?: boolean, conversation?: Parameters<RunStore['commitWorkerContinuation']>[4]): { ok: boolean; error?: string };
   recover(familyRootId?: string): Promise<void>;
   dropActive(runId: string): void;
   runContinuation(runId: string, stepId: string, sessionId: string | undefined, backend: RunnerId, prompt: string, images?: PastedContent[], persistedImages?: ContentBlock[], persistedAttachments?: PersistedAttachment[]): Promise<void>;

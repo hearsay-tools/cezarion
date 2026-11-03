@@ -27,7 +27,7 @@ export type ContinueRunOptions = {
 };
 
 export type ContinuationRefusal = { ok: false; error: string };
-export type ContinuationConversation = Parameters<RunStore['commitWorkerContinuation']>[3];
+export type ContinuationConversation = Parameters<RunStore['commitWorkerContinuation']>[4];
 
 export function modelLockRefusal(repoRoot: string, opts: ContinueRunOptions): ContinuationRefusal | undefined {
   if (agentModelsLocked(repoRoot) && (opts.model?.trim() || opts.effort?.trim())) {

@@ -47,7 +47,7 @@ describe('commitOutcome', () => {
     const refusal = input({ purpose: 'completion-refusal' });
     const commits = vi.spyOn(runPersistence(store), 'persist');
     store.commitOutcome(id, [{ kind: 'delivered', inputIds: [wait.id, message.id], at }, { kind: 'charged', automaticWakes: 7 }, { kind: 'counted', waitDeliveryFailures: undefined }],
-      { patch: { status: RUN_STATUS.running }, enqueue: [refusal] });
+      { exit: 'start', enqueue: [refusal] });
     expect(commits).toHaveBeenCalledTimes(1);
     const row = committed();
     expect(row).toMatchObject({ status: RUN_STATUS.running, automaticWakes: 7 });

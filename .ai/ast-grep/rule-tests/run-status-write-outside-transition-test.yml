@@ -2,8 +2,9 @@ id: run-status-write-outside-transition
 valid:
   # The table's entry points.
   - "this.move(runId, 'cancel', { finishedAt })"
-  - "this.store.updateRun(runId, { ...patch, status: transition(exit, () => this.store.getRun(runId)) })"
-  - "this.store.commitOutcome(runId, outcomes, { patch: { status: transition('resume', read) } })"
+  - "this.context.store.move(runId, 'start', { invalidAsk: undefined })"
+  - "this.store.commitOutcome(runId, outcomes, { exit: 'resume', resumeStepId })"
+  - "this.store.commitWorkerContinuation(runId, 'continue-line', acceptedPatch, step)"
   - "transitionVia('park', () => this.store.getRun(runId), () => this.store.commitParked(runId, stepId))"
   - "const cancelled = transitionVia('cancel', read, () => this.store.commitRootFinishCancellation(id))"
   # Step writes, and status fields that are not a run's.

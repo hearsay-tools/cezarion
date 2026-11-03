@@ -386,7 +386,7 @@ describe('RunStore durable delegation', () => {
     const delivered = agentInput('delivered');
     const state = { messages: [], outcomes: [] };
     if (path === 'conversation delivery') store.commitConversation(run.id, state, { recipientRunId: id, input: delivered });
-    else store.commitWorkerContinuation(id, { status: RUN_STATUS.queued, ...(patched ? { agentInputs: patched.map(agentInput) } : {}) },
+    else store.commitWorkerContinuation(id, 'continue-line', patched ? { agentInputs: patched.map(agentInput) } : {},
       undefined, { rootId: run.id, state, input: delivered });
     expect(store.getRun(id)?.agentInputs?.map(entry => entry.text)).toEqual(expected);
     expect(RunStore.open(dataDir, { keepLive: true }).getRun(id)?.agentInputs?.map(entry => entry.text)).toEqual(expected);
@@ -400,7 +400,7 @@ describe('RunStore durable delegation', () => {
     store.createOwnedRun(input, run.id, randomUUID(), metadata, requestHash);
     const delivered = { id: randomUUID(), source: WAIT_SOURCE.agent, parentRunId: run.id, text: 'delivered', createdAt: now };
     const before = store.getRun(id);
-    expect(() => store.commitWorkerContinuation(id, { status: RUN_STATUS.queued, agentInputs: [{ ...delivered, text: 'patched' }] }, undefined,
+    expect(() => store.commitWorkerContinuation(id, 'continue-line', { agentInputs: [{ ...delivered, text: 'patched' }] }, undefined,
       { rootId: run.id, state: { messages: [], outcomes: [] }, input: delivered })).toThrow(ConversationIdInUseError);
     expect(store.getRun(id)).toEqual(before);
   });
@@ -414,7 +414,7 @@ describe('RunStore durable delegation', () => {
     const secret = `session-${randomUUID()}`;
     store.registerSessionSecret(secret);
     const agentInput = (text: string) => ({ id: randomUUID(), source: WAIT_SOURCE.agent, parentRunId: run.id, text, createdAt: now });
-    store.commitWorkerContinuation(id, { status: RUN_STATUS.queued, agentInputs: [agentInput(`patched ${secret}`)] }, undefined,
+    store.commitWorkerContinuation(id, 'continue-line', { agentInputs: [agentInput(`patched ${secret}`)] }, undefined,
       withDelivery ? { rootId: run.id, state: { messages: [], outcomes: [] }, input: agentInput(`delivered ${secret}`) } : undefined);
     store.flush();
     expect(readPersistedText(dataDir)).not.toContain(secret);

@@ -6,7 +6,7 @@ import type { RunRecord, RunStore, StepState } from '../../runs/store.ts';
 import * as continuation from '../continuation-admission.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import { queuedRecoveryInput } from '../run-scheduling.ts';
-import { transition, type RunExitId } from '../../runs/run-exits.ts';
+import type { RunExitId } from '../../runs/run-exits.ts';
 import { contentBlocksOf, type PastedContent } from '../pasted-content.ts';
 import type { WorkflowDef } from '../types.ts';
 import type { RunModuleContext, StartRunInput } from './types.ts';
@@ -141,7 +141,6 @@ export class ContinuationAcceptance {
     // The recoverable status and original input must commit before startup can await anything.
     const acceptedPatch = {
       continuationMessage: continuation.acceptedMessage(message, stepId, prompt, resumeContext, recovered, conversation, opts, deferForCapacity),
-      status: transition(toLine ? 'continue-line' : 'continue-now', () => this.context.store.getRun(runId)),
       error: undefined,
       finishedAt: undefined,
       currentStepId: toLine ? undefined : stepId,
@@ -149,7 +148,7 @@ export class ContinuationAcceptance {
       archived: false,
       archivedAt: undefined,
     };
-    const refusal = this.checkpointContinuation(runId, run, acceptedPatch, continuationStep, conversation);
+    const refusal = this.checkpointContinuation(runId, run, toLine ? 'continue-line' : 'continue-now', acceptedPatch, continuationStep, conversation);
     if (refusal) return refusal;
     if (supersedes) this.workerQuestions.supersedeWorkerFallback(runId);
     // Resolve waits/restart budgets only with or after the dependent answer (hearsay-tools/cezarion#1805).
@@ -159,18 +158,18 @@ export class ContinuationAcceptance {
     return this.dispatchAcceptedContinuation(runId, toLine, stepId, admitted.resumeSessionId, admitted.targetRunner, prompt, images);
   }
 
-  private checkpointContinuation(runId: string, run: RunRecord,
-    acceptedPatch: Parameters<RunStore['commitWorkerContinuation']>[1],
-    continuationStep: Parameters<RunStore['commitWorkerContinuation']>[2],
+  private checkpointContinuation(runId: string, run: RunRecord, exit: 'continue-line' | 'continue-now',
+    acceptedPatch: Parameters<RunStore['commitWorkerContinuation']>[2],
+    continuationStep: Parameters<RunStore['commitWorkerContinuation']>[3],
     conversation: continuation.ContinuationConversation): continuation.ContinuationRefusal | undefined {
     if (run.delegation?.role === 'worker') {
-      try { this.context.store.commitWorkerContinuation(runId, acceptedPatch, continuationStep, conversation); }
+      try { this.context.store.commitWorkerContinuation(runId, exit, acceptedPatch, continuationStep, conversation); }
       catch {
         // No session exists yet. Release the private reservation through execution finalization.
         void this.host.finishWorkerExecution(runId);
         return { ok: false, error: 'worker execution checkpoint unavailable' };
       }
-    } else this.context.store.updateRun(runId, acceptedPatch);
+    } else this.context.store.move(runId, exit, acceptedPatch);
   }
 
   private dispatchAcceptedContinuation(runId: string, toLine: boolean, stepId: string,

@@ -503,7 +503,7 @@ describe('RunStore history compression', () => {
     await store.historyIdle();
     const { plain, compressed } = historyPaths(dir, worker.id);
     expect(existsSync(compressed)).toBe(true);
-    store.commitWorkerContinuation(worker.id, { archived: false, status: RUN_STATUS.queued });
+    store.commitWorkerContinuation(worker.id, 'continue-line', { archived: false });
     expect(existsSync(plain)).toBe(true);
     expect(existsSync(compressed)).toBe(false);
     expect(readHistoryText(dir, worker.id)).toContain('old');

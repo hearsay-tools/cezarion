@@ -3,7 +3,6 @@ import type { RunRecord, RunStore } from '../../runs/store.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { WorkflowDef } from '../types.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
-import { transition } from '../../runs/run-exits.ts';
 import { accountHeldFor } from '../run-scheduling.ts';
 import { loadConfig } from '../../config.ts';
 import { getHeadCommit, getRepoInfo } from '../../server/git.ts';
@@ -87,11 +86,10 @@ export class StepLoop {
     }
     const ownedRun = this.context.store.getRun(runId);
     const owned = ownedRun?.delegation?.role === 'worker' ? ownedRun.delegation.workspace : undefined;
-    this.context.store.updateRun(runId, {
-      // A resumed workflow stays durably queued until its next step is actually
-      // entered. If setup crashes, recovery can replay from `startAt` instead
-      // of treating the previous continuation as the interrupted step.
-      status: transition(startAt > 0 ? 'start-held' : 'start', () => this.context.store.getRun(runId)),
+    // A resumed workflow stays durably queued until its next step is actually
+    // entered. If setup crashes, recovery can replay from `startAt` instead
+    // of treating the previous continuation as the interrupted step.
+    this.context.store.move(runId, startAt > 0 ? 'start-held' : 'start', {
       invalidAsk: undefined,
       startedAt: ownedRun?.startedAt ?? new Date().toISOString(),
       runner: taskBackend,

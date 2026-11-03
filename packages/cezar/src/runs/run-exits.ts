@@ -4,13 +4,19 @@
  * rows in `workflows/run-states.ts` name the exit they take; this module imports nothing from
  * `workflows/`.
  *
- * `run.ts` takes every run status it writes from `transition` or `transitionVia`. Both always read
- * the stored status and check it against the exit's `from`. An undeclared transition is written
- * as before and reported as a violation; nothing throws in the write path. Strict mode
- * (`vitest.setup.ts`) records each violation, and the test setup fails the test after it ran.
- * Outside strict mode each violation is one `console.warn` and nothing is recorded.
+ * `run.ts` writes every run status by applying an exit in the store: `RunStore.move`, or the
+ * `exit` of `commitOutcome` and `commitWorkerContinuation`. Each checks the status of the record
+ * its write changes against the exit's `from` (`exitStatus`). `transitionVia` checks a store
+ * commit that writes a status itself. An undeclared transition is written as before and reported
+ * as a violation; nothing throws in the write path. Strict mode (`vitest.setup.ts`) records each
+ * violation, and the test setup fails the test after it ran. Outside strict mode each violation
+ * is one `console.warn` and nothing is recorded.
  */
 import type { RunRecord, RunStatus } from '@open-mercato/cezar-contract';
+
+/** The fields a write that applies a run exit patches beside it: never the status, which the exit
+ *  writes (`RunStore.move`). */
+export type RunPatch = Partial<Omit<RunRecord, 'id' | 'steps' | 'status'>> & { status?: never };
 
 /** One kind of status write: the statuses it may leave from and the one it writes. */
 export const RUN_EXITS = {
@@ -77,12 +83,12 @@ function checkFrom(exit: RunExitId, from: RunStatus | undefined): void {
 }
 
 /**
- * THE entry point for a run status write in `run.ts`: the status `exit` writes. It reads the
- * stored record and reports an exit that does not leave from its status, then returns the status
- * all the same. A run the store does not hold passes, because the write then writes nothing.
+ * The status `exit` writes onto a run whose status is `from`. The store calls it inside the write
+ * that applies the exit, with the record that write changes. It reports an exit that does not
+ * leave from `from`, then returns the status all the same.
  */
-export function transition<E extends RunExitId>(exit: E, read: ReadStatus): (typeof RUN_EXITS)[E]['to'] {
-  checkFrom(exit, read()?.status);
+export function exitStatus<E extends RunExitId>(exit: E, from: RunStatus): (typeof RUN_EXITS)[E]['to'] {
+  checkFrom(exit, from);
   return RUN_EXITS[exit].to;
 }
 

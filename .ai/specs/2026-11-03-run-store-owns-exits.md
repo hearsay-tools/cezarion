@@ -89,9 +89,9 @@ touches a turn-end, wait or settlement path.
 |---|---|---|---|
 | S0 | Slice 4.4 (Decision 7) | outcome baseline | none |
 | S1 | Move `RUN_EXITS` to `runs/run-exits.ts`; Decision 3 | the throw in the write path | tests only: an undeclared transition now writes, then fails the test |
-| S2 | `RunStore.move(id, exit, extras)`. `RunManager.move` and the five `status: transition(…)` patches call it. `status` leaves `updateRun`'s patch type | `transition()` | none |
+| S2 | `RunStore.move(id, exit, extras)`. `RunManager.move` and the five `status: transition(…)` patches call it; `commitOutcome` and `commitWorkerContinuation` take an exit instead of a status. `status` leaves the patch types of `move`'s extras, `commitWorkerContinuation` and `commitOutcome`'s dependency patch | direct status in the five patches; `transition()` | none |
 | S3 | Decision 5 | `transitionVia`, five commits | none |
-| S4 | Decision 6, including `setLiveStatus` | status rule and baseline | none |
+| S4 | Decision 6, including `setLiveStatus` and the Draft PR route. `status` leaves `updateRun`'s patch type; test fixtures that set a status move to a `setRunStatus` testkit helper | status rule and baseline | none |
 | S5 | Each exit settles the fields all its sites agree on (Table A). A site that does more passes an explicit extra; a site that does less uses a named variant of the exit | hand-written clears in 66 sites | none |
 | S6 | Decision 4 | `WRITE_PATH_RULES` path lists, `UpdateHooks` | none |
 | S7 | Normalize Table B, one commit per row, each with a red test where it fixes a bug | the S5 extras and variants | yes, per row (§ Table B targets) |

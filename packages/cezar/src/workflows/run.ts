@@ -30,7 +30,7 @@ export { makeRunTitle } from '../runs/run-title.ts';
 import { clearHeldHumanInputTimer, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
 import * as workflowPosition from './run/workflow-position.ts';
-import { transition, type RunExitId } from '../runs/run-exits.ts';
+import { RUN_EXITS, type RunExitId, type RunPatch } from '../runs/run-exits.ts';
 import { deriveAccountHolds } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { type PreviewHostLike } from '../preview/registration.ts';
@@ -565,7 +565,7 @@ export class RunManager {
     /** Restart recovery may discover several interrupted tasks at once. Those
      *  continuations are queued; an explicit user Continue remains immediate. */
     deferForCapacity = false,
-    conversation?: Parameters<RunStore['commitWorkerContinuation']>[3],
+    conversation?: Parameters<RunStore['commitWorkerContinuation']>[4],
   ): { ok: boolean; error?: string } {
     // Another process's run (#779, plan step 3) is its owner's to continue.
     const refusal = this.store.writeRefusal(runId);
@@ -700,9 +700,8 @@ export class RunManager {
   }
 
   /** Every run status `run.ts` writes comes from the run state table (hearsay-tools/cezarion#1804). */
-  private move(runId: string, exit: RunExitId, patch: Omit<Parameters<RunStore['updateRun']>[1], 'status'> = {}): RunRecord | undefined {
-    const status = transition(exit, () => this.store.getRun(runId));
-    return this.store.updateRun(runId, { ...patch, ...(status === 'failed' ? settledRootFinishPatch(this.store, runId) : {}), status });
+  private move(runId: string, exit: RunExitId, patch: RunPatch = {}): RunRecord | undefined {
+    return this.store.move(runId, exit, { ...patch, ...(RUN_EXITS[exit].to === 'failed' ? settledRootFinishPatch(this.store, runId) : {}) });
   }
 
   private autosaveCleanupBlocker(runId: string): string | undefined {
