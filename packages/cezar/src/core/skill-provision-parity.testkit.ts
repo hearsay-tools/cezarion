@@ -162,18 +162,20 @@ const PARTS: Readonly<Record<string, readonly string[]>> = {
     "pi R92",
     "pi R96"
   ],
-  "continue-and-slash": [
+  "continue": [
     "claude R93",
-    "claude R95",
     "codex R93",
-    "codex R95",
     "cursor R93",
-    "cursor R95",
     "omp R93",
-    "omp R95",
     "opencode R93",
+    "pi R93"
+  ],
+  "slash-install": [
+    "claude R95",
+    "codex R95",
+    "cursor R95",
+    "omp R95",
     "opencode R95",
-    "pi R93",
     "pi R95"
   ],
   "recovery": [
