@@ -134,7 +134,7 @@ test('report validation and same-file and cross-package policies fail closed', (
   const a = 'packages/demo/src/a.ts'; const b = 'packages/other/src/b.ts';
   const summary = (clones) => summarize(reportRoot, clones);
   const base = summary([]);
-  assert.deepEqual(compare(base, summary([reportedClone(a, a, 100, false)])), []);
+  assert.match(compare(base, summary([reportedClone(a, a, 100, false)]))[0], /New same-file clone/);
   assert.match(compare(base, summary([reportedClone(a, a, 100)]))[0], /New same-file clone/);
   assert.match(compare(base, summary([reportedClone(a, b, 100, false)]))[0], /Cross-package clone/);
   for (const tokens of [undefined, NaN, -1, 0, 1.5]) assert.throws(() => summary([reportedClone(a, a, tokens)]), /Invalid clone accounting/);
@@ -143,7 +143,7 @@ test('report validation and same-file and cross-package policies fail closed', (
   assert.throws(() => summary([bad]), /Invalid clone location/);
 });
 
-test('same-file fingerprints and empty committed trees retain their policy', () => {
+test('same-file token ceilings and empty committed trees retain their policy', () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'clone-self-'));
   const git = (...args) => execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', ...args], { cwd: repo, encoding: 'utf8' }).trim();
   const scan = (base) => spawnSync(process.execPath, [script, '--base', base], { cwd: repo, encoding: 'utf8' });
@@ -164,8 +164,13 @@ test('same-file fingerprints and empty committed trees retain their policy', () 
     fs.writeFileSync(file, code + code.replace('calculate', 'another').replace(' total += values[15] * 52;', ' total = uniqueBoundary(total);'));
     git('add', '.'); git('commit', '-qm', 'recut same-file clone');
     const recut = scan(base);
-    assert.equal(recut.status, 1, recut.stdout + recut.stderr);
-    assert.match(recut.stdout, /New same-file clone/);
+    assert.equal(recut.status, 0, recut.stdout + recut.stderr);
+    const grown = code.replace(' return total;', ' total += values[100] * 137;\n return total;');
+    fs.writeFileSync(file, grown + grown.replace('calculate', 'another'));
+    git('add', '.'); git('commit', '-qm', 'grow same-file clone');
+    const growth = scan(base);
+    assert.equal(growth.status, 1, growth.stdout + growth.stderr);
+    assert.match(growth.stdout, /Clone token increase:.*baseline \d+, head \d+ tokens/);
   } finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
@@ -190,4 +195,39 @@ test('named wait-baseline exception allows only its unordered file pair', () => 
     assert.match(compare(base, summary([reportedClone(first, other, 100)]))[0], /Cross-package clone/);
   }
   assert.match(compare(base, summary([reportedClone('packages/demo/src/a.ts', other, 100)]))[0], /Cross-package clone/);
+});
+
+// hearsay-tools/cezarion#2532: removing a copy can re-cut the remaining clone.
+test('removes one copy of a repeated block without raising same-file tokens', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'clone-remove-copy-'));
+  const git = (...args) => execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', ...args], { cwd: repo, encoding: 'utf8' }).trim();
+  const folder = path.join(repo, 'packages/demo/src');
+  const code = Array.from({ length: 12 }, (_, i) => ` total += values[${i}] * ${i + 37};`).join('\n');
+  const block = (name, suffix = '') => `export function ${name}(values: number[]) {\n let total = 0;\n${code}\n${suffix}\n return total;\n}\n`;
+  try {
+    git('init', '--quiet'); fs.mkdirSync(folder, { recursive: true });
+    const file = path.join(folder, 'self.ts');
+    const remaining = block('second', ' total = finishSecond(total);') + block('third', ' total = finishThird(total);');
+    fs.writeFileSync(file, block('first') + remaining);
+    git('add', '.'); git('commit', '-qm', 'three repeated blocks');
+    const base = git('rev-parse', 'HEAD');
+    fs.writeFileSync(file, remaining);
+    git('add', '.'); git('commit', '-qm', 'remove first copy');
+    const result = spawnSync(process.execPath, [script, '--base', base], { cwd: repo, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('same-file totals ignore fingerprints and cannot borrow another file or pair allowance', () => {
+  const a = 'packages/demo/src/a.ts'; const b = 'packages/demo/src/b.ts';
+  const summary = (clones) => summarize(reportRoot, clones);
+  const base = summary([reportedClone(a, a, 200, false), reportedClone(b, b, 200, false), reportedClone(a, b, 200, false)]);
+  for (const tokens of [199, 200]) {
+    assert.deepEqual(compare(base, summary([reportedClone(a, a, 80), reportedClone(a, a, tokens - 80)])), []);
+  }
+  assert.deepEqual(compare(base, summary([])), []);
+  const growth = compare(base, summary([reportedClone(a, a, 100, false), reportedClone(a, a, 101, false)]));
+  assert.equal(growth.length, 1);
+  assert.match(growth[0], /Clone token increase:.*baseline 200, head 201 tokens/);
+  assert.match(compare(summary([reportedClone(a, b, 200)]), summary([reportedClone(a, a, 50, false)]))[0], /New same-file clone/);
 });

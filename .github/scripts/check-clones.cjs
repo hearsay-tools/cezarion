@@ -68,6 +68,7 @@ function relativeFile(scratch, file) {
 function summarize(scratch, duplicates) {
   const pairs = new Map();
   const forbidden = [];
+  const sameFiles = new Map();
   for (const clone of duplicates) {
     const { firstFile, secondFile, tokens, isNew } = clone;
     const first = relativeFile(scratch, firstFile);
@@ -79,7 +80,9 @@ function summarize(scratch, duplicates) {
         files.includes(first) && files.includes(second));
       if (!excepted) forbidden.push(`Cross-package clone: ${location}`);
     } else if (first === second) {
-      if (isNew) forbidden.push(`New same-file clone: ${location}`);
+      const file = sameFiles.get(first) || { tokens: 0, location };
+      file.tokens += tokens;
+      sameFiles.set(first, file);
     } else {
       const key = JSON.stringify([first, second].sort());
       const pair = pairs.get(key) || { tokens: 0, location };
@@ -87,7 +90,7 @@ function summarize(scratch, duplicates) {
       pairs.set(key, pair);
     }
   }
-  return { pairs, forbidden };
+  return { pairs, sameFiles, forbidden };
 }
 
 function compare(baseline, head) {
@@ -96,6 +99,14 @@ function compare(baseline, head) {
     const previous = baseline.pairs.get(key);
     if (!previous || pair.tokens > previous.tokens) {
       failures.push(`Clone token increase: ${pair.location} (baseline ${previous?.tokens ?? 0}, head ${pair.tokens} tokens)`);
+    }
+  }
+  for (const [name, file] of head.sameFiles) {
+    const previous = baseline.sameFiles.get(name);
+    if (!previous) {
+      failures.push(`New same-file clone: ${file.location}`);
+    } else if (file.tokens > previous.tokens) {
+      failures.push(`Clone token increase: ${file.location} (baseline ${previous.tokens}, head ${file.tokens} tokens)`);
     }
   }
   return failures;
