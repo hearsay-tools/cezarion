@@ -4,9 +4,9 @@ severity: warning
 message: >-
   Take a run status from the run state table (hearsay-tools/cezarion#1804): in RunManager write it
   with this.move(runId, exit, patch), elsewhere with store.move(runId, exit, extras) or the exit
-  argument of commitOutcome and commitWorkerContinuation, and wrap a store commit that writes its
-  own status in transitionVia(exit, read, commit). Declare a new exit
-  in runs/run-exits.ts, or a new trigger in workflows/run-states.ts, first.
+  argument of commitOutcome and commitWorkerContinuation. A status write with a precondition is a
+  guarded exit (a guard and a settle on the exit). Declare a new exit in runs/run-exits.ts, or a
+  new trigger in workflows/run-states.ts, first.
 files:
   - packages/cezar/src/**/*.ts
 ignores:
@@ -28,7 +28,6 @@ utils:
       - kind: pair
       - has: { field: key, regex: '^status$' }
       - has: { field: value, matches: run-status-value }
-  commit-with-status: { regex: '^(commitParked|commitAutoResumeWithdrawal|commitRootFinishCancellation|commitRootFinishSuccess|commitWorkerCancellation)$' }
 rule:
   any:
     # `updateRun(id, { status: 'x' })`, and a continuation patch.
@@ -70,16 +69,5 @@ rule:
         - kind: assignment_expression
         - has: { field: left, kind: member_expression, all: [{ has: { field: object, regex: '^(run|current|next|record|row)$' } }, { has: { field: property, regex: '^status$' } }] }
         - has: { field: right, matches: run-status-value }
-    # A store commit that writes a status it holds, called outside transitionVia.
-    - all:
-        - kind: call_expression
-        - has: { field: function, kind: member_expression, has: { field: property, matches: commit-with-status } }
-        - not: { inside: { stopBy: end, kind: call_expression, has: { field: function, regex: '^transitionVia$' } } }
   # Left out: a step write (`updateStep`, `{ ...step, status }`); a status passed as a variable, or
-  # set on a patch whose name does not end in `patch`; and the five store commits' own bodies,
-  # which the calls wrap.
-  not:
-    inside:
-      stopBy: end
-      kind: method_definition
-      has: { field: name, matches: commit-with-status }
+  # set on a patch whose name does not end in `patch`.

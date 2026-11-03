@@ -3,7 +3,7 @@ import { hasWorkerDeadline, workerWaitEntryToLegacy, isUsageLimitHold, type Dead
 import { DelegationPolicyError } from '../../delegation/policy.ts';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import type { ActiveRun } from '../active-run.ts';
-import { transitionVia, type RunExitId } from '../../runs/run-exits.ts';
+import type { RunExitId } from '../../runs/run-exits.ts';
 import { clearIdleTimer } from './input-timers.ts';
 import { WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE } from './constants.ts';
 import type { RunModuleContext } from './types.ts';
@@ -35,7 +35,7 @@ export class RunCancel {
     const hadWaits = !!this.context.store.getRun(runId)?.waits?.length;
     this.wakeAdmission.cancelOpenWaits(runId);
     const retiredRefusal = this.turnNudges.retireCompletionRefusal(runId);
-    const cancelledFinish = transitionVia('cancel', () => this.context.store.getRun(runId), () => this.context.store.commitRootFinishCancellation(runId));
+    const cancelledFinish = !!this.context.store.move(runId, 'cancel-root');
     // Still waiting in the queue: just drop it there.
     const queuedAt = this.line.indexOf(runId);
     if (queuedAt >= 0) {
@@ -61,7 +61,7 @@ export class RunCancel {
   private cancelWorkerExecution(runId: string): void {
     if (this.context.store.getRun(runId)?.delegation?.role === 'worker') {
       const proof = this.context.store.readWorkerExecution(runId);
-      transitionVia('stop-worker', () => this.context.store.getRun(runId), () => this.context.store.commitWorkerCancellation(runId));
+      this.context.store.move(runId, 'stop-worker');
       this.workerExecutions.markStopped(runId);
       if (!this.workerExecutions.has(runId) && !this.host.active.has(runId) && !this.line.hasStarting(runId) && proof?.phase === 'queued') {
         this.context.store.commitWorkerExecutionComplete(runId, proof.generation);

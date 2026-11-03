@@ -5,8 +5,8 @@ valid:
   - "this.context.store.move(runId, 'start', { invalidAsk: undefined })"
   - "this.store.commitOutcome(runId, outcomes, { exit: 'resume', resumeStepId })"
   - "this.store.commitWorkerContinuation(runId, 'continue-line', acceptedPatch, step)"
-  - "transitionVia('park', () => this.store.getRun(runId), () => this.store.commitParked(runId, stepId))"
-  - "const cancelled = transitionVia('cancel', read, () => this.store.commitRootFinishCancellation(id))"
+  - "this.context.store.move(runId, 'park-release', {}, stepId)"
+  - "const cancelled = !!this.context.store.move(runId, 'cancel-root')"
   # Step writes, and status fields that are not a run's.
   - "this.store.updateStep(runId, stepId, { status: 'done', finishedAt })"
   - "const next = { ...step, status: 'cancelled' }"
@@ -18,8 +18,6 @@ valid:
   # Reads.
   - "if (run.status === 'waiting') park()"
   - "const { status } = run"
-  # A store commit's own body.
-  - "class RunStore { commitParked(id) { this.commitIndex(new Map([[id, { ...run, status: 'waiting' }]])); } }"
 invalid:
   - "this.store.updateRun(runId, { status: 'waiting' })"
   - "this.store.updateRun(run.id, { status: 'failed', error, finishedAt })"
@@ -30,5 +28,4 @@ invalid:
   - "this.store.commitOutcome(runId, outcomes, resumes ? { patch: { status: 'running' } } : {})"
   - "const record = { ...run, status: 'cancelled' as const, finishedAt }"
   - "run.status = 'cancelled'"
-  - "this.store.commitParked(runId, stepId)"
-  - "if (!this.store.commitRootFinishSuccess(runId, 'done')) return"
+  - "class RunStore { commitParked(id) { this.commitIndex(new Map([[id, { ...run, status: 'waiting' }]])); } }"

@@ -62,7 +62,7 @@ import { extractTaskRefs, isRepoScopedRef, MAX_REF, promptNamesRepo, refUrlRepo 
 import { workflowDefSchema } from '../workflows/types.ts';
 
 import { applyOutcomes, type OutcomeDependencies, type OutcomeReceipt, type RunOutcome } from './outcome-commit.ts';
-import { exitStatus, type RunExitId, type RunPatch } from './run-exits.ts';
+import { exitStatus, RUN_EXITS, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
 import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
 export { ConversationIdInUseError } from './conversation-identity.ts';
 
@@ -2449,25 +2449,15 @@ export class RunStore extends EventEmitter {
         ? run.agentInputs : [...(run.agentInputs ?? []), agentInput] } : {}) }]]));
   }
 
-  /** A park that gives up its slot (hearsay-tools/cezarion#1235): the run and its step read
-   *  `waiting`, committed at once instead of on the debounced save, so a refused write throws with
-   *  nothing changed and the caller keeps the slot. */
-  commitParked(id: string, stepId?: string): void {
-    const run = this.peek(id);
-    if (!run) return;
-    this.commitIndex(new Map([[id, { ...run, status: 'waiting', activity: undefined,
-      ...(stepId ? { steps: run.steps.map((step) => step.id === stepId ? { ...step, status: 'waiting' as const } : step) } : {}) }]]));
-  }
-
   /** A usage-limit appointment withdrawn, committed at once instead of on the debounced save
    *  (hearsay-tools/cezarion#1236): a crash right after the withdrawal must not find it on disk,
-   *  or recovery re-arms work the user cancelled. A run held for its resume settles `failed`. */
+   *  or recovery re-arms work the user cancelled. A run held for its resume settles `failed` by
+   *  the `withdraw-hold` exit; any other run only loses its resume fields. */
   commitAutoResumeWithdrawal(id: string): void {
     const run = this.peek(id);
     if (!run || (run.autoResumeAt === undefined && run.autoResumeAttempts === undefined)) return;
-    const held = isUsageLimitHold(run);
-    this.commitIndex(new Map([[id, { ...run, autoResumeAt: undefined, autoResumeAttempts: undefined,
-      ...(held ? { status: 'failed' as const, finishedAt: new Date().toISOString() } : {}) }]]));
+    if (isUsageLimitHold(run)) this.move(id, 'withdraw-hold');
+    else this.commitIndex(new Map([[id, { ...run, autoResumeAt: undefined, autoResumeAttempts: undefined }]]));
   }
 
   /** Legacy CI checkpoint over `commitWait`, kept until its callers move (unified waits, Task 4). */
@@ -2522,32 +2512,6 @@ export class RunStore extends EventEmitter {
     if (run?.status !== 'waiting' || run.delegation?.role !== 'root') throw new Error('root is not waiting');
     if (run.delegation.finishRequestedAt) return;
     this.commitDelegation([{ id, delegation: { ...run.delegation, finishRequestedAt: new Date().toISOString() } }]);
-  }
-
-  /** Cancellation supersedes pending Finish in one durable checkpoint. Also
-   * repairs cancelled-plus-intent snapshots left by older controllers. */
-  commitRootFinishCancellation(id: string): boolean {
-    const run = this.peek(id);
-    if (run?.delegation?.role !== 'root' || !run.delegation.finishRequestedAt ||
-      !['waiting', 'cancelled'].includes(run.status)) return false;
-    const { finishRequestedAt: _intent, ...delegation } = run.delegation;
-    this.commitIndex(new Map([[id, { ...run, delegation, status: 'cancelled' as const, finishedAt: run.finishedAt ?? new Date().toISOString() }]]));
-    return true;
-  }
-
-  /** Publish terminal success and completed steps only after their atomic checkpoint.
-   * A concurrent explicit cancellation is never overwritten by the async diff. */
-  commitRootFinishSuccess(id: string, status: 'done' | 'review'): boolean {
-    const run = this.peek(id);
-    if (run?.status !== 'waiting' || run.delegation?.role !== 'root' || !run.delegation.finishRequestedAt) return false;
-    const { finishRequestedAt: _intent, ...delegation } = run.delegation;
-    const finishedAt = new Date().toISOString();
-    this.commitIndex(new Map([[id, { ...run, delegation, status, finishedAt, currentStepId: undefined, autoResumeAttempts: undefined,
-      activity: undefined,
-      steps: run.steps.map(step => step.status === 'waiting' || step.status === 'running'
-        ? { ...step, status: 'done' as const, finishedAt: step.finishedAt ?? finishedAt } : step),
-    }]]));
-    return true;
   }
 
   /** Persist all authority patches before exposing any of them to the engine or subscribers. */
@@ -2895,10 +2859,23 @@ export class RunStore extends EventEmitter {
   }
 
   /** Move run `id` by `exit` (ADR 0056): its status and `extras` in one `updateRun` write, checked
-   *  against the record that write changes. A run this store cannot write is neither checked nor written. */
-  move(id: string, exit: RunExitId, extras: RunPatch = {}): RunRecord | undefined {
-    const run = this.record(id);
-    return run && this.updateRun(id, { ...extras, status: exitStatus(exit, run.status) });
+   *  against the record that write changes. A run this store cannot write is neither checked nor
+   *  written. A guarded exit (one with `settle`) commits at once instead, and writes nothing when
+   *  its guard fails: undefined, or its `refused` error. `stepId` names the step its settle sets. */
+  move(id: string, exit: RunExitId, extras: RunPatch = {}, stepId?: string): RunRecord | undefined {
+    const spec: RunExitSpec = RUN_EXITS[exit];
+    if (!spec.settle) {
+      const run = this.record(id);
+      return run && this.updateRun(id, { ...extras, status: exitStatus(exit, run.status) });
+    }
+    const run = this.peek(id);
+    if (!run || (spec.guard && !spec.guard(run))) {
+      if (spec.refused) throw new Error(spec.refused);
+      return undefined;
+    }
+    const settled = spec.settle({ ...run, ...this.redactPatch(extras) }, { now: new Date().toISOString(), stepId });
+    this.commitIndex(new Map([[id, { ...settled, status: exitStatus(exit, run.status) }]]));
+    return this.peek(id);
   }
 
   updateRun(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>): RunRecord | undefined {
@@ -3846,13 +3823,6 @@ export class RunStore extends EventEmitter {
       this.emit('run', this.peek(id)!);
       return true;
     } catch { return false; }
-  }
-
-  /** Cancellation must hit disk before queued no-start evidence authorizes cleanup. */
-  commitWorkerCancellation(id: string): void {
-    const run = this.peek(id);
-    if (run?.delegation?.role !== 'worker') throw new Error('Worker not found');
-    this.commitIndex(new Map([[id, { ...run, status: 'cancelled' as const, finishedAt: new Date().toISOString() }]]));
   }
 
   /** Complete replacement evidence can stand in for absent child history, never for a present execution. */

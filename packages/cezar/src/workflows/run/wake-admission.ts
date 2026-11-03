@@ -9,7 +9,7 @@ import { accountHeldFor, sessionlessWakePrompt } from '../run-scheduling.ts';
 import { executionAccount } from '../execution-account.ts';
 import { chargesBudgetMessage, isMonitoringTimer, openWaits, resolvedWaits, waitInputId, waitResultText } from '../waits.ts';
 import { runsAwaitingPeer } from '../wait-scope.ts';
-import { transitionVia, type RunExitId } from '../../runs/run-exits.ts';
+import type { RunExitId } from '../../runs/run-exits.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import type { ActiveRun } from '../active-run.ts';
 import { liveSubagents } from './subagent-waits.ts';
@@ -176,7 +176,7 @@ export class WakeAdmission {
     if (keepsSlot) {
       this.host.move(runId, 'park');
       if (state.currentStepId) this.context.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
-    } else transitionVia('park', () => this.context.store.getRun(runId), () => this.context.store.commitParked(runId, state.currentStepId));
+    } else this.context.store.move(runId, 'park-release', {}, state.currentStepId);
     this.host.line.park(runId);
     if (keepsSlot) this.host.line.joinPool(runId); else this.leaveMonitoringPool(runId);
     if (!holdsSubagents && (top === 'workers' || top === 'peers')) this.host.armIdleTimer(runId, state);

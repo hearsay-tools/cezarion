@@ -321,7 +321,7 @@ describe('wait checkpoints', () => {
     const runId = store.createRun({ title: 'Waits', workflow: 'quick-task', task: 'wait', steps: [{ id: stepId, name: 'main', kind: STEP_KIND.agent }] }).id;
     const resolved = timerEntry({ phase: WAIT_PHASE.resolved, resolvedAt: iso(0) });
     store.commitWait(runId, resolved, { ...input(resolved.id), parentRunId: runId });
-    store.commitParked(runId, stepId);
+    store.move(runId, 'park-release', {}, stepId);
     const commits = vi.spyOn(runPersistence(store), 'persist');
     store.commitOutcome(runId, { kind: 'delivered', inputIds: [resolved.id], at: iso(1_000) }, { exit: 'resume', resumeStepId: stepId });
     expect(commits).toHaveBeenCalledTimes(1);
