@@ -7,7 +7,7 @@ import { enqueueAgentInput, hasLiveInboxClaim } from '../../delegation/input.ts'
 import { recordRequestRefusal, type CompletionRefusal } from '../completion-policy.ts';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_NUDGE, stepScopedNudge, type TurnEndOutcome } from '../turn-end.ts';
 import type { ActiveRun } from '../active-run.ts';
-import type { RunExitId } from '../run-states.ts';
+import type { RunExitId } from '../../runs/run-exits.ts';
 import { clearIdleTimer, clearNoWaitNudgeReplyTimer, harnessOwesInput } from './input-timers.ts';
 import { hasPendingHumanAsk, pendingHumanAskSeq } from './pending-ask-facts.ts';
 import * as completionGateReads from './completion-gate.ts';

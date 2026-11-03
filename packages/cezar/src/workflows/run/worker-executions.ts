@@ -1,6 +1,6 @@
 import type { AgentSession } from '../../core/claude-cli-runner.ts';
 import { sessionGroupOf } from '../../core/session-process.ts';
-import { transitionVia } from '../run-states.ts';
+import { transitionVia } from '../../runs/run-exits.ts';
 import type { RunModuleContext } from './types.ts';
 import type { WorkerOrphans } from './worker-orphans.ts';
 

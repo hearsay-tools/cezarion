@@ -1,6 +1,7 @@
 'use strict';
 // All consumers use this live reader. Native Actions checks remain the protected
-// checks; CodeRabbit's success only proves execution, never finding settlement.
+// checks; success or the exact trusted no-files decision supplies provider
+// admission. Neither decision proves finding settlement.
 const { reader, pages, validSha, positive, newest } = require('./queue-ci-proof.cjs');
 const { listReviewThreads } = require('./review-threads.cjs');
 const { isBotReleaseBumpPr, isAppUpstreamScanPr, filesAreVersionStampsOnly } = require('./release-bump-pr.cjs');
@@ -60,18 +61,35 @@ async function providerCheck(read, head) {
   return newest(candidates);
 }
 const fingerprint = check => JSON.stringify(check && [check.id, check.head_sha, check.status, check.conclusion,
-  check.started_at, check.completed_at, check.app.id, check.app.slug, check.name]);
+  check.started_at, check.completed_at, check.app.id, check.app.slug, check.name, check.output?.title]);
 function stablePull(pr, final, fullName, pullNumber, head) {
   return validPull(final, fullName, pullNumber, head) && final.base.sha === pr.base.sha
     && final.changed_files === pr.changed_files && final.head.ref === pr.head.ref && final.user?.login === pr.user?.login
     && final.head.repo.full_name === pr.head.repo.full_name;
 }
+function providerState(check) {
+  if (!check) return 'missing';
+  if (['queued', 'in_progress'].includes(check.status)) return 'pending';
+  if (check.status !== 'completed') return 'unknown';
+  if (check.conclusion === 'skipped' && check.output?.title === 'No files to review') return 'no-files';
+  return ['success', 'skipped', 'neutral', 'failure', 'cancelled', 'timed_out', 'action_required', 'stale']
+    .includes(check.conclusion) ? check.conclusion : 'unknown';
+}
+function providerAction(state, openThreads) {
+  const actions = openThreads ? ['Resolve every open review thread.'] : [];
+  if (state === 'pending') actions.push('Wait for the current CodeRabbit execution to complete.');
+  else if (!['success', 'no-files', 'exception'].includes(state)) {
+    actions.push('Inspect the trusted CodeRabbit check and App installation; repair the provider or request @coderabbitai full review manually.');
+  }
+  return actions.join(' ');
+}
 function admissionResult(check, exception, threads, head) {
   const openThreads = threads.filter(t => !t.isResolved).length;
-  const executed = exception || (check?.status === 'completed' && check.conclusion === 'success');
-  return { admitted: Boolean(executed && openThreads === 0), head, checkId: check?.id ?? null, exception,
-    providerPending: !exception && (!check || ['queued', 'in_progress'].includes(check.status)),
-    reason: openThreads ? 'unresolved-threads' : executed ? 'admitted' : check ? 'provider-not-successful' : 'provider-missing' };
+  const state = exception ? 'exception' : providerState(check);
+  const accepted = ['exception', 'success', 'no-files'].includes(state);
+  return { admitted: Boolean(accepted && openThreads === 0), head, checkId: check?.id ?? null, exception,
+    providerState: state, action: providerAction(state, openThreads),
+    reason: openThreads ? 'unresolved-threads' : accepted ? 'admitted' : `provider-${state}` };
 }
 async function readCodeRabbitAdmission({ github, owner, repo, pullNumber, head, releaseAppBotLogin,
   now = Date.now, deadline = now() + 60000 }) {

@@ -45,7 +45,7 @@ import { existsSync } from 'node:fs';
 import type { RunRecord, StepState } from '../../runs/store.ts';
 import { rematerializeReclaimedWorktree } from '../../runs/retention.ts';
 import { ownedContinuationWorkspace } from './run-workspace.ts';
-import type { RunExitId } from '../run-states.ts';
+import type { RunExitId } from '../../runs/run-exits.ts';
 import type { RunLine } from './run-line.ts';
 import type { RunModuleContext, WorkerDelegationRecord } from './types.ts';
 

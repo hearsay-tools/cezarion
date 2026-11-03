@@ -30,7 +30,7 @@ export { makeRunTitle } from '../runs/run-title.ts';
 import { clearHeldHumanInputTimer, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
 import * as workflowPosition from './run/workflow-position.ts';
-import { transition, type RunExitId } from './run-states.ts';
+import { transition, type RunExitId } from '../runs/run-exits.ts';
 import { deriveAccountHolds } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { type PreviewHostLike } from '../preview/registration.ts';

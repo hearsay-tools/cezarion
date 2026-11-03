@@ -3,7 +3,7 @@ import { hasWorkerDeadline, workerWaitEntryToLegacy, isUsageLimitHold, type Dead
 import { DelegationPolicyError } from '../../delegation/policy.ts';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import type { ActiveRun } from '../active-run.ts';
-import { transitionVia, type RunExitId } from '../run-states.ts';
+import { transitionVia, type RunExitId } from '../../runs/run-exits.ts';
 import { clearIdleTimer } from './input-timers.ts';
 import { WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE } from './constants.ts';
 import type { RunModuleContext } from './types.ts';

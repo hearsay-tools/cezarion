@@ -51,7 +51,7 @@ import { AutoResumeScheduler } from './auto-resume.ts';
 import type { RunModuleContext } from './types.ts';
 import * as launchContext from './launch-context.ts';
 import { clearUnreadInputTimer, clearHeldHumanInputTimer } from './input-timers.ts';
-import { type RunExitId } from '../run-states.ts';
+import { type RunExitId } from '../../runs/run-exits.ts';
 import { type PreviewHostLike } from '../../preview/registration.ts';
 import { acquireCiResources } from '../../ci-wait/resources.ts';
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';

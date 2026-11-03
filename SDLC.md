@@ -45,10 +45,12 @@ by hand. The [board binding](AGENTS.md#dev-flow-bindings) holds the details.
 Readiness uses fresh evidence from the current head for every event, including
 human draft or ready changes. CodeRabbit reviews drafts and incremental pushes
 automatically, without a label filter or auto-pause. After preflight, the native
-`Automated Code Review` gate requires successful current-head execution from the
-trusted CodeRabbit App and resolved review threads before heavy verification.
-Readiness and queue admission also read that evidence. After manually reopening
-or resolving a thread, dispatch **Reconcile CodeRabbit admission** with
+`Automated Code Review` gate requires the newest trusted CodeRabbit check on the
+live head to report success or skipped with exact title `No files to review`,
+and requires every review thread resolved before heavy verification. The named
+skip is a provider decision; it does not prove model execution. Readiness and
+queue admission read the same evidence. CI requests no model review. After
+manually reopening or resolving a thread, dispatch **Reconcile CodeRabbit admission** with
 `pr_number`, then **PR Readiness** if draft state needs refreshing. Manual thread
 changes do not emit a workflow event. Fork PRs retain their author's draft state
 and need a maintainer's native review-job rerun. See

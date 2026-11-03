@@ -152,7 +152,7 @@ row's value when the thing it names changes, rather than its label.
 | Issue tracker | GitHub Issues |
 | Stack | TypeScript (Node ≥24.21.0), pnpm workspaces (npm script metadata retained); Hono + Zod server; React 19 + Vite + Tailwind v4 cockpit |
 | Verification | Local: Squeal when installed and validating, otherwise focused npm checks. Full gate in CI: `npm run typecheck`, `npm test -- --shard=N/4 --maxWorkers=4` (N=1..4), `npm run test:unit`, `npm run build`, `npm run test:package`, `npm run test:e2e` |
-| Automated reviewer | CodeRabbit App (`347564`, `coderabbitai`), automatic draft/incremental reviews via `.coderabbit.yaml`. The native `Automated Code Review` job requires fresh execution and resolved threads; see `docs/sdlc/ci.md`. |
+| Automated reviewer | CodeRabbit App (`347564`, `coderabbitai`), automatic draft/incremental reviews via `.coderabbit.yaml`. The native `Automated Code Review` job requires fresh admission and resolved threads; see `docs/sdlc/ci.md`. |
 | Review recovery | `Reconcile CodeRabbit admission` reacts to provider/CI/review events. For eventless thread changes, dispatch it with `pr_number`; it reruns only the native review gate. No model dispatch or round cap. |
 | Commit convention | Conventional Commits |
 | Specs and plans | `.ai/specs/`, `.ai/specs/` (tracked; new files are `YYYY-MM-DD-<slug>.md`, and plans end in `-plan.md`) |

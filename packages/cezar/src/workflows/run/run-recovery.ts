@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { HumanWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { hasLiveInboxClaim } from '../../delegation/input.ts';
-import { transition, type RunExitId } from '../run-states.ts';
+import { transition, type RunExitId } from '../../runs/run-exits.ts';
 import { holdsOwedResults, isCezarHumanWait, openWaits } from '../waits.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import type { WorkerScratchCleanup } from '../../delegation/scratch-cleanup.ts';

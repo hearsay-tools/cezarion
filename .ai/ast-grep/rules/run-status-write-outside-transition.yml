@@ -5,7 +5,7 @@ message: >-
   Take a run status from the run state table (hearsay-tools/cezarion#1804): in RunManager write it
   with this.move(runId, exit, patch), set a patch's status with transition(exit, read), and wrap a
   store commit that writes its own status in transitionVia(exit, read, commit). Declare a new exit
-  or trigger in workflows/run-states.ts first.
+  in runs/run-exits.ts, or a new trigger in workflows/run-states.ts, first.
 files:
   - packages/cezar/src/**/*.ts
 ignores:

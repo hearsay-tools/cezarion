@@ -21,7 +21,7 @@ test('native workflow waits for a missing, queued and running review and passes 
   };
   const ci = yaml.parse(fs.readFileSync(path.join(__dirname, '../workflows/ci.yml'), 'utf8'));
   const gate = ci.jobs['review-result'];
-  const script = gate.steps.find(s => s.name === 'Require fresh CodeRabbit execution and resolved threads').with.script;
+  const script = gate.steps.find(s => s.name === 'Require fresh CodeRabbit admission and resolved threads').with.script;
   const load = relative => relative.endsWith('/coderabbit-wait.cjs')
     ? { waitForCodeRabbitAdmission: args => wait(h, { ...args, sleep }) }
     : require(path.resolve(__dirname, '../..', relative));
@@ -57,6 +57,17 @@ for (const conclusion of ['success', 'failure', 'skipped', 'neutral', 'cancelled
     assert.equal(result.admitted, conclusion === 'success');
   });
 }
+
+test('trusted no-files admission returns immediately and still requires resolved threads', async () => {
+  const h = fixture(); h.s.checks[0].conclusion = 'skipped';
+  h.s.checks[0].output = { title: 'No files to review' };
+  const sleep = async () => assert.fail('accepted no-files decision cannot wait');
+  assert.equal((await wait(h, { sleep })).admitted, true);
+  h.s.threads = [{ id: 'outdated', isResolved: false, isOutdated: true }];
+  const blocked = await wait(h, { sleep });
+  assert.equal(blocked.admitted, false);
+  assert.equal(blocked.reason, 'unresolved-threads');
+});
 
 for (const state of ['missing', 'queued', 'in_progress']) {
   test(`persistent ${state} review reaches the fixed deadline and blocks admission`, async () => {

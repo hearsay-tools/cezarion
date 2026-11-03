@@ -19,7 +19,7 @@ async function waitForCodeRabbitAdmission({ now = Date.now, sleep = delay, log =
       if (error.message !== 'Review evidence changed while reading') throw error;
       log('CodeRabbit evidence changed during the read; checking fresh evidence.');
     }
-    if (admission && !admission.providerPending) return admission;
+    if (admission && !['missing', 'pending'].includes(admission.providerState)) return admission;
     const remaining = deadline - now();
     if (remaining <= 0) break;
     log('Waiting for the current CodeRabbit execution; heavy verification remains blocked.');
