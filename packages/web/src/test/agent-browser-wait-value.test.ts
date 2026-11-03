@@ -2,7 +2,7 @@
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentBrowser, WaitForValueError, configureFailureCapture } from '../../e2e/agent-browser'
 import { waitForSettledSample } from '../../e2e/visual-ready'
 import { dismissWithEscape, focusWithKeyboard, hoverVisiblePoint } from '../../e2e/contrast'
@@ -75,6 +75,10 @@ function fakeBrowser(results: unknown[]) {
 
 const fakes: Array<{ browser: AgentBrowser; dispose: () => void }> = []
 const savedTimeout = process.env.AGENT_BROWSER_DEFAULT_TIMEOUT
+beforeEach(() => {
+  vi.stubEnv('AGENT_BROWSER_ARGS', '')
+  vi.stubEnv('AGENT_BROWSER_CONFIG', undefined)
+})
 afterEach(() => {
   for (const fake of fakes.splice(0)) {
     fake.browser.close()
@@ -83,6 +87,7 @@ afterEach(() => {
   configureFailureCapture({ root: undefined, spec: undefined, test: undefined })
   if (savedTimeout === undefined) delete process.env.AGENT_BROWSER_DEFAULT_TIMEOUT
   else process.env.AGENT_BROWSER_DEFAULT_TIMEOUT = savedTimeout
+  vi.unstubAllEnvs()
 })
 function open(results: unknown[]) {
   const fake = fakeBrowser(results)

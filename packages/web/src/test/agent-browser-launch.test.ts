@@ -1,6 +1,34 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { browserSpawnPlan } from '../../e2e/agent-browser'
+import { captureLaunchArguments } from '../../e2e/browser-launch'
+
+describe('provider launch configuration', () => {
+  it('keeps user config args, explicit config precedence, and explicit empty overrides', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cez-launch-config-'))
+    try {
+      mkdirSync(join(home, '.agent-browser'))
+      writeFileSync(join(home, '.agent-browser', 'config.json'), JSON.stringify({ args: '--user-flag' }))
+      const explicit = join(home, 'explicit.json')
+      writeFileSync(explicit, JSON.stringify({ args: '--explicit-flag' }))
+      const env = { HOME: home }
+      expect(captureLaunchArguments({}, env)).toEqual(['--user-flag'])
+      expect(captureLaunchArguments({}, { ...env, AGENT_BROWSER_CONFIG: explicit })).toEqual(['--explicit-flag'])
+      expect(captureLaunchArguments({}, { ...env, AGENT_BROWSER_ARGS: '' })).toEqual([])
+      expect(captureLaunchArguments({ launchArgs: ['--descriptor'] }, env)).toEqual(['--descriptor'])
+      expect(captureLaunchArguments({}, { ...env, AGENT_BROWSER_ARGS: '--environment' })).toEqual(['--environment'])
+      writeFileSync(explicit, '{')
+      expect(() => captureLaunchArguments({}, { ...env, AGENT_BROWSER_CONFIG: explicit })).toThrow('cannot read agent-browser config')
+      writeFileSync(join(home, '.agent-browser', 'config.json'), '{')
+      expect(captureLaunchArguments({}, env)).toEqual([])
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+})
 
 describe('browserSpawnPlan', () => {
   it('passes the resolved container args and keeps a short caller TMPDIR', () => {

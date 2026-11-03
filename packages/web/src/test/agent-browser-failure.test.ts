@@ -2,7 +2,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AgentBrowser,
   configureFailureCapture,
@@ -66,6 +66,10 @@ function fakeBrowser(pageScript?: string, evalError = false) {
 }
 
 const fakes: Array<{ browser: AgentBrowser; dispose: () => void }> = []
+beforeEach(() => {
+  vi.stubEnv('AGENT_BROWSER_ARGS', '')
+  vi.stubEnv('AGENT_BROWSER_CONFIG', undefined)
+})
 afterEach(() => {
   // Close before disposing: a seam left open stays on the attached stack and would be what the
   // next test's `lastAttachedBrowser()` finds.
@@ -74,6 +78,7 @@ afterEach(() => {
     fake.dispose()
   }
   configureFailureCapture({ root: undefined, spec: undefined, test: undefined })
+  vi.unstubAllEnvs()
 })
 function open(pageScript?: string, evalError = false) {
   const fake = fakeBrowser(pageScript, evalError)

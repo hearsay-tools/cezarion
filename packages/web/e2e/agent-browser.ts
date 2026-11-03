@@ -1,4 +1,4 @@
-import { sessionLaunchArguments } from './browser-launch'
+import { captureLaunchArguments, sessionLaunchArguments } from './browser-launch'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -523,7 +523,7 @@ export class AgentBrowser {
     if (!browser.installed) {
       throw new Error(`cezar e2e: the agent-browser provider is not installed (${browser.notes})`)
     }
-    const seam = new AgentBrowser(browser.command, session, { ...browser, launchArgs: sessionLaunchArguments(browser, process.env) })
+    const seam = new AgentBrowser(browser.command, session, { ...browser, launchArgs: captureLaunchArguments(browser, process.env) })
     attached.push(seam)
     return seam
   }

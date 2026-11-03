@@ -2,7 +2,7 @@
 import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentBrowser, configureFailureCapture, OPEN_OVERLAY_PROBE } from '../../e2e/agent-browser'
 import { resetBrowserPage } from '../../e2e/browser-page'
 
@@ -61,6 +61,10 @@ function fakeBrowser(opts: { waitFails?: boolean; tabTarget?: unknown; evalResul
 }
 
 const fakes: Array<{ dispose: () => void }> = []
+beforeEach(() => {
+  vi.stubEnv('AGENT_BROWSER_ARGS', '')
+  vi.stubEnv('AGENT_BROWSER_CONFIG', undefined)
+})
 afterEach(() => {
   for (const fake of fakes.splice(0)) fake.dispose()
   configureFailureCapture({ root: undefined })
@@ -73,6 +77,22 @@ function open(opts?: { waitFails?: boolean; tabTarget?: unknown; evalResult?: un
 }
 
 describe('AgentBrowser auto-wait (#405)', () => {
+  it('captures provider config arguments before later setup changes the config and environment', () => {
+    vi.stubEnv('AGENT_BROWSER_ARGS', '')
+    const fixture = open()
+    const config = join(fixture.dir, 'provider.json')
+    writeFileSync(config, JSON.stringify({ args: '--force-device-scale-factor=2' }))
+    vi.stubEnv('AGENT_BROWSER_ARGS', undefined)
+    vi.stubEnv('AGENT_BROWSER_CONFIG', config)
+    const session = open()
+    writeFileSync(config, JSON.stringify({ args: '--force-device-scale-factor=1' }))
+    vi.stubEnv('AGENT_BROWSER_ARGS', '--blink-settings=primaryHoverType=2')
+    session.browser.goto('about:blank')
+    const calls = readFileSync(join(session.dir, 'calls.ndjson'), 'utf8').trim().split('\n')
+      .map(line => JSON.parse(line) as string[])
+    expect(calls.every(args => args[0] === '--args' && args[1] === '--force-device-scale-factor=2')).toBe(true)
+  })
+
   it('keeps launch arguments owned by the session when another setup changes the environment', () => {
     vi.stubEnv('AGENT_BROWSER_ARGS', '')
     const first = open()
