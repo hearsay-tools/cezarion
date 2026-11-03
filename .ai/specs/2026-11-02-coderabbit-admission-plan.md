@@ -20,9 +20,12 @@ for preflight and the native protected review job. No model commands or PAT fall
 2. Keep protected check names and native CI provenance. Replace the reusable model
    workflow with a read-only native `review-result`. Keep heavy dependencies and queue,
    push reuse, snapshot publication and verified bot skip guarantees.
-3. Reconcile genuine provider created/completed events, native CI completion and review
-   events. Discover open main PRs and create independent trusted PR jobs; ignore forks, require
-   newest native run/attempt and successful preflight. Re-read before rerunning only
+3. Reconcile genuine provider creation/completion, native CI completion and review
+   events. Select at most four validated event-associated PRs. Only an empty provider
+   association uses a bounded inventory lookup for matching current heads. Manual
+   `pr_number` dispatch recovers dropped or eventless changes. Create independent
+   trusted PR jobs; ignore forks, require newest native run/attempt and successful
+   preflight. Re-read before rerunning only
    the completed native review job when admission differs. Serialize per discovered PR,
    never retry ambiguous writes. No-op once outcomes agree. Limit to GitHub's 30-day,
    50-attempt rerun window. Manual `pr_number` handles eventless thread reopening and resolution.
