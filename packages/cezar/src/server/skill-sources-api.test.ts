@@ -6,7 +6,7 @@ import type { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SKILLS_REPO_FORMATS, type TeamSkillSourcesResponse } from '@open-mercato/cezar-contract/skill-sources';
 import { RunStore } from '../runs/store.ts';
-import { waitForTeamSkills } from '../skills-remote.ts';
+import { bareDirFor, waitForTeamSkills } from '../skills-remote.ts';
 import type { Skill } from '../skills.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -229,6 +229,21 @@ describe('the team skill sources API', () => {
       state: 'error',
       cause: 'ref-not-found',
       detail: `The ref "${sha}" was not found in ${repo}.`,
+      skillCount: 0,
+    });
+  });
+
+  it('a tree listing git cannot read is a failure with Retry, not an empty ok source', async () => {
+    const repo = sourceRepo('greet');
+    await add({ repo });
+    const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: repo, encoding: 'utf8' }).trim();
+    rmSync(join(bareDirFor(repo), 'objects', tree.slice(0, 2), tree.slice(2)));
+    expect((await send('PATCH', '/skills/sources', { repo, ref: 'main', enabled: false })).status).toBe(200);
+    expect((await send('PATCH', '/skills/sources', { repo, ref: 'main', enabled: true })).status).toBe(200);
+    expect((await sources()).sources[0]?.status).toEqual({
+      state: 'error',
+      cause: 'fetch-failed',
+      detail: `git could not list the skills of ${repo} at main.`,
       skillCount: 0,
     });
   });

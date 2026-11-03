@@ -242,8 +242,9 @@ export async function listRemoteSkills(src: SkillsRepoRef): Promise<Skill[]> {
   return (await listRemoteSource(src)).skills;
 }
 
-/** Why a listing came back empty: no clone on disk yet, or a ref the clone cannot resolve. */
-type ListProblem = 'no-clone' | 'ref-not-found' | null;
+/** Why a listing came back empty: no clone on disk yet, a ref the clone cannot resolve, or a
+ *  `git ls-tree` that failed on a resolved ref. */
+type ListProblem = 'no-clone' | 'ref-not-found' | 'list-failed' | null;
 
 async function listRemoteSource(src: SkillsRepoRef): Promise<{ skills: Skill[]; problem: ListProblem }> {
   const bareDir = bareDirFor(src.repo);
@@ -254,7 +255,7 @@ async function listRemoteSource(src: SkillsRepoRef): Promise<{ skills: Skill[]; 
   if (commit === null) return { skills: [], problem: 'ref-not-found' };
   // `--` after the ref keeps a `-`-leading value out of git's option surface.
   const ls = await git(['ls-tree', '-r', '--name-only', commit, '--'], LIST_TIMEOUT_MS, bareDir);
-  if (!ls.ok) return { skills: [], problem: null };
+  if (!ls.ok) return { skills: [], problem: 'list-failed' };
 
   const skills: Skill[] = [];
   const seen = new Set<string>();
@@ -753,6 +754,9 @@ function settledStatus(src: SkillsRepoRef, skills: Skill[], problem: ListProblem
   if (failure !== undefined) return { state: 'error', cause: 'fetch-failed', detail: failure, skillCount };
   if (problem === 'ref-not-found') {
     return { state: 'error', cause: 'ref-not-found', detail: `The ref "${src.ref}" was not found in ${src.repo}.`, skillCount };
+  }
+  if (problem === 'list-failed') {
+    return { state: 'error', cause: 'fetch-failed', detail: `git could not list the skills of ${src.repo} at ${src.ref}.`, skillCount };
   }
   if (problem === 'no-clone') return { state: 'idle' };
   return { state: 'ok', skillCount };
