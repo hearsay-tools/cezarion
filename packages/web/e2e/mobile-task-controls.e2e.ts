@@ -64,9 +64,7 @@ beforeEach(async () => {
     })
     expect(restored.ok).toBe(true)
   }
-  await browser.withCdp(request => request('Emulation.setEmulatedMedia', {
-    features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
-  }))
+  browser.setReducedMotion(false)
   browser.setViewport(360, 640)
   browser.goto(`${baseUrl}/p/${project}/`)
   browser.waitForFunction(`document.querySelector('[data-slot="task-card"]') !== null`)
@@ -123,10 +121,8 @@ describe('mobile Tasks controls', () => {
   })
 
   for (const reduced of [false, true]) for (const density of ['comfortable', 'compact', 'ultra']) for (const theme of ['light', 'dark']) {
-    it(`fits both viewports with keyboard focus and 44px mobile targets: ${theme}/${density}/${reduced ? 'reduced' : 'normal'}`, async () => {
-      await browser.withCdp(request => request('Emulation.setEmulatedMedia', {
-        features: [{ name: 'prefers-reduced-motion', value: reduced ? 'reduce' : 'no-preference' }],
-      }))
+    it(`fits both viewports with keyboard focus and 44px mobile targets: ${theme}/${density}/${reduced ? 'reduced' : 'normal'}`, () => {
+      browser.setReducedMotion(reduced)
       browser.evaluate(`document.documentElement.dataset.density = '${density}'; document.documentElement.classList.toggle('light', ${theme === 'light'})`)
       for (const width of [360, 1440]) {
         browser.setViewport(width, width === 360 ? 640 : 900)

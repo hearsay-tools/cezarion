@@ -128,6 +128,7 @@ describe('task GitHub item tabs against the dry-run mock', () => {
   })
 
   it('the Session activity PR chip opens the PR tab with its merge box, and the issue tab shows the issue body', () => {
+    browser.setViewport(1440, 900)
     const active = openPrFromChip()
     expect(active).toContain(`#${PR}`)
     expect(browser.url()).toBe(`${baseUrl}${scoped(`/tasks/${runId}/pr/${PR}`)}`)

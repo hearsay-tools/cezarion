@@ -159,51 +159,59 @@ describe('sidebar reference status (#677)', () => {
   })
 
   it('touch-pointer inert rows retain status while the 360px task header keeps full chips', () => {
-    browser.close()
-    if (originalArgs === undefined) delete process.env.AGENT_BROWSER_ARGS
-    else process.env.AGENT_BROWSER_ARGS = originalArgs
-    browser = AgentBrowser.open(`sidebar-reference-touch-${process.pid}`)
-    browser.goto(base)
-    mockForge()
-    // The inert row is a `hover: none` affordance, not a width one. The phone drawer no longer
-    // holds the quick list (#621), so the rows are measured in the desktop sidebar of this
-    // hover-less browser; the 360px half of the test is the task header below.
-    browser.setViewport(1440, 900)
-    browser.setReducedMotion()
-    for (const theme of ['dark', 'light']) {
-      browser.evaluate(`localStorage.setItem('cez-theme', ${JSON.stringify(theme)})`)
-      browser.goto(`${base}/p/${project}`)
-      expect(browser.waitForValue(`matchMedia('(hover: none)').matches`)).toBe(true)
-      for (const status of cases) {
-        const selector = `[data-slot="sidebar"] ${chip(status)}`
-        const inert = waitForSettledSample(browser, `(() => {
-          const el = document.querySelector(${JSON.stringify(selector)})
-          if (!el?.querySelector('svg:not([data-slot="reference-kind"])')) return null
-          return { tag: el.tagName, inert: el.dataset.inert, links: el.querySelectorAll('a, button, [tabindex]').length,
-            tone: el.querySelector('svg:not([data-slot="reference-kind"])').getAttribute('class'), rowHeight: el.closest('[data-slot="task-row"]').getBoundingClientRect().height }
-        })()`) as { tag: string; inert: string; links: number; tone: string; rowHeight: number }
-        expect(inert).toMatchObject({ tag: 'SPAN', inert: 'true', links: 0 })
-        expect(inert.rowHeight).toBeGreaterThanOrEqual(44)
-        expect(inert.tone).not.toContain('text-accent')
+    const desktop = browser
+    const desktopArgs = process.env.AGENT_BROWSER_ARGS
+    try {
+      if (originalArgs === undefined) delete process.env.AGENT_BROWSER_ARGS
+      else process.env.AGENT_BROWSER_ARGS = originalArgs
+      browser = AgentBrowser.open(`sidebar-reference-touch-${process.pid}`)
+      browser.goto(base)
+      mockForge()
+      // The inert row is a `hover: none` affordance, not a width one. The phone drawer no longer
+      // holds the quick list (#621), so the rows are measured in the desktop sidebar of this
+      // hover-less browser; the 360px half of the test is the task header below.
+      browser.setViewport(1440, 900)
+      browser.setReducedMotion()
+      for (const theme of ['dark', 'light']) {
+        browser.evaluate(`localStorage.setItem('cez-theme', ${JSON.stringify(theme)})`)
+        browser.goto(`${base}/p/${project}`)
+        expect(browser.waitForValue(`matchMedia('(hover: none)').matches`)).toBe(true)
+        for (const status of cases) {
+          const selector = `[data-slot="sidebar"] ${chip(status)}`
+          const inert = waitForSettledSample(browser, `(() => {
+            const el = document.querySelector(${JSON.stringify(selector)})
+            if (!el?.querySelector('svg:not([data-slot="reference-kind"])')) return null
+            return { tag: el.tagName, inert: el.dataset.inert, links: el.querySelectorAll('a, button, [tabindex]').length,
+              tone: el.querySelector('svg:not([data-slot="reference-kind"])').getAttribute('class'), rowHeight: el.closest('[data-slot="task-row"]').getBoundingClientRect().height }
+          })()`) as { tag: string; inert: string; links: number; tone: string; rowHeight: number }
+          expect(inert).toMatchObject({ tag: 'SPAN', inert: 'true', links: 0 })
+          expect(inert.rowHeight).toBeGreaterThanOrEqual(44)
+          expect(inert.tone).not.toContain('text-accent')
+        }
+        expect(browser.waitForValue(`getComputedStyle(document.querySelector('[data-slot="sidebar"] ${chip('checks-pending')} svg:not([data-slot="reference-kind"])')).animationName`)).toBe('none')
+        browser.screenshot(join(artifacts, `${theme}-touch-inert.png`), { viewport: true })
+        browser.evaluate(`document.querySelector('[data-slot="sidebar"] ${chip('conflict')}').scrollIntoView({ block: 'center' })`)
+        browser.waitForFunction(`document.querySelector('[data-slot="sidebar"] ${chip('conflict')}').getBoundingClientRect().bottom < innerHeight`)
+        browser.screenshot(join(artifacts, `${theme}-touch-conflict.png`), { viewport: true })
       }
-      expect(browser.waitForValue(`getComputedStyle(document.querySelector('[data-slot="sidebar"] ${chip('checks-pending')} svg:not([data-slot="reference-kind"])')).animationName`)).toBe('none')
-      browser.screenshot(join(artifacts, `${theme}-touch-inert.png`), { viewport: true })
-      browser.evaluate(`document.querySelector('[data-slot="sidebar"] ${chip('conflict')}').scrollIntoView({ block: 'center' })`)
-      browser.waitForFunction(`document.querySelector('[data-slot="sidebar"] ${chip('conflict')}').getBoundingClientRect().bottom < innerHeight`)
-      browser.screenshot(join(artifacts, `${theme}-touch-conflict.png`), { viewport: true })
+      browser.setViewport(360, 640)
+      browser.goto(`${base}/p/${project}/tasks/ref-conflict`)
+      // The task's chips live in the Session activity card's Workspace row (hearsay-tools/cezarion#1333).
+      openSessionActivityRow(browser, 'workspace')
+      const header = waitForSettledSample(browser, `(() => {
+        const el = document.querySelector('[data-slot="run-activity-workspace"] [data-slot="pr-chip"]')
+        if (!el || el.getBoundingClientRect().height === 0) return null
+        return { tag: el.tagName, tone: el.className, height: el.getBoundingClientRect().height }
+      })()`) as { tag: string; tone: string; height: number }
+      expect(header.tag).toBe('A')
+      expect(header.tone).toContain('text-conflict')
+      expect(header.tone).toContain('border-conflict')
+      expect(header.height).toBeGreaterThanOrEqual(44)
+    } finally {
+      browser.close()
+      browser = desktop
+      if (desktopArgs === undefined) delete process.env.AGENT_BROWSER_ARGS
+      else process.env.AGENT_BROWSER_ARGS = desktopArgs
     }
-    browser.setViewport(360, 640)
-    browser.goto(`${base}/p/${project}/tasks/ref-conflict`)
-    // The task's chips live in the Session activity card's Workspace row (hearsay-tools/cezarion#1333).
-    openSessionActivityRow(browser, 'workspace')
-    const header = waitForSettledSample(browser, `(() => {
-      const el = document.querySelector('[data-slot="run-activity-workspace"] [data-slot="pr-chip"]')
-      if (!el || el.getBoundingClientRect().height === 0) return null
-      return { tag: el.tagName, tone: el.className, height: el.getBoundingClientRect().height }
-    })()`) as { tag: string; tone: string; height: number }
-    expect(header.tag).toBe('A')
-    expect(header.tone).toContain('text-conflict')
-    expect(header.tone).toContain('border-conflict')
-    expect(header.height).toBeGreaterThanOrEqual(44)
   }, 90_000)
 })

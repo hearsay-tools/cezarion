@@ -88,7 +88,11 @@ afterAll(async () => {
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
-beforeEach(() => {
+beforeEach(async () => {
+  const resetUsage = await fetch(`${baseUrl}/api/v1/ui-state`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ skillUsage: {} }),
+  })
+  expect(resetUsage.ok).toBe(true)
   browser.goto(`${baseUrl}${scoped('/')}`)
   browser.evaluate(`(() => {
     for (const key of Object.keys(localStorage)) {

@@ -112,10 +112,8 @@ function gotoRail(theme: 'dark' | 'light' = 'dark'): void {
 const style = (selector: string, prop: string) =>
   String(normalizeColorSample(browser, browser.evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(selector)}))[${JSON.stringify(prop)}]`)))
 
-beforeEach(async () => {
-  await browser.withCdp(request => request('Emulation.setEmulatedMedia', {
-    features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
-  }))
+beforeEach(() => {
+  browser.setReducedMotion(false)
   browser.goto(baseUrl + `/p/${bootProject}/`)
   browser.evaluate(`localStorage.removeItem('cez-project-locations'); localStorage.removeItem('cez-project-rail-expanded')`)
 })

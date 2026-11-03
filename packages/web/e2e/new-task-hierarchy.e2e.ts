@@ -74,6 +74,7 @@ function geometry() {
 }
 
 beforeEach(() => {
+  browser.setReducedMotion(false)
   browser.goto(`${baseUrl}/new`)
   browser.evaluate(`(() => {
     for (const key of Object.keys(localStorage)) {
@@ -83,6 +84,12 @@ beforeEach(() => {
   browser.goto(`${baseUrl}/new`)
   browser.waitForFunction(`document.querySelector('[data-slot="source-pill"]')?.textContent.includes('Skill')`)
 })
+
+function clickExecutionDisclosure() {
+  browser.evaluate(`document.querySelector('${summary}').scrollIntoView({ block: 'center' })`)
+  waitForSettledSample(browser, `document.querySelector('${summary}').getBoundingClientRect().top`)
+  browser.click(summary)
+}
 
 describe('New Task hierarchy (#168)', () => {
   it('separates prompt context, submission, and execution options', () => {
@@ -97,16 +104,8 @@ describe('New Task hierarchy (#168)', () => {
 
   for (const reduced of [false, true]) {
     describe(reduced ? 'reduced motion' : 'normal motion', () => {
-      beforeEach(async () => {
-        const url = browser.url()
-        await browser.withCdp(async request => {
-          const { targetInfos } = await request('Target.getTargets')
-          const target = targetInfos.find((target: { type: string; url: string }) => target.type === 'page' && target.url === url)
-          const { sessionId } = await request('Target.attachToTarget', { targetId: target.targetId, flatten: true })
-          await request('Emulation.setEmulatedMedia', {
-            features: [{ name: 'prefers-reduced-motion', value: reduced ? 'reduce' : 'no-preference' }],
-          }, sessionId)
-        })
+      beforeEach(() => {
+        browser.setReducedMotion(reduced)
         browser.fill(prompt, 'Verify the task composer')
       })
       it.each(matrix)('$width $theme $density: hierarchy, focus, target sizes, no clipping', ({ width, theme, density }) => {
@@ -187,6 +186,7 @@ describe('New Task hierarchy (#168)', () => {
   })
 
   it('keeps the same prompt, attachment, and option nodes through disclosure and viewport changes', () => {
+    browser.setViewport(360, 640)
     browser.click('[data-slot="source-pill"]')
     browser.click('[data-slot="source-option"][data-source-ref="lint-fix"]')
     browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') === null`)
@@ -200,19 +200,19 @@ describe('New Task hierarchy (#168)', () => {
       input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }));
     })()`)
     browser.waitForFunction(`document.querySelector('[aria-label="Remove notes.txt"]') !== null`)
-    browser.click(summary)
+    clickExecutionDisclosure()
     for (const width of [360, 1440, 360]) {
       browser.setViewport(width, width === 360 ? 640 : 900)
       expect(browser.evaluate(`document.querySelector('${prompt}') === window.hierarchyPrompt && document.querySelector('[data-slot="model-pill"]') === window.hierarchyModel`)).toBe(true)
       expect(browser.evaluate(`document.querySelector('${prompt}').value`)).toBe('Keep this task and its attachment')
       expect(browser.count('[aria-label="Remove notes.txt"]')).toBe(1)
       expect(browser.text('[data-slot="source-pill"]')).toContain('lint-fix')
-      browser.click(summary)
+      clickExecutionDisclosure()
       browser.waitForFunction(`document.querySelector('${disclosure}').open === true`)
       expect(browser.count('[data-slot="variants-pill"]')).toBe(0)
-      browser.click(summary)
+      clickExecutionDisclosure()
     }
-    browser.click(summary)
+    clickExecutionDisclosure()
     browser.click('[aria-label="Start task"]')
     browser.waitForFunction(`location.pathname.includes('/tasks/')`)
   })
