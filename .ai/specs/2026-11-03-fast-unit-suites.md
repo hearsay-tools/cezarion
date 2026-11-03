@@ -294,27 +294,20 @@ importing the real runner factory or `RunManager`. Match only the selected
 spawn and every unrelated child-process export. Git, discovery, `tsx`, process
 probes and real lifecycle fixtures remain real.
 
-**Proposed changed runner-source lines: none.** This does not mean no shipped
-files change. `packages/cezar/package.json` includes `scripts` in its published
-files, and CEZ_DRY_RUN executes these scripts. Extracting scenario engines changes
-the shipped wrappers `mock-claude.mjs`, `mock-codex-app-server.mjs`,
-`mock-opencode-serve.mjs`, `mock-pi-rpc.mjs`, `mock-cursor-print.mjs` and
-`mock-omp-rpc.mjs` under `packages/cezar/scripts/`, plus their new shared engine
-modules. Any shared control helper imported by those engines must be listed in
-the 3.2 diff review too. Dry-run output must stay byte-identical, not merely
-semantically similar. The 3.2 PR must record the raw-frame before/after comparison
-for **every extracted scenario**, with the same inputs and original defaults.
-Keep wrapper changes to imports and explicit dependencies; put the virtual child
-and interception code in testkits. The smallest-seam and unchanged-default rule
-applies to these shipped scripts as strictly as to runner source.
+**Proposed changed runner-source lines: none. Proposed changed shipped mock
+files: none.** This includes `session-process.ts` and `runner-runtime.ts`.
+`packages/cezar/package.json` publishes the scripts directory, and CEZ_DRY_RUN
+executes `mock-claude.mjs`, `mock-codex-app-server.mjs`, `mock-opencode-serve.mjs`,
+`mock-pi-rpc.mjs`, `mock-cursor-print.mjs` and `mock-omp-rpc.mjs`. All six, their
+shared helpers and every other shipped mock keep identical bytes. The VM loads
+these existing files; it does not extract or copy their scenario engines. Dry-run
+output stays byte-identical by construction because its source and launch path
+are unchanged. The 3.2 diff check must show no shipped runner or mock edits.
 
-No source-line change is proposed in
-`session-process.ts` and `runner-runtime.ts`. No constructor option, environment
-flag or application dependency injection is needed. The shipped default path
-executes the identical source, imports, spawn arguments, timers, parser and
-cleanup calls. The interception module and virtual process belong in testkits.
-This is smaller than a production transport abstraction and satisfies owner
-constraint 1 without a default branch that must be reasoned equivalent.
+The shipped default path executes the identical source, imports, spawn
+arguments, timers, parser and cleanup calls. No application constructor option,
+environment flag or dependency injection is needed. The interception module,
+per-child VM and process shim belong in testkits.
 
 A virtual child is an EventEmitter with PassThrough stdin/stdout/stderr. Keep
 `error`, stdout EOF, process `exit`, and pipe/process `close` distinct. Implement
@@ -350,25 +343,74 @@ stdout, and exercise the actual REST and SSE parsers. Close connections and the
 server in fixture cleanup. This removes the mock server process, not the HTTP
 protocol boundary.
 
-### One implementation of each mock scenario
+### Load the shipped mock itself
 
-Extract scenario engines from `packages/cezar/scripts/mock-*.mjs` into importable
-helpers. Give them streams, argv, environment, cwd, exit and signal hooks. The
-CLI wrapper and virtual process must call the same engine. Do not translate a
-scenario into normalized AgentEvents. Per-session data must not leak through
-shared process.env or module state.
+The VM loader resolves the native mock executable selected by HARNESS_ADAPTERS
+to its real path under `packages/cezar/scripts/`, reads that file, and uses its
+file URL as the SourceTextModule identifier/import.meta.url. Resolve relative
+imports from that identifier; cache modules per virtual child, not globally.
+Reject a file outside the shipped script root. Never load a checked-in or
+scratch copy of the mock, and never map a scenario directly to AgentEvents.
 
-These scripts also implement CEZ_DRY_RUN. Their wrapper defaults and wire bytes
-must therefore stay unchanged. For each extracted scenario, compare the real
-wrapper's raw native frames, recording files, exit status and terminal ordering
-before and after extraction. Mask only pre-existing nondeterministic IDs/times
-with the same comparison on both sides. Keep real signal scheduling in wrappers.
-A scenario whose equivalence cannot be proved stays real; it does not gain a
-second test-only scenario implementation.
+A loader guard pins each adapter's resolved entrypoint to the shipped file and
+compares the bytes passed to SourceTextModule with readFile of that path. In a
+scratch proof, mutate a baseline frame in the shipped script itself: both the
+real smoke and VM cell must observe that mutation and fail the same payload
+assertion. Restore the file afterward. Changing a decoy copy must have no effect.
+This proves the VM reaches the same source rather than merely expecting a path.
+The 3.2 PR records the mutation red and clean pass per runner.
 
-Keep RunManager, RunStore, disk recovery and isolated git workspaces real. A
-virtual process may reduce native mock startup cost. It must not replace the
-behavior the workflow cells assert.
+The current spike uses NODE_OPTIONS=--experimental-vm-modules. Node 24 requires
+that flag for vm.SourceTextModule. Slice 3.2 sets it only on Vitest workers via
+`test.execArgv: ['--experimental-vm-modules']` in
+`packages/cezar/vitest.config.ts`, preserving any existing execArgv entries.
+Do not add it to application launch commands or require a user environment
+setting. A worker setup check must fail clearly if SourceTextModule is absent
+or linking/evaluation is incompatible. A later Node API change fails the tests;
+it must not silently skip cells or switch to normalized fixtures. Replace the
+VM mechanism in a separately reviewed test-only change before adopting such a
+Node version, keeping shipped code and native-wire coverage intact.
+
+Each virtual child owns argv, a copy of its passed env, cwd, stdin/stdout/stderr,
+console, exit intent, signal listeners, timers and an independent module graph.
+Relative mock file operations resolve against that child's cwd without changing
+the host cwd. Console output must enter the virtual pipes. Clear owned timers,
+close owned HTTP connections and settle pending writes on cleanup. Preserve
+native frame boundaries and asynchronous request/response order. Virtual child
+state must not leak across cases or alter process.env in the test worker.
+
+### VM limits: cells that stay real
+
+The source inventory finds process.argv, cwd, env, execPath, pid, stdin, stdout,
+stderr, exit, on, removeAllListeners, kill and send. A shim can supply scalar
+identity/options, byte streams, callbacks, module state and owned timers. It
+cannot prove the following process behavior; retain real cells for it:
+
+| Mock feature | Limit and retained real proof |
+| --- | --- |
+| process.pid, process.kill and OS signals | Virtual identity is not an OS identity; no virtual PID is ever group-signalled. Keep S10 and the real shutdown/process-group matrix, OMP self-SIGKILL and wrapper signal forwarding real. |
+| SIGINT/SIGKILL, stopped event loop, abrupt process.exit | A VM shares the test worker's event loop and cannot kill/stop it. It cannot faithfully terminate arbitrary native callbacks or host I/O. Keep crash, hang, blocked-loop, exit-vs-EOF, held-pipe and signal-escalation cells real. Ordinary virtual completion may publish exit/close; it does not replace those proofs. |
+| process.send IPC | A VM has no OS IPC channel. Keep mock-runner-crash's IPC-ready process and related real-process fixture evidence real. Do not synthesize that handshake as OS proof. |
+| child_process spawn, detached/setsid descendants, inherited descriptors | A per-child realm is not an OS process tree. Keep all descendant, ownership, zombie, PID-reuse, taskkill and detached-holder cases real. The virtual loader rejects accidental child-process requests. |
+| Process cwd/env and executable/argv OS effects | A local shim can interpret options, but cannot prove spawn applied them. Keep relative-recording cwd/env probes and executable/argv capability probes real. Mock file APIs need explicit child-cwd resolution; an unsupported API fails loudly or keeps its scenario real, never silently uses host cwd. |
+| Separate-process scheduling, pipe capacity and event-loop isolation | PassThrough cannot reproduce kernel pipe buffers or independent stalled loops. Keep real backpressure/input-pipe failure, crash-drain, native timing and clean/failed teardown tests. Deterministic wire ordering remains virtual; OS ordering proof remains real. |
+| Timers and module/global state | VM timers share one host clock; native builtin modules can share host state. Give each child a module cache and tracked timer ownership, never patch host builtins globally for a scenario. A scenario requiring isolated host builtin state or an unmodelled timer boundary stays real. |
+| HTTP listen/start retry and orphan watchdog | In-process loopback HTTP proves REST/SSE frames but not backend process death before listening or parent-death watchdog behavior. Keep S25 serve retry and mock-opencode-orphan tests real. |
+
+The Process exits tables below name exact test ownership. Slice 3.2 inventories
+all scenarios before migration and fails on unsupported process features; it
+does not expand exemptions or weaken assertions to make a scenario virtual.
+RunManager, RunStore, disk recovery and isolated git workspaces stay real.
+
+### Rejected alternative
+
+Extracting scenario engines into shared factories would edit the six published
+mock wrappers and their shared helpers. That would need byte-identical replay
+proof for every extracted dry-run scenario. The VM spike shows a testkit-only
+seam works, so extraction adds shipped change without a necessary benefit and
+is not proposed. No mock replay gate is needed when no shipped mock bytes change.
+If a runner later requires extraction, return for a separate design review and
+restore that every-scenario proof requirement before changing shipped files.
 
 ### Imported-testkit seam spike
 
@@ -396,14 +438,23 @@ first, so warm caches and JIT can favor the following virtual cell; one pair is
 not a stable performance distribution. Raw per-runner observations are
 `spike-<runner>.json` in the same ignored evidence directory.
 
-| Runner | Real cell ms | In-process cell ms | Observed reduction | Interpretation |
-| --- | ---: | ---: | ---: | --- |
-| claude | 384.55 | 19.62 | 94.9% | Native launch removed; shipped adapter still parses native frames |
-| codex | 171.24 | 29.94 | 82.5% | Native launch removed; shipped adapter still parses native frames |
-| opencode | 526.96 | 92.91 | 82.4% | Native launch removed; shipped adapter still parses native frames |
-| pi | 203.45 | 16.22 | 92.0% | Native launch removed; shipped adapter still parses native frames |
-| cursor | 392.12 | 313.79 | 20.0% | The print turn still retains its adapter settlement wait |
-| omp | 271.76 | 14.21 | 94.8% | Native launch removed; shipped adapter still parses native frames |
+| Runner | Real cell ms | In-process cell ms | In-process / real ratio | Observed reduction | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| claude | 384.55 | 19.62 | 0.051 | 94.9% | Native launch removed; shipped adapter still parses native frames |
+| codex | 171.24 | 29.94 | 0.175 | 82.5% | Native launch removed; shipped adapter still parses native frames |
+| opencode | 526.96 | 92.91 | 0.176 | 82.4% | Native launch removed; shipped adapter still parses native frames |
+| pi | 203.45 | 16.22 | 0.080 | 92.0% | Native launch removed; shipped adapter still parses native frames |
+| cursor | 392.12 | 313.79 | 0.800 | 20.0% | The print turn still retains its adapter settlement wait |
+| omp | 271.76 | 14.21 | 0.052 | 94.8% | Native launch removed; shipped adapter still parses native frames |
+
+Cursor's 0.800 ratio is explained by its shipped
+`cursor-print-process.ts:86–87`: after exit it always waits the default **250 ms**
+drain before the final SIGKILL/pipe closure. A virtual process still passes
+through this adapter code. The VM removes startup; it does not remove that
+load-bearing drain. Multiple print turns repeat it. Cursor's harness/base-waits/
+worker-waits files therefore need the semantic 3.3 splits below unless actual
+post-change CI proves a group below 40 s. Do not set drainMs to zero on parity
+cells merely to improve the measurement; real adapter timing remains under test.
 
 The first diagnostic attempt failed at module registration: Vitest does not
 allow `export const x = vi.hoisted(...)`. A local hoisted binding followed by
