@@ -17,14 +17,13 @@ the Task routing rows for run search, pending asks and skills list their readers
 Where readers hide, searched from the repo root (replace the example values):
 
 - **A `RunRecord` field renamed, moved or removed**: packaged and browser fixtures, by
-  its old and new names or paths, searched as below (hearsay-tools/cezarion#1300); a unit
+  its old and new names or paths, searched as below; a unit
   test using `makeRunRecord` fails to compile instead.
 
 - **An enum or discriminant value renamed** (a wait kind, outcome, status or attention
   label): the quoted old value in tests, searched before each push that renames one; the
   `test-enum-literal` baseline lists tests still on literals. A rejection test that
-  passes only because the old value is now unknown must test its constraint
-  (hearsay-tools/cezarion#1504).
+  passes only because the old value is now unknown must test its constraint.
 
   ```bash
   rg -n -F -e 'delegation.wait' -e "'ci'" packages --glob '*.test.*' --glob '*.e2e.ts'
@@ -35,8 +34,7 @@ Where readers hide, searched from the repo root (replace the example values):
   entries — a spec can depend on how many entries a list holds without naming any of
   them. A spec that counts, lists or scrolls the default's entries must seed its own, as
   [the e2e README](../../../packages/web/e2e/README.md#seed-the-catalog-entries-a-spec-relies-on)
-  says (hearsay-tools/cezarion#1541 broke `settings-skills.e2e.ts` only in CI, through
-  its scroll case; hearsay-tools/cezarion#1572).
+  says.
 
   ```bash
   rg -l -F -e 'open-mercato/skills' -e 'skill-row' packages/web/e2e/*.e2e.ts
@@ -49,7 +47,7 @@ Where readers hide, searched from the repo root (replace the example values):
   `data-slot`, `data-streamdown` and `data-testid` values and class names that the file
   and the local components it imports render. Walk down to what the file renders, never
   up: going up reaches most of the suite. One edit to a shared renderer can reach specs
-  of other features (hearsay-tools/cezarion#1076).
+  of other features.
 
   ```bash
   grep -lE 'link-safety|data-streamdown|thread-markdown' packages/web/e2e/*.e2e.ts
@@ -74,12 +72,12 @@ Where readers hide, searched from the repo root (replace the example values):
 
 - **Dry-run turn-end behavior changed** — the `packages/cezar/scripts/mock-*.mjs` mocks,
   the turn-end rule, attention, or the human-ask summary: the browser and packaged
-  fixtures that drive a dry-run task to a park (hearsay-tools/cezarion#1251). A
+  fixtures that drive a dry-run task to a park. A
   `mock-*.mjs` edit counts when it changes the frames that an existing `mock:<scenario>`
   sends, or where that scenario's turn ends, for the configuration a runner sends at
   shipped defaults. A new scenario does not count, and neither does a branch that the
   shipped configuration never reaches, such as one for a misconfigured runner or for a
-  configuration no runner sends yet (hearsay-tools/cezarion#1334). When a mock edit does
+  configuration no runner sends yet. When a mock edit does
   not count, the PR's Verification section says why.
 
   ```bash
