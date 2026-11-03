@@ -50,6 +50,14 @@ const WORKFLOWS: WorkflowsResponse = {
 
 let requests: Array<{ method: string; url: string; body?: unknown }> = []
 
+/** Reads that answer the same body in every case. The sources panel's own states are pinned in
+ *  team-sources-panel.test.tsx. */
+const FIXED_ANSWERS: Record<string, unknown> = {
+  '/api/v1/workflows': WORKFLOWS,
+  '/api/v1/launch-key': { key: 'sekret' },
+  '/api/v1/skills/sources': { sources: [], editable: true, configIssue: null },
+}
+
 function serve({
   skills = SKILLS,
   refreshed = SKILLS,
@@ -116,10 +124,7 @@ function serve({
       }
       // Both the fast read and the ?wait=1 convergence read hit this endpoint.
       if (url.startsWith('/api/v1/skills/importable')) return importableAnswer()
-      // The sources panel's own states are pinned in team-sources-panel.test.tsx.
-      if (url === '/api/v1/skills/sources' && method === 'GET') return json({ sources: [], editable: true, configIssue: null })
-      if (url === '/api/v1/workflows') return json(WORKFLOWS)
-      if (url === '/api/v1/launch-key') return json({ key: 'sekret' })
+      if (url in FIXED_ANSWERS) return json(FIXED_ANSWERS[url])
       if (url === '/api/v1/ui-state') return projectUiState(method, body)
       if (url === '/api/v1/workspace/ui-state' && method === 'GET') return json(global)
       if (url === '/api/v1/workspace/ui-state' && method === 'PUT') return json({ ...global, ...(body as Record<string, unknown>) })
