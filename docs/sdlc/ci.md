@@ -538,6 +538,33 @@ positive/negative examples and manual recovery.
 Node-side browser-test API requests send `Connection: close`. The synchronous agent-browser commands can block the test process long enough for a fixture server to expire an idle connection before Node handles its close event. CI diagnostics captured reused sockets after 6–23 seconds without an event-loop tick, followed by `UND_ERR_SOCKET`. Fresh connections avoid that stale pool; the real browser and application server keep their normal connection policies. No request retries are added.
 Wed Sep 16 13:50:51 CEST 2026
 
+### Merge-queue pilot metrics
+
+The owner reads the parallel queue-build pilot by hand, once a week
+([spec](../../.ai/specs/2026-11-03-speculative-merge-queue.md) § Rollout step 4).
+This command prints its metrics and both rollback verdicts (§ Owner decisions Q3):
+
+```bash
+node .github/scripts/queue-metrics.cjs                    # the 7 days before now
+node .github/scripts/queue-metrics.cjs --from 2026-11-01 --to 2026-11-03 --json
+```
+
+It only reads, through authenticated `gh api` calls, and needs no configuration.
+A date covers its whole UTC day. A `YYYY-MM-DDTHH:MM:SSZ` time is an exact bound.
+
+- **Runner-minutes**: the jobs of completed `merge_group` runs of `ci.yml`, each
+  rounded up to a whole minute. An `ubicloud-*` label is Ubicloud. A GitHub image
+  label (`ubuntu-*`, `windows-*`, `macos-*`) is hosted.
+- **Per merge**: divided by the PRs merged in the window that entered the queue.
+- **Queue failure rate**: `failure`, `timed_out` and `startup_failure` runs over
+  completed runs.
+- **Invalidated runs**: runs whose group base, from the
+  `gh-readonly-queue/main/pr-<N>-<base>` ref, never reached `main`.
+- **Main-push proof fallback**: a `main` push run whose Typecheck job ran. The API
+  does not return the proof's job summary, so the command rebuilds the reason from
+  the evidence `queue-ci-proof.cjs` reads. It prints the URL of each run it cannot
+  explain.
+
 ### Investigating a CI or load failure
 
 A full local Vitest run (or one shard) that fails only under host load can still
