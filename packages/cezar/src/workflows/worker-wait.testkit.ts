@@ -164,7 +164,7 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
       await until(() => {
         const active = store.listRunIds().filter(id => {
           const run = store.getRun(id);
-          return manager.isActive(id) && !(run?.status === 'queued' && !run.steps.some(step => !!step.sessionId));
+          return manager.isActive(id) && run?.status !== 'queued';
         });
         return active.every(id => store.getRun(id)?.steps.some(step => !!step.sessionId)) && active.length <= work.liveSessions.size;
       }, () => JSON.stringify(captureState()));
