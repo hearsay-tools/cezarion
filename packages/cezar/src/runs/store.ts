@@ -62,7 +62,7 @@ import { extractTaskRefs, isRepoScopedRef, MAX_REF, promptNamesRepo, refUrlRepo 
 import { workflowDefSchema } from '../workflows/types.ts';
 
 import { applyOutcomes, type OutcomeDependencies, type OutcomeReceipt, type RunOutcome } from './outcome-commit.ts';
-import { exitStatus, RUN_EXITS, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
+import { applyExit, RUN_EXITS, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
 import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
 export { ConversationIdInUseError } from './conversation-identity.ts';
 
@@ -315,14 +315,16 @@ function legacyWaitId(name: string): string {
  * dropped, `lastWaitsError` says so, and the status is left alone. A `waiting` run with no open
  * wait reads as Needs you, which a human can resume.
  */
-/** A live run and its live step move from `from` to `to` together, as every park and resume writes them. */
-function setLiveStatus(row: Record<string, unknown>, from: 'running' | 'waiting', to: 'running' | 'waiting'): void {
-  row.status = to;
+/** A live run and its live step move together by `exit`, as every park and resume writes them:
+ *  park from running to waiting, resume from waiting to running. The caller has read the row's status. */
+function setLiveStatus(row: Record<string, unknown>, exit: 'park' | 'resume'): void {
+  const [from, to] = exit === 'park' ? ['running', 'waiting'] : ['waiting', 'running'];
+  Object.assign(row, applyExit(row as Pick<RunRecord, 'status'>, exit));
   if (Array.isArray(row.steps)) for (const step of row.steps) {
     if (step && typeof step === 'object' && (step as { status?: unknown }).status === from) (step as { status: string }).status = to;
   }
 }
-const resumeParked = (row: Record<string, unknown>) => setLiveStatus(row, 'waiting', 'running');
+const resumeParked = (row: Record<string, unknown>) => setLiveStatus(row, 'resume');
 
 export function upgradeLegacyWaits(row: Record<string, unknown>): void {
   if (!hasLegacyWaitFields(row)) return;
@@ -388,7 +390,7 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
         registeredAt: new Date(now).toISOString(), deadline: wakeAt, phase: 'open', turnId: 'legacy', seconds,
       });
     }
-    if (row.status === 'running') setLiveStatus(row, 'running', 'waiting');
+    if (row.status === 'running') setLiveStatus(row, 'park');
   }
   const asksHuman = (entry: unknown) => !!entry && typeof entry === 'object' && (entry as { kind?: unknown }).kind === 'human' && (entry as { phase?: unknown }).phase === 'open';
   if (row.hasPendingHumanAsk === true && row.status === 'waiting' &&
@@ -549,10 +551,7 @@ export type RepoHandle = { owner: string; name: string };
 function clearPendingAutoResume(run: RunRecord): void {
   // A withdrawn appointment settles the run failed with its kept error (hearsay-tools/cezarion#1236),
   // the state a usage-limited run was in before it waited.
-  if (isUsageLimitHold(run)) {
-    run.status = 'failed';
-    run.finishedAt ??= new Date().toISOString();
-  }
+  if (isUsageLimitHold(run)) Object.assign(run, applyExit(run, 'withdraw-hold', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
   run.autoResumeAt = undefined;
   run.autoResumeAttempts = undefined;
 }
@@ -800,10 +799,10 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
 }
 
 function settleLoadedStop(run: RunRecord): void {
-  // An accepted Stop is durable intent, never an interrupted run to auto-resume.
+  // An accepted Stop is durable intent, never an interrupted run to auto-resume. It can meet a run
+  // that settled before the Stop did (the engine's own late Stop), so it takes `cancel-late`.
   if (run.stopping) {
-    run.status = 'cancelled';
-    run.finishedAt ??= new Date().toISOString();
+    Object.assign(run, applyExit(run, 'cancel-late', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
     for (const step of run.steps) {
       if (step.status === 'running' || step.status === 'waiting') step.status = 'cancelled';
     }
@@ -814,10 +813,7 @@ function settleLoadedStop(run: RunRecord): void {
 function restoreLoadedUsageLimitHold(run: RunRecord): void {
   // A usage-limited run is waiting for its resume (hearsay-tools/cezarion#1236, phase 4a). Rows a
   // schema-7 cezar wrote kept it failed with the appointment; they read as the waiting run they are.
-  if (run.status === 'failed' && run.autoResumeAt !== undefined) {
-    run.status = 'waiting';
-    run.finishedAt = undefined;
-  }
+  if (run.status === 'failed' && run.autoResumeAt !== undefined) Object.assign(run, applyExit(run, 'hold', { finishedAt: undefined }));
 }
 
 function failLoadedInterruptedRun(run: RunRecord, opts?: { keepLive?: boolean }): void {
@@ -828,9 +824,8 @@ function failLoadedInterruptedRun(run: RunRecord, opts?: { keepLive?: boolean })
   // all still work.
   // A usage-limit hold runs no process, so no exit interrupted it: its appointment stands.
   if (!opts?.keepLive && engineOwnsRun(run)) {
-    run.status = 'failed';
-    run.error = 'interrupted — cezar process exited during the run';
-    run.finishedAt = run.finishedAt ?? new Date().toISOString();
+    Object.assign(run, applyExit(run, 'fail-interrupted', {
+      error: 'interrupted — cezar process exited during the run', finishedAt: run.finishedAt ?? new Date().toISOString() }));
     for (const step of run.steps) {
       if (step.status === 'running' || step.status === 'waiting') step.status = 'failed';
     }
@@ -850,8 +845,7 @@ export function settleOrphanedRun(run: RunRecord, opts: { stop?: boolean | undef
   if (opts.stop && (run.status === 'queued' || run.status === 'running' || run.status === 'waiting')) run.stopping = true;
   if (run.status === 'queued' && !run.startedAt && run.workflowDef !== undefined &&
     run.steps.every((step) => step.status === 'pending' && !step.startedAt && !step.sessionId)) {
-    run.status = 'cancelled';
-    run.finishedAt ??= new Date().toISOString();
+    Object.assign(run, applyExit(run, 'cancel', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
   }
   return reconcileLoadedRun(run, { keepLive: false });
 }
@@ -2552,7 +2546,7 @@ export class RunStore extends EventEmitter {
       executionStartSeq: this.transcriptFacts(id).lastSeq,
     });
     const staged = new Map<string, RunRecord>();
-    const next: RunRecord = { ...run, ...this.redactPatch(patch), status: exitStatus(exit, run.status), delegation,
+    const next: RunRecord = { ...run, ...this.redactPatch(patch), ...applyExit(run, exit), delegation,
       ...(step ? { steps: [...run.steps, { ...step, status: 'pending' as const, iterations: 0, tokensUsed: 0 }] } : {}),
     };
     staged.set(id, next);
@@ -2866,7 +2860,7 @@ export class RunStore extends EventEmitter {
     const spec: RunExitSpec = RUN_EXITS[exit];
     if (!spec.settle) {
       const run = this.record(id);
-      return run && this.updateRun(id, { ...extras, status: exitStatus(exit, run.status) });
+      return run && this.updateRun(id, applyExit(run, exit, extras));
     }
     const run = this.peek(id);
     if (!run || (spec.guard && !spec.guard(run))) {
@@ -2874,7 +2868,7 @@ export class RunStore extends EventEmitter {
       return undefined;
     }
     const settled = spec.settle({ ...run, ...this.redactPatch(extras) }, { now: new Date().toISOString(), stepId });
-    this.commitIndex(new Map([[id, { ...settled, status: exitStatus(exit, run.status) }]]));
+    this.commitIndex(new Map([[id, { ...settled, ...applyExit(run, exit) }]]));
     return this.peek(id);
   }
 

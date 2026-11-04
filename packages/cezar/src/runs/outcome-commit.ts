@@ -2,7 +2,7 @@ import type { AgentInput, Wait } from '@open-mercato/cezar-contract';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { LAST_WAITS_LIMIT } from '@open-mercato/cezar-contract/waits';
 import { waitInputId } from '../workflows/waits.ts';
-import { exitStatus, type RunExitId } from './run-exits.ts';
+import { applyExit, type RunExitId } from './run-exits.ts';
 import type { RunRecord } from './store.ts';
 
 /**
@@ -203,7 +203,7 @@ export function applyOutcomes(run: RunRecord, outcomes: readonly RunOutcome[], d
   const queued = (deps.enqueue ?? []).map((input) => agentInputSchema.parse(input)).filter((input) => !next.agentInputs?.some((row) => row.id === input.id));
   if (queued.length) { next = { ...next, agentInputs: [...(next.agentInputs ?? []), ...queued] }; changed = true; }
   if (deps.patch && Object.keys(deps.patch).length) { next = { ...next, ...deps.patch }; changed = true; }
-  if (deps.exit) { next = { ...next, status: exitStatus(deps.exit, run.status) }; changed = true; }
+  if (deps.exit) { next = { ...next, ...applyExit(run, deps.exit) }; changed = true; }
   const resumeStepId = deps.resumeStepId;
   if (resumeStepId && next.steps.some((step) => step.id === resumeStepId && step.status === 'waiting')) {
     next = { ...next, steps: next.steps.map((step) => step.id === resumeStepId && step.status === 'waiting' ? { ...step, status: 'running' as const } : step) };
