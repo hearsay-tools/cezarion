@@ -228,7 +228,7 @@ export const NO_PROGRESS_CRITERIA = [
   { id: 'N4', scenario: 'baseline', name: 'Continue sessions enforce inactivity' },
 ] as const;
 
-/** #486: workflow-followup-parity.test.ts, real native wires on both turn-end paths. */
+/** #486: workflow-followup-cells.testkit.ts, real native wires on both turn-end paths. */
 export const FOLLOWUP_CRITERIA = [
   { id: 'H1', scenario: 'hold-cezar-done', name: 'keeps a mid-turn human follow-up across a cezar_done turn' },
   { id: 'H2', scenario: 'hold-cezar-ask', name: 'drops a mid-turn human follow-up when the turn parks on cezar_ask' },
@@ -255,7 +255,7 @@ export const AUTONOMOUS_CRITERIA = [
   { id: 'A14', scenario: 'autonomous-readiness-idle', name: 'settles a continued root readiness timeout after process exit' },
 ] as const;
 
-/** #544: workflow-final-message-parity.test.ts, real native wires on both turn-end paths. */
+/** #544: workflow-final-message-cells.testkit.ts, real native wires on both turn-end paths. */
 export const FINAL_MESSAGE_CRITERIA = [
   { id: 'F1', scenario: 'silent-tail', name: 'nudges a silent tail to a visible cezar_done' },
   { id: 'F2', scenario: 'silent-tail-again', name: 'parks waiting after one still-silent nudge' },
