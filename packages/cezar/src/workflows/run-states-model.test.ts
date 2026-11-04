@@ -1,5 +1,4 @@
 import { fireCapturedTimer } from './waits.testkit.ts';
-import { runInternals } from './run-internals.testkit.ts';
 import { spawn } from 'node:child_process';
 import * as fc from 'fast-check';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
