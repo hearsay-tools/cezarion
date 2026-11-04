@@ -488,6 +488,7 @@ describe('provider availability preserves existing execution', () => {
       ],
     };
 
+    const admissionReads = vi.spyOn(semaphore, 'maxParallel');
     const run = manager.startRun(workflow, {
       task: 'mock:native-codex-ask choose a library',
       runner: 'claude',
@@ -502,6 +503,8 @@ describe('provider availability preserves existing execution', () => {
       body: JSON.stringify({ enabled: false }),
     });
     expect(disabled.status).toBe(200);
+    // bound: admission awaits repository discovery before reading capacity.
+    await vi.waitFor(() => expect(admissionReads).toHaveBeenCalled(), { timeout: 10_000 });
     expect(semaphore.busy()).toBe(0);
     await semaphore.refresh();
     await semaphore.release();
