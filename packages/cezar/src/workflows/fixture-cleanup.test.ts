@@ -21,13 +21,32 @@ import { RunStore } from '../runs/store.ts';
 import * as git from '../git-worktree.ts';
 import * as retention from '../runs/retention.ts';
 import * as workflows from './load.ts';
+import * as fixtureCleanup from './fixture-cleanup.testkit.ts';
 import { createFixtureManager, removeFixtureRepo, fixtureWorkSettled, unused, fixtureWork, managerDisposed } from './fixture-cleanup.testkit.ts';
 
 const roots: string[] = [];
-afterEach(async () => {
-  for (const root of roots.splice(0)) await removeFixtureRepo(root);
-  vi.useRealTimers();
-  vi.unstubAllEnvs();
+async function cleanupFixtureRoots() {
+  try {
+    for (const root of roots.splice(0)) await removeFixtureRepo(root);
+  } finally {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  }
+}
+afterEach(cleanupFixtureRoots);
+
+it('restores real timers when fixture removal rejects', async () => {
+  const failure = new Error('fixture drain failed');
+  const remove = vi.spyOn(fixtureCleanup, 'removeFixtureRepo').mockRejectedValueOnce(failure);
+  roots.push('failed-fixture');
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    await expect(cleanupFixtureRoots()).rejects.toBe(failure);
+    expect(vi.isFakeTimers()).toBe(false);
+  } finally {
+    remove.mockRestore();
+    vi.useRealTimers();
+  }
 });
 
 function fixture() {
