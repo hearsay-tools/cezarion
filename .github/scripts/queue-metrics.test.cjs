@@ -27,7 +27,8 @@ function replay(responses = RECORDED, { fail = () => undefined } = {}) {
 async function run(argv, gh) {
   let out = '';
   let err = '';
-  const code = await main(argv, { gh, stdout: text => { out += text; }, stderr: text => { err += text; }, wait: async () => {} });
+  const code = await main(argv, { gh, stdout: text => { out += text; }, stderr: text => { err += text; }, wait: async () => {},
+    now: Date.parse('2026-11-10T00:00:00Z') });
   return { code, out, err };
 }
 
@@ -128,7 +129,9 @@ test('a multi-day window reads one UTC day per query and counts a boundary resul
   const { code, out, err } = await run(['--from', '2026-11-01T12:00:00Z', '--to', '2026-11-03T06:00:00Z', '--repo', 'o/r', '--json'], gh);
   assert.equal(err, '');
   assert.equal(code, 0);
-  assert.deepEqual(queried, { runs: days, search: days });
+  // Queue runs reach one day past the window, for the runs that invalidate runs inside it.
+  assert.deepEqual(queried, { runs: [...days.slice(0, 2), '2026-11-03T00:00:00Z..2026-11-04T00:00:00Z',
+    '2026-11-04T00:00:00Z..2026-11-04T06:00:00Z'], search: days });
   const metrics = JSON.parse(out);
   assert.equal(metrics.queue.completed, 1);
   assert.equal(metrics.merges.total, 1);
@@ -215,6 +218,10 @@ test('the failure rate counts neither invalidated runs nor runs removed for anot
   assert.equal(queue.failed, 3);
   assert.equal(queue.invalidated.runs, 1);
   assert.equal(queue.removed, 2);
+  // A replacement created after the window still invalidates the run inside it.
+  const after = { ...queueRun(30, 'success', SHA('c9'), 10, 11), created_at: '2026-11-03T01:00:00Z' };
+  assert.equal(computeMetrics({ ...raw, removals: {}, queueRuns: [queueRun(3, 'failure', SHA('c1'), 10, 11)],
+    laterQueueRuns: [after] }).queue.invalidated.runs, 1);
   // The entry ends at a removal before the run's first attempt starts; a re-run attempt starts later still.
   const late = { ...queueRun(4, 'failure', SHA('c1'), 10, 12), run_started_at: '2026-11-02T05:00:00Z' };
   assert.equal(computeMetrics({ ...raw, queueRuns: [late] }).queue.removed, 1);

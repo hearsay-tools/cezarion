@@ -198,20 +198,25 @@ async function readProofEvidence(api, repo, push, queueJobs) {
   return { queueRun: newest, queueJobs: jobs };
 }
 
-async function readAll({ gh, repo, from, to, wait }) {
+async function readAll({ gh, repo, from, to, wait, now = Date.now() }) {
   const api = client(gh, { wait });
   try {
-    return await readEvidence(api, repo, { from, to });
+    return await readEvidence(api, repo, { from, to }, Math.min(now, to + DAY));
   } catch (error) {
     api.stop(error);
     throw error;
   }
 }
 
-async function readEvidence(api, repo, window) {
+// A replacement run starts while its PR is still queued, within hours of the run it invalidates.
+// So the queue runs read for invalidation reach a day past the window, but not past now.
+async function readEvidence(api, repo, window, lookahead) {
   const { from, to } = window;
-  const [queueRuns, pushRuns, merges] = await Promise.all([
-    readRuns(api, repo, window, 'merge_group'), readRuns(api, repo, window, 'push'), readQueueMerges(api, repo, window)]);
+  const [allQueueRuns, pushRuns, merges] = await Promise.all([
+    readRuns(api, repo, { from, to: Math.max(to, lookahead) }, 'merge_group'), readRuns(api, repo, window, 'push'),
+    readQueueMerges(api, repo, window)]);
+  const queueRuns = allQueueRuns.filter(run => inWindow(run.created_at, window));
+  const laterQueueRuns = allQueueRuns.filter(run => !inWindow(run.created_at, window));
   const completedQueue = queueRuns.filter(run => run.status === 'completed');
   const completedPush = pushRuns.filter(run => run.status === 'completed');
   const queueJobs = {};
@@ -222,7 +227,7 @@ async function readEvidence(api, repo, window) {
   });
   const queuePrs = [...new Set(queueRuns.map(run => groupRef(run.head_branch)?.pr).filter(Boolean))].sort((a, b) => a - b);
   const removals = await readRemovals(api, repo, window, queuePrs);
-  return { repo, from: iso(from), to: iso(to), queueRuns, queueJobs, pushes, merges, removals };
+  return { repo, from: iso(from), to: iso(to), queueRuns, laterQueueRuns, queueJobs, pushes, merges, removals };
 }
 
 // ---- Computing (pure) ----
@@ -268,7 +273,7 @@ function exclusion(run, raw) {
   const started = Date.parse(run.created_at);
   const removals = (raw.removals[ref.pr] ?? []).map(removal => ({ at: Date.parse(removal.createdAt), reason: removal.reason }))
     .filter(removal => removal.at >= started).sort((a, b) => a.at - b.at);
-  const rebuilt = raw.queueRuns.some(other => {
+  const rebuilt = [...raw.queueRuns, ...(raw.laterQueueRuns ?? [])].some(other => {
     const otherRef = groupRef(other.head_branch);
     const at = Date.parse(other.created_at);
     return otherRef?.pr === ref.pr && otherRef.base !== ref.base && at > started && !removals.some(removal => removal.at < at);
@@ -410,7 +415,7 @@ async function main(argv, { gh = defaultGh, stdout = text => process.stdout.writ
     const options = parseOptions(argv, now);
     if (options.help) { stdout(USAGE); return 0; }
     const repo = options.repo ?? (await gh(['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'])).trim();
-    const metrics = computeMetrics(await readAll({ gh, repo, from: options.from, to: options.to, wait }));
+    const metrics = computeMetrics(await readAll({ gh, repo, from: options.from, to: options.to, wait, now }));
     stdout(options.json ? `${JSON.stringify(metrics, null, 2)}\n` : formatReport(metrics));
     return 0;
   } catch (error) {
