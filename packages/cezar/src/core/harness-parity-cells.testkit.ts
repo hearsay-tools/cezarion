@@ -175,7 +175,7 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
     id: 'S20',
     name: 'S20 reports missing executables through its existing failure channel without starting a turn',
     scenario: 'missing-binary',
-    assert: ({ backend, v1, failure, pid }) => {
+    assert: ({ backend, v1, failure, pid, elapsedMs }) => {
       // ENOENT precedes the backend wire. Runners retain their existing event
       // and/or rejected-result channels; none may look like a successful turn.
       expect(pid).toBeUndefined();
@@ -186,6 +186,7 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
         expect(failure).toBeDefined();
         expect(errors[0]!.message).toBe(failure!.message);
         expect(v1.some(event => event.type === 'done' || event.type === 'turn-end')).toBe(false);
+        expect(elapsedMs).toBeLessThan(2_000); // hearsay-tools/cezarion#895: the real spawn error, not the 30 s server URL deadline.
       }
       const diagnostics = [...errors.map(event => event.message), ...(failure ? [failure.message] : [])];
       expect(diagnostics.length).toBeGreaterThan(0);

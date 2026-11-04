@@ -4,7 +4,7 @@
   "files": {
     "packages/cezar/scripts/mock-opencode-serve.mjs": 1169,
     "packages/cezar/src/core/codex-app-server-runner.ts": 1271,
-    "packages/cezar/src/core/opencode-server-runner.ts": 1723,
+    "packages/cezar/src/core/opencode-server-runner.ts": 1722,
     "packages/cezar/src/runs/run-database.ts": 1172,
     "packages/cezar/src/runs/store.ts": 4068,
     "packages/cezar/src/server-install/platforms/ubuntu-vps.ts": 1146,

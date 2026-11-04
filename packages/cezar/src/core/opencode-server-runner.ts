@@ -699,23 +699,22 @@ class OpencodeSession implements AgentSession {
       const onData = (chunk: string) => {
         buffer += chunk;
         const m = /https?:\/\/[\d.]+:\d+/.exec(buffer);
-        if (m) {
-          cleanup();
-          resolve(m[0]);
-        }
+        if (m) { cleanup(); resolve(m[0]); }
       };
-      const onExit = () => {
-        cleanup();
-        reject(new ServeExitedBeforeListening());
-      };
+      const onExit = () => { cleanup(); reject(new ServeExitedBeforeListening()); };
+      // A failed spawn emits `error` and `close`, never `exit` (hearsay-tools/cezarion#895).
+      const onError = () => { if (child.pid === undefined) onExit(); };
       const cleanup = () => {
         clearTimeout(timer);
         child.stdout.off('data', onData);
         child.off('exit', onExit);
+        child.off('error', onError);
       };
       child.stdout.setEncoding('utf8');
       child.stdout.on('data', onData);
       child.once('exit', onExit);
+      child.on('error', onError);
+      if (serve.spawnFailed) onError();
     });
   }
 
