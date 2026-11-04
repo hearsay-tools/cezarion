@@ -68,12 +68,6 @@
       "count": 1
     },
     {
-      "file": "packages/web/src/routes/github/github.test.tsx",
-      "rule": "test-enum-literal-tsx",
-      "site": "kind: 'pr'",
-      "count": 3
-    },
-    {
       "file": "packages/web/src/routes/repo-git/repo-git.test.tsx",
       "rule": "test-enum-literal-tsx",
       "site": "kind: 'pr'",

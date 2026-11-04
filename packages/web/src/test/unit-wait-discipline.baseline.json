@@ -116,36 +116,6 @@
       "count": 2
     },
     {
-      "file": "routes/github/github.test.tsx",
-      "rule": "sleep",
-      "site": "await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)) })",
-      "count": 2
-    },
-    {
-      "file": "routes/github/github.test.tsx",
-      "rule": "sleep",
-      "site": "await new Promise((r) => setTimeout(r, 20))",
-      "count": 2
-    },
-    {
-      "file": "routes/github/github.test.tsx",
-      "rule": "sleep",
-      "site": "await new Promise((resolve) => setTimeout(resolve, 100))",
-      "count": 1
-    },
-    {
-      "file": "routes/github/github.test.tsx",
-      "rule": "sleep",
-      "site": "await new Promise((resolve) => setTimeout(resolve, 50)) // inside the 350 ms debounce",
-      "count": 1
-    },
-    {
-      "file": "routes/github/github.test.tsx",
-      "rule": "sleep",
-      "site": "await new Promise((resolve) => setTimeout(resolve, 700)) // past the 350 ms debounce",
-      "count": 1
-    },
-    {
       "file": "routes/global-tasks.test.tsx",
       "rule": "sleep",
       "site": "await new Promise((resolve) => setTimeout(resolve, 350))",

@@ -1,9 +1,14 @@
-/** GitHub list paging and cross-state search. */
-import { ISSUE_142, ISSUE_139, PR_137, GITHUB, type SentRequest, jsonResponse, stubFetch, renderAt, rows, detail } from './github.testkit'
+import { ISSUE_142, ISSUE_139, PR_137, GITHUB, COMMENT_TEXT, COMMENT_IMAGE, REVIEW_CHANGES, THREAD, type SentRequest, jsonResponse, stubFetch, renderAt, renderGithubInMain, rows, detail, ghList, ghListHandle, dragGithubList, changesRequested, health, compactHiddenFlags } from './github.testkit'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { GithubItem } from '@open-mercato/cezar-api-client'
+import { queryKeys } from '@/api/queries'
+import type { GithubCommentsData, GithubData, GithubItem, RunRecord } from '@open-mercato/cezar-api-client'
 import { resetToasts } from '@/components/ui/toaster'
+import { GITHUB_LIST_WIDTH_STORAGE_KEY, MAX_GITHUB_LIST_WIDTH, MIN_GITHUB_LIST_WIDTH } from '@/lib/github-list-width'
+
+import { groupCommitRuns, type ThreadRow } from './github'
 import { ListViewportResizeObserver } from './github-geometry.testkit'
 
 beforeAll(() => {
@@ -13,7 +18,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   // Radix popovers position with floating-ui, which needs a ResizeObserver; jsdom has none. The
-  // list's scroll owner gets a tall viewport so the virtualized rows mount (#1183).
+  // list's scroll owner gets a tall viewport so the virtualized rows mount (hearsay-tools/cezarion#1183).
   vi.stubGlobal('ResizeObserver', ListViewportResizeObserver)
   // The #408 follow-up persistence (remembered selection + per-item draft) is localStorage-
   // backed and jsdom's localStorage survives across tests in this file — start every test clean.
@@ -26,822 +31,1598 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('scroll-driven paging (hearsay-tools/cezarion#1183, port of open-mercato/cezar#1374)', () => {
-  /** jsdom has no IntersectionObserver; this one lets a test say "the sentinel scrolled into view". */
-  let observers: { target: Element | null; root: Element | null; fire: (visible: boolean) => void }[]
-  beforeEach(() => {
-    observers = []
-    vi.stubGlobal(
-      'IntersectionObserver',
-      class {
-        constructor(cb: (entries: { isIntersecting: boolean }[]) => void, opts: { root?: Element | null | undefined }) {
-          const record = { target: null as Element | null, root: opts.root ?? null, fire: (v: boolean) => cb([{ isIntersecting: v }]) }
-          observers.push(record)
-          this.observe = (el: Element) => { record.target = el }
-          this.disconnect = () => { record.target = null }
-        }
-        observe: (el: Element) => void
-        disconnect: () => void
-        unobserve() {}
-      },
+it('/github/prs/:n/changes renders PR-only file review navigation and completeness', async () => {
+  const sent = stubFetch()
+  renderAt('/github/prs/137/changes')
+  await changesRequested(sent, 137)
+  expect(await screen.findByText('2 changed files')).not.toBeNull()
+  expect(screen.getByRole('navigation', { name: 'Pull request detail' }).textContent).toContain('ConversationChanges')
+  expect(screen.getByRole('status').textContent).toContain('One patch was omitted.')
+  expect(screen.getByLabelText('Next file').hasAttribute('disabled')).toBe(false)
+})
+
+it.each(['/github/prs/137', '/github/prs/137/changes'])('keeps the PR list beside %s, like Issues', async (route) => {
+  stubFetch()
+  renderAt(route)
+  await screen.findByRole('heading', { name: 'Pull requests · All open' })
+  expect(document.querySelector('[data-route="github"]')?.hasAttribute('data-pr-detail')).toBe(false)
+  expect(document.querySelector('[data-slot="gh-list"]')).not.toBeNull()
+  expect(rows().length).toBeGreaterThan(0)
+})
+
+describe('the GitHub tab lists', () => {
+  it('restores one stored width for Issues and PRs', async () => {
+    localStorage.setItem(GITHUB_LIST_WIDTH_STORAGE_KEY, '400')
+    stubFetch()
+    renderAt('/github')
+    await screen.findByRole('heading', { name: 'Issues · All open' })
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('400px')
+
+    cleanup()
+    stubFetch()
+    renderAt('/github/prs')
+    await screen.findByRole('heading', { name: 'Pull requests · All open' })
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('400px')
+  })
+
+  it('exposes the separator range and persists pointer changes', async () => {
+    stubFetch()
+    renderAt('/github')
+    await screen.findByRole('heading', { name: 'Issues · All open' })
+    const handle = ghListHandle()
+    expect(handle.getAttribute('role')).toBe('separator')
+    expect(handle.getAttribute('aria-orientation')).toBe('vertical')
+    expect(handle.getAttribute('aria-label')).toBe('Resize the GitHub list')
+    expect(handle.getAttribute('aria-valuemin')).toBe(String(MIN_GITHUB_LIST_WIDTH))
+    expect(handle.getAttribute('aria-valuemax')).toBe(String(MAX_GITHUB_LIST_WIDTH))
+    expect(handle.className).toContain('touch-none')
+
+    dragGithubList(360, 440)
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('440px')
+    expect(handle.getAttribute('aria-valuenow')).toBe('440')
+    expect(localStorage.getItem(GITHUB_LIST_WIDTH_STORAGE_KEY)).toBe('440')
+    expect(document.activeElement).toBe(handle)
+
+    dragGithubList(440, 2_000)
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('520px')
+    dragGithubList(520, -2_000)
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('280px')
+  })
+
+  it('supports keyboard bounds and reset while ignoring non-primary pointer input', async () => {
+    stubFetch()
+    renderAt('/github')
+    await screen.findByRole('heading', { name: 'Issues · All open' })
+    const handle = ghListHandle()
+    fireEvent.keyDown(handle, { key: 'ArrowRight' })
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('376px')
+    fireEvent.keyDown(handle, { key: 'End' })
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('520px')
+    fireEvent.keyDown(handle, { key: 'Home' })
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('280px')
+    fireEvent.doubleClick(handle)
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('360px')
+
+    handle.setPointerCapture = vi.fn()
+    fireEvent.pointerDown(handle, { button: 2, pointerId: 1, clientX: 360 })
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 500 })
+    expect(ghList().style.getPropertyValue('--github-list-width')).toBe('360px')
+    expect(handle.setPointerCapture).not.toHaveBeenCalled()
+  })
+
+  it('keeps the mobile structure and hides the resize handle below md', async () => {
+    stubFetch()
+    renderAt('/github')
+    await screen.findByRole('heading', { name: 'Issues · All open' })
+    expect(ghList().className).toContain('w-full')
+    expect(ghList().className).toContain('md:w-[var(--github-list-width)]')
+    expect(ghListHandle().className).toContain('hidden')
+    expect(ghListHandle().className).toContain('md:block')
+
+    cleanup()
+    stubFetch()
+    renderAt('/github/issues/142')
+    await screen.findByRole('heading', { name: 'Issues · All open' })
+    expect(ghList().className).not.toContain('max-md:max-h-64')
+    expect(ghList().className.split(' ')).not.toContain('hidden')
+    expect(document.querySelector('[data-slot="gh-detail"]')?.className).toContain('flex')
+  })
+
+  // jsdom lays nothing out, so the classes are all this can check. The real-layout proof
+  // (the title can scroll away, then filters stay and each pane scrolls) lives in e2e.
+  it('lets the GitHub title leave while filters and panes stay in flow until dock (#523)', async () => {
+    stubFetch()
+    renderAt('/github')
+    await screen.findByRole('heading', { name: 'Issues · All open' })
+
+    const route = document.querySelector('[data-route="github"]') as HTMLElement
+    const masthead = document.querySelector('[data-slot="gh-masthead"]') as HTMLElement
+    const workspace = document.querySelector('[data-slot="gh-workspace"]') as HTMLElement
+    const header = document.querySelector('[data-slot="gh-header"]') as HTMLElement
+    const detail = document.querySelector('[data-slot="gh-detail"]') as HTMLElement
+
+    expect(route.className.split(' ')).not.toContain('md:h-full')
+    expect(masthead).not.toBeNull()
+    expect(masthead.contains(screen.getByRole('heading', { name: 'Issues · All open' }))).toBe(true)
+    expect(header.contains(document.querySelector('[data-slot="gh-tabs"]'))).toBe(true)
+    expect(header.contains(document.querySelector('[data-slot="gh-filter-toolbar"]'))).toBe(true)
+    expect(workspace.contains(header)).toBe(true)
+    expect(route.className).toContain('md:pb-4')
+    expect(workspace.className).toContain('md:h-[calc(var(--gh-workspace-height,calc(100dvh-4rem))-1rem)]')
+    expect(workspace.className).toContain('md:flex-none')
+    expect(header.className).not.toContain('sticky')
+    expect(header.className).toContain('shrink-0')
+    expect(document.querySelector('[data-slot="gh-panes"]')?.className).not.toContain('sticky')
+    expect(ghList().className).toContain('min-w-0')
+    expect(ghList().className).toContain('md:overflow-x-hidden')
+    expect(ghList().className).toContain('md:overflow-y-auto')
+    expect(detail.className).toContain('md:overflow-y-auto')
+  })
+
+  // jsdom lays nothing out, so this stubs the docking geometry: a desktop viewport, a workspace
+  // wide enough for columns, and a workspace top below main's top. The real-layout proof stays in
+  // `github-layout.e2e.ts`; this pins which wheel input the route takes over while docking.
+  it('routes wheel input over the panes to main until the workspace docks (#523)', async () => {
+    stubFetch()
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(min-width: 768px)', addEventListener() {}, removeEventListener() {},
+    }))
+    const clientWidth = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')!.get!
+    const clientHeight = Object.getOwnPropertyDescriptor(Element.prototype, 'clientHeight')!.get!
+    let workspaceTop = 120
+    const spies = [
+      vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) {
+        return this.matches('[data-slot="gh-workspace"]') ? 1_200 : clientWidth.call(this)
+      }),
+      vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) {
+        return this.matches('[data-slot="main"]') ? 800 : clientHeight.call(this)
+      }),
+      vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+        const top = this.matches('[data-slot="gh-workspace"]') ? workspaceTop : 0
+        return { x: 0, y: top, top, left: 0, right: 0, bottom: top, width: 0, height: 0, toJSON: () => ({}) } as DOMRect
+      }),
+    ]
+    try {
+      const main = renderGithubInMain()
+      let scrollTop = 0
+      Object.defineProperty(main, 'scrollTop', { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value } })
+      await screen.findByRole('heading', { name: 'Issues · All open' })
+      // Columns fit, so the route docks the workspace to main's height.
+      const route = document.querySelector<HTMLElement>('[data-route="github"]')!
+      await waitFor(() => expect(route.style.getPropertyValue('--gh-workspace-height')).toBe('800px'))
+      await waitFor(() => expect(rows().length).toBeGreaterThan(0))
+      const row = rows()[0]!
+      // Pixels, lines and pages all move main; the pane under the pointer does not scroll first.
+      expect(fireEvent.wheel(row, { deltaY: 40 })).toBe(false)
+      expect(fireEvent.wheel(row, { deltaY: 2, deltaMode: 1 })).toBe(false)
+      expect(fireEvent.wheel(row, { deltaY: 1, deltaMode: 2 })).toBe(false)
+      expect(scrollTop).toBe(40 + 2 * 16 + 800)
+      // Zoom, horizontal input, input outside the panes and a docked workspace keep native scrolling.
+      expect(fireEvent.wheel(row, { deltaY: 40, ctrlKey: true })).toBe(true)
+      expect(fireEvent.wheel(row, { deltaX: 50, deltaY: 10 })).toBe(true)
+      expect(fireEvent.wheel(document.querySelector('[data-slot="gh-search"]')!, { deltaY: 40 })).toBe(true)
+      workspaceTop = 1
+      expect(fireEvent.wheel(row, { deltaY: 40 })).toBe(true)
+      expect(scrollTop).toBe(40 + 2 * 16 + 800)
+    } finally {
+      for (const spy of spies) spy.mockRestore()
+    }
+  })
+
+  it('compacts the phone header so the first result can share the 360×640 viewport (#325)', async () => {
+    stubFetch()
+    renderAt('/github')
+    const title = await screen.findByRole('heading', { name: 'Issues · All open' })
+    const route = document.querySelector('[data-route="github"]')
+    const header = document.querySelector('[data-slot="gh-header"]')
+    expect(route?.className).toMatch(/gap-3/)
+    expect(route?.className).toMatch(/md:gap-\[22px\]/)
+    expect(header?.className).toMatch(/gap-3/)
+    expect(header?.className).toMatch(/md:gap-\[22px\]/)
+    expect(title.className).toMatch(/text-2xl/)
+    expect(title.className).toMatch(/md:text-\[15px\]/)
+    expect(document.querySelector('[data-slot="gh-repo"]')?.textContent).toBe('acme/demo')
+    for (const control of [
+      document.querySelector('[data-slot="gh-search"]'),
+      document.querySelector('[data-slot="gh-label-filter"]'),
+      document.querySelector('[data-slot="gh-refresh"]'),
+      screen.getByRole('button', { name: 'Clear filters' }),
+      screen.getByRole('button', { name: 'Assignee' }),
+      screen.getByRole('button', { name: 'Assigned to me' }),
+    ]) {
+      expect(control?.className).toMatch(/min-h-11|gh-utility/)
+      expect(control?.className).toMatch(/min-w-11|w-full|gh-utility/)
+    }
+  })
+
+  it('/github renders the header, both count tabs, the issue rows, and the first issue’s detail', async () => {
+    stubFetch()
+    renderAt('/github')
+
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-header"]')).not.toBeNull())
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Issues · All open')
+    expect(document.querySelector('[data-slot="gh-repo"]')?.textContent).toBe('acme/demo')
+
+    const tabs = [...document.querySelectorAll('[data-slot="gh-tabs"] a')].map((a) => ({
+      text: a.textContent,
+      href: a.getAttribute('href'),
+      current: a.getAttribute('aria-current'),
+    }))
+    expect(tabs).toEqual([
+      { text: 'Issues · 2', href: '/github', current: 'page' },
+      { text: 'Pull requests · 1', href: '/github/prs', current: null },
+    ])
+
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    expect(rows().map((row) => row.dataset.number)).toEqual(['142', '139'])
+    // Rows are deep links, not click handlers.
+    expect(rows()[0]?.getAttribute('href')).toBe('/github/issues/142')
+
+    // No URL selection → the first item's detail renders (legacy parity), marked current.
+    expect(rows()[0]?.getAttribute('aria-current')).toBe('page')
+    await waitFor(() => expect(detail()?.textContent).toContain('Login form drops session'))
+  })
+
+  // #801: the tab's only cross-link into automations follows the capability — advertising
+  // "Set up automations" on a server that answers 409 would be a dead end.
+  it('offers the automations shortcut only while the capability is on', async () => {
+    stubFetch()
+    renderAt('/github')
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-header"]')).not.toBeNull())
+    expect(screen.queryByRole('link', { name: 'Set up automations' })).toBeNull()
+
+    cleanup()
+    stubFetch({
+      'GET /api/v1/health': () => jsonResponse({
+        ...health(['claude']),
+        capabilities: { ...health(['claude']).capabilities, automations: true },
+      }),
+    })
+    renderAt('/github')
+    expect(await screen.findByRole('link', { name: 'Set up automations' })).not.toBeNull()
+  })
+
+  it('/github/prs lists pull requests', async () => {
+    stubFetch()
+    renderAt('/github/prs')
+
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    expect(rows()[0]?.getAttribute('href')).toBe('/github/prs/137')
+  })
+
+  it('a PR row hydrates its checks glyph lazily by outcome (#664); an issue row shows none', async () => {
+    // The list tier no longer ships `statusCheckRollup` — rows come back `checks: null` and the
+    // glyph is filled in from GET /api/v1/github/checks for the on-screen window (#664).
+    const p201: GithubItem = { ...PR_137, number: 201, url: 'u201', checks: null }
+    const p202: GithubItem = { ...PR_137, number: 202, url: 'u202', checks: null }
+    const p203: GithubItem = { ...PR_137, number: 203, url: 'u203', checks: null }
+    const pr137: GithubItem = { ...PR_137, checks: null }
+    stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [pr137, p201, p202, p203] }),
+      'GET /api/v1/github/checks?prs=137%2C201%2C202%2C203': () =>
+        jsonResponse({ available: true, checks: { 137: 'failing', 201: 'passing', 202: 'pending', 203: null } }),
+    })
+    renderAt('/github/prs')
+
+    await waitFor(() => expect(rows()).toHaveLength(4))
+    const glyph = (number: string) =>
+      document.querySelector(`[data-slot="gh-row"][data-number="${number}"] [data-slot="gh-row-checks"]`)
+
+    // The glyph appears a beat later, once the lazy checks query resolves.
+    await waitFor(() => expect(glyph('137')?.getAttribute('data-checks')).toBe('failing'))
+    expect(glyph('137')?.textContent).toBe('✗')
+    expect(glyph('201')?.getAttribute('data-checks')).toBe('passing')
+    expect(glyph('201')?.textContent).toBe('✓')
+    expect(glyph('202')?.getAttribute('data-checks')).toBe('pending')
+    expect(glyph('202')?.textContent).toBe('○')
+    expect(glyph('203')).toBeNull() // null from the checks map → no CI → no glyph
+
+    // Issues never carry `checks`, and the checks query is skipped on the Issues view.
+    cleanup()
+    stubFetch()
+    renderAt('/github')
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0))
+    expect(document.querySelector('[data-slot="gh-row-checks"]')).toBeNull()
+  })
+
+  it('warms the thread on row hover so opening it is instant (#664)', async () => {
+    const threadRequests: string[] = []
+    stubFetch()
+    const origFetch = globalThis.fetch
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).replace('?archived=recent', '')
+      if (path.startsWith('/api/v1/github/comments/')) threadRequests.push(path)
+      return (origFetch as typeof fetch)(input, init as RequestInit)
+    })
+
+    renderAt('/github') // issues view; the first issue's thread loads for the detail pane
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0))
+    await waitFor(() => expect(threadRequests.length).toBeGreaterThan(0))
+    expect(threadRequests.some((p) => p === '/api/v1/github/comments/issue/139')).toBe(false)
+
+    // Hovering a different row prefetches ITS thread before any click.
+    fireEvent.mouseEnter(document.querySelector<HTMLElement>('[data-slot="gh-row"][data-number="139"]')!)
+    await waitFor(() =>
+      expect(threadRequests.some((p) => p === '/api/v1/github/comments/issue/139')).toBe(true),
     )
   })
 
-  const ISSUE_120: GithubItem = { ...ISSUE_139, number: 120, title: 'Older issue', url: 'https://github.com/acme/demo/issues/120' }
-  const listPage = (path: string) => path === '/api/v1/github' || path.startsWith('/api/v1/github?')
-  const sentinel = () => document.querySelector('[data-slot="gh-load-more"]')
-  const live = () => observers.filter((o) => o.target !== null)
+  it('shows a comment-count badge only on rows with comments (#499)', async () => {
+    stubFetch()
+    renderAt('/github')
 
-  /** First list page carries a cursor; the cursored page carries ISSUE_120 and ends the list. */
-  function stubPaged(): SentRequest[] {
-    const sent = stubFetch()
-    const base = vi.mocked(fetch).getMockImplementation()!
-    vi.mocked(fetch).mockImplementation(async (input, init) => {
-      const path = String(input)
-      if ((init?.method ?? 'GET') === 'GET' && listPage(path)) {
-        sent.push({ path, method: 'GET', body: undefined })
-        return path.includes('issuesCursor=')
-          ? jsonResponse({ ...GITHUB, issues: [ISSUE_120], prs: [], issuesNextCursor: null, prsNextCursor: null })
-          : jsonResponse({ ...GITHUB, issuesNextCursor: 'c1', prsNextCursor: null })
-      }
-      return base(input, init)
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    const badge = (number: string) =>
+      document.querySelector(`[data-slot="gh-row"][data-number="${number}"] [data-slot="gh-comment-count"]`)
+
+    // #142 has 3 comments → a labelled badge; #139 has 0 → none, so quiet rows look untouched.
+    expect(badge('142')?.getAttribute('data-count')).toBe('3')
+    expect(badge('142')?.getAttribute('aria-label')).toBe('3 comments')
+    expect(badge('142')?.textContent).toContain('3')
+    expect(badge('139')).toBeNull()
+  })
+
+  it('shows the exact open count from the single fast load — no 30+ guesswork (#664)', async () => {
+    // The two-shot is gone: one fast fetch (limit 1000, no rollup) returns the whole open set, so
+    // the tab reports the real count instead of the old fast-batch "30+" placeholder.
+    const many: GithubData = {
+      ...GITHUB,
+      issues: Array.from({ length: 45 }, (_, i) => ({ ...ISSUE_142, number: i + 1, url: `u${i}` })),
+    }
+    stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse(many),
     })
-    return sent
+    renderAt('/github')
+
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-tabs"]')).not.toBeNull())
+    await waitFor(() =>
+      expect(document.querySelector('[data-slot="gh-tabs"] a')?.textContent).toBe('Issues · 45'),
+    )
+  })
+
+  it('a row deep link selects that item and renders its detail', async () => {
+    stubFetch()
+    renderAt('/github/issues/139')
+
+    await waitFor(() => expect(detail()?.textContent).toContain('Add --json flag'))
+    expect(document.querySelector('[data-slot="gh-row"][data-number="139"]')?.getAttribute('aria-current')).toBe('page')
+    // A blank body renders the honest placeholder, not an empty markdown shell.
+    expect(document.querySelector('[data-slot="gh-body"]')?.textContent).toContain('(no description)')
+  })
+
+  it('an unknown number renders the honest not-found state, not a crash', async () => {
+    // Not in the open list, so the tab asks GitHub for it by number (#692); GitHub has none.
+    stubFetch({ 'GET /api/v1/github/items/issue/9999': () => jsonResponse({ available: true, item: null }) })
+    renderAt('/github/issues/9999')
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 2, name: 'Not found' })).toBeTruthy(),
+    )
+    // Since #730 the advice is actionable — a closed or merged item IS reachable through the
+    // search box — so the copy must point there rather than shrug "it may be closed".
+    expect(document.querySelector('[data-slot="gh-detail"]')?.textContent).toContain(
+      'Search for 9999 above',
+    )
+  })
+
+  it('dragging a row carries the hand-to-agent prompt as text/plain', async () => {
+    stubFetch()
+    renderAt('/github')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+
+    const setData = vi.fn()
+    fireEvent.dragStart(rows()[0]!, { dataTransfer: { setData, effectAllowed: 'none' } })
+    expect(setData).toHaveBeenCalledWith(
+      'text/plain',
+      expect.stringContaining('Fix GitHub issue #142: Login form drops session on refresh'),
+    )
+    expect(setData.mock.calls[0]?.[1]).toContain(ISSUE_142.url)
+  })
+})
+
+describe('remembering the last-selected tab (#417)', () => {
+  it('clicking Pull requests persists the choice via PUT /api/v1/ui-state', async () => {
+    const sent = stubFetch()
+    renderAt('/github')
+    await waitFor(() => expect(rows()).toHaveLength(2))
+
+    fireEvent.click(screen.getByRole('link', { name: /Pull requests/ }))
+
+    await waitFor(() =>
+      expect(sent.some((request) => request.method === 'PUT' && request.path === '/api/v1/ui-state')).toBe(
+        true,
+      ),
+    )
+    const put = sent.find((request) => request.method === 'PUT' && request.path === '/api/v1/ui-state')
+    expect(put?.body).toEqual({ githubView: 'prs' })
+  })
+
+  it('opening /github restores "prs" when that was the last-selected tab', async () => {
+    stubFetch({ 'GET /api/v1/ui-state': () => jsonResponse({ githubView: 'prs' }) })
+    renderAt('/github')
+
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    expect(rows()[0]?.getAttribute('href')).toBe('/github/prs/137')
+  })
+
+  it('opening /github falls back to Issues when nothing was ever remembered', async () => {
+    stubFetch({ 'GET /api/v1/ui-state': () => jsonResponse({}) })
+    renderAt('/github')
+
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    expect(rows()[0]?.getAttribute('href')).toBe('/github/issues/142')
+  })
+
+  it('clicking Issues while "prs" is remembered switches to Issues instead of bouncing back', async () => {
+    // The regression this guards: without eagerly patching the query cache on click, the
+    // index route would still read the stale "prs" remembered choice and redirect the click
+    // straight back to /github/prs, making the Issues tab unclickable.
+    stubFetch({ 'GET /api/v1/ui-state': () => jsonResponse({ githubView: 'prs' }) })
+    renderAt('/github/prs')
+    await waitFor(() => expect(rows()).toHaveLength(1))
+
+    fireEvent.click(screen.getByRole('link', { name: /^Issues/ }))
+
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    expect(rows().map((row) => row.dataset.number)).toEqual(['142', '139'])
+  })
+})
+
+describe('the GitHub detail pane', () => {
+  it('a PR renders the meta line, ± stat, label chips and the checks badge', async () => {
+    stubFetch()
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(detail()).not.toBeNull())
+    const meta = document.querySelector('[data-slot="gh-meta"]')?.textContent ?? ''
+    expect(meta).toContain('#137')
+    expect(meta).toContain('pull request')
+    expect(meta).toContain('opened by grace')
+    // The comment count renders as an icon+count badge (#499), labelled for screen readers.
+    const detailCount = document.querySelector('[data-slot="gh-meta"] [data-slot="gh-comment-count"]')
+    expect(detailCount?.getAttribute('data-count')).toBe('1')
+    expect(detailCount?.getAttribute('aria-label')).toBe('1 comment')
+    expect(document.querySelector('[data-slot="gh-diffstat"]')?.textContent).toBe('+120 −30')
+    expect(document.querySelector('[data-slot="gh-open-link"]')?.getAttribute('href')).toBe(PR_137.url)
+
+    expect(document.querySelector('[data-slot="gh-label"]')?.textContent).toBe('perf')
+    const checks = document.querySelector('[data-slot="gh-checks"]')
+    expect(checks?.getAttribute('data-checks')).toBe('failing')
+    expect(checks?.textContent).toContain('checks failing')
+  })
+
+  it('the checks badge links to the PR checks tab on GitHub, open in a new tab (#415)', async () => {
+    stubFetch()
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(detail()).not.toBeNull())
+    const checks = document.querySelector('[data-slot="gh-checks"]')
+    expect(checks?.tagName).toBe('A')
+    expect(checks?.getAttribute('href')).toBe(`${PR_137.url}/checks`)
+    expect(checks?.getAttribute('target')).toBe('_blank')
+    expect(checks?.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
+  it('hydrates the selected PR body and diffstat from the thread detail (hearsay-tools/cezarion#1183)', async () => {
+    stubFetch({
+      'GET /api/v1/github/comments/pr/137': () => jsonResponse({
+        ...THREAD,
+        detail: { body: 'Hydrated PR description', additions: 240, deletions: 12 },
+      }),
+    })
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-body"]')?.textContent).toContain('Hydrated PR description'))
+    expect(document.querySelector('[data-slot="gh-diffstat"]')?.textContent).toBe('+240 −12')
+  })
+
+  it('an issue whose list row has no body shows the detail body', async () => {
+    const { body: _body, ...bodiless } = ISSUE_142
+    stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [bodiless, ISSUE_139] }),
+      'GET /api/v1/github/comments/issue/142': () => jsonResponse({ ...THREAD, detail: { body: 'Body from the detail tier' } }),
+    })
+    renderAt('/github/issues/142')
+
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-body"]')?.textContent).toContain('Body from the detail tier'))
+    expect(document.querySelector('[data-slot="gh-body"]')?.textContent).not.toContain('(no description)')
+  })
+
+  it('renders the issue body through the markdown pipeline', async () => {
+    stubFetch()
+    renderAt('/github/issues/142')
+
+    await waitFor(() =>
+      expect(document.querySelector('[data-slot="gh-body"]')?.textContent).toContain(
+        'Repro: log in, hit reload',
+      ),
+    )
+  })
+
+  it.each(['/github/prs/137', '/github/prs/137/changes'])('shows authoritative merge state and confirms the reviewed head on %s', async (route) => {
+    const sent = stubFetch({
+      'GET /api/v1/github/prs/137/merge-state': () => jsonResponse({
+        available: true,
+        mergeState: {
+          number: 137,
+          title: PR_137.title,
+          url: PR_137.url,
+          state: 'open',
+          isDraft: false,
+          headRef: 'feat/sse',
+          baseRef: 'main',
+          headSha: '0123456789abcdef0123456789abcdef01234567',
+          mergeable: 'mergeable',
+          reviewDecision: 'approved',
+          checks: [{ name: 'test', state: 'passing', required: true, url: 'https://example.com/check' }],
+          methods: ['squash', 'rebase'],
+          defaultMethod: 'squash',
+          eligibility: 'ready',
+          blockers: [],
+          canMerge: true,
+          canOverride: false,
+        },
+      }),
+      'GET /api/v1/github/prs/137/merge-state?refresh=1': () => jsonResponse({
+        available: true,
+        mergeState: {
+          number: 137,
+          title: PR_137.title,
+          url: PR_137.url,
+          state: 'open',
+          isDraft: false,
+          headRef: 'feat/sse',
+          baseRef: 'main',
+          headSha: '0123456789abcdef0123456789abcdef01234567',
+          mergeable: 'mergeable',
+          reviewDecision: 'approved',
+          checks: [],
+          methods: ['squash'],
+          defaultMethod: 'squash',
+          eligibility: 'ready',
+          blockers: [],
+          canMerge: true,
+          canOverride: false,
+        },
+      }),
+      'POST /api/v1/github/prs/137/merge': () => jsonResponse({
+        merged: true,
+        number: 137,
+        url: PR_137.url,
+        method: 'squash',
+      }),
+    })
+    renderAt(route)
+
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-merge-box"]')?.textContent).toContain('Ready to merge'))
+    expect(document.querySelectorAll('[data-slot="gh-merge-status-passing"]')).toHaveLength(3)
+    fireEvent.click(within(document.querySelector('[data-slot="gh-merge-box"]')!).getByRole('button', { name: 'Refresh' }))
+    await waitFor(() => expect(sent.some((request) => request.path.endsWith('merge-state?refresh=1'))).toBe(true))
+    fireEvent.click(screen.getByRole('button', { name: 'Squash and merge' }))
+    expect(sent.some((request) => request.method === 'POST')).toBe(false)
+    expect(await screen.findByText(/This will merge/)).toBeTruthy()
+    fireEvent.click(within(document.querySelector('[data-slot="gh-merge-confirm"]')!).getByRole('button', { name: 'Squash and merge' }))
+    await waitFor(() => expect(sent.find((request) => request.method === 'POST')?.body).toEqual({
+      method: 'squash',
+      expectedHeadSha: '0123456789abcdef0123456789abcdef01234567',
+    }))
+  })
+
+  it('allows an explicit rules override while warning that GitHub still authorizes it', async () => {
+    const sent = stubFetch({
+      'GET /api/v1/github/prs/137/merge-state': () => jsonResponse({
+        available: true,
+        mergeState: {
+          number: 137,
+          title: PR_137.title,
+          url: PR_137.url,
+          state: 'open',
+          isDraft: false,
+          headRef: 'feat/sse',
+          baseRef: 'main',
+          headSha: '0123456789abcdef0123456789abcdef01234567',
+          mergeable: 'mergeable',
+          reviewDecision: 'review-required',
+          checks: [{ name: 'test', state: 'pending', required: true }],
+          methods: ['squash'],
+          defaultMethod: 'squash',
+          eligibility: 'blocked',
+          blockers: [{ code: 'reviews', message: 'A required review is missing.' }],
+          canMerge: false,
+          canOverride: true,
+        },
+      }),
+      'POST /api/v1/github/prs/137/merge': () => jsonResponse({
+        merged: true,
+        number: 137,
+        url: PR_137.url,
+        method: 'squash',
+      }),
+    })
+    renderAt('/github/prs/137')
+
+    const override = await screen.findByRole('checkbox', { name: /Merge without waiting for requirements/ })
+    expect(screen.getByRole('button', { name: 'Squash and merge' }).hasAttribute('disabled')).toBe(true)
+    expect(document.querySelectorAll('[data-slot="gh-merge-status-failing"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-slot="gh-merge-status-pending"]')).toHaveLength(1)
+    fireEvent.click(override)
+    fireEvent.click(screen.getByRole('button', { name: 'Squash and merge' }))
+    expect(await screen.findByText(/asking GitHub to bypass unmet repository requirements/)).toBeTruthy()
+    fireEvent.click(within(document.querySelector('[data-slot="gh-merge-confirm"]')!).getByRole('button', { name: 'Squash and merge' }))
+    await waitFor(() => expect(sent.find((request) => request.method === 'POST')?.body).toEqual({
+      method: 'squash',
+      expectedHeadSha: '0123456789abcdef0123456789abcdef01234567',
+      overrideRules: true,
+    }))
+  })
+
+  it('focuses the hand-to-agent prompt from a conflicting PR\'s merge box', async () => {
+    stubFetch({
+      'GET /api/v1/github/prs/137/merge-state': () => jsonResponse({
+        available: true,
+        mergeState: {
+          number: 137,
+          title: PR_137.title,
+          url: PR_137.url,
+          state: 'open',
+          isDraft: false,
+          headRef: 'feat/sse',
+          baseRef: 'main',
+          headSha: '0123456789abcdef0123456789abcdef01234567',
+          mergeable: 'conflicting',
+          reviewDecision: 'approved',
+          checks: [],
+          methods: ['squash'],
+          defaultMethod: 'squash',
+          eligibility: 'blocked',
+          blockers: [],
+          canMerge: false,
+          canOverride: false,
+        },
+      }),
+    })
+    renderAt('/github/prs/137')
+
+    // The hand-to-agent panel has its own "Run agent on this PR" submit; this is the merge box's.
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-merge-box"]')?.textContent).toContain('Conflicts: present'))
+    fireEvent.click(within(document.querySelector<HTMLElement>('[data-slot="gh-merge-box"]')!).getByRole('button', { name: 'Run agent on this PR' }))
+    expect(document.activeElement).toBe(document.querySelector('[data-slot="gh-custom-prompt"]'))
+  })
+})
+
+describe('the comment thread', () => {
+  const thread = (kind: 'issue' | 'pr', n: number, data: GithubCommentsData) => ({
+    [`GET /api/v1/github/comments/${kind}/${n}`]: () => jsonResponse(data),
+  })
+  const threadSection = () => document.querySelector('[data-slot="gh-thread"]')
+  const entries = () => [...document.querySelectorAll<HTMLElement>('[data-slot="gh-thread-entry"]')]
+
+  it('renders an "Activity · N comments" section with each body through the markdown pipeline', async () => {
+    stubFetch(thread('issue', 142, { available: true, comments: [COMMENT_TEXT, COMMENT_IMAGE] }))
+    renderAt('/github/issues/142')
+
+    await waitFor(() => expect(threadSection()).not.toBeNull())
+    // Retitled by #525: heading a twenty-row list `Comments · 2` would be incoherent once events
+    // render, so the section is "Activity" and the comment count becomes a secondary.
+    expect(document.querySelector('[data-slot="gh-thread-header"]')?.textContent).toBe(
+      'Activity · 2 comments',
+    )
+    expect(entries()).toHaveLength(2)
+    expect(entries()[0]?.textContent).toContain('maya')
+    expect(entries()[0]?.querySelector('[data-slot="gh-thread-body"]')?.textContent).toContain(
+      'Confirmed on my end too',
+    )
+  })
+
+  it('renders an image comment as an <img> through the shared Markdown component', async () => {
+    stubFetch(thread('issue', 142, { available: true, comments: [COMMENT_IMAGE] }))
+    renderAt('/github/issues/142')
+
+    await waitFor(() => expect(threadSection()).not.toBeNull())
+    const img = document.querySelector<HTMLImageElement>('[data-slot="gh-thread-body"] img')
+    expect(img?.getAttribute('src')).toBe('https://example.com/shot.png')
+  })
+
+  it('renders nothing when BOTH streams are empty — the count badge already said so', async () => {
+    stubFetch(thread('issue', 139, { available: true, comments: [], events: [] }))
+    renderAt('/github/issues/139')
+
+    await waitFor(() => expect(detail()?.textContent).toContain('Add --json flag'))
+    expect(threadSection()).toBeNull()
+    expect(document.querySelector('[data-slot="gh-thread-error"]')).toBeNull()
+  })
+
+  it('shows a one-line reason + open-on-GitHub link when the thread is unavailable', async () => {
+    stubFetch(thread('issue', 142, { available: false, reason: 'gh not installed', comments: [] }))
+    renderAt('/github/issues/142')
+
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-thread-error"]')).not.toBeNull())
+    const error = document.querySelector('[data-slot="gh-thread-error"]')!
+    expect(error.textContent).toContain('gh not installed')
+    expect(error.querySelector('a')?.getAttribute('href')).toBe(ISSUE_142.url)
+  })
+
+  it('renders a review entry with a state chip (green/red tone tables)', async () => {
+    stubFetch(thread('pr', 137, { available: true, comments: [COMMENT_TEXT, REVIEW_CHANGES] }))
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(entries()).toHaveLength(2))
+    const review = document.querySelector('[data-slot="gh-thread-entry"][data-kind="review"]')
+    const chip = review?.querySelector('[data-slot="gh-review-chip"]')
+    expect(chip?.getAttribute('data-review-state')).toBe('changes_requested')
+    expect(chip?.textContent).toBe('changes requested')
+    expect(chip?.className).toContain('text-danger')
+  })
+
+  it('uses the real avatar when present and a letter fallback when absent', async () => {
+    stubFetch(thread('issue', 142, { available: true, comments: [COMMENT_TEXT, COMMENT_IMAGE] }))
+    renderAt('/github/issues/142')
+
+    await waitFor(() => expect(entries()).toHaveLength(2))
+    // COMMENT_TEXT has an avatarUrl → an <img>; COMMENT_IMAGE has none → a letter block.
+    expect(entries()[0]?.querySelector('[data-slot="gh-avatar"]')?.getAttribute('src')).toBe(
+      COMMENT_TEXT.avatarUrl,
+    )
+    const fallback = entries()[1]?.querySelector('[data-slot="gh-avatar-fallback"]')
+    expect(fallback).not.toBeNull()
+    expect(fallback?.textContent).toBe('n') // first letter of "noAvatar"
+  })
+
+  // ---- timeline events (#525) ----------------------------------------------
+
+  const events = () => [...document.querySelectorAll<HTMLElement>('[data-slot="gh-event-row"]')]
+  const SHA = 'abc1234' + 'f'.repeat(33)
+  const EVT = {
+    committed: {
+      id: `evt-${SHA}`, kind: 'committed' as const, actor: 'Ada Lovelace',
+      createdAt: '2026-01-02T00:00:00Z', sha: SHA, message: 'bound the timeline page loop',
+    },
+    labeled: {
+      id: 'evt-1', kind: 'labeled' as const, actor: 'octocat',
+      createdAt: '2026-01-03T00:00:00Z', label: { name: 'bug', color: 'd73a4a' },
+    },
+    merged: { id: 'evt-2', kind: 'merged' as const, actor: 'octocat', createdAt: '2026-01-04T00:00:00Z' },
+    crossRef: {
+      id: 'evt-3', kind: 'cross-referenced' as const, actor: 'octocat',
+      createdAt: '2026-01-05T00:00:00Z', refNumber: 520, refTitle: 'Sibling work',
+      refIsPr: true, url: 'https://github.com/o/r/pull/520',
+    },
   }
 
-  it('fetches the next page when the sentinel intersects, with no button', async () => {
-    const sent = stubPaged()
+  it('renders a row per event kind, each carrying data-kind for keying', async () => {
+    stubFetch(thread('pr', 137, {
+      available: true, comments: [],
+      events: [
+        EVT.committed, EVT.labeled, EVT.merged, EVT.crossRef,
+        { id: 'evt-4', kind: 'assigned', actor: 'octocat', createdAt: '2026-01-06T00:00:00Z', subject: 'maya' },
+        { id: 'evt-5', kind: 'renamed', actor: 'octocat', createdAt: '2026-01-07T00:00:00Z', subject: 'A better title' },
+        { id: 'evt-6', kind: 'head_ref_force_pushed', actor: 'octocat', createdAt: '2026-01-08T00:00:00Z' },
+        { id: 'evt-7', kind: 'closed', actor: 'octocat', createdAt: '2026-01-09T00:00:00Z' },
+      ],
+    }))
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(events()).toHaveLength(8))
+    expect(events().map((e) => e.dataset.kind)).toEqual([
+      'committed', 'labeled', 'merged', 'cross-referenced',
+      'assigned', 'renamed', 'head_ref_force_pushed', 'closed',
+    ])
+    expect(events()[0]?.textContent).toContain('Ada Lovelace')
+    expect(events()[0]?.textContent).toContain('abc1234') // short sha
+    expect(events()[0]?.textContent).toContain('bound the timeline page loop')
+    expect(events()[2]?.textContent).toContain('merged this')
+    expect(events()[3]?.textContent).toContain('#520')
+    expect(events()[4]?.textContent).toContain('assigned maya')
+    expect(events()[5]?.textContent).toContain('renamed this to A better title')
+    expect(events()[6]?.textContent).toContain('force-pushed')
+  })
+
+  it('renders a PR with events but ZERO comments — the motivating case', async () => {
+    // The empty guard used to key on comments alone, which would hide the whole feature on a
+    // merged PR carrying commits, labels and a merge event but no conversation.
+    stubFetch(thread('pr', 137, { available: true, comments: [], events: [EVT.committed, EVT.merged] }))
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(threadSection()).not.toBeNull())
+    expect(events()).toHaveLength(2)
+    expect(entries()).toHaveLength(0)
+    expect(document.querySelector('[data-slot="gh-thread-header"]')?.textContent).toBe(
+      'Activity · 0 comments',
+    )
+  })
+
+  it('interleaves comments and events chronologically', async () => {
+    // The server returns two independently-capped arrays and deliberately does NOT merge them;
+    // ordering is presentation. This is the merge.
+    stubFetch(thread('pr', 137, {
+      available: true,
+      comments: [{ ...COMMENT_TEXT, createdAt: '2026-01-03T12:00:00Z' }],
+      events: [
+        { ...EVT.committed, createdAt: '2026-01-02T00:00:00Z' },
+        { ...EVT.merged, createdAt: '2026-01-04T00:00:00Z' },
+      ],
+    }))
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(events()).toHaveLength(2))
+    const rows = [...document.querySelectorAll('[data-slot="gh-thread-entry"], [data-slot="gh-event-row"]')]
+    expect(rows.map((r) => (r as HTMLElement).dataset.slot ?? r.getAttribute('data-slot'))).toEqual([
+      'gh-event-row', 'gh-thread-entry', 'gh-event-row',
+    ])
+  })
+
+  it('sends refresh=1 on the BARE /github route too, where no :n is in the URL', async () => {
+    // The regression the first fix batch shipped: keying the open thread off the `:n` route param
+    // left the DEFAULT landing pages refreshing nothing, because with no `:n` the tab still shows
+    // a thread — `selected` falls back to items[0]. The refresh must follow what is rendered.
+    const threadRequests: string[] = []
+    stubFetch({ 'GET /api/v1/github?refresh=1': () => jsonResponse(GITHUB) })
+    const origFetch = globalThis.fetch
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).replace('?archived=recent', '')
+      if (path.startsWith('/api/v1/github/comments/')) threadRequests.push(path)
+      return (origFetch as typeof fetch)(input, init as RequestInit)
+    })
+
+    renderAt('/github') // no :n at all
+    await waitFor(() => expect(threadRequests.length).toBe(1))
+
+    fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-refresh"]')!)
+
+    await waitFor(() => expect(threadRequests.some((p) => p.includes('refresh=1'))).toBe(true))
+  })
+
+  it('does not blank the open thread while refreshing it', async () => {
+    // The other half of that regression: the removeQueries predicate wiped the MOUNTED thread,
+    // resetting it to pending so the loading skeleton flashed under the user on every refresh.
+    stubFetch({ 'GET /api/v1/github?refresh=1': () => jsonResponse(GITHUB) })
+    renderAt('/github/issues/142')
+
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-thread"]')).not.toBeNull())
+
+    fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-refresh"]')!)
+
+    // The thread stays rendered throughout — never replaced by the loading skeleton.
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-thread"]')).not.toBeNull())
+    expect(document.querySelector('[data-slot="gh-thread-loading"]')).toBeNull()
+  })
+
+  it('orders a comment and an event made in the SAME second by their true order', async () => {
+    // The two streams carry different precisions: events go through toISOString() (`…00.000Z`),
+    // comments keep GitHub's `…00Z`. A raw string compare puts '.' (46) before 'Z' (90), so the
+    // event would always win a same-second tie regardless of what actually happened first.
+    stubFetch(thread('pr', 137, {
+      available: true,
+      comments: [{ ...COMMENT_TEXT, createdAt: '2026-01-03T10:00:00Z' }],
+      events: [{ ...EVT.merged, createdAt: '2026-01-03T10:00:00.000Z' }],
+    }))
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(events()).toHaveLength(1))
+    const rows = [...document.querySelectorAll('[data-slot="gh-thread-entry"], [data-slot="gh-event-row"]')]
+    // Same instant → stable sort keeps insertion order, and comments are inserted first.
+    expect(rows[0]?.getAttribute('data-slot')).toBe('gh-thread-entry')
+  })
+
+  it('does not let an unparseable timestamp scramble the order', async () => {
+    // normalizeReviews emits createdAt: '' for a PENDING review that has a body, and
+    // Date.parse('') is NaN. An NaN comparator result coerces to +0, which makes the sort
+    // INCONSISTENT rather than crashing — the row lands wherever the engine leaves it. Pinned
+    // to the top explicitly instead.
+    stubFetch(thread('pr', 137, {
+      available: true,
+      comments: [
+        { ...COMMENT_TEXT, id: 91, createdAt: '' },
+        { ...COMMENT_TEXT, id: 92, createdAt: '2026-01-03T00:00:00Z' },
+      ],
+      events: [{ ...EVT.merged, createdAt: '2026-01-02T00:00:00Z' }],
+    }))
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(entries()).toHaveLength(2))
+    const rows = [...document.querySelectorAll('[data-slot="gh-thread-entry"], [data-slot="gh-event-row"]')]
+    // The timestamp-less row first, then the ordered ones — deterministic, whatever else changes.
+    expect(rows.map((r) => r.getAttribute('data-slot'))).toEqual([
+      'gh-thread-entry', 'gh-event-row', 'gh-thread-entry',
+    ])
+  })
+
+  it('tints a label chip from the event colour', async () => {
+    stubFetch(thread('pr', 137, { available: true, comments: [], events: [EVT.labeled] }))
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(events()).toHaveLength(1))
+    const chip = document.querySelector<HTMLElement>('[data-slot="gh-event-label"]')
+    expect(chip?.textContent).toBe('bug')
+    expect(chip?.style.borderColor).not.toBe('') // tinted, not the muted fallback
+  })
+
+  it('links a cross-reference out to the referenced thread', async () => {
+    stubFetch(thread('pr', 137, { available: true, comments: [], events: [EVT.crossRef] }))
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(events()).toHaveLength(1))
+    expect(events()[0]?.querySelector('a')?.getAttribute('href')).toBe('https://github.com/o/r/pull/520')
+  })
+
+  it('renders comments unchanged when the server sent no events at all', async () => {
+    // The degraded path: the server fell back to the legacy comments-only fetch, so `events` is
+    // absent. The thread must render exactly as it did pre-#525.
+    stubFetch(thread('issue', 142, { available: true, comments: [COMMENT_TEXT] }))
+    renderAt('/github/issues/142')
+
+    await waitFor(() => expect(entries()).toHaveLength(1))
+    expect(events()).toHaveLength(0)
+    expect(threadSection()).not.toBeNull()
+  })
+
+  it.each([
+    ['passing', '✓', 'text-success'],
+    ['failing', '✗', 'text-danger'],
+    ['pending', '○', 'text-muted-foreground'],
+  ])('renders the %s CI glyph on a commit row', async (state, glyph, tone) => {
+    stubFetch(thread('pr', 137, {
+      available: true, comments: [],
+      events: [{ ...EVT.committed, checks: state as 'passing' | 'failing' | 'pending' }],
+    }))
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(events()).toHaveLength(1))
+    const badge = document.querySelector<HTMLElement>('[data-slot="gh-commit-checks"]')
+    expect(badge?.getAttribute('data-checks')).toBe(state)
+    expect(badge?.textContent).toBe(glyph)
+    expect(badge?.className).toContain(tone)
+  })
+
+  it('renders no glyph when checks is null AND when it is absent', async () => {
+    // null = the commit has no CI configured; absent = the rollup query failed or was skipped.
+    // They look identical here on purpose, but stay distinct on the wire.
+    stubFetch(thread('pr', 137, {
+      available: true, comments: [],
+      events: [
+        // Distinct authors so the Phase-2 commit-run grouping does not collapse them — this case
+        // is about glyph rendering, not grouping.
+        { ...EVT.committed, id: 'evt-null', actor: 'Ada Lovelace', checks: null },
+        { ...EVT.committed, id: 'evt-absent', actor: 'Grace Hopper' }, // no `checks` key at all
+      ],
+    }))
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(events()).toHaveLength(2))
+    expect(document.querySelectorAll('[data-slot="gh-commit-checks"]')).toHaveLength(0)
+  })
+
+  it('collapses a run of consecutive commits by one author, and expands on click', async () => {
+    const commit = (n: number, actor = 'Ada Lovelace') => ({
+      id: `evt-c${n}`, kind: 'committed' as const, actor,
+      createdAt: `2026-01-0${n}T00:00:00Z`, sha: String(n).repeat(40).slice(0, 40),
+      message: `commit number ${n}`, checks: 'passing' as const,
+    })
+    stubFetch(thread('pr', 137, {
+      available: true, comments: [],
+      events: [commit(1), commit(2), commit(3)],
+    }))
+    renderAt('/github/prs/137')
+
+    const group = () => document.querySelector<HTMLElement>('[data-slot="gh-commit-group"]')
+    await waitFor(() => expect(group()).not.toBeNull())
+
+    // Collapsed: one summary row, no individual commit rows.
+    expect(group()?.dataset.open).toBe('false')
+    expect(group()?.textContent).toContain('added 3 commits')
+    expect(group()?.querySelector('button')?.getAttribute('aria-expanded')).toBe('false')
+    expect(events()).toHaveLength(0)
+
+    fireEvent.click(group()!.querySelector('button')!)
+
+    // Expanded: each commit keeps its own message AND its own glyph — nothing is lost to the
+    // collapse, which is why grouping is client-side and the wire stays flat.
+    await waitFor(() => expect(events()).toHaveLength(3))
+    expect(group()?.querySelector('button')?.getAttribute('aria-expanded')).toBe('true')
+    expect(events()[0]?.textContent).toContain('commit number 1')
+    expect(events()[2]?.textContent).toContain('commit number 3')
+    expect(document.querySelectorAll('[data-slot="gh-commit-checks"]')).toHaveLength(3)
+  })
+
+  it('does not group a lone commit into a "1 commit" expander', async () => {
+    stubFetch(thread('pr', 137, { available: true, comments: [], events: [EVT.committed] }))
+    renderAt('/github/prs/137')
+
+    await waitFor(() => expect(events()).toHaveLength(1))
+    expect(document.querySelector('[data-slot="gh-commit-group"]')).toBeNull()
+  })
+
+  it('manual Refresh bypasses the list cache and updates the selected issue body', async () => {
+    const sent = stubFetch({
+      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse({
+        ...GITHUB, issues: [{ ...ISSUE_142, body: 'Edited upstream requirements' }, ISSUE_139],
+      }),
+    })
+    renderAt('/github/issues/142')
+    await screen.findByText(ISSUE_142.body!)
+    fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-refresh"]')!)
+    await screen.findByText('Edited upstream requirements')
+    expect(screen.queryByText(ISSUE_142.body!)).toBeNull()
+    expect(sent.some(({ path }) => path === '/api/v1/github?limit=50&refresh=1')).toBe(true)
+  })
+
+  it('tabs show the server totals, not the loaded length (hearsay-tools/cezarion#1183)', async () => {
+    const many = Array.from({ length: 45 }, (_, i) => ({ ...ISSUE_139, number: 1000 + i, url: `https://github.com/acme/demo/issues/${1000 + i}` }))
+    stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({
+        ...GITHUB, issues: many, issuesTotal: 88, prsTotal: 12, issuesNextCursor: 'c45', prsNextCursor: 'p1',
+      }),
+    })
+    renderAt('/github?filter=all')
+    expect(await screen.findByText('Issues · 88')).toBeTruthy()
+    expect(screen.getByText('Pull requests · 12')).toBeTruthy()
+  })
+
+  it('a deferred row shows no badge until its count lands, then shows it', async () => {
+    let answer!: (response: Response) => void
+    stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({
+        ...GITHUB, issues: [{ ...ISSUE_142, comments: 0 }, { ...ISSUE_139, comments: 0 }], commentsDeferred: true,
+      }),
+      'GET /api/v1/github/comment-counts?kind=issue&numbers=142%2C139': () => new Promise<Response>((resolve) => { answer = resolve }),
+    })
     renderAt('/github?filter=all')
     await waitFor(() => expect(rows()).toHaveLength(2))
-    expect(screen.queryByRole('button', { name: /load more/i })).toBeNull()
-    await waitFor(() => expect(live()).toHaveLength(1))
-    // Observed against the element that really scrolls the list: with no shell `main` around it,
-    // that is the list pane itself.
-    expect(live()[0]!.root?.getAttribute('data-slot')).toBe('gh-list')
-    expect(live()[0]!.target).toBe(sentinel())
-
-    act(() => live()[0]!.fire(true))
-    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142', '139', '120']))
-    expect(sent.filter((r) => listPage(r.path) && r.path.includes('issuesCursor=c1'))).toHaveLength(1)
-    // The last page is in: no sentinel, no observer, nothing left to offer.
-    expect(sentinel()).toBeNull()
-    expect(live()).toHaveLength(0)
+    await waitFor(() => expect(answer).toBeTypeOf('function'))
+    expect(document.querySelector('[data-slot="gh-comment-count"]')).toBeNull()
+    await act(async () => { answer(jsonResponse({ available: true, counts: { 142: 3, 139: 0 } })) })
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-row"] [data-slot="gh-comment-count"]')?.getAttribute('data-count')).toBe('3'))
+    // Rows only: the previewed detail shows the same hydrated count in its own meta line.
+    expect(document.querySelectorAll('[data-slot="gh-row"] [data-slot="gh-comment-count"]')).toHaveLength(1)
   })
 
-  it('does not fetch while the sentinel stays out of view', async () => {
-    const sent = stubPaged()
-    renderAt('/github?filter=all')
-    await waitFor(() => expect(live()).toHaveLength(1))
-    act(() => live()[0]!.fire(false))
-    await new Promise((r) => setTimeout(r, 20))
-    expect(sent.filter((r) => r.path.includes('issuesCursor='))).toHaveLength(0)
-    expect(rows()).toHaveLength(2)
-  })
-
-  it('a failed page stops auto-paging and Retry is the only way on', async () => {
-    const sent = stubPaged()
-    const paged = vi.mocked(fetch).getMockImplementation()!
-    let failNext = true
-    vi.mocked(fetch).mockImplementation(async (input, init) => {
-      if (String(input).includes('issuesCursor=') && failNext) {
-        failNext = false
-        sent.push({ path: String(input), method: 'GET', body: undefined })
-        return jsonResponse({ error: 'boom' }, 400)
-      }
-      return paged(input, init)
+  it('the open detail shows the hydrated comment count, not the deferred placeholder', async () => {
+    stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({
+        ...GITHUB, issues: [{ ...ISSUE_142, comments: 0 }, { ...ISSUE_139, comments: 0 }], commentsDeferred: true,
+      }),
+      'GET /api/v1/github/comment-counts?kind=issue&numbers=142%2C139': () => jsonResponse({ available: true, counts: { 142: 4, 139: 0 } }),
     })
-    renderAt('/github?filter=all')
-    await waitFor(() => expect(live()).toHaveLength(1))
-    act(() => live()[0]!.fire(true))
-    const retry = await screen.findByRole('button', { name: 'Retry' })
-    expect(sentinel()?.textContent).toContain('Could not load more.')
-    expect(retry.getAttribute('data-slot')).toBe('gh-load-more-retry')
-    expect(live()).toHaveLength(0)
-    expect(sent.filter((r) => r.path.includes('issuesCursor='))).toHaveLength(1)
-
-    fireEvent.click(retry)
-    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142', '139', '120']))
+    renderAt('/github/issues/142')
+    await waitFor(() => expect(
+      document.querySelector('[data-slot="gh-meta"] [data-slot="gh-comment-count"]')?.getAttribute('data-count'),
+    ).toBe('4'))
   })
 
-  it('a page GitHub could not serve (HTTP 200, available: false) keeps Retry instead of ending the list', async () => {
-    const sent = stubPaged()
-    const paged = vi.mocked(fetch).getMockImplementation()!
-    let failNext = true
-    vi.mocked(fetch).mockImplementation(async (input, init) => {
-      if (String(input).includes('issuesCursor=') && failNext) {
-        failNext = false
-        sent.push({ path: String(input), method: 'GET', body: undefined })
-        // The server's degrade contract: a timeout or lost auth answers 200 with a reason.
-        return jsonResponse({ available: false, reason: 'GitHub did not answer in time. Refresh to try again.', issues: [], prs: [] })
-      }
-      return paged(input, init)
+  it('Refresh collapses to a fresh first page', async () => {
+    const sent = stubFetch({
+      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issuesNextCursor: 'c2', prsNextCursor: null }),
+      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse({
+        ...GITHUB, issues: [{ ...ISSUE_142, title: 'Fresh title' }], issuesNextCursor: 'c1', prsNextCursor: null,
+      }),
     })
-    renderAt('/github?filter=all')
-    await waitFor(() => expect(live()).toHaveLength(1))
-    act(() => live()[0]!.fire(true))
-    const retry = await screen.findByRole('button', { name: 'Retry' })
-    expect(sentinel()?.textContent).toContain('Could not load more.')
-    expect(rows()).toHaveLength(2)
-    expect(sent.filter((r) => r.path.includes('issuesCursor='))).toHaveLength(1)
-
-    fireEvent.click(retry)
-    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142', '139', '120']))
-  })
-
-  it('a preset with no match on the loaded pages still pages on to find one', async () => {
-    const sent = stubPaged()
-    const paged = vi.mocked(fetch).getMockImplementation()!
-    vi.mocked(fetch).mockImplementation(async (input, init) => {
-      const path = String(input)
-      // Page 1's issues are both assigned to someone else; the viewer's issue is on page 2.
-      if ((init?.method ?? 'GET') === 'GET' && listPage(path)) {
-        sent.push({ path, method: 'GET', body: undefined })
-        return path.includes('issuesCursor=')
-          ? jsonResponse({ ...GITHUB, viewerLogin: 'octocat', issues: [{ ...ISSUE_120, assignees: ['octocat'] }], prs: [], issuesNextCursor: null, prsNextCursor: null })
-          : jsonResponse({
-            ...GITHUB, viewerLogin: 'octocat', issuesNextCursor: 'c1', prsNextCursor: null,
-            issues: GITHUB.issues.map((issue) => ({ ...issue, assignees: ['someone-else'] })),
-          })
-      }
-      return paged(input, init)
-    })
-    renderAt('/github?filter=assigned')
-    await waitFor(() => expect(live()).toHaveLength(1))
-    expect(rows()).toHaveLength(0)
-    act(() => live()[0]!.fire(true))
-    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['120']))
-    expect(sent.filter((r) => listPage(r.path) && r.path.includes('issuesCursor=c1'))).toHaveLength(1)
-  })
-
-  it('under a text narrow, Load more reaches matches on later pages without auto-paging', async () => {
-    const sent = stubPaged()
-    renderAt('/github?filter=all')
+    const client = renderAt('/github?filter=all')
     await waitFor(() => expect(rows()).toHaveLength(2))
-    // 'session' matches #142 on page 1; page 2's #120 is titled to match too.
-    const paged = vi.mocked(fetch).getMockImplementation()!
-    vi.mocked(fetch).mockImplementation(async (input, init) => {
-      if (String(input).includes('issuesCursor=')) {
-        sent.push({ path: String(input), method: 'GET', body: undefined })
-        return jsonResponse({ ...GITHUB, issues: [{ ...ISSUE_120, title: 'Older session bug' }], prs: [], issuesNextCursor: null, prsNextCursor: null })
-      }
-      return paged(input, init)
+    // A second page is loaded (the scroll sentinel lands in a later change).
+    const key = queryKeys.githubPages(50)
+    await act(async () => {
+      client.setQueryData(key, (current: { pages: GithubData[]; pageParams: unknown[] } | undefined) => ({
+        pages: [...current!.pages, { ...GITHUB, issues: [{ ...ISSUE_139, number: 7, url: 'https://github.com/acme/demo/issues/7' }], prs: [] }],
+        pageParams: [...current!.pageParams, { issuesCursor: 'c2', prsDone: true }],
+      }))
     })
-    fireEvent.change(document.querySelector('[data-slot="gh-search"]')!, { target: { value: 'session' } })
-    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142']))
-    // No observer: a narrowed list would keep the sentinel in view and crawl every page.
-    expect(live()).toHaveLength(0)
-    expect(sent.filter((r) => r.path.includes('issuesCursor='))).toHaveLength(0)
-    fireEvent.click(await screen.findByRole('button', { name: 'Load more' }))
-    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142', '120']))
-    expect(sent.filter((r) => r.path.includes('issuesCursor='))).toHaveLength(1)
-    expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull()
-  })
-
-  it('Refresh during a pending page load keeps the fresh first page', async () => {
-    let finishPage!: (response: Response) => void
-    stubPaged()
-    const paged = vi.mocked(fetch).getMockImplementation()!
-    vi.mocked(fetch).mockImplementation(async (input, init) => {
-      const path = String(input)
-      if (path.includes('issuesCursor=')) return new Promise<Response>((resolve) => { finishPage = resolve })
-      if (path.includes('refresh=1') && listPage(path)) {
-        return jsonResponse({ ...GITHUB, issues: [{ ...ISSUE_142, title: 'Fresh title' }], prs: [], issuesNextCursor: null, prsNextCursor: null })
-      }
-      return paged(input, init)
-    })
-    renderAt('/github?filter=all')
-    await waitFor(() => expect(live()).toHaveLength(1))
-    act(() => live()[0]!.fire(true))
-    await waitFor(() => expect(finishPage).toBeTypeOf('function'))
+    await waitFor(() => expect(rows()).toHaveLength(3))
     fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-refresh"]')!)
     await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142']))
-    // The old page lands after the refresh: it must not restore the pre-refresh pages.
-    await act(async () => { finishPage(jsonResponse({ ...GITHUB, issues: [ISSUE_120], prs: [], issuesNextCursor: null, prsNextCursor: null })) })
-    await new Promise((r) => setTimeout(r, 20))
-    expect(rows().map((row) => row.dataset.number)).toEqual(['142'])
-    expect(rows()[0]?.textContent).toContain('Fresh title')
+    expect(rows()[0]!.textContent).toContain('Fresh title')
+    expect(client.getQueryData<{ pages: unknown[]; pageParams: unknown[] }>(key)).toMatchObject({ pages: [expect.anything()], pageParams: [{}] })
+    expect(sent.some(({ path }) => path === '/api/v1/github?limit=50&refresh=1')).toBe(true)
   })
 
-  it('a text search pauses paging; the No task yet preset keeps paging', async () => {
-    stubPaged()
-    renderAt('/github?filter=all')
-    await waitFor(() => expect(sentinel()).not.toBeNull())
-    fireEvent.change(document.querySelector('[data-slot="gh-search"]')!, { target: { value: '142' } })
-    await waitFor(() => expect(rows()).toHaveLength(1))
-    // Paused, not gone: the next page waits for Load more.
-    expect(live()).toHaveLength(0)
-    expect(screen.getByRole('button', { name: 'Load more' })).toBeTruthy()
-    cleanup()
-    observers = []
-    stubPaged()
-    renderAt('/github?filter=no-task')
-    await waitFor(() => expect(rows()).toHaveLength(2))
-    await waitFor(() => expect(live()).toHaveLength(1))
-    act(() => live()[0]!.fire(true))
-    await waitFor(() => expect(rows().map((row) => row.dataset.number)).toEqual(['142', '139', '120']))
+  it('sends refresh=1 for the OPEN THREAD when the tab is manually refreshed', async () => {
+    // Asserts the PROPERTY (fresh data is actually requested), not the mechanism (a request went
+    // out). The first attempt at this fix only invalidated the query key, which made the client
+    // re-request WITHOUT `refresh=1` — and the route only busts its 60 s commentsCache when that
+    // param is present, so the user got the same stale object back and the test still passed.
+    const threadRequests: string[] = []
+    const sent = stubFetch({
+      'GET /api/v1/github?refresh=1': () => jsonResponse(GITHUB),
+    })
+    const origFetch = globalThis.fetch
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).replace('?archived=recent', '')
+      if (path.startsWith('/api/v1/github/comments/')) threadRequests.push(path)
+      return (origFetch as typeof fetch)(input, init as RequestInit)
+    })
+
+    renderAt('/github/issues/142')
+    await waitFor(() => expect(threadRequests.length).toBe(1))
+    expect(threadRequests[0]).toBe('/api/v1/github/comments/issue/142') // initial load: no refresh
+
+    fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-refresh"]')!)
+
+    // The re-request MUST carry refresh=1, or the server hands back its cached thread.
+    await waitFor(() =>
+      expect(threadRequests.some((p) => p === '/api/v1/github/comments/issue/142?refresh=1')).toBe(true),
+    )
+    expect(sent.length).toBeGreaterThan(0)
   })
 
-  it('no sentinel when the first page is the whole list', async () => {
-    stubFetch()
-    renderAt('/github?filter=all')
-    await waitFor(() => expect(rows()).toHaveLength(2))
-    expect(sentinel()).toBeNull()
+  it('shows a truncation row linking to GitHub when the thread was trimmed', async () => {
+    stubFetch(thread('issue', 142, { available: true, comments: [COMMENT_TEXT], truncated: true }))
+    renderAt('/github/issues/142')
+
+    await waitFor(() => expect(threadSection()).not.toBeNull())
+    const trunc = document.querySelector('[data-slot="gh-thread-truncated"]')
+    expect(trunc?.textContent).toContain('thread truncated')
+    expect(trunc?.getAttribute('href')).toBe(ISSUE_142.url)
   })
 })
 
-describe('cross-state search fallback (#730)', () => {
-  const MERGED_PR: GithubItem = {
-    kind: 'pr',
-    number: 4507,
-    title: 'reconcile payment-session amount with order total',
-    author: 'wojciechszyjka',
-    createdAt: '2026-07-25T07:08:17.000Z',
-    labels: ['security'],
-    body: 'A merged PR — never present in the open list.',
-    url: 'https://github.com/acme/demo/pull/4507',
-    comments: 20,
-    isDraft: false,
-    checks: null,
-  }
-
-  const searchBox = () => document.querySelector<HTMLInputElement>('[data-slot="gh-search"]')!
-  const hits = () => document.querySelector('[data-slot="gh-search-hits"]')
-
-  it.each(['4507', '#4507'])('searches exact numeric %s despite an open substring match', async (query) => {
+describe('the unavailable forge state', () => {
+  it('renders the server reason and the gh hint, and Try again refetches with refresh=1', async () => {
+    const unavailable: GithubData = { available: false, reason: 'gh not installed', issues: [], prs: [] }
     const sent = stubFetch({
-      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [{ ...PR_137, number: 14507 }] }),
-      [`GET /api/v1/github/search?kind=pr&q=${encodeURIComponent(query)}`]: () => jsonResponse({ available: true, items: [MERGED_PR] }),
-    })
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(1))
-    fireEvent.change(searchBox(), { target: { value: query } })
-    await waitFor(() => expect(hits()?.textContent).toContain(MERGED_PR.title))
-    expect(rows().map(row => row.dataset.number)).toEqual(['14507', '4507'])
-    expect(sent.filter(r => r.path.includes('/github/search?'))).toHaveLength(1)
-  })
-
-  it.each(['unavailable', 'empty'])('reports exact lookup %s alongside local substring rows', async (outcome) => {
-    let finish!: (response: Response) => void
-    const sent = stubFetch({
-      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [{ ...PR_137, number: 14507 }] }),
-      'GET /api/v1/github/search?kind=pr&q=4507': () => new Promise(resolve => { finish = resolve }),
-    })
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(1))
-    fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(sent.some(r => r.path.includes('/github/search?'))).toBe(true))
-    expect(screen.getByText(/Searching GitHub/)).toBeTruthy()
-    finish(jsonResponse(outcome === 'empty' ? { available: true, items: [] } : { available: false, reason: 'offline' }))
-    await screen.findByText(outcome === 'empty' ? /No additional pull requests/ : /GitHub could not be searched: offline/)
-    expect(rows().map(row => row.dataset.number)).toEqual(['14507'])
-    expect(screen.queryByText(/No open pull requests/)).toBeNull()
-  })
-
-  it.each([false, true])('shows refresh failure beside cached hits and recovers with local matches %s', async (withLocal) => {
-    let outcome: 'success' | 'failure' | 'recovered' = 'success'
-    const listData = { ...GITHUB, prs: withLocal ? [{ ...PR_137, number: 14507 }] : [PR_137] }
-    const sent = stubFetch({
-      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
-      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse(listData),
-      'GET /api/v1/github/search?kind=pr&q=4507': () => outcome === 'failure'
-        ? jsonResponse({ error: 'Search refresh unavailable' }, 400)
-        : jsonResponse({ available: true, items: [{ ...MERGED_PR, title: outcome === 'recovered' ? 'Updated remote title' : MERGED_PR.title }] }),
-    })
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(1))
-    fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()).not.toBeNull())
-    fireEvent.click(hits()!.querySelector('a')!)
-    // Reuse the cached hit before refreshing, preserving the URL-selected detail.
-    fireEvent.change(searchBox(), { target: { value: '' } })
-    fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()).not.toBeNull())
-    expect(sent.filter(r => r.path.includes('/github/search?'))).toHaveLength(1)
-    outcome = 'failure'
-    fireEvent.click(screen.getByTitle('Refresh from GitHub'))
-    await screen.findByText(/Showing previous results.*Search refresh unavailable/)
-    expect(hits()?.textContent).toContain(MERGED_PR.title)
-    expect(detail()?.textContent).toContain(MERGED_PR.title)
-    expect(searchBox().value).toBe('4507')
-    expect(rows().map(row => row.dataset.number)).toEqual(withLocal ? ['14507', '4507'] : ['4507'])
-    outcome = 'recovered'
-    fireEvent.click(screen.getByTitle('Refresh from GitHub'))
-    await waitFor(() => expect(hits()?.textContent).toContain('Updated remote title'))
-    expect(screen.queryByText(/Showing previous results/)).toBeNull()
-    expect(detail()?.textContent).toContain('Updated remote title')
-    expect(searchBox().value).toBe('4507')
-  })
-
-  it.each(['Stream', 'another query', '4508', ''])('hides old hits immediately on change to %s and retains URL-selected detail', async (next) => {
-    const sent = stubFetch({
-      'GET /api/v1/github/search?kind=pr&q=4507': () => jsonResponse({ available: true, items: [MERGED_PR] }),
-    })
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(1))
-    fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()).not.toBeNull())
-    fireEvent.click(hits()!.querySelector('a')!)
-    await waitFor(() => expect(detail()?.textContent).toContain(MERGED_PR.title))
-    fireEvent.change(searchBox(), { target: { value: 'intermediate keystrokes' } })
-    fireEvent.change(searchBox(), { target: { value: next } })
-    expect(hits()).toBeNull()
-    expect(detail()?.textContent).toContain(MERGED_PR.title)
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)) })
-    expect(hits()).toBeNull()
-    expect(detail()?.textContent).toContain(MERGED_PR.title)
-    expect(sent.filter(r => r.path.includes('/github/search?')).map(r => r.path)).toEqual([
-      '/api/v1/github/search?kind=pr&q=4507',
-      ...(next === '' || next === 'Stream' ? [] : [`/api/v1/github/search?kind=pr&q=${encodeURIComponent(next).replace(/%20/g, '+')}`]),
-    ])
-    const requestCount = sent.filter(r => r.path.includes('/github/search?')).length
-    fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()?.textContent).toContain(MERGED_PR.title))
-    expect(detail()?.textContent).toContain(MERGED_PR.title)
-    expect(sent.filter(r => r.path.includes('/github/search?'))).toHaveLength(requestCount)
-  })
-
-  it.each([null, 9999])('hydrates searched PR checks within 100 numbers with selected detail %s', async (selected) => {
-    const openPrs = Array.from({ length: 105 }, (_, i) => ({ ...MERGED_PR, number: i + 1, title: `Open work ${i}`, url: `https://github.com/acme/demo/pull/${i + 1}`, checks: null }))
-    const expectedNumbers = [...(selected === null ? [] : [selected]), MERGED_PR.number, ...openPrs.slice(0, selected === null ? 99 : 98).map(pr => pr.number)]
-    const checksPath = `/api/v1/github/checks?prs=${encodeURIComponent(expectedNumbers.join(','))}`
-    const sent = stubFetch({
-      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: openPrs }),
-      'GET /api/v1/github/search?kind=pr&q=4507': () => jsonResponse({ available: true, items: [MERGED_PR] }),
-      [`GET ${checksPath}`]: () => jsonResponse({ available: true, checks: { 4507: 'passing' } }),
-    })
-    renderAt(selected === null ? '/github/prs' : `/github/prs/${selected}`)
-    await waitFor(() => expect(rows()).toHaveLength(105))
-    fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(
-      document.querySelector('[data-slot="gh-row"][data-number="4507"] [data-slot="gh-row-checks"]')?.getAttribute('data-checks'),
-    ).toBe('passing'))
-    expect(sent.some(r => r.path === checksPath)).toBe(true)
-    const requests = sent.filter(r => r.path.startsWith('/api/v1/github/checks?'))
-    expect(requests.every(r => new URL(r.path, 'http://localhost').searchParams.get('prs')!.split(',').length <= 100)).toBe(true)
-    // Clearing the query restores the already cached open-list window, with no lingering search demand.
-    fireEvent.change(searchBox(), { target: { value: '' } })
-    await waitFor(() => expect(rows()).toHaveLength(105))
-    expect(hits()).toBeNull()
-    expect(sent.filter(r => r.path.startsWith('/api/v1/github/checks?'))).toHaveLength(requests.length)
-  })
-
-  it('finds a merged PR the open list never contained — the bug in #730', async () => {
-    const sent = stubFetch({
-      'GET /api/v1/github/search?kind=pr&q=4507': () =>
-        jsonResponse({ available: true, items: [MERGED_PR] }),
-    })
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(1)) // only the one OPEN pr
-
-    fireEvent.change(searchBox(), { target: { value: '4507' } })
-
-    await waitFor(() => expect(hits()).not.toBeNull())
-    expect(hits()?.textContent).toContain('reconcile payment-session amount')
-    expect(hits()?.textContent).toContain('Found on GitHub')
-    expect(sent.some((r) => r.path === '/api/v1/github/search?kind=pr&q=4507')).toBe(true)
-  })
-
-  const CLOSED_ISSUE: GithubItem = {
-    kind: 'issue',
-    number: 4507,
-    title: 'payment session amount drifts from the order total',
-    author: 'wojciechszyjka',
-    createdAt: '2026-07-25T07:08:17.000Z',
-    labels: ['bug'],
-    body: 'A closed issue — never present in the open list.',
-    url: 'https://github.com/acme/demo/issues/4507',
-    comments: 4,
-  }
-
-  /**
-   * CLICKING a hit, not deep-linking to it — the test above renders `/github/prs/4507` directly
-   * and types, so it never exercises the navigation a real user makes.
-   *
-   * These two cover the click path on both tabs against this file's richer fixtures. They do NOT
-   * pin the route wiring: the map in `renderAt` is a hand-written copy of `routes.tsx`, so it
-   * cannot catch a defect that lives in the real one — and one did (a wrapper component on
-   * `/github` remounted the route on the hop and reset the search text). That guard is
-   * `github-route-wiring.test.tsx`, which drives the real `AppRoutes`.
-   */
-  it('keeps a clicked cross-state hit open across the /github → /github/issues/:n hop', async () => {
-    stubFetch({
-      'GET /api/v1/github/search?kind=issue&q=4507': () =>
-        jsonResponse({ available: true, items: [CLOSED_ISSUE] }),
+      'GET /api/v1/github?limit=50': () => jsonResponse(unavailable),
+      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse(unavailable),
     })
     renderAt('/github')
-    await waitFor(() => expect(rows()).toHaveLength(2)) // the two OPEN issues
 
-    fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()).not.toBeNull())
-
-    fireEvent.click(within(hits() as HTMLElement).getByRole('link'))
-
-    // The query survived the navigation, so the hit is still rendered AND still selectable.
-    await waitFor(
-      () => expect(detail()?.textContent).toContain('payment session amount drifts')
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 1, name: 'GitHub is unavailable here' })).toBeTruthy(),
     )
-    expect(searchBox().value).toBe('4507')
-    expect(hits()).not.toBeNull()
-    expect(detail()?.textContent ?? '').not.toContain('is not among the open issues')
-  })
+    expect(screen.getByText('gh not installed')).toBeTruthy()
+    // One fast fetch now (#664): the single limit=50 load is what proved the forge unreachable.
+    expect(sent.some((request) => request.path === '/api/v1/github?limit=50')).toBe(true)
 
-  it('keeps a clicked cross-state hit open across the /github/prs → /github/prs/:n hop', async () => {
-    stubFetch({
-      'GET /api/v1/github/search?kind=pr&q=4507': () =>
-        jsonResponse({ available: true, items: [MERGED_PR] }),
-    })
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(1))
-
-    fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()).not.toBeNull())
-
-    fireEvent.click(within(hits() as HTMLElement).getByRole('link'))
-
-    await waitFor(
-      () => expect(detail()?.textContent).toContain('reconcile payment-session amount')
-    )
-    expect(searchBox().value).toBe('4507')
-    expect(hits()).not.toBeNull()
-  })
-
-  it('opens a searched item in the detail pane, like any listed row', async () => {
-    stubFetch({
-      'GET /api/v1/github/search?kind=pr&q=4507': () =>
-        jsonResponse({ available: true, items: [MERGED_PR] }),
-    })
-    renderAt('/github/prs/4507')
-    // The deep link renders before the list resolves; wait for the header to exist before typing.
-    await waitFor(() => expect(document.querySelector('[data-slot="gh-search"]')).not.toBeNull())
-
-    fireEvent.change(searchBox(), { target: { value: '4507' } })
-
-    await waitFor(
-      () => expect(detail()?.textContent).toContain('reconcile payment-session amount')
-    )
-  })
-
-  it('does not shell out while the local filter still matches something', async () => {
-    const sent = stubFetch()
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(1))
-
-    // 'Stream' matches the open PR_137 locally — the forge must not be asked.
-    fireEvent.change(searchBox(), { target: { value: 'Stream' } })
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 700)) // past the 350 ms debounce
-    })
-
-    expect(rows()).toHaveLength(1)
-    expect(sent.some((r) => r.path.includes('/github/search'))).toBe(false)
-  })
-
-  it('says it is searching rather than claiming nothing exists', async () => {
-    stubFetch({
-      // Never resolves within the assertion window — the tab must not declare "no match" yet.
-      'GET /api/v1/github/search?kind=pr&q=4507': () =>
-        new Promise<Response>(() => {}) as unknown as Response,
-    })
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(1))
-
-    fireEvent.change(searchBox(), { target: { value: '4507' } })
-
-    await waitFor(
-      () => expect(document.querySelector('[data-slot="gh-empty"]')?.textContent).toContain('Searching GitHub')
-    )
-  })
-
-  it('reports an unavailable search with the server’s own reason', async () => {
-    stubFetch({
-      'GET /api/v1/github/search?kind=pr&q=4507': () =>
-        jsonResponse({ available: false, reason: 'HTTP 403: rate limit exceeded', items: [] }),
-    })
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(1))
-
-    fireEvent.change(searchBox(), { target: { value: '4507' } })
-
-    await waitFor(
-      () =>
-        expect(document.querySelector('[data-slot="gh-empty"]')?.textContent).toContain(
-          'rate limit exceeded',
-        )
-    )
-  })
-
-  it('drops the empty-state wrapper entirely once hits arrive, so its padding leaves no gap (#838)', async () => {
-    stubFetch({
-      'GET /api/v1/github/search?kind=pr&q=4507': () =>
-        jsonResponse({ available: true, items: [MERGED_PR] }),
-    })
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(1))
-
-    fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()).not.toBeNull())
-
-    // The verdict was already null in this state; what #838 fixes is the `px-4 py-4` container
-    // still rendering around it, which read as an empty ~2 rem band above "Found on GitHub".
-    expect(document.querySelector('[data-slot="gh-empty"]')).toBeNull()
-  })
-
-  it('states plainly that nothing matched in ANY state when the search comes back empty', async () => {
-    stubFetch() // the default search stub answers `{available: true, items: []}`
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(1))
-
-    fireEvent.change(searchBox(), { target: { value: 'nothing-matches-this' } })
-
-    await waitFor(
-      () =>
-        expect(document.querySelector('[data-slot="gh-empty"]')?.textContent).toContain(
-          'open, closed or merged',
-        )
-    )
-  })
-
-  it('stops rendering hits once the local filter matches the query again (#856)', async () => {
-    // A second open PR carrying a label PR_137 does not, so the label filter can empty the local
-    // narrow for a query that otherwise matches — the only way to reach the forge fallback while
-    // an open item is a genuine match for the text.
-    const PR_200: GithubItem = {
-      kind: 'pr',
-      number: 200,
-      title: 'Docs pass',
-      author: 'lin',
-      createdAt: '2026-07-12T08:00:00.000Z',
-      labels: ['docs'],
-      body: '',
-      url: 'https://github.com/acme/demo/pull/200',
-      comments: 0,
-      isDraft: false,
-      checks: null,
-    }
-    const MERGED_STREAM: GithubItem = { ...MERGED_PR, title: 'Stream reconcile' }
-
-    const sent = stubFetch({
-      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [PR_137, PR_200] }),
-      // A real `gh search prs Stream` answers with the OPEN #137 alongside the merged one — which
-      // is what made the stale payload render #137 a second time.
-      'GET /api/v1/github/search?kind=pr&q=Stream': () =>
-        jsonResponse({ available: true, items: [PR_137, MERGED_STREAM] }),
-    })
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(2))
-
-    // 1. Narrow to `docs`, which #137 does not carry. The popover stays open on select.
-    fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-label-filter"]')!)
-    const docsOption = await waitFor(() =>
-      [...document.querySelectorAll<HTMLElement>('[cmdk-item]')].find(
-        (el) => el.textContent?.trim() === 'docs',
-      )!,
-    )
-    fireEvent.click(docsOption)
-    await waitFor(() => expect(rows()).toHaveLength(1)) // only #200 survives the label narrow
-
-    // 2. Search `Stream`: the local narrow (`Stream` + `docs`) is empty, so the forge is asked and
-    //    the answer is cached under the key ('pr', 'Stream'). The hits themselves stay off screen
-    //    while `docs` is on — they are narrowed by the same filter — so the request is the signal.
-    fireEvent.change(searchBox(), { target: { value: 'Stream' } })
-    await waitFor(
-      () =>
-        expect(sent.some((r) => r.path === '/api/v1/github/search?kind=pr&q=Stream')).toBe(true)
-    )
-    // Let the response land in the cache before the filter is cleared, so the assertion below is
-    // about a cached payload outliving its `enabled` flag and not about a request in flight.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 100))
-    })
-
-    // 3. Clear the label filter. #137 matches `Stream` locally again, so the fallback is no longer
-    //    wanted — but the query TEXT never changed, so the cache key did not either. Before #856
-    //    the stale payload kept rendering and #137 appeared in both lists at once.
-    const clearOption = [...document.querySelectorAll<HTMLElement>('[cmdk-item]')].find((el) =>
-      el.textContent?.startsWith('Clear'),
-    )!
-    fireEvent.click(clearOption)
-
-    await waitFor(() => expect(document.querySelector('[data-slot="gh-rows"]')).not.toBeNull())
-    const numbersIn = (slot: string) =>
-      [...document.querySelectorAll<HTMLElement>(`[data-slot="${slot}"] [data-slot="gh-row"]`)].map(
-        (row) => row.dataset.number,
-      )
-    expect(numbersIn('gh-rows')).toEqual(['137'])
-    // Nothing may appear in both lists — the assertion the issue asks for.
-    const listed = new Set(numbersIn('gh-rows'))
-    expect(numbersIn('gh-search-hits').filter((n) => listed.has(n))).toEqual([])
-    expect(document.querySelector('[data-slot="gh-search-hits"]')).toBeNull()
-  })
-
-  it('never repeats a listed item under "Found on GitHub" mid-debounce either (#856)', async () => {
-    // The other half of #856, and the reason the `searchWanted` gate alone is not enough: while a
-    // freshly typed query debounces, the payload on screen is still the PREVIOUS query's, and
-    // `searchWanted` is still derived from that same stale text — so the gate reads true. The hits
-    // must disappear immediately, including items the local list now shows.
-    const MERGED_STREAM: GithubItem = { ...MERGED_PR, title: 'Stream reconcile' }
-    stubFetch({
-      // As a real `gh search prs 4507` would: the open #137 comes back beside the merged one.
-      'GET /api/v1/github/search?kind=pr&q=4507': () =>
-        jsonResponse({ available: true, items: [PR_137, MERGED_STREAM] }),
-    })
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(1))
-
-    fireEvent.change(searchBox(), { target: { value: '4507' } })
-    await waitFor(() => expect(hits()).not.toBeNull())
-
-    // `Stream` matches the open #137 locally, so it enters the list above — while the hits still
-    // hold the payload keyed on `4507`, which contains #137 too.
-    fireEvent.change(searchBox(), { target: { value: 'Stream' } })
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50)) // inside the 350 ms debounce
-    })
-
-    const numbers = rows().map((row) => row.dataset.number)
-    expect(numbers).toEqual([...new Set(numbers)]) // no number rendered twice
-    expect(numbers).toContain('137')
-  })
-
-  it('does not claim "open, closed or merged" when no query ever reached the forge', async () => {
-    // A label-only narrow never searches — `shouldSearchForge` requires a non-empty query — so the
-    // cross-state verdict would be unfounded certainty of exactly the kind #730 removed, just
-    // reached from the label dropdown instead of the search box. Two labels no single item carries
-    // together is the cheapest way to empty the list without typing anything.
-    const PR_200: GithubItem = {
-      kind: 'pr',
-      number: 200,
-      title: 'Docs pass',
-      author: 'lin',
-      createdAt: '2026-07-12T08:00:00.000Z',
-      labels: ['docs'],
-      body: '',
-      url: 'https://github.com/acme/demo/pull/200',
-      comments: 0,
-      isDraft: false,
-      checks: null,
-    }
-    const sent = stubFetch({
-      'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, prs: [PR_137, PR_200] }),
-    })
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(2))
-
-    // AND-narrow to `docs` + `perf`: #200 carries only the first, #137 only the second.
-    fireEvent.click(document.querySelector<HTMLElement>('[data-slot="gh-label-filter"]')!)
-    for (const name of ['docs', 'perf']) {
-      const option = await waitFor(() =>
-        [...document.querySelectorAll<HTMLElement>('[cmdk-item]')].find(
-          (el) => el.textContent?.trim() === name,
-        )!,
-      )
-      fireEvent.click(option)
-    }
-
-    await waitFor(() => expect(rows()).toHaveLength(0))
-    const verdict = document.querySelector('[data-slot="gh-empty"]')?.textContent ?? ''
-    expect(verdict).toContain('No open pull requests match your filter')
-    expect(verdict).not.toContain('open, closed or merged')
-    expect(sent.some((r) => r.path.includes('/github/search'))).toBe(false)
-  })
-
-  it('says the search failed when the REQUEST failed, not just when the driver degraded', async () => {
-    // The driver's own `{available: false, reason}` was handled from the start; a request that
-    // never landed was not. A `q` past the route's 256-char cap is the deterministic way there —
-    // a 400 the client turns into a rejected query, which used to fall through to the flat
-    // "nothing in any state" and assert the opposite of what the tab actually knows.
-    const overLong = 'x'.repeat(300)
-    stubFetch({
-      [`GET /api/v1/github/search?kind=pr&q=${overLong}`]: () =>
-        jsonResponse({ error: 'invalid search query' }, 400),
-    })
-    renderAt('/github/prs')
-    await waitFor(() => expect(rows()).toHaveLength(1))
-
-    fireEvent.change(searchBox(), { target: { value: overLong } })
-
-    await waitFor(
-      () => {
-        const verdict = document.querySelector('[data-slot="gh-empty"]')?.textContent ?? ''
-        expect(verdict).toContain('GitHub could not be searched')
-        expect(verdict).not.toContain('open, closed or merged')
-      }
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() =>
+      expect(sent.some((request) => request.path === '/api/v1/github?limit=50&refresh=1')).toBe(true),
     )
   })
 })
 
-describe('cross-state search preserves fork filters', () => {
-  const boards = [{ id: 'P1', title: 'First', url: 'https://github.com/users/acme/projects/1' },
-    { id: 'P2', title: 'Delivery', url: 'https://github.com/users/acme/projects/2' }]
-  const listData = { ...GITHUB, viewerLogin: 'alice', projects: boards, issues: [
-    { ...ISSUE_142, title: 'payment open', assignees: ['bob'], projectIds: ['P1'] },
-    { ...ISSUE_139, assignees: ['alice'], projectIds: ['P2'] },
+describe('groupCommitRuns', () => {
+  const commit = (id: string, actor: string): ThreadRow => ({
+    row: 'event',
+    event: { id, kind: 'committed', actor, createdAt: '2026-01-01T00:00:00Z', sha: 'a'.repeat(40) },
+  })
+  const label = (id: string): ThreadRow => ({
+    row: 'event',
+    event: { id, kind: 'labeled', actor: 'octocat', createdAt: '2026-01-01T00:00:00Z' },
+  })
+  const comment = (id: number): ThreadRow => ({
+    row: 'comment',
+    comment: { id, author: 'maya', createdAt: '2026-01-01T00:00:00Z', body: 'hi', kind: 'comment', url: 'u' },
+  })
+
+  it('groups consecutive commits by the same author', () => {
+    const out = groupCommitRuns([commit('a', 'Ada'), commit('b', 'Ada'), commit('c', 'Ada')])
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ group: 'commits' })
+    expect((out[0] as { commits: unknown[] }).commits).toHaveLength(3)
+  })
+
+  it('ends a run at an author change', () => {
+    const out = groupCommitRuns([commit('a', 'Ada'), commit('b', 'Ada'), commit('c', 'Grace'), commit('d', 'Grace')])
+    expect(out).toHaveLength(2)
+    expect(out.every((g) => g.group === 'commits')).toBe(true)
+  })
+
+  it('ends a run at any non-commit row', () => {
+    const out = groupCommitRuns([commit('a', 'Ada'), commit('b', 'Ada'), label('l'), commit('c', 'Ada'), commit('d', 'Ada')])
+    expect(out.map((g) => g.group)).toEqual(['commits', 'single', 'commits'])
+  })
+
+  it('does not group a single commit', () => {
+    const out = groupCommitRuns([commit('a', 'Ada')])
+    expect(out).toEqual([{ group: 'single', entry: commit('a', 'Ada') }])
+  })
+
+  it('leaves a comment-only thread completely untouched', () => {
+    const entries = [comment(1), comment(2)]
+    expect(groupCommitRuns(entries)).toEqual(entries.map((entry) => ({ group: 'single', entry })))
+  })
+
+  it('handles an empty list', () => {
+    expect(groupCommitRuns([])).toEqual([])
+  })
+})
+
+describe('issue assignee and board controls', () => {
+  const filteredData = { ...GITHUB, viewerLogin: 'alice', projects: [{ id: 'P1', title: 'Delivery', url: 'https://github.com/users/acme/projects/1' }], issues: [
+    { ...ISSUE_142, assignees: ['alice'], projectIds: ['P1'] },
+    { ...ISSUE_139, assignees: ['bob'], projectIds: [] },
   ] }
-  const remote = [
-    { ...ISSUE_142, number: 901, title: 'payment first', url: 'https://github.com/acme/demo/issues/901', labels: ['bug'], assignees: ['Alice'], projectIds: ['P1'] },
-    { ...ISSUE_142, number: 902, title: 'payment second', url: 'https://github.com/acme/demo/issues/902', labels: ['bug'], assignees: ['bob'], projectIds: ['P2'] },
-    { ...ISSUE_142, number: 903, title: 'payment third', url: 'https://github.com/acme/demo/issues/903', labels: ['bug'], assignees: ['alice'], projectIds: ['P2'] },
-    { ...ISSUE_142, number: 904, title: 'payment fourth', url: 'https://github.com/acme/demo/issues/904', labels: ['enhancement'], assignees: ['alice'], projectIds: ['P2'] },
-  ]
-  const hits = () => document.querySelector('[data-slot="gh-search-hits"]')
-  const hitTitles = () => Array.from(hits()?.querySelectorAll('li') ?? []).map(row => row.textContent).join('|')
-  it('uses the full local narrow to trigger search, then ANDs labels and board with OR assignees', async () => {
-    stubFetch({
-      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
-      'GET /api/v1/github/search?kind=issue&q=payment': () => jsonResponse({ available: true, items: remote }),
-    })
+  it('composes Assigned to me with the board and search, then clears every filter', async () => {
+    stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse(filteredData) })
     renderAt('/github')
-    fireEvent.change(await screen.findByRole('combobox', { name: 'Project board' }), { target: { value: 'P2' } })
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'payment' } })
-    await waitFor(() => expect(hits()).not.toBeNull())
-    expect(hitTitles()).not.toContain('payment first')
-    fireEvent.click(screen.getByRole('button', { name: 'Assigned to me' }))
-    expect(hitTitles()).not.toContain('payment second')
-    fireEvent.click(screen.getByRole('button', { name: /Assignee/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Assigned to me' }))
+    expect(rows().map(r => r.textContent).join()).toContain(ISSUE_142.title)
+    expect(rows().map(r => r.textContent).join()).not.toContain(ISSUE_139.title)
+    expect(screen.queryByText('Project board')).toBeNull()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Project board' }), { target: { value: 'P1' } })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search issues' }), { target: { value: 'no match' } })
+    expect(rows()).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    // The emptied list unmounted its virtualizer (hearsay-tools/cezarion#1183); the remount sizes its viewport on the
+    // next ResizeObserver tick, which a browser delivers before paint.
+    await waitFor(() => expect(rows()).toHaveLength(2))
+  })
+  it('marks Assigned to me active only when the viewer is the sole assignee, including manual selection', async () => {
+    stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse(filteredData) })
+    renderAt('/github')
+    const me = await screen.findByRole('button', { name: 'Assigned to me' })
+    expect(me.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(screen.getByRole('button', { name: 'Assignee' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'alice' }))
+    expect(me.getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(screen.getByRole('checkbox', { name: 'bob' }))
-    fireEvent.keyDown(screen.getByRole('checkbox', { name: 'bob' }), { key: 'Escape' })
-    fireEvent.click(screen.getByRole('button', { name: /Labels/ }))
-    fireEvent.click(await screen.findByRole('option', { name: 'bug' }))
-    expect(hitTitles()).toContain('payment second')
-    expect(hitTitles()).toContain('payment third')
-    expect(hitTitles()).not.toContain('payment fourth')
+    expect(me.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'bob' }))
+    expect(me.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'alice' }))
+    expect(me.getAttribute('aria-pressed')).toBe('false')
   })
-
-  it('keeps the selected remote detail when filters hide its row', async () => {
-    stubFetch({
-      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
-      'GET /api/v1/github/search?kind=issue&q=remote': () => jsonResponse({ available: true, items: [remote[0]] }),
-    })
+  it('keeps issue filters off the PR list when changing tabs', async () => {
+    stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse(filteredData) })
     renderAt('/github')
-    fireEvent.change(await screen.findByRole('searchbox'), { target: { value: 'remote' } })
-    await waitFor(() => expect(hits()).not.toBeNull())
-    fireEvent.click(within(hits() as HTMLElement).getByRole('link'))
-    expect(detail()?.textContent).toContain('payment first')
-    fireEvent.change(screen.getByRole('combobox', { name: 'Project board' }), { target: { value: 'P2' } })
-    expect(hits()).toBeNull()
-    expect(detail()?.textContent).toContain('payment first')
-  })
-
-  it('refresh retries an incomplete search without losing the active filter', async () => {
-    let attempts = 0
-    stubFetch({
-      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
-      'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse(listData),
-      'GET /api/v1/github/search?kind=issue&q=remote': () => jsonResponse(++attempts === 1
-        ? { available: true, items: [{ ...remote[0], projectIds: undefined }], projectsReason: 'Project board lookup timed out.' }
-        : { available: true, items: [remote[2]] }),
-    })
-    renderAt('/github')
-    fireEvent.change(await screen.findByRole('combobox', { name: 'Project board' }), { target: { value: 'P2' } })
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'remote' } })
-    await screen.findByText(/Cannot apply the selected filters/)
-    fireEvent.click(screen.getByTitle('Refresh from GitHub'))
-    await waitFor(() => expect(hitTitles()).toContain('payment third'))
-    expect((screen.getByRole('combobox', { name: 'Project board' }) as HTMLSelectElement).value).toBe('P2')
-  })
-
-  it('does not claim exhaustive absence when filters discard a truncated search window', async () => {
-    stubFetch({
-      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
-      'GET /api/v1/github/search?kind=issue&q=remote': () => jsonResponse({ available: true, items: [remote[0]], truncated: true }),
-    })
-    renderAt('/github')
-    fireEvent.change(await screen.findByRole('combobox', { name: 'Project board' }), { target: { value: 'P2' } })
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'remote' } })
-    await waitFor(() => expect(document.querySelector('[data-slot="gh-empty"]')?.textContent).toContain('first matches'))
-    expect(document.querySelector('[data-slot="gh-empty"]')?.textContent).not.toContain('open, closed or merged')
-  })
-
-  it('reports incomplete search board metadata without clearing query or selected board', async () => {
-    stubFetch({
-      'GET /api/v1/github?limit=50': () => jsonResponse(listData),
-      'GET /api/v1/github/search?kind=issue&q=remote': () => jsonResponse({ available: true,
-        items: [{ ...remote[0], projectIds: undefined }], projectsReason: 'Project board lookup timed out.' }),
-    })
-    renderAt('/github')
-    fireEvent.change(await screen.findByRole('combobox', { name: 'Project board' }), { target: { value: 'P2' } })
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'remote' } })
-    await waitFor(() => expect(document.querySelector('[data-slot="gh-empty"]')?.textContent).toContain('Project board lookup timed out.'))
-    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('remote')
-    expect((screen.getByRole('combobox', { name: 'Project board' }) as HTMLSelectElement).value).toBe('P2')
-    expect(hits()).toBeNull()
-    expect(document.querySelector('[data-slot="gh-empty"]')?.textContent).not.toContain('open, closed or merged')
+    fireEvent.click(await screen.findByRole('button', { name: 'Assigned to me' }))
+    fireEvent.click(screen.getByRole('link', { name: /Pull requests ·/ }))
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    expect(screen.queryByRole('button', { name: 'Assigned to me' })).toBeNull()
+    expect(rows()[0]?.textContent).toContain(PR_137.title)
   })
 })
 
-it('debounces to the settled query and never searches after clearing to a label-only narrow', async () => {
-  const sent = stubFetch()
+it('selects multiple assignees and retains filter chrome during refresh', async () => {
+  let finish!: (response: Response) => void
+  const data = { ...GITHUB, viewerLogin: 'alice', projects: [], issues: [
+    { ...ISSUE_142, assignees: ['alice'] }, { ...ISSUE_139, assignees: ['bob'] },
+  ] }
+  stubFetch({
+    'GET /api/v1/github?limit=50': () => jsonResponse(data),
+    'GET /api/v1/github?limit=50&refresh=1': () => new Promise(resolve => { finish = resolve }),
+  })
   renderAt('/github')
-  const box = await screen.findByRole('searchbox')
-  fireEvent.change(box, { target: { value: 'oldtext' } })
-  fireEvent.change(box, { target: { value: 'settledtext' } })
-  expect(sent.some(r => r.path.includes('/github/search'))).toBe(false)
-  await waitFor(() => expect(sent.filter(r => r.path.includes('/github/search'))).toHaveLength(1))
-  expect(sent.find(r => r.path.includes('/github/search'))?.path).toContain('q=settledtext')
-  fireEvent.change(box, { target: { value: 'cancelledtext' } })
-  fireEvent.change(box, { target: { value: '' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Labels' }))
-  fireEvent.click(await screen.findByRole('option', { name: 'bug' }))
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)) })
-  expect(sent.filter(r => r.path.includes('/github/search'))).toHaveLength(1)
+  fireEvent.click(await screen.findByRole('button', { name: 'Assignee' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'alice' }))
+  expect(rows()).toHaveLength(1)
+  fireEvent.click(screen.getByRole('checkbox', { name: 'bob' }))
+  expect(rows()).toHaveLength(2)
+  fireEvent.keyDown(screen.getByRole('checkbox', { name: 'bob' }), { key: 'Escape' })
+  fireEvent.click(screen.getByTitle('Refresh from GitHub'))
+  await waitFor(() => expect(finish).toBeTypeOf('function'))
+  expect(screen.getByRole('button', { name: 'Assignee · 2' })).toBeTruthy()
+  expect(rows()).toHaveLength(2)
+  await act(async () => finish(jsonResponse(data)))
+  expect(screen.getByRole('button', { name: 'Assignee · 2' })).toBeTruthy()
+})
+
+it('keeps legacy metadata usable with disabled personal filtering and no board picker', async () => {
+  stubFetch()
+  renderAt('/github')
+  const me = await screen.findByRole('button', { name: 'Assigned to me' })
+  expect((me as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.queryByRole('combobox', { name: 'Project board' })).toBeNull()
+  expect(rows()).toHaveLength(2)
+})
+
+it('renders a disabled No boards picker on the filter row when projects is empty', async () => {
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, viewerLogin: 'alice', projects: [] }) })
+  renderAt('/github')
+  const picker = await screen.findByRole('combobox', { name: 'Project board' }) as HTMLSelectElement
+  expect(picker.disabled).toBe(true)
+  expect([...picker.options].map(option => option.textContent)).toEqual(['No boards'])
+  expect(screen.queryByText('No linked project boards.')).toBeNull()
+  expect(picker.className).toMatch(/min-h-11/)
+  expect(picker.className).toMatch(/border-input/)
+  expect(document.querySelector('[data-slot="gh-issue-filters"]')?.contains(picker)).toBe(true)
+})
+
+it.each([[], undefined])('does not restore a stale board selection after refresh returns projects=%j', async projects => {
+  const boardData = { ...GITHUB, projects: [{ id: 'P1', title: 'Delivery', url: 'https://github.com/users/acme/projects/1' }], issues: [
+    { ...ISSUE_142, projectIds: ['P1'] }, { ...ISSUE_139, projectIds: [] },
+  ] }
+  let refreshes = 0
+  stubFetch({
+    'GET /api/v1/github?limit=50': () => jsonResponse(boardData),
+    'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse(++refreshes === 1 ? { ...boardData, projects } : boardData),
+  })
+  renderAt('/github')
+  fireEvent.change(await screen.findByRole('combobox', { name: 'Project board' }), { target: { value: 'P1' } })
+  expect(rows()).toHaveLength(1)
+  fireEvent.click(screen.getByTitle('Refresh from GitHub'))
+  await waitFor(() => expect(rows()).toHaveLength(2))
+  expect(screen.getByRole('button', { name: 'Clear filters' }).hasAttribute('disabled')).toBe(true)
+  await waitFor(() => expect((screen.getByTitle('Refresh from GitHub') as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(screen.getByTitle('Refresh from GitHub'))
+  const picker = await screen.findByRole('combobox', { name: 'Project board' })
+  expect((picker as HTMLSelectElement).value).toBe('')
+  expect(rows()).toHaveLength(2)
+})
+
+it('keeps passing checks with unknown requirements blocked', async () => {
+  stubFetch({ 'GET /api/v1/github/prs/137/merge-state': () => jsonResponse({ available: true, mergeState: {
+    number: 137, title: PR_137.title, url: PR_137.url, state: 'open', isDraft: false,
+    headRef: 'feature', baseRef: 'main', headSha: '0123456789abcdef0123456789abcdef01234567',
+    mergeable: 'mergeable', reviewDecision: 'unknown', checks: [{ name: 'fixture-check', state: 'passing', required: null }],
+    methods: ['squash'], defaultMethod: 'squash', eligibility: 'unknown', blockers: [], canMerge: false, canOverride: true,
+  } }) })
+  renderAt('/github/prs/137')
+  await screen.findByText('Merge blocked · Requirements unknown')
+  expect(screen.getByRole('button', { name: 'Squash and merge' }).hasAttribute('disabled')).toBe(true)
+  expect((screen.getByRole('checkbox', { name: /Merge without waiting/ }) as HTMLInputElement).checked).toBe(false)
+  expect(screen.getByText(/fixture-check · passing · requiredness unknown/)).toBeTruthy()
+})
+
+it('hides phone-list rows past the second unless that row is the open detail (#344)', async () => {
+  const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  renderAt('/github/issues/142')
+  await screen.findByRole('button', { name: 'View all 3 issues' })
+  expect(compactHiddenFlags()).toEqual([false, false, true])
+})
+
+it('keeps the selected phone-list row when it sits past the second (#344)', async () => {
+  const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  renderAt('/github/issues/138')
+  await screen.findByRole('button', { name: 'View all 3 issues' })
+  expect(compactHiddenFlags()).toEqual([false, false, false])
+  expect(rows()[2]?.getAttribute('aria-current')).toBe('page')
+})
+
+it('wraps each list row in one item that carries the divider and the phone-preview flag (hearsay-tools/cezarion#1183)', async () => {
+  const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  renderAt('/github/issues/142')
+  await screen.findByRole('button', { name: 'View all 3 issues' })
+  const items = rows().map((row) => row.closest('[data-slot="gh-row-item"]'))
+  // The virtualizer wraps every child in its own element, so `ul > li` and `li + li` no longer
+  // reach the rows: the item itself says whether it draws a divider or hides on a phone.
+  expect(items.map((item) => item?.getAttribute('role'))).toEqual(['listitem', 'listitem', 'listitem'])
+  expect(items.map((item) => item?.hasAttribute('data-divided'))).toEqual([false, true, true])
+  expect(document.querySelectorAll('[data-slot="gh-rows"] li')).toHaveLength(0)
+})
+
+it('lets a mobile detail preview reveal every issue without losing its selected item', async () => {
+  const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
+  stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
+  renderAt('/github/issues/142')
+  const expand = await screen.findByRole('button', { name: 'View all 3 issues' })
+  expect(expand.getAttribute('aria-expanded')).toBe('false')
+  expect(compactHiddenFlags()).toEqual([false, false, true])
+  fireEvent.click(expand)
+  expect(screen.getByRole('button', { name: 'Show fewer issues' }).getAttribute('aria-expanded')).toBe('true')
+  expect(rows()).toHaveLength(3)
+  expect(compactHiddenFlags()).toEqual([false, false, false])
+  expect(rows()[0]?.getAttribute('aria-current')).toBe('page')
+})
+
+it.each(['ready', 'unavailable', 'network'] as const)('keeps the board filter and unknown rows while project metadata refreshes, then settles as %s', async state => {
+  const generation = '00000000-0000-4000-8000-000000000662'
+  const boardData = { ...GITHUB, projects: [{ id: 'P1', title: 'Delivery', url: 'https://github.com/orgs/acme/projects/1' }], issues: [
+    { ...ISSUE_142, projectIds: ['P1'] }, { ...ISSUE_139, projectIds: [] },
+  ] }
+  let finish!: (value: Response) => void
+  stubFetch({
+    'GET /api/v1/github?limit=50': () => jsonResponse(boardData),
+    'GET /api/v1/github?limit=50&refresh=1': () => jsonResponse({ ...boardData, projectsState: 'refreshing', projectsGeneration: generation,
+      issues: [boardData.issues[0], { ...ISSUE_139 }] }),
+    [`GET /api/v1/github/projects?generation=${generation}`]: () => new Promise<Response>(resolve => { finish = resolve }),
+  })
+  renderAt('/github')
+  const picker = await screen.findByRole('combobox', { name: 'Project board' })
+  fireEvent.change(picker, { target: { value: 'P1' } })
+  expect(rows()).toHaveLength(1)
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+  await screen.findByText(/Refreshing project boards/)
+  expect((picker as HTMLSelectElement).value).toBe('P1')
+  expect(rows()).toHaveLength(2)
+  await waitFor(() => expect(finish).toBeTypeOf('function'))
+  finish(state === 'network' ? new Response('offline', { status: 503 }) : jsonResponse(state === 'ready'
+    ? { generation, state, projects: boardData.projects, membership: { 142: ['P1'], 139: [] } }
+    : { generation, state, reason: 'Project lookup failed.' }))
+  await waitFor(() => expect(screen.queryByText(/Refreshing project boards/)).toBeNull())
+  expect((picker as HTMLSelectElement).value).toBe('P1')
+  expect(rows()).toHaveLength(state === 'ready' ? 1 : 2)
+  if (state !== 'ready') expect(screen.getByText(/Previous memberships are shown/)).toBeTruthy()
+})
+
+describe('deep links to items outside the open list (#692)', () => {
+  const MERGED_PR: GithubItem = {
+    ...PR_137,
+    number: 150,
+    title: 'Merged long ago',
+    url: 'https://github.com/acme/demo/pull/150',
+    body: 'This one already landed.',
+  }
+  const CLOSED_ISSUE: GithubItem = {
+    ...ISSUE_142,
+    number: 160,
+    title: 'Closed as completed',
+    url: 'https://github.com/acme/demo/issues/160',
+  }
+  const itemRequests = (sent: SentRequest[]) => sent.filter((request) => request.path.includes('/github/items/'))
+
+  it('renders a merged PR’s changes view from /github/prs/N/changes', async () => {
+    const sent = stubFetch({ 'GET /api/v1/github/items/pr/150': () => jsonResponse({ available: true, item: MERGED_PR }) })
+    renderAt('/github/prs/150/changes')
+    await waitFor(() => expect(detail()?.textContent).toContain('Merged long ago'))
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-pr-changes"]')?.textContent).toContain('src/new.ts'))
+    expect(itemRequests(sent).map((request) => request.path)).toEqual(['/api/v1/github/items/pr/150'])
+  })
+
+  it('renders a merged PR’s conversation from /github/prs/N', async () => {
+    stubFetch({ 'GET /api/v1/github/items/pr/150': () => jsonResponse({ available: true, item: MERGED_PR }) })
+    renderAt('/github/prs/150')
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-body"]')?.textContent).toContain('This one already landed.'))
+  })
+
+  it('renders a closed issue from /github/issues/N', async () => {
+    stubFetch({ 'GET /api/v1/github/items/issue/160': () => jsonResponse({ available: true, item: CLOSED_ISSUE }) })
+    renderAt('/github/issues/160')
+    await waitFor(() => expect(detail()?.textContent).toContain('Closed as completed'))
+  })
+
+  it('shows the detail loading state, not Not found, while the item is fetched', async () => {
+    stubFetch({ 'GET /api/v1/github/items/pr/150': () => new Promise<Response>(() => {}) })
+    renderAt('/github/prs/150')
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-detail-loading"]')).not.toBeNull())
+    expect(screen.queryByRole('heading', { level: 2, name: 'Not found' })).toBeNull()
+  })
+
+  it('says why when GitHub cannot be asked', async () => {
+    stubFetch({ 'GET /api/v1/github/items/pr/150': () => jsonResponse({ available: false, reason: 'gh is not logged in' }) })
+    renderAt('/github/prs/150')
+    expect(await screen.findByText('gh is not logged in')).toBeTruthy()
+    expect(screen.queryByRole('heading', { level: 2, name: 'Not found' })).toBeNull()
+  })
+
+  it('Refresh from GitHub re-asks gh for the deep-linked item, past its cache', async () => {
+    let refreshed = false
+    const sent = stubFetch({
+      'GET /api/v1/github/items/pr/150': () => jsonResponse({ available: true, item: MERGED_PR }),
+      'GET /api/v1/github/items/pr/150?refresh=1': () => {
+        refreshed = true
+        return jsonResponse({ available: true, item: { ...MERGED_PR, title: 'Merged, then retitled' } })
+      },
+    })
+    renderAt('/github/prs/150')
+    await waitFor(() => expect(detail()?.textContent).toContain('Merged long ago'))
+    fireEvent.click(screen.getByTitle('Refresh from GitHub'))
+    await waitFor(() => expect(refreshed).toBe(true))
+    await waitFor(() => expect(detail()?.textContent).toContain('Merged, then retitled'))
+    expect(itemRequests(sent).map((request) => request.path)).toEqual([
+      '/api/v1/github/items/pr/150',
+      '/api/v1/github/items/pr/150?refresh=1',
+    ])
+  })
+
+  it('a failed exact fetch recovers through Refresh from GitHub', async () => {
+    stubFetch({
+      'GET /api/v1/github/items/pr/150': () => jsonResponse({ error: 'boom' }, 500),
+      'GET /api/v1/github/items/pr/150?refresh=1': () => jsonResponse({ available: true, item: MERGED_PR }),
+    })
+    renderAt('/github/prs/150')
+    // The client retries a 5xx once on its own (query-client.ts) before the error shows.
+    expect(await screen.findByRole('heading', { level: 2, name: 'Could not load #150' }, { timeout: 5000 })).toBeTruthy()
+    fireEvent.click(screen.getByTitle('Refresh from GitHub'))
+    await waitFor(() => expect(detail()?.textContent).toContain('Merged long ago'))
+  })
+
+  it('Could not load #N offers its own Retry, past the item cache', async () => {
+    const sent = stubFetch({
+      'GET /api/v1/github/items/pr/150': () => jsonResponse({ available: false, reason: 'gh is not logged in' }),
+      'GET /api/v1/github/items/pr/150?refresh=1': () => jsonResponse({ available: true, item: MERGED_PR }),
+    })
+    renderAt('/github/prs/150')
+    expect(await screen.findByText('gh is not logged in')).toBeTruthy()
+    fireEvent.click(within(document.querySelector('[data-slot="gh-detail"]') as HTMLElement).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(detail()?.textContent).toContain('Merged long ago'))
+    expect(itemRequests(sent).map((request) => request.path)).toContain('/api/v1/github/items/pr/150?refresh=1')
+  })
+
+  it('does not ask GitHub for an item the open list already holds', async () => {
+    const sent = stubFetch()
+    renderAt('/github/prs/137/changes')
+    await waitFor(() => expect(detail()?.textContent).toContain('Stream tokens over SSE'))
+    await waitFor(() => expect(document.querySelector('[data-slot="gh-pr-changes"]')).not.toBeNull())
+    expect(itemRequests(sent)).toEqual([])
+  })
+})
+
+describe('issue linked tasks (#750)', () => {
+  const task = (id: string, over: Partial<RunRecord> = {}): RunRecord => ({
+    id, title: id, task: id, workflow: 'quick-task', status: RUN_STATUS.done,
+    createdAt: '2026-09-01T12:00:00Z', tokensUsed: 0, archived: false, steps: [],
+    issueNumber: 142, ...over,
+  })
+  const expand = async () => fireEvent.click(await screen.findByRole('button', { name: /^Linked tasks/ }))
+  const linked = () => screen.getByRole('region', { name: /Linked tasks/ })
+
+  it('opens a single linked task from a direct project-scoped issue URL', async () => {
+    stubFetch({ 'GET /api/v1/run-summaries': () => jsonResponse([task('diagnosis')]) })
+    renderAt('/p/boot/github/issues/142')
+    await expand()
+    const link = await screen.findByRole('link', { name: /diagnosis/ })
+    expect(link.getAttribute('href')).toBe('/p/boot/tasks/diagnosis')
+    expect(within(linked()).getByRole('heading').textContent).toBe('Linked tasks (1)')
+    fireEvent.click(link)
+    expect(await screen.findByText('Task destination')).toBeTruthy()
+  })
+
+  it('lists diagnosis and fix separately, newest first, with archived history and no duplicate or foreign tasks', async () => {
+    stubFetch({ 'GET /api/v1/run-summaries': () => jsonResponse([
+      task('diagnosis', { archived: true, referencedIssueUrl: ISSUE_142.url }),
+      task('fix', { status: RUN_STATUS.running, createdAt: '2026-10-01T12:00:00Z' }),
+      task('fix', { status: RUN_STATUS.running, createdAt: '2026-10-01T12:00:00Z' }),
+      task('foreign', { referencedIssueUrl: 'https://github.com/other/repo/issues/142' }),
+      task('pr-only', { issueNumber: undefined, prNumber: 142 }),
+    ]) })
+    renderAt('/github/issues/142')
+    await expand()
+    await screen.findByRole('heading', { name: 'Linked tasks (2)' })
+    const links = within(linked()).getAllByRole('link')
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(['/tasks/fix', '/tasks/diagnosis'])
+    expect(within(links[0]!).getByRole('img', { name: 'running' }).getAttribute('data-tone')).toBe('running')
+    expect(within(links[1]!).getByRole('img', { name: 'done' }).getAttribute('data-tone')).toBe('success')
+    expect(links[0]?.textContent).not.toContain('running')
+    expect(links[1]?.textContent).not.toContain('done')
+    expect(links[1]?.textContent).toContain('Archived')
+    expect(links[1]?.querySelector('time')?.dateTime).toBe('2026-09-01T12:00:00Z')
+  })
+
+  it('shows loading before an empty answer and reacts to the existing live runs cache', async () => {
+    let resolve!: (response: Response) => void
+    stubFetch({ 'GET /api/v1/run-summaries': () => new Promise<Response>((r) => { resolve = r }) })
+    const client = renderAt('/github/issues/142')
+    await expand()
+    expect(await screen.findByText('Loading linked tasks…')).toBeTruthy()
+    await act(async () => resolve(jsonResponse([])))
+    expect(await screen.findByText('No linked tasks yet.')).toBeTruthy()
+    act(() => client.setQueryData(['default', 'runs', 'list'], [task('new-task')]))
+    expect(await screen.findByRole('link', { name: /new-task/ })).toBeTruthy()
+  })
+
+  it('retries a failed runs request without hiding the issue', async () => {
+    let fail = true
+    stubFetch({ 'GET /api/v1/run-summaries': () => fail
+      ? jsonResponse({ error: 'Unavailable' }, 403)
+      : jsonResponse([task('recovered')]) })
+    renderAt('/github/issues/142')
+    await expand()
+    const retry = await screen.findByRole('button', { name: 'Retry linked tasks' })
+    expect(detail()?.textContent).toContain(ISSUE_142.title)
+    fail = false
+    fireEvent.click(retry)
+    expect(await screen.findByRole('link', { name: /recovered/ })).toBeTruthy()
+  })
+
+  it('includes archived tasks for an exact issue absent from the open list', async () => {
+    stubFetch({
+      'GET /api/v1/run-summaries': () => jsonResponse([task('old-task', { issueNumber: 4507, archived: true })]),
+      'GET /api/v1/github/items/issue/4507': () => jsonResponse({ available: true, item: { ...ISSUE_142, number: 4507 } }),
+    })
+    renderAt('/github/issues/4507')
+    await expand()
+    expect(await screen.findByRole('link', { name: /old-task/ })).toBeTruthy()
+  })
+
+  it('collapses when switching issues and when reopening the same issue through the real route', async () => {
+    stubFetch({ 'GET /api/v1/run-summaries': () => jsonResponse([task('diagnosis')]) })
+    renderAt('/github/issues/142')
+    const toggle = () => screen.getByRole('button', { name: /^Linked tasks/ })
+    await screen.findByRole('button', { name: 'Linked tasks (1)' })
+    expect(toggle().getAttribute('aria-expanded')).toBe('false')
+    await expand()
+    fireEvent.click(rows().find(row => row.textContent?.includes(ISSUE_139.title))!)
+    await waitFor(() => expect(detail()?.textContent).toContain(ISSUE_139.title))
+    expect(toggle().getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(rows().find(row => row.textContent?.includes(ISSUE_142.title))!)
+    await screen.findByRole('button', { name: 'Linked tasks (1)' })
+    await expand()
+    fireEvent.click(screen.getByRole('link', { name: /Back to the list/ }))
+    // The list keeps its first issue mounted as a desktop preview, even on a phone.
+    await waitFor(() => expect(toggle().getAttribute('aria-expanded')).toBe('false'))
+    await expand()
+    fireEvent.click(rows().find(row => row.textContent?.includes(ISSUE_142.title))!)
+    await waitFor(() => expect(toggle().getAttribute('aria-expanded')).toBe('false'))
+  })
 })
