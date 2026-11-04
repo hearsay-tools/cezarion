@@ -614,12 +614,12 @@ const CONTROL_CRITERIA = [
   { id: 'R27', scenario: 'hold' },
   // hearsay-tools/cezarion#1225: cancel/destroy releases the same-turn wait slot.
   { id: 'R80', scenario: 'hold' },
-  // workflows/ci-wait-conflict-parity.test.ts: real gh metadata, atomic input, native wake.
+  // workflows/ci-wait-conflict-{fresh,continued,recovered,cancellation}-parity.test.ts: real gh metadata, atomic input, native wake.
   { id: 'R81', scenario: 'baseline' },
   { id: 'R82', scenario: 'baseline' },
   { id: 'R83', scenario: 'baseline' },
   { id: 'R84', scenario: 'baseline' },
-  // hearsay-tools/cezarion#1399: workflows/ci-wait-rerun-parity.test.ts keeps
+  // hearsay-tools/cezarion#1399: workflows/ci-wait-rerun-{fresh,recovered}-parity.test.ts keeps
   // partial green pending during a rerun, including recovery without a session.
   { id: 'R85', scenario: 'baseline' },
   // hearsay-tools/cezarion#1440: query retry through native wake, fresh and recovered.
@@ -654,7 +654,7 @@ const CONTROL_CRITERIA = [
   { id: 'R40', scenario: 'baseline' },
   { id: 'R41', scenario: 'cezar-done' },
   { id: 'R42', scenario: 'baseline' },
-  // workflows/worker-reboot-parity.test.ts and worker-location-evidence.test.ts: native exit/Continue,
+  // workflows/worker-reboot-{collect,destroy,reuse}-parity.test.ts and worker-location-evidence.test.ts: native exit/Continue,
   // independent reboot proof, legacy location uncertainty, readable vs unreadable holders, cleanup retries
   // and parent Finish.
   { id: 'R43', scenario: 'baseline' },
@@ -3290,7 +3290,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
     }
   });
 
-  // cezar's own tools are covered where they run: Codex rows of ci-wait-parity park only
+  // cezar's own tools are covered where they run: Codex rows of ci-wait-{fresh,continued,recovered}-parity park only
   // when the mock's MCP tool gate lets cezar_wait through unasked.
   describeRunners('mcp', 'MCP tool approval routing (hearsay-tools/cezarion#1294)', () => {
     for (const backend of runners) {

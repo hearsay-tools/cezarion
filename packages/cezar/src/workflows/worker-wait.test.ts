@@ -1,63 +1,21 @@
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
-import {
-  RUN_STATUS, STEP_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA, makeWorkerWait,
-} from '@open-mercato/cezar-contract/test-factories.testkit';
-import { type RunRecord } from '../runs/store.ts';
-import * as runnerFactory from '../core/runner-factory.ts';
-import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
+import { describe, expect, it } from 'vitest';
+import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES } from './run.ts';
-import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withHeldAck } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { gate, thenSay, toolCall } from './waits-parity.testkit.ts';
-import { writeInput, type ActiveRun } from './active-run.ts';
-
-import {
-  checkpoint, collect, controlledWire, fixtureUpdateRun, manager, parent, register, restart, root, semaphore,
-  store, until, useWorkerWaitFixture, waitOf, lastWaitOf, worker,
-} from './worker-wait.testkit.ts';
-import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
-
-/** The refusal nudges a blocked done received (hearsay-tools/cezarion#1301), as their notes. */
-const completionNudges = (id: string) => store.readEvents(id).filter(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE));
-/** The agent inputs Cezar submitted on the session, by text. */
-const sentTexts = (sent: string[], text: string) => sent.filter(entry => entry.includes(text));
-/** Record every text a session is sent through Cezar's agent-input seam. */
-function recordAgentInput(id: string): string[] {
-  const sent: string[] = [];
-  const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(id)!.session;
-  const real = session.sendAgentMessage.bind(session);
-  session.sendAgentMessage = ((content, ...rest) => {
-    sent.push(content.map(block => block.type === 'text' ? block.text : '').join('\n'));
-    return real(content, ...rest);
-  }) as AgentSession['sendAgentMessage'];
-  return sent;
-}
-
-/** hearsay-tools/cezarion#2397: cezar_done refuses a done that workers already block, and that answer
- *  is the agent's. The turn end's refusal comes from a done the tool accepted before `block` added
- *  the blocker later in the same turn, as an agent that spawns a worker after its done does. `send`
- *  opens the turn: a human message unless the test sends straight to the session. */
-async function blockedDone<T>(id: string, block: () => Promise<T>, send: (text: string) => unknown = text => manager.sendMessage(id, [{ type: 'text', text }])): Promise<T> {
-  const opened = join(root, `gate-${randomUUID()}`);
-  expect(send(`${toolCall('cezar_done', {})} ${gate(opened)} ${thenSay('All done.')}`)).toBe(true);
-  await until(() => !!(manager as unknown as { active: Map<string, { doneRequested?: unknown }> }).active.get(id)?.doneRequested);
-  const blocker = await block();
-  writeFileSync(opened, '');
-  return blocker;
-}
-const sessionOf = (id: string) => (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(id)!.session;
+import { checkpoint, collect, manager, parent, semaphore, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { completionNudges, sentTexts, recordAgentInput, blockedDone } from './worker-wait-readiness.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
-describe('worker waits through RunManager', { timeout: 30_000 }, () => {
+
+// Real Git, durable checkpoints and native process shutdown retain their original budgets.
+describe('worker Finish and completion nudges', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
-  for (const mode of ['fresh', 'continuation'] as const) {
+
+for (const mode of ['fresh', 'continuation'] as const) {
     it(`readiness ${mode}: a DONE blocked by live workers gets the refusal nudge, opens no wait, and Finish stays refused`, async () => {
       const p = await parent();
       await until(() => store.getRun(p.id)?.status === 'waiting');
@@ -80,116 +38,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       expect(semaphore.busy()).toBe(0);
     });
   }
-
-  // hearsay-tools/cezarion#1301: a closed session's blocked done is queued as the refusal, and the
-  // scheduler continuation reopens the session to deliver it; Cezar opens no wait.
-  it('readiness closed session reopens to refuse a successful done with outstanding workers', async () => {
-    const p = await parent(); const w = await worker(p.id);
-    const state = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!;
-    state.session.end();
-    const refusal = (run: RunRecord | undefined) => run?.agentInputs?.find(input => input.source === 'lifecycle' && input.text.includes(`Workers are still live: ${w.id}.`));
-    await until(() => !!refusal(store.getRun(p.id))?.deliveredAt && store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true);
-    expect(refusal(store.getRun(p.id))?.text).toContain(COMPLETION_WILL_WAIT);
-    expect(completionNudges(p.id)).toHaveLength(1);
-    expect(store.getRun(p.id)?.status).not.toBe('done');
-    expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
-    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
-    expect(store.getRun(w.id)?.status).toBe('queued');
-  });
-
-  it('readiness collects a markerless worker after its idle timer closes the session', async () => {
-    const p = await parent();
-    const w = await worker(p.id);
-    const wait = register(p.id, [w.id]);
-    manager.enqueueOwnedRun(w.id);
-    await until(() => store.getRun(w.id)?.status === 'waiting');
-    const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(w.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting worker did not arm an idle timer');
-    idleTimer._onTimeout();
-
-    await until(() => store.getRun(w.id)?.status === 'done');
-    await until(() => store.getRun(p.id)?.agentInputs?.some(input => input.id === wait.id && !!input.deliveredAt) === true);
-    expect(store.readWorkerExecution(w.id)?.phase).toBe('complete');
-    expect(waitOf(store.getRun(p.id))).toBeUndefined();
-  });
-
-  it('readiness fails rather than collects success for a worker with a rejected ASK marker', async () => {
-    const p = await parent();
-    const w = await worker(p.id);
-    const wait = register(p.id, [w.id]);
-    manager.enqueueOwnedRun(w.id);
-    await until(() => store.getRun(w.id)?.status === 'waiting');
-    store.updateRun(w.id, { invalidAsk: true });
-    const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(w.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting worker did not arm an idle timer');
-    idleTimer._onTimeout();
-
-    await until(() => store.getRun(w.id)?.status === 'failed');
-    await until(() => store.getRun(p.id)?.agentInputs?.some(input => input.id === wait.id && !!input.deliveredAt) === true);
-    expect(store.getRun(w.id)?.error).toBe('invalid structured question');
-  });
-
-  it('readiness public cancellation does not wake until private completion is durable', async () => {
-    const p = await parent(); const w = await worker(p.id);
-    const generation = store.commitWorkerExecutionStart(w.id);
-    const wait = register(p.id, [w.id]);
-    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    store.updateRun(w.id, { status: RUN_STATUS.cancelled }); manager.reconcileWorkerWaits();
-    expect(waitOf(store.getRun(p.id))?.phase).toBe('parked');
-    expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
-    expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
-    await until(() => !waitOf(store.getRun(p.id)));
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id && input.deliveredAt)).toHaveLength(1);
-  });
-
-  it('readiness real stopped process wakes its parent only after actual exit and finalization', async () => {
-    const p = await parent(); const w = await worker(p.id);
-    let child: ReturnType<typeof spawn> | undefined; let ready = false;
-    const runner = vi.spyOn(runnerFactory, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', interrupt: async () => undefined,
-      run: async () => { throw Error('unused'); }, startSession: () => {
-        child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)"], { stdio: ['ignore', 'pipe', 'pipe'] });
-        child.stdout!.once('data', () => { ready = true; });
-        const result = new Promise<never>((_resolve, reject) => child!.once('close', () => reject(Error('stopped'))));
-        return { pid: child.pid, result, open: true, sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => {}, holdsHumanInput: () => false,
-          interrupt: () => { child!.kill('SIGTERM'); }, end: () => { child!.kill('SIGTERM'); } };
-      } });
-    try {
-      const wait = register(p.id, [w.id]); manager.enqueueOwnedRun(w.id);
-      await until(() => ready);
-      expect(manager.requestWorkerStop(w.id).state).toBe('stopping');
-      expect(store.getRun(w.id)?.status).toBe('cancelled');
-      expect(await manager.awaitRunTermination(w.id, 30)).toBe(false);
-      expect(waitOf(store.getRun(p.id))?.phase).toBe('parked');
-      expect(manager.finish(p.id)).toBe(false);
-      child!.kill('SIGKILL');
-      await until(() => store.getRun(p.id)?.agentInputs?.some(input => input.id === wait.id && !!input.deliveredAt) === true);
-      expect(store.readWorkerExecution(w.id)?.phase).toBe('complete');
-      expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    } finally { child?.kill('SIGKILL'); runner.mockRestore(); }
-  });
-
-  // hearsay-tools/cezarion#2410: the completion gate never lets a parent reach review with a live
-  // worker, so the status is forced here. A reviewing parent ends a live worker as every settled
-  // parent does, live and through recovery: no exception keeps it running beside a parent at rest.
-  it('readiness review cancels a live worker, live and through recovery', async () => {
-    const p = await parent(); const w = await worker(p.id);
-    await until(() => store.getRun(p.id)?.status === RUN_STATUS.waiting);
-    store.flush(); const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
-    for (const run of disk) if (run.id === p.id) run.status = RUN_STATUS.review;
-    store.updateRun(p.id, { status: RUN_STATUS.review }); manager.reconcileWorkerWaits();
-    expect(store.getRun(w.id)?.status).toBe('cancelled');
-    // A reviewing parent holds no session, but this one is live: the old manager stops the session
-    // from the park it really has (hearsay-tools/cezarion#1804).
-    store.updateRun(p.id, { status: RUN_STATUS.waiting });
-    await restart(false, disk);
-    await until(() => store.getRun(w.id)?.status === 'cancelled');
-  });
-
-  // hearsay-tools/cezarion#2410: every settled parent gates its worker's Continue, naming itself.
-  it.each(['review', 'done', 'failed'] as const)('readiness worker Continue requires continuing a %s parent first', async status => {
+it.each(['review', 'done', 'failed'] as const)('readiness worker Continue requires continuing a %s parent first', async status => {
     const p = await parent(); const w = await worker(p.id);
     await until(() => store.getRun(p.id)?.status === RUN_STATUS.waiting);
     store.updateRun(w.id, { status: RUN_STATUS.done });
@@ -203,8 +52,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     // teardown stops it (hearsay-tools/cezarion#1804).
     store.updateRun(p.id, { status: RUN_STATUS.waiting });
   });
-
-  it.each(['review', 'failed', 'cancelled'] as const)('readiness requires settled collection of %s and accepts partial failures', async status => {
+it.each(['review', 'failed', 'cancelled'] as const)('readiness requires settled collection of %s and accepts partial failures', async status => {
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id);
@@ -220,137 +68,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => !manager.isActive(p.id));
     expect(store.getRun(p.id)?.status).toBe('done');
   });
-
-  // hearsay-tools/cezarion#1301: a blocked done gets the refusal nudge. The nudge's own turn end with
-  // live workers opens the live-worker re-check timer, so the next done, which cezar_done itself
-  // refuses, parks on that timer, and neither opens an automatic worker wait.
-  it('readiness repeated done with live workers: one nudge, then a park on the re-check timer, and no automatic wait', async () => {
-    const p = await parent();
-    await until(() => store.getRun(p.id)?.status === 'waiting');
-    const w = await blockedDone(p.id, () => worker(p.id));
-    await until(() => completionNudges(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting');
-    const timer = store.getRun(p.id)?.waits?.find(wait => wait.kind === 'timer' && wait.via === 'monitoring-line');
-    expect(timer).toBeDefined();
-    const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
-    const engine = manager as unknown as { active: Map<string, ActiveRun> };
-    // Cezar's own write, as its nudges are, so the turn it starts is not the runner's
-    // (hearsay-tools/cezarion#2431 closes timers only on a turn the runner starts itself).
-    const state = engine.active.get(p.id)!;
-    writeInput(state, () => state.session!.sendMessage([{ type: 'text', text: toolCall('cezar_done', {}) }]));
-    const refused = () => store.readEvents(p.id).filter(event => event.type === 'text' && String(event.text).includes('workers_outstanding') && String(event.text).includes(`worker stop ${w.id}`));
-    await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && refused().length === 1 && store.getRun(p.id)?.status === 'waiting');
-    expect(completionNudges(p.id)).toHaveLength(1);
-    expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ id: timer!.id, phase: WAIT_PHASE.open })]);
-    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
-    expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle') ?? []).toEqual([]);
-    expect(store.getRun(w.id)?.status).toBe('queued');
-  });
-
-  // The refusal nudge is charged to the automatic-wake budget; with it spent, the blocked DONE opens
-  // Cezar's budget human wait instead (hearsay-tools/cezarion#1301).
-  it('a blocked done with the automatic-wake budget spent opens the budget human wait instead of a nudge', async () => {
-    const p = await parent();
-    await until(() => store.getRun(p.id)?.status === 'waiting');
-    store.commitOutcome(p.id, { kind: 'charged', automaticWakes: MAX_AUTO_CONTINUES });
-    const sent = recordAgentInput(p.id);
-    const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
-    // Straight to the session: a human message would restart the budget.
-    const w = await blockedDone(p.id, () => worker(p.id), text => sessionOf(p.id).sendMessage([{ type: 'text', text }]));
-    await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && store.getRun(p.id)?.status === 'waiting');
-    expect(completionNudges(p.id)).toEqual([]);
-    expect(sentTexts(sent, `Workers are still live: ${w.id}.`)).toEqual([]);
-    expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ kind: WAIT_KIND.human, source: WAIT_SOURCE.cezar, via: WAIT_VIA.budget, phase: WAIT_PHASE.open })]);
-    expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes(`Workers are still live: ${w.id}.`))).toBe(true);
-    expect(store.getRun(p.id)?.automaticWakes).toBe(MAX_AUTO_CONTINUES);
-    expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    expect(manager.finish(p.id)).toBe(false);
-  });
-
-  it('readiness settled uncollected completion sends the collect refusal without the will-wait sentence, then finishes once collected', async () => {
-    const p = await parent();
-    await until(() => store.getRun(p.id)?.status === 'waiting');
-    const sent = recordAgentInput(p.id);
-    const w = await blockedDone(p.id, async () => {
-      const settled = await worker(p.id);
-      manager.requestWorkerStop(settled.id); expect(await manager.awaitRunTermination(settled.id, 15000)).toBe(true);
-      return settled;
-    });
-    await until(() => completionNudges(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting');
-    const [nudge, ...more] = sentTexts(sent, `worker collect ${w.id}`);
-    expect(more).toEqual([]);
-    expect(nudge).not.toContain(COMPLETION_WILL_WAIT);
-    expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle') ?? []).toEqual([]);
-    await collect(w.id);
-    process.env.CEZ_REVIEW_GATE = '1';
-    writeFileSync(join(store.getRun(p.id)!.worktreePath!, 'parent-result.txt'), 'parent result');
-    const state = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!;
-    state.session.sendMessage([{ type: 'text', text: toolCall('cezar_done', {}) }]);
-    await until(() => !manager.isActive(p.id));
-    expect(store.getRun(p.id)?.status).toBe('review');
-  });
-
-  it('readiness accepted worker revision invalidates a previously collected settled result', async () => {
-    const p = await parent();
-    await until(() => store.getRun(p.id)?.status === 'waiting');
-    const w = await worker(p.id);
-    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true); await collect(w.id);
-    store.commitWorkerContinuation(w.id, 'continue-line');
-    expect(manager.finish(p.id)).toBe(false);
-    fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
-    expect(manager.finish(p.id)).toBe(false);
-    await collect(w.id);
-    expect(manager.finish(p.id)).toBe(true);
-    await until(() => !manager.isActive(p.id));
-  });
-
-  // hearsay-tools/cezarion#1301: which input is a refusal is in memory only; one still queued at a
-  // crash is a lifecycle input no wait names, which recovery delivers as ordinary input.
-  it('readiness closed-session refusal still queued at a crash is delivered after recovery', async () => {
-    const p = await parent(); const w = await worker(p.id);
-    await until(() => store.getRun(p.id)?.status === 'waiting');
-    const events = new Map();
-    const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<RunRecord>;
-    const text = `Workers are still live: ${w.id}. u-crash`;
-    const input = { id: randomUUID(), parentRunId: p.id, source: 'lifecycle' as const, text, createdAt: new Date().toISOString() };
-    for (const run of disk) if (run.id === p.id) Object.assign(run, { agentInputs: [...run.agentInputs ?? [], input] });
-    await restart(false, disk, events);
-    await until(() => !!store.getRun(p.id)?.agentInputs?.find(entry => entry.id === input.id)?.deliveredAt);
-    expect(store.getRun(p.id)?.status).not.toBe('done');
-    expect(waitOf(store.getRun(p.id))).toBeUndefined();
-  });
-
-  it('readiness ready human Finish retires an accepted wait before closing its session', async () => {
-    const p = await parent('mock:slow'); const w = await worker(p.id);
-    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true); await collect(w.id);
-    register(p.id, [w.id]);
-    expect(manager.finish(p.id)).toBe(true);
-    await until(() => !manager.isActive(p.id));
-    expect(store.getRun(p.id)?.status).toBe('done');
-    expect(waitOf(store.getRun(p.id))).toBeUndefined();
-  });
-
-  it('readiness discards cached unsettled observations lacking current private proof', async () => {
-    const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
-    const generation = store.commitWorkerExecutionStart(first.id);
-    store.updateRun(first.id, { status: RUN_STATUS.cancelled });
-    // An agent's worker wait is a list entry (hearsay-tools/cezarion#1301).
-    const now = Date.now();
-    store.commitWait(p.id, makeWorkerWait({ registeredAt: new Date(now).toISOString(),
-      deadline: new Date(now + 600000).toISOString(), mode: 'all',
-      workerIds: [first.id, second.id], revisions: [{ workerId: first.id, revision: 0 }, { workerId: second.id, revision: 0 }],
-      outcomes: [{ workerId: first.id, revision: 0, status: RUN_STATUS.cancelled, observedAt: new Date(now).toISOString() }] }));
-    manager.reconcileWorkerWaits();
-    expect(waitOf(store.getRun(p.id))?.outcomes).toEqual([]);
-    expect(store.commitWorkerExecutionComplete(first.id, generation)).toBe(true);
-    expect(waitOf(store.getRun(p.id))?.outcomes).toHaveLength(1);
-  });
-
-  // hearsay-tools/cezarion#1301: the refusal nudge goes through the agent-input seam, so an OpenCode
-  // acknowledgement that lands after the nudge's own turn ended neither sends it twice nor charges
-  // it twice.
-  for (const mode of ['fresh', 'continuation'] as const) {
+for (const mode of ['fresh', 'continuation'] as const) {
     for (const delayedAck of [false, true]) {
       it(`completion nudge ${mode} is sent and charged once with delayed ACK=${delayedAck}`, async () => {
         const exercise = async (release: () => void) => {
@@ -393,131 +111,4 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       });
     }
   }
-
-  it('readiness Finish preserves pending parent human questions', async () => {
-    const p = await parent('mock:cezar-ask'); await until(() => store.getRun(p.id)?.status === 'waiting');
-    expect(manager.finish(p.id)).toBe(false);
-    expect(store.getRun(p.id)?.status).toBe('waiting');
-    expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
-  });
-
-  it('all-mode replaces old observations when a selected worker accepts another execution', async () => {
-    const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
-    manager.registerWorkerWait(p.id, { workerIds: [first.id, second.id], timeoutSeconds: 600, mode: 'all' });
-    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    fixtureUpdateRun(first.id, { status: RUN_STATUS.review }); manager.reconcileWorkerWaits();
-    expect(waitOf(store.getRun(p.id))?.outcomes).toHaveLength(1);
-    store.commitWorkerContinuation(first.id, 'continue-line');
-    fixtureUpdateRun(second.id, { status: RUN_STATUS.done }); manager.reconcileWorkerWaits();
-    expect(waitOf(store.getRun(p.id))).toMatchObject({ phase: 'parked', outcomes: [{ workerId: second.id }] });
-    expect(waitOf(store.getRun(p.id))?.revisions).toContainEqual({ workerId: first.id, revision: 1 });
-    fixtureUpdateRun(first.id, { status: RUN_STATUS.review }); manager.reconcileWorkerWaits();
-    await until(() => !waitOf(store.getRun(p.id)));
-    expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ outcomes: expect.arrayContaining([{ workerId: first.id, revision: 1, status: RUN_STATUS.review, observedAt: expect.any(String) }]) });
-    expect(store.readEvents(p.id)).toContainEqual(expect.objectContaining({ type: 'worker-outcome', outcome: expect.objectContaining({ workerId: first.id, revision: 1 }) }));
-  });
-
-  it('all-mode stays parked after one outcome and wakes exactly once after both', async () => {
-    const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
-    const wait = manager.registerWorkerWait(p.id, { workerIds: [first.id, second.id], timeoutSeconds: 600, mode: 'all' });
-    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    fixtureUpdateRun(first.id, { status: RUN_STATUS.done }); manager.reconcileWorkerWaits();
-    expect(waitOf(store.getRun(p.id))).toMatchObject({ phase: 'parked', mode: 'all', outcomes: [{ workerId: first.id }] });
-    expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
-    fixtureUpdateRun(second.id, { status: RUN_STATUS.done }); manager.reconcileWorkerWaits();
-    await until(() => !waitOf(store.getRun(p.id)));
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
-    expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, reason: 'outcome' });
-  });
-
-  it('cancels before park durably without releasing an executing parent slot', async () => {
-    const release = join(root, 'release-cancelled-turn'); const wire = controlledWire({ firstResultGate: release });
-    const p = await parent(); await until(wire.initialReceived); const w = await worker(p.id);
-    const wait = register(p.id, [w.id]);
-    const cancelled = manager.cancelWorkerWait(p.id, wait.id);
-    expect(cancelled).toMatchObject({ id: wait.id, phase: 'wake-pending', reason: 'cancelled', wakeId: wait.id });
-    expect(semaphore.busy()).toBe(1); expect(store.getRun(w.id)?.status).toBe('queued');
-    const disk = readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[];
-    // hearsay-tools/cezarion#1235: a cancelled wait moves to lastWaits and queues no wake.
-    expect(lastWaitOf(disk.find(run => run.id === p.id))).toMatchObject({ id: wait.id, reason: 'cancelled' });
-    expect(store.getRun(p.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
-    writeFileSync(release, 'release');
-    await until(() => !waitOf(store.getRun(p.id)));
-    expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id) ?? []).toEqual([]);
-  });
-
-  it('answers a cancelled wait from the entry its commit settled, and never one the commit did not settle', async () => {
-    const release = join(root, 'release-unsettled-cancel'); const wire = controlledWire({ firstResultGate: release });
-    const p = await parent(); await until(wire.initialReceived); const w = await worker(p.id);
-    const wait = register(p.id, [w.id]);
-    const commit = vi.spyOn(store, 'commitOutcome').mockReturnValueOnce({ committed: false, answered: [], settled: [] });
-    expect(() => manager.cancelWorkerWait(p.id, wait.id)).toThrow(expect.objectContaining({ code: 'incompatible_state' }));
-    commit.mockRestore();
-    expect(store.getRun(p.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe('open');
-    const cancelled = manager.cancelWorkerWait(p.id, wait.id);
-    expect(cancelled).toEqual(lastWaitOf(readPersistedRuns(join(root, '.ai/cezar')).find(run => run.id === p.id)));
-    expect(cancelled).toMatchObject({ id: wait.id, reason: 'cancelled' });
-    writeFileSync(release, 'release');
-    await until(() => !waitOf(store.getRun(p.id)));
-  });
-
-  it('cancelled parked wait queues no wake behind a running worker and stale IDs cannot cancel a later wait', async () => {
-    const p = await parent(); const w = await worker(p.id, 'mock:slow');
-    const wait = register(p.id, [w.id]); manager.enqueueOwnedRun(w.id);
-    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked' && store.getRun(w.id)?.status === 'running');
-    manager.cancelWorkerWait(p.id, wait.id); manager.cancelWorkerWait(p.id, wait.id); manager.reconcileWorkerWaits();
-    expect(store.getRun(w.id)?.status).toBe('running'); expect(semaphore.busy()).toBe(1);
-    // hearsay-tools/cezarion#1235: the cancelled entry moves to lastWaits; nothing wakes the parent.
-    expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, reason: 'cancelled' });
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id) ?? []).toEqual([]);
-    manager.requestWorkerStop(w.id); await manager.awaitRunTermination(w.id, 15_000);
-    await until(() => !waitOf(store.getRun(p.id)));
-    const nextWorker = await worker(p.id); const next = register(p.id, [nextWorker.id]);
-    expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
-    expect(waitOf(store.getRun(p.id))?.id).toBe(next.id);
-    expect(() => manager.cancelWorkerWait(p.id, randomUUID())).toThrow();
-    expect(waitOf(store.getRun(p.id))?.reason).toBeUndefined();
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id) ?? []).toEqual([]);
-  });
-
-  it('restarts a cancelled wait and retains its receipt across restarts without a wake', async () => {
-    const release = join(root, 'release-recovered-turn'); const wire = controlledWire({ firstResultGate: release });
-    const p = await parent(); await until(wire.initialReceived); const w = await worker(p.id);
-    const wait = register(p.id, [w.id]); manager.cancelWorkerWait(p.id, wait.id);
-    const disk = readPersistedRuns(join(root, '.ai/cezar'));
-    writeFileSync(release, 'release');
-    await restart(false, disk);
-    await until(() => !waitOf(store.getRun(p.id)));
-    expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id) ?? []).toEqual([]);
-    expect(store.getRun(w.id)?.status).not.toBe('cancelled');
-    await restart();
-    expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id) ?? []).toEqual([]);
-  });
-
-  it('failed cancellation checkpoint publishes no wake and keeps the original wait retryable', async () => {
-    const p = await parent('mock:slow'); const w = await worker(p.id); const wait = register(p.id, [w.id]);
-    store.flush(); const release = blockRunWrites(join(root, '.ai/cezar'));
-    try {
-      expect(() => manager.cancelWorkerWait(p.id, wait.id)).toThrow();
-      expect(waitOf(store.getRun(p.id))).toEqual(wait);
-      expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
-      expect(lastWaitOf(store.getRun(p.id))).toBeUndefined();
-      expect(semaphore.busy()).toBe(1);
-    } finally { release(); }
-    expect(manager.cancelWorkerWait(p.id, wait.id).reason).toBe('cancelled');
-  });
-
-  it('parent cancellation retires its wait with a receipt while cancelling workers', async () => {
-    const p = await parent(); const w = await worker(p.id); const wait = register(p.id, [w.id]);
-    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    manager.cancel(p.id);
-    expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, reason: 'cancelled' });
-    await until(() => store.getRun(w.id)?.status === 'cancelled');
-    expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
-  });
-
 });

@@ -1407,7 +1407,7 @@ native permission request carry P1's exemption for each row.
 **P9** (hearsay-tools/cezarion#1294) routes another MCP server's tool approval
 from the native Codex mock through `RunManager` and the cockpit HTTP decision
 route; accept and decline each reach Codex as the exact elicitation reply. The
-mock models Codex's MCP tool gate, so Codex rows of `ci-wait-parity`,
+mock models Codex's MCP tool gate, so Codex rows of `ci-wait-{fresh,continued,recovered}-parity`,
 `ci-tools` H1 and U0 fail if cezar's own server loses `approve`. Runners whose
 wires carry no MCP tool approval request have named exemptions.
 
@@ -1420,7 +1420,7 @@ the observation. Later successful settlement must leave that failed attempt inta
 Clean session closure while CI is pending still parks without failure. No runner
 exemptions or normalized-event injection.
 
-**R85** (hearsay-tools/cezarion#1399), in `workflows/ci-wait-rerun-parity.test.ts`,
+**R85** (hearsay-tools/cezarion#1399), in `workflows/ci-wait-rerun-{fresh,recovered}-parity.test.ts`,
 drives every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native CI tool
 call with the real supervisor and a controlled GitHub wire. A partial green check
 list stays pending while a rerun is active, then delivers one observation after
@@ -1709,7 +1709,7 @@ after the grace), under the same reuse guard, and keeps its host up until the gr
 the SIGKILL is sent. Cursor print reaches the same reap when it ends its group after each turn.
 win32 skips both rows. No wire exemptions.
 
-**R43** (hearsay-tools/cezarion#738), in `workflows/worker-reboot-parity.test.ts` and
+**R43** (hearsay-tools/cezarion#738), in `workflows/worker-reboot-{collect,destroy,reuse}-parity.test.ts` and
 `workflows/worker-location-evidence.test.ts`, drives every `RUNNER_IDS`
 backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
 Linux prior-boot controller evidence settles the old execution independently of resource cleanup.
@@ -3026,7 +3026,7 @@ withheld-ACK tests cover completion state and barrier bypass for both diagnostic
 
 ### CI conflict observation parity (hearsay-tools/cezarion#1339)
 
-R81–R84 in `workflows/ci-wait-conflict-parity.test.ts` exercise every
+R81–R84 in `workflows/ci-wait-conflict-{fresh,continued,recovered,cancellation}-parity.test.ts` exercise every
 `RUNNER_IDS` native mock through `HARNESS_ADAPTERS`, with a real GitHub client
 and supervisor reading explicit `CONFLICTING` metadata from a separate gh wire.
 R81 covers a fresh session, R82 a Continue, and R83 restart recovery without an
