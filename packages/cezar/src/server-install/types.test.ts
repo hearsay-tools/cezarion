@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { freshServerState, serverStateSchema } from './types.ts';
+import { z } from 'zod';
+import { STEP_STATUSES } from './types.ts';
+
+const STEP_STATUS = z.enum(STEP_STATUSES).enum;
+
 
 describe('serverStateSchema', () => {
   it('round-trips a full server.json', () => {
@@ -10,9 +15,9 @@ describe('serverStateSchema', () => {
       createdAt: '2026-07-16T09:00:00.000Z',
       primaryPort: 4321,
       steps: {
-        deps: { status: 'done', created: { artifacts: [{ kind: 'shared', type: 'package', name: 'gh' }] } },
+        deps: { status: STEP_STATUS.done, created: { artifacts: [{ kind: 'shared', type: 'package', name: 'gh' }] } },
         'nginx-proxy': {
-          status: 'done',
+          status: STEP_STATUS.done,
           created: {
             artifacts: [
               { kind: 'owned', type: 'file', path: '/etc/nginx/sites-available/cezar' },
@@ -20,7 +25,7 @@ describe('serverStateSchema', () => {
             ],
           },
         },
-        ssl: { status: 'skipped', created: null },
+        ssl: { status: STEP_STATUS.skipped, created: null },
       },
     };
     const parsed = serverStateSchema.parse(full);

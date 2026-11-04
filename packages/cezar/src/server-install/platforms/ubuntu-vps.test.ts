@@ -18,6 +18,11 @@ import {
 import { StepAborted, StepSkipped, sudoStep } from '../steps.ts';
 import { createAutoUi } from '../ui.ts';
 import type { InstallContext, InstallStep, Runner, Ui } from '../types.ts';
+import { z } from 'zod';
+import { STEP_STATUSES } from '../types.ts';
+
+const STEP_STATUS = z.enum(STEP_STATUSES).enum;
+
 
 const okRunner: Runner = { capture: async () => ({ code: 0, stdout: '', stderr: '' }), interactive: async () => 0 };
 
@@ -690,7 +695,7 @@ describe('ubuntu-vps redeploy restart verification (#430)', () => {
       dryRun: opts.dryRun,
       state: {
         externalProxy: true,
-        steps: { autostart: { status: 'done', created: { artifacts: [{ kind: 'owned', type: 'service', name: 'cezar.service', scope: opts.scope ?? 'user' }] } } },
+        steps: { autostart: { status: STEP_STATUS.done, created: { artifacts: [{ kind: 'owned', type: 'service', name: 'cezar.service', scope: opts.scope ?? 'user' }] } } },
       },
     });
     ctx.instance = opts.instance ?? 'default';
