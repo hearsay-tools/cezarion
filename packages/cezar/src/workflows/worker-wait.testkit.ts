@@ -1,5 +1,6 @@
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
+import { observeWaitTimers } from './waits.testkit.ts';
+import { TrackedWork } from './run/tracked-work.ts';
 /**
  * The delegation fixture the worker-wait suites share: a real `RunManager` over a scratch Git repo
  * and native mocks (`useWorkerWaitFixture`), with builders for parents, workers, waits and restarts.
@@ -79,34 +80,42 @@ export let root: string;
 export let store: RunStore;
 export let manager: RunManager;
 export let semaphore: WorkspaceSemaphore;
+export let work: TrackedWork;
+const toolGenerations = new Map<string, string>();
+/** Capture the generation passed through the public tool-handler boundary. */
+export function toolGenerationOf(id: string): string {
+  const generation = toolGenerations.get(id);
+  if (!generation) throw new Error(`No tool launch observed for ${id}`);
+  return generation;
+}
 let saved: NodeJS.ProcessEnv;
 let phase = 'setup';
 let checkpoints: Array<{ phase: string; ms: number }> = [];
 let began = 0;
 let failureState: unknown;
 export function checkpoint(value: string) { phase = value; checkpoints.push({ phase, ms: Math.round(performance.now() - began) }); }
-function fixtureEngine() {
-  return runInternals(manager);
-}
-export function captureState() { const engine = fixtureEngine(); return { root, phase, checkpoints: checkpoints.map(entry => ({ ...entry })), elapsedMs: Math.round(performance.now() - began), busy: semaphore?.busy(),
-  starting: [...runInternals(manager).line.starting], queued: [...runInternals(manager).line.queue],
-  executions: [...engine.workerExecutions.executions].map(([id, entry]) => ({ id, sessions: entry.sessions.size, turns: entry.turns.size, deliveries: entry.deliveries.size })),
+export function captureState() { return { root, phase, checkpoints: checkpoints.map(entry => ({ ...entry })), elapsedMs: Math.round(performance.now() - began), busy: semaphore?.busy(),
+  ownedOperations: [...(work?.pending.values() ?? [])],
+  sessions: [...(work?.liveSessions ?? [])].map(session => ({ pid: session.pid, open: session.open })),
   runs: store?.listRunIds().flatMap(id => store!.getRun(id) ?? []).map(run => ({ id: run.id, status: run.status, error: run.error, step: run.currentStepId, wait: waitOf(run)?.phase,
-    active: manager.isActive(run.id), stopping: run.stopping, executionPhase: store.readWorkerExecution(run.id)?.phase,
-    session: (() => { const state = engine.active.get(run.id); return state ? { opened: state.sessionEverOpened, cancelled: state.cancelled,
-      pid: state.session?.pid, open: state.session?.open, flight: state.agentInputFlight?.inputIds } : undefined; })(),
+    active: manager.isActive(run.id), stopping: run.stopping, execution: store.readWorkerExecution(run.id),
+    inputs: run.agentInputs?.map(input => ({ id: input.id, deliveredAt: input.deliveredAt })),
     events: formatTimeline(run.id, store.readEvents(run.id).slice(-6)), })),
 }; }
 async function settleTrackedWork(): Promise<void> {
-  const work = runInternals(manager).context.work;
   while (work.pending.size) await Promise.allSettled([...work.pending.keys()]);
 }
 
 export const bookkeeping: Promise<unknown>[] = [];
 export const executions: Promise<unknown>[] = [];
 export function track() {
-  const work = runInternals(manager).context.work;
-  const realTrack = work.track.bind(work);
+  observeWaitTimers(manager, store);
+  const handlers = manager.cezarToolHandlers.bind(manager);
+  vi.spyOn(manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
+    toolGenerations.set(id, generation);
+    return handlers(id, generation);
+  });
+  const realTrack = TrackedWork.prototype.track.bind(work);
   vi.spyOn(work, 'track').mockImplementation((label, promise) => {
     if (label === 'execute' || label === 'runContinuation') executions.push(promise);
     if (label === 'recordTurnEnd') bookkeeping.push(promise);
@@ -137,9 +146,10 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
     execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });
     execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
     execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
+    work = new TrackedWork(); toolGenerations.clear();
     semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
     store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
-    manager = new RunManager(store, root, { semaphore, ...(options.unreadInputGraceMs === undefined ? {} : { unreadInputGraceMs: options.unreadInputGraceMs }),
+    manager = new RunManager(store, root, { semaphore, work, ...(options.unreadInputGraceMs === undefined ? {} : { unreadInputGraceMs: options.unreadInputGraceMs }),
       ...(options.subagentGraceMs === undefined ? {} : { subagentGraceMs: options.subagentGraceMs }),
       ...(options.subagentDeadlineMs === undefined ? {} : { subagentDeadlineMs: options.subagentDeadlineMs }) }); track();
   });
@@ -152,8 +162,8 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
       // Cancellation during the dequeue/spawn gap is covered by Task 6's barrier;
       // this fixture waits for its real runner handles before stopping processes.
       await until(() => {
-        const engine = fixtureEngine();
-        return runInternals(manager).line.starting.size === 0 && [...engine.active.values()].every(state => state.sessionEverOpened);
+        const active = store.listRunIds().filter(id => manager.isActive(id));
+        return active.every(id => store.getRun(id)?.steps.some(step => !!step.sessionId)) && active.length <= work.liveSessions.size;
       }, () => JSON.stringify(captureState()));
       checkpoint('teardown-cancel');
       for (const id of store.listRunIds()) cleanup(() => manager.cancel(id));
@@ -166,9 +176,7 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
     } finally {
       // A failed assertion must not strand native sessions, skip disposal, or close the
       // store beneath execution/bookkeeping. Keep every cleanup attempt independent.
-      const states = [...fixtureEngine().active.values()];
-      const sessions = states.flatMap(state => state.session ? [state.session] : []);
-      for (const state of states) cleanup(() => state.interrupt());
+      const sessions = [...work.liveSessions];
       for (const session of sessions) cleanup(() => session.interrupt());
       cleanup(() => manager.dispose());
       await Promise.allSettled(sessions.map(session => session.result));
@@ -224,7 +232,7 @@ async function startParent(task: string, runner: RunnerId, permissions: WorkerOp
   const run = manager.startRun(QUICK_TASK_WORKFLOW, { task, runner });
   store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions, receipts: [] } }]);
   await until(() => {
-    return (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(run.id)?.sessionEverOpened === true;
+    return manager.isActive(run.id) && toolGenerations.has(run.id) && store.getRun(run.id)?.steps.some(step => !!step.sessionId) === true;
   });
   checkpoint('parent-session-open'); return run;
 }
@@ -316,7 +324,7 @@ export async function restart(fakeClock = false, diskCheckpoint?: readonly unkno
   for (const [path, content] of events ?? []) writeFileSync(path, content);
   store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
   if (fakeClock) vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
-  manager = new RunManager(store, root, { semaphore }); track(); checkpoint('restart-recover-start');
+  manager = new RunManager(store, root, { semaphore, work }); track(); checkpoint('restart-recover-start');
   await manager.recover(); checkpoint('restart-recovered');
 }
 
@@ -341,7 +349,7 @@ export async function queuedWake(runner: RunnerId = 'claude') {
   const entry = workerEntryOf(store.getRun(p.id));
   if (!entry) throw Error('fixture');
   await restart(); checkpoint('queued-wake-restarted');
-  await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(w.id)?.sessionEverOpened === true); checkpoint('queued-wake-child-open');
+  await until(() => manager.isActive(w.id) && store.getRun(w.id)?.steps.some(step => !!step.sessionId) === true); checkpoint('queued-wake-child-open');
   // Overdue only once the worker holds the slot: a wake resolved during recovery would take the
   // slot before the recovered worker, since wakes go first (hearsay-tools/cezarion#1236).
   store.commitWait(p.id, { ...workerEntryOf(store.getRun(p.id))!, deadline: new Date().toISOString() });
@@ -361,6 +369,6 @@ export function reopenRuntime() {
     if (!(error instanceof RunStoreOpenError)) throw error;
     store = RunStore.unavailable(join(root, '.ai/cezar'), error);
   }
-  manager = new RunManager(store, root, { semaphore });
+  manager = new RunManager(store, root, { semaphore, work });
   track();
 }
