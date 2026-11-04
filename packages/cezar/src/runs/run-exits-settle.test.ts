@@ -227,3 +227,44 @@ describe('B10: every exit to cancelled settles running and waiting steps to canc
     } finally { reopened.close(); }
   });
 });
+
+// B11: a failed root has no live step; a parent resume re-enters an owned worker's waiting step
+// (hearsay-tools/cezarion#1620).
+describe('B11: every exit to failed settles open steps to failed for a root; a worker keeps its waiting step', () => {
+  const FAILING = SETTLING.filter(exit => RUN_EXITS[exit].to === RUN_STATUS.failed);
+  const steps = (run: { steps: Array<{ status: string; finishedAt?: string | undefined; error?: string | undefined }> }) =>
+    run.steps.map(step => [step.status, step.finishedAt, step.error]);
+
+  it.each(FAILING)('%s on a root', (exit) => {
+    const { store, root } = setup();
+    const id = root(exit, { error: 'kept' });
+    store.updateStep(id, 'a', { status: STEP_STATUS.running, finishedAt: EARLIER, error: 'own' });
+    store.updateStep(id, 'b', { status: STEP_STATUS.waiting });
+    store.move(id, exit);
+    const run = store.getRun(id)!;
+    expect(steps(run)).toEqual([[STEP_STATUS.failed, EARLIER, 'own'], [STEP_STATUS.failed, run.finishedAt, run.error], [STEP_STATUS.pending, undefined, undefined]]);
+  });
+
+  it.each(FAILING.filter(exit => exit !== 'withdraw-hold'))('%s on a worker keeps its waiting step', (exit) => {
+    const { store, worker } = setup();
+    const id = worker(exit, { error: 'kept' });
+    store.updateStep(id, 'a', { status: STEP_STATUS.waiting });
+    store.updateStep(id, 'b', { status: STEP_STATUS.running });
+    store.move(id, exit);
+    const run = store.getRun(id)!;
+    expect(steps(run)).toEqual([[STEP_STATUS.waiting, undefined, undefined], [STEP_STATUS.failed, run.finishedAt, run.error], [STEP_STATUS.pending, undefined, undefined]]);
+  });
+
+  it('the store\'s load-time interrupted run settles them too', () => {
+    const { dir, store, root } = setup();
+    const id = root('fail-interrupted', { status: RUN_STATUS.waiting });
+    store.updateStep(id, 'b', { status: STEP_STATUS.waiting });
+    store.flush();
+    store.close();
+    const reopened = RunStore.open(dir);
+    try {
+      const run = reopened.getRun(id)!;
+      expect(steps(run)[1]).toEqual([STEP_STATUS.failed, run.finishedAt, 'interrupted — cezar process exited during the run']);
+    } finally { reopened.close(); }
+  });
+});

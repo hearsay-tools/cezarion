@@ -28,15 +28,22 @@ function oldManagerPatch(run: ExitRead, exit: RunExitId, patch: RunPatch): RunPa
   return { ...patch, delegation };
 }
 
+/** The exit stamps the run's settlement time (`finishedAt ??= now`), so the site no longer passes
+ *  the time it shared with its own step writes. */
+const exitTime = (run: ExitRead, old: RunPatch): RunPatch => ({ ...old, finishedAt: run.finishedAt ?? NOW });
+
 /** What each Table B row of S7 adds to the record a site wrote before. */
 const S7_ROWS = {
   // B1-B3: every settling exit clears `currentStepId` and retires the root's Finish intent.
   'B1-B3': (run: ExitRead, old: RunPatch): RunPatch => ({ ...old, currentStepId: undefined, ...retiredFinishPatch(run) }),
+  // B4: a settling exit keeps an existing `finishedAt`, else stamps now.
+  B4: exitTime,
+  // B5: success clears the legacy `activity`, and settles its steps at the run's own time.
+  B5: (run: ExitRead, old: RunPatch): RunPatch => ({ ...exitTime(run, old), activity: undefined } as RunPatch),
   // B6: accept-review and draft-pr set `finishedAt ??= now`.
-  B6: (run: ExitRead, old: RunPatch): RunPatch => ({ ...old, finishedAt: run.finishedAt ?? NOW }),
-  // B5: success clears the legacy `activity`, and settles its steps at the run's own time, so the
-  // site no longer passes the time it shared with its side calls.
-  B5: (_run: ExitRead, old: RunPatch): RunPatch => ({ ...old, finishedAt: NOW, activity: undefined } as RunPatch),
+  B6: exitTime,
+  // B11: an exit to failed settles the open steps at the run's own time.
+  B11: exitTime,
 } satisfies Record<string, (run: ExitRead, old: RunPatch) => RunPatch>;
 type S7Row = keyof typeof S7_ROWS;
 
@@ -99,7 +106,7 @@ const SITES: Site[] = [
   { site: 'settleClosingWakes, settleFailedRun', exit: 'fail', from: 'running', manager: true,
     before: () => ({ error: 'e', finishedAt: NOW, currentStepId: u }), after: () => ({ error: 'e' }), s7: ['B1-B3'] },
   { site: 'settleIdleClosedWorker, failRecoveredInvalidAsk', exit: 'fail', from: 'waiting', manager: true,
-    before: () => ({ error: 'e', finishedAt: SHARED, currentStepId: u }), after: () => ({ error: 'e', finishedAt: SHARED }), s7: ['B1-B3'] },
+    before: () => ({ error: 'e', finishedAt: SHARED, currentStepId: u }), after: () => ({ error: 'e' }), s7: ['B1-B3', 'B11'] },
   ...(['running', 'cancelled'] as const).map((from): Site => ({ site: `settleFailedContinuation from ${from}`, exit: 'fail-continue', from, manager: true,
     before: () => ({ error: 'e', finishedAt: NOW, currentStepId: u }), after: () => ({ error: 'e' }), s7: ['B1-B3'] })),
   // fail-crash
@@ -108,9 +115,9 @@ const SITES: Site[] = [
   // fail-interrupted
   { site: 'recoverInterruptedRun', exit: 'fail-interrupted', from: 'running', manager: true,
     before: () => ({ error: 'interrupted — cezar process exited during the run', finishedAt: SHARED, currentStepId: u }),
-    after: () => ({ finishedAt: SHARED }), s7: ['B1-B3'] },
+    after: () => ({}), s7: ['B1-B3', 'B11'] },
   { site: 'failLoadedInterruptedRun', exit: 'fail-interrupted', from: 'waiting', manager: false,
-    before: () => ({ error: 'interrupted — cezar process exited during the run', finishedAt: SHARED }), after: () => ({ finishedAt: SHARED }), s7: ['B1-B3'] },
+    before: () => ({ error: 'interrupted — cezar process exited during the run', finishedAt: SHARED }), after: () => ({}), s7: ['B1-B3', 'B4'] },
 ];
 
 const plainRun = (status: RunStatus): ExitRead => ({ status, delegation: undefined });

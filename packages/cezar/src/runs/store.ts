@@ -701,9 +701,6 @@ function failLoadedInterruptedRun(run: RunRecord, opts?: { keepLive?: boolean })
   // A usage-limit hold runs no process, so no exit interrupted it: its appointment stands.
   if (!opts?.keepLive && engineOwnsRun(run)) {
     Object.assign(run, applyExit(run, 'fail-interrupted'));
-    for (const step of run.steps) {
-      if (step.status === 'running' || step.status === 'waiting') step.status = 'failed';
-    }
   }
 }
 

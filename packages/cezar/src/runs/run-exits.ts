@@ -29,15 +29,16 @@ export type ExitCall = { stepId?: string | undefined };
  *  caller names. */
 export type ExitSettlement = ExitCall & { now: string };
 
-/** What an exit's `steps` read beside the step: the time the run settles at. */
-export type StepSettlement = ExitSettlement & { finishedAt: string };
+/** What an exit's `steps` read beside the step: the time the run settles at, and the error it
+ *  keeps. */
+export type StepSettlement = ExitSettlement & { finishedAt: string; error?: string | undefined };
 
 /** How a write that applies an exit persists: `committed` at once, or `debounced` to the next save,
  *  which is best-effort, so a locked database cannot stop cleanup (Decision 4). */
 export type ExitDurability = 'debounced' | 'committed';
 
 /** What an exit's `fields` and `steps` read off the record a write applies it to. */
-export type ExitRead = Pick<RunRecord, 'status' | 'delegation'> & Partial<Pick<RunRecord, 'finishedAt' | 'currentStepId'>> & { steps?: readonly StepState[] };
+export type ExitRead = Pick<RunRecord, 'status' | 'delegation'> & Partial<Pick<RunRecord, 'finishedAt' | 'currentStepId' | 'error'>> & { steps?: readonly StepState[] };
 
 /**
  * One kind of status write: the statuses it may leave from and the one it writes. `fields` are
@@ -112,6 +113,13 @@ const succeededStep = (step: StepState, _run: ExitRead, { finishedAt, stepId }: 
 const cancelledStep = (step: StepState, _run: ExitRead, { finishedAt }: StepSettlement): StepState =>
   openStep(step) ? { ...step, status: 'cancelled', finishedAt: step.finishedAt ?? finishedAt } : step;
 
+/** A failed root has no live step (B11): its running and waiting steps fail at the run's time,
+ *  each keeping an error of its own, else taking the run's. An owned worker keeps a waiting step:
+ *  a parent resume re-enters it (hearsay-tools/cezarion#1620). */
+const failedStep = (step: StepState, run: ExitRead, { finishedAt, error }: StepSettlement): StepState =>
+  step.status === 'running' || (step.status === 'waiting' && run.delegation?.role !== 'worker')
+    ? { ...step, status: 'failed', finishedAt: step.finishedAt ?? finishedAt, error: step.error ?? error } : step;
+
 /** A park settles its step waiting in the same write (B8): the step the caller names, else the
  *  run's current step. A step that already ended (a failed attempt a park keeps for its wakes)
  *  stays as it is. */
@@ -151,16 +159,16 @@ export const RUN_EXITS = {
   // Draft PR (`POST /runs/:id/pr`): the cockpit offers it on review and on settled runs, so a
   // settled run that is published reads done too. A usage-limit hold is not declared (spec B13).
   'draft-pr': { durability: 'debounced', from: ['review', 'done', 'failed', 'cancelled'], to: 'done' },
-  'fail-start': { durability: 'debounced', from: ['queued', 'running'], to: 'failed' },
-  fail: { durability: 'debounced', from: ['running', 'waiting'], to: 'failed' },
+  'fail-start': { durability: 'debounced', from: ['queued', 'running'], to: 'failed', steps: failedStep },
+  fail: { durability: 'debounced', from: ['running', 'waiting'], to: 'failed', steps: failedStep },
   // settleFailedContinuation alone: a worker Stop can record cancelled before it settles.
-  'fail-continue': { durability: 'debounced', from: ['running', 'waiting', 'cancelled'], to: 'failed' },
+  'fail-continue': { durability: 'debounced', from: ['running', 'waiting', 'cancelled'], to: 'failed', steps: failedStep },
   'fail-interrupted': { durability: 'debounced', from: ['queued', 'running', 'waiting'], to: 'failed',
-    fields: () => ({ error: 'interrupted — cezar process exited during the run' }) },
-  'fail-crash': { durability: 'debounced', from: ['queued', 'running', 'waiting'], to: 'failed' },
+    fields: () => ({ error: 'interrupted — cezar process exited during the run' }), steps: failedStep },
+  'fail-crash': { durability: 'debounced', from: ['queued', 'running', 'waiting'], to: 'failed', steps: failedStep },
   // A crash right after the withdrawal must not find it on disk (hearsay-tools/cezarion#1236).
   'withdraw-hold': { durability: 'committed', from: ['waiting'], to: 'failed', guard: isUsageLimitHold,
-    settle: run => ({ ...run, autoResumeAt: undefined, autoResumeAttempts: undefined }) },
+    settle: run => ({ ...run, autoResumeAt: undefined, autoResumeAttempts: undefined }), steps: failedStep },
   cancel: { durability: 'debounced', from: ['queued', 'running', 'waiting'], to: 'cancelled', steps: cancelledStep },
   // Cancellation supersedes a root's pending Finish; from cancelled it repairs a snapshot an older
   // controller left with the intent.
@@ -244,7 +252,8 @@ export function applyExit<E extends RunExitId>(run: ExitRead, exit: E, extras: R
   const at: ExitSettlement = { ...call, now: new Date().toISOString() };
   const patch = { ...spec.fields?.(run, at), ...extras };
   const write = { ...patch, ...(settlesRun(exit) ? settledRun(run, patch, at) : {}) };
-  const steps = spec.steps && run.steps ? settleSteps(run.steps, step => spec.steps!(step, run, { ...at, finishedAt: write.finishedAt ?? at.now })) : undefined;
+  const settlement: StepSettlement = { ...at, finishedAt: write.finishedAt ?? at.now, error: write.error ?? run.error };
+  const steps = spec.steps && run.steps ? settleSteps(run.steps, step => spec.steps!(step, run, settlement)) : undefined;
   return { ...write, ...(steps ? { steps } : {}), status: exitStatus(exit, run.status) };
 }
 

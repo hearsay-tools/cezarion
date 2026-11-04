@@ -453,14 +453,12 @@ export class RunSettlement {
     this.workerQuestions.supersedeWorkerFallback(runId);
     const run = this.context.store.getRun(runId);
     if (run?.delegation?.role !== 'worker' || hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id))) return false;
-    const finishedAt = new Date().toISOString();
     if (run.invalidAsk) {
-      for (const step of run.steps) if (step.status === 'waiting' || step.status === 'running') {
-        this.context.store.updateStep(runId, step.id, { status: 'failed', error: 'invalid structured question', finishedAt });
-      }
-      this.host.move(runId, 'fail', { error: 'invalid structured question', finishedAt });
+      // The exit fails its running step and keeps the waiting one a parent resume re-enters (B11).
+      this.host.move(runId, 'fail', { error: 'invalid structured question' });
       return true;
     }
+    const finishedAt = new Date().toISOString();
     for (const step of run.steps) {
       if (settlesAsDone(step, keepStepId)) {
         this.context.store.updateStep(runId, step.id, { status: 'done', finishedAt });
