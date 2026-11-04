@@ -1764,7 +1764,7 @@ parked run waiting, and a restart still answers it. R51: adopting a dead owner's
 middle of a turn starts no agent, and Continue resumes it. R52: Stop on a dead owner's run in
 the middle of a turn ends it as cancelled and starts no agent. No runner is exempt.
 
-**R53–R57** (hearsay-tools/cezarion#790), in `core/skill-resume-parity.test.ts`, drive every
+**R53–R57** (hearsay-tools/cezarion#790), in `core/skill-resume-parity.testkit.ts`, drive every
 `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire on a skill-driven task.
 R53: a live Continue resends `skillSystemPrompt` before the extra prompt on `resent`
 runners (claude, pi, omp) and does not duplicate it on an `in-thread` same-session resume
@@ -1796,7 +1796,7 @@ records `worktreeSetup.status === 'done'`, and the paragraph saying what ran rea
 message on each runner's own wire. The note is appended in `workflows/run.ts` before the
 runner seam, so no runner can lose it on the way. No runner is exempt.
 
-**R92–R96** (hearsay-tools/cezarion#1408), in `core/skill-provision-parity.test.ts`, drive every
+**R92–R96** (hearsay-tools/cezarion#1408), in `core/skill-provision-parity.testkit.ts`, drive every
 `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire on a skill-driven task in its
 own worktree. The selected skill names a companion. R92: Start installs both in `.claude`,
 `.agents` and `.cursor` `skills/`, and nothing under them shows in `git status`. R93: an
@@ -1857,7 +1857,7 @@ spawned process's stdio, with no listen phase, and carry named
 `scenario-unconstructible` exemptions; retrying their starts is out of scope.
 
 Workflow deadline rows **T1–T6** (hearsay-tools/cezarion#470) live in
-`core/workflow-timeout-parity.test.ts` and are registered in the shared parity
+`core/workflow-timeout-parity.testkit.ts` and are registered in the shared parity
 guard. Each `RUNNER_IDS` backend uses its own `HARNESS_ADAPTERS` native wire:
 non-final managed steps outlive the default runner deadline, explicit zero disables
 it, authored positive limits fail before trailing checks, and standalone sessions
@@ -1877,7 +1877,7 @@ intermediate `cezar_ask` that the tool refuses while the tail runs with no human
 stop/failure; an unanswered clean close retains durable waiting and releases capacity.
 
 
-Open-turn inactivity rows **N1–N8** live in `core/workflow-no-progress-parity.test.ts`
+Open-turn inactivity rows **N1–N8** live in `core/workflow-no-progress-parity.testkit.ts`
 and the same parity guard. Every native adapter proves that stalled nonfinal turns
 fail without running trailing checks, native progress/heartbeats sustain a long
 turn, parked sessions do not time out, followups and Continue rearm protection,
@@ -1894,7 +1894,7 @@ emits a failure and interrupts the runner; it never synthesizes process exit or
 releases capacity early. Standalone wall-clock limits remain unchanged.
 
 Autonomous turn-end rows **A1–A14** live in
-`core/workflow-autonomous-parity.test.ts` and the same parity guard (hearsay-tools/cezarion#426).
+`core/workflow-autonomous-parity.testkit.ts` and the same parity guard (hearsay-tools/cezarion#426).
 Every adapter covers fresh and Continue nudges, a refused `cezar_ask` (A3/A4), the
 40-nudge cap, non-autonomous parking, a `cezar_wait` timer park with no nudge (A7),
 `cezar_done` with no nudge (A8) and persisted-question priority (A10). A9 preserves

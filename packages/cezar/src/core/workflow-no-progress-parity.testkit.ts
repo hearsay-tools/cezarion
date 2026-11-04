@@ -1,7 +1,9 @@
+import { WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { partitionParity, type ParityPart, type ParityCollector } from './parity-partition.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { readPid, requirePid } from '../pid-file.testkit.ts';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, expect, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import * as sessionProcess from './session-process.ts';
 import { NO_PROGRESS_CRITERIA, driveSeam, exemptionFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
@@ -44,6 +46,65 @@ function controlDeadlines(killEscalation: boolean, onDeadlineArmed?: () => void)
 
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
+const PARTS: Readonly<Record<string, readonly string[]>> = {
+  "progress": [
+    "claude N1",
+    "claude N2",
+    "codex N1",
+    "codex N2",
+    "cursor N1",
+    "cursor N2",
+    "omp N1",
+    "omp N2",
+    "opencode N1",
+    "opencode N2",
+    "pi N1",
+    "pi N2"
+  ],
+  "parked-input": [
+    "claude N3",
+    "claude N4",
+    "claude N6",
+    "claude N8",
+    "codex N3",
+    "codex N4",
+    "codex N6",
+    "codex N8",
+    "cursor N3",
+    "cursor N4",
+    "cursor N6",
+    "cursor N8",
+    "omp N3",
+    "omp N4",
+    "omp N6",
+    "omp N8",
+    "opencode N3",
+    "opencode N4",
+    "opencode N6",
+    "opencode N8",
+    "pi N3",
+    "pi N4",
+    "pi N6",
+    "pi N8"
+  ],
+  "process-exit": [
+    "claude N5",
+    "claude N7",
+    "codex N5",
+    "codex N7",
+    "cursor N5",
+    "cursor N7",
+    "omp N5",
+    "omp N7",
+    "opencode N5",
+    "opencode N7",
+    "pi N5",
+    "pi N7"
+  ]
+};
+
+export function describeWorkflowNoProgressParity(part: ParityPart, collect?: ParityCollector): void {
+  const { describe, it } = partitionParity(part, PARTS, collect);
 describe('managed open-turn inactivity — #470', () => {
   for (const backend of RUNNER_IDS) {
     for (const row of NO_PROGRESS_CRITERIA) {
@@ -100,7 +161,7 @@ describe('managed open-turn inactivity — #470', () => {
               return;
             }
             if (row.id === 'N8') {
-              expect(manager.steerWorker(runId, { id: randomUUID(), source: 'agent', parentRunId, text: 'mock:no-progress-ack-only', createdAt: new Date().toISOString() })).toBe('queued');
+              expect(manager.steerWorker(runId, { id: randomUUID(), source: WAIT_SOURCE.agent, parentRunId, text: 'mock:no-progress-ack-only', createdAt: new Date().toISOString() })).toBe('queued');
               await waitFor(() => store.getRun(runId)?.agentInputs?.[0]?.deliveredAt !== undefined);
             } else if (row.id === 'N4') {
               manager.finish(runId);
@@ -158,3 +219,5 @@ describe('managed open-turn inactivity — #470', () => {
     }
   }
 });
+
+}

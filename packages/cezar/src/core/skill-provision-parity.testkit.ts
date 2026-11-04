@@ -1,3 +1,4 @@
+import { partitionParity, type ParityPart, type ParityCollector } from './parity-partition.testkit.ts';
 /**
  * hearsay-tools/cezarion#1408 (port of upstream open-mercato/cezar#1429): a task's selected skill and the
  * companions its body names are installed in the run's own task worktree on Start, Continue and
@@ -9,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, expect, vi } from 'vitest';
 import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { HARNESS_ADAPTERS, SKILL_PROVISION_CRITERIA, promptFor, waitFor } from './harness-parity.testkit.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
@@ -47,7 +48,9 @@ function removeInstalled(worktree: string, name: string): void {
 
 async function idleClose(manager: RunManager, runId: string): Promise<void> {
   type State = { idleTimer?: NodeJS.Timeout & { _onTimeout?: () => void } };
-  const stateOf = () => (manager as unknown as { active: Map<string, State> }).active.get(runId);
+  const stateOf = () => {
+    return (manager as unknown as { active: Map<string, State> }).active.get(runId);
+  };
   await waitFor(() => typeof stateOf()?.idleTimer?._onTimeout === 'function');
   stateOf()!.idleTimer!._onTimeout!();
   await waitFor(() => !manager.isActive(runId));
@@ -144,6 +147,49 @@ function liveProvisioning(fixture: Fixture): Promise<void> | undefined {
     .active.get(fixture.runId)?.liveSkillProvisioning;
 }
 
+const PARTS: Readonly<Record<string, readonly string[]>> = {
+  "start-and-stop": [
+    "claude R92",
+    "claude R96",
+    "codex R92",
+    "codex R96",
+    "cursor R92",
+    "cursor R96",
+    "omp R92",
+    "omp R96",
+    "opencode R92",
+    "opencode R96",
+    "pi R92",
+    "pi R96"
+  ],
+  "continue": [
+    "claude R93",
+    "codex R93",
+    "cursor R93",
+    "omp R93",
+    "opencode R93",
+    "pi R93"
+  ],
+  "slash-install": [
+    "claude R95",
+    "codex R95",
+    "cursor R95",
+    "omp R95",
+    "opencode R95",
+    "pi R95"
+  ],
+  "recovery": [
+    "claude R94",
+    "codex R94",
+    "cursor R94",
+    "omp R94",
+    "opencode R94",
+    "pi R94"
+  ]
+};
+
+export function describeSkillProvisionParity(part: ParityPart, collect?: ParityCollector): void {
+  const { describe, it } = partitionParity(part, PARTS, collect);
 describe('harness parity — skill provisioning (#1408)', () => {
   expect(SKILL_PROVISION_CRITERIA.map((row) => row.id)).toEqual(['R92', 'R93', 'R94', 'R95', 'R96']);
 
@@ -233,3 +279,5 @@ describe('harness parity — skill provisioning (#1408)', () => {
     }, 60_000);
   }
 });
+
+}

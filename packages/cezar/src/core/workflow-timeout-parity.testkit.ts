@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { partitionParity, type ParityPart, type ParityCollector } from './parity-partition.testkit.ts';
+import { expect, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { driveSeam, waitFor, withOwnedInputRun, WORKFLOW_TIMEOUT_CRITERIA } from './harness-parity.testkit.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
@@ -11,6 +12,53 @@ vi.mock('./runner-runtime.ts', async importOriginal => ({
   DEFAULT_RUN_TIMEOUT_MS: 150,
 }));
 
+const PARTS: Readonly<Record<string, readonly string[]>> = {
+  "defaults": [
+    "claude T1",
+    "claude T6",
+    "codex T1",
+    "codex T6",
+    "cursor T1",
+    "cursor T6",
+    "omp T1",
+    "omp T6",
+    "opencode T1",
+    "opencode T6",
+    "pi T1",
+    "pi T6"
+  ],
+  "explicit-zero": [
+    "claude T2",
+    "codex T2",
+    "cursor T2",
+    "omp T2",
+    "opencode T2",
+    "pi T2"
+  ],
+  "authored-and-standalone": [
+    "claude T3",
+    "claude T4",
+    "claude T5",
+    "codex T3",
+    "codex T4",
+    "codex T5",
+    "cursor T3",
+    "cursor T4",
+    "cursor T5",
+    "omp T3",
+    "omp T4",
+    "omp T5",
+    "opencode T3",
+    "opencode T4",
+    "opencode T5",
+    "pi T3",
+    "pi T4",
+    "pi T5"
+  ]
+};
+
+export function describeWorkflowTimeoutParity(part: ParityPart, collect?: ParityCollector): void {
+  const { describe, it } = partitionParity(part, PARTS, collect);
 describe('workflow wall-clock policy — #470', () => {
   for (const backend of RUNNER_IDS) {
     for (const criterion of WORKFLOW_TIMEOUT_CRITERIA) {
@@ -58,3 +106,5 @@ describe('workflow wall-clock policy — #470', () => {
     }
   }
 });
+
+}

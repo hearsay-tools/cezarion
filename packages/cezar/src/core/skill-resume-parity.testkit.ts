@@ -1,3 +1,5 @@
+import { partitionParity, type ParityPart, type ParityCollector } from './parity-partition.testkit.ts';
+import { skillSchema } from '@open-mercato/cezar-contract/skills';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 /**
  * #790: a skill-driven task must keep `skillSystemPrompt` on Continue and
@@ -9,7 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { describe, expect, it } from 'vitest';
+import { expect } from 'vitest';
 import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { createRunner } from './runner-factory.ts';
 import {
@@ -50,7 +52,7 @@ function expectedSkillPrompt(repoRoot: string): string {
     description: SKILL_DESCRIPTION,
     body: SKILL_BODY,
     path: join(repoRoot, '.ai/cezar/skills', SKILL_NAME, 'SKILL.md'),
-    source: 'cezar',
+    source: skillSchema.shape.source.enum.cezar,
   });
 }
 
@@ -133,15 +135,44 @@ function systemFromPrepended(text: string): string {
   return at >= 0 ? text.slice(0, at) : text;
 }
 
+function appendedSystemPrompts(rows: unknown[]): string[] {
+  return rows.flatMap((row) => {
+    if (!Array.isArray(row)) return [];
+    const index = row.indexOf('--append-system-prompt');
+    return index >= 0 && typeof row[index + 1] === 'string' ? [row[index + 1]] : [];
+  });
+}
+
+function cursorSystemPrompt(rec: Record<string, unknown>): string | undefined {
+  if (rec.method === 'session/prompt') {
+    const prompt = (rec.params as { prompt?: Array<{ type?: string; text?: string }> } | undefined)?.prompt;
+    const text = prompt?.find((part) => typeof part.text === 'string')?.text;
+    if (typeof text === 'string') return systemFromPrepended(text);
+  }
+  if (rec.method === 'cursor-print/stdin' && typeof rec.prompt === 'string') {
+    return systemFromPrepended(rec.prompt);
+  }
+  return undefined;
+}
+
+function recordedSystemPrompt(backend: RunnerId, rec: Record<string, unknown>): string | undefined {
+  if (backend === 'codex' && rec.method === 'turn/start') {
+    const input = (rec.params as { input?: Array<{ text?: string }> } | undefined)?.input;
+    const text = input?.[0]?.text;
+    if (typeof text === 'string') return systemFromPrepended(text);
+  }
+  if (backend === 'cursor') return cursorSystemPrompt(rec);
+  if (backend === 'opencode' && typeof rec.url === 'string' && rec.url.includes('prompt_async')) {
+    const parts = (rec.body as { parts?: Array<{ type?: string; text?: string }> } | undefined)?.parts;
+    const text = parts?.[0]?.text;
+    if (typeof text === 'string') return systemFromPrepended(text);
+  }
+  return undefined;
+}
+
 function systemPromptsFrom(backend: RunnerId, recording: string): string[] {
   const rows = parsedLines(recording);
-  if (backend === 'claude' || backend === 'pi' || backend === 'omp') {
-    return rows.flatMap((row) => {
-      if (!Array.isArray(row)) return [];
-      const index = row.indexOf('--append-system-prompt');
-      return index >= 0 && typeof row[index + 1] === 'string' ? [row[index + 1]] : [];
-    });
-  }
+  if (backend === 'claude' || backend === 'pi' || backend === 'omp') return appendedSystemPrompts(rows);
   const texts: string[] = [];
   for (const row of rows) {
     if (backend === 'cursor' && Array.isArray(row)) {
@@ -150,25 +181,8 @@ function systemPromptsFrom(backend: RunnerId, recording: string): string[] {
       continue;
     }
     if (!row || typeof row !== 'object') continue;
-    const rec = row as Record<string, unknown>;
-    if (backend === 'codex' && rec.method === 'turn/start') {
-      const input = (rec.params as { input?: Array<{ text?: string }> } | undefined)?.input;
-      const text = input?.[0]?.text;
-      if (typeof text === 'string') texts.push(systemFromPrepended(text));
-    }
-    if (backend === 'cursor' && rec.method === 'session/prompt') {
-      const prompt = (rec.params as { prompt?: Array<{ type?: string; text?: string }> } | undefined)?.prompt;
-      const text = prompt?.find((part) => typeof part.text === 'string')?.text;
-      if (typeof text === 'string') texts.push(systemFromPrepended(text));
-    }
-    if (backend === 'cursor' && rec.method === 'cursor-print/stdin' && typeof rec.prompt === 'string') {
-      texts.push(systemFromPrepended(rec.prompt));
-    }
-    if (backend === 'opencode' && typeof rec.url === 'string' && rec.url.includes('prompt_async')) {
-      const parts = (rec.body as { parts?: Array<{ type?: string; text?: string }> } | undefined)?.parts;
-      const text = parts?.[0]?.text;
-      if (typeof text === 'string') texts.push(systemFromPrepended(text));
-    }
+    const text = recordedSystemPrompt(backend, row as Record<string, unknown>);
+    if (text !== undefined) texts.push(text);
   }
   return texts;
 }
@@ -345,6 +359,74 @@ function assertContinuationSkill(
   }
 }
 
+const PARTS: Readonly<Record<string, readonly string[]>> = {
+  "generation-claude-codex": [
+    "claude R100",
+    "codex R100"
+  ],
+  "generation-opencode": [
+    "opencode R100"
+  ],
+  "generation-pi-cursor-omp": [
+    "cursor R100",
+    "omp R100",
+    "pi R100"
+  ],
+  "live-continue": [
+    "claude R53",
+    "claude R55",
+    "codex R53",
+    "codex R55",
+    "cursor R53",
+    "cursor R55",
+    "omp R53",
+    "omp R55",
+    "opencode R53",
+    "opencode R55",
+    "pi R53",
+    "pi R55"
+  ],
+  "recovery-prompt": [
+    "claude R54",
+    "codex R54",
+    "cursor R54",
+    "omp R54",
+    "opencode R54",
+    "pi R54"
+  ],
+  "recovery-before-session-event": [
+    "claude R59",
+    "codex R59",
+    "cursor R59",
+    "omp R59",
+    "opencode R59",
+    "pi R59"
+  ],
+  "session-identity": [
+    "claude R57",
+    "codex R57",
+    "cursor R57",
+    "omp R57",
+    "opencode R57",
+    "pi R57"
+  ],
+  "wire-and-fallback": [
+    "claude R56",
+    "codex R56",
+    "codex fresh-session continuation includes the skill",
+    "cursor R56",
+    "cursor fresh-session continuation includes the skill",
+    "every runner declares systemPromptOnResume",
+    "omp R56",
+    "opencode R56",
+    "opencode fresh-session continuation includes the skill",
+    "opens a fresh session with the skill, one note, and a new session id",
+    "pi R56"
+  ]
+};
+
+export function describeSkillResumeParity(part: ParityPart, collect?: ParityCollector): void {
+  const { describe, it } = partitionParity(part, PARTS, collect);
 describe('harness parity — skill system prompt on Continue (#790)', () => {
   expect(SKILL_RESUME_CRITERIA.map((row) => row.id)).toEqual(['R100', 'R53', 'R54', 'R55', 'R56', 'R57', 'R59']);
 
@@ -634,3 +716,5 @@ describe('opencode lost-session fallback (#790)', () => {
     });
   }, 60_000);
 });
+
+}

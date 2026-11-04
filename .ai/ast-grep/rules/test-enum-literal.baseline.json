@@ -170,12 +170,6 @@
       "count": 1
     },
     {
-      "file": "packages/cezar/src/core/skill-resume-parity.test.ts",
-      "rule": "test-enum-literal",
-      "site": "source: 'cezar'",
-      "count": 1
-    },
-    {
       "file": "packages/cezar/src/core/ui-events.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'running'",
@@ -189,12 +183,6 @@
     },
     {
       "file": "packages/cezar/src/core/workflow-final-message-parity.test.ts",
-      "rule": "test-enum-literal",
-      "site": "source: 'agent'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/core/workflow-no-progress-parity.test.ts",
       "rule": "test-enum-literal",
       "site": "source: 'agent'",
       "count": 1
