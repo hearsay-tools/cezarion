@@ -87,7 +87,7 @@ export function reviveQueuedContinuation(context: RunModuleContext, host: Queued
     const error = 'Cursor print session identity lacks a matching recorded session event';
     const finishedAt = new Date().toISOString();
     context.store.updateStep(run.id, queuedStepId, { status: 'failed', error, finishedAt });
-    host.move(run.id, 'fail-start', { error, finishedAt, currentStepId: undefined });
+    host.move(run.id, 'fail-start', { error, finishedAt });
     return;
   }
   host.enqueueContinuation(run.id, {

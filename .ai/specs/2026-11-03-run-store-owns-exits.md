@@ -101,9 +101,15 @@ touches a turn-end, wait or settlement path.
 
 ### Table A: exits and what they settle
 
-"Settles" is what every call site does today; the exit will own it. "Sites" counts call sites at
-the baseline. SRF is `settledRootFinishPatch` (retires the root's Finish intent), which `RunManager.move`
-added for every exit whose status is `failed` until S5. Durability: D debounced, C commit.
+"Settles" is what the exit owns since S7 (Table B targets; the row that changed it is named). "Sites"
+counts call sites at the baseline. SRF is `settledRootFinishPatch` (retires the root's Finish intent),
+which `RunManager.move` added for every exit whose status is `failed` until S5. Durability: D
+debounced, C commit.
+
+**Settled** (S7, B1-B4) is what every exit that writes done, review, failed or cancelled writes over
+its caller's extras: `currentStepId` cleared, the root's Finish intent retired, and
+`finishedAt ??=` the caller's time, else now. "Live steps" are running and waiting steps; a step an
+exit settles takes `finishedAt ??=` the run's settled time.
 
 | Exit | from → to | Sites | Settles (all sites agree) | Guard | Durability |
 |---|---|---|---|---|---|
@@ -112,24 +118,24 @@ added for every exit whose status is `failed` until S5. Durability: D debounced,
 | requeue | queued, running, failed → queued | 6 | `currentStepId` cleared | none | D |
 | continue-line | waiting, review, done, failed, cancelled → queued | 3 | `error`, `finishedAt`, `currentStepId` cleared | none | D by exit; worker C by enclosing commit (`commitWorkerContinuation`) |
 | continue-now | same → running | 1 | `error`, `finishedAt` cleared; `currentStepId` = the step | none | D by exit; worker C by enclosing commit |
-| park | running, queued, waiting → waiting | 14 | nothing | none | D by exit; `park-release` (Decision 4): C by exit, clears `activity`, sets the step in the same commit |
+| park | running, queued, waiting → waiting | 14 | the step the caller names, else the current step, waiting unless it ended (B8) | none | D by exit; `park-release` (Decision 4): C by exit, clears `activity`, settles the step as `park` does |
 | park-for-wake | queued, waiting → waiting | 1 | nothing | none | D |
 | hold | failed, waiting → waiting | 1 + `failed.legacy-hold` | `finishedAt` cleared; `autoResumeAt` set | none | D |
 | resume | waiting → running | 4 | nothing | none | D by exit; C by enclosing commit (`commitOutcome` at `sendAgentInput`) |
-| succeed, succeed-review | running, waiting → done, review | 1 (`commitOrdinarySuccess`) | SRF, `finishedAt` = now, `currentStepId` and `autoResumeAttempts` cleared | none | D by exit; `succeed` only: C by record (completion option), since only `done` takes the record rule |
-| succeed-root, succeed-root-review | waiting → done, review | 1 (`settleSuccessWork`) | as succeed, plus the Finish intent retired, `activity` cleared, running or waiting steps done (`finishedAt ??= now`), in one commit | root with a pending Finish intent; else no write, returns false | C by exit |
-| accept-review | review → done | 1 | SRF | none | D by exit; C by record |
-| draft-pr | review, done, failed, cancelled → done | 1 | `pullRequestUrl`, `finishedAt ??= now` | none | D by exit; C by record |
-| fail-start | queued, running → failed | 7 | `error`, `finishedAt` = now, SRF | none | D |
-| fail | running, waiting → failed | 4 | `error`, `finishedAt` = now, `currentStepId` cleared, SRF | none | D |
+| succeed, succeed-review | running, waiting → done, review | 1 (`commitOrdinarySuccess`) | Settled, `autoResumeAttempts` and `activity` cleared, live steps done but the one the caller keeps (a worker's re-entry step, hearsay-tools/cezarion#1620) (B5) | none | D by exit; `succeed` only: C by record (completion option), since only `done` takes the record rule |
+| succeed-root, succeed-root-review | waiting → done, review | 1 (`settleSuccessWork`) | as succeed, in one commit | root with a pending Finish intent; else no write, returns false | C by exit |
+| accept-review | review → done | 1 | Settled (B6) | none | D by exit; C by record |
+| draft-pr | review, done, failed, cancelled → done | 1 | Settled (B6); `pullRequestUrl` is the route's extra. The route refuses a usage-limit hold (B13) | none | D by exit; C by record |
+| fail-start | queued, running → failed | 7 | Settled; `error` is the caller's; running steps failed, each keeping its own error, else the run's; a waiting step stays waiting, as the cursor a Continue resumes (B11) | none | D |
+| fail | running, waiting → failed | 4 | as fail-start | none | D |
 | fail-continue | running, waiting, cancelled → failed | 1 | as fail | none | D |
-| fail-interrupted | queued, running, waiting → failed | 1 + `live.read-only` | fixed `error`, `finishedAt` | none | D |
-| fail-crash | queued, running, waiting → failed | 2 | `error`, `finishedAt` = now, SRF | none | D |
-| withdraw-hold | waiting → failed | 1 + `hold.archive` | `autoResumeAt`, `autoResumeAttempts` cleared | usage-limit hold | C |
-| cancel | queued, running, waiting → cancelled | 10 + `queued.orphaned` | `finishedAt` set | none | D by exit |
-| cancel-root | waiting, cancelled → cancelled | 2 (`cancel`, `reconcileFamilyPass` repair) | Finish intent retired, `finishedAt ??= now`, in one commit | root with a pending Finish intent; else no write, returns false | C by exit |
-| stop-worker | all but cancelled → cancelled | 2 | `finishedAt` = now (overwrites) | role worker | C |
-| cancel-late | queued, running, waiting, done, review, failed → cancelled | 1 + `live.stopping`, `settled.stopping` | `finishedAt` set; the load-time Stop keeps `currentStepId` | none | D |
+| fail-interrupted | queued, running, waiting → failed | 1 + `live.read-only` | as fail-start, with a fixed `error` | none | D |
+| fail-crash | queued, running, waiting → failed | 2 | as fail-start | none | D |
+| withdraw-hold | waiting → failed | 1 + `hold.archive` | as fail-start; `autoResumeAt`, `autoResumeAttempts` cleared | usage-limit hold | C |
+| cancel | queued, running, waiting → cancelled | 10 + `queued.orphaned` | Settled; live steps cancelled (B10); one `run cancelled` lifecycle event when it moves the run into cancelled, its text the caller's when it names one (B12) | none | D by exit |
+| cancel-root | waiting, cancelled → cancelled | 2 (`cancel`, `reconcileFamilyPass` repair) | as cancel, in one commit | root with a pending Finish intent; else no write, returns false | C by exit |
+| stop-worker | all but cancelled → cancelled | 2 | as cancel (B4: keeps an existing `finishedAt`) | role worker | C |
+| cancel-late | queued, running, waiting, done, review, failed → cancelled | 1 + `live.stopping`, `settled.stopping` | as cancel; the load-time Stop writes its event once the transcripts are readable | none | D |
 
 Every exit also passes the store's status-driven rules: the stale-resume rule clears
 `autoResumeAt` off a run that is not `waiting`, and a completion action is retired off a run that
@@ -137,7 +143,7 @@ is not `done` or not opted in.
 
 ### Table B: differences between sites of one exit
 
-S5 keeps every row as it is (owner, 2026-11-03). S7 normalizes them. "Today" is the behavior at shipped defaults.
+S5 keeps every row as it is (owner, 2026-11-03). S7 normalizes them (§ Table B targets). "Today" is the behavior at shipped defaults before S7.
 
 | # | Exit | Today | Sites |
 |---|---|---|---|
@@ -195,19 +201,22 @@ state has an automatic exit or a recorded human-only reason.
 
 ### Table B targets (S7)
 
-| # | Target rule | Reason |
-|---|---|---|
-| B1, B2, B3 | Every settling exit (one that writes done, review, failed or cancelled) clears `currentStepId` and retires the root's Finish intent. `review` is not final (it has `accept-review` and Continue exits); `succeed-review` already does both | A settled run points at no step; a Finish intent has no meaning once the run settled. The family reconciler stops being the repair path for cancel |
-| B4 | A settling exit keeps an existing `finishedAt` (`??=`); `continue-*` and `hold` clear it | The first settlement time is the fact; a later writer on a settled run only repairs |
-| B5 | Both success paths clear `activity` and settle running or waiting steps in the same write | One exit, one result |
-| B6 | accept-review and draft-pr set `finishedAt ??= now` and retire the Finish intent | As B3 and B4 |
-| B7 | The usage-limit Continue writes `continue-line` once | The second write repeats the first |
-| B8 | `park` settles the current step to waiting in the same write | As B5 |
-| B9 | Kept; recorded only. The follow-up `flush()` stays until S6 gives each exit its durability | S6 decides it |
-| B10 | Every exit to cancelled settles running and waiting steps to cancelled, with `finishedAt ??= now` | A cancelled run has no live step. The load-time repair (hearsay-tools/cezarion#2590) reuses this rule |
-| B11 | Every exit to failed settles open steps to failed for a root run; an owned worker keeps its re-entry step `waiting` (hearsay-tools/cezarion#1620) | A failed root has no live step; a parent resume re-enters the worker's step |
-| B12 | The cancel exits write the `run cancelled` event once, at every site | The web header (hearsay-tools/cezarion#2589) and the timeline read one event for one cancellation |
-| B13 | S7 decides whether the Draft PR route refuses a usage-limit hold, or `draft-pr` declares it | Until then the raw route records a violation; the cockpit offers no Draft PR on a hold |
+S7 commits one row (or row group) at a time, each with a regression test that fails without it
+(`runs/run-exits-settle.test.ts`). The S7 column marks the rows that landed.
+
+| # | Target rule | Reason | S7 |
+|---|---|---|---|
+| B1, B2, B3 | Every settling exit (one that writes done, review, failed or cancelled) clears `currentStepId` and retires the root's Finish intent. `review` is not final (it has `accept-review` and Continue exits); `succeed-review` already does both | A settled run points at no step; a Finish intent has no meaning once the run settled. The family reconciler stops being the repair path for cancel | done |
+| B4 | A settling exit keeps an existing `finishedAt` (`??=`); `continue-*` and `hold` clear it | The first settlement time is the fact; a later writer on a settled run only repairs | done |
+| B5 | Both success paths clear `activity` and settle running or waiting steps in the same write | One exit, one result | done |
+| B6 | accept-review and draft-pr set `finishedAt ??= now` and retire the Finish intent | As B3 and B4 | done: the Finish intent with B1-B3 |
+| B7 | The usage-limit Continue writes `continue-line` once | The second write repeats the first | done |
+| B8 | `park` settles the current step to waiting in the same write | As B5 | done, `park-release` too |
+| B9 | Kept; recorded only. The follow-up `flush()` stays until S6 gives each exit its durability | S6 decides it | no change |
+| B10 | Every exit to cancelled settles running and waiting steps to cancelled, with `finishedAt ??= now` | A cancelled run has no live step. The load-time repair (hearsay-tools/cezarion#2590) reuses this rule | done. Kept as written in S7 review: a Stop also cancels a waiting step, so a Continue after a Stop runs no remaining workflow step, as the live-session Stop already did before S7 |
+| B11 | Every exit to failed settles running steps to failed. A waiting step stays `waiting`, for a root and an owned worker alike (decided in S7: the first text failed a root's waiting step too) | A failed run has no live step. A waiting step is the cursor a Continue resumes: a root's earlier workflow step (`settleIncompleteStep`), so a failed Continue does not lose the workflow's remaining steps, and an owned worker's re-entry step (hearsay-tools/cezarion#1620) | done |
+| B12 | The cancel exits write the `run cancelled` event once, at every site | The web header (hearsay-tools/cezarion#2589) and the timeline read one event for one cancellation | done: the exit writes it when it moves a run into cancelled; a queued run's Stop keeps its text `cancelled while queued` |
+| B13 | S7 decides whether the Draft PR route refuses a usage-limit hold, or `draft-pr` declares it | Until then the raw route records a violation; the cockpit offers no Draft PR on a hold | done: the route refuses a hold with 409 before any write; `draft-pr` keeps its `from` (owner review) |
 
 ## Open decisions
 

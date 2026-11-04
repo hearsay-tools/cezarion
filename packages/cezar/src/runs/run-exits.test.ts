@@ -102,7 +102,7 @@ describe('run exits: each exit declares how its write persists', () => {
   });
 
   it('commits every guarded exit, which writes in its own commit', () => {
-    const guarded = Object.entries(RUN_EXITS).filter(([, spec]) => 'settle' in spec).map(([id]) => id);
+    const guarded = Object.entries(RUN_EXITS).filter(([, spec]) => 'guard' in spec || 'settle' in spec).map(([id]) => id);
     expect(guarded.sort()).toEqual([...COMMITTED].sort());
   });
 

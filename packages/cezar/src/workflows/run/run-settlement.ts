@@ -193,8 +193,7 @@ export class RunSettlement {
   /** A Stop ended the Continue's session: cancel its step and the run. */
   settleCancelledContinuation(runId: string, stepId: string): void {
     this.context.store.updateStep(runId, stepId, { status: 'cancelled', finishedAt: new Date().toISOString() });
-    this.host.move(runId, 'cancel', { finishedAt: new Date().toISOString(), currentStepId: undefined });
-    this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+    this.host.move(runId, 'cancel');
   }
 
   /** The Continue's step is done: settle the run, or the workflow step it resumed. Returns the
@@ -317,15 +316,7 @@ export class RunSettlement {
 
   /** The cancelled settlement: the run and its running and waiting steps become cancelled. */
   settleCancelledRun(runId: string): void {
-    const finishedAt = new Date().toISOString();
-    const run = this.context.store.getRun(runId);
-    for (const s of run?.steps ?? []) {
-      if (s.status === 'running' || s.status === 'waiting') {
-        this.context.store.updateStep(runId, s.id, { status: 'cancelled' });
-      }
-    }
-    this.host.move(runId, 'cancel', { finishedAt, currentStepId: undefined });
-    this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+    this.host.move(runId, 'cancel');
   }
 
   /** The failed settlement. A capped wake delivery adds the cap's note. */
@@ -365,7 +356,7 @@ export class RunSettlement {
     const current = this.context.store.getRun(runId);
     if (!current || this.successSuperseded(runId, current.status, state, continuationGeneration)) return;
     if (state?.cancelled) {
-      this.settleCancelledSuccess(runId, current);
+      this.settleCancelledSuccess(runId);
       return;
     }
     // A worker's accepted continuation or a new child can defer parent completion.
@@ -421,32 +412,15 @@ export class RunSettlement {
 
   /** A Stop accepted while the success settlement read the diff: the run and its running and
    *  waiting steps become cancelled, and a step keeps a finish time it already has. */
-  settleCancelledSuccess(runId: string, current: RunRecord): void {
-    const finishedAt = new Date().toISOString();
-    for (const step of current.steps) {
-      if (step.status === 'running' || step.status === 'waiting') {
-        this.context.store.updateStep(runId, step.id, { status: 'cancelled', finishedAt: step.finishedAt ?? finishedAt });
-      }
-    }
-    this.host.move(runId, 'cancel', { finishedAt, currentStepId: undefined });
-    this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+  settleCancelledSuccess(runId: string): void {
+    this.host.move(runId, 'cancel');
   }
 
-  /** The ordinary success path (not a root finish): the steps that settle as done, then the run
-   *  as `review` or `done`. */
+  /** The ordinary success path (not a root finish): the run as `review` or `done`. The exit
+   *  settles an idle-closed Continue's intermediate steps with it (B5); a worker's incomplete
+   *  earlier step stays `waiting`, since a parent resume re-enters it (hearsay-tools/cezarion#1620). */
   commitOrdinarySuccess(runId: string, review: boolean, keepStepId: string | undefined): void {
-    const finishedAt = new Date().toISOString();
-    // An idle-closed Continue remains waiting until the whole task succeeds.
-    // Complete those intermediate steps before publishing terminal run status.
-    // A worker's incomplete earlier step stays `waiting`: a parent resume re-enters it (hearsay-tools/cezarion#1620).
-    for (const step of this.context.store.getRun(runId)?.steps ?? []) {
-      if (settlesAsDone(step, keepStepId)) {
-        this.context.store.updateStep(runId, step.id, { status: 'done', finishedAt: step.finishedAt ?? finishedAt });
-      }
-    }
-    // The exit clears `currentStepId` and the resume counter and retires the Finish intent; the
-    // run settles at the time its steps did.
-    this.context.store.move(runId, review ? 'succeed-review' : 'succeed', { finishedAt });
+    this.context.store.move(runId, review ? 'succeed-review' : 'succeed', {}, { stepId: keepStepId });
   }
 
   /** Called only after session/process settlement. A refused nudge retained its
@@ -476,14 +450,12 @@ export class RunSettlement {
     this.workerQuestions.supersedeWorkerFallback(runId);
     const run = this.context.store.getRun(runId);
     if (run?.delegation?.role !== 'worker' || hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id))) return false;
-    const finishedAt = new Date().toISOString();
     if (run.invalidAsk) {
-      for (const step of run.steps) if (step.status === 'waiting' || step.status === 'running') {
-        this.context.store.updateStep(runId, step.id, { status: 'failed', error: 'invalid structured question', finishedAt });
-      }
-      this.host.move(runId, 'fail', { error: 'invalid structured question', finishedAt });
+      // The exit fails its running step and keeps the waiting one a parent resume re-enters (B11).
+      this.host.move(runId, 'fail', { error: 'invalid structured question' });
       return true;
     }
+    const finishedAt = new Date().toISOString();
     for (const step of run.steps) {
       if (settlesAsDone(step, keepStepId)) {
         this.context.store.updateStep(runId, step.id, { status: 'done', finishedAt });

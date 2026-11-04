@@ -29,7 +29,7 @@ export { makeRunTitle } from '../runs/run-title.ts';
 import { clearHeldHumanInputTimer, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
 import * as workflowPosition from './run/workflow-position.ts';
-import { type RunExitId, type RunPatch } from '../runs/run-exits.ts';
+import { type RunExitId, type RunPatch, type ExitCall } from '../runs/run-exits.ts';
 import { deriveAccountHolds } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { type PreviewHostLike } from '../preview/registration.ts';
@@ -700,8 +700,8 @@ export class RunManager {
 
   /** Every run status `run.ts` writes comes from the run state table (hearsay-tools/cezarion#1804).
    *  The exit settles its own fields, the Finish intent of a failed run among them. */
-  private move(runId: string, exit: RunExitId, patch: RunPatch = {}): RunRecord | undefined {
-    return this.store.move(runId, exit, patch);
+  private move(runId: string, exit: RunExitId, patch: RunPatch = {}, call: ExitCall = {}): RunRecord | undefined {
+    return this.store.move(runId, exit, patch, call);
   }
 
   private autosaveCleanupBlocker(runId: string): string | undefined {

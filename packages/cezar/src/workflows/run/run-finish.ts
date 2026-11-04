@@ -3,7 +3,7 @@ import type { RunRecord, RunStore } from '../../runs/store.ts';
 import { doneErrorMessage } from '../../ci-wait/errors.ts';
 import { openCompletionRequests, recordRequestRefusal, type CompletionRefusal } from '../completion-policy.ts';
 import type { ActiveRun } from '../active-run.ts';
-import type { RunExitId } from '../../runs/run-exits.ts';
+import type { RunExitId, ExitCall } from '../../runs/run-exits.ts';
 import { openWaitList, openWaits } from '../waits.ts';
 import { toolSessionRefusal } from './cezar-tools.ts';
 import { clearIdleTimer, clearAutosaveTimer } from './input-timers.ts';
@@ -16,7 +16,7 @@ import type { TurnNudges } from './turn-nudges.ts';
 import type { RunLine } from './run-line.ts';
 
 interface RunFinishHost {
-  move(id: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>): RunRecord | undefined;
+  move(id: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>, call?: ExitCall): RunRecord | undefined;
   dropActive(id: string): void;
   cancelOpenWaits(id: string): void;
   reconcileWorkerWaits(id?: string): void;
@@ -106,12 +106,11 @@ export class RunFinish {
     if (refusal) { this.turnNudges.queueCompletionRefusal(runId, refusal); return 'held'; }
     // Every blocker but the pending human question is a refusal: the question parks for the user.
     this.context.store.appendEvent(runId, { type: 'note', tone: 'warning', message: 'Completion blocked: answer the pending human question.' });
-    this.host.move(runId, 'park', { finishedAt: undefined });
+    this.host.move(runId, 'park', { finishedAt: undefined }, { stepId: state?.currentStepId });
     this.context.store.flush();
     if (state) {
       clearIdleTimer(state);
       this.line.leavePool(runId); this.line.park(runId);
-      if (state.currentStepId) this.context.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
       this.line.releaseSlot();
     }
     return 'held';

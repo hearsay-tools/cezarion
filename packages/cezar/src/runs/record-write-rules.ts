@@ -35,7 +35,8 @@ import {
 } from './run-references.ts';
 import type { RepoHandle, RunRecord, StepState } from './store.ts';
 
-type RecordPatch = Partial<Omit<RunRecord, 'id' | 'steps'>>;
+/** The fields an update writes: a run exit's write may carry the steps it settled (`applyExit`). */
+export type RecordPatch = Partial<Omit<RunRecord, 'id' | 'steps'>> & { steps?: StepState[] };
 type StepPatch = Partial<Omit<StepState, 'id'>>;
 
 export const WRITE_PATHS = ['commit', 'durableUpdate', 'debouncedUpdate', 'loaded', 'conversation', 'pullRequests', 'archiveFields', 'stepUpdate'] as const;
@@ -348,7 +349,7 @@ export function redactPatch(
 function withdrawHold(run: RunRecord): void {
   // A withdrawn appointment settles the run failed with its kept error (hearsay-tools/cezarion#1236),
   // the state a usage-limited run was in before it waited.
-  if (isUsageLimitHold(run)) Object.assign(run, applyExit(run, 'withdraw-hold', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
+  if (isUsageLimitHold(run)) Object.assign(run, applyExit(run, 'withdraw-hold'));
   run.autoResumeAt = undefined;
   run.autoResumeAttempts = undefined;
 }

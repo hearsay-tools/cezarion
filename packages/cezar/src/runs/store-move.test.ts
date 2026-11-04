@@ -142,7 +142,8 @@ describe('RunStore.move with a guarded exit', () => {
       expect(store.move(id, exit)).toBe(store.getRun(id));
       const row = committed(id);
       expect(row).toMatchObject({ status, delegation: ROOT });
-      expect(row.finishedAt).not.toBe(EARLIER);
+      // B4 (S7): a settling exit keeps the first settlement time; the steps settle at it.
+      expect(row.finishedAt).toBe(EARLIER);
       for (const key of ['currentStepId', 'autoResumeAttempts', 'activity']) expect(row).not.toHaveProperty(key);
       expect(row.delegation).not.toHaveProperty('finishRequestedAt');
       expect(row.steps.map((step: { status: string; finishedAt?: string }) => [step.status, step.finishedAt])).toEqual([
@@ -197,7 +198,8 @@ describe('RunStore.move with a guarded exit', () => {
     store.flush();
     store.commitAutoResumeWithdrawal(held);
     expect(committed(held)).toMatchObject({ status: RUN_STATUS.failed });
-    expect(committed(held).finishedAt).not.toBe(EARLIER);
+    // B4 (S7): a settling exit keeps the first settlement time.
+    expect(committed(held).finishedAt).toBe(EARLIER);
     for (const key of ['autoResumeAt', 'autoResumeAttempts']) expect(committed(held)).not.toHaveProperty(key);
     const attemptsOnly = created();
     store.updateRun(attemptsOnly, { status: RUN_STATUS.waiting, autoResumeAttempts: 2 });
@@ -218,9 +220,9 @@ describe('RunStore.move with a guarded exit', () => {
     store.flush();
     const before = structuredClone(store.getRun(id));
     const release = blockRunWrites(dir);
-    try { expect(() => store.move(id, 'park-release', {}, 'b')).toThrow(); } finally { release(); }
+    try { expect(() => store.move(id, 'park-release', {}, { stepId: 'b' })).toThrow(); } finally { release(); }
     expect(store.getRun(id)).toEqual(before);
-    store.move(id, 'park-release', {}, 'b');
+    store.move(id, 'park-release', {}, { stepId: 'b' });
     expect(committed(id)).toMatchObject({ status: RUN_STATUS.waiting });
     expect(committed(id)).not.toHaveProperty('activity');
     expect(committed(id).steps.map((step: { status: string }) => step.status)).toEqual(['pending', 'waiting', 'pending']);

@@ -3,7 +3,6 @@ import type { HumanWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { hasLiveInboxClaim } from '../../delegation/input.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
-import { settledRootFinishPatch } from '../completion-policy.ts';
 import { holdsOwedResults, isCezarHumanWait, openWaits } from '../waits.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import type { WorkerScratchCleanup } from '../../delegation/scratch-cleanup.ts';
@@ -350,9 +349,8 @@ export class RunRecovery {
     // parent because workers cannot accept an ordinary inactive Continue.
     if (run.delegation?.role !== 'worker' ||
       run.agentInputs?.some(input => !input.deliveredAt && hasLiveInboxClaim(input))) return undefined;
-    const finishedAt = new Date().toISOString();
     if (run.invalidAsk) {
-      this.failRecoveredInvalidAsk(run, finishedAt);
+      this.failRecoveredInvalidAsk(run);
       return undefined;
     }
     if (ciWorkflowResumeStepIndex(run) >= 0) {
@@ -364,6 +362,7 @@ export class RunRecovery {
         : `cezar restarted — could not resume worker CI recovery (${resumed.error ?? 'unknown'})` });
       return undefined;
     }
+    const finishedAt = new Date().toISOString();
     for (const step of run.steps) {
       if (step.status === 'waiting' || step.status === 'running') {
         this.context.store.updateStep(run.id, step.id, { status: 'done', finishedAt });
@@ -377,11 +376,8 @@ export class RunRecovery {
   }
 
   /** A recovered run whose structured question cannot be answered fails with its open steps. */
-  private failRecoveredInvalidAsk(run: RunRecord, finishedAt: string): void {
-    for (const step of run.steps) if (step.status === 'waiting' || step.status === 'running') {
-      this.context.store.updateStep(run.id, step.id, { status: 'failed', error: 'invalid structured question', finishedAt });
-    }
-    this.host.move(run.id, 'fail', { error: 'invalid structured question', finishedAt });
+  private failRecoveredInvalidAsk(run: RunRecord): void {
+    this.host.move(run.id, 'fail', { error: 'invalid structured question' });
   }
 
   /** A `running` run whose process died mid-turn. */
@@ -390,17 +386,8 @@ export class RunRecovery {
     // continueRun expects), then pick the work back up from the last session.
     const run = this.host.checkpointRestartContext(found);
     const interruptedStepId = run.currentStepId;
-    const finishedAt = new Date().toISOString();
-    for (const step of run.steps) {
-      if (step.status === 'running' || step.status === 'waiting') {
-        this.context.store.updateStep(run.id, step.id, {
-          status: 'failed',
-          error: 'interrupted — cezar process exited during the run',
-          finishedAt,
-        });
-      }
-    }
-    this.host.move(run.id, 'fail-interrupted', { finishedAt, currentStepId: undefined, ...settledRootFinishPatch(this.context.store, run.id) });
+    // The exit fails its running steps with the interrupted error and keeps a waiting one (B11).
+    this.host.move(run.id, 'fail-interrupted');
     if (this.host.requeueInterruptedRun(run, interruptedStepId)) return;
     const resumed = this.host.continueRun(
       run.id,

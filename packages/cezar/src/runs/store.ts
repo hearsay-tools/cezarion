@@ -1,5 +1,5 @@
 import { reportsIndex, type ReportsIndex } from '../artifacts/reports-index.ts';
-import { stageCommit, stageLoaded, stageDurableUpdate, stageDebouncedUpdate, stageConversation, stageArchiveFields, stagePullRequests, stageStepUpdate, redactPatch, redactText, clearPin } from './record-write-rules.ts';
+import { stageCommit, stageLoaded, stageDurableUpdate, stageDebouncedUpdate, stageConversation, stageArchiveFields, stagePullRequests, stageStepUpdate, redactPatch, redactText, clearPin, type RecordPatch } from './record-write-rules.ts';
 import { workerDeletionProof } from './worker-deletion-proof.ts';
 import { listPeerTaskSummaries, parseStoredSummary, type PeerTaskPageOptions } from './run-summary-page.ts';
 export { parseStoredSummary } from './run-summary-page.ts';
@@ -43,7 +43,7 @@ import {
   TIMER_MIN_SECONDS,
   WAIT_LIMIT,
 } from '@open-mercato/cezar-contract/waits';
-import { engineOwnsRun, isSweepable, UNREAD_RUN_RULE, SWEEPABLE_RUN_RULE, RETENTION_RUN_RULE, REFERENCED_RUN_RULE } from '@open-mercato/cezar-contract/run-predicates';
+import { isSweepable, UNREAD_RUN_RULE, SWEEPABLE_RUN_RULE, RETENTION_RUN_RULE, REFERENCED_RUN_RULE } from '@open-mercato/cezar-contract/run-predicates';
 import type { ArchiveFinishedScope, ArchivedRunsResponse, ArchivePullRequestIdentity, CiWait, PrWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, MergedPullRequest, RunPullRequest, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry, WorkerWait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { matchesRunSearch, sqlPrefilterTokens, type AutomationNames } from '@open-mercato/cezar-contract/run-search';
 import { storedDelegationStateSchema } from './delegation-state.ts';
@@ -63,7 +63,7 @@ import { workflowDefSchema } from '../workflows/types.ts';
 
 import { applyOutcomes, type OutcomeDependencies, type OutcomeReceipt, type RunOutcome } from './outcome-commit.ts';
 import { ISSUE_URL_RE, originatingIssue, PR_URL_RE, refUrlNumber, referencedPrDeclaration, rescopeRun, resolveIssueReference, resolveReferencedRef, restoreOriginatingIssue, trackReferencedIssues, trackReferencedPrs } from './run-references.ts';
-import { applyExit, doneCommits, exitDurability, RUN_EXITS, type ExitDurability, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
+import { applyExit, doneCommits, exitDurability, RUN_EXITS, type ExitCall, type ExitDurability, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
 import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
 export { ConversationIdInUseError } from './conversation-identity.ts';
 
@@ -73,6 +73,8 @@ import {
   type RunConflictEvidence, type RunDatabaseChanges, type RunDatabaseCommit, type RunFenceClaim, type RunRow, type RunRowInput, type RunWriteFence,
 } from './run-database.ts';
 import { restoreLostReferencedPullRequest } from './loaded-run-healing.ts';
+import { failLoadedInterruptedRun, restoreLoadedUsageLimitHold, settleLoadedStop } from './loaded-run-exits.ts';
+import { ExitEvents } from './exit-events.ts';
 import { encodeRunRow, isLiveRecord, isLiveStatus } from './run-row.ts';
 import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.ts';
 import { ColdReadCache, storedRow, type StoredRow } from './cold-reads.ts';
@@ -320,7 +322,7 @@ function legacyWaitId(name: string): string {
  *  park from running to waiting, resume from waiting to running. The caller has read the row's status. */
 function setLiveStatus(row: Record<string, unknown>, exit: 'park' | 'resume'): void {
   const [from, to] = exit === 'park' ? ['running', 'waiting'] : ['waiting', 'running'];
-  Object.assign(row, applyExit(row as Pick<RunRecord, 'status' | 'delegation'>, exit));
+  Object.assign(row, applyExit({ status: row.status, delegation: row.delegation } as Pick<RunRecord, 'status' | 'delegation'>, exit));
   if (Array.isArray(row.steps)) for (const step of row.steps) {
     if (step && typeof step === 'object' && (step as { status?: unknown }).status === from) (step as { status: string }).status = to;
   }
@@ -678,39 +680,6 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
   return run;
 }
 
-function settleLoadedStop(run: RunRecord): void {
-  // An accepted Stop is durable intent, never an interrupted run to auto-resume. It can meet a run
-  // that settled before the Stop did (the engine's own late Stop), so it takes `cancel-late`.
-  if (run.stopping) {
-    Object.assign(run, applyExit(run, 'cancel-late', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
-    for (const step of run.steps) {
-      if (step.status === 'running' || step.status === 'waiting') step.status = 'cancelled';
-    }
-  }
-  run.stopping = undefined;
-}
-
-function restoreLoadedUsageLimitHold(run: RunRecord): void {
-  // A usage-limited run is waiting for its resume (hearsay-tools/cezarion#1236, phase 4a). Rows a
-  // schema-7 cezar wrote kept it failed with the appointment; they read as the waiting run they are.
-  if (run.status === 'failed' && run.autoResumeAt !== undefined) Object.assign(run, applyExit(run, 'hold'));
-}
-
-function failLoadedInterruptedRun(run: RunRecord, opts?: { keepLive?: boolean }): void {
-  // A run that was live when the previous process exited can never finish —
-  // surface that instead of a forever-"running" ghost. `review` survives
-  // restarts on purpose: the gate is pure data (worktree + branch + record)
-  // with no live process, so the diff panel, Send back (resume) and Draft PR
-  // all still work.
-  // A usage-limit hold runs no process, so no exit interrupted it: its appointment stands.
-  if (!opts?.keepLive && engineOwnsRun(run)) {
-    Object.assign(run, applyExit(run, 'fail-interrupted', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
-    for (const step of run.steps) {
-      if (step.status === 'running' || step.status === 'waiting') step.status = 'failed';
-    }
-  }
-}
-
 function clearLoadedStaleResume(run: RunRecord): void {
   // Recovery owns waits; a usage-limit appointment survives while status is waiting.
   stageLoaded(run);
@@ -724,7 +693,7 @@ export function settleOrphanedRun(run: RunRecord, opts: { stop?: boolean | undef
   if (opts.stop && (run.status === 'queued' || run.status === 'running' || run.status === 'waiting')) run.stopping = true;
   if (run.status === 'queued' && !run.startedAt && run.workflowDef !== undefined &&
     run.steps.every((step) => step.status === 'pending' && !step.startedAt && !step.sessionId)) {
-    Object.assign(run, applyExit(run, 'cancel', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
+    Object.assign(run, applyExit(run, 'cancel'));
   }
   return reconcileLoadedRun(run, { keepLive: false });
 }
@@ -1043,6 +1012,8 @@ export class RunStore extends EventEmitter {
   private persistence: RunStorePersistence | undefined;
   /** Runs whose held record is ahead of its row; the next save or commit writes them. */
   private readonly dirty = new Set<string>();
+  /** The lifecycle events run exits write (B12). */
+  private readonly exitEvents = new ExitEvents((id, event) => this.appendEvent(id, event));
   /** Runs gone from memory whose rows the next save or commit deletes. */
   private readonly deleted = new Set<string>();
   /** Deleted runs whose history files (events, handoff, images, artifacts) go once the delete of
@@ -1142,6 +1113,7 @@ export class RunStore extends EventEmitter {
       if (!maintenance) {
         store.loadHeldRows();
         store.warmTranscriptFacts();
+        store.exitEvents.writeLoaded();
       }
     } catch (error) {
       if (store.owner) {
@@ -1242,6 +1214,7 @@ export class RunStore extends EventEmitter {
    *  the row's family. */
   private adoptLoadedRun({ run, extras, upgraded }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean; stop?: boolean }, row: RunRow): void {
     const before = loadNormalizedFields(run);
+    const wasCancelled = run.status === 'cancelled';
     if (opts.settle) settleOrphanedRun(run, { stop: opts.stop });
     else reconcileLoadedRun(run, opts);
     const changed = upgraded === true || loadNormalizedFields(run) !== before;
@@ -1249,6 +1222,7 @@ export class RunStore extends EventEmitter {
     this.held.set(run.id, run);
     this.base.set(run.id, { revision: row.revision, seq: row.seq, data: row.data, extras });
     if (changed) this.dirty.add(run.id);
+    if (!wasCancelled && run.status === 'cancelled') this.exitEvents.loadCancelled(run.id);
   }
 
   /**
@@ -1385,6 +1359,7 @@ export class RunStore extends EventEmitter {
     const family = this.db?.familyOf(id);
     if (family === undefined || !this.claimFamilies([family], { allowLive: true, wait: true }).has(family)) return undefined;
     this.holdFamily(family, undefined, true, opts.stop ? id : undefined);
+    this.exitEvents.writeLoaded();
     return family;
   }
 
@@ -2381,6 +2356,7 @@ export class RunStore extends EventEmitter {
       executionStartSeq: this.transcriptFacts(id).lastSeq,
     });
     const staged = new Map<string, RunRecord>();
+    this.exitEvents.started(id);
     const next: RunRecord = { ...run, ...applyExit(run, exit, this.redactPatch(patch) as RunPatch), delegation,
       ...(step ? { steps: [...run.steps, { ...step, status: 'pending' as const, iterations: 0, tokensUsed: 0 }] } : {}),
     };
@@ -2690,22 +2666,29 @@ export class RunStore extends EventEmitter {
   /** Move run `id` by `exit` (ADR 0056): its status and `extras` in one write, checked against the
    *  record that write changes. A run this store cannot write is neither checked nor written. The
    *  exit decides how the write persists (`exitDurability`), never the extras. A guarded exit (one
-   *  with `settle`) commits at once, and writes nothing when its guard fails: undefined, or its
-   *  `refused` error. `stepId` names the step its settle sets. */
-  move(id: string, exit: RunExitId, extras: RunPatch = {}, stepId?: string): RunRecord | undefined {
+   *  with a `guard` or a `settle`) commits at once, and writes nothing when its guard fails: undefined, or its
+   *  `refused` error. `call` names the step the exit settles apart from the others, and the text
+   *  of the lifecycle event it writes after the write (`exitEvent`). */
+  move(id: string, exit: RunExitId, extras: RunPatch = {}, call: ExitCall = {}): RunRecord | undefined {
     const spec: RunExitSpec = RUN_EXITS[exit];
-    if (!spec.settle) {
-      const run = this.record(id);
-      return run && this.writeRun(id, run, applyExit(run, exit, extras), exitDurability(exit, run));
-    }
-    const run = this.peek(id);
-    if (!run || (spec.guard && !spec.guard(run))) {
+    const guarded = Boolean(spec.guard || spec.settle);
+    const run = guarded ? this.peek(id) : this.record(id);
+    if (!run || spec.guard?.(run) === false) {
       if (spec.refused) throw new Error(spec.refused);
       return undefined;
     }
-    const settled = spec.settle({ ...run, ...this.redactPatch(extras) }, { now: new Date().toISOString(), stepId });
-    this.commitIndex(new Map([[id, { ...settled, ...applyExit(run, exit) }]]));
-    return this.peek(id);
+    const event = this.exitEvents.owed(id, exit, run.status, call);
+    // Redacted first: a step the exit settles takes the run's error.
+    const redacted = this.redactPatch(extras) as RunPatch;
+    let moved: RunRecord | undefined;
+    if (!guarded) moved = this.writeRun(id, run, applyExit(run, exit, redacted, call), exitDurability(exit, run));
+    else {
+      const input = { ...run, ...redacted };
+      this.commitIndex(new Map([[id, { ...(spec.settle?.(input, { ...call, now: new Date().toISOString() }) ?? input), ...applyExit(run, exit, {}, call) }]]));
+      moved = this.peek(id);
+    }
+    if (event) this.exitEvents.write(id, event);
+    return moved;
   }
 
   /** A write that is not a run exit. It commits at once when it changes handoff records or a
@@ -2721,7 +2704,7 @@ export class RunStore extends EventEmitter {
 
   /** One update of the held record `run`: committed at once, or written to the record for the next
    *  save. A debounced write is best-effort, so a locked database cannot stop cleanup. */
-  private writeRun(id: string, run: RunRecord, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>, durability: ExitDurability): RunRecord | undefined {
+  private writeRun(id: string, run: RunRecord, patch: RecordPatch, durability: ExitDurability): RunRecord | undefined {
     const hooks = {
       redact: (text: string) => this.redactText(text),
       repoHandle: this.repoHandle,

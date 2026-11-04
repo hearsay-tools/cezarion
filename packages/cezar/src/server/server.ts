@@ -10,6 +10,7 @@ import { mergeNumberParams, prChangesParams, prChangesQuery, mergeBodySchema } f
 import { gitCommitSchema, reclaimBodySchema, repoBranchSchema } from '@open-mercato/cezar-contract/repo-requests';
 import { setConfigSchema, setAgentConfigSchema } from '@open-mercato/cezar-contract/config-requests';
 import { saveWorkflowInputSchema as saveWorkflowSchema } from '@open-mercato/cezar-contract/workflows';
+import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { patchRunInputSchema as patchRunSchema, messageInputSchema as messageSchema } from '@open-mercato/cezar-contract/runs';
 import { checkoutProjectInputSchema as checkoutSchema, registerProjectInputSchema as registerProjectSchema } from '@open-mercato/cezar-contract/projects';
 import { setWorkspaceConfigInputSchema as workspaceConfigUpdateSchema } from '@open-mercato/cezar-contract/workspace';
@@ -4024,8 +4025,11 @@ export function createApp(deps: ServerDeps) {
     .post('/runs/:id/pr', async (c) => {
       const { root: repoRoot, dataDir, store, manager } = c.get('project');
       const id = c.req.param('id');
-      if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
+      const held = store.getRun(id);
+      if (!held) return c.json({ error: 'not found' }, 404);
       if (manager.isActive(id)) return c.json({ error: 'run is still active — wait for the review gate' }, 409);
+      // A hold is live: done would drop its resume (S7 B13). Don’t resume (DELETE …/auto-resume) settles it failed.
+      if (isUsageLimitHold(held)) return c.json({ error: 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry Draft PR' }, 409);
       const release = manager.claimForPublish(id);
       if (!release) return c.json({ error: 'its worktree or branch is being cleaned up — retry in a moment' }, 409);
       try {
@@ -4035,12 +4039,7 @@ export function createApp(deps: ServerDeps) {
         const run = store.getRun(id);
         if (!run) return c.json({ error: 'not found' }, 404);
         if (!run.worktreePath || !existsSync(run.worktreePath) || !run.branch) {
-          return c.json(
-            {
-              error: 'no worktree/branch to publish — this task ran in the repo working tree',
-            },
-            400,
-          );
+          return c.json({ error: 'no worktree/branch to publish — this task ran in the repo working tree' }, 400);
         }
         const outcome = await resolveForgeRoot(repoRoot, deps.forgeFactory).createPR({
           repoRoot,
@@ -4050,7 +4049,7 @@ export function createApp(deps: ServerDeps) {
         if (!outcome.ok) {
           return c.json({ error: outcome.error, manual: `git merge ${run.branch}` }, 409);
         }
-        store.move(id, 'draft-pr', { pullRequestUrl: outcome.url, finishedAt: run.finishedAt ?? new Date().toISOString() });
+        store.move(id, 'draft-pr', { pullRequestUrl: outcome.url });
         store.appendEvent(id, {
           type: 'note',
           message: `draft PR created: ${outcome.url}${outcome.dryRun ? ' (dry run — no real PR)' : ''}`,

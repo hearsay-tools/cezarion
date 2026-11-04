@@ -34,7 +34,9 @@ describe('applyExit', () => {
   });
 
   it('records an exit that does not leave from the record\'s status', () => {
-    expect(applyExit(makeRunRecord({ status: RUN_STATUS.queued }), 'accept-review')).toEqual({ status: RUN_STATUS.done });
+    // B1-B3 and B6 (S7): accept-review settles the run, so it also leaves the step and sets finishedAt.
+    expect(applyExit(makeRunRecord({ status: RUN_STATUS.queued }), 'accept-review'))
+      .toEqual({ currentStepId: undefined, finishedAt: expect.any(String), status: RUN_STATUS.done });
     expect(takeRunExitViolations()).toEqual(['undeclared run transition: exit accept-review from queued (declare it in runs/run-exits.ts)']);
   });
 });
@@ -69,10 +71,11 @@ describe('restoreLoadedUsageLimitHold (failed.legacy-hold)', () => {
 });
 
 describe('failLoadedInterruptedRun (live.read-only)', () => {
-  it.each(['queued', 'running', 'waiting'] as const)('fails a %s row a read-only store meets, with the fixed error and its live steps failed', (status) => {
+  // B11 (S7): the exit fails the running step and keeps the waiting one, the cursor a Continue resumes.
+  it.each(['queued', 'running', 'waiting'] as const)('fails a %s row a read-only store meets, with the fixed error and its running steps failed', (status) => {
     const run = reconcileLoadedRun(makeRunRecord({ status, steps: steps() }));
     expect(run).toMatchObject({ status: RUN_STATUS.failed, error: 'interrupted — cezar process exited during the run', finishedAt: expect.any(String) });
-    expect(stepStatuses(run)).toEqual(['done', 'failed', 'failed', 'pending']);
+    expect(stepStatuses(run)).toEqual(['done', 'failed', 'waiting', 'pending']);
   });
 
   it('keeps a finishedAt the row already has, and leaves a usage-limit hold alone', () => {
