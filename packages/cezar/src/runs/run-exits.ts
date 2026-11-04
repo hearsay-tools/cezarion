@@ -22,8 +22,9 @@ import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
  *  writes (`RunStore.move`). */
 export type RunPatch = Partial<Omit<RunRecord, 'id' | 'steps' | 'status'>> & { status?: never };
 
-/** What a caller names beside an exit's extras: the step the exit settles apart from the others. */
-export type ExitCall = { stepId?: string | undefined };
+/** What a caller names beside an exit's extras: the step the exit settles apart from the others,
+ *  and the text of the lifecycle event the exit writes, when the caller's says more. */
+export type ExitCall = { stepId?: string | undefined; event?: string | undefined };
 
 /** What an exit reads beside the record: one time for every field it stamps, and the step the
  *  caller names. */
@@ -43,7 +44,8 @@ export type ExitRead = Pick<RunRecord, 'status' | 'delegation'> & Partial<Pick<R
 /**
  * One kind of status write: the statuses it may leave from and the one it writes. `fields` are
  * the fields every site of the exit writes alike; a caller's extras override them. `steps` settles
- * each step of the run in the same write (Table B targets B5, B8, B10, B11). A guarded exit
+ * each step of the run in the same write (Table B targets B5, B8, B10, B11). `event` is the
+ * lifecycle event the store writes once, when the exit moves a run into its status (B12). A guarded exit
  * declares a `guard`, a `settle`, or both: the store commits it at once, with the record `settle`
  * returns (the store writes the exit's fields and `to` over it). Its `guard` decides whether the run may take it: a failed guard writes nothing, and the store
  * returns undefined, or throws `refused` when the exit names one. `durability` is how a write that
@@ -55,6 +57,7 @@ export type RunExitSpec = {
   durability: ExitDurability;
   fields?: (run: ExitRead, at: ExitSettlement) => RunPatch;
   steps?: (step: StepState, run: ExitRead, at: StepSettlement) => StepState;
+  event?: string;
   guard?: (run: RunRecord) => boolean;
   refused?: string;
   settle?: (run: RunRecord, at: ExitSettlement) => RunRecord;
@@ -132,6 +135,9 @@ function settleParkRelease(run: RunRecord): RunRecord {
   return settled;
 }
 
+/** The lifecycle event of a cancellation: one for each run a cancel exit moves into cancelled (B12). */
+export const RUN_CANCELLED = 'run cancelled';
+
 const rootFinishWaiting = (run: RunRecord) => run.status === 'waiting' && rootFinishPending(run);
 
 export const RUN_EXITS = {
@@ -169,19 +175,27 @@ export const RUN_EXITS = {
   // A crash right after the withdrawal must not find it on disk (hearsay-tools/cezarion#1236).
   'withdraw-hold': { durability: 'committed', from: ['waiting'], to: 'failed', guard: isUsageLimitHold,
     settle: run => ({ ...run, autoResumeAt: undefined, autoResumeAttempts: undefined }), steps: failedStep },
-  cancel: { durability: 'debounced', from: ['queued', 'running', 'waiting'], to: 'cancelled', steps: cancelledStep },
+  cancel: { durability: 'debounced', from: ['queued', 'running', 'waiting'], to: 'cancelled', steps: cancelledStep, event: RUN_CANCELLED },
   // Cancellation supersedes a root's pending Finish; from cancelled it repairs a snapshot an older
   // controller left with the intent.
   'cancel-root': { durability: 'committed', from: ['waiting', 'cancelled'], to: 'cancelled',
-    guard: run => (run.status === 'waiting' || run.status === 'cancelled') && rootFinishPending(run), steps: cancelledStep },
+    guard: run => (run.status === 'waiting' || run.status === 'cancelled') && rootFinishPending(run), steps: cancelledStep, event: RUN_CANCELLED },
   // Must hit disk before queued no-start evidence authorizes cleanup.
   'stop-worker': { durability: 'committed', from: ['queued', 'running', 'waiting', 'review', 'done', 'failed'], to: 'cancelled',
-    guard: run => run.delegation?.role === 'worker', refused: 'Worker not found', steps: cancelledStep },
+    guard: run => run.delegation?.role === 'worker', refused: 'Worker not found', steps: cancelledStep, event: RUN_CANCELLED },
   // A Stop that lands after the run settled. A Stop accepted before an exit (`stopping` on load)
   // can meet any status, as the engine's late Stop can.
-  'cancel-late': { durability: 'debounced', from: ['queued', 'running', 'waiting', 'done', 'review', 'failed'], to: 'cancelled', steps: cancelledStep },
+  'cancel-late': { durability: 'debounced', from: ['queued', 'running', 'waiting', 'done', 'review', 'failed'], to: 'cancelled', steps: cancelledStep, event: RUN_CANCELLED },
 } as const satisfies Record<string, RunExitSpec>;
 export type RunExitId = keyof typeof RUN_EXITS;
+
+/** The lifecycle event a write that applies `exit` to a run at `from` writes: the exit's `event`,
+ *  or the caller's text for it, when the exit moves the run into its status. A repeated write on a
+ *  run already there writes none, so one cancellation reads as one event (B12). */
+export function exitEvent(exit: RunExitId, from: RunStatus, call: ExitCall = {}): string | undefined {
+  const spec: RunExitSpec = RUN_EXITS[exit];
+  return spec.event && from !== spec.to ? call.event ?? spec.event : undefined;
+}
 
 /** The record rule: a Done commits at once on a run with a completion option, because its
  *  completion action and archive must be durable (hearsay-tools/cezarion#2324). */

@@ -72,8 +72,8 @@ export class RunCancel {
   private cancelQueuedRun(runId: string, queuedAt: number): void {
     this.line.takeAt(queuedAt);
     this.line.takePending(runId);
-    this.host.move(runId, 'cancel');
-    this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'cancelled while queued' });
+    // The exit writes the cancellation's one lifecycle event; a queued run's says so (B12).
+    this.context.store.move(runId, 'cancel', {}, { event: 'cancelled while queued' });
     this.context.store.flush();
     if (this.workerExecutions.admitted(runId) === false) void this.workerExecutions.finishWorkerExecution(runId);
   }

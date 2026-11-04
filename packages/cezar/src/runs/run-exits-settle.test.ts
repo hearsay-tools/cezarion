@@ -268,3 +268,42 @@ describe('B11: every exit to failed settles open steps to failed for a root; a w
     } finally { reopened.close(); }
   });
 });
+
+// B12: the web header (hearsay-tools/cezarion#2589) and the timeline read one event for one
+// cancellation.
+describe('B12: the cancel exits write the run cancelled event once, at every site', () => {
+  const CANCELLING = SETTLING.filter(exit => RUN_EXITS[exit].to === RUN_STATUS.cancelled);
+  const cancelled = (store: RunStore, id: string) => store.readEvents(id)
+    .filter(event => event.type === 'lifecycle' && /cancelled/.test(String(event.message))).map(event => event.message);
+
+  it.each(CANCELLING)('%s writes it when it cancels the run, and not again on a cancelled run', (exit) => {
+    const { store, root, worker } = setup();
+    const id = exit === 'stop-worker' ? worker(exit) : root(exit);
+    store.move(id, exit);
+    expect(cancelled(store, id)).toEqual(['run cancelled']);
+    store.move(id, 'cancel');
+    expect(cancelled(store, id)).toEqual(['run cancelled']);
+  });
+
+  it('a caller may name the event, as a queued cancellation does', () => {
+    const { store, root } = setup();
+    const id = root('cancel');
+    store.move(id, 'cancel', {}, { event: 'cancelled while queued' });
+    expect(cancelled(store, id)).toEqual(['cancelled while queued']);
+  });
+
+  it('the store\'s load-time Stop writes it once', () => {
+    const { dir, store, root } = setup();
+    const id = root('cancel', { status: RUN_STATUS.running, stopping: true });
+    store.flush();
+    store.close();
+    const reopened = RunStore.open(dir, { keepLive: true });
+    try {
+      expect(cancelled(reopened, id)).toEqual(['run cancelled']);
+    } finally { reopened.close(); }
+    const again = RunStore.open(dir, { keepLive: true });
+    try {
+      expect(cancelled(again, id)).toEqual(['run cancelled']);
+    } finally { again.close(); }
+  });
+});

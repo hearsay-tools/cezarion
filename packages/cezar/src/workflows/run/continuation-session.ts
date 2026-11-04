@@ -159,7 +159,6 @@ export class ContinuationSession {
   private async acquireContinuationRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
     if (await this.repoRootLease.acquireRepoRoot(runId, state)) return true;
     this.host.move(runId, 'cancel');
-    this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
     this.host.dropActive(runId);
     return false;
   }
@@ -649,7 +648,6 @@ export class ContinuationSession {
       close.resumeWorkflow = undefined;
       if (this.context.store.getRun(runId)?.status !== 'cancelled') {
         this.host.move(runId, 'cancel-late');
-        this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
       }
     }
     this.host.dropActive(runId);

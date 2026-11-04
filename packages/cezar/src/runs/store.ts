@@ -63,7 +63,7 @@ import { workflowDefSchema } from '../workflows/types.ts';
 
 import { applyOutcomes, type OutcomeDependencies, type OutcomeReceipt, type RunOutcome } from './outcome-commit.ts';
 import { ISSUE_URL_RE, originatingIssue, PR_URL_RE, refUrlNumber, referencedPrDeclaration, rescopeRun, resolveIssueReference, resolveReferencedRef, restoreOriginatingIssue, trackReferencedIssues, trackReferencedPrs } from './run-references.ts';
-import { applyExit, doneCommits, exitDurability, RUN_EXITS, type ExitCall, type ExitDurability, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
+import { applyExit, doneCommits, exitDurability, exitEvent, RUN_CANCELLED, RUN_EXITS, type ExitCall, type ExitDurability, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
 import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
 export { ConversationIdInUseError } from './conversation-identity.ts';
 
@@ -1036,6 +1036,8 @@ export class RunStore extends EventEmitter {
   private persistence: RunStorePersistence | undefined;
   /** Runs whose held record is ahead of its row; the next save or commit writes them. */
   private readonly dirty = new Set<string>();
+  /** Runs this store's load cancelled: their lifecycle event waits until transcripts are readable. */
+  private readonly loadCancellations: string[] = [];
   /** Runs gone from memory whose rows the next save or commit deletes. */
   private readonly deleted = new Set<string>();
   /** Deleted runs whose history files (events, handoff, images, artifacts) go once the delete of
@@ -1135,6 +1137,7 @@ export class RunStore extends EventEmitter {
       if (!maintenance) {
         store.loadHeldRows();
         store.warmTranscriptFacts();
+        store.writeLoadCancellations();
       }
     } catch (error) {
       if (store.owner) {
@@ -1235,6 +1238,7 @@ export class RunStore extends EventEmitter {
    *  the row's family. */
   private adoptLoadedRun({ run, extras, upgraded }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean; stop?: boolean }, row: RunRow): void {
     const before = loadNormalizedFields(run);
+    const wasCancelled = run.status === 'cancelled';
     if (opts.settle) settleOrphanedRun(run, { stop: opts.stop });
     else reconcileLoadedRun(run, opts);
     const changed = upgraded === true || loadNormalizedFields(run) !== before;
@@ -1242,6 +1246,17 @@ export class RunStore extends EventEmitter {
     this.held.set(run.id, run);
     this.base.set(run.id, { revision: row.revision, seq: row.seq, data: row.data, extras });
     if (changed) this.dirty.add(run.id);
+    if (!wasCancelled && run.status === 'cancelled') this.loadCancellations.push(run.id);
+  }
+
+  /** The `run cancelled` event of each run this load cancelled (a Stop accepted before the process
+   *  exited, or an untouched orphan), as a cancel exit writes it (Table B12). Best-effort: a
+   *  transcript that cannot be written must not stop the store from opening. */
+  private writeLoadCancellations(): void {
+    for (const id of this.loadCancellations.splice(0)) {
+      try { this.appendEvent(id, { type: 'lifecycle', message: RUN_CANCELLED }); }
+      catch (error) { console.warn(`[cez] run ${id}: the load-time cancellation event was not written: ${error instanceof Error ? error.message : String(error)}`); }
+    }
   }
 
   /**
@@ -1378,6 +1393,7 @@ export class RunStore extends EventEmitter {
     const family = this.db?.familyOf(id);
     if (family === undefined || !this.claimFamilies([family], { allowLive: true, wait: true }).has(family)) return undefined;
     this.holdFamily(family, undefined, true, opts.stop ? id : undefined);
+    this.writeLoadCancellations();
     return family;
   }
 
@@ -2684,23 +2700,32 @@ export class RunStore extends EventEmitter {
    *  record that write changes. A run this store cannot write is neither checked nor written. The
    *  exit decides how the write persists (`exitDurability`), never the extras. A guarded exit (one
    *  with a `guard` or a `settle`) commits at once, and writes nothing when its guard fails: undefined, or its
-   *  `refused` error. `call` names the step the exit settles apart from the others. */
+   *  `refused` error. `call` names the step the exit settles apart from the others, and the text
+   *  of the lifecycle event it writes after the write (`exitEvent`). */
   move(id: string, exit: RunExitId, extras: RunPatch = {}, call: ExitCall = {}): RunRecord | undefined {
     const spec: RunExitSpec = RUN_EXITS[exit];
+    let moved: RunRecord | undefined;
+    let event: string | undefined;
     if (!spec.guard && !spec.settle) {
       const run = this.record(id);
+      if (!run) return undefined;
+      event = exitEvent(exit, run.status, call);
       // Redacted first: a step the exit settles takes the run's error.
-      return run && this.writeRun(id, run, applyExit(run, exit, this.redactPatch(extras) as RunPatch, call), exitDurability(exit, run));
+      moved = this.writeRun(id, run, applyExit(run, exit, this.redactPatch(extras) as RunPatch, call), exitDurability(exit, run));
+    } else {
+      const run = this.peek(id);
+      if (!run || (spec.guard && !spec.guard(run))) {
+        if (spec.refused) throw new Error(spec.refused);
+        return undefined;
+      }
+      event = exitEvent(exit, run.status, call);
+      const input = { ...run, ...this.redactPatch(extras) };
+      const settled = spec.settle ? spec.settle(input, { ...call, now: new Date().toISOString() }) : input;
+      this.commitIndex(new Map([[id, { ...settled, ...applyExit(run, exit, {}, call) }]]));
+      moved = this.peek(id);
     }
-    const run = this.peek(id);
-    if (!run || (spec.guard && !spec.guard(run))) {
-      if (spec.refused) throw new Error(spec.refused);
-      return undefined;
-    }
-    const input = { ...run, ...this.redactPatch(extras) };
-    const settled = spec.settle ? spec.settle(input, { ...call, now: new Date().toISOString() }) : input;
-    this.commitIndex(new Map([[id, { ...settled, ...applyExit(run, exit, {}, call) }]]));
-    return this.peek(id);
+    if (event) this.appendEvent(id, { type: 'lifecycle', message: event });
+    return moved;
   }
 
   /** A write that is not a run exit. It commits at once when it changes handoff records or a

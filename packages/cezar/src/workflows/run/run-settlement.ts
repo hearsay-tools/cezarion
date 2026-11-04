@@ -194,7 +194,6 @@ export class RunSettlement {
   settleCancelledContinuation(runId: string, stepId: string): void {
     this.context.store.updateStep(runId, stepId, { status: 'cancelled', finishedAt: new Date().toISOString() });
     this.host.move(runId, 'cancel');
-    this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
   }
 
   /** The Continue's step is done: settle the run, or the workflow step it resumed. Returns the
@@ -318,7 +317,6 @@ export class RunSettlement {
   /** The cancelled settlement: the run and its running and waiting steps become cancelled. */
   settleCancelledRun(runId: string): void {
     this.host.move(runId, 'cancel');
-    this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
   }
 
   /** The failed settlement. A capped wake delivery adds the cap's note. */
@@ -416,7 +414,6 @@ export class RunSettlement {
    *  waiting steps become cancelled, and a step keeps a finish time it already has. */
   settleCancelledSuccess(runId: string): void {
     this.host.move(runId, 'cancel');
-    this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
   }
 
   /** The ordinary success path (not a root finish): the run as `review` or `done`. The exit
