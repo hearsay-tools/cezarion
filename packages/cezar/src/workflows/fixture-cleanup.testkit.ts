@@ -3,7 +3,16 @@ import type { AgentSession } from '../core/agent-runner.ts';
 import type { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
 import { TrackedWork } from './run/tracked-work.ts';
-import { runInternals } from './run-internals.testkit.ts';
+
+const managerWork = new WeakMap<RunManager, TrackedWork>();
+const disposedManagers = new WeakSet<RunManager>();
+
+class FixtureManager extends RunManager {
+  override dispose(): void {
+    disposedManagers.add(this);
+    super.dispose();
+  }
+}
 
 const fixtures = new Map<string, { work: TrackedWork; managers: Array<{ manager: RunManager; store: RunStore }> }>();
 
@@ -11,7 +20,8 @@ const fixtures = new Map<string, { work: TrackedWork; managers: Array<{ manager:
 export function createFixtureManager(...args: ConstructorParameters<typeof RunManager>): RunManager {
   const [store, root, options] = args;
   const group = fixtures.get(root) ?? { work: options?.work ?? new TrackedWork(), managers: [] };
-  const manager = new RunManager(store, root, { ...options, work: group.work });
+  const manager = new FixtureManager(store, root, { ...options, work: group.work });
+  managerWork.set(manager, group.work);
   group.managers.push({ manager, store });
   fixtures.set(root, group);
   return manager;
@@ -20,7 +30,14 @@ export function createFixtureManager(...args: ConstructorParameters<typeof RunMa
 /** Whether a test already disposed `manager`, as a restart does to the process it replaces: its
  *  runs are then the recovered manager's, and its store may already be closed (#779). */
 export function managerDisposed(manager: RunManager): boolean {
-  return runInternals(manager).disposed;
+  return disposedManagers.has(manager);
+}
+
+/** The work registry owned by fixtures under this root, including recovered managers. */
+export function fixtureWork(root: string | RunManager): TrackedWork {
+  const work = typeof root === 'string' ? fixtures.get(root)?.work : managerWork.get(root);
+  if (!work) throw new Error(`No fixture owns work under ${root}`);
+  return work;
 }
 
 /** Wait until every engine call the fixtures under `root` observe has settled, cancelling and
