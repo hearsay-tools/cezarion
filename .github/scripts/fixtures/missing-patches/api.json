@@ -1,0 +1,105 @@
+[
+  {
+    "pr": "hearsay-tools/cezarion#2611",
+    "url": "https://api.github.com/repos/hearsay-tools/cezarion/compare/0d93febf2f3946779215999af1a21086ad8fb820...b18c5b70cb57450ff34e5fafd87c12395a672786",
+    "fetched": "2026-11-04",
+    "head": "b18c5b70cb57450ff34e5fafd87c12395a672786",
+    "files": [
+      {
+        "sha": "f8595db2c16971ecb9d018429dc2b9ca8d84153e",
+        "filename": "packages/web/src/routes/github/github.test.tsx",
+        "status": "modified",
+        "additions": 157,
+        "deletions": 3542,
+        "changes": 3699,
+        "blob_url": "https://github.com/hearsay-tools/cezarion/blob/b18c5b70cb57450ff34e5fafd87c12395a672786/packages%2Fweb%2Fsrc%2Froutes%2Fgithub%2Fgithub.test.tsx",
+        "raw_url": "https://github.com/hearsay-tools/cezarion/raw/b18c5b70cb57450ff34e5fafd87c12395a672786/packages%2Fweb%2Fsrc%2Froutes%2Fgithub%2Fgithub.test.tsx",
+        "contents_url": "https://api.github.com/repos/hearsay-tools/cezarion/contents/packages%2Fweb%2Fsrc%2Froutes%2Fgithub%2Fgithub.test.tsx?ref=b18c5b70cb57450ff34e5fafd87c12395a672786"
+      },
+      {
+        "sha": "814da8ce83da148d01e3ccf5300b61d91896cff4",
+        "filename": "packages/web/src/routes/new-task.test.tsx",
+        "status": "removed",
+        "additions": 0,
+        "deletions": 2734,
+        "changes": 2734,
+        "blob_url": "https://github.com/hearsay-tools/cezarion/blob/0d93febf2f3946779215999af1a21086ad8fb820/packages%2Fweb%2Fsrc%2Froutes%2Fnew-task.test.tsx",
+        "raw_url": "https://github.com/hearsay-tools/cezarion/raw/0d93febf2f3946779215999af1a21086ad8fb820/packages%2Fweb%2Fsrc%2Froutes%2Fnew-task.test.tsx",
+        "contents_url": "https://api.github.com/repos/hearsay-tools/cezarion/contents/packages%2Fweb%2Fsrc%2Froutes%2Fnew-task.test.tsx?ref=0d93febf2f3946779215999af1a21086ad8fb820"
+      }
+    ]
+  },
+  {
+    "pr": "hearsay-tools/cezarion#2633",
+    "url": "https://api.github.com/repos/hearsay-tools/cezarion/compare/afef4b36584a297ada036daf918d56b8b71a8d8d...a070592ad8b07483aece59d2212af6a84d7e8a6b",
+    "fetched": "2026-11-04",
+    "head": "a070592ad8b07483aece59d2212af6a84d7e8a6b",
+    "files": [
+      {
+        "sha": "8a08fb9cf65fd7bbece7bd2aaf5a5c7510bdb0df",
+        "filename": ".ai/ast-grep/rules/test-enum-literal.baseline.json",
+        "status": "modified",
+        "additions": 0,
+        "deletions": 6,
+        "changes": 6,
+        "blob_url": "https://github.com/hearsay-tools/cezarion/blob/a070592ad8b07483aece59d2212af6a84d7e8a6b/.ai%2Fast-grep%2Frules%2Ftest-enum-literal.baseline.json",
+        "raw_url": "https://github.com/hearsay-tools/cezarion/raw/a070592ad8b07483aece59d2212af6a84d7e8a6b/.ai%2Fast-grep%2Frules%2Ftest-enum-literal.baseline.json",
+        "contents_url": "https://api.github.com/repos/hearsay-tools/cezarion/contents/.ai%2Fast-grep%2Frules%2Ftest-enum-literal.baseline.json?ref=a070592ad8b07483aece59d2212af6a84d7e8a6b",
+        "patch": "@@ -193,12 +193,6 @@\n       \"site\": \"status: 'skipped'\",\n       \"count\": 20\n     },\n-    {\n-      \"file\": \"packages/cezar/src/workflows/run.test.ts\",\n-      \"rule\": \"test-enum-literal\",\n-      \"site\": \"status: 'running'\",\n-      \"count\": 1\n-    },\n     {\n       \"file\": \"packages/cezar/src/worktree-setup.test.ts\",\n       \"rule\": \"test-enum-literal\","
+      },
+      {
+        "sha": "3ffba4ad55758cddde9c01848e4596f34ee6954c",
+        "filename": "packages/cezar/src/workflows/run.test.ts",
+        "status": "modified",
+        "additions": 8,
+        "deletions": 3226,
+        "changes": 3234,
+        "blob_url": "https://github.com/hearsay-tools/cezarion/blob/a070592ad8b07483aece59d2212af6a84d7e8a6b/packages%2Fcezar%2Fsrc%2Fworkflows%2Frun.test.ts",
+        "raw_url": "https://github.com/hearsay-tools/cezarion/raw/a070592ad8b07483aece59d2212af6a84d7e8a6b/packages%2Fcezar%2Fsrc%2Fworkflows%2Frun.test.ts",
+        "contents_url": "https://api.github.com/repos/hearsay-tools/cezarion/contents/packages%2Fcezar%2Fsrc%2Fworkflows%2Frun.test.ts?ref=a070592ad8b07483aece59d2212af6a84d7e8a6b"
+      }
+    ]
+  },
+  {
+    "pr": "hearsay-tools/cezarion#847",
+    "url": "https://api.github.com/repos/hearsay-tools/cezarion/pulls/847/files",
+    "fetched": "2026-11-04",
+    "files": [
+      {
+        "sha": "3d02df3f098da579f6549c3a115a4752f4f5ccfe",
+        "filename": "packages/desktop/src-tauri/icons/128x128.png",
+        "status": "added",
+        "additions": 0,
+        "deletions": 0,
+        "changes": 0,
+        "blob_url": "https://github.com/hearsay-tools/cezarion/blob/a773c30d96b96f464a07b58f343ab500c98f08c4/packages%2Fdesktop%2Fsrc-tauri%2Ficons%2F128x128.png",
+        "raw_url": "https://github.com/hearsay-tools/cezarion/raw/a773c30d96b96f464a07b58f343ab500c98f08c4/packages%2Fdesktop%2Fsrc-tauri%2Ficons%2F128x128.png",
+        "contents_url": "https://api.github.com/repos/hearsay-tools/cezarion/contents/packages%2Fdesktop%2Fsrc-tauri%2Ficons%2F128x128.png?ref=a773c30d96b96f464a07b58f343ab500c98f08c4"
+      }
+    ],
+    "base": "4e5c6608ff134be5b5af2328a4d5457e4e7d00c2",
+    "head": "a773c30d96b96f464a07b58f343ab500c98f08c4",
+    "numstat": "-\t-\tpackages/desktop/src-tauri/icons/128x128.png\u0000"
+  },
+  {
+    "pr": "hearsay-tools/cezarion#1174",
+    "url": "https://api.github.com/repos/hearsay-tools/cezarion/pulls/1174/files",
+    "fetched": "2026-11-04",
+    "files": [
+      {
+        "sha": "14a6c5400c79de7cb1a328a7187553fce5345ad9",
+        "filename": "packages/web/e2e/github-nav-contract.ts",
+        "status": "renamed",
+        "additions": 0,
+        "deletions": 0,
+        "changes": 0,
+        "blob_url": "https://github.com/hearsay-tools/cezarion/blob/91b0fa828df052d129d2dd65448944e39e83429c/packages%2Fweb%2Fe2e%2Fgithub-nav-contract.ts",
+        "raw_url": "https://github.com/hearsay-tools/cezarion/raw/91b0fa828df052d129d2dd65448944e39e83429c/packages%2Fweb%2Fe2e%2Fgithub-nav-contract.ts",
+        "contents_url": "https://api.github.com/repos/hearsay-tools/cezarion/contents/packages%2Fweb%2Fe2e%2Fgithub-nav-contract.ts?ref=91b0fa828df052d129d2dd65448944e39e83429c",
+        "previous_filename": "packages/web/src/lib/github-nav-contract.ts"
+      }
+    ],
+    "base": "3040cbf78caf3b61fdd6a2b82bef9cb495a4bdd9",
+    "head": "91b0fa828df052d129d2dd65448944e39e83429c"
+  }
+]

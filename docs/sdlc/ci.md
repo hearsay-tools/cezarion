@@ -11,7 +11,8 @@ satisfies the required aggregate.
 
 The PR-shape classifier checks out only one commit. Fetching every branch and
 tag can consume its five-minute job budget before classification. Only the PR
-baseline check reads history; § CI verification says what each gate fetches.
+baseline and patch checks read history; § CI verification says what each gate fetches.
+For PRs into `main`, the PR-shape check requires GitHub to return a patch for every changed text file, except pure renames or copies, and rejects incomplete file lists.
 
 Main PRs run cheap deterministic preflight, automated review, then heavy
 verification. Findings block heavy work. Both protected checks remain required.
