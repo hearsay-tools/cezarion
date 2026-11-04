@@ -22,7 +22,7 @@ beforeEach(() => {
   // Radix popovers position with floating-ui, which needs a ResizeObserver; jsdom has none. The
   // list's scroll owner gets a tall viewport so the virtualized rows mount (hearsay-tools/cezarion#1183).
   vi.stubGlobal('ResizeObserver', ListViewportResizeObserver)
-  // The #408 follow-up persistence (remembered selection + per-item draft) is localStorage-
+  // The open-mercato/cezar#408 follow-up persistence (remembered selection + per-item draft) is localStorage-
   // backed and jsdom's localStorage survives across tests in this file — start every test clean.
   localStorage.clear()
 })
@@ -761,7 +761,7 @@ describe('the hand-to-agent run (legacy three-way body)', () => {
   })
 })
 
-describe('the skills dropdown frequency sort (#408 item 1, re-tiered by #519)', () => {
+describe('the skills dropdown frequency sort (open-mercato/cezar#408 item 1, re-tiered by #519)', () => {
   it('promotes used skills into "Most used" ahead of locality, frequency descending', async () => {
     stubFetch({
       'GET /api/v1/ui-state': () => jsonResponse({ skillUsage: { 'team-x': 9, 'g-review': 1 } }),
@@ -849,7 +849,7 @@ describe('the skills dropdown frequency sort (#408 item 1, re-tiered by #519)', 
   })
 })
 
-describe('the remembered last selection (#408 item 3)', () => {
+describe('the remembered last selection (open-mercato/cezar#408 item 3)', () => {
   it('a repeat hand-off pre-selects the previous workflow + skills on a fresh mount', async () => {
     stubFetch()
     await openDetail()
@@ -882,7 +882,7 @@ describe('the remembered last selection (#408 item 3)', () => {
   })
 })
 
-describe('a remembered pick the catalog no longer has (#408)', () => {
+describe('a remembered pick the catalog no longer has (open-mercato/cezar#408)', () => {
   const WITHOUT_SHIP_IT: WorkflowsResponse = {
     workflows: [{ name: 'quick-task', description: 'one step', steps: [], source: 'built-in' }],
     issues: [],
@@ -945,7 +945,7 @@ describe('a remembered pick the catalog no longer has (#408)', () => {
   })
 })
 
-describe('the follow-up prompt draft (#408 item 4)', () => {
+describe('the follow-up prompt draft (open-mercato/cezar#408 item 4)', () => {
   it('typed instructions persist when navigating away and back to the same item', async () => {
     stubFetch()
     await openDetail()
@@ -1020,7 +1020,7 @@ describe('the follow-up prompt draft (#408 item 4)', () => {
   })
 })
 
-describe('⌘/Ctrl+Enter submits the follow-up composer (#408 item 5)', () => {
+describe('⌘/Ctrl+Enter submits the follow-up composer (open-mercato/cezar#408 item 5)', () => {
   it('Ctrl+Enter runs the agent', async () => {
     const sent = stubFetch()
     await openDetail()
