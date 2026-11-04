@@ -13,8 +13,6 @@ catalog![0] = other.skills.catalog![0]!;
 catalog![0]!.body = 'forged';
 // @ts-expect-error Nested team records are getter-only.
 catalog![0]!.team!.repo = 'forged';
-function helper(group: SkillsGroup): void {
-  // @ts-expect-error A helper cannot replace the provisioning handle.
-  group.liveSkillProvisioning = Promise.resolve();
-}
-void helper;
+declare const group: Parameters<(group: SkillsGroup) => void>[0];
+// @ts-expect-error A helper cannot replace the provisioning handle.
+group.liveSkillProvisioning = Promise.resolve();

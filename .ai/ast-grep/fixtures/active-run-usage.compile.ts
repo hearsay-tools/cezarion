@@ -34,10 +34,8 @@ const costs = alias.reportedClaudeCost!;
 costs.set('forged', 99);
 // @ts-expect-error Map bracket access is read-only too.
 costs['clear']();
-function helper(view: UsageGroup): void {
-  // @ts-expect-error Typed helper parameters have the same getter-only boundary.
-  view.usageInvocation!.observed = true;
-  // @ts-expect-error A helper cannot acquire a writable map.
-  view.reportedClaudeCost!.set('forged', 99);
-}
-void helper;
+declare const view: Parameters<(view: UsageGroup) => void>[0];
+// @ts-expect-error Typed helper parameters have the same getter-only boundary.
+view.usageInvocation!.observed = true;
+// @ts-expect-error A helper cannot acquire a writable map.
+view.reportedClaudeCost!.set('forged', 99);

@@ -12,8 +12,6 @@ children.set('forged', { session: undefined, status: 'running' });
 children.get('child')!.status = 'failed';
 // @ts-expect-error A nested session reference cannot be replaced.
 children.get('child')!.session = undefined;
-function helper(view: ChildrenGroup): void {
-  // @ts-expect-error Passing a view to a helper does not grant mutation.
-  view.backgroundChildren.clear();
-}
-void helper;
+declare const view: Parameters<(view: ChildrenGroup) => void>[0];
+// @ts-expect-error Passing a view to a helper does not grant mutation.
+view.backgroundChildren.clear();
