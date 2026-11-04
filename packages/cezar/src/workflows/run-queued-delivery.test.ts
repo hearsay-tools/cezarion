@@ -7,12 +7,14 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { WorkflowDef } from './types.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 describe('queued stacking reaches the backend (#472)', () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
+  let semaphore: WorkspaceSemaphore;
   const savedEnv: Record<string, string | undefined> = {};
 
   const WORKFLOW: WorkflowDef = {
@@ -32,10 +34,9 @@ describe('queued stacking reaches the backend (#472)', () => {
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
-    // One slot, so the second run demonstrably waits in the queue.
-    writeFileSync(join(repoRoot, '.ai/cezar', 'config.json'), JSON.stringify({ maxParallel: 1 }));
+    semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot, { semaphore });
   });
 
   afterAll(async () => {
@@ -49,10 +50,16 @@ describe('queued stacking reaches the backend (#472)', () => {
   });
 
   it('delivers the task plus every stacked message, with the edit applied', async () => {
-    manager.startRun(WORKFLOW, { task: 'mock:cezar-done occupy the slot', worktree: false });
+    const first = manager.startRun(WORKFLOW, { task: 'mock:cezar-done occupy the slot', worktree: false });
+    await waitForProduct(manager, store, () => store.getRun(first.id)?.status === RUN_STATUS.running && semaphore.busy() === 1);
     const second = manager.startRun(WORKFLOW, { task: 'mock:cezar-done original prompt', worktree: false });
 
+    // Wait for the scheduler's owned capacity check, not only startRun's initial queued record.
+    await waitForProduct(manager, store, () => ![...runInternals(manager).context.work.pending.values()].includes('pump') &&
+      !runInternals(manager).line.hasStarting(second.id));
+
     // The second run is holding in the queue — amend it there.
+    expect(runInternals(manager).line.hasQueued(second.id)).toBe(true);
     expect(store.getRun(second.id)?.status).toBe('queued');
     const typo = manager.enqueueMessage(second.id, [{ type: 'text', text: 'STACKEDONE with a typo' }]);
     expect(typo).not.toBeNull();
