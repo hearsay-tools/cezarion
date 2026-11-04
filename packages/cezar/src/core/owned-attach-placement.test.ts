@@ -59,10 +59,7 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     return { worker, delegation: worker.delegation };
   };
   const launch = async () => {
-    const pump = vi.mocked(runInternals(f.manager).line.pump);
-    expect(pump).toHaveBeenCalled();
-    pump.mockRestore();
-    await (runInternals(f.manager).line).pump();
+    await f.releaseAdmission();
   };
   beforeEach(() => {
     vi.stubEnv('CEZ_DELEGATION', '1'); vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
