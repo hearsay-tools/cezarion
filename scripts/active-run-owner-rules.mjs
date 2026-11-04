@@ -4,6 +4,12 @@ import { resolve } from 'node:path';
 import { isMap, isSeq, parseDocument, visit } from 'yaml';
 
 export const ownerGroups = {
+  session: {
+    slot: 'liveSession', owner: 'live-session-state.ts', factory: 'createSessionGroup',
+    types: ['SessionGroup', 'ReadonlySetView'],
+    getters: ['liveSession'],
+    fields: ['liveSession', 'delegationSettings', 'revokeDelegation', 'revokeCiTools', 'ciGeneration', 'cancelled', 'finishRequested', 'interrupt', 'cwd', 'session', 'pendingPermissions', 'agentSessionError', 'currentStepId', 'sessionEverOpened', 'releaseRepoRoot', 'runner', 'model', 'modelIdentity', 'effort', 'agentProfile', 'accountBinding', 'systemPrompt', 'allowedTools', 'bashAllowlist', 'provider', 'profileId', 'homePath', 'claudeLayout', 'kind', 'statePath', 'length', 'size'],
+  },
   usage: {
     owner: 'usage-accounting.ts', factory: 'createUsageGroup',
     types: ['UsageGroup', 'UsageInvocation', 'ReadonlyMapView', 'ReadonlySetView'],
@@ -31,7 +37,7 @@ export function renderOwnerRule(group) {
   const metadata = ownerGroups[group];
   if (!metadata) throw new Error(`Unknown ActiveRun owner group: ${group}`);
   const substitutions = {
-    __SLOT__: group, __OWNER__: metadata.owner, __FACTORY__: metadata.factory, __TYPES__: metadata.types.join('|'),
+    __GROUP__: group, __SLOT__: metadata.slot ?? group, __OWNER__: metadata.owner, __FACTORY__: metadata.factory, __TYPES__: metadata.types.join('|'),
     __GETTERS__: metadata.getters.join('|'), __FIELDS__: metadata.fields.join('|'),
   };
   const doc = parseDocument(readFileSync(template, 'utf8'));

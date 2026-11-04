@@ -1,3 +1,4 @@
+import { createSessionGroup, type SessionGroup } from './run/live-session-state.ts';
 import { createChildrenGroup, type ChildrenGroup } from './run/subagent-waits.ts';
 import type { AgentSession, InputDelivery } from '../core/agent-runner.ts';
 import { createSkillsGroup, type SkillsGroup } from './run/run-skills.ts';
@@ -10,6 +11,7 @@ import { createUsageGroup, type UsageGroup } from './run/usage-accounting.ts';
  */
 export interface ActiveRun {
   readonly usage: UsageGroup;
+  readonly liveSession: SessionGroup;
   delegationSettings?: DelegationExecutionSettings | undefined;
   revokeDelegation?: (() => void) | undefined;
   revokeCiTools?: (() => void) | undefined;
@@ -156,6 +158,7 @@ export interface ActiveRunInit {
 export function createActiveRun(init: ActiveRunInit): ActiveRun {
   const state = {
     usage: createUsageGroup(),
+    liveSession: createSessionGroup(init.cwd),
     delegationSettings: undefined, revokeDelegation: undefined,
     cancelled: false, interrupt: () => undefined, cwd: init.cwd,
     pendingHumanAsk: init.pendingHumanAsk,
@@ -164,6 +167,7 @@ export function createActiveRun(init: ActiveRunInit): ActiveRun {
     skills: createSkillsGroup(),
     autonomous: init.autonomous,
   };
+  Object.defineProperty(state, 'liveSession', { writable: false, configurable: false });
   Object.defineProperty(state, 'usage', { writable: false, configurable: false });
   Object.defineProperty(state, 'children', { writable: false, configurable: false });
   Object.defineProperty(state, 'skills', { writable: false, configurable: false });

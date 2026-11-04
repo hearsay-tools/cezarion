@@ -1,4 +1,4 @@
-id: active-run-__SLOT__-write-outside-owner
+id: active-run-__GROUP__-write-outside-owner
 language: typescript
 severity: warning
 message: Change ActiveRun __SLOT__ only through __OWNER__. Groups and their live views expose no writable storage
