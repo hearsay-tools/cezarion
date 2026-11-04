@@ -1,3 +1,4 @@
+import { MONITORING_PARTITIONS, type MonitoringPartitionName } from './monitoring-turn-partitions.testkit.ts';
 import { RUN_STATUS, WAIT_KIND, WAIT_VIA, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { execFileSync } from 'node:child_process';
@@ -6,7 +7,7 @@ import { join } from 'node:path';
 import { expect, it, describe } from 'vitest';
 import { deriveAttention, WEBHOOK_TRIGGERS } from '@open-mercato/cezar-contract/attention';
 import type { ApiRun, TimerWaitEntry } from '@open-mercato/cezar-contract';
-import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
+import { type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { attentionFields, projectStatus } from '../task-cli/projections.ts';
 import { endsWait } from '../task-cli/watch.ts';
@@ -184,7 +185,7 @@ const ROW_SPECS: Record<RowId, RowSpec> = {
 };
 
 // The run start, the Continue path, `attention`, `send` and the webhook check are the same for every row.
-async function runMonitoringRow(backend: RunnerId, mode: 'fresh' | 'continuation', row: { id: RowId }): Promise<void> {
+export async function runMonitoringRow(backend: RunnerId, mode: 'fresh' | 'continuation', row: { id: RowId }): Promise<void> {
   process.env.CEZ_DRY_RUN = '0';
   process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
   // Turn-end bookkeeping (diff stat: `git add -N .`) runs after the run already reads
@@ -237,12 +238,8 @@ async function runMonitoringRow(backend: RunnerId, mode: 'fresh' | 'continuation
   } finally { hook.dispose(); }
 }
 
-for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeout: 30_000 }, () => {
-  useWorkerWaitFixture();
-  for (const mode of ['fresh', 'continuation'] as const) for (const row of MONITORING_TURN_CRITERIA) {
-    it(`${mode} ${row.id} ${row.name}`, () => runMonitoringRow(backend, mode, row));
-  }
-  for (const mode of ['fresh', 'continuation'] as const) it(`${mode} ${mode === 'fresh' ? 'M13' : 'M14'} ordinary markerless prose questions keep autonomous nudges`, async () => {
+export function registerAutonomousProse(backend: RunnerId, mode: 'fresh' | 'continuation'): void {
+  it(`${mode} ${mode === 'fresh' ? 'M13' : 'M14'} ordinary markerless prose questions keep autonomous nudges`, async () => {
     process.env.CEZ_DRY_RUN = '0';
     process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
     const prompt = messagesPrompt(backend, ['Should I merge this PR?']);
@@ -259,6 +256,8 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
     expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes('autonomous — continuing without pausing'))).toBe(true);
   });
 
+}
+export function registerClose(backend: RunnerId): void {
   it('fresh M17 a clean session close with an accepted worker wait open parks the run on it', async () => {
     process.env.CEZ_DRY_RUN = '0';
     process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
@@ -279,9 +278,11 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
     expect(store.getRun(w.id)?.status).toBe('queued');
   });
 
+}
+export function registerAutonomousAsk(backend: RunnerId, mode: 'fresh' | 'continuation'): void {
   // An autonomous run assumes instead of asking while its wake budget lasts: cezar_ask is refused
   // with `autonomous_run`, registers nothing, and the turn takes the autonomous nudge.
-  for (const mode of ['fresh', 'continuation'] as const) it(`${mode} M23 an autonomous cezar_ask followed by acknowledgement is refused, and the run continues`, async () => {
+  it(`${mode} M23 an autonomous cezar_ask followed by acknowledgement is refused, and the run continues`, async () => {
     process.env.CEZ_DRY_RUN = '0';
     process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
     const prompt = script(ASK, thenSay(ACK_TEXT));
@@ -300,5 +301,20 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
     expect(store.readEvents(p.id).some(event => event.type === 'note' && event.code === 'unstructured-human-gate')).toBe(false);
     expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested' || event.type === 'human-input-delivered')).toHaveLength(0);
   });
+}
 
-});
+export function registerMonitoringPartition(name: MonitoringPartitionName): void {
+  const partition = MONITORING_PARTITIONS[name];
+  for (const backend of partition.runners) describe(`${backend} monitoring turn`, { timeout: 30_000 }, () => {
+    useWorkerWaitFixture();
+    for (const mode of partition.modes) for (const id of partition.rows) {
+      if (id === 'M13' || id === 'M14') registerAutonomousProse(backend, mode);
+      else if (id === 'M23') registerAutonomousAsk(backend, mode);
+      else if (id === 'M17') registerClose(backend);
+      else {
+        const row = MONITORING_TURN_CRITERIA.find(row => row.id === id)!;
+        it(`${mode} ${row.id} ${row.name}`, () => runMonitoringRow(backend, mode, row));
+      }
+    }
+  });
+}
