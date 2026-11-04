@@ -4,7 +4,7 @@ Status: design draft for coordinator and planner review. No product change is au
 Subject: hearsay-tools/cezarion#2520, slice 4.1 of hearsay-tools/cezarion#2487.
 Baseline: `origin/main` at `172032e46e4475add22af4d11b20143a1f73ac3e`, fetched 2026-11-04.
 All source paths below start at `packages/cezar/src/`, unless stated otherwise.
-Line regions refer only to this SHA. PR labels P1–P5 below name future implementation PRs, not existing pull requests.
+Line regions refer only to this SHA. PR labels P1–P6 below name future implementation PRs, not existing pull requests.
 
 ## Decision and limits
 
@@ -15,14 +15,14 @@ Put all turn-boundary writes behind `transitionTurnBoundary`. Keep stored status
 Use the form and durability rules in [the run-exit spec](2026-11-03-run-store-owns-exits.md).
 
 Eight groups cover all 59 fields. Queue and slot collections are not a ninth ActiveRun group:
-`RunLine` already owns them. P5 can retire the handler-order expiry block after it closes the
-remaining entry-path test gaps. The queue-head expiry block has a separate scope question below.
-This draft does **not** claim the Phase 4 exit is met while that question stays open.
+`RunLine` already owns them. P5 retires the handler-order expiry block. P6 retires the queue-head
+expiry block through read ownership at the existing read phases. The planner approved P6
+on 2026-11-04 (decision `2ed14ca2`, routed by the coordinator). Both require their guards and proofs.
 
-An ast-grep pattern cannot resolve arbitrary aliases or helper calls. Each group's syntax rule
-therefore ships with a type-aware ownership check and deep read-only caller types. A pattern
-that checks only names such as `state` would leave the acceptance condition unenforced.
-No PR may substitute such a pattern, add exceptions, or add a baseline to hide outside writes.
+Use ES `#private` fields in one class per owner module. Getters expose read-only values;
+methods perform the owner operations. Aliases and helpers do not acquire a writable reference.
+The ast-grep rules guard escape forms and public mutable fields. No new semantic lint tool
+is part of the primary design. P1 must prove the representation and guards before it expands.
 
 ## Evidence
 
@@ -99,6 +99,8 @@ fields directly in each owning PR; there is no test-only rule exclusion.
 ## Groups and readers
 
 The group boundary follows a decision that reads fields together. Do not group by spelling.
+The issue's queue/slot group is `RunLine` state, not ActiveRun state, so it is outside these
+ActiveRun rules; slice 4.2 (hearsay-tools/cezarion#2521) covers slot release.
 All paths in the owner column are under `workflows/`. The owner writes its group's factory
 initial state too; `createActiveRun` composes those factories. This gives each group exactly
 one writer, including construction. It keeps one ActiveRun construction site.
@@ -137,95 +139,139 @@ one writer, including construction. It keeps one ActiveRun construction site.
 
 ### Representation and commands
 
-Migrate one group per PR. A migrated property is a named group (`state.boundary`, `state.input`,
-etc.) with a deep read-only public view. Its backing writable type and storage stay private to
-the owner. Use `ReadonlyMap`/`ReadonlySet` and read-only nested records, not `Readonly<T>` alone.
-Do not freeze or copy live maps: readers must still see the same current values and iteration
-order. Session objects remain usable AgentSession capabilities; do not make their runner internals
-part of ActiveRun's ownership domain. Only assignment of the session handle belongs to session.
+Migrate one group per PR. Each group is a class defined in its owner module. Its writable
+state lives in ES `#private` fields. `ActiveRun` holds each group in a readonly property.
+Only its owner module implements the class's commands. Do not export writable backing records.
+Getters preserve the current values and live collection order. They do not copy a map/set
+on each access or snapshot it at a new time. Their types use `ReadonlyMap`/`ReadonlySet` and
+read-only nested records. AgentSession is still a runner capability, not owned runner internals.
+A session getter returns that same session object; comparisons keep their identity meaning.
 
-Owners expose narrow commands such as `attachSession`, `retireSession`, `recordConsumed`,
-`acknowledgeFlight`, `rotateCiTurn`, and `clearAutosave`. They do not export mutable references,
-setter callbacks, or `patch(Partial<...>)`. A helper may request an operation. Only the owner
-performs its writes. Cross-group operations call the other owner at the original effect position.
-Keep `RunManager` as the facade under ADR 0053. No durable schema, API payload, event or runner
-protocol changes. Migrating flat internal field reads is part of the same group's PR.
+Owners expose `attachSession`, `retireSession`, `recordConsumed`, `acknowledgeFlight`,
+`rotateCiTurn`, and `clearAutosave`. Commands name an operation, not a generic patch. Cross-group
+operations call the other owner at the old effect position. No setter callback exposes backing
+state. Keep `RunManager` as the facade under ADR 0053. No durable schema, API or protocol changes.
+
+### Nested values and identity
+
+A getter must not return a plain mutable record owned by the group. A read-only TypeScript type
+alone does not stop `Object.assign`: a local pinned-compiler probe accepted both
+`Object.assign(group.invocation, { observed: true })` and the same call through a local alias.
+The representation closes that hole before the syntax guard runs.
+
+| Field or nested value | Form | Baseline reference/write evidence and preservation requirement |
+| --- | --- | --- |
+| `agentInputFlight` | Small `InputFlight` class in the input owner, with private session/IDs/settled/reservation fields and read getters | `input-delivery.ts:341–434` captures `flight` across the ACK promise, compares `state.agentInputFlight === flight`, and changes `wakeReserved`/`settled` in place. Keep one flight object and those identity checks. The owner changes its private fields at the same points, including pre-attachment reservation. `input-receipts.ts:202` still reads its live settled promise. No frozen replacement per mutation. |
+| `usageInvocation` | Small `UsageInvocation` class in the usage owner, with private observed flag and deduplication sets | `usage-accounting.ts:106–153` holds an invocation alias and passes it to `recordCompletedTurnUsage`. Keep one object per epoch and live set membership. Mutations stay in the usage module. |
+| `parkAfterAck` | Frozen owner-created record, replaced as a whole | `turn-settler.ts:113` and `input-delivery.ts:254` assign new values; readers compare its session, not object identity. No member mutation exists in the census. Preserve the same record until its existing replacement/clear point. Freeze this container, never its AgentSession. |
+| `doneRequested` | Frozen owner-created record, replaced as a whole | `run-finish.ts:62`, `completion-policy.ts:54`, `turn-settler.ts:59–67` set/read/clear it. Keep session identity and summary; there is no member mutation or across-await member update. |
+| `nextStep` | Frozen owner-created record, replaced as a whole | `step-session.ts:266,310`, `continuation-session.ts:602`, `turn-nudges.ts:130` scope it to the same session and label. Keep that session, label and clear point. |
+| `doneClose` | Frozen owner-created record, replaced as a whole | `turn-settler.ts:67–78` creates/reads it; no member mutation. Freeze only its scalar value container. |
+| `delegationSettings` | Owned immutable cloneable value record; nested owned option arrays/account-binding data are immutable values | `step-session.ts:105`, `continuation-session.ts:331` replace the whole record. `delegation/execution-settings.ts:18` clones that value, not ActiveRun. The getter must return the same plain structured-cloneable value, not the group class. Freeze only owner-created value containers; do not freeze shared account/catalog objects. If an input container is shared, construct the owner value once on assignment, not on each read; prove no reader compares that container's identity. |
+| `backgroundChildren` map values | Frozen owner-created `{ session, status }` records replaced by `set` | `subagent-waits.ts:90–93` reads the old entry and writes a new record. Preserve the entry's session identity and status; do not freeze session internals. |
+| Maps/sets in usage, input and session groups | Stable live read-only collection views of private collections | No content copy. Getters expose only read operations; the view observes owner mutations immediately and keeps stable identity. If returning the native collection leaves an unguarded mutation path, use a stable read-only facade backed by the same private collection, never a snapshot. P1 proves this and all mutating escape fixtures before later groups move. |
+| `skills` array and Skill records | Stable read-only catalog view; catalog discovery/replacement stays in `RunSkills` | Do not freeze shared catalog entries or change `enabledSkills` filtering time. A view must not expose a mutable nested Skill record; use read getters backed by the same entry where the catalog shares objects. Prove body/files/source reads stay the same. |
+| `bundledInputIds`, flight `inputIds` | Owner-created immutable ID sequence | Bundled IDs are replaced/cleared (`input-receipts.ts:96,121,139`); flight IDs are read throughout ACK. Do not mutate a caller-owned array. Keep stable identity throughout one flight; no read-time copies. |
+
+The classes for mutable nested records do not expose public mutation methods to readers. Their
+owner has the write capability; readers see a getter-only interface. Frozen replacement values
+are made once at their existing assignment points. This adds no new read phase, timer or await.
+A stable collection facade is a live view of the same backing object, not a copied collection.
+Test equality and iteration explicitly before choosing the native view or facade in P1.
+
+### Copy and fixture sweep
+
+Searches over `packages/cezar/src` found no production clone/serialization of ActiveRun itself.
+`structuredClone(state.delegationSettings)` at `delegation/execution-settings.ts:18` clones one
+plain value. It stays cloneable through the session getter; retain the clone-is-independent test.
+Do not pass a group instance to `structuredClone` (private state would not survive).
+
+Tests do spread or copy ActiveRun: `autonomous-nudge-guards.test.ts:131`,
+`ci-wait-registration.test.ts:33,54`, and `delegation/input.test.ts:117,174`
+(`Object.assign(createActiveRun(...), state)`). Replace these fixtures with a new factory-built
+ActiveRun and explicit owner commands. A state replacement must use new group instances, so
+old callbacks still fail the old-state identity check. A spread of a group would lose its
+private state; never preserve a fixture by casting that spread. Other `...state` matches in
+conversation, mapper, voice and automation code refer to other types and stay unchanged.
+Repeat the sweep on each starting main; search aliases and all ActiveRun construction sites too.
+
+`cwd` changes at `step-loop.ts:143`; `autonomous` changes at `memory-guard.ts:56`. Neither is
+construction-only. `interrupt` swaps at `repo-root-lease.ts:45–55`: preserve installation before
+park/release and restoration inside the existing finally, before unpark. `writeInput` likewise
+restores `writingInput` in its current synchronous finally. Add explicit order tests for both.
 
 ## Guards with no baseline
 
-Each row adds one ast-grep rule in `.ai/ast-grep/rules/` and matching valid/invalid cases in
-`.ai/ast-grep/rule-tests/`. All scan production **and tests**, with no baseline file. The allowed
-path is the owner alone. Factory code calls the owner's constructor; it is not an exception.
+Each row adds one ast-grep rule and valid/invalid fixtures. Rules scan production and tests.
+No baseline file or suppression is allowed. The writing module contains the owner class and
+all its command implementations, including initial values. `createActiveRun` calls constructors.
 
-| Rule id | Group | Allowed path |
-| --- | --- | --- |
-| `active-run-session-write-outside-owner` | `session` | `packages/cezar/src/workflows/run/live-session-state.ts` |
-| `active-run-boundary-write-outside-owner` | `boundary` | `packages/cezar/src/workflows/run/turn-boundary.ts` |
-| `active-run-input-write-outside-owner` | `input` | `packages/cezar/src/workflows/run/input-delivery.ts` |
-| `active-run-wait-write-outside-owner` | `wait` | `packages/cezar/src/workflows/run/wait-registry.ts` |
-| `active-run-children-write-outside-owner` | `children` | `packages/cezar/src/workflows/run/subagent-waits.ts` |
-| `active-run-usage-write-outside-owner` | `usage` | `packages/cezar/src/workflows/run/usage-accounting.ts` |
-| `active-run-skills-write-outside-owner` | `skills` | `packages/cezar/src/workflows/run/run-skills.ts` |
-| `active-run-autosave-write-outside-owner` | `autosave` | `packages/cezar/src/workflows/run/worktree-autosave.ts` |
+| Rule id | Owner class module (under `workflows/`) |
+| --- | --- |
+| `active-run-session-write-outside-owner` | `run/live-session-state.ts` |
+| `active-run-boundary-write-outside-owner` | `run/turn-boundary.ts` |
+| `active-run-input-write-outside-owner` | `run/input-delivery.ts` |
+| `active-run-wait-write-outside-owner` | `run/wait-registry.ts` |
+| `active-run-children-write-outside-owner` | `run/subagent-waits.ts` |
+| `active-run-usage-write-outside-owner` | `run/usage-accounting.ts` |
+| `active-run-skills-write-outside-owner` | `run/run-skills.ts` |
+| `active-run-autosave-write-outside-owner` | `run/worktree-autosave.ts` |
 
-Use this exact syntax-pattern family for each group G (replace `boundary` below with G).
-`$FIELD` is constrained to that group's table, plus its group property for replacement writes.
-The real YAML must include both member and subscript AST forms, including optional forms.
-Do not restrict the receiver to a variable named `state`.
+ES private fields make `s.#value`, `s['#value']`, a renamed receiver, destructuring, or a helper
+parameter unable to reach the backing state. Getter-only interfaces refuse direct assignments,
+delete, updates, augmented assignments and collection mutation calls. A helper must accept a
+read view or call an owner operation. It cannot accept a writable backing type that is not exported.
+Runtime getter-only nested classes/frozen value records also stop aliased Object.assign from
+changing an owned record. Do not claim the compiler alone rejects Object.assign.
+
+The syntax rule guards the remaining escapes. This is the exact pattern family to instantiate
+for each group's class/view/getter names; G denotes that group's names, not a receiver spelling:
 
 ```yaml
-# Sketch: match targets, then exclude only the exact owner file by files/ignores.
 any:
-  - pattern: $OBJ.boundary.$FIELD = $VALUE
-  - pattern: $OBJ.boundary[$KEY] = $VALUE
-  - pattern: delete $OBJ.boundary.$FIELD
-  - pattern: $OBJ.boundary.$FIELD++
-  - pattern: ++$OBJ.boundary.$FIELD
-  - pattern: $OBJ.boundary.$FIELD.set($$$ARGS)
-  - pattern: $OBJ.boundary.$FIELD.add($$$ARGS)
-  - pattern: $OBJ.boundary.$FIELD.delete($$$ARGS)
-  - pattern: $OBJ.boundary.$FIELD.clear()
-  - pattern: Object.assign($OBJ.boundary, $$$ARGS)
+  # Cast syntax, including imported view aliases and a getter as the operand.
+  - pattern: $VIEW as Map<$$$T>
+  - pattern: $VIEW as Set<$$$T>
+  - pattern: $VIEW as any
+  - pattern: $VIEW as unknown
+  - pattern: $VIEW as unknown as $TYPE
+  - kind: type_assertion  # <Map<...>>view and other angle assertions
+  # Target-copy escapes. Include direct getter, bracket getter, and local alias cases.
+  - pattern: Object.assign($VIEW, $$$ARGS)
+  - pattern: Object.defineProperty($VIEW, $$$ARGS)
+  # Public class fields: only #private state and get accessors are valid storage.
+  - kind: public_field_definition
 ```
 
-Also match all augmented assignments (`??=`, `||=`, `&&=`, arithmetic and bitwise operators),
-decrement, optional mutation calls, a whole-group replacement, destructuring assignment targets,
-and nested member paths (for example `usageInvocation.startedTurns.add`). Use AST kinds
-`assignment_expression`, `augmented_assignment_expression`, `update_expression`,
-`unary_expression`, `call_expression`, `member_expression`, and `subscript_expression` to
-avoid a separate pattern for each operator. Constant and nonconstant subscript keys must both
-be checked. Do not silently drop dynamic writes.
+Constrain cast and target-copy matches with AST relations to a group view/getter or a bound
+local alias, including a destructuring binding. Include imported type aliases and typed helper
+parameters in rule fixtures. Public-field matches are constrained to the owner class, even
+inside its module; readonly public storage that contains a mutable record is invalid too.
+Match computed getter access and all type assertions, not only `as Map`. Also reject an
+Object.assign source spread used to copy a writable target/view. Plain `{ ...view }` as a detached
+read snapshot is not itself a state mutation, but it must never be cast back into a group.
 
-**Alias and helper closure:** the YAML family alone cannot catch `const b = state.boundary;
-b.doneRequested = ...`, `const { unreadInputIds: ids } = state.input; ids.add(id)`, or a helper
-that takes that map. Its same-PR companion, `active-run-ownership` in the repository lint
-runner, uses the TypeScript checker to resolve the target type's group identity, including
-indexed access types, imported aliases and helper parameters. It classifies assignment,
-update, delete, destructuring targets, collection calls and `Object.assign` targets before
-checking the owning source path. Brand writable backing types by group; never export them.
-The check also rejects a cast to a writable group or `any`/`unknown` escape from a group view,
-a mutable-return helper, and a callback that exposes a backing object. Unsupported target
-provenance is an error, not an ignored match. Legitimate read aliases stay valid.
+The patterns are a second line of defense. They do not perform arbitrary interprocedural
+analysis. The private/frozen/getter-only representation must prevent mutation even if a
+renamed aliased record escapes a syntax match. A rule must not be presented as catching
+arbitrary data flow. If P1 cannot meet this boundary with live views and no behavior change,
+stop before moving another group and report the exact counterexample to the coordinator.
+A TypeScript-checker companion is fallback scope only. It requires a new planner decision,
+package-area review, a feasible library API (the pinned TS7 compiler is native), and cost evidence.
+It is not authorized by this spec and is not a dependency of P1–P6.
 
-Deep read-only types refuse the ordinary alias/helper writes at typecheck. The ownership lint
-check detects attempts to strip those types. This is an added guard, not a new baseline or
-allowlist. The eight YAML rules provide local, fast diagnostics; the semantic check provides
-the promise they cannot make alone. P1 must prove the checker integration on one group before
-any later group is migrated. If the planner requires ast-grep alone to provide arbitrary
-cross-module data-flow checking, that requirement is not feasible with the present scanner.
-Do not call a name-only rule equivalent.
+P1 prototypes this on the usage group first. Compile direct/alias/destructuring/helper/bracket
+mutation fixtures as expected errors. Exercise runtime attempts against nested getters and
+frozen values to prove no owner state changes. Test `as Map`, `as Set`, `as any`, double casts,
+angle assertions, getter aliases, helper parameters, Object.assign, spread-into-target, and a
+new public mutable field in the group's rule cases. Use unrelated objects and plain read aliases
+as valid cases. A test-only injected cast write must make the usage rule fail; remove it and
+require the zero-match scan. No new compiler-library dependency is needed.
 
-Guard fixtures must include direct, renamed receiver, whole-object alias, destructured alias,
-nested typed alias, imported mutating helper, callback, chained initialization/mutation,
-optional call, bracket access, `Object.assign`, delete, increment, and forged mutable cast.
-For each form, an outside write is invalid and the owner command is valid. Add negative cases
-for unrelated objects with the same property name and read aliases. Compile invalid alias
-fixtures as expected diagnostics; do not put failing TypeScript into production tests.
-
-The PR that adds each rule moves **every** outside write for that group, updates every test
-fixture, and proves zero matches without update mode. Record a red scan on the baseline or an
-injected outside write, then a green scan on the changed head. Keep compiler diagnostics and
-semantic-lint proofs separate from ast-grep fixture results.
+Every later group's PR moves all its outside writes, updates all fixture copies/readers and
+adds its guard in the same commit series. It must pass with no baseline. P1 replaces the
+Appendix A census with enforced owner boundaries; the census remains historical evidence,
+not a committed developer tool. This design PR commits only this Markdown file.
 
 ## Turn-boundary transition
 
@@ -318,7 +364,7 @@ category; do not add it during extraction. Outcome includes the current heartbea
 | monitoring | commit fails | withdraw alias → attempt commit → reread facts → park; no timer arm | `failed timer checkpoint leaves it unarmed before carrying out the park` |
 | UI turn completed (`session-events.ts:150–156`) | fresh/Continue | retire unread → consume bundled → clear wake-turn → set boundary → rotate CI identity | new `fresh and continued completion preserve receipt-before-boundary order` |
 | UI activity (`session-events.ts:263–318`) | parent/child/native ask | persist usage/UI → child tracking → reply content → activity clears boundary → permission/ask or spontaneous resume | new `parent activity invalidates boundary after persisted UI and child tracking`; retain child-only negative case |
-| ACK (`input-delivery.ts:376–434`) | success/reject/stale | current check → atomic outcome checkpoint → refund/charge/resume/receipt effects → clear flight → unread bound → flush input → late boundary settlement; reject follows existing fail path | new `ack effects follow commit before boundary settlement`; `input-receipt-boundaries.test.ts` for callback session lookup |
+| ACK (`input-delivery.ts:376–434`) | success/reject/stale | current check → analyseAcknowledgedInput (including retiredInFlight.delete before checkpoint) → atomic outcome checkpoint → refund/charge/resume/receipt effects → clear flight → unread bound → flush input → late boundary settlement; reject follows existing fail path | new `ack analysis retires markers before commit and effects follow commit before boundary settlement`; `input-receipt-boundaries.test.ts` for callback session lookup |
 | ready (`input-delivery.ts:308–328`) | pending/absent boundary | current checks → flush durable input → retry autonomous boundary or settle ACK | `autonomous-nudge-guards.test.ts`: `refused ordinary input waits for readiness without charging the cap or releasing capacity`; add order-log assertion |
 | unread/held timers (`input-delivery.ts:229–299`) | stale/current/never drains | validate captured session → retire/retry input or mark expiry → restore boundary → re-settle; preserve notes and bounds | `held-human-input-liveness.test.ts`: `re-settles a DONE boundary after holdsHumanInput flips false without a new turn`, `expires a hold that never drains and settles with an unconfirmed-read note`; add unread order row |
 | tool done (`run-finish.ts:40–65`) | accepted/refused/stale | session check → root Finish gate → question gate → completion refusal → retain done request | new `done admission keeps gates before boundary request` plus U20/U22/R13/R17 |
@@ -333,25 +379,27 @@ A site without a row blocks P5. Preserve synchronous return values and throw bou
 
 ## Implementation PRs
 
-Land P1–P5 **in order**, each into current `main` after the preceding PR merges. No stack or
+Land P1–P6 **in order**, each into current `main` after the preceding PR merges. No stack or
 integration branch. The phase prerequisite remains slice 3.3 accepted on main. These PRs are
 not dispatched until the planner approves this spec and the coordinator assigns regions.
 All region numbers below are baseline lines, not reservations for parallel edits.
 
-Every PR runs its group rule fixtures, zero-match scan, semantic ownership cases, focused tests
+Every PR runs its owner/escape rule fixtures, zero-match scan, encapsulation cases, focused tests
 below, root lint and typecheck. Every PR that touches wait/turn-end/failure/step settlement or a
 parity fixture runs `npm run test:parity`. Unit results use Squeal where it validates; use the
 repo parity command for its required gate. Every new guard/test gets recorded red/green proof.
 
 | PR | Files and baseline regions; new files | Guard added | Focused and parity proof | Expiry block deleted |
 | --- | --- | --- | --- | --- |
-| P1: accounting and observation | `active-run.ts:12–14,119–140,172–181`; `run/usage-accounting.ts:13–27,33–47,105–153`; `run/subagent-waits.ts:63–96`; `run/run-skills.ts:38–76`; all usage/skills/children reader sites in evidence table; lint runner and rule fixtures | usage, children, skills rules; semantic ownership checker first | usage/accounting and skills tests; `team-skill-materialize.test.ts`; subagent wait tests; full `npm run test:parity` for shared fixtures. Prove alias/helper/cast checks before proceeding | None |
+| P1: accounting and observation | `active-run.ts:12–14,119–140,172–181`; `run/usage-accounting.ts:13–27,33–47,105–153`; `run/subagent-waits.ts:63–96`; `run/run-skills.ts:38–76`; all usage/skills/children reader sites in evidence table; lint runner and rule fixtures | usage, children, skills rules; usage encapsulation prototype first | usage/accounting and skills tests; `team-skill-materialize.test.ts`; subagent wait tests; full `npm run test:parity` for shared fixtures. Prove private-state, nested getter, alias/helper/cast checks before proceeding | None |
 | P2: session ownership | `active-run.ts` session fields; `run.ts:260–276,400–408`; `run/step-session.ts:105–125,244–269,304–317`; `run/continuation-session.ts:331,431,498–521,583–604,637–638`; `run/step-loop.ts:143,220,278–306,504`; `run/run-cancel.ts:55–59`; `run/launch-context.ts:164–172`; `run/repo-root-lease.ts:38–59`; `run/drop-active.ts:6–10`; `run/session-events.ts:103–190,280–302`; new `run/live-session-state.ts` | session rule | fresh/Continue receipt boundaries, cancellation, root lease, no-session cancellation and run-exit tests; parity U6s/U9w/U22. Move only session-group writes in listed regions | None |
 | P3: input ownership | `active-run.ts:24–61,131–133,144–149`; `workflows/input-acknowledgement.ts:23`; `run/input-delivery.ts:86–101,229–299,332–434`; `run/input-receipts.ts:26–139`; `run/input-timers.ts:1–14`; `run/opening.ts:29`; `run/compose.ts:265`; fresh/Continue input setup `:125`/`:521` | input rule | input receipt/ACK tests, input consumption, held-human liveness, queued input, input-ready tests; parity U3w/U9w/U15 and input-delivery cells for each runner | None |
 | P4: wait identity and autosave | `run/wait-registry.ts:95,118,152,213,247`; `run/cezar-tools.ts:123`; `run/session-events.ts:155`; `run/input-timers.ts:45`; `run/worktree-autosave.ts:138`; ActiveRun factory/view; callers clearing autosave | wait, autosave rules | wait/tool-generation and autosave tests; parity wait registration/cancel/restart cells on each runner. Keep actual timer clear at current teardown position | None |
 | P5: boundary owner | new `run/turn-boundary.ts`; `run/turn-settler.ts:54–497`; `run/turn-nudges.ts:44–216`; `workflows/completion-policy.ts:52–65`; `run/input-delivery.ts:179–180,253–254,355,519–522,605–615`; `run/input-timers.ts:30–37`; `run/session-events.ts:153–155,272–274,318`; `run/step-session.ts:112,266,310–314`; Continue next-step and pending-ask writes `:469,602`; `run/human-waits.ts:28–29,105`; `run/run-finish.ts:62`; `run/run-settlement.ts:131`; `run/step-loop.ts:391`; `run/wake-admission.ts:414`; `run/subagent-waits.ts:131`; `run/memory-guard.ts:56`; `run/compose.ts:266`; skill block at baseline `load-bearing-change/SKILL.md:65–71` | boundary rule, all entry-path order tests | full order table; `autonomous-nudge-guards.test.ts`, `held-human-input-liveness.test.ts`, `input-receipt-boundaries.test.ts`; parity U6s/U15/U20/U22/U22s/U3w/U9w/R13/R17 plus existing wait/done cells on every runner | Handler-order block and its marker, only after every row and zero outside writes pass |
+| P6: launch read ownership | New `run/launch-read-resolver.ts`; source regions, read forms and tests listed in the P6 section below; skill queue-head block at baseline `:35–42` | `launch-read-outside-resolver`, source-capability/alias fixtures | held-head and phase-gate fixtures for every mutable source; unchanged `team-skill-materialize.test.ts`, `agent-profile-wiring.test.ts`, model identity and queued input tests; `npm run test:parity` | Queue-head block and its marker, with zero off-owner reads and timing proof |
 
-Shared-file writes make these serial landing units even though groups are distinct. Allow one
+Each PR re-measures its regions on the current main it starts from; the baseline regions are
+not reusable coordinates after a merge. Shared-file writes make these serial landing units even though groups are distinct. Allow one
 implementation worker per PR by default. At most two workers may touch any hot file, and only
 with assigned regions at least 40 lines apart. Closely spaced `step-session` and input regions
 cannot run in parallel. P5 owns all of `turn-settler` and the relevant skill block; reserve that
@@ -361,8 +409,9 @@ while slice 4.2 or 4.3 has an assigned overlapping region.
 ## Behavior-neutral proof
 
 No existing test's expected observable outcome changes. Each migration records old site,
-command, order-table row and focused/parity cell in its PR body. The evidence table is the
-starting inventory; every 209 site must either move or already be in its owner. Constructor
+command, order-table row and focused/parity cell in its PR body. The input owner command `analyseAcknowledgedInput` must preserve `input-acknowledgement.ts:23`
+retired-marker deletion before commitOutcome, including when the commit fails; it is not moved
+into post-commit receipt effects. The evidence table is the starting inventory; every 209 site must either move or already be in its owner. Constructor
 values and absent-optionals get separate checks for fresh, Continue and restart paths.
 
 - Session/input proof covers stored status/step fields, receipt durability and rejection,
@@ -385,7 +434,7 @@ values and absent-optionals get separate checks for fresh, Continue and restart 
   evidence. Do not add sleeps, retries or longer timeouts.
 
 A guard proof injects an outside write in a disposable worktree and requires the intended rule
-or semantic diagnostic. An order regression swaps/removes one effect and must fail its named
+or encapsulation diagnostic. An order regression swaps/removes one effect and must fail its named
 order test, then pass restored. Existing behavior tests may stay green before and after; label
 them behavior guards, not regression proof. Follow `docs/sdlc/regression-proof.md`.
 No full local suite is required for this docs-only design PR.
@@ -403,44 +452,148 @@ The new ACK/UI/timer/launch rows are required. Current `turn-settler.test.ts` al
 A swapped checkpoint/timer/ask operation must fail its order test; a restored outside write must
 fail the owner guard. If any path lacks that proof, keep the block and report P5 incomplete.
 
-### Queue-head block: candidate tested, scope decision needed
+### P6: phase-aware launch-read ownership (planner approved)
 
-Protection today: a queued run must use values at the same points as before a queue-boundary
-change. An ActiveRun write rule cannot protect this read contract.
+The planner approved this PR as required scope (decision `2ed14ca2`). Keeping the queue-head
+block indefinitely is not the accepted exit. P6 deletes the block and its marker with the fix.
+The resolver owns **where** values come from, not **when** they are read. Each call remains at
+its current point, on the same side of every await, gate and callback. Nothing is read earlier.
 
-The coordinator proposed (a) ID-only entries and (b) one named launch function that reads every
-mutable launch setting/catalog/account/runner/model from store/live sources, with an outside-read
-rule. Source-level checks against the baseline give this result:
+Add `workflows/run/launch-read-resolver.ts` as the single owner of launch source selection.
+Its named operations are `atTaskHead`, `atStepOpen`, `atContinue`, and `atLiveInput`.
+Each is a set of narrow read operations called at the original read points, not one eager
+read-all snapshot. A caller can request `resolveStepModel` after an earlier await, then
+`resolveStepProfile` later as today. It must not preload the second value in the first call.
+Move bodies, not calls. Existing `RunSkills`, `QueuedInput` and session adapters invoke the
+resolver at those same points; their observable work and error handling stay in order.
 
-| Candidate | Evidence | Result |
-| --- | --- | --- |
-| (a) queue entries are run IDs | `run/run-line.ts:54` is `string[]`; `enqueueJob` at `:375` takes an ID, but retains `{ workflow, input, startAt }` in `pendingJobs`; continuations have their own payload map | Entry identity holds. ID-only queue type alone does not prohibit an enqueue-time settings snapshot in a side map. Add a negative type/guard fixture for non-ID entries if this candidate proceeds. |
-| (b) one launch read from current sources | `run/run-start.ts:164–191` launches `job.workflow` and hydrated `job.input`; `run/queued-input.ts:68–92` refreshes task/attachments but spreads original input; `run/step-loop.ts:64–81` reads config, then chooses `input.runner`, `input.systemPrompt`, `input.model` | Does not hold. Some authored inputs are deliberately pinned. A stored workflow definition also preserves ad-hoc workflows across restart (`run-start.ts:96–99`). |
-| account/model read phase | `run/step-session.ts:92–97` resolves step model/profile after task launch; `run/launch-settings.ts:43–48,115–130` distinguishes authored/pinned model from live provider lookup | Task launch and each step are different read boundaries. One eager snapshot moves live reads earlier. |
-| catalog removal/deselection | `run/run-skills.ts:38–59` discovers on start/Continue but filters disabled skills/sources on each prompt; `step-session.ts:160,179` reads enabled skills again | One launch snapshot would change a later step and live `/name` after deselection. |
+Queue identity remains `RunLine.queue: string[]` (`run-line.ts:54`); pending job/continuation
+maps retain the accepted workflow/input recipe. The resolver distinguishes authored pins,
+durable amendments and live settings. It never replaces an authored input with a current
+default, re-resolves an ad-hoc workflow by name, or turns the accepted job into a live catalog
+lookup. Queue IDs alone cannot prove this: `pendingJobs` can still contain a stale live value.
 
-This is a source test of the candidate, not a runtime experiment and not a claim of a failing
-product test. Existing `team-skill-materialize.test.ts` cases `a later step does not run a skill
-switched off while an earlier step ran`, `a live /name of a team skill switched off during the
-run is not expanded`, and `a companion switched off after the run started is not installed on
-Continue` pin why those later reads cannot move into an eager task-launch snapshot.
-`agent-profile-wiring.test.ts` also pins that a recorded step profile wins over changed defaults.
+#### Read inventory method
 
-A shared resolver module could preserve these distinct phases by exposing task-head, step-open,
-Continue and live-input operations. It must keep pinned inputs distinct from live values and
-must not cache later reads at enqueue or head. That is a broader read-ownership design, not
-proof that one launch-time snapshot works. No implementation PR in P1–P5 deletes this block.
-The coordinator must route this gap to the planner: approve that behavior-neutral multi-phase
-resolver/guard as added scope, or keep the block and revise the phase exit. This design does
-not authorize a behavior change or claim a weaker guard replaces the rule.
+At the starting main, use the TypeScript AST parser from Appendix A to enumerate member,
+bracket and destructured reads on `PendingJob`, `PendingContinuation`, `StartRunInput`,
+`WorkflowDef`, launch config, step identity, profiles and skill-selection records. List source
+imports and calls to loadConfig, model/provider/profile selection, skill discovery/off-list and
+attachment reads. Follow each returned alias/helper parameter until it becomes a launch value.
+Record file:line, source, pin/live policy, phase, call point, await position, error behavior,
+resolver operation and test. Review computed keys and dynamic imports manually; none may be
+ignored by the guard. Grep is a cross-check, not the inventory. This is P6's checked read ledger,
+committed with that implementation's tests; do not treat the current table as a complete
+future-main count. The AST census alone does not enforce read ownership.
 
-If extra scope is approved, its separately reviewed PR must list every source/read phase,
-centralize the reads without moving their call points, refuse off-owner reads, and add held-head
-fixtures that edit/remove/deselect each mutable source before releasing the head. Red proof
-must replace a late read with the enqueue snapshot and fail the intended assertion. Only that
-PR may delete `Preserve queue-head reads when changing queue boundaries...` and its marker.
-A PR number and complete read inventory are not available yet; this remains an explicit exit
-blocker for planner review, not a promised follow-up that counts as completion.
+#### Value and phase case table
+
+TH means task head after dequeue; SO means each step open; C means Continue; LI means live
+input into an existing session. A phase with no source read is explicit: P6 must not add one.
+New tests below live in `workflows/run/launch-read-resolver.test.ts` and
+`workflows/launch-read-boundaries.test.ts`. Existing tests keep their expected outcomes.
+
+| Value | Read phase | Current source and pin/live policy | Test that pins it |
+| --- | --- | --- | --- |
+| Workflow | TH | accepted `job.workflow`, persisted `workflowDef` for restart; `run-start.ts:96–99,191`. Do not look up the name in a changed catalog | new `task head keeps accepted ad-hoc workflow after catalog edit and removal` |
+| Workflow | SO | current accepted execution's `workflow.steps`; no catalog refresh | new `later step keeps accepted workflow definition` |
+| Workflow | C | stored workflow definition/owning step selected by continuation setup | new `Continue uses stored owning workflow after catalog removal`; existing non-final done parity U6s |
+| Workflow | LI | no workflow lookup; existing open session receives input | new `live input does not reload workflow` |
+| Input recipe | TH | accepted `job.input` plus current durable task/message/attachment amendments; `queued-input.ts:68–92` | new `task head keeps accepted input pins and refreshes amendments` |
+| Input recipe | SO | accepted execution input and authored step overrides; no wholesale refresh | new `step open keeps accepted input recipe` |
+| Input recipe | C | hydrated pending continuation plus current `continuationMessage` and task/message stack (`queued-input.ts:99–131`) | new `queued Continue refreshes edits without dropping continuation pins` |
+| Input recipe | LI | current delivery content and durable queue, not original opening input | new `live input delivers current queued content` |
+| Task text | TH | current `run.task` plus current `queuedMessages`, folded at hydration (`queued-input.ts:69–73`) | new `task head sees edit and queued-message removal while held` |
+| Task text | SO | prepared task/prompt and step substitution at its existing point; no new record refresh | new `later step preserves existing task substitution point` |
+| Task text | C | current amended task plus continuation text (`queued-input.ts:109–113`) | new `queued Continue sees amended task and prompt` |
+| Task text | LI | message content/durable input queue at send time; task record is not rewritten | new `live text delivery leaves task record unchanged` |
+| Attachments | TH | original live blocks when available, otherwise persisted URLs; stacked URLs re-read and stat-checked at hydration (`queued-input.ts:75–92,134–160`) | new `task head honors attachment removal and replacement`; include persistence-failed live-block path |
+| Attachments | SO | prepared attachment set at current step call point, not an eager new disk scan | new `step attachment read stays at its current point` |
+| Attachments | C | persisted queued URLs read at continuation hydration (`queued-input.ts:114–126`) | new `queued Continue omits deleted attachment` |
+| Attachments | LI | current pasted blocks persisted by current message path | new `live attachment uses current message content` |
+| Runner | TH | accepted `input.runner` else config default at `step-loop.ts:64–71`; account hold gate reads fallback during pump (`run-line.ts:246–257`) | new `held task reads current default runner but retains an explicit runner`; keep two separate read points |
+| Runner | SO | authored `step.runner ?? taskBackend` (`step-session.ts:88`) and worker step identity | new `step runner override remains pinned` |
+| Runner | C | recorded backend/owning step and existing continuation transport choice (`launch-settings.ts:88–105`) | new `Continue retains owning runner and transport` |
+| Runner | LI | current session/delegation settings; no backend reselection | new `live input uses current session runner` |
+| systemPrompt | TH | explicit input override wins, else live config default; worker pin path preserved (`step-loop.ts:78–80`) | new `held task reads current system prompt default and keeps explicit override` |
+| systemPrompt | SO | existing launch/step prompt assembly, same extra prompt value and selected skill reads | new `step prompt preserves task extra-prompt pin` |
+| systemPrompt | C | current continuation setup reads recorded/worker settings at its current point | new `Continue keeps recorded extra prompt and worker pin` |
+| systemPrompt | LI | current slash expansion/message; no session system prompt rewrite | new `live input does not replace opening system prompt` |
+| Model/effort | TH | accepted model/effort pins plus live model-lock/provider lookup; `step-loop.ts:81`, `launch-settings.ts:115–128` | new `held task preserves model pin and reads provider policy at launch` |
+| Model/effort | SO | worker step identity else authored step override else accepted input; live provider/lock lookup (`launch-settings.ts:140–190`) | `model-identity-wiring.test.ts`; new `step open reads provider policy after preceding step` |
+| Model/effort | C | stored owning step/run pin and live lock/provider lookup (`launch-settings.ts:35–81`) | `model-identity-wiring.test.ts`; new `Continue retains authored model and reads current policy` |
+| Model/effort | LI | no model reselection in ordinary message send; child delegation selection is its existing separate operation | new `ordinary live input does not resolve a model again` |
+| Agent profile | TH | per-run account pin persisted at enqueue (`run-start.ts:76–79`), current account/hold check at pump and startExecution | new `held task retains per-task account while current hold changes`; keep both gates |
+| Agent profile | SO | recorded step profile/worker identity, then project/default resolution at `session-events.ts:164–182`, called by `step-session.ts:97` | `agent-profile-wiring.test.ts`: `a RECORDED step profile wins over everything — resume must not follow a changed default`; new `step open sees changed default and deleted account fallback` |
+| Agent profile | C | owning recorded profile wins; continuation passes existing step/session identity at `continuation-session.ts:293` | `agent-profile-wiring.test.ts`: `keeps a Continue on the account the step recorded, whatever the project uses now` |
+| Agent profile | LI | current session profile; no ordinary message account reselection | new `live input keeps current session account` |
+| Skills | TH | discover run registry at existing start point (`run-skills.ts:38–46`), selected skill reads remain at prompt preparation | new `held task discovers current skill body and source availability` |
+| Skills | SO | current off-list/source filtering on run registry at each prompt (`run-skills.ts:56–61`; `step-session.ts:160,179`) | `team-skill-materialize.test.ts`: `a later step does not run a skill switched off while an earlier step ran` |
+| Skills | C | discover at Continue with current throw/ignore policy, then current enabled selection | `team-skill-materialize.test.ts`: `a companion switched off after the run started is not installed on Continue` |
+| Skills | LI | live slash expansion/provision uses current disabled skill/source settings | `team-skill-materialize.test.ts`: `a live /name of a team skill switched off during the run is not expanded` |
+
+Task-head includes several current boundaries, not one transaction: pump admission, dequeue
+hydration, task preparation and spawn-time gate. Keep each one. The profile/runner row must
+not merge the pre-dequeue and pre-spawn account gates. The same principle applies to different
+await positions inside step and Continue setup. Test absence/deletion at the phase where it
+already takes effect; do not make a pin live merely to satisfy a held-head assertion.
+
+#### Read rule, regions and proof
+
+P6 adds `launch-read-outside-resolver` with no baseline and no exceptions. It is a read rule,
+not an ActiveRun write rule. Its YAML covers `workflows/run.ts` and `workflows/run/**`; only
+`run/launch-read-resolver.ts` may import/call launch source selection APIs or unpack raw launch
+source fields. Move relevant source adapters into that owner. Callers receive resolved values,
+not the raw source record; owner-only wrappers keep source selection out of handlers.
+
+The pattern families are: imports/re-exports of source selectors (including renamed imports),
+member/subscript/destructuring reads of workflow/input/config/record launch fields at the
+selection seams, and calls through a local imported alias. Include optional reads, defaulted
+bindings, helper parameters and computed keys found in the read ledger. Each fixture corresponds
+to a ledger form. The rule must distinguish a raw source read from reading an already-resolved
+value. Narrow capability interfaces keep raw inputs inside the resolver; methods return the
+chosen value at the old point. The class/adapter boundary must make an alias unable to expose
+a raw source. Do not claim ast-grep can resolve arbitrary helper data flow. If the prototype
+cannot close a found form without exceptions, stop and route the concrete gap before landing.
+
+Add both positive fixtures for resolver operations at each phase and negative fixtures for
+each off-owner source read, imported alias, destructured/bracket read and helper form. Scan
+the full scoped source tree at zero matches. No source reader may remain as an ignored match.
+Run the rule fixtures, compiler checks, focused tests below, and `npm run test:parity` for the
+run paths touched. P6 must preserve all existing tests, including both suites named by the planner.
+
+Baseline regions: `run-line.ts:140–171,200–269,288–310,375–382`;
+`run-start.ts:61–105,164–191`; `queued-input.ts:68–160`;
+`step-loop.ts:60–99`; `step-session.ts:88–105,150–180`;
+`continuation-session.ts:160–185,240–335`; `launch-settings.ts:14–190`;
+`session-events.ts:164–182`; `run-skills.ts:27–61,125–153`.
+Add `launch-read-resolver.ts`, its rule/fixtures, `launch-read-resolver.test.ts`, and
+`launch-read-boundaries.test.ts`. Re-measure all regions on P6's starting main. P6 runs after
+P5; do not edit these hot regions in parallel with 4.2 or overlapping 4.3 batches.
+
+Held-head fixtures use a product release gate: hold the first task, queue the second, change
+the source, release, and observe the second task's actual runner input/store/events. For workflow
+and explicit input pins, assert the accepted value survives catalog changes. For task text and
+queued input, edit and remove queued messages. For attachments, replace and remove persisted
+files and cover the original-live-block fallback. For runner/systemPrompt/model policy/profile,
+change the default and remove the selected resource where supported; keep explicit pins and
+current fallback/error behavior. For skills, edit body, remove a source, and deselect skill/source.
+Repeat for queued Continue. For SO and LI reads, add a second release gate at the current phase,
+then change the source after task head; a task-head fixture alone cannot pin a later read.
+
+Red proof is a **test-only patch** that captures each live source at enqueue and feeds that
+snapshot to the original later call. It must fail each corresponding live-source fixture.
+For deliberate pins and no-read phases, the paired fixture is a behavior guard; add an
+opposite-policy mutant (re-resolve a pin or add a new read) and require that fixture to fail.
+Do not claim an enqueue snapshot can fail a field deliberately pinned at enqueue: the planner's
+stale-snapshot proof applies to the mutable late source, not accepted authored values. Record
+source, phase, mutation patch, failing assertion, red command and fixed green command in the
+PR body. All existing team-skill/profile tests stay unchanged and pass.
+
+P6 then deletes `Preserve queue-head reads when changing queue boundaries...` and
+`<!-- until: hearsay-tools/cezarion#2520 -->` in the same PR. A restored off-owner read must fail
+the rule; a moved-early read must fail the phase fixture. These guards replace the block's
+source-selection and read-timing protection. The resolver is not an eager cache or new queue.
 
 ## Interactions
 
@@ -453,7 +606,9 @@ blocker for planner review, not a promised follow-up that counts as completion.
 - **Slice 4.3, hearsay-tools/cezarion#2522:** tests often read
   `runInternals(m).active.get(id)` fields. Search all old field names, new group paths and
   `runInternals(` before each group moves. 4.3 should assert store/events or a narrow public
-  signal. It must not expose a mutable group view to preserve old tests. 4.1 updates any
+  signal. It must not expose a mutable group view to preserve old tests. 4.3 batches touching these modules, especially B3 turn-end tests that construct TurnSettler,
+  RunFinish and TurnNudges with stub hosts, must land before the PR that changes that module's
+  host/state shape, or that PR must update the batch itself. 4.1 updates any
   remaining internal read assertions in its own PR; it adds no new `runInternals` calls.
   Coordinate each file so one worker owns fixture changes. Tests that intentionally pin
   internal command order use the owner's test seam and observe effects, not mutable handles.
@@ -468,13 +623,12 @@ blocker for planner review, not a promised follow-up that counts as completion.
 
 ## Open risks and decisions
 
-1. The queue-head candidate does not satisfy its one-launch-read condition. The phase exit
-   remains blocked until the planner resolves the scope above. Neither expiry block is
-   deleted by this design PR.
-2. Arbitrary alias/helper enforcement requires a semantic companion. Prototype its diagnostics
-   and read-only return boundary in P1. The pinned TypeScript 7 compiler is native; do not assume
-   its npm package exports the older JavaScript checker API. Check tool feasibility before
-   dispatch. Any added compiler-library dependency needs package-area review and planner approval. A clean syntax scan alone cannot satisfy acceptance.
+1. P6 has planner approval but its exact source capability/rule prototype still needs proof.
+   It cannot land with an alias escape, moved read phase, or stale-source baseline. Neither
+   expiry block is deleted by this design PR; P5 and P6 delete them with their replacements.
+2. P1 must prove that private classes, immutable owned values and live read-only views close
+   alias/helper writes without a semantic companion. If this fails, stop and route the
+   counterexample; a new gate tool is not implicitly approved. A clean syntax scan alone cannot satisfy acceptance.
 3. P5 moves many small writes across interleaved handlers. The event union and order tests
    must preserve overlaps and caller reentrancy. An over-broad transition command would hide
    policy instead of owning it; review each command against its ledger rows.
