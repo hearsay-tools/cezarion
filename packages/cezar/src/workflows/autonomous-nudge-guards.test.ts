@@ -182,7 +182,6 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   it.each(['replaced-state', 'replaced-session', 'new-boundary', 'done', 'no-pending', 'closed-by-idle', 'session-error'] as const)(
     '%s revokes readiness authority', guard => {
       pendingBoundary();
-      canContinue.mockReturnValue(false);
       switch (guard) {
         case 'replaced-state': active.set(id, fakeState()); break;
         case 'replaced-session': state.session = { ...session }; break;
@@ -263,13 +262,13 @@ describe('autonomous nudge priority and lifecycle guards', () => {
 
 describe('nudge bounds through a live runner', () => {
   const f = setupMonitoringFixture();
-  let session: AgentSession;
+  let session: AgentSession | undefined;
   let emit: (event: AgentEvent) => void;
   let ready: () => void;
   let emitUi: (event: import('../core/ui-events.ts').UiEvent) => void;
 
   beforeEach(() => {
-    session = undefined!;
+    session = undefined;
     f.manager.dispose();
     f.manager = createFixtureManager(f.store, f.repoRoot, { noWaitNudgeReplyMs: 300 });
     runnerHook.runner = {
@@ -297,11 +296,12 @@ describe('nudge bounds through a live runner', () => {
     f.currentId = record.id;
     await waitForProduct(f.manager, f.store, () => !!session);
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    return record.id;
+    if (!session) throw new Error('runner session missing');
+    return { id: record.id, session };
   }
 
   it('refused ordinary input waits for readiness without charging the cap or releasing capacity', async () => {
-    const id = await start(true);
+    const { id, session } = await start(true);
     f.store.updateRun(id, { automaticWakes: 39 });
     vi.mocked(session.sendAgentMessage).mockReturnValueOnce(false);
     emit({ type: 'turn-end' });
@@ -312,10 +312,13 @@ describe('nudge bounds through a live runner', () => {
     expect(f.store.getRun(id)).toMatchObject({ status: RUN_STATUS.running, automaticWakes: 40 });
     expect(readPersistedRuns(join(f.repoRoot, '.ai/cezar')).find(record => record.id === id)?.automaticWakes).toBe(40);
     expect(session.sendMessage).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS + 1);
+    expect(session.open).toBe(true);
+    expect(session.end).not.toHaveBeenCalled();
   });
 
   it('queued input takes readiness before an autonomous retry', async () => {
-    const id = await start(true);
+    const { id, session } = await start(true);
     vi.mocked(session.sendAgentMessage).mockReturnValueOnce(false);
     emit({ type: 'turn-end' });
     const inputId = randomUUID();
@@ -330,7 +333,7 @@ describe('nudge bounds through a live runner', () => {
   });
 
   it('parent activity invalidates the refused boundary and its timer', async () => {
-    const id = await start(true);
+    const { id, session } = await start(true);
     vi.mocked(session.sendAgentMessage).mockReturnValue(false);
     emit({ type: 'turn-end' });
     emitUi({ type: 'turn.started', turnId: randomUUID() });
@@ -338,10 +341,13 @@ describe('nudge bounds through a live runner', () => {
     expect(session.sendAgentMessage).toHaveBeenCalledOnce();
     expect(f.store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     expect(f.store.getRun(id)?.status).toBe(RUN_STATUS.running);
+    await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS + 1);
+    expect(session.open).toBe(true);
+    expect(session.end).not.toHaveBeenCalled();
   });
 
   it('user-authored delivery resets the no-wait nudge latch', async () => {
-    const id = await start(false);
+    const { id, session } = await start(false);
     emit({ type: 'turn-end' });
     await vi.advanceTimersByTimeAsync(0);
     expect(session.sendAgentMessage).toHaveBeenCalledOnce();
@@ -352,7 +358,7 @@ describe('nudge bounds through a live runner', () => {
   });
 
   it('a transport exception fails without retaining a readiness retry', async () => {
-    const id = await start(true);
+    const { id, session } = await start(true);
     vi.mocked(session.sendAgentMessage).mockImplementation(() => { throw new Error('failed transport'); });
     emit({ type: 'turn-end' });
     expect(f.store.readEvents(id)).toEqual(expect.arrayContaining([expect.objectContaining({
@@ -365,7 +371,7 @@ describe('nudge bounds through a live runner', () => {
   });
 
   it('missing readiness reaches the existing idle close bound', async () => {
-    const id = await start(true);
+    const { id, session } = await start(true);
     vi.mocked(session.sendAgentMessage).mockReturnValue(false);
     emit({ type: 'turn-end' });
     expect(f.store.getRun(id)?.automaticWakes ?? 0).toBe(0);
@@ -379,7 +385,7 @@ describe('nudge bounds through a live runner', () => {
   });
 
   it('expiry opens the no-wait human wait and the run waits for the user', async () => {
-    const id = await start(false);
+    const { id } = await start(false);
     emit({ type: 'turn-end' });
     await vi.advanceTimersByTimeAsync(300);
     expect(f.store.getRun(id)?.status).toBe('waiting');
@@ -389,7 +395,7 @@ describe('nudge bounds through a live runner', () => {
 
   it('expiry after a completion nudge names the completion nudge', async () => {
     const tools = vi.spyOn(f.manager, 'cezarToolHandlers');
-    const id = await start(false);
+    const { id } = await start(false);
     f.store.commitDelegation([{ id, delegation: { role: 'root', permissions: [], receipts: [] } }]);
     const handlers = tools.mock.results.find(result => result.type === 'return')?.value;
     expect(handlers).toBeDefined();

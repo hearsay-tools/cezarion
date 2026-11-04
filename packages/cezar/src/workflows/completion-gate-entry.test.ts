@@ -68,9 +68,8 @@ describe('the completion gate outside a turn end', () => {
   function modules() {
     const context: RunModuleContext = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work: new TrackedWork(),
       semaphore: new WorkspaceSemaphore(), disposed: () => false };
-    gateHost = { active, pendingHumanAskSeq: () => undefined, isActive: key => active.has(key),
-      holdsAgentWaits: () => !!store.getRun(id)?.waits?.length, waitingBeforeFinalWorkflowStep: () => false,
-      parentCompletionBlockers: vi.fn(() => []), unansweredQuestions: () => [] };
+    gateHost = unused<CompletionGateHost>('gateHost', { active, pendingHumanAskSeq: () => undefined,
+      parentCompletionBlockers: vi.fn(() => []), unansweredQuestions: () => [] });
     type SettlerArgs = ConstructorParameters<typeof TurnSettler>;
     settler = new TurnSettler(context, unused<SettlerArgs[1]>('heldDoneHost', {
       completionGate: () => 'held', settledTurnOutcome: outcomes,
@@ -304,10 +303,17 @@ describe('completion refusal through a live runner', () => {
     emitUi({ type: 'ask.requested', requestId: randomUUID(), context: 'Choose a path.',
       questions: [{ header: 'Choice', question: 'Which path?' }] });
     await f.store.factsWarmIdle();
+    const releaseSlot = semaphore.release.bind(semaphore);
+    const release = vi.spyOn(semaphore, 'release').mockImplementation(() => {
+      expect(f.store.getRun(id)?.status).toBe(RUN_STATUS.waiting);
+      expect(f.store.getRun(id)?.steps.find(step => step.id === 'task')?.status).toBe(STEP_STATUS.waiting);
+      return releaseSlot();
+    });
     emit({ type: 'turn-end' });
     await waitForProduct(f.manager, f.store, () => f.store.getRun(id)?.status === 'waiting');
     expect(f.store.getRun(id)?.steps.find(step => step.id === 'task')?.status).toBe('waiting');
     expect(semaphore.busy()).toBe(0);
+    expect(release).toHaveBeenCalledOnce();
     expect(f.store.readEvents(id)).toEqual(expect.arrayContaining([expect.objectContaining({
       type: 'note', message: 'Completion blocked: answer the pending human question.',
     })]));

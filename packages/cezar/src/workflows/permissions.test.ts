@@ -10,7 +10,7 @@ import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 describe('human permission lifecycle', () => {
   const f = setupMonitoringFixture();
   let id: string;
-  let session: AgentSession;
+  let session: AgentSession | undefined;
   let open: boolean;
   let emit: (event: UiEvent) => void;
   let agentEvent: (event: AgentEvent) => void;
@@ -18,7 +18,7 @@ describe('human permission lifecycle', () => {
   const request = (requestId: string) => emit({ type: 'permission.requested', requestId, title: 'Run command', options: [{ id: 'deny', label: 'Decline', kind: 'reject_once' }] });
 
   beforeEach(async () => {
-    session = undefined!;
+    session = undefined;
     open = true;
     f.manager.dispose();
     semaphore = new WorkspaceSemaphore();
@@ -52,7 +52,13 @@ describe('human permission lifecycle', () => {
     });
   });
 
+  function liveSession(): AgentSession {
+    if (!session) throw new Error('runner session missing');
+    return session;
+  }
+
   it('parks concurrent requests until their exact IDs resolve and blocks all ordinary input', () => {
+    const session = liveSession();
     request('a'); request('b');
     expect(f.store.getRun(id)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
     expect(semaphore.busy()).toBe(0);
@@ -72,6 +78,7 @@ describe('human permission lifecycle', () => {
   });
 
   it.each(['cancelled', 'stopping', 'closed'] as const)('%s refuses decisions and teardown clears attention', async reason => {
+    const session = liveSession();
     request('a');
     if (reason === 'cancelled') f.manager.cancel(id);
     if (reason === 'stopping') f.store.updateRun(id, { stopping: true });
