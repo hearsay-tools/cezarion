@@ -1,6 +1,8 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA, WORKER_OUTCOME_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
+import { WorkerOrphans } from './run/worker-orphans.ts';
+import { fixtureWork } from './fixture-cleanup.testkit.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
@@ -92,7 +94,6 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
     it('destroy reaps a recorded child that ignores SIGTERM, then completes', async () => {
       const { w, child, prior, reopened, other, service } = await crashed('failed');
-      runInternals(other).orphans.orphanTermGraceMs = 500;
       // A leader spawned outside spawnSessionLeader records no group (hearsay-tools/cezarion#890): pid-only reaping.
       expect(readRecord(w.id).processes.map(entry => 'pgid' in entry)).toEqual([false]);
       try {
@@ -307,24 +308,26 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
     it.each(['inside', 'after'] as const)('a parked parent wait resolves once a survivor dies %s the fast re-probe window', async window => {
       const { w, child, reopened, other } = await crashed('failed');
-      const cadence = runInternals(other).orphans;
-      // After the fast window a slow probe remains the wake source; it never gives up.
-      cadence.orphanBackoff = window === 'inside' ? { fastMs: 100, fastCount: 60, capMs: 3_600_000 } : { fastMs: 600_000, fastCount: 0, capMs: 100 };
+      // Drive the shipped 15-second cadence and its 15-minute fast window.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
       // The parent's worker wait is a wait-list entry (hearsay-tools/cezarion#1301).
+      // Keep the parent wait open beyond the shipped 15-minute fast window.
       const waitId = randomUUID(); const now = Date.now();
       reopened.commitWait(parent.id, { kind: WAIT_KIND.worker, id: waitId, source: WAIT_SOURCE.agent, via: WAIT_VIA['cez-worker-wait'], registeredAt: new Date(now).toISOString(),
-        deadline: new Date(now + 600_000).toISOString(), timeoutSeconds: 600, phase: WAIT_PHASE.open, turnId: 'turn-1', mode: 'all',
+        deadline: new Date(now + 1_800_000).toISOString(), timeoutSeconds: 1_800, phase: WAIT_PHASE.open, turnId: 'turn-1', mode: 'all',
         workerIds: [w.id], revisions: [{ workerId: w.id, revision: 0 }], outcomes: [] });
       const wait = () => { const run = reopened.getRun(parent.id); return [...(run?.waits ?? []), ...(run?.lastWaits ?? [])].find((entry): entry is Extract<typeof entry, { kind: 'worker' }> => entry.id === waitId && entry.kind === 'worker'); };
       try {
         await other.recover();
         expect(reopened.readWorkerExecution(w.id)?.phase).toBe('starting');
         expect(wait()?.outcomes).toEqual([]);
+        if (window === 'after') await vi.advanceTimersByTimeAsync(15_000 * 60);
         child.proc.kill('SIGKILL'); await child.exited;
-        await until(() => reopened.readWorkerExecution(w.id)?.phase === 'complete');
-        await until(() => !!wait()?.outcomes?.some(outcome => outcome.workerId === w.id));
+        await vi.advanceTimersByTimeAsync(window === 'inside' ? 15_000 : 30_000);
+        expect(reopened.readWorkerExecution(w.id)?.phase).toBe('complete');
+        expect(wait()?.outcomes?.some(outcome => outcome.workerId === w.id)).toBe(true);
         expect(wait()!.outcomes).toEqual([expect.objectContaining({ workerId: w.id, revision: 0, status: WORKER_OUTCOME_STATUS.failed })]);
-      } finally { other.dispose(); reopened.flush(); }
+      } finally { vi.useRealTimers(); other.dispose(); reopened.flush(); }
     });
 
     it('scan-only survivors share one /proc scan per reprobe tick, and the reprobe backs off (hearsay-tools/cezarion#879)', async () => {
@@ -336,7 +339,12 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         rmSync(recordPath(w.id), { force: true }); // legacy: the cwd scan is the only evidence
         holders.push(await spawnReady(created.path)); ids.push(w.id);
       }
-      const cadence = runInternals(manager).orphans;
+      // This case owns one small module: only its batched scan and retry cadence matter.
+      const cadence = new WorkerOrphans({ store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
+        semaphore: new WorkspaceSemaphore(), work: fixtureWork(root), disposed: () => false }, {
+        holds: () => false, reapTerminalScratch: () => {},
+        settleOrphanedWorkerExecution: (id, options) => cadence.settleOrphanedWorkerExecution(id, options),
+      });
       cadence.orphanBackoff = { fastMs: 400, fastCount: 2, capMs: 1_600 };
       const listings = () => vi.mocked(fs.readdirSync).mock.calls.filter(([path]) => path === '/proc').length;
       // The clock is fake too, so arming the two orphans one after the other cannot drift them apart
@@ -358,7 +366,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         await vi.advanceTimersByTimeAsync(1_700);
         expect(ids.map(id => store.readWorkerExecution(id)?.phase)).toEqual(['complete', 'complete']);
         expect(cadence.orphanDue.size).toBe(0);
-      } finally { vi.useRealTimers(); }
+      } finally { cadence.dispose(); vi.useRealTimers(); }
     });
 
     it('destroy waits out a scan-only survivor of a legacy generation instead of returning at once', async () => {

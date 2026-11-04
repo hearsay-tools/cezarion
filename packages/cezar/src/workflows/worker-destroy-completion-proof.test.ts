@@ -1,8 +1,11 @@
-import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
+import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 import { readPid, requirePid } from '../pid-file.testkit.ts';
 
+import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { planOwnedWorkspace } from '../delegation/workspace.ts';
+import { workerWorkflowHash } from '../delegation/execution-identity.ts';
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -12,10 +15,13 @@ import * as worktrees from '../git-worktree.ts';
 import * as runners from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
+import type { WorkflowDef } from './types.ts';
+import { createFixtureManager } from './fixture-cleanup.testkit.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 
 import { setRunStatus, blockRunWrites } from '../runs/run-store.testkit.ts';
 
-import { HANG_GUARD_MS, until, gate, root, store, manager, releases, worker, workspace, useWorkerDestroyFixture } from "./worker-destroy.testkit.ts";
+import { HANG_GUARD_MS, until, gate, root, store, manager, parent, releases, worker, workspace, useWorkerDestroyFixture, replaceWorkerDestroyManager } from "./worker-destroy.testkit.ts";
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -68,10 +74,13 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   });
 
   it('admits the same manager deferred Continue without rotating its exact owned generation', async () => {
+    manager.dispose();
+    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
+    replaceWorkerDestroyManager(createFixtureManager(store, root, { semaphore }));
     const w = await worker(); manager.enqueueOwnedRun(w.id); await until(() => store.getRun(w.id)?.status === 'waiting');
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
     // Finish the old release sweep: Continue must schedule its own new queue entry.
-    await (runInternals(manager).line).pump();
+    await semaphore.release();
     expect(manager.continueRun(w.id, { text: 'mock:hold' }, true).ok).toBe(true);
     const deferred = store.readWorkerExecution(w.id)!;
     await until(() => store.getRun(w.id)?.status === 'waiting');
@@ -103,11 +112,15 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   });
 
   it('keeps workflow checks inside the termination barrier until the check process closes', async () => {
-    const w = await worker(); const script = join(root, 'controlled-check.cjs');
+    const script = join(root, 'controlled-check.cjs');
     writeFileSync(script, "process.on('SIGTERM',()=>{}); const fs = require('node:fs'); fs.writeFileSync('check.pid.tmp', String(process.pid)); fs.renameSync('check.pid.tmp', 'check.pid'); setInterval(()=>{},1000);");
-    const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown> };
-    const real = engine.execute.bind(manager);
-    engine.execute = (...args) => real(args[0], { name: 'check barrier fixture', steps: [{ id: 'task', command: `exec '${process.execPath}' '${script}'` }] }, args[2]);
+    const workflow: WorkflowDef = { name: 'check barrier fixture', source: 'built-in', steps: [{ id: 'task', command: `exec '${process.execPath}' '${script}'` }] };
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    const owned = await planOwnedWorkspace(root, randomUUID(), sha);
+    const w = store.createOwnedRun({ title: 'worker', task: 'check', workflow: workflow.name, workflowDef: workflow,
+      runner: 'claude', steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.check }] }, parent.id, randomUUID(), {
+      role: 'worker', permissions: [], parentRunId: parent.id, workspace: owned,
+    }, 'a'.repeat(64), { kind: 'internal', workflowHash: workerWorkflowHash(workflow) });
     const pidPath = join(workspace(w).path, 'check.pid'); let pid: number | undefined;
     releases.push(() => { if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* already closed */ } } });
     manager.enqueueOwnedRun(w.id); await until(() => readPid(pidPath) !== undefined); pid = requirePid(pidPath);
@@ -120,13 +133,21 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it('synchronous dequeue hydration failure still finalizes the admitted generation', async () => {
     const w = await worker();
-    const hydrate = vi.spyOn(runInternals(manager).queuedInput, 'hydrateQueuedInput').mockImplementation(() => { throw Error('fixture hydration failed'); });
-    releases.push(() => { void runInternals(manager).workerExecutions.finishWorkerExecution(w.id); });
+    const read = store.getRun.bind(store); let failedRead = false;
+    vi.spyOn(store, 'getRun').mockImplementation(id => {
+      const run = read(id);
+      if (id !== w.id || !run || failedRead || store.readWorkerExecution(id)?.phase !== 'starting') return run;
+      return new Proxy(run, { get(target, key, receiver) {
+        if (key === 'queuedMessages') { failedRead = true; throw Error('fixture hydration failed'); }
+        return Reflect.get(target, key, receiver);
+      } });
+    });
     manager.enqueueOwnedRun(w.id);
     await vi.waitFor(() => expect(store.getRun(w.id)?.status).toBe('failed'), { timeout: HANG_GUARD_MS });
     expect(await manager.awaitRunTermination(w.id, 100)).toBe(true);
     expect(existsSync(workspace(w).path)).toBe(false);
-    expect(hydrate).toHaveBeenCalled();
+    expect(failedRead).toBe(true);
+    expect(store.getRun(w.id)?.error).toContain('fixture hydration failed');
   });
 
   it('failed session startup cannot leave periodic autosave running after termination proof', async () => {
