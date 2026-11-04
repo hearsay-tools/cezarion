@@ -566,8 +566,8 @@ Each runs and search query covers one UTC day, because GitHub returns at most
   - **invalidated**: GitHub started a later run for the same PR on another base,
     from the `gh-readonly-queue/main/pr-<N>-<base>` ref, with no queue removal of
     that PR between the two runs;
-  - **removed for another cause**: the first queue removal of the run's PR after the
-    run started has a reason other than `failed_checks`, a timeout or `merged`, for
+  - **removed for another cause**: the first queue removal of the run's PR after GitHub
+    created the run has a reason other than `failed_checks`, a timeout or `merged`, for
     example `manual` or `merge_conflict`.
 - **Invalidated runs**: the runner-minutes of the invalidated runs above are waste.
 - **Main-push proof fallback**: a `main` push run whose Typecheck job ran. The API

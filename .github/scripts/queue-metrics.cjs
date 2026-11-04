@@ -260,7 +260,8 @@ const keepsRun = reason => reason === 'merged' || reason === 'failed_checks' || 
 
 // Spec § Rollout, "How the failure rate is counted": the runs that count in neither term.
 // Invalidated: a later run for the same PR on another base, with no removal of that PR between the two.
-// Removed: the first removal of the run's entry after the run started is for another cause.
+// Removed: the first removal of the run's PR after GitHub created the run is for another cause. A run belongs to
+// its entry from creation, and run_started_at moves to the latest attempt when the run is re-run.
 function exclusion(run, raw) {
   const ref = groupRef(run.head_branch);
   if (!ref) return null;

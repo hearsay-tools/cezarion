@@ -215,6 +215,9 @@ test('the failure rate counts neither invalidated runs nor runs removed for anot
   assert.equal(queue.failed, 3);
   assert.equal(queue.invalidated.runs, 1);
   assert.equal(queue.removed, 2);
+  // The entry ends at a removal before the run's first attempt starts; a re-run attempt starts later still.
+  const late = { ...queueRun(4, 'failure', SHA('c1'), 10, 12), run_started_at: '2026-11-02T05:00:00Z' };
+  assert.equal(computeMetrics({ ...raw, queueRuns: [late] }).queue.removed, 1);
 });
 
 test('a run rebuilt on another base counts as invalidated waste', () => {
