@@ -12,6 +12,12 @@ function allowedDeclaration(node: Node, parent: Node | undefined): boolean {
   return false;
 }
 
+function registrationDeclaration(node: Node, parent: Node | undefined, onImport?: () => void): boolean {
+  if (!allowedDeclaration(node, parent)) return false;
+  if (parent?.type === 'ImportSpecifier') onImport?.();
+  return true;
+}
+
 export const NATIVE_TOOL_REGISTRATION = 'registerCiNativeTools';
 
 function registrationReference(node: Node, parent: Node | undefined, callee: string): Node | undefined {
@@ -88,20 +94,20 @@ function executesRegistration(call: Node, path: readonly Node[], callee: string)
 }
 
 /** Every reference must be an unchanged declaration/import/export or a supported plain call. */
-export function registrationGroups(source: string, file: string, callee: string, catalog: string, knownGroups: readonly string[]): string[] {
+function registrationArguments(source: string, file: string, callee: string, argumentValue: (call: Node, path: readonly Node[]) => string | undefined, onImport?: () => void): string[] {
   const groups: string[] = [];
   const tree = parse(source, { sourceType: 'module', plugins: ['typescript'], allowUndeclaredExports: true });
   traverse(tree, (node, ancestors) => {
     const parent = ancestors.at(-1)?.node;
     const reference = registrationReference(node, parent, callee);
-    if (!reference || allowedDeclaration(node, parent)) return;
+    if (!reference || registrationDeclaration(node, parent, onImport)) return;
     const call = reference === parent ? ancestors.at(-2)?.node : parent;
     const plainMember = reference.type === 'MemberExpression' && !reference.computed && reference.object.type === 'Identifier'
       && reference.property.type === 'Identifier' && `${reference.object.name}.${reference.property.name}` === callee;
     const plainCallee = reference.type === 'Identifier' && reference.name === callee;
-    const group = call?.type === 'CallExpression' && call.callee === reference && (plainCallee || plainMember)
-      ? supportedGroup(call, catalog, knownGroups) : undefined;
     const path = ancestors.map(ancestor => ancestor.node).concat(node);
+    const group = call?.type === 'CallExpression' && call.callee === reference && (plainCallee || plainMember)
+      ? argumentValue(call, path) : undefined;
     if (group === undefined || !call || !executesRegistration(call, path, callee)) {
       const form = call ?? reference;
       throw new Error(`${file}: unsupported ${callee} registration: ${source.slice(form.start!, form.end!)}`);
@@ -109,4 +115,26 @@ export function registrationGroups(source: string, file: string, callee: string,
     groups.push(group);
   });
   return groups;
+}
+
+/** Scan catalog-member registrations with the same reference and execution rules. */
+export function registrationGroups(source: string, file: string, callee: string, catalog: string, knownGroups: readonly string[]): string[] {
+  return registrationArguments(source, file, callee, call => supportedGroup(call, catalog, knownGroups));
+}
+
+function importedLiteral(call: Node, path: readonly Node[], callee: string, moduleSpecifier: string): string | undefined {
+  const statement = path.at(-3);
+  const program = path.at(-4);
+  if (program?.type !== 'Program' || statement?.type !== 'ExpressionStatement' || statement.expression !== call) return undefined;
+  const imported = program.body.some(entry => entry.type === 'ImportDeclaration' && entry.importKind !== 'type' && entry.source.value === moduleSpecifier && entry.specifiers.some(specifier =>
+    specifier.type === 'ImportSpecifier' && specifier.importKind !== 'type' && specifier.imported.type === 'Identifier'
+    && specifier.imported.name === callee && specifier.local.name === callee));
+  if (!imported || call.type !== 'CallExpression' || call.arguments.length !== 1) return undefined;
+  const argument = call.arguments[0];
+  return argument?.type === 'StringLiteral' ? argument.value : undefined;
+}
+
+/** Literal partitions require their unchanged module import and a top-level call. */
+export function registrationStrings(source: string, file: string, callee: string, moduleSpecifier: string, onImport?: () => void): string[] {
+  return registrationArguments(source, file, callee, (call, path) => importedLiteral(call, path, callee, moduleSpecifier), onImport);
 }
