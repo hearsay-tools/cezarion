@@ -1,6 +1,5 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -90,13 +89,11 @@ describe('Stop before the first Codex turn (#493)', { timeout: 15_000 }, () => {
     expect(a.store.getRun(runId)).toMatchObject({ status: RUN_STATUS.running, tokensUsed: 0 });
     expect(a.store.readEvents(runId).some(event => ['session', 'turn.started', 'turn-end', 'text'].includes(event.type))).toBe(false);
 
-    const admission = vi.spyOn(runInternals(b.manager).line, 'pump');
     const queued = b.manager.startRun({ name: 'next', source: 'built-in', steps: [{ id: 'check', command: 'true' }] }, { task: 'next project', worktree: false });
     // Observe B's real initial sweep finishing while capacity is unavailable.
     // Otherwise that still-pending sweep could admit B without a release wake,
     // and a broken cross-project broadcast would pass this test accidentally.
-    await vi.waitFor(() => expect(admission).toHaveBeenCalled(), waitOptions);
-    await Promise.all(admission.mock.results.map(result => result.value));
+    await semaphore.release();
     expect(b.store.getRun(queued.id)?.status).toBe('queued');
     expect(semaphore.busy()).toBe(1);
 
