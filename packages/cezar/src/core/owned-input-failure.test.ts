@@ -26,7 +26,7 @@ async function openSession(fixture: Fixture, mode: 'fresh' | 'continuation'): Pr
 
 function activeState({ manager, runId }: Fixture) {
   return (manager as unknown as {
-    active: Map<string, { session: AgentSession; agentInputError?: string }>;
+    active: Map<string, { liveSession: { session: AgentSession; }; agentInputError?: string }>;
   }).active.get(runId)!;
 }
 
@@ -45,9 +45,9 @@ it.each(['fresh', 'continuation'] as const)('%s acknowledged input checkpoint re
       await openSession(fixture, mode);
       const { store, manager, runId, repoRoot, parentRunId } = fixture;
       const state = activeState(fixture), checkpointsAtInterrupt: Array<string | undefined> = [];
-      const interrupt = state.session.interrupt.bind(state.session);
+      const interrupt = state.liveSession.session.interrupt.bind(state.liveSession.session);
       let injected = false;
-      vi.spyOn(state.session, 'interrupt').mockImplementation(() => {
+      vi.spyOn(state.liveSession.session, 'interrupt').mockImplementation(() => {
         checkpointsAtInterrupt.push(state.agentInputError);
         if (!injected) { injected = true; emitError?.(); }
         interrupt();
@@ -87,9 +87,9 @@ it.each(['fresh', 'continuation'] as const)('%s earlier provider failure remains
     await openSession(fixture, mode);
     const { store, manager, runId } = fixture;
     const state = activeState(fixture);
-    const interrupt = state.session.interrupt.bind(state.session);
+    const interrupt = state.liveSession.session.interrupt.bind(state.liveSession.session);
     let observedProviderInterrupt = false;
-    vi.spyOn(state.session, 'interrupt').mockImplementation(() => {
+    vi.spyOn(state.liveSession.session, 'interrupt').mockImplementation(() => {
       // Deliberately inject the later state at this test seam. The preceding
       // provider error is an actual HTTP/SSE wire frame, already latched by the
       // manager before it invokes interrupt. This is not a second disk-fault test.

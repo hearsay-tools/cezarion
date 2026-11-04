@@ -54,8 +54,8 @@ function registrationFixture() {
   const run = store.createRun({ title: 'registration', task: 'guard', workflow: 'quick-task', steps: [] });
   setRunStatus(store, run.id, RUN_STATUS.running);
   const state = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false });
-  state.session = unused<AgentSession>({ open: true });
-  state.ciGeneration = 'generation';
+  state.liveSession.attachSession(unused<AgentSession>({ open: true }));
+  state.liveSession.beginCiGeneration('generation');
   state.ciTurnId = 'turn';
   let current: typeof state | undefined = state;
   const resolve = vi.fn(async () => identity);
@@ -142,9 +142,9 @@ describe('CI registration guards before and after metadata lookup', { timeout: 3
     if (code === 'session_replaced') {
       if (duringLookup) fixture.replace();
       else fixture.remove();
-    } else if (code === 'run_cancelled') state.cancelled = true;
-    else if (code === 'finish_requested') state.finishRequested = true;
-    else state.ciGeneration = 'replaced';
+    } else if (code === 'run_cancelled') state.liveSession.cancel();
+    else if (code === 'finish_requested') state.liveSession.requestFinish();
+    else state.liveSession.beginCiGeneration('replaced');
     if (pending) { finish(); await assertion; }
     else await expect(call()).rejects.toMatchObject({ code });
     if (!duringLookup) expect(resolve).not.toHaveBeenCalled();

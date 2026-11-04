@@ -74,7 +74,7 @@ describe('step completion mark at settlement callers', () => {
   });
 
   it.each([false, true])('Continue preserves the mark only when cancelled=%s', async cancelled => {
-    state.cancelled = cancelled;
+    if (cancelled) state.liveSession.cancel();
     const done = vi.spyOn(settlement, 'settleDoneContinuation').mockResolvedValue(undefined);
     const sink = new UiEventSink({ persist: vi.fn(), emitLive: vi.fn() });
     await settlement.settleClosedContinuation(runId, state, step.id, sink, next, {});

@@ -62,10 +62,10 @@ it.each([false, true])('monitoring synthetic delivery respects legacy pending Fi
       manager.enqueueOwnedRun(w.id);
       await until(() => !!monitoringWakeOf(store.getRun(w.id)));
       const engine = manager as unknown as {
-        active: Map<string, { session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
+        active: Map<string, { liveSession: { session: { sendAgentMessage(...args: unknown[]): false | Promise<void> }; };  }>;
       };
       const state = engine.active.get(w.id)!;
-      const send = vi.spyOn(state.session, 'sendAgentMessage');
+      const send = vi.spyOn(state.liveSession.session, 'sendAgentMessage');
       const deadline = monitoringWakeOf(store.getRun(w.id))!;
       try {
         if (pending) store.commitRootFinishIntent(p.id);

@@ -53,8 +53,8 @@ describe('CI query retries across native harnesses', {timeout:30_000},()=>{
    try {
     const run=manager.startRun(QUICK_TASK_WORKFLOW,{task:HARNESS_ADAPTERS[runner].scenarios.baseline!,runner});
     await until(()=>store.getRun(run.id)?.status==='waiting');
-    const engine=manager as unknown as {active:Map<string,{ciGeneration:string}>};
-    await manager.registerWait(run.id,{kind: WAIT_KIND.pr,pr:'https://github.com/org/repo/pull/12',timeout_seconds:120},'cezar_wait',engine.active.get(run.id)!.ciGeneration);
+    const engine=manager as unknown as {active:Map<string,{ liveSession: { ciGeneration:string; };  }>};
+    await manager.registerWait(run.id,{kind: WAIT_KIND.pr,pr:'https://github.com/org/repo/pull/12',timeout_seconds:120},'cezar_wait',engine.active.get(run.id)!.liveSession.ciGeneration);
     await until(()=>probes.size===1 || !!lastWaitOf(run.id)?.deliveredAt);
     expect(lastWaitOf(run.id)).toBeUndefined();
     await until(()=>ciWaitOf(run.id)?.phase==='open' && store.getRun(run.id)?.status==='waiting');

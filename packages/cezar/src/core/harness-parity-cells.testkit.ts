@@ -1776,13 +1776,13 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
           await waitFor(() => store.readEvents(runId).some(e => e.type === 'ask.requested'));
           const askSeq = store.readEvents(runId).find(e => e.type === 'ask.requested')!.seq;
           const internal = manager as unknown as {
-            active: Map<string, { pendingHumanAsk: boolean; session: import('./agent-runner.ts').AgentSession }>;
+            active: Map<string, { liveSession: { session: import('./agent-runner.ts').AgentSession; }; pendingHumanAsk: boolean; }>;
             hasPendingHumanAsk(id: string): boolean;
           };
           await waitFor(() => store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined && store.getRun(runId)?.status === 'waiting');
           const state = internal.active.get(runId)!;
           // The session refuses the parent's answer once: it stays queued, and the ask stays pending.
-          const refuse = vi.spyOn(state.session, 'sendMessage').mockReturnValue(false);
+          const refuse = vi.spyOn(state.liveSession.session, 'sendMessage').mockReturnValue(false);
           const reply = await fixture.answer('refused answer');
           await waitFor(() => refuse.mock.calls.length > 0 || !!store.getRun(runId)?.agentInputs?.find(entry => entry.id === reply)?.deliveredAt);
           refuse.mockRestore();
@@ -2850,11 +2850,11 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
           // Native asks can hold the turn open without an idle timer. Close the
           // actual session through the same idle-close state, after its native ask.
           const internal = manager as unknown as {
-            active: Map<string, { idleClosed: boolean; session: import('./agent-runner.ts').AgentSession }>;
+            active: Map<string, { liveSession: { session: import('./agent-runner.ts').AgentSession; }; idleClosed: boolean; }>;
           };
           const state = internal.active.get(runId)!;
           state.idleClosed = true;
-          state.session.end();
+          state.liveSession.session.end();
           await waitFor(() => !manager.isActive(runId));
           expect(store.getRun(runId)?.status).toBe('waiting');
           expect(store.readWorkerExecution(runId)?.phase).toBe('complete');

@@ -48,11 +48,10 @@ function nativeWire(runner: RunnerId) {
 }
 
 const engine = () => manager as unknown as {
-  active: Map<string, { session?: AgentSession; ciGeneration: string; idleTimer?: NodeJS.Timeout & { _onTimeout(): void };
-    agentInputFlight?: { inputIds: string[] } }>;
+  active: Map<string, { liveSession: { session?: AgentSession; ciGeneration: string; }; idleTimer?: NodeJS.Timeout & { _onTimeout(): void }; agentInputFlight?: { inputIds: string[] } }>;
 };
 async function openWait(id: string, request: CezarWaitRequestInput): Promise<TimedWait> {
-  const tools = manager.cezarToolHandlers(id, engine().active.get(id)!.ciGeneration);
+  const tools = manager.cezarToolHandlers(id, engine().active.get(id)!.liveSession.ciGeneration);
   const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
   if (!('wait' in registered)) throw Error('registration refused');
   return timed(registered.wait);
@@ -244,10 +243,10 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     const { run, waits: [timer] } = await parkedOnTimers({ seconds: 60, note: 'refused' });
     const state = engine().active.get(run.id)!;
     store.updateRun(run.id, { automaticWakes: 39 });
-    const send = state.session!.sendAgentMessage.bind(state.session);
+    const send = state.liveSession.session!.sendAgentMessage.bind(state.liveSession.session);
     const reserved: (number | undefined)[] = [];
     let refusals = 0;
-    vi.spyOn(state.session!, 'sendAgentMessage').mockImplementation((content, ids) => {
+    vi.spyOn(state.liveSession.session!, 'sendAgentMessage').mockImplementation((content, ids) => {
       reserved.push(runInternals(manager).wakeAdmission.automaticWakes(run.id));
       if (refusals++ === 0) return false;
       return send(content, ids);
@@ -276,7 +275,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     expect(prompted('claude', 'second message')[0]!.trimEnd().endsWith(footer)).toBe(true);
     await until(() => store.getRun(run.id)?.status === 'waiting' && turnEnds(run.id) >= 3);
     // A continuation's opening prompt is a delivered turn too.
-    engine().active.get(run.id)!.session!.end();
+    engine().active.get(run.id)!.liveSession.session!.end();
     await until(() => !manager.isActive(run.id));
     expect(manager.continueRun(run.id, { text: 'third message' }).ok).toBe(true);
     await until(() => prompted('claude', 'third message').length > 0);
@@ -311,7 +310,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios.baseline!, runner: 'claude' });
     await until(() => store.getRun(run.id)?.status === 'waiting');
     const timer = await openWait(run.id, { kind: WAIT_KIND.timer, seconds: 60, note: 'owed' });
-    engine().active.get(run.id)!.session!.end();
+    engine().active.get(run.id)!.liveSession.session!.end();
     await until(() => !manager.isActive(run.id));
     return { run, timer };
   }
@@ -359,10 +358,10 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     // The second wake reaches the wire; the process stops after the disk saw the batch and before
     // its acknowledgement did.
     const state = engine().active.get(run.id)!;
-    const send = state.session!.sendAgentMessage.bind(state.session);
+    const send = state.liveSession.session!.sendAgentMessage.bind(state.liveSession.session);
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
-    vi.spyOn(state.session!, 'sendAgentMessage').mockImplementation((content, ids) => {
+    vi.spyOn(state.liveSession.session!, 'sendAgentMessage').mockImplementation((content, ids) => {
       const ack = send(content, ids);
       return ack && ack.then(() => gate);
     });
@@ -414,7 +413,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     await until(() => store.getRun(run.id)?.status === 'waiting');
     const timer = await openWait(run.id, { kind: WAIT_KIND.timer, seconds: 60, note: 'owed' });
     const later = await openWait(run.id, { kind: WAIT_KIND.timer, seconds: 7200, note: 'later' });
-    engine().active.get(run.id)!.session!.end();
+    engine().active.get(run.id)!.liveSession.session!.end();
     await until(() => !manager.isActive(run.id));
     fireTimer(timer.id);
     await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id));

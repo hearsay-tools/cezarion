@@ -24,7 +24,7 @@ describe('request wait during a parent-resumed opening turn', { timeout: 30_000 
       conversation: { senderRunId: p.id, recipientRunId: w.id, kind: 'request' as const } };
     try {
       expect(manager.continueRun(w.id, { text: opening.text }, true, { rootId: p.id, state: { messages: [request, opening], outcomes: [] }, input }).ok).toBe(true);
-      await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(w.id)?.sessionEverOpened === true);
+      await until(() => (manager as unknown as { active: Map<string, { liveSession: { sessionEverOpened?: boolean; };  }> }).active.get(w.id)?.liveSession.sessionEverOpened === true);
       const wait = manager.registerRequestWait(w.id, { requestIds: [request.id], timeoutSeconds: 600 });
       expect(wait.phase).toBe('registered');
       expect(store.getRun(w.id)?.agentInputs?.[0]?.deliveredAt).toBeUndefined();

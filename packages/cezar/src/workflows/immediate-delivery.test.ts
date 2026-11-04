@@ -20,7 +20,7 @@ function conversation(rootId: string) {
 }
 const inputOf = (runId: string, id: string) => store.getRun(runId)?.agentInputs?.find(input => input.id === id);
 const turnEnds = (runId: string) => store.readEvents(runId).filter(event => event.type === 'turn-end').length;
-const sessionOf = (runId: string) => (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(runId)!.session;
+const sessionOf = (runId: string) => (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; };  }> }).active.get(runId)!.liveSession.session;
 
 describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
   useWorkerWaitFixture();

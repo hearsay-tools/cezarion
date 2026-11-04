@@ -49,14 +49,13 @@ describe('createActiveRun', () => {
     // The keys the `execute` and `runContinuation` literals both set. A field added to `ActiveRun`
     // as required fails to compile in the factory; an optional one lands here.
     expect(Object.keys(state).sort()).toEqual([
-      'autonomous', 'cancelled', 'children', 'cwd', 'delegationSettings', 'interrupt', 'pendingHumanAsk',
-      'pendingPermissions', 'revokeDelegation', 'skills', 'usage',
+      'autonomous', 'children', 'liveSession', 'pendingHumanAsk', 'skills', 'usage',
     ]);
-    expect(state).toMatchObject({ cwd: '/work/tree', pendingHumanAsk: true, autonomous: true, cancelled: false });
-    expect(state.delegationSettings).toBeUndefined();
-    expect(state.revokeDelegation).toBeUndefined();
-    expect(state.interrupt()).toBeUndefined();
-    expect(state.pendingPermissions).toEqual(new Set());
+    expect(state).toMatchObject({ liveSession: { cwd: '/work/tree', cancelled: false }, pendingHumanAsk: true, autonomous: true });
+    expect(state.liveSession.delegationSettings).toBeUndefined();
+    expect(state.liveSession.revokeDelegation).toBeUndefined();
+    expect(state.liveSession.interrupt()).toBeUndefined();
+    expect([...state.liveSession.pendingPermissions]).toEqual([]);
     // No native subagent is known before a session reports one (hearsay-tools/cezarion#2431).
     expect([...state.children.backgroundChildren]).toEqual([]);
     // The registry is loaded after the run is registered, by `loadRunSkills`, never by the factory.
@@ -66,10 +65,10 @@ describe('createActiveRun', () => {
   it('takes cwd, the pending ask and the mode from its caller, and shares no mutable state', () => {
     const first = createActiveRun({ cwd: '/a', pendingHumanAsk: false, autonomous: false });
     const second = createActiveRun({ cwd: '/b', pendingHumanAsk: true, autonomous: true });
-    expect(first).toMatchObject({ cwd: '/a', pendingHumanAsk: false, autonomous: false });
-    expect(second).toMatchObject({ cwd: '/b', pendingHumanAsk: true, autonomous: true });
-    first.pendingPermissions?.add('p');
-    expect(second.pendingPermissions?.size).toBe(0);
+    expect(first).toMatchObject({ liveSession: { cwd: '/a' }, pendingHumanAsk: false, autonomous: false });
+    expect(second).toMatchObject({ liveSession: { cwd: '/b' }, pendingHumanAsk: true, autonomous: true });
+    first.liveSession.requestPermission('p');
+    expect(second.liveSession.pendingPermissions?.size).toBe(0);
     expect(first.children).not.toBe(second.children);
     expect(first.children.backgroundChildren).not.toBe(second.children.backgroundChildren);
     expect(second.children.backgroundChildren.size).toBe(0);

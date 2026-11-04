@@ -105,8 +105,8 @@ export function provisionWorkflowFixture() {
     const runId = entry.spec.env!.CEZ_TASK_ID!;
     const manager = [f.manager, ...recoveredManagers].find(candidate => runInternals(candidate).active.has(runId));
     const state = manager && runInternals(manager).active.get(runId);
-    if (!manager || !state?.ciGeneration) throw new Error(`no live session for ${runId}`);
-    const answer = await manager.cezarToolHandlers(runId, state.ciGeneration).finishTurn({}, new AbortController().signal);
+    if (!manager || !state?.liveSession.ciGeneration) throw new Error(`no live session for ${runId}`);
+    const answer = await manager.cezarToolHandlers(runId, state.liveSession.ciGeneration).finishTurn({}, new AbortController().signal);
     if (!answer.ok) throw new Error(`cezar_done refused: ${answer.code}`);
     entry.emit({ type: 'text', text });
     entry.emit({ type: 'turn-end' });

@@ -203,7 +203,7 @@ it('readiness rejects a replaced state independently of the session identity', (
   const send = vi.fn(() => Promise.resolve());
   const session: AgentSession = { open: true, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
     sendAgentMessage: send, sendMessage: () => false, discardQueuedMessages() {}, holdsHumanInput: () => false, end() {}, interrupt() {} };
-  old.session = session; replacement.session = session;
+  old.liveSession.attachSession(session); replacement.liveSession.attachSession(session);
   const record = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
   const host = unused<DeliveryHost>({ active: new Map([[record.id, replacement]]) });
   const owner = new InputDelivery({ store, repoRoot: dir, dataDir: dir, semaphore: new WorkspaceSemaphore(),
@@ -273,7 +273,7 @@ it.each(['replacement session', 'replacement state'] as const)(
     const session: AgentSession = { open: true, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
       sendMessage: () => false, sendAgentMessage: () => ack, discardQueuedMessages() {}, holdsHumanInput: () => false, end() {}, interrupt() {} };
     const state = createActiveRun({ cwd: dir, pendingHumanAsk: false, autonomous: false });
-    state.session = session;
+    state.liveSession.attachSession(session);
     const record = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
     setRunStatus(store, record.id, RUN_STATUS.running); store.commitAgentInputs(record.id, [input]);
     const active = new Map([[record.id, state]]), move = vi.fn();
@@ -287,10 +287,10 @@ it.each(['replacement session', 'replacement state'] as const)(
       expect(owner.submitAgentInput(record.id, state, [{ type: 'text', text: input.text }], [input.id])).toBe(true);
       const settled = state.agentInputFlight?.settled;
       expect(settled).toBeInstanceOf(Promise);
-      if (transition === 'replacement session') state.session = { ...session };
+      if (transition === 'replacement session') state.liveSession.attachSession({ ...session });
       else {
         const replacement = createActiveRun({ cwd: dir, pendingHumanAsk: false, autonomous: false });
-        replacement.session = session; active.set(record.id, replacement);
+        replacement.liveSession.attachSession(session); active.set(record.id, replacement);
       }
       move.mockClear();
       const before = JSON.stringify(store.getRun(record.id));

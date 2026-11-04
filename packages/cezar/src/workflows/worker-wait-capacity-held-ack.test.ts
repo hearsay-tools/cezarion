@@ -23,13 +23,13 @@ it.each(['codex', 'opencode', 'pi', 'omp'].flatMap(backend => ['agent', 'check']
         store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
         // hearsay-tools/cezarion#1235: the list's park and admission, not `workerWaiting`/`workerWakeAdmitted`.
         const engine = runInternals(manager);
-        await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
-        const session = engine.active.get(run.id)!.session!;
+        await until(() => !!engine.active.get(run.id)?.liveSession.sessionEverOpened);
+        const session = engine.active.get(run.id)!.liveSession.session!;
         const w = await worker(run.id, 'mock:slow');
         register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
         const clock = autoEndObservationClock();
         try {
-          await until(() => parkedOnWorkers(run.id) && !!engine.active.get(w.id)?.sessionEverOpened);
+          await until(() => parkedOnWorkers(run.id) && !!engine.active.get(w.id)?.liveSession.sessionEverOpened);
           expect(semaphore.busy()).toBe(1);
           const boundaries = store.readEvents(run.id).filter(event => event.type === 'turn-end').length;
           manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
@@ -44,7 +44,7 @@ it.each(['codex', 'opencode', 'pi', 'omp'].flatMap(backend => ['agent', 'check']
           expect(waitOf(store.getRun(run.id))?.wakeId).toBe(wake?.id);
           expect(parkedOnWorkers(run.id)).toBe(false);
           expect(runInternals(manager).line.waitWakeAdmitted.has(run.id)).toBe(true);
-          expect(engine.active.get(run.id)?.session).toBe(session); expect(session.open).toBe(true);
+          expect(engine.active.get(run.id)?.liveSession.session).toBe(session); expect(session.open).toBe(true);
           expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
           expect(semaphore.busy()).toBe(1);
           await collect(w.id);

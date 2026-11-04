@@ -123,7 +123,7 @@ describe('explicit step completion parity — hearsay-tools/cezarion#1620', () =
         expect(notes(NO_WAIT_NOTE)).toHaveLength(1);
         expect(nudged(NO_WAIT_NUDGE)).toBe(true);
         expect(statuses()).toEqual([['implement', 'waiting'], ['review', 'pending'], ['verify', 'pending']]);
-        const session = manager['active'].get(runId)!.session!;
+        const session = manager['active'].get(runId)!.liveSession.session!;
         // The session stays open for the user past the runners' one-shot-close window.
         await new Promise(resolve => setTimeout(resolve, 350)); // bound: observe past the 250 ms runner auto-end timer
         expect(session.open).toBe(true);

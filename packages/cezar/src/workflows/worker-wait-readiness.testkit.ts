@@ -18,7 +18,7 @@ export const sentTexts = (sent: string[], text: string) => sent.filter(entry => 
 /** Record every text a session is sent through Cezar's agent-input seam. */
 export function recordAgentInput(id: string): string[] {
   const sent: string[] = [];
-  const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(id)!.session;
+  const session = (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; };  }> }).active.get(id)!.liveSession.session;
   const real = session.sendAgentMessage.bind(session);
   session.sendAgentMessage = ((content, ...rest) => {
     sent.push(content.map(block => block.type === 'text' ? block.text : '').join('\n'));
@@ -39,5 +39,5 @@ export async function blockedDone<T>(id: string, block: () => Promise<T>, send: 
   writeFileSync(opened, '');
   return blocker;
 }
-export const sessionOf = (id: string) => (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(id)!.session;
+export const sessionOf = (id: string) => (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; };  }> }).active.get(id)!.liveSession.session;
 

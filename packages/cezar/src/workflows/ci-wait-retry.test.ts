@@ -30,7 +30,7 @@ describe('CI wait retry', { timeout: 30_000 }, () => {
     await until(() => store.getRun(run.id)?.status === 'waiting');
     const receipt = await register(run.id);
     const engine = runInternals(manager);
-    const session = engine.active.get(run.id)!.session!;
+    const session = engine.active.get(run.id)!.liveSession.session!;
     const send = vi.spyOn(session, 'sendAgentMessage').mockReturnValueOnce(false);
     external.settle(success());
     await until(() => send.mock.calls.length > 0);

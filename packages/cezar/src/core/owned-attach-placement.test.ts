@@ -79,7 +79,7 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
         const done = async (runId: string) => {
           if (open) {
             const state = runInternals(f.manager).active.get(runId)!;
-            const answer = await f.manager.cezarToolHandlers(runId, state.ciGeneration!).finishTurn({}, new AbortController().signal);
+            const answer = await f.manager.cezarToolHandlers(runId, state.liveSession.ciGeneration!).finishTurn({}, new AbortController().signal);
             if (!answer.ok) throw new Error(`cezar_done refused: ${answer.code}`);
             onEvent?.({ type: 'text', text: 'ok' }); onEvent?.({ type: 'turn-end' });
           }

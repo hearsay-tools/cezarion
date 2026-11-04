@@ -26,7 +26,7 @@ it('keeps a live read view, immutable child records and independent owner state'
   const session: AgentSession = { open: true, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
     sendMessage: unused, sendAgentMessage: unused, discardQueuedMessages: unused, holdsHumanInput: unused,
     end: unused, interrupt: unused };
-  state.session = session;
+  state.liveSession.attachSession(session);
   // This observation-only case calls no wait/line policy. A read of one fails the test.
   const owner = new SubagentWaits({ store, repoRoot: root, dataDir: root,
     semaphore: new WorkspaceSemaphore(), work: new TrackedWork(), disposed: () => false }, {

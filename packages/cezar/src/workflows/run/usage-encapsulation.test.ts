@@ -135,8 +135,8 @@ describe('usage owner encapsulation', () => {
     expect(mutations.reflectDelete(state, 'usage')).toBe(false);
     expect(state.usage).toBe(usage);
     // Other groups still have legitimate writers until their migration.
-    state.cancelled = true;
-    expect(state.cancelled).toBe(true);
+    state.liveSession.cancel();
+    expect(state.liveSession.cancelled).toBe(true);
     recordUsageUiEvent(store, run.id, state, { type: 'turn.started', turnId: 'real' });
     expect(usage.usageInvocation!.observed).toBe(true);
   });

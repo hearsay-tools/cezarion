@@ -13,7 +13,7 @@ describe('conversation backlog delivery (#475)', { timeout: 30_000 }, () => {
     const release = join(root, 'release-turn'); const wire = controlledWire({ firstResultGate: release });
     const p = await parent(); await until(wire.initialReceived);
     const a = await worker(p.id); const b = await worker(p.id);
-    const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!.session;
+    const session = (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; };  }> }).active.get(p.id)!.liveSession.session;
     const send = vi.spyOn(session, 'sendAgentMessage');
     const createdAt = new Date().toISOString();
     const messages = [a, b, a].map((sender, i) => ({ id: randomUUID(), senderRunId: sender.id, recipientRunId: p.id,

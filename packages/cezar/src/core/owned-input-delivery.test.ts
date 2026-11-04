@@ -43,7 +43,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
         // An accepted cezar_done in the turn whose input ACK the fixture holds ('delay-owned-ack').
         const input = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId,
           text: `delay-owned-ack ${toolCall('cezar_done', {})} ${thenSay('delay-owned-ack finished')}`, createdAt: new Date().toISOString() };
-        const session = (manager as unknown as { active: Map<string, { session: import('./agent-runner.ts').AgentSession }> }).active.get(runId)!.session;
+        const session = (manager as unknown as { active: Map<string, { liveSession: { session: import('./agent-runner.ts').AgentSession; };  }> }).active.get(runId)!.liveSession.session;
         if (origin === 'owned') expect(manager.steerWorker(runId, input)).toBe('queued');
         else expect(runInternals(manager).inputDelivery.deliverMessage(runId, [{ type: 'text', text: input.text }], false)).toBe(true);
         await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('delay-owned-ack')));

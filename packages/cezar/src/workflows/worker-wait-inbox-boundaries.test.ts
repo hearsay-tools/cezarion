@@ -72,7 +72,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     const f = await conversationPair();
     const engine = runInternals(manager);
     const pump = vi.spyOn(engine.line, 'pump').mockResolvedValue();
-    const send = vi.spyOn(engine.active.get(f.p.id)!.session!, 'sendAgentMessage');
+    const send = vi.spyOn(engine.active.get(f.p.id)!.liveSession.session!, 'sendAgentMessage');
     try {
       const first = randomUUID();
       await f.service.send(f.workerCaller, { id: first, recipientRunId: f.p.id, kind: 'request', text: 'Unanswered request mock:hold', timeoutSeconds: 600 });

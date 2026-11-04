@@ -22,7 +22,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           wire = controlledWire({ firstResultGate: release });
           expect(manager.continueRun(p.id, { text: marker }).ok).toBe(true);
           await until(() => {
-            return (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(p.id)?.sessionEverOpened === true;
+            return (manager as unknown as { active: Map<string, { liveSession: { sessionEverOpened?: boolean; };  }> }).active.get(p.id)?.liveSession.sessionEverOpened === true;
           });
         }
         await until(wire!.initialReceived);

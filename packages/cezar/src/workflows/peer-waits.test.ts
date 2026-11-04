@@ -23,7 +23,7 @@ import { controlledWire, fixtureUpdateRun, manager, parent, restart, root, semap
  */
 
 const internals = () => runInternals(manager);
-const handlers = (runId: string) => manager.cezarToolHandlers(runId, internals().active.get(runId)!.ciGeneration!);
+const handlers = (runId: string) => manager.cezarToolHandlers(runId, internals().active.get(runId)!.liveSession.ciGeneration!);
 const entryOf = (runId: string, waitId: string): Wait | undefined => store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
 const settledOf = (runId: string, waitId: string): Wait | undefined => store.getRun(runId)?.lastWaits?.filter(wait => wait.id === waitId).at(-1);
 const anyOf = (runId: string, waitId: string) => entryOf(runId, waitId) ?? settledOf(runId, waitId);

@@ -51,7 +51,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
         expect(manager.acknowledgeInbox(f.p.id, generation, claim.receiptId)).toBe('acknowledged');
       } else {
         const active = runInternals(manager);
-        const send = vi.spyOn(active.active.get(f.p.id)!.session!, 'sendAgentMessage');
+        const send = vi.spyOn(active.active.get(f.p.id)!.liveSession.session!, 'sendAgentMessage');
         expect(pump).toHaveBeenCalled(); pump.mockRestore(); await runInternals(manager).line.pump();
         await until(() => [progressId, requestId].every(id => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt));
         const submitted = JSON.stringify(send.mock.calls);
@@ -71,7 +71,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();
     let acknowledge!: () => void;
     const pending = new Promise<void>(resolve => { acknowledge = resolve; });
-    const send = vi.spyOn(engine.active.get(f.p.id)!.session!, 'sendAgentMessage').mockReturnValue(pending);
+    const send = vi.spyOn(engine.active.get(f.p.id)!.liveSession.session!, 'sendAgentMessage').mockReturnValue(pending);
     try {
       const wait = manager.registerWorkerWait(f.p.id, { workerIds: [f.w.id], timeoutSeconds: 600 });
       expect(pump).toHaveBeenCalled();

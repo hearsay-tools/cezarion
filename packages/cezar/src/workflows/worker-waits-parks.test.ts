@@ -23,11 +23,11 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
   afterEach(() => vi.restoreAllMocks());
 
   type Internals = {
-    active: Map<string, { session: AgentSession; idleTimer?: unknown; sessionEverOpened?: boolean }>;
+    active: Map<string, { liveSession: { session: AgentSession; sessionEverOpened?: boolean; }; idleTimer?: unknown; }>;
   };
   const internals = () => manager as unknown as Internals;
   const parkedOn = (runId: string, waitId: string) =>
-    store.getRun(runId)?.status === 'waiting' && entryOf(runId, waitId)?.phase === 'open' && internals().active.get(runId)?.session.open !== false;
+    store.getRun(runId)?.status === 'waiting' && entryOf(runId, waitId)?.phase === 'open' && internals().active.get(runId)?.liveSession.session.open !== false;
 
   it('a worker park holds no slot at maxParallel 1 and its worker runs', async () => {
     const { run: p, release } = await heldParent();
@@ -40,7 +40,7 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     // The parked parent's idle timer bounds its open session.
     expect(internals().active.get(p.id)?.idleTimer).toBeDefined();
     manager.enqueueOwnedRun(w.id);
-    await until(() => internals().active.get(w.id)?.sessionEverOpened === true);
+    await until(() => internals().active.get(w.id)?.liveSession.sessionEverOpened === true);
     expect(semaphore.busy()).toBe(1);
     expect(store.getRun(p.id)?.status).toBe('waiting');
     expect(entryOf(p.id, entry.id)?.phase).toBe('open');
@@ -76,7 +76,7 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     const entry = manager.registerWorkerListWait(p.id, { workerIds: [w.id], timeoutSeconds: 600 }, 'cezar_wait');
     release();
     await until(() => parkedOn(p.id, entry.id));
-    internals().active.get(p.id)!.session.end();
+    internals().active.get(p.id)!.liveSession.session.end();
     await until(() => !manager.isActive(p.id));
     expect(store.getRun(p.id)).toMatchObject({ status: RUN_STATUS.waiting });
     expect(store.getRun(p.id)?.error).toBeUndefined();

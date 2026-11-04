@@ -28,7 +28,7 @@ it('readiness repeated done with live workers: one nudge, then a park on the re-
     // Cezar's own write, as its nudges are, so the turn it starts is not the runner's
     // (hearsay-tools/cezarion#2431 closes timers only on a turn the runner starts itself).
     const state = engine.active.get(p.id)!;
-    writeInput(state, () => state.session!.sendMessage([{ type: 'text', text: toolCall('cezar_done', {}) }]));
+    writeInput(state, () => state.liveSession.session!.sendMessage([{ type: 'text', text: toolCall('cezar_done', {}) }]));
     const refused = () => store.readEvents(p.id).filter(event => event.type === 'text' && String(event.text).includes('workers_outstanding') && String(event.text).includes(`worker stop ${w.id}`));
     await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && refused().length === 1 && store.getRun(p.id)?.status === 'waiting');
     expect(completionNudges(p.id)).toHaveLength(1);
@@ -73,8 +73,8 @@ it('readiness settled uncollected completion sends the collect refusal without t
     await collect(w.id);
     process.env.CEZ_REVIEW_GATE = '1';
     writeFileSync(join(store.getRun(p.id)!.worktreePath!, 'parent-result.txt'), 'parent result');
-    const state = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!;
-    state.session.sendMessage([{ type: 'text', text: toolCall('cezar_done', {}) }]);
+    const state = (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; };  }> }).active.get(p.id)!;
+    state.liveSession.session.sendMessage([{ type: 'text', text: toolCall('cezar_done', {}) }]);
     await until(() => !manager.isActive(p.id));
     expect(store.getRun(p.id)?.status).toBe('review');
   });

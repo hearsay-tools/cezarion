@@ -30,7 +30,7 @@ describe('human messages beside an owed timer wait', { timeout: 45_000 }, () => 
     if (timer.kind === 'human') throw Error('unexpected human wait');
     await restart();
     await until(() => {
-      return (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(blocker.id)?.sessionEverOpened === true;
+      return (manager as unknown as { active: Map<string, { liveSession: { sessionEverOpened?: boolean; };  }> }).active.get(blocker.id)?.liveSession.sessionEverOpened === true;
     });
     fireCapturedTimer(timer.id);
     await until(() => store.getRun(p.id)?.status === 'queued');

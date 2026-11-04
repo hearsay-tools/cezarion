@@ -161,7 +161,7 @@ function laterDoneSurvivesAck(ctx: RowContext): Promise<void> {
 async function doneRefusedBesideQuestion({ runId, send, attention, run }: RowContext): Promise<void> {
   await send(script(WAIT, ASK, thenSay(ACK_TEXT)));
   attention('needs you', true);
-  const tools = manager.cezarToolHandlers(runId, runInternals(manager).active.get(runId)!.ciGeneration!);
+  const tools = manager.cezarToolHandlers(runId, runInternals(manager).active.get(runId)!.liveSession.ciGeneration!);
   const answer = await tools.finishTurn({ summary: 'Complete.' }, new AbortController().signal);
   expect(answer).toMatchObject({ ok: false, code: 'human_question_pending' });
   attention('needs you', true);
@@ -267,7 +267,7 @@ export function registerClose(backend: RunnerId): void {
     expect(manager.sendMessage(p.id, [{ type: 'text', text: script(WAIT, thenSay(ACK_TEXT)) }])).toBe(true);
     register(p.id, [w.id]);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    manager['active'].get(p.id)!.session!.end();
+    manager['active'].get(p.id)!.liveSession.session!.end();
     await until(() => !manager.isActive(p.id));
     // hearsay-tools/cezarion#1235: an agent's worker wait is a list entry, so a clean close parks
     // on it like any open wait; only the completion gate's wait still fails the session.

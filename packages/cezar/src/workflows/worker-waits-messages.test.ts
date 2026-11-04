@@ -17,7 +17,7 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
   useWorkerWaitFixture();
   afterEach(() => vi.restoreAllMocks());
 
-  const sessionOf = (runId: string) => (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(runId)!.session;
+  const sessionOf = (runId: string) => (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; };  }> }).active.get(runId)!.liveSession.session;
   const eventsOf = (runId: string, type: string) => store.readEvents(runId).filter(event => event.type === type);
   const answered = (runId: string) => eventsOf(runId, 'human-input-delivered').filter(event => event.source === 'parent');
   const delivered = (runId: string, id: string) => !!inputOf(runId, id)?.deliveredAt;

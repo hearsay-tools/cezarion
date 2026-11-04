@@ -36,7 +36,7 @@ const SINGLE_STEP: WorkflowDef = {
 /** The turn calls cezar_done, then ends (hearsay-tools/cezarion#2397). */
 async function doneTurn(manager: RunManager, onEvent: ((event: AgentEvent) => void) | undefined): Promise<void> {
   const [runId, state] = [...runInternals(manager).active][0]!;
-  const answer = await manager.cezarToolHandlers(runId, state.ciGeneration!).finishTurn({}, new AbortController().signal);
+  const answer = await manager.cezarToolHandlers(runId, state.liveSession.ciGeneration!).finishTurn({}, new AbortController().signal);
   if (!answer.ok) throw new Error(`cezar_done refused: ${answer.code}`);
   onEvent?.({ type: 'turn-end' });
 }
