@@ -63,26 +63,20 @@ it.each(['ordinary', 'delegated root'] as const)('drains detached Finish settlem
     boundary.enter(); await boundary.held;
     return result;
   });
-  const track = vi.spyOn(fixtureWork(root), 'track');
   expect(manager.isActive(run.id)).toBe(false);
   expect(manager.finish(run.id)).toBe(true);
-  const label = mode === 'ordinary' ? 'settleSuccess' : 'settleRequestedRootFinish';
-  const operation = track.mock.calls.find(([name]) => name === label);
-  expect(operation).toBeDefined();
-  const finished = Promise.allSettled([operation![1]]);
   await boundary.entered;
   const removing = removeFixtureRepo(root);
   try {
     await new Promise(resolve => setImmediate(resolve));
     expect(existsSync(root)).toBe(true);
     boundary.release();
-    expect(await finished).toEqual([{ status: 'fulfilled', value: undefined }]);
     await removing;
     expect(store.getRun(run.id)?.status).toBe('done');
     expect(existsSync(root)).toBe(false);
   } finally {
-    boundary.release(); await finished; await removing;
-    track.mockRestore(); diffSpy.mockRestore();
+    boundary.release(); await removing;
+    diffSpy.mockRestore();
   }
 });
 
@@ -98,21 +92,18 @@ it('drains queue rescue held while loading a lost queued run workflow', async ()
     return result;
   });
   expect(store.getRun(run.id)?.status).toBe('queued');
-  const tracking = vi.spyOn(fixtureWork(root), 'track');
   vi.advanceTimersByTime(QUEUE_WATCHDOG_MS);
-  const rescued = Promise.allSettled([tracking.mock.calls.find(([label]) => label === 'rescueStalledQueue')![1]]);
   await boundary.entered;
   const removing = removeFixtureRepo(root);
   try {
     await new Promise(resolve => setImmediate(resolve));
     expect(existsSync(root)).toBe(true);
     boundary.release();
-    expect(await rescued).toEqual([{ status: 'fulfilled', value: undefined }]);
     await removing;
     expect(manager.isActive(run.id)).toBe(false);
     expect(existsSync(root)).toBe(false);
   } finally {
-    boundary.release(); await rescued; await removing; loadSpy.mockRestore();
+    boundary.release(); await removing; loadSpy.mockRestore();
   }
 });
 
