@@ -26,21 +26,27 @@ export function monitoringWakeOf(run?: { waits?: Wait[] | undefined }): string |
   return monitoringTimerWait(run)?.deadline;
 }
 
-type TimerCapture = { id?: string; due(): number | undefined; indices: number[] };
+type TimerCapture = { id?: string; now: number; due(): number | undefined; indices: number[] };
 const registering = new AsyncLocalStorage<TimerCapture[]>();
 let clock: ReturnType<typeof observationClock> | undefined;
+let restoreDateNow: (() => void) | undefined;
 const capturedTimers = new Map<string, number>();
 
 function registrationClock() {
+  if (!clock) {
+    const now = Date.now.bind(Date);
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => registering.getStore()?.[0]?.now ?? now());
+    restoreDateNow = () => spy.mockRestore();
+  }
   return clock ??= observationClock(delay => {
-    const pending = registering.getStore()?.find(entry => entry.indices.length === 0 && delay !== undefined && entry.due() !== undefined && Math.abs(delay - Math.max(0, entry.due()! - Date.now())) <= 2);
+    const pending = registering.getStore()?.find(entry => entry.indices.length === 0 && delay !== undefined && entry.due() !== undefined && delay === Math.max(0, entry.due()! - entry.now));
     if (!pending) return false;
     pending.indices.push(clock!.captured);
     return true;
   });
 }
 
-afterEach(() => { clock?.restore(); clock = undefined; capturedTimers.clear(); });
+afterEach(() => { clock?.restore(); clock = undefined; restoreDateNow?.(); restoreDateNow = undefined; capturedTimers.clear(); });
 
 /** Own timers at the public registration boundary, including a restart's restored waits. */
 export function observeWaitTimers(manager: RunManager, store: RunStore): void {
@@ -49,7 +55,7 @@ export function observeWaitTimers(manager: RunManager, store: RunStore): void {
     if (args[1].kind !== 'timer') return register(...args);
     registrationClock();
     const request = args[1];
-    const capture: TimerCapture = { due: () => {
+    const capture: TimerCapture = { now: Date.now(), due: () => {
       const wait = store.getRun(args[0])?.waits?.find(wait => wait.kind === 'timer' && wait.phase === 'open' && wait.seconds === request.seconds && wait.note === request.note);
       return wait && wait.kind === 'timer' ? Date.parse(wait.deadline) : undefined;
     }, indices: [] };
@@ -62,9 +68,10 @@ export function observeWaitTimers(manager: RunManager, store: RunStore): void {
   });
   const recover = manager.recover.bind(manager);
   vi.spyOn(manager, 'recover').mockImplementation(async (...args) => {
+    const now = Date.now();
     const captures = store.listRunIds().flatMap(id => { const run = store.getRun(id); return run && ['running', 'waiting', 'queued'].includes(run.status) ? run.waits ?? [] : []; })
       .filter((wait): wait is TimerWaitEntry => wait.kind === 'timer' && wait.phase === 'open' && Date.parse(wait.deadline) > Date.now())
-      .map(wait => ({ id: wait.id, due: () => Date.parse(wait.deadline), indices: [] as number[] }));
+      .map(wait => ({ id: wait.id, now, due: () => Date.parse(wait.deadline), indices: [] as number[] }));
     if (!captures.length) return recover(...args);
     registrationClock();
     await registering.run(captures, () => recover(...args));
