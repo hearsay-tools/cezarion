@@ -26,7 +26,7 @@ export function monitoringWakeOf(run?: { waits?: Wait[] | undefined }): string |
   return monitoringTimerWait(run)?.deadline;
 }
 
-type TimerCapture = { id?: string; active: boolean; now: number; due(): number | undefined; indices: number[] };
+type TimerCapture = { id?: string; active: boolean; now: number; delay: number; indices: number[] };
 const registering = new AsyncLocalStorage<TimerCapture[]>();
 let clock: ReturnType<typeof observationClock> | undefined;
 let restoreDateNow: (() => void) | undefined;
@@ -35,7 +35,7 @@ const capturedTimers = new Map<string, number>();
 function registrationClock() {
   if (!clock) {
     clock = observationClock(delay => {
-      const pending = registering.getStore()?.find(entry => entry.active && entry.indices.length === 0 && delay !== undefined && entry.due() !== undefined && delay === Math.max(0, entry.due()! - entry.now));
+      const pending = registering.getStore()?.find(entry => entry.active && delay === entry.delay);
       if (!pending) return false;
       pending.indices.push(clock!.captured);
       return true;
@@ -55,12 +55,9 @@ export function observeWaitTimers(manager: RunManager, store: RunStore): void {
   vi.spyOn(manager, 'registerWait').mockImplementation(async (...args) => {
     if (args[1].kind !== 'timer') return register(...args);
     registrationClock();
-    const request = args[1];
-    const capture: TimerCapture = { active: true, now: Date.now(), due: () => {
-      const wait = store.getRun(args[0])?.waits?.find(wait => wait.kind === 'timer' && wait.phase === 'open' && wait.seconds === request.seconds && wait.note === request.note);
-      return wait && wait.kind === 'timer' ? Date.parse(wait.deadline) : undefined;
-    }, indices: [] };
+    const capture: TimerCapture = { active: true, now: Date.now(), delay: args[1].seconds * 1000, indices: [] };
     const wait = await registering.run([capture], () => register(...args)).finally(() => { capture.active = false; });
+    if (capture.indices.length > 1) throw new Error('ambiguous wait timer');
     if (!capturedTimers.has(wait.id)) {
       expect(capture.indices).toHaveLength(1);
       capturedTimers.set(wait.id, capture.indices[0]!);
@@ -72,8 +69,10 @@ export function observeWaitTimers(manager: RunManager, store: RunStore): void {
     const now = Date.now();
     const captures = store.listRunIds().flatMap(id => { const run = store.getRun(id); return run && ['running', 'waiting', 'queued'].includes(run.status) ? run.waits ?? [] : []; })
       .filter((wait): wait is TimerWaitEntry => wait.kind === 'timer' && wait.phase === 'open' && Date.parse(wait.deadline) > Date.now())
-      .map(wait => ({ id: wait.id, active: true, now, due: () => Date.parse(wait.deadline), indices: [] as number[] }));
+      .map(wait => ({ id: wait.id, active: true, now, delay: Date.parse(wait.deadline) - now, indices: [] as number[] }));
     if (!captures.length) return recover(...args);
+    const deadlines = captures.map(capture => capture.delay);
+    if (new Set(deadlines).size !== deadlines.length) throw new Error('ambiguous recovered timer: give recovered waits distinct deadlines');
     registrationClock();
     await registering.run(captures, () => recover(...args)).finally(() => { for (const capture of captures) capture.active = false; });
     for (const capture of captures) {
