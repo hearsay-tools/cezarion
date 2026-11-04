@@ -200,11 +200,19 @@ function evidenceRun(runs, proof) {
   return seen.reduce((latest, run) => (!latest || run.id > latest.id ? run : latest), null);
 }
 
+// A run's fields describe its latest attempt. A re-run run also gets each attempt, so a decision made
+// before a re-run can be read against the attempt that existed then.
+async function readAttempts(api, repo, run) {
+  if (!(run?.run_attempt > 1)) return undefined;
+  return mapLimit(Array.from({ length: run.run_attempt }, (_, i) => i + 1),
+    async attempt => trimRun(await api.json([`repos/${repo}/actions/runs/${run.id}/attempts/${attempt}`])));
+}
+
 async function readProofEvidence(api, repo, push, queueJobs) {
   const runs = (await api.list(`repos/${repo}/actions/workflows/ci.yml/runs?event=merge_group&head_sha=${push.run.head_sha}`, 'workflow_runs')).map(trimRun);
   const newest = evidenceRun(runs, proofJob(push));
   const jobs = newest ? queueJobs[newest.id] ?? await readJobs(api, repo, newest.id) : [];
-  return { queueRun: newest, queueJobs: jobs };
+  return { queueRun: newest, queueJobs: jobs, attempts: await readAttempts(api, repo, newest) };
 }
 
 async function readAll({ gh, repo, from, to, wait, now = Date.now() }) {
@@ -229,14 +237,18 @@ async function readEvidence(api, repo, window, lookahead) {
   const completedQueue = queueRuns.filter(run => run.status === 'completed');
   const completedPush = pushRuns.filter(run => run.status === 'completed');
   const queueJobs = {};
-  await mapLimit(completedQueue, async run => { queueJobs[run.id] = await readJobs(api, repo, run.id); });
+  const attempts = {};
+  await mapLimit(completedQueue, async run => {
+    queueJobs[run.id] = await readJobs(api, repo, run.id);
+    attempts[run.id] = await readAttempts(api, repo, run);
+  });
   const pushes = await mapLimit(completedPush, async run => ({ run, jobs: await readJobs(api, repo, run.id) }));
   await mapLimit(pushes.filter(isFallback), async push => {
     push.evidence = await readProofEvidence(api, repo, push, queueJobs);
   });
   const queuePrs = [...new Set(queueRuns.map(run => groupRef(run.head_branch)?.pr).filter(Boolean))].sort((a, b) => a - b);
   const removals = await readRemovals(api, repo, window, queuePrs);
-  return { repo, from: iso(from), to: iso(to), queueRuns, laterQueueRuns, queueJobs, pushes, merges, removals };
+  return { repo, from: iso(from), to: iso(to), queueRuns, laterQueueRuns, queueJobs, attempts, pushes, merges, removals };
 }
 
 // ---- Computing (pure) ----
@@ -276,12 +288,26 @@ const keepsRun = reason => reason === 'merged' || reason === 'failed_checks' || 
 // Invalidated: a later run for the same PR on another base, with no removal of that PR between the two.
 // Removed: the first removal of the run's PR after GitHub created the run is for another cause. A run belongs to
 // its entry from creation, and run_started_at moves to the latest attempt when the run is re-run.
+// The run as it stood at a moment: its latest attempt that had started by then, else its first attempt.
+function attemptAt(run, attempts, at) {
+  if (!attempts?.length || !Number.isFinite(at)) return run;
+  const sorted = [...attempts].sort((a, b) => a.run_attempt - b.run_attempt);
+  return sorted.filter(attempt => Date.parse(attempt.run_started_at) <= at).at(-1) ?? sorted[0];
+}
+
+// The queue removals of the run's PR from the run's creation on, oldest first. The first one ends the run's entry.
+function entryRemovals(run, raw) {
+  const ref = groupRef(run.head_branch);
+  const started = Date.parse(run.created_at);
+  return (ref ? raw.removals[ref.pr] ?? [] : []).map(removal => ({ at: Date.parse(removal.createdAt), reason: removal.reason }))
+    .filter(removal => removal.at >= started).sort((a, b) => a.at - b.at);
+}
+
 function exclusion(run, raw) {
   const ref = groupRef(run.head_branch);
   if (!ref) return null;
   const started = Date.parse(run.created_at);
-  const removals = (raw.removals[ref.pr] ?? []).map(removal => ({ at: Date.parse(removal.createdAt), reason: removal.reason }))
-    .filter(removal => removal.at >= started).sort((a, b) => a.at - b.at);
+  const removals = entryRemovals(run, raw);
   const rebuilt = [...raw.queueRuns, ...(raw.laterQueueRuns ?? [])].some(other => {
     const otherRef = groupRef(other.head_branch);
     const at = Date.parse(other.created_at);
@@ -293,9 +319,13 @@ function exclusion(run, raw) {
 
 function queueRunMetrics(raw) {
   const completed = raw.queueRuns.filter(run => run.status === 'completed');
+  // Every attempt costs runner-minutes. The attempt that ran when the entry ended gives the outcome:
+  // a re-run after the removal proves nothing for the entry (spec row 23).
   const runs = completed.map(run => {
     const jobs = raw.queueJobs[run.id] ?? [];
-    return { run, minutes: runnerMinutes(jobs), reused: reused(jobs), excluded: exclusion(run, raw) };
+    const decided = attemptAt(run, raw.attempts?.[run.id], entryRemovals(run, raw)[0]?.at);
+    return { run: decided, minutes: runnerMinutes(jobs), excluded: exclusion(run, raw),
+      reused: reused(jobs.filter(job => job.run_attempt === decided.run_attempt)) };
   });
   const conclusions = {};
   for (const { run } of runs) conclusions[run.conclusion] = (conclusions[run.conclusion] ?? 0) + 1;
@@ -336,8 +366,9 @@ function proofReason(push) {
   const proof = proofJob(push);
   if (!proof) return 'proof-job-missing';
   if (proof.conclusion !== 'success') return `proof-job-${proof.conclusion}`;
-  const { queueRun, queueJobs } = push.evidence ?? {};
-  if (!queueRun) return 'no-exact-queue-run';
+  const { queueJobs } = push.evidence ?? {};
+  if (!push.evidence?.queueRun) return 'no-exact-queue-run';
+  const queueRun = attemptAt(push.evidence.queueRun, push.evidence.attempts, Date.parse(proof.completed_at));
   if (queueRun.status !== 'completed' || Date.parse(queueRun.updated_at) > Date.parse(proof.completed_at)) return 'source-pending';
   if (queueRun.conclusion !== 'success') return 'source-not-successful';
   if (!successfulJobs(queueJobs.filter(job => job.run_attempt === queueRun.run_attempt), REQUIRED_QUEUE_JOBS)) return 'incomplete-gate';

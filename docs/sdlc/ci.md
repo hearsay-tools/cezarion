@@ -570,6 +570,8 @@ Each runs and search query covers one UTC day, because GitHub returns at most
     created the run has a reason other than `failed_checks`, a timeout or `merged`, for
     example `manual` or `merge_conflict`.
 - **Invalidated runs**: the runner-minutes of the invalidated runs above are waste.
+- **Re-run attempts**: runner-minutes count every attempt. A re-run run's outcome is the
+  attempt that ran when its entry ended. A fallback reason uses the attempt the proof read.
 - **Main-push proof fallback**: a `main` push run whose Typecheck job ran. The API
   does not return the proof's job summary, so the command rebuilds the reason from
   the evidence `queue-ci-proof.cjs` reads. It prints the URL of each run it cannot

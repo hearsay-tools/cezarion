@@ -308,6 +308,24 @@ test('fallback evidence is the newest exact queue run that existed when the proo
   assert.equal(evidenceRun(runs, undefined).id, 3);
 });
 
+test('a queue run re-run after a decision is read as the attempt that ran when the decision was made', () => {
+  // Attempt 1 fails and its entry is removed for failed checks; a re-run three hours later succeeds.
+  const first = { ...queueRun(1, 'failure', SHA('c1')), updated_at: '2026-11-02T01:20:00Z' };
+  const rerun = { ...queueRun(1, 'success', SHA('c1')), run_attempt: 2, run_started_at: '2026-11-02T04:00:00Z', updated_at: '2026-11-02T04:12:00Z' };
+  const raw = { repo: 'o/r', from: '2026-11-02T00:00:00Z', to: '2026-11-03T00:00:00Z', pushes: [], merges: [],
+    queueRuns: [rerun], queueJobs: { 1: [{ ...jobFor(10), run_attempt: 1 }, { ...jobFor(12), id: 99, run_attempt: 2 }] },
+    attempts: { 1: [first, rerun] }, removals: { 1: [removedAfter(1, 'failed_checks')] } };
+  const { queue } = computeMetrics(raw);
+  assert.equal(queue.failed, 1);
+  assert.deepEqual(queue.conclusions, { failure: 1 });
+  assert.equal(queue.minutes.all, 22);
+  // The proof completed between the two attempts and read attempt 1.
+  const proof = { name: PROOF_JOB, run_attempt: 1, conclusion: 'success', completed_at: '2026-11-02T02:00:00Z' };
+  const push = { run: { run_attempt: 1, html_url: 'u' }, jobs: [proof],
+    evidence: { queueRun: rerun, attempts: [first, rerun], queueJobs: [] } };
+  assert.equal(proofReason(push), 'source-not-successful');
+});
+
 test('group refs name their PR and base', () => {
   assert.deepEqual(groupRef(`gh-readonly-queue/main/pr-12-${SHA(5)}`), { pr: 12, base: SHA(5) });
   assert.equal(groupRef('gh-readonly-queue/main/pr-12-short'), undefined);
