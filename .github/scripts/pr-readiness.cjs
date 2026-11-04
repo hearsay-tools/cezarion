@@ -9,8 +9,9 @@
 // Flips made with the workflow token fire no workflow events, so the board is
 // synced inline after each flip; human flips arrive as their own events.
 
-const { readCodeRabbitAdmission } = require('./coderabbit-admission.cjs');
+const { readCodeRabbitReadiness } = require('./coderabbit-admission.cjs');
 const { readNativeReview } = require('./native-review-proof.cjs');
+const { retainedNativeReview } = require('./readiness-native.cjs');
 const { positive } = require('./queue-ci-proof.cjs');
 const { discover: discoverAdmission, eligiblePull } = require('./coderabbit-reconcile.cjs');
 
@@ -144,21 +145,29 @@ function sameRepo(pull, owner, repo) {
   return pull?.head?.repo?.full_name === `${owner}/${repo}`;
 }
 
-async function followPull({ github, projectGithub, owner, repo, candidate, sha, checks, deadline, log }) {
-  const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: candidate.number });
-  if (live?.state !== 'open' || live.head?.sha !== sha || !sameRepo(live, owner, repo)) return;
+async function readinessProof({ github, owner, repo, live, sha, checks, deadline, log }) {
   let admitted = false;
+  let retained = false;
   try {
     const proof = await readNativeReview({ github, owner, repo, pr: live, deadline });
-    const admission = await readCodeRabbitAdmission({ github, owner, repo, pullNumber: live.number, head: sha, deadline,
+    const admission = await readCodeRabbitReadiness({ github, owner, repo, pullNumber: live.number, head: sha, deadline,
       releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN });
     admitted = checks.ready && proof.passed && admission.admitted;
+    if (!admitted) admitted = await retainedNativeReview({ github, owner, repo, proof, checks, admission, deadline });
+    retained = admission.retained === true;
   } catch (error) {
     log(`PR ${live.number}: fresh review proof unavailable: ${error.message}`);
   }
+  return { admitted, retained };
+}
+
+async function followPull({ github, projectGithub, owner, repo, candidate, sha, checks, deadline, log }) {
+  const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: candidate.number });
+  if (live?.state !== 'open' || live.head?.sha !== sha || !sameRepo(live, owner, repo)) return;
+  const { admitted, retained } = await readinessProof({ github, owner, repo, live, sha, checks, deadline, log });
   const { data: final } = await github.rest.pulls.get({ owner, repo, pull_number: live.number });
   if (final?.state !== 'open' || final.head?.sha !== sha || !sameRepo(final, owner, repo) || final.base?.ref !== 'main') return;
-  const draft = !admitted;
+  const draft = !admitted || (retained && final.draft);
   if (final.draft === draft) log(`PR ${final.number}: readiness unchanged (admitted=${admitted}).`);
   else {
     await setDraft({ github, pull: final, draft });

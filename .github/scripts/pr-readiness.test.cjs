@@ -60,6 +60,7 @@ function fakeGithub(state = {}) {
     request: async (route, params) => {
       calls.push(['request', route, params.branch]);
       if (route.endsWith('/rules/branches/{branch}')) return { data: s.rules };
+      if (route.endsWith('/check-runs/{check_run_id}/annotations')) return { data: s.annotations ?? [] };
       s.pr = s.live?.(params.pull_number ?? 7) ?? s.pulls.find(p => p.number === (params.pull_number ?? 7)) ?? s.pulls[0];
       return { data: structuredClone(reviewData(s, route, params)) };
     },
@@ -663,5 +664,83 @@ for (const condition of ['failed native aggregate', 'skipped native review', 'mi
   if (condition === 'skipped native review') github.state.jobs[0].conclusion = 'skipped';
   if (condition === 'missing required check') github.state.checkRuns = [];
   await completeRun(github);
+  assert.deepEqual(flips(github), []);
+});
+
+for (const scenario of ['same-head pending', 'new-head pending', 'same-head failure', 'same-head finding']) {
+  test(`ready re-review: ${scenario}`, async () => {
+    const github = fakeGithub({ pulls: [pullFixture({ draft: false })] });
+    const previous = structuredClone(github.state.checks[0]);
+    github.state.checks.push({ ...github.state.checks[0], id: 101,
+      status: scenario === 'same-head failure' ? 'completed' : 'in_progress',
+      conclusion: scenario === 'same-head failure' ? 'failure' : null });
+    github.state.checks[0] = previous;
+    // A new head has no completed provider execution of its own.
+    if (scenario === 'new-head pending') github.state.checks.shift();
+    if (scenario === 'same-head finding') github.state.threads = [{ id: 'new-finding', isResolved: false }];
+    await completeRun(github);
+    assert.equal(github.state.pulls[0].draft, scenario !== 'same-head pending');
+  });
+}
+
+for (const conclusion of ['failure', 'skipped', 'neutral']) {
+  test(`pending re-review cannot retain an earlier completed ${conclusion}`, async () => {
+    const github = fakeGithub({ pulls: [pullFixture({ draft: false })] });
+    github.state.checks.push({ ...github.state.checks[0], id: 101, conclusion });
+    github.state.checks.push({ ...github.state.checks[0], id: 102, status: 'queued', conclusion: null });
+    await completeRun(github);
+    assert.equal(github.state.pulls[0].draft, true);
+  });
+}
+
+test('a pending re-review cannot promote a draft using an earlier success', async () => {
+  const github = fakeGithub();
+  github.state.checks.push({ ...github.state.checks[0], id: 101, status: 'in_progress', conclusion: null });
+  await completeRun(github);
+  assert.deepEqual(flips(github), []);
+});
+
+for (const scenario of ['queued admission', 'running admission', 'provider timeout', 'missing notice', 'ambiguous notice', 'other step failed', 'other native failure', 'other required check failed', 'partial notice', 'duplicate notice', 'wrong check URL']) {
+  test(`pending re-review with native revocation: ${scenario}`, async () => {
+    const github = fakeGithub({ pulls: [pullFixture({ draft: false })] });
+    github.state.checks.push({ ...github.state.checks[0], id: 101, status: 'in_progress', conclusion: null });
+    const running = ['queued admission', 'running admission'].includes(scenario);
+    const gate = github.state.jobs[0];
+    gate.status = running ? (scenario === 'queued admission' ? 'queued' : 'in_progress') : 'completed';
+    gate.conclusion = running ? null : 'failure';
+    gate.check_run_url = 'https://api.github.com/repos/o/r/check-runs/2';
+    gate.steps = [
+      { name: 'Checkout trusted review gate', status: 'completed', conclusion: 'success' },
+      { name: 'Require fresh CodeRabbit admission and resolved threads', status: gate.status, conclusion: gate.conclusion },
+      { name: 'Reject a cancelled run', status: running ? 'queued' : 'completed', conclusion: running ? null : 'skipped' },
+    ];
+    github.state.checkRuns[1].status = gate.status;
+    github.state.checkRuns[1].conclusion = gate.conclusion;
+    github.state.annotations = [{ annotation_level: 'notice', message: 'CodeRabbit admission blocked: provider-wait-timeout. CodeRabbit did not settle within the 20-minute review wait. Inspect the provider check; reconciliation can retry after it completes. The reconciler refreshes this job after provider/CI/review events. For eventless thread resolution, dispatch Reconcile CodeRabbit admission with pr_number.' }];
+    if (scenario === 'missing notice') github.state.annotations = [];
+    if (scenario === 'ambiguous notice') github.state.annotations.push({ annotation_level: 'failure', message: 'Unhandled script error' });
+    if (scenario === 'other step failed') gate.steps[0].conclusion = 'failure';
+    if (scenario === 'other native failure') github.state.jobs[2].conclusion = 'failure';
+    if (scenario === 'other required check failed') github.state.checkRuns[0].conclusion = 'failure';
+    if (scenario === 'partial notice') github.state.annotations[0].message = 'CodeRabbit admission blocked: provider-wait-timeout.';
+    if (scenario === 'duplicate notice') github.state.annotations.push({ ...github.state.annotations[0] });
+    if (scenario === 'wrong check URL') gate.check_run_url = 'https://api.github.com/repos/other/repo/check-runs/2';
+    await completeRun(github);
+    assert.equal(github.state.pulls[0].draft, !['queued admission', 'running admission', 'provider timeout'].includes(scenario));
+  });
+}
+
+test('retained readiness cannot promote a PR drafted during its final read', async () => {
+  const github = fakeGithub({ pulls: [pullFixture({ draft: false })] });
+  github.state.checks.push({ ...github.state.checks[0], id: 101, status: 'in_progress', conclusion: null });
+  let reads = 0;
+  const get = github.rest.pulls.get;
+  github.rest.pulls.get = async args => {
+    const result = await get(args);
+    if (++reads === 3) github.state.pulls[0].draft = true;
+    return result;
+  };
+  await completeRun(github);
+  assert.equal(github.state.pulls[0].draft, true);
   assert.deepEqual(flips(github), []);
 });

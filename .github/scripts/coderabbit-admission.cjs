@@ -52,13 +52,16 @@ async function verifiedException(read, pr, fullName, releaseAppBotLogin) {
   return filesAreVersionStampsOnly({ repository: fullName, files: paths, baseRef: pr.base.sha,
     headRef: pr.head.sha, readJsonFile: readFile, readTextFile: readFile }) ? 'release-stamps' : null;
 }
-async function providerCheck(read, head) {
+async function providerSnapshot(read, head) {
   const checks = await pages(read, 'GET /repos/{owner}/{repo}/commits/{ref}/check-runs',
     { ref: head, filter: 'all', check_name: CHECK_NAME, app_id: APP_ID }, 'check_runs');
   const candidates = checks.filter(trustedCheck);
   if (candidates.some(c => !positive(c.id) || c.head_sha !== head || typeof c.status !== 'string')
     || new Set(checks.map(c => c.id)).size !== checks.length) throw new Error('Malformed provider execution');
-  return newest(candidates);
+  return { latest: newest(candidates), completed: newest(candidates.filter(c => c.status === 'completed')) };
+}
+async function providerCheck(read, head) {
+  return (await providerSnapshot(read, head)).latest;
 }
 const fingerprint = check => JSON.stringify(check && [check.id, check.head_sha, check.status, check.conclusion,
   check.started_at, check.completed_at, check.app.id, check.app.slug, check.name, check.output?.title]);
@@ -91,27 +94,43 @@ function admissionResult(check, exception, threads, head) {
     providerState: state, action: providerAction(state, openThreads),
     reason: openThreads ? 'unresolved-threads' : accepted ? 'admitted' : `provider-${state}` };
 }
-async function readCodeRabbitAdmission({ github, owner, repo, pullNumber, head, releaseAppBotLogin,
-  now = Date.now, deadline = now() + 60000 }) {
+function stableProvider(before, after, readiness) {
+  if (fingerprint(before?.latest) !== fingerprint(after?.latest)) return false;
+  return !readiness || fingerprint(before?.completed) === fingerprint(after?.completed);
+}
+function retainedCheck(snapshot, pr, final, readiness) {
+  const retained = readiness && pr.draft === false && final.draft === false && providerState(snapshot?.latest) === 'pending';
+  return retained ? snapshot.completed : snapshot?.latest;
+}
+async function readAdmission({ github, owner, repo, pullNumber, head, releaseAppBotLogin,
+  now = Date.now, deadline = now() + 60000 }, readiness) {
   if (!positive(pullNumber) || !validSha(head)) throw new Error('Invalid review identity');
   const read = reader(github, owner, repo, deadline, now), fullName = `${owner}/${repo}`;
   const pull = () => read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: pullNumber });
   const pr = await pull();
   if (!validPull(pr, fullName, pullNumber, head)) throw new Error('PR head changed or invalid target');
   const exception = await verifiedException(read, pr, fullName, releaseAppBotLogin);
-  const check = exception ? null : await providerCheck(read, head);
+  const snapshot = exception ? null : await providerSnapshot(read, head);
   const graphql = async (query, variables) => {
     const result = await read('POST /graphql', { query, variables });
     if (result?.errors) throw new Error('Incomplete GraphQL response');
     return result?.data;
   };
   const threads = await listReviewThreads({ github: { graphql }, owner, repo, pullNumber });
-  const finalCheck = exception ? null : await providerCheck(read, head);
+  const finalSnapshot = exception ? null : await providerSnapshot(read, head);
   const final = await pull();
-  if (!stablePull(pr, final, fullName, pullNumber, head) || fingerprint(check) !== fingerprint(finalCheck)) {
+  if (!stablePull(pr, final, fullName, pullNumber, head) || !stableProvider(snapshot, finalSnapshot, readiness)) {
     throw new Error('Review evidence changed while reading');
   }
-  return admissionResult(check, exception, threads, head);
+  // Readiness alone retains a ready head during a re-execution. Admission for
+  // native CI and the queue always uses the newest execution, including pending.
+  const selected = retainedCheck(snapshot, pr, final, readiness);
+  const result = admissionResult(selected, exception, threads, head);
+  if (readiness) result.retained = result.admitted && selected !== snapshot?.latest;
+  return result;
 }
 
-module.exports = { readCodeRabbitAdmission, trustedCheck, APP_ID, APP_SLUG, CHECK_NAME, providerCheck, verifiedException };
+const readCodeRabbitAdmission = args => readAdmission(args, false);
+const readCodeRabbitReadiness = args => readAdmission(args, true);
+
+module.exports = { readCodeRabbitReadiness, readCodeRabbitAdmission, trustedCheck, APP_ID, APP_SLUG, CHECK_NAME, providerCheck, verifiedException };
