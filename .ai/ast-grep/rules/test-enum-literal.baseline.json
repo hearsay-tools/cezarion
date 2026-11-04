@@ -104,12 +104,6 @@
       "count": 1
     },
     {
-      "file": "packages/web/src/api/github-pages.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind: 'pr'",
-      "count": 1
-    },
-    {
       "file": "packages/web/src/lib/github-task.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'pr'",
@@ -132,12 +126,6 @@
       "rule": "test-enum-literal",
       "site": "status: 'failed' as const",
       "count": 8
-    },
-    {
-      "file": "packages/web/src/routes/github/github-sidebar-model.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind: 'pr'",
-      "count": 1
     },
     {
       "file": "packages/web/src/routes/task-thread/conversation-presentation.test.ts",

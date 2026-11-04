@@ -1,3 +1,4 @@
+import { githubItemSchema } from '@open-mercato/cezar-api-client/contract/github'
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
@@ -22,7 +23,7 @@ const issue = (number: number, over: Partial<GithubItem> = {}): GithubItem => ({
   labels: [], body: '', url: `https://github.com/acme/demo/issues/${number}`, comments: 0, ...over,
 })
 const pr = (number: number, over: Partial<GithubItem> = {}): GithubItem => ({
-  kind: 'pr', number, title: `PR ${number}`, author: 'grace', createdAt: '2026-07-01T00:00:00Z',
+  kind: githubItemSchema.shape.kind.enum.pr, number, title: `PR ${number}`, author: 'grace', createdAt: '2026-07-01T00:00:00Z',
   labels: [], body: '', url: `https://github.com/acme/demo/pull/${number}`, comments: 0, checks: null, ...over,
 })
 const data = (over: Partial<GithubData> = {}): GithubData => ({

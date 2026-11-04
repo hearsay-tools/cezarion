@@ -1,3 +1,4 @@
+import { githubItemSchema } from '@open-mercato/cezar-api-client/contract/github'
 import { describe, expect, it } from 'vitest'
 import type { GithubData, GithubItem } from '@open-mercato/cezar-api-client'
 import { flattenGithubPages, githubSideExhausted, nextGithubPageParam, reconcileGithubHead } from './github-pages'
@@ -5,7 +6,7 @@ import { flattenGithubPages, githubSideExhausted, nextGithubPageParam, reconcile
 const issue = (number: number, over: Partial<GithubItem> = {}): GithubItem => ({
   kind: 'issue', number, title: `Issue ${number}`, author: 'a', createdAt: '2026-10-16T00:00:00Z', labels: [], url: `u${number}`, comments: 0, ...over,
 })
-const pr = (number: number): GithubItem => ({ ...issue(number), kind: 'pr', title: `PR ${number}` })
+const pr = (number: number): GithubItem => ({ ...issue(number), kind: githubItemSchema.shape.kind.enum.pr, title: `PR ${number}` })
 const page = (over: Partial<GithubData> = {}): GithubData => ({
   available: true, repo: 'o/r', syncedAt: '2026-10-16T00:00:00Z', issues: [], prs: [],
   issuesTotal: 0, prsTotal: 0, issuesNextCursor: null, prsNextCursor: null, commentsDeferred: true, ...over,

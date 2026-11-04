@@ -1,3 +1,4 @@
+import { githubItemSchema } from '@open-mercato/cezar-api-client/contract/github'
 import { worktreeInfoSchema } from '@open-mercato/cezar-api-client/contract/repo'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -81,7 +82,7 @@ const GITHUB: GithubData = {
   issues: [],
   prs: [
     {
-      kind: 'pr',
+      kind: githubItemSchema.shape.kind.enum.pr,
       number: 7,
       title: 'Improve everything',
       author: 'ada',
