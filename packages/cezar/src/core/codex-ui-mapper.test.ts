@@ -19,13 +19,9 @@ import type { AgentEvent } from './agent-runner.ts';
 import type { UiEvent, UiItem } from './ui-events.ts';
 import { STATUS_MAP as CODEX_TOOL_STATUS_MAP, HOOK_STATUS as CODEX_HOOK_STATUS_MAP, codexSessionStarted, createCodexUiState, mapCodexNotification } from './codex-ui-mapper.ts';
 import { CodexAppServerRunner } from './codex-app-server-runner.ts';
-import { STATUS_MAP as OPENCODE_TOOL_STATUS_MAP } from './opencode-ui-mapper.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
-const TOOL_STATUS = z.enum([
-  ...Object.values(OPENCODE_TOOL_STATUS_MAP),
-  ...Object.values(CODEX_TOOL_STATUS_MAP),
-]).enum;
+const TOOL_STATUS = z.enum(Object.values(CODEX_TOOL_STATUS_MAP)).enum;
 const WIRE_HOOK_STATUS = z.enum(Object.keys(CODEX_HOOK_STATUS_MAP)).enum;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
