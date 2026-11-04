@@ -2884,8 +2884,8 @@ describe('fetchRefStatuses', () => {
     const { resolved: out } = await fetchRefStatuses(runGraphql, 'o', 'n', [7, 12, 3]);
     expect(runGraphql).toHaveBeenCalledTimes(1);
     expect(sent).toContain('issueOrPullRequest');
-    expect(out[7]).toEqual({ kind: 'pr', status: 'ready', mergeable: 'mergeable' });
-    expect(out[12]).toEqual({ kind: 'pr', status: 'merged' });
+    expect(out[7]).toEqual({ kind: githubItemSchema.shape.kind.enum.pr, status: 'ready', mergeable: 'mergeable' });
+    expect(out[12]).toEqual({ kind: githubItemSchema.shape.kind.enum.pr, status: 'merged' });
     expect(out[3]).toEqual({ kind: 'issue', status: 'not-planned' });
   });
 
@@ -3146,7 +3146,7 @@ describe('fetchRefStatuses', () => {
 
     expect(runGraphql).toHaveBeenCalledTimes(1);
     expect(sent).toContain('mergeable');
-    expect(out[7]).toEqual({ kind: 'pr', status: 'ready', mergeable: 'conflicting' });
+    expect(out[7]).toEqual({ kind: githubItemSchema.shape.kind.enum.pr, status: 'ready', mergeable: 'conflicting' });
   });
 
   it('keeps "still computing" apart from "merges cleanly" instead of collapsing both to false', async () => {
@@ -3184,8 +3184,8 @@ describe('fetchRefStatuses', () => {
     const { resolved: out } = await fetchRefStatuses(runGraphql, 'o', 'n', [7, 8]);
 
     // No `mergeable` at all — the question does not apply, which is not the same as answering it.
-    expect(out[7]).toEqual({ kind: 'pr', status: 'merged' });
-    expect(out[8]).toEqual({ kind: 'pr', status: 'closed' });
+    expect(out[7]).toEqual({ kind: githubItemSchema.shape.kind.enum.pr, status: 'merged' });
+    expect(out[8]).toEqual({ kind: githubItemSchema.shape.kind.enum.pr, status: 'closed' });
   });
 });
 

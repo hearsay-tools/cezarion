@@ -1397,14 +1397,14 @@ export function __clearRepoHandleCacheForTests(): void {
   for (const flight of repoDiscoveryFlights.values()) flight.controller.abort();
   repoDiscoveryFlights.clear();
 }
-
+export const REPO_HANDLE_DISCOVERY_STATUSES = ['resolved', 'unknown', 'retryable', 'cancelled'] as const;
+export type RepoHandleDiscoveryStatus = (typeof REPO_HANDLE_DISCOVERY_STATUSES)[number];
 /** Internal discovery outcome: callers that own a lifecycle can retry only transient failures. */
 export type RepoHandleDiscovery =
-  | { status: 'resolved'; handle: { owner: string; name: string } }
-  | { status: 'unknown' }
-  | { status: 'retryable' }
-  | { status: 'cancelled' };
-
+  | { status: Extract<RepoHandleDiscoveryStatus, 'resolved'>; handle: { owner: string; name: string } }
+  | { status: Extract<RepoHandleDiscoveryStatus, 'unknown'> }
+  | { status: Extract<RepoHandleDiscoveryStatus, 'retryable'> }
+  | { status: Extract<RepoHandleDiscoveryStatus, 'cancelled'> };
 /** Local absence cannot improve through network retries. Authentication, timeouts and remote
  * errors deliberately stay retryable, including 404s for temporarily inaccessible repositories. */
 function isPermanentRepoFailure(error: unknown): boolean {

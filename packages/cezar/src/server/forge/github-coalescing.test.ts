@@ -1,11 +1,14 @@
+import { z } from 'zod';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const execFileMock = vi.hoisted(() => vi.fn());
 vi.mock('node:child_process', async (original) => ({
   ...await original<typeof import('node:child_process')>(),
   execFile: (...args: unknown[]) => execFileMock(...args),
 }));
-import { __clearRepoHandleCacheForTests, __clearRefStatusCacheForTests, discoverRepoHandle,
+import { REPO_HANDLE_DISCOVERY_STATUSES, __clearRepoHandleCacheForTests, __clearRefStatusCacheForTests, discoverRepoHandle,
   resolveRepoHandle, fetchGithub, fetchGithubRefStatus, forgetRefStatus } from './github.ts';
+
+const DISCOVERY_STATUS = z.enum(REPO_HANDLE_DISCOVERY_STATUSES).enum;
 
 type Call = { args: string[]; cwd: string; env?: NodeJS.ProcessEnv; signal?: AbortSignal; reply: (error: Error | null, result: { stdout: string; stderr: string }) => void };
 let calls: Call[];
@@ -89,7 +92,7 @@ describe('shared GitHub discovery and status misses', () => {
     const b = resolveRepoHandle('/cancel');
     expect(discoveries()).toHaveLength(1);
     controller.abort();
-    expect(await a).toEqual({ status: 'cancelled' });
+    expect(await a).toEqual({ status: DISCOVERY_STATUS.cancelled });
     expect(discoveries()[0]!.signal?.aborted).toBe(false);
     answer(discoveries()[0]!);
     expect(await b).toEqual({ owner: 'owner', name: 'repo' });
@@ -99,7 +102,7 @@ describe('shared GitHub discovery and status misses', () => {
     const controller = new AbortController();
     const a = discoverRepoHandle('/abandon', controller.signal);
     controller.abort();
-    expect(await a).toEqual({ status: 'cancelled' });
+    expect(await a).toEqual({ status: DISCOVERY_STATUS.cancelled });
     expect(discoveries()[0]!.signal?.aborted).toBe(true);
     const b = resolveRepoHandle('/abandon');
     answer(discoveries()[1]!, 'new/repo');
