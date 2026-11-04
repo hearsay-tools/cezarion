@@ -561,7 +561,7 @@ function collabStatus(raw: Record<string, unknown>, receiverIds: string[], event
   return toolStatus(raw, eventType);
 }
 
-const HOOK_STATUS: Readonly<Record<string, HookStatus>> = {
+export const HOOK_STATUS: Readonly<Record<string, HookStatus>> = {
   completed: 'completed',
   failed: 'failed',
   blocked: 'blocked',
@@ -732,7 +732,7 @@ function longer(a: string | undefined, b: string | undefined): string | undefine
 
 /** The §7.1 status map — the wire word wins; an item without one derives its
  *  status from the lifecycle phase it arrived in. */
-const STATUS_MAP: Readonly<Record<string, ToolStatus>> = {
+export const STATUS_MAP: Readonly<Record<string, ToolStatus>> = {
   inProgress: 'running',
   in_progress: 'running',
   completed: 'completed',

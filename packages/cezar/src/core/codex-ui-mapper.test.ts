@@ -13,12 +13,16 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import type { AgentEvent } from './agent-runner.ts';
 import type { UiEvent, UiItem } from './ui-events.ts';
-import { codexSessionStarted, createCodexUiState, mapCodexNotification } from './codex-ui-mapper.ts';
+import { STATUS_MAP as CODEX_TOOL_STATUS_MAP, HOOK_STATUS as CODEX_HOOK_STATUS_MAP, codexSessionStarted, createCodexUiState, mapCodexNotification } from './codex-ui-mapper.ts';
 import { CodexAppServerRunner } from './codex-app-server-runner.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
+
+const TOOL_STATUS = z.enum(Object.values(CODEX_TOOL_STATUS_MAP)).enum;
+const WIRE_HOOK_STATUS = z.enum(Object.keys(CODEX_HOOK_STATUS_MAP)).enum;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(HERE, '__fixtures__', 'codex');
@@ -107,7 +111,7 @@ describe('codex hook/completed (#961)', () => {
 
   it('does not duplicate statusMessage already present as an entry', () => {
     const { events } = mapCodexNotification(
-      frame('hook/completed', { status: 'failed', statusMessage: 'boom', entries: [{ kind: 'error', text: 'boom' }] }),
+      frame('hook/completed', { status: WIRE_HOOK_STATUS.failed, statusMessage: 'boom', entries: [{ kind: 'error', text: 'boom' }] }),
       createCodexUiState(),
     );
     expect(events).toHaveLength(1);
@@ -265,7 +269,7 @@ describe('mapCodexNotification edge cases', () => {
     expect(output.events).toEqual([
       {
         type: 'item.started',
-        item: { kind: 'tool', id: 'item_c', name: 'commandExecution', toolKind: 'execute', title: 'Ran', status: 'running' },
+        item: { kind: 'tool', id: 'item_c', name: 'commandExecution', toolKind: 'execute', title: 'Ran', status: TOOL_STATUS.running },
       },
       { type: 'item.delta', itemId: 'item_c', field: 'output', delta: '$ ls\n' },
     ]);
@@ -487,7 +491,7 @@ describe('mapCodexNotification edge cases', () => {
     ).events;
     expect(review).toEqual({
       type: 'item.started',
-      item: { kind: 'tool', id: 'item_rv', name: 'enteredReviewMode', toolKind: 'task', title: 'Review', status: 'running' },
+      item: { kind: 'tool', id: 'item_rv', name: 'enteredReviewMode', toolKind: 'task', title: 'Review', status: TOOL_STATUS.running },
     });
 
     const [compaction] = mapCodexNotification(
@@ -605,7 +609,7 @@ describe('mapCodexNotification edge cases', () => {
         { method: 'turn/failed', params: { turn: { id: 'turn_1' }, error: { message: 'boom' } } },
         entered.state,
       );
-      expect(ended.events[0]).toMatchObject({ type: 'item.completed', item: { id: 'item_rv_1', status: 'failed' } });
+      expect(ended.events[0]).toMatchObject({ type: 'item.completed', item: { id: 'item_rv_1', status: TOOL_STATUS.failed } });
     });
 
     it('emits no review completion for a turn that had no open span', () => {
@@ -633,7 +637,7 @@ describe('mapCodexNotification edge cases', () => {
         },
         {
           type: 'item.started',
-          item: { kind: 'tool', id: 'rv_2', name: 'enteredReviewMode', toolKind: 'task', title: 'Review', status: 'running' },
+          item: { kind: 'tool', id: 'rv_2', name: 'enteredReviewMode', toolKind: 'task', title: 'Review', status: TOOL_STATUS.running },
         },
       ]);
       expect(second.state.reviewItemId).toBe('rv_2');
@@ -645,7 +649,7 @@ describe('mapCodexNotification edge cases', () => {
         { method: 'item/completed', params: { item: { type: 'enteredReviewMode', id: 'rv_1', status: 'inProgress' } } },
         state,
       );
-      expect(mapped.events[0]).toMatchObject({ item: { status: 'running' } });
+      expect(mapped.events[0]).toMatchObject({ item: { status: TOOL_STATUS.running } });
       expect(mapped.state.reviewItemId).toBe('rv_1');
     });
 

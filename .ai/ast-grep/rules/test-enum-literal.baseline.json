@@ -4,14 +4,8 @@
     {
       "file": "packages/cezar/src/core/claude-ui-mapper.test.ts",
       "rule": "test-enum-literal",
-      "site": "status: 'failed'",
-      "count": 2
-    },
-    {
-      "file": "packages/cezar/src/core/claude-ui-mapper.test.ts",
-      "rule": "test-enum-literal",
       "site": "status: 'running'",
-      "count": 2
+      "count": 1
     },
     {
       "file": "packages/cezar/src/core/codex-startup.test.ts",
@@ -23,7 +17,7 @@
       "file": "packages/cezar/src/core/codex-ui-mapper.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'failed'",
-      "count": 6
+      "count": 4
     },
     {
       "file": "packages/cezar/src/core/codex-ui-mapper.test.ts",
@@ -35,13 +29,7 @@
       "file": "packages/cezar/src/core/codex-ui-mapper.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'running'",
-      "count": 6
-    },
-    {
-      "file": "packages/cezar/src/core/cursor-print-ui-mapper.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'failed'",
-      "count": 1
+      "count": 2
     },
     {
       "file": "packages/cezar/src/core/dry-run-backends.test.ts",
@@ -84,24 +72,6 @@
       "rule": "test-enum-literal",
       "site": "status: 'running'",
       "count": 1
-    },
-    {
-      "file": "packages/cezar/src/core/opencode-ui-mapper.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'failed'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/core/opencode-ui-mapper.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'pending'",
-      "count": 7
-    },
-    {
-      "file": "packages/cezar/src/core/opencode-ui-mapper.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'running'",
-      "count": 19
     },
     {
       "file": "packages/cezar/src/core/ui-events.test.ts",

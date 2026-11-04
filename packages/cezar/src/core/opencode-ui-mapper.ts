@@ -362,7 +362,7 @@ function mapTextLike(
 
 /** The §7.1 direct status map — opencode is the only backend with a real
  *  pending phase, and its `error` state is v2's `failed`. */
-const STATUS_MAP: Readonly<Record<string, ToolStatus>> = {
+export const STATUS_MAP: Readonly<Record<string, ToolStatus>> = {
   pending: 'pending',
   running: 'running',
   completed: 'completed',
