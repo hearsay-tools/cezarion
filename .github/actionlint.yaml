@@ -5,6 +5,7 @@ self-hosted-runner:
   # and release.yml 8 vCPU.
   labels:
     - blacksmith-*-ubuntu-2404
+    - cezarion-lxc-canary
 
 paths:
   .github/workflows/**/*.{yml,yaml}:
