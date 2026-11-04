@@ -8,6 +8,12 @@ import { manager, parent, store, until, useWorkerWaitFixture, worker } from './w
  * Slice S7, Table B row B12 (.ai/specs/2026-11-03-run-store-owns-exits.md): a worker Stop writes
  * the cancellation's one lifecycle event through its `stop-worker` exit.
  */
+
+/** Whether run `id`'s session opened: its slot is taken. */
+function sessionOpened(id: string): boolean {
+  return (runInternals(manager).active.get(id) as { sessionEverOpened?: boolean } | undefined)?.sessionEverOpened === true;
+}
+
 const cancellations = (id: string) => store.readEvents(id)
   .filter(event => event.type === 'lifecycle' && /cancelled/.test(String(event.message))).map(event => event.message);
 
@@ -19,7 +25,7 @@ describe('a worker Stop and its cancellation event', { timeout: 30_000 }, () => 
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:slow', runner: 'claude' });
-    await until(() => (runInternals(manager).active.get(blocker.id) as { sessionEverOpened?: boolean } | undefined)?.sessionEverOpened === true);
+    await until(() => sessionOpened(blocker.id));
     const queued = await worker(p.id);
     manager.enqueueOwnedRun(queued.id);
     expect(store.getRun(queued.id)?.status).toBe(RUN_STATUS.queued);
@@ -27,6 +33,7 @@ describe('a worker Stop and its cancellation event', { timeout: 30_000 }, () => 
     expect(store.getRun(queued.id)?.status).toBe(RUN_STATUS.cancelled);
     expect(cancellations(queued.id)).toEqual(['cancelled while queued']);
     manager.cancel(blocker.id);
+    // bound: a mock session ends within a second of its interrupt; 15 s covers a loaded host.
     await manager.awaitRunTermination(blocker.id, 15_000);
   });
 
@@ -35,7 +42,7 @@ describe('a worker Stop and its cancellation event', { timeout: 30_000 }, () => 
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:slow');
     manager.enqueueOwnedRun(w.id);
-    await until(() => (runInternals(manager).active.get(w.id) as { sessionEverOpened?: boolean } | undefined)?.sessionEverOpened === true);
+    await until(() => sessionOpened(w.id));
     const append = store.appendEvent.bind(store);
     const refused = vi.spyOn(store, 'appendEvent').mockImplementation((id, event) => {
       if (event.type === 'lifecycle' && event.message === 'run cancelled') throw new Error('ENOSPC: no space left on device');
