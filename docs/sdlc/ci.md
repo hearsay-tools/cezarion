@@ -142,24 +142,7 @@ exactly the `engines.node` minimum (Node 24.21.0):
 - Four Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/4 --maxWorkers=4` for N=1..4.
 - The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs pinned workflow lint, issue-citation checking and `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It keeps the minimum-Node setup and its bounded retry.
 - The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It builds server declarations, then runs Node unit tests, the full application build, packaged CLI E2E typecheck and tests, and release-package dry-run packing. The explicit server build preserves the preparation that typecheck supplied before the split. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
-- Four cockpit browser E2E shards on `ubicloud-standard-2` (2 vCPU, 8 GB RAM, Ubuntu 24.04 x64) each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --allow-skip --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
-
-The Ubicloud trial moves only the four browser CI shards to the lowest x64 tier,
-`ubicloud-standard-2`. The Vitest and coverage trials on that tier hit the existing
-15-minute job and 20-minute coverage limits, so those suites stay on GitHub-hosted
-Ubuntu. Compare browser job times after the switch before changing shard counts
-or worker limits. Other jobs, including nightly verification, keep their existing
-runners. The trial changes no test command, worker count, timeout or required check.
-
-An independent, optional `Warm Ubicloud dependency cache` job installs dependencies
-on Ubicloud on every push to `main`, even when queue proof skips verification.
-Ubicloud's cache is separate from GitHub's and restores only from the current
-branch or the default branch. Seeding `main` lets task and merge-queue branches
-reuse its pnpm cache while keeping cache branch protection enabled. The job uses
-the browser shards' Node and pnpm setup, skips install scripts, and runs no tests.
-It also runs on a bare manual CI dispatch to prove workflow changes; a dispatch
-from a feature branch populates only that branch's cache. Cache warming does not
-gate verification or snapshot publication.
+- Four cockpit browser E2E shards on GitHub-hosted `ubuntu-latest` each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --allow-skip --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
 The separate typecheck uses Blacksmith's 3,000 monthly x64 2-vCPU equivalent
 minutes. A seven-day sample projects about 2,833 PR/dispatch typecheck jobs per
