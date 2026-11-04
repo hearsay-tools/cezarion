@@ -1,6 +1,5 @@
 import { skillSchema } from '@open-mercato/cezar-contract/skills';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 /**
  * #790 review follow-ups: Continue must revalidate after skill materialize,
  * wait briefly for the team-skill cache, keep extra-only worker inheritance,
@@ -22,11 +21,16 @@ import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { workerWorkflowHash } from '../delegation/execution-identity.ts';
 import { RunStore } from '../runs/store.ts';
-import type { Skill } from '../skills.ts';
+import { discoverSkills, type Skill } from '../skills.ts';
 import * as skillsRemote from '../skills-remote.ts';
 import { seedTeamSkillsClone, writeSkillsReposConfig } from '../skills-remote.testkit.ts';
 import { RunManager, skillSystemPrompt } from './run.ts';
 import { plannedWorkflow, skillTaskSteps } from './types.ts';
+
+vi.mock('../skills.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../skills.ts')>();
+  return { ...actual, discoverSkills: vi.fn(actual.discoverSkills) };
+});
 
 // A launch creates a worktree and runs git; under full-suite load that outlasts
 // vi.waitFor's 1 s default (seen failing in the #790 gate run).
@@ -61,13 +65,17 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
-  let launches: Array<{ spec: AgentRunSpec; inheritedSystemPrompt: string | undefined }>;
+  let launches: Array<{ spec: AgentRunSpec }>;
   let sessions: Array<{ spec: AgentRunSpec; finish: (text?: string) => void }>;
   let releases: Array<() => void>;
   let cleanup: string[];
 
   beforeEach(async () => {
     scopeFixtureProcesses();
+    vi.mocked(discoverSkills).mockImplementation(async (...args) => {
+      const actual = await vi.importActual<typeof import('../skills.ts')>('../skills.ts');
+      return actual.discoverSkills(...args);
+    });
     vi.stubEnv('CEZ_DRY_RUN', '1');
     vi.stubEnv('CEZ_AUTONAME', '0');
     vi.stubEnv('CEZ_DELEGATION', '1');
@@ -91,8 +99,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
       interrupt: async () => undefined,
       run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
       startSession: (spec: AgentRunSpec, onEvent) => {
-        const active = [...(manager as unknown as { active: Map<string, { delegationSettings?: { systemPrompt?: string } }> }).active.values()].at(-1);
-        launches.push({ spec, inheritedSystemPrompt: active?.delegationSettings?.systemPrompt });
+        launches.push({ spec });
         let resolveResult!: (value: AgentRunResult) => void;
         let open = true;
         const result = new Promise<AgentRunResult>((resolve) => { resolveResult = resolve; });
@@ -123,8 +130,8 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     await drainFixtureManagers(repoRoot);
     manager.dispose();
     store.flush();
-    const discover = runInternals(manager).runSkills.discoverSkills;
-    if (vi.isMockFunction(discover)) expect(discover).toHaveBeenCalled();
+    expect(discoverSkills).toHaveBeenCalled();
+    vi.mocked(discoverSkills).mockReset();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     rmSync(repoRoot, { recursive: true, force: true });
@@ -165,7 +172,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
 
   it('Stop during materializeSkillDir never launches the continued session', async () => {
     const skill = teamDirSkill();
-    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValue([skill]);
+    vi.mocked(discoverSkills).mockResolvedValue([skill]);
     let release!: (written: string[]) => void;
     const held = new Promise<string[]>((resolve) => { release = resolve; });
     const materialize = vi.spyOn(skillsRemote, 'materializeSkillDir').mockReturnValue(held);
@@ -185,7 +192,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
 
   it('Stop during materializeSkillToCache never launches a continued session without a worktree (#1024)', async () => {
     const skill = teamDirSkill();
-    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValue([skill]);
+    vi.mocked(discoverSkills).mockResolvedValue([skill]);
     let release!: (dir: string | null) => void;
     const held = new Promise<string | null>((resolve) => { release = resolve; });
     const materialize = vi.spyOn(skillsRemote, 'materializeSkillToCache').mockReturnValue(held);
@@ -205,7 +212,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   });
 
   it('bounds the team-skill wait when the continued skill is missing', async () => {
-    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValue([]);
+    vi.mocked(discoverSkills).mockResolvedValue([]);
     const wait = vi.spyOn(skillsRemote, 'waitForTeamSkills').mockReturnValue(new Promise(() => {}));
     const id = terminalSkillRun(TEAM_SKILL);
     const started = Date.now();
@@ -222,7 +229,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
 
   it('re-discovers a team skill that arrives during the bounded wait', async () => {
     const skill = teamDirSkill();
-    const discover = vi.spyOn(runInternals(manager).runSkills, 'discoverSkills');
+    const discover = vi.mocked(discoverSkills);
     discover.mockResolvedValueOnce([]);
     discover.mockResolvedValue([skill]);
     vi.spyOn(skillsRemote, 'waitForTeamSkills').mockResolvedValue([skill]);
@@ -293,7 +300,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
 
   it('Continue of a team directory skill rematerializes without a note', async () => {
     const skill = teamDirSkill();
-    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValue([skill]);
+    vi.mocked(discoverSkills).mockResolvedValue([skill]);
     // Provisioning stages the copies in the worktree's git dir, then places them (hearsay-tools/cezarion#1814).
     const materialize = vi.spyOn(skillsRemote, 'materializeSkillDir').mockImplementation(async (root) => {
       for (const dir of writtenSkillDirs(root)) {
@@ -309,7 +316,12 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
     expect(materialize).toHaveBeenCalledTimes(1);
-    expect(materialize).toHaveBeenCalledWith(expect.stringContaining('cezar-staging'), skill, expect.any(Function));
+    const [staging, received, ignore] = materialize.mock.calls[0]!;
+    expect(staging).toContain('cezar-staging');
+    expect(typeof ignore).toBe('function');
+    expect({ name: received.name, description: received.description, body: received.body,
+      source: received.source, path: received.path, team: { repo: received.team!.repo,
+        ref: received.team!.ref, path: received.team!.path, dir: received.team!.dir } }).toEqual(skill);
     for (const dir of writtenSkillDirs(worktree)) expect(readFileSync(join(dir, 'SKILL.md'), 'utf8')).toBe(TEAM_SKILL_BODY);
     expect(launches[0]!.spec.systemPrompt).toContain(skillSystemPrompt(skill));
     expect(store.readEvents(id).some((event) => event.type === 'note' && String(event.message).includes(MATERIALIZED_NOTE))).toBe(false);
@@ -319,7 +331,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   it('Continue without a worktree names the cache copy of a team directory skill, without a note (#1024)', async () => {
     const skill = teamDirSkill();
     const filesDir = '/cache/skill-files/org__skills/abc/team-playbook';
-    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValue([skill]);
+    vi.mocked(discoverSkills).mockResolvedValue([skill]);
     const intoCheckout = vi.spyOn(skillsRemote, 'materializeSkillDir');
     const toCache = vi.spyOn(skillsRemote, 'materializeSkillToCache').mockResolvedValue(filesDir);
     const id = terminalSkillRun(TEAM_SKILL);
@@ -364,8 +376,8 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     });
     expect(launches[0]!.spec.systemPrompt).toContain(expectedSkill);
     expect(launches[0]!.spec.systemPrompt).toContain(EXTRA_PROMPT);
-    expect(launches[0]!.inheritedSystemPrompt).toBe(EXTRA_PROMPT);
-    expect(launches[0]!.inheritedSystemPrompt).not.toContain(WORKER_SKILL_BODY);
+    expect(manager.delegationExecutionSettings(workerId).systemPrompt).toBe(EXTRA_PROMPT);
+    expect(manager.delegationExecutionSettings(workerId).systemPrompt).not.toContain(WORKER_SKILL_BODY);
     sessions[0]!.finish();
     expect(await manager.awaitRunTermination(workerId, 15_000)).toBe(true);
     expect(['done', 'review']).toContain(store.getRun(workerId)?.status);
@@ -374,9 +386,9 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     await vi.waitFor(() => expect(launches.length).toBe(2), { timeout: LAUNCH_WAIT_MS });
     expect(launches[1]!.spec.systemPrompt).toContain(expectedSkill);
     expect(launches[1]!.spec.systemPrompt).toContain(EXTRA_PROMPT);
-    expect(launches[1]!.inheritedSystemPrompt).toBe(EXTRA_PROMPT);
-    expect(launches[1]!.inheritedSystemPrompt).not.toContain(`Selected skill: /${WORKER_SKILL}`);
-    expect(launches[1]!.inheritedSystemPrompt).not.toContain(WORKER_SKILL_BODY);
+    expect(manager.delegationExecutionSettings(workerId).systemPrompt).toBe(EXTRA_PROMPT);
+    expect(manager.delegationExecutionSettings(workerId).systemPrompt).not.toContain(`Selected skill: /${WORKER_SKILL}`);
+    expect(manager.delegationExecutionSettings(workerId).systemPrompt).not.toContain(WORKER_SKILL_BODY);
     sessions[1]!.finish();
   });
 });
