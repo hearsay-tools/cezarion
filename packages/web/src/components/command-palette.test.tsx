@@ -1,3 +1,4 @@
+import { skillSchema } from '@open-mercato/cezar-api-client/contract/skills'
 import {
   RUN_STATUS,
   WAIT_KIND,
@@ -977,7 +978,7 @@ describe('Skills group', () => {
     skill({ name: 'project-review', source: 'agents', description: 'Review the diff' }),
     skill({ name: 'team-release', source: 'team' }),
     skill({ name: 'project-fix', source: 'ai' }),
-    skill({ name: 'project-plan', source: 'cezar' }),
+    skill({ name: 'project-plan', source: skillSchema.shape.source.enum.cezar }),
   ]
 
   it('orders local and team project skills before global ones, stably (#377/#555)', async () => {
@@ -1032,7 +1033,7 @@ describe('the pure ordering helpers', () => {
       skill({ name: 'g', source: 'global' }),
       skill({ name: 't', source: 'team' }),
       skill({ name: 'a', source: 'agents' }),
-      skill({ name: 'c', source: 'cezar' }),
+      skill({ name: 'c', source: skillSchema.shape.source.enum.cezar }),
       skill({ name: 'i', source: 'ai' }),
     ])
     expect(ordered.map((entry) => entry.source)).toEqual(['team', 'agents', 'cezar', 'ai', 'global'])

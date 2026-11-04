@@ -29,7 +29,8 @@ const SUPPRESS_CLICK_MS = 300
 /** The window a release velocity is measured over. */
 const FLING_WINDOW_MS = 100
 
-export type SwipePhase = 'idle' | 'dragging' | 'open' | 'committing'
+export const SWIPE_PHASES = ['idle', 'dragging', 'open', 'committing'] as const
+export type SwipePhase = (typeof SWIPE_PHASES)[number]
 
 type SwipeState = { offset: number; phase: SwipePhase; past: boolean }
 const IDLE: SwipeState = { offset: 0, phase: 'idle', past: false }
