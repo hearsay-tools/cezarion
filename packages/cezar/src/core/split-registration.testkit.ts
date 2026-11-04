@@ -5,7 +5,9 @@ import { parse } from '@babel/parser';
 /** Collect registration names without executing native-process test bodies. */
 export function registrationCollector(names: string[]): typeof it {
   return Object.assign((name: string) => { names.push(name); }, {
-    skipIf: () => (name: string) => { names.push(name); },
+    skipIf: () => {
+      return (name: string) => { names.push(name); };
+    },
     each: (rows: readonly string[]) => (name: string) => {
       for (const row of rows) names.push(name.replace('%s', row));
     },
