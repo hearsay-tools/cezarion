@@ -2,14 +2,14 @@ import type { SubagentChild } from '@open-mercato/cezar-contract/waits';
 import type { AgentSession, InputDelivery } from '../core/agent-runner.ts';
 import type { Skill } from '../skills.ts';
 import type { DelegationExecutionSettings } from './run/types.ts';
+import { createUsageGroup, type UsageGroup } from './run/usage-accounting.ts';
 
 /**
  * The in-memory state of a run this manager is executing, and the one place it is built
  * (hearsay-tools/cezarion#1806). `RunManager` registers every instance through `activate`.
  */
 export interface ActiveRun {
-  /** Last cumulative Claude report per provider session during this process. */
-  reportedClaudeCost?: Map<string, number>;
+  readonly usage: UsageGroup;
   delegationSettings?: DelegationExecutionSettings | undefined;
   revokeDelegation?: (() => void) | undefined;
   revokeCiTools?: (() => void) | undefined;
@@ -130,13 +130,6 @@ export interface ActiveRun {
   /** A park for the user kept the session and its slot for running native subagents
    *  (hearsay-tools/cezarion#2431): their last end gives both back. */
   heldForSubagents?: boolean | undefined;
-  usageInvocation?: {
-    stepId: string;
-    epoch: number;
-    observed: boolean;
-    startedTurns: Set<string>;
-    recordedTurns: Set<string>;
-  };
 }
 
 /** Run Cezar's own write into the session: a parent turn the runner starts during it is Cezar's
@@ -170,7 +163,8 @@ export interface ActiveRunInit {
  * `RunSkills.loadRunSkills` loads it, from the same two callers.
  */
 export function createActiveRun(init: ActiveRunInit): ActiveRun {
-  return {
+  const state: ActiveRun = {
+    usage: createUsageGroup(),
     delegationSettings: undefined, revokeDelegation: undefined,
     cancelled: false, interrupt: () => undefined, cwd: init.cwd,
     pendingHumanAsk: init.pendingHumanAsk,
@@ -178,4 +172,6 @@ export function createActiveRun(init: ActiveRunInit): ActiveRun {
     backgroundChildren: new Map(),
     autonomous: init.autonomous,
   };
+  Object.defineProperty(state, 'usage', { writable: false, configurable: false });
+  return state;
 }
