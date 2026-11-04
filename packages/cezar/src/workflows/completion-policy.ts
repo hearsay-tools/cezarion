@@ -2,6 +2,7 @@ import type { CezarDoneAnswer, ConversationMessage } from '@open-mercato/cezar-c
 import { WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord, RunStore } from '../runs/store.ts';
 import { rootsAwaitingPeer } from '../delegation/conversations.ts';
+import { retiredFinishPatch } from '../runs/run-exits.ts';
 import type { ActiveRun } from './active-run.ts';
 
 type DoneRefusal = Extract<CezarDoneAnswer, { ok: false }>;
@@ -90,10 +91,7 @@ export function incomingRequestInstructions(requests: ConversationMessage[]): st
 
 /** Terminal publication retires the accepted Finish intent in the same run write. */
 export function settledRootFinishPatch(store: RunStore, runId: string): Partial<Pick<RunRecord, 'delegation'>> {
-  const root = store.getRun(runId)?.delegation;
-  if (root?.role !== 'root' || !root.finishRequestedAt) return {};
-  const { finishRequestedAt: _intent, ...delegation } = root;
-  return { delegation };
+  return retiredFinishPatch(store.getRun(runId) ?? {});
 }
 
 /** Recovery of a failed Finish keeps the error and releases its stale continuation gate. */

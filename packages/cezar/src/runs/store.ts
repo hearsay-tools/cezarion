@@ -319,7 +319,7 @@ function legacyWaitId(name: string): string {
  *  park from running to waiting, resume from waiting to running. The caller has read the row's status. */
 function setLiveStatus(row: Record<string, unknown>, exit: 'park' | 'resume'): void {
   const [from, to] = exit === 'park' ? ['running', 'waiting'] : ['waiting', 'running'];
-  Object.assign(row, applyExit(row as Pick<RunRecord, 'status'>, exit));
+  Object.assign(row, applyExit(row as Pick<RunRecord, 'status' | 'delegation'>, exit));
   if (Array.isArray(row.steps)) for (const step of row.steps) {
     if (step && typeof step === 'object' && (step as { status?: unknown }).status === from) (step as { status: string }).status = to;
   }
@@ -813,7 +813,7 @@ function settleLoadedStop(run: RunRecord): void {
 function restoreLoadedUsageLimitHold(run: RunRecord): void {
   // A usage-limited run is waiting for its resume (hearsay-tools/cezarion#1236, phase 4a). Rows a
   // schema-7 cezar wrote kept it failed with the appointment; they read as the waiting run they are.
-  if (run.status === 'failed' && run.autoResumeAt !== undefined) Object.assign(run, applyExit(run, 'hold', { finishedAt: undefined }));
+  if (run.status === 'failed' && run.autoResumeAt !== undefined) Object.assign(run, applyExit(run, 'hold'));
 }
 
 function failLoadedInterruptedRun(run: RunRecord, opts?: { keepLive?: boolean }): void {
@@ -824,8 +824,7 @@ function failLoadedInterruptedRun(run: RunRecord, opts?: { keepLive?: boolean })
   // all still work.
   // A usage-limit hold runs no process, so no exit interrupted it: its appointment stands.
   if (!opts?.keepLive && engineOwnsRun(run)) {
-    Object.assign(run, applyExit(run, 'fail-interrupted', {
-      error: 'interrupted — cezar process exited during the run', finishedAt: run.finishedAt ?? new Date().toISOString() }));
+    Object.assign(run, applyExit(run, 'fail-interrupted', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
     for (const step of run.steps) {
       if (step.status === 'running' || step.status === 'waiting') step.status = 'failed';
     }
@@ -2546,7 +2545,7 @@ export class RunStore extends EventEmitter {
       executionStartSeq: this.transcriptFacts(id).lastSeq,
     });
     const staged = new Map<string, RunRecord>();
-    const next: RunRecord = { ...run, ...this.redactPatch(patch), ...applyExit(run, exit), delegation,
+    const next: RunRecord = { ...run, ...applyExit(run, exit, this.redactPatch(patch) as RunPatch), delegation,
       ...(step ? { steps: [...run.steps, { ...step, status: 'pending' as const, iterations: 0, tokensUsed: 0 }] } : {}),
     };
     staged.set(id, next);

@@ -23,7 +23,7 @@ import { hasPendingHumanAsk, pendingHumanAskSeq } from './pending-ask-facts.ts';
 
 interface ContinuationAcceptanceHost {
   isActive(runId: string): boolean;
-  move(id: string, exit: RunExitId, patch: Omit<Parameters<RunStore['updateRun']>[1], 'status'>): RunRecord | undefined;
+  move(id: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>): RunRecord | undefined;
   ownedJob(run: RunRecord): { workflow: WorkflowDef; input: StartRunInput };
   executionBlockedByRootFinish(run: RunRecord): boolean;
   finishWorkerExecution(runId: string): Promise<void>;
@@ -113,8 +113,8 @@ export class ContinuationAcceptance {
     const message = content.length ? this.queuedInput.toQueuedMessage(runId, content) : undefined;
     this.autoResumeScheduler.clearAutoResume(runId);
     this.context.store.setArchived(runId, false);
-    this.host.move(runId, 'continue-line', { stopping: undefined, error: undefined, finishedAt: undefined,
-      currentStepId: undefined, ...(message ? { queuedMessages: [...(current.queuedMessages ?? []), message] } : {}) });
+    this.host.move(runId, 'continue-line', { stopping: undefined,
+      ...(message ? { queuedMessages: [...(current.queuedMessages ?? []), message] } : {}) });
     this.context.store.flush();
     this.line.enqueueJob(runId, job);
     void this.host.pump();
@@ -141,9 +141,7 @@ export class ContinuationAcceptance {
     // The recoverable status and original input must commit before startup can await anything.
     const acceptedPatch = {
       continuationMessage: continuation.acceptedMessage(message, stepId, prompt, resumeContext, recovered, conversation, opts, deferForCapacity),
-      error: undefined,
-      finishedAt: undefined,
-      currentStepId: toLine ? undefined : stepId,
+      ...(toLine ? {} : { currentStepId: stepId }),
       invalidAsk: undefined,
       archived: false,
       archivedAt: undefined,
@@ -178,7 +176,7 @@ export class ContinuationAcceptance {
       this.line.enqueueContinuation(runId, {
         stepId, sessionId: resumeSessionId, backend: targetRunner, prompt, images, lineJoinedAt: Date.now(),
       });
-      this.host.move(runId, 'continue-line', { error: undefined, finishedAt: undefined, currentStepId: undefined });
+      this.host.move(runId, 'continue-line');
       // Enqueueing wakes the scheduler even after the previous execution released its slot.
       void this.host.pump();
       return { ok: true };
@@ -193,10 +191,7 @@ export class ContinuationAcceptance {
   /** A Continue whose engine threw: the run fails and leaves the active set (exit `fail-crash`). */
   failCrashedContinuation(runId: string, err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
-    this.host.move(runId, 'fail-crash', {
-      error: `continue crashed: ${message}`,
-      finishedAt: new Date().toISOString(),
-    });
+    this.host.move(runId, 'fail-crash', { error: `continue crashed: ${message}` });
     this.line.unmarkStarting(runId);
     this.host.dropActive(runId);
   }

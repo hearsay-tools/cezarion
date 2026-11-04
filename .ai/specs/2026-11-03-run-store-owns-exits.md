@@ -102,8 +102,8 @@ touches a turn-end, wait or settlement path.
 ### Table A: exits and what they settle
 
 "Settles" is what every call site does today; the exit will own it. "Sites" counts call sites at
-the baseline. SRF is `settledRootFinishPatch` (retires the root's Finish intent), which `move`
-adds for every exit whose status is `failed`. Durability: D debounced, C commit.
+the baseline. SRF is `settledRootFinishPatch` (retires the root's Finish intent), which `RunManager.move`
+added for every exit whose status is `failed` until S5. Durability: D debounced, C commit.
 
 | Exit | from → to | Sites | Settles (all sites agree) | Guard | Durability |
 |---|---|---|---|---|---|
@@ -118,7 +118,7 @@ adds for every exit whose status is `failed`. Durability: D debounced, C commit.
 | resume | waiting → running | 4 | nothing | none | D by exit; C by enclosing commit (`commitOutcome` at `sendAgentInput`) |
 | succeed, succeed-review | running, waiting → done, review | 1 (`commitOrdinarySuccess`) | SRF, `finishedAt` = now, `currentStepId` and `autoResumeAttempts` cleared | none | D by exit; `succeed` only: C by record (completion option), since only `done` takes the record rule |
 | succeed-root, succeed-root-review | waiting → done, review | 1 (`settleSuccessWork`) | as succeed, plus the Finish intent retired, `activity` cleared, running or waiting steps done (`finishedAt ??= now`), in one commit | root with a pending Finish intent; else no write, returns false | C by exit |
-| accept-review | review → done | 1 | nothing | none | D by exit; C by record |
+| accept-review | review → done | 1 | SRF | none | D by exit; C by record |
 | draft-pr | review, done, failed, cancelled → done | 1 | `pullRequestUrl`, `finishedAt ??= now` | none | D by exit; C by record |
 | fail-start | queued, running → failed | 7 | `error`, `finishedAt` = now, SRF | none | D |
 | fail | running, waiting → failed | 4 | `error`, `finishedAt` = now, `currentStepId` cleared, SRF | none | D |
@@ -150,6 +150,9 @@ S5 keeps every row as it is (owner, 2026-11-03). S7 normalizes them. "Today" is 
 | B7 | continue-line | the usage-limit Continue writes it twice: `acceptResumedContinuation`, then `dispatchAcceptedContinuation` | both |
 | B8 | park | step → waiting is in the commit at one site (`parkOnWaits` without a slot), a side call at five, set earlier at two (`settleIdleClosedRun`, `settleIncompleteStep`), absent at six | side calls: `completionGate`, `handlePermissionRequested`, `handleNativeAskRequested`, `parkForUser`, `parkOnWaits` with a slot |
 | B9 | requeue, park, continue-line, cancel | four requeue sites, six park sites, `acceptUntouchedContinuation` and `cancelQueuedRun` call `store.flush()` right after a debounced write: a second save, not atomic with the write | as listed |
+| B10 | every exit to cancelled | Only `settleCancelledRun` (no step `finishedAt`) and `settleCancelledSuccess` (`finishedAt ??= now`) settle running and waiting steps to cancelled, and so does the store's load-time Stop `settleLoadedStop` when `run.stopping` is set (no step `finishedAt`). `settleCancelledContinuation` and `settleContinuationPrelaunchCancel` cancel only their own step. `cancelRunWithoutSession`, `settleStoppedContinuation` and both `startExecution` sites settle none | as listed |
+| B11 | every exit to failed | Open steps settle per site: `recoverInterruptedRun`, `failRecoveredInvalidAsk` and `settleIdleClosedWorker` fail every running or waiting step; the Continue failure paths fail only their own step; the rest leave steps to the caller or settle none | as listed |
+| B12 | cancel, cancel-root | The `run cancelled` lifecycle event is written by `settleCancelledRun`, `settleCancelledSuccess`, `settleCancelledContinuation`, `acquireContinuationRepoRoot` and the late Stop; `cancelQueuedRun` writes `cancelled while queued`; `cancelRunWithoutSession`, `settleStoppedContinuation`, `settleContinuationPrelaunchCancel`, both `startExecution` sites and `commitRootFinishCancellation` (`cancel-root`) write none | as listed |
 | B13 | draft-pr | the route accepts a usage-limit hold no `RunManager` holds and writes waiting → done, an undeclared transition; the cockpit never offers it there | `POST /runs/:id/pr` |
 
 ### Table C: writers outside the table
@@ -201,6 +204,9 @@ state has an automatic exit or a recorded human-only reason.
 | B7 | The usage-limit Continue writes `continue-line` once | The second write repeats the first |
 | B8 | `park` settles the current step to waiting in the same write | As B5 |
 | B9 | Kept; recorded only. The follow-up `flush()` stays until S6 gives each exit its durability | S6 decides it |
+| B10 | Every exit to cancelled settles running and waiting steps to cancelled, with `finishedAt ??= now` | A cancelled run has no live step. The load-time repair (hearsay-tools/cezarion#2590) reuses this rule |
+| B11 | Every exit to failed settles open steps to failed for a root run; an owned worker keeps its re-entry step `waiting` (hearsay-tools/cezarion#1620) | A failed root has no live step; a parent resume re-enters the worker's step |
+| B12 | The cancel exits write the `run cancelled` event once, at every site | The web header (hearsay-tools/cezarion#2589) and the timeline read one event for one cancellation |
 | B13 | S7 decides whether the Draft PR route refuses a usage-limit hold, or `draft-pr` declares it | Until then the raw route records a violation; the cockpit offers no Draft PR on a hold |
 
 ## Open decisions

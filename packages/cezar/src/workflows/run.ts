@@ -9,7 +9,6 @@ import * as completionGateReads from './run/completion-gate.ts';
 import { cezarToolHandlers } from './run/cezar-tools.ts';
 import type { DelegationExecutionSettings, StartRunInput, Execution, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
 export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
-import { settledRootFinishPatch } from './completion-policy.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
 import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type TimerWaitEntry, type WaitVia, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from './turn-end.ts';
@@ -30,7 +29,7 @@ export { makeRunTitle } from '../runs/run-title.ts';
 import { clearHeldHumanInputTimer, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
 import * as workflowPosition from './run/workflow-position.ts';
-import { RUN_EXITS, type RunExitId, type RunPatch } from '../runs/run-exits.ts';
+import { type RunExitId, type RunPatch } from '../runs/run-exits.ts';
 import { deriveAccountHolds } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { type PreviewHostLike } from '../preview/registration.ts';
@@ -699,9 +698,10 @@ export class RunManager {
     return entry === 'gate' || (entry === 'ready' && outcome.kind === 'readiness') ? undefined : outcome;
   }
 
-  /** Every run status `run.ts` writes comes from the run state table (hearsay-tools/cezarion#1804). */
+  /** Every run status `run.ts` writes comes from the run state table (hearsay-tools/cezarion#1804).
+   *  The exit settles its own fields, the Finish intent of a failed run among them. */
   private move(runId: string, exit: RunExitId, patch: RunPatch = {}): RunRecord | undefined {
-    return this.store.move(runId, exit, { ...patch, ...(RUN_EXITS[exit].to === 'failed' ? settledRootFinishPatch(this.store, runId) : {}) });
+    return this.store.move(runId, exit, patch);
   }
 
   private autosaveCleanupBlocker(runId: string): string | undefined {

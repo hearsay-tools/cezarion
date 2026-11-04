@@ -3,6 +3,7 @@ import type { HumanWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { hasLiveInboxClaim } from '../../delegation/input.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
+import { settledRootFinishPatch } from '../completion-policy.ts';
 import { holdsOwedResults, isCezarHumanWait, openWaits } from '../waits.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import type { WorkerScratchCleanup } from '../../delegation/scratch-cleanup.ts';
@@ -380,7 +381,7 @@ export class RunRecovery {
     for (const step of run.steps) if (step.status === 'waiting' || step.status === 'running') {
       this.context.store.updateStep(run.id, step.id, { status: 'failed', error: 'invalid structured question', finishedAt });
     }
-    this.host.move(run.id, 'fail', { error: 'invalid structured question', finishedAt, currentStepId: undefined });
+    this.host.move(run.id, 'fail', { error: 'invalid structured question', finishedAt });
   }
 
   /** A `running` run whose process died mid-turn. */
@@ -399,11 +400,7 @@ export class RunRecovery {
         });
       }
     }
-    this.host.move(run.id, 'fail-interrupted', {
-      error: 'interrupted — cezar process exited during the run',
-      finishedAt,
-      currentStepId: undefined,
-    });
+    this.host.move(run.id, 'fail-interrupted', { finishedAt, currentStepId: undefined, ...settledRootFinishPatch(this.context.store, run.id) });
     if (this.host.requeueInterruptedRun(run, interruptedStepId)) return;
     const resumed = this.host.continueRun(
       run.id,

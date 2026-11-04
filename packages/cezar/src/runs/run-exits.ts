@@ -7,7 +7,8 @@
  * The store writes every run status by applying an exit: `RunStore.move`, `applyExit` on a record
  * it reconciles at load or stages for archive, or the `exit` of `commitOutcome` and
  * `commitWorkerContinuation`. Each checks the status of the record its write
- * changes against the exit's `from` (`exitStatus`). An exit with a `settle` is a guarded exit
+ * changes against the exit's `from` (`exitStatus`). An exit with `fields` settles them on every
+ * write that applies it, under the caller's extras (slice S5). An exit with a `settle` is a guarded exit
  * (Decision 5): `RunStore.move` commits it at once, with the record `settle` returns, only when
  * its `guard` passes. An undeclared transition is written as before and reported as a violation;
  * nothing throws in the write path. Strict mode (`vitest.setup.ts`) records each violation, and
@@ -25,15 +26,20 @@ export type RunPatch = Partial<Omit<RunRecord, 'id' | 'steps' | 'status'>> & { s
  *  the step the caller names. */
 export type ExitSettlement = { now: string; stepId?: string | undefined };
 
+/** What an exit's `fields` read off the record a write applies it to. */
+export type ExitRead = Pick<RunRecord, 'status' | 'delegation'>;
+
 /**
- * One kind of status write: the statuses it may leave from and the one it writes. A guarded exit
- * also declares `settle`, the record it commits at once (the store writes `to` over its status).
+ * One kind of status write: the statuses it may leave from and the one it writes. `fields` are
+ * the fields every site of the exit writes alike; a caller's extras override them. A guarded exit
+ * declares `settle` instead, the record it commits at once (the store writes `to` over its status).
  * Its `guard` decides whether the run may take it: a failed guard writes nothing, and the store
  * returns undefined, or throws `refused` when the exit names one.
  */
 export type RunExitSpec = {
   from: readonly RunStatus[];
   to: RunStatus;
+  fields?: (run: ExitRead, at: ExitSettlement) => RunPatch;
   guard?: (run: RunRecord) => boolean;
   refused?: string;
   settle?: (run: RunRecord, at: ExitSettlement) => RunRecord;
@@ -46,12 +52,26 @@ type WithLegacyActivity = RunRecord & { activity?: undefined };
 /** A root that holds a pending Finish intent. */
 const rootFinishPending = (run: RunRecord) => run.delegation?.role === 'root' && !!run.delegation.finishRequestedAt;
 
-/** The root's Finish intent, retired. */
-function retiredFinish(run: RunRecord): RunRecord {
-  if (run.delegation?.role !== 'root') return run;
+/** The root's pending Finish intent, retired as a patch (SRF): nothing when the run holds none. */
+export function retiredFinishPatch(run: Pick<RunRecord, 'delegation'>): Pick<RunPatch, 'delegation'> {
+  if (run.delegation?.role !== 'root' || !run.delegation.finishRequestedAt) return {};
   const { finishRequestedAt: _intent, ...delegation } = run.delegation;
-  return { ...run, delegation };
+  return { delegation };
 }
+
+/** A run settled now, its Finish intent retired. */
+const settledNow = (run: ExitRead, { now }: ExitSettlement): RunPatch => ({ ...retiredFinishPatch(run), finishedAt: now });
+
+/** A run settled now that also leaves its step. */
+const settledOffStep = (run: ExitRead, at: ExitSettlement): RunPatch => ({ ...settledNow(run, at), currentStepId: undefined });
+
+/** A run that succeeded: settled now, off its step, its resume counter and Finish intent retired.
+ *  A run that got all the way to a settled turn is not in a usage-limit loop, so its resume
+ *  counter starts over instead of creeping toward the cap. */
+const succeededNow = (run: ExitRead, at: ExitSettlement): RunPatch => ({ ...settledOffStep(run, at), autoResumeAttempts: undefined });
+
+/** The root's Finish intent, retired. */
+const retiredFinish = (run: RunRecord): RunRecord => ({ ...run, ...retiredFinishPatch(run) });
 
 /** A root Finish that succeeds: the intent retired, the run and its running or waiting steps
  *  settled at one time. */
@@ -74,34 +94,44 @@ const rootFinishWaiting = (run: RunRecord) => run.status === 'waiting' && rootFi
 export const RUN_EXITS = {
   start: { from: ['queued', 'running', 'waiting'], to: 'running' },
   'start-held': { from: ['queued'], to: 'queued' },
-  requeue: { from: ['queued', 'running', 'failed'], to: 'queued' },
-  'continue-line': { from: ['waiting', 'review', 'done', 'failed', 'cancelled'], to: 'queued' },
-  'continue-now': { from: ['waiting', 'review', 'done', 'failed', 'cancelled'], to: 'running' },
+  requeue: { from: ['queued', 'running', 'failed'], to: 'queued', fields: () => ({ currentStepId: undefined }) },
+  'continue-line': { from: ['waiting', 'review', 'done', 'failed', 'cancelled'], to: 'queued',
+    fields: () => ({ error: undefined, finishedAt: undefined, currentStepId: undefined }) },
+  // The step it runs is the caller's: `currentStepId` is an extra.
+  'continue-now': { from: ['waiting', 'review', 'done', 'failed', 'cancelled'], to: 'running',
+    fields: () => ({ error: undefined, finishedAt: undefined }) },
   park: { from: ['running', 'queued', 'waiting'], to: 'waiting' },
   // A park that gives up its slot (hearsay-tools/cezarion#1235): committed at once, so a refused
   // write throws with nothing changed and the caller keeps the slot.
   'park-release': { from: ['running', 'queued', 'waiting'], to: 'waiting', settle: settleParkRelease },
   'park-for-wake': { from: ['queued', 'waiting'], to: 'waiting' },
-  hold: { from: ['failed', 'waiting'], to: 'waiting' },
+  hold: { from: ['failed', 'waiting'], to: 'waiting', fields: () => ({ finishedAt: undefined }) },
   resume: { from: ['waiting'], to: 'running' },
-  succeed: { from: ['running', 'waiting'], to: 'done' },
-  'succeed-review': { from: ['running', 'waiting'], to: 'review' },
+  succeed: { from: ['running', 'waiting'], to: 'done', fields: succeededNow },
+  'succeed-review': { from: ['running', 'waiting'], to: 'review', fields: succeededNow },
   // A root's durable Finish: a concurrent explicit cancellation is never overwritten.
   'succeed-root': { from: ['waiting'], to: 'done', guard: rootFinishWaiting, settle: settleRootFinish },
   'succeed-root-review': { from: ['waiting'], to: 'review', guard: rootFinishWaiting, settle: settleRootFinish },
-  'accept-review': { from: ['review'], to: 'done' },
+  // Sets no `finishedAt` (Table B6).
+  'accept-review': { from: ['review'], to: 'done', fields: retiredFinishPatch },
   // Draft PR (`POST /runs/:id/pr`): the cockpit offers it on review and on settled runs, so a
   // settled run that is published reads done too. A usage-limit hold is not declared (spec B13).
   'draft-pr': { from: ['review', 'done', 'failed', 'cancelled'], to: 'done' },
-  'fail-start': { from: ['queued', 'running'], to: 'failed' },
-  fail: { from: ['running', 'waiting'], to: 'failed' },
+  // Three sites keep `currentStepId` (Table B1); the others clear it in their extras.
+  'fail-start': { from: ['queued', 'running'], to: 'failed', fields: settledNow },
+  fail: { from: ['running', 'waiting'], to: 'failed', fields: settledOffStep },
   // settleFailedContinuation alone: a worker Stop can record cancelled before it settles.
-  'fail-continue': { from: ['running', 'waiting', 'cancelled'], to: 'failed' },
-  'fail-interrupted': { from: ['queued', 'running', 'waiting'], to: 'failed' },
-  'fail-crash': { from: ['queued', 'running', 'waiting'], to: 'failed' },
+  'fail-continue': { from: ['running', 'waiting', 'cancelled'], to: 'failed', fields: settledOffStep },
+  // Restart recovery sets `finishedAt` now and retires the Finish intent; the store's load-time
+  // writer keeps an existing `finishedAt` and the intent (Table B4). Each passes its own.
+  'fail-interrupted': { from: ['queued', 'running', 'waiting'], to: 'failed',
+    fields: () => ({ error: 'interrupted — cezar process exited during the run' }) },
+  // Neither site clears `currentStepId` (Table B2).
+  'fail-crash': { from: ['queued', 'running', 'waiting'], to: 'failed', fields: settledNow },
   // A crash right after the withdrawal must not find it on disk (hearsay-tools/cezarion#1236).
   'withdraw-hold': { from: ['waiting'], to: 'failed', guard: isUsageLimitHold,
     settle: (run, { now }) => ({ ...run, autoResumeAt: undefined, autoResumeAttempts: undefined, finishedAt: now }) },
+  // `finishedAt` and `currentStepId` stay with each site (Table B3, B4).
   cancel: { from: ['queued', 'running', 'waiting'], to: 'cancelled' },
   // Cancellation supersedes a root's pending Finish; from cancelled it repairs a snapshot an older
   // controller left with the intent.
@@ -156,12 +186,14 @@ export type ExitWrite<E extends RunExitId> = Omit<RunPatch, 'status'> & { status
 
 /**
  * Apply `exit` to `run`, a record in hand: check its status against the exit's `from` and return
- * the fields to write, `extras` with the exit's status. It neither runs a guard nor settles: a
- * caller of a guarded exit checks its guard itself. `RunStore.move` writes through it, and the
- * store's load-time and archive writers assign its result onto the record they change.
+ * the fields to write: the exit's `fields`, then `extras` over them, then the exit's status. It
+ * neither runs a guard nor a guarded `settle`: a caller of a guarded exit checks its guard itself.
+ * `RunStore.move` writes through it, and the store's load-time and archive writers assign its
+ * result onto the record they change.
  */
-export function applyExit<E extends RunExitId>(run: Pick<RunRecord, 'status'>, exit: E, extras: RunPatch = {}): ExitWrite<E> {
-  return { ...extras, status: exitStatus(exit, run.status) };
+export function applyExit<E extends RunExitId>(run: ExitRead, exit: E, extras: RunPatch = {}): ExitWrite<E> {
+  const spec: RunExitSpec = RUN_EXITS[exit];
+  return { ...spec.fields?.(run, { now: new Date().toISOString() }), ...extras, status: exitStatus(exit, run.status) };
 }
 
 /**

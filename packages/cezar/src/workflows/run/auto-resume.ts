@@ -95,7 +95,7 @@ export class AutoResumeScheduler {
   /** Publish the deadline on the record (the cockpit's only source) and arm the timer for it. The
    *  run waits for it (hearsay-tools/cezarion#1236): `waiting`, its error kept for a withdrawal. */
   private armAutoResume(runId: string, deadline: number): void {
-    this.host.move(runId, 'hold', { finishedAt: undefined, autoResumeAt: new Date(deadline).toISOString() });
+    this.host.move(runId, 'hold', { autoResumeAt: new Date(deadline).toISOString() });
     const timer = setTimeout(() => this.fireAutoResume(runId), Math.max(0, deadline - Date.now()));
     timer.unref?.();
     this.autoResumeTimers.set(runId, timer);
