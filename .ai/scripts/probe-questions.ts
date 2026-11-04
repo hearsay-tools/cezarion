@@ -1,3 +1,4 @@
+import { setRunStatus } from '../../packages/cezar/src/runs/run-store.testkit.ts';
 // Manual real-harness probe for #505 PR B: a worker's CEZ:ASK question travels to its
 // parent, and the parent's reply answers it on the real harness.
 //
@@ -31,7 +32,7 @@ const rec = (kind: string, detail: unknown = '') => console.log(JSON.stringify({
 
 const store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
 const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-store.updateRun(parent.id, { status: 'waiting' });
+setRunStatus(store, parent.id, 'waiting');
 store.commitDelegation([{ id: parent.id, delegation: { role: 'root', permissions: ['spawn', 'wait', 'steer'], receipts: [] } }]);
 const MARKER = JSON.stringify({ questions: [{ header: 'Color', question: 'Which color should the probe report?', options: [{ label: 'Teal' }, { label: 'Amber' }] }] });
 const TASK = `Do not run any tools. First, ask which color to report: reply with one short sentence, then end your reply with this exact final line:\nCEZ:ASK ${MARKER}\nWhen you later receive the answer, reply with exactly "COLOR IS <the answer>" and nothing else.`;

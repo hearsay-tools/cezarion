@@ -1,3 +1,4 @@
+import { setRunStatus } from '../src/runs/run-store.testkit.ts';
 /** Repro fixture for #657: 12 archiveable parents, 48 owned workers, 200 review rows.
  * Run only against an empty scratch repository:
  * `tsx packages/cezar/scripts/seed-archive-profile.ts <scratch-repo>`. */
@@ -15,8 +16,7 @@ for (let p = 0; p < 12; p++) {
     title: `Profile parent ${p + 1}`, task: 'Task '.repeat(300), workflow: 'quick-task',
     steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
   });
-  store.updateRun(parent.id, {
-    status: 'done', finishedAt: '2026-01-01T00:00:00.000Z',
+  setRunStatus(store, parent.id, 'done', { finishedAt: '2026-01-01T00:00:00.000Z',
     delegation: { role: 'root', permissions: ['spawn'], receipts: [] },
   });
   for (let w = 0; w < 4; w++) {
@@ -39,7 +39,7 @@ for (let p = 0; p < 12; p++) {
       },
       'a'.repeat(64),
     );
-    store.updateRun(worker.id, { status: 'running' });
+    setRunStatus(store, worker.id, 'running');
   }
 }
 for (let i = 0; i < 200; i++) {
@@ -47,7 +47,7 @@ for (let i = 0; i < 200; i++) {
     title: `Background task ${i + 1}`, task: 'Background task '.repeat(100),
     workflow: 'quick-task', steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
   });
-  store.updateRun(extra.id, { status: 'review' });
+  setRunStatus(store, extra.id, 'review');
 }
 console.log(JSON.stringify({ root, runs: store.listRunSummaries().runs.length, finished: 12 }));
 store.close();

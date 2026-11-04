@@ -1,3 +1,4 @@
+import { setRunStatus } from '../src/runs/run-store.testkit.ts';
 /**
  * Family reconcile benchmark (hearsay-tools/cezarion#2378): what one reconcile pass over a settled
  * conversation root costs as its message count grows, with a fixed member count.
@@ -72,10 +73,10 @@ function seed(dataDir: string, root: string, messageCount: number) {
         path: join(root, 'workers', id), branch: `cez/${id.slice(0, 8)}`, baselineSha: '0'.repeat(40),
       },
     }, 'a'.repeat(64));
-    store.updateRun(worker.id, { status: 'done' });
+    setRunStatus(store, worker.id, 'done');
     return worker.id;
   });
-  store.updateRun(parent.id, { status: 'done' });
+  setRunStatus(store, parent.id, 'done');
   const messages: ConversationMessage[] = Array.from({ length: messageCount }, (_, i) => {
     const worker = workers[i % workers.length]!;
     const [senderRunId, recipientRunId] = i % 2 ? [worker, parent.id] : [parent.id, worker];

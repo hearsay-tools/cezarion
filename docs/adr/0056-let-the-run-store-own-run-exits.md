@@ -24,7 +24,9 @@ held usage-limit resume) is an exit with a named guard. A failed guard writes no
 false, as the commit's early return did. `transitionVia` and the separate status-writing commits
 go away. The store's own load-time status writes and the Draft-PR review accept are exits too, so
 the `run-status-write-outside-transition` rule and its baseline go away: the patch type refuses a
-status outside an exit.
+status outside an exit. Test fixtures use `setRunStatus` in
+`runs/run-store.testkit.ts` to seed states through the unchanged update path. An import guard
+keeps this bypass out of production.
 
 An undeclared transition behaves the same in tests and in production. The store writes it and
 records a violation; production logs a warning, and the test setup fails the test after it ran

@@ -1,0 +1,19 @@
+id: run-store-testkit-import
+language: TypeScript
+severity: warning
+message: Production must use RunStore.move for status changes; run-store.testkit is for fixtures only.
+files:
+  - packages/cezar/src/**/*.ts
+ignores:
+  - '**/*.test.ts'
+  - '**/*.testkit.ts'
+rule:
+  all:
+    - any:
+        - kind: import_statement
+        - kind: export_statement
+        - kind: call_expression
+    - has:
+        kind: string
+        stopBy: end
+        regex: 'run-store\.testkit(\.ts|\.js)?["'']$'

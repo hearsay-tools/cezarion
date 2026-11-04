@@ -75,6 +75,8 @@ Seven writers bypass the table: six in the `run-status-write-outside-transition`
    `park-release` exit (Decision 4). `transitionVia` is deleted.
 6. **The bypass writers become exits** (§ Table C). Then `run-status-write-outside-transition`
    and its baseline are deleted: the type refuses a status outside an exit.
+   Test fixtures use `setRunStatus` in `runs/run-store.testkit.ts`, which calls the same
+   update path as before. Production cannot import the helper.
 7. **Slice 4.4 removes the four outcome baseline entries at their cause**: `commitOutcome`
    returns the waits it settled, and the outcome module provides the receipt fields of the
    `conversation-message` event. PR hearsay-tools/cezarion#2572.
@@ -92,7 +94,7 @@ touches a turn-end, wait or settlement path.
 | S2 | `RunStore.move(id, exit, extras)`. `RunManager.move` and the five `status: transition(…)` patches call it; `commitOutcome` and `commitWorkerContinuation` take an exit instead of a status. `status` leaves the patch types of `move`'s extras, `commitWorkerContinuation` and `commitOutcome`'s dependency patch | direct status in the five patches; `transition()` | none |
 | S3 | Decision 5 | `transitionVia`, five commits | none |
 | S4a | Decision 6: every writer in Table C applies an exit. The store's load-time and archive writers use `applyExit` (`runs/run-exits.ts`) on the record in hand, and `move` writes through it. The Draft PR route takes its own exit, `draft-pr` (review, done, failed, cancelled → done); a Stop on load takes `cancel-late` | the status rule's baseline entries | none |
-| S4b | `status` leaves `updateRun`'s patch type; test fixtures that set a status move to a `setRunStatus` testkit helper | status rule and baseline | none |
+| S4b | `status` leaves `updateRun`'s patch type; test fixtures that set a status move to `setRunStatus` in `runs/run-store.testkit.ts`, guarded against production imports | status rule and baseline | none |
 | S5 | Each exit settles the fields all its sites agree on (Table A). A site that does more passes an explicit extra; a site that does less uses a named variant of the exit | hand-written clears in 66 sites | none |
 | S6 | Decision 4. Each exit declares its durability; `RunStore.move` takes it from the record rule (`doneCommits`), then the exit, never from its extras. `updateRun` keeps its field rule (handoff records, completion options) for writes that are not exits. The record rules become one ordered list, `RECORD_WRITE_RULES`, that every write path runs with its path as input; a rule one update save skips names its difference. `UpdateHooks` keeps what the store owns: redaction, the repository, the transcript and the save | `WRITE_PATH_RULES` path lists, ten of the fifteen `UpdateHooks` | none |
 | S7 | Normalize Table B, one commit per row, each with a red test where it fixes a bug | the S5 extras and variants | yes, per row (§ Table B targets) |
