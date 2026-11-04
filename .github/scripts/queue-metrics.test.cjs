@@ -135,6 +135,30 @@ test('a multi-day window reads one UTC day per query and counts a boundary resul
   assert.equal(metrics.merges.total, 1);
 });
 
+test('after the first failed read, no further read starts', async () => {
+  const runs = Array.from({ length: 20 }, (_, i) => queueRun(i + 1, 'success', SHA('c')));
+  const calls = [];
+  const held = [];
+  const gh = async args => {
+    calls.push(args[1]);
+    if (args[1].includes('/runs?event=merge_group')) return JSON.stringify({ total_count: runs.length, workflow_runs: runs });
+    if (args[1].includes('/runs?event=push')) return JSON.stringify({ total_count: 0, workflow_runs: [] });
+    if (args[1] === 'graphql') return JSON.stringify({ data: { search: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] } } });
+    if (args[1].includes('/runs/1/jobs?')) throw new Error('gh: Forbidden (HTTP 403)');
+    await new Promise(resolve => held.push(resolve));
+    return JSON.stringify({ total_count: 0, jobs: [] });
+  };
+  const { code, err } = await run(['--from', '2026-11-02', '--to', '2026-11-02', '--repo', 'o/r'], gh);
+  assert.equal(code, 1);
+  assert.match(err, /HTTP 403/);
+  // Release the reads in flight when the report failed, and let any read they lead to start.
+  while (held.length) {
+    for (const release of held.splice(0)) release();
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.equal(calls.filter(call => call.includes('/jobs?')).length, 8);
+});
+
 test('window options: dates are whole UTC days, the default is the last 7 days', () => {
   const now = Date.parse('2026-11-08T10:30:15.400Z');
   assert.deepEqual(parseOptions(['--from', '2026-11-01', '--to', '2026-11-03'], now),

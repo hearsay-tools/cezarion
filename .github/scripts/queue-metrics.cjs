@@ -56,8 +56,10 @@ function parseOptions(argv, now) {
 
 // Every call is a GET, so a server error is safe to retry.
 function client(gh, { retries = 3, wait = attempt => delay(1000 * attempt) } = {}) {
+  let stopped;
   async function call(args) {
     for (let attempt = 1; ; attempt++) {
+      if (stopped) throw stopped;
       try {
         return await gh(['api', ...args]);
       } catch (error) {
@@ -79,7 +81,9 @@ function client(gh, { retries = 3, wait = attempt => delay(1000 * attempt) } = {
       if (batch.length < 100 || (key && rows.length >= data.total_count)) return rows;
     }
   }
-  return { json, text, list };
+  // After the first failure, no read starts: the report is lost anyway.
+  const stop = error => { stopped ??= error; };
+  return { json, text, list, stop };
 }
 
 async function mapLimit(items, fn) {
@@ -180,7 +184,16 @@ async function readProofEvidence(api, repo, push, queueJobs) {
 
 async function readAll({ gh, repo, from, to, wait }) {
   const api = client(gh, { wait });
-  const window = { from, to };
+  try {
+    return await readEvidence(api, repo, { from, to });
+  } catch (error) {
+    api.stop(error);
+    throw error;
+  }
+}
+
+async function readEvidence(api, repo, window) {
+  const { from, to } = window;
   const [queueRuns, pushRuns, merges] = await Promise.all([
     readRuns(api, repo, window, 'merge_group'), readRuns(api, repo, window, 'push'), readQueueMerges(api, repo, window)]);
   const completedQueue = queueRuns.filter(run => run.status === 'completed');
