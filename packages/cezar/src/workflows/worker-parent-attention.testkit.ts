@@ -1,7 +1,6 @@
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
@@ -169,19 +168,19 @@ it('queued wake after worker completion waits for capacity, not Needs you (#971)
       // The wait settles on the worker's durable exit proof, not its status write:
       // finishWorkerExecution awaits the worker's sessions, turns and deliveries, then
       // commitWorkerExecutionComplete emits the run that reconcileWorkerWaits reads.
-      // Hold that proof the way a loaded host delays it (hearsay-tools/cezarion#1113: the
+      // Hold the durable proof at its store boundary (hearsay-tools/cezarion#1113: the
       // gate read `parked` right after the worker reached `done`).
-      let releaseExit!: () => void;
-      runInternals(manager).workerExecutions.executions.get(w.id)!
-        .deliveries.add(new Promise<void>(resolve => { releaseExit = resolve; }));
+      const complete = vi.spyOn(store, 'commitWorkerExecutionComplete').mockReturnValue(false);
       manager.finish(w.id);
       try {
         await until(() => terminal.includes(store.getRun(w.id)?.status ?? ''));
+        await until(() => complete.mock.calls.some(([id]) => id === w.id));
         // Until the proof lands the parent stays parked on its worker, and that reads as
         // waiting on the worker, never Needs you.
         expect(waitOf(store.getRun(p.id))?.phase).toBe('parked');
         expect(deriveAttention(store.getRun(p.id)!)).toMatchObject({ bucket: 'none', tone: 'running', shape: 'workers', label: 'waiting on 1 worker' });
-      } finally { releaseExit(); }
+      } finally { complete.mockRestore(); }
+      expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
       await until(() => waitOf(store.getRun(p.id))?.phase !== 'parked');
       expect(store.getRun(p.id)?.status).toBe('waiting');
       capacity(p.id);
