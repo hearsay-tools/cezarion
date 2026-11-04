@@ -1,4 +1,4 @@
-import { vi } from 'vitest';
+import { onTestFinished, vi } from 'vitest';
 import { setTimeout as nodeTimeout, clearTimeout as nodeClearTimeout } from 'node:timers';
 import { AUTO_END_DELAY_MS } from './runner-runtime.ts';
 
@@ -44,7 +44,7 @@ export function observationClock(capture: (delay: number | undefined) => boolean
   installObservationClock();
   const observer: Observer = { capture, timers: [] };
   observers.add(observer);
-  return {
+  const clock = {
     get captured() { return observer.timers.length; },
     get pending() { return observer.timers.filter(timer => timer.active).length; },
     /** Also permits a stale callback: the product must refuse a cancelled wait itself. */
@@ -55,13 +55,15 @@ export function observationClock(capture: (delay: number | undefined) => boolean
     },
     advance: (ms: number) => vi.advanceTimersByTimeAsync(ms),
     restore() {
-      observers.delete(observer);
+      if (!observers.delete(observer)) return;
       if (observers.size) return;
       vi.useRealTimers();
       globalThis.setTimeout = nativeTimeout;
       globalThis.clearTimeout = nativeClearTimeout;
     },
   };
+  onTestFinished(() => clock.restore());
+  return clock;
 }
 
 /** Every native runner owns its one-shot close timer in scheduleAutoEnd. */
