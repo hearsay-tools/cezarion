@@ -162,7 +162,10 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
       // Cancellation during the dequeue/spawn gap is covered by Task 6's barrier;
       // this fixture waits for its real runner handles before stopping processes.
       await until(() => {
-        const active = store.listRunIds().filter(id => manager.isActive(id));
+        const active = store.listRunIds().filter(id => {
+          const run = store.getRun(id);
+          return manager.isActive(id) && !(run?.status === 'queued' && !run.steps.some(step => !!step.sessionId));
+        });
         return active.every(id => store.getRun(id)?.steps.some(step => !!step.sessionId)) && active.length <= work.liveSessions.size;
       }, () => JSON.stringify(captureState()));
       checkpoint('teardown-cancel');
