@@ -21,6 +21,17 @@ import {
   validateLiveCursor,
 } from './event-history.ts';
 import { compressHistory } from './history-file.ts';
+import { z } from 'zod';
+import { STATUS_MAP as CODEX_TOOL_STATUS_MAP } from '../core/codex-ui-mapper.ts';
+import { STATUS_MAP as OPENCODE_TOOL_STATUS_MAP } from '../core/opencode-ui-mapper.ts';
+import { PLAN_STATUSES } from '../core/opencode-ui-mapper.ts';
+
+const TOOL_STATUS = z.enum([
+  ...Object.values(CODEX_TOOL_STATUS_MAP),
+  ...Object.values(OPENCODE_TOOL_STATUS_MAP),
+]).enum;
+const PLAN_STATUS = z.enum(PLAN_STATUSES).enum;
+
 
 const dirs: string[] = [];
 
@@ -312,18 +323,18 @@ describe('live cursor replay and compact context', () => {
 
   it('keeps the latest plan and selector-relevant task lifecycle in chronological order', async () => {
     const { dataDir, id } = fixture([
-      { seq: 1, type: 'plan.updated', entries: [{ content: 'old', status: 'pending' }] },
+      { seq: 1, type: 'plan.updated', entries: [{ content: 'old', status: PLAN_STATUS.pending }] },
       { seq: 2, type: 'turn.started', turnId: 't1' },
       {
         seq: 3,
         type: 'item.started',
-        item: { kind: 'tool', id: 'task-1', toolKind: 'task', status: 'running' },
+        item: { kind: 'tool', id: 'task-1', toolKind: 'task', status: TOOL_STATUS.running },
       },
       { seq: 4, type: 'plan.updated', entries: [{ content: 'new', status: 'in_progress' }] },
       {
         seq: 5,
         type: 'item.updated',
-        item: { kind: 'tool', id: 'child-1', parentItemId: 'task-1', status: 'running' },
+        item: { kind: 'tool', id: 'child-1', parentItemId: 'task-1', status: TOOL_STATUS.running },
       },
     ]);
     const context = await deriveRunContextEvents(dataDir, id);
@@ -337,7 +348,7 @@ describe('live cursor replay and compact context', () => {
       {
         seq: 2,
         type: 'item.started',
-        item: { kind: 'tool', id: 'task-1', toolKind: 'task', status: 'running' },
+        item: { kind: 'tool', id: 'task-1', toolKind: 'task', status: TOOL_STATUS.running },
       },
     ];
     for (let index = 0; index < 2_100; index += 1) {
@@ -348,7 +359,7 @@ describe('live cursor replay and compact context', () => {
           kind: 'tool',
           id: 'child-1',
           parentItemId: 'task-1',
-          status: 'running',
+          status: TOOL_STATUS.running,
           title: `activity ${index}`,
         },
       });
@@ -363,18 +374,18 @@ describe('live cursor replay and compact context', () => {
   it('preserves the current plan and lets a settled earlier fan-out bound carry-over', async () => {
     const events = [
       { seq: 1, type: 'turn.started', turnId: 't1' },
-      { seq: 2, type: 'plan.updated', entries: [{ content: 'old', status: 'pending' }] },
+      { seq: 2, type: 'plan.updated', entries: [{ content: 'old', status: PLAN_STATUS.pending }] },
       {
         seq: 3,
         type: 'item.started',
-        item: { kind: 'tool', id: 'task-1', toolKind: 'task', status: 'running', title: 'Task: one' },
+        item: { kind: 'tool', id: 'task-1', toolKind: 'task', status: TOOL_STATUS.running, title: 'Task: one' },
       },
       { seq: 4, type: 'user-message', text: 'steer' },
       { seq: 5, type: 'turn.started', turnId: 't2' },
       {
         seq: 6,
         type: 'item.started',
-        item: { kind: 'tool', id: 'task-2', toolKind: 'task', status: 'running', title: 'Task: two' },
+        item: { kind: 'tool', id: 'task-2', toolKind: 'task', status: TOOL_STATUS.running, title: 'Task: two' },
       },
       {
         seq: 7,

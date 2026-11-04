@@ -31,6 +31,10 @@ import { ConversationIdInUseError } from './conversation-identity.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText, runIds, seedRuns } from './run-store.testkit.ts';
 
+
+const INVALID_WORKER_OUTCOME_STATUS = 'running';
+
+
 const workerId = randomUUID();
 const requestId = randomUUID();
 const parentRunId = randomUUID();
@@ -125,7 +129,7 @@ describe('delegation schemas', () => {
     for (const patch of [{ deadline: 'yesterday' }, { phase: 'done' }, { wakeId: 'bad' }, { id: 'bad' }]) {
       expect(workerWaitSchema.safeParse({ ...wait, ...patch }).success).toBe(false);
     }
-    for (const patch of [{ status: 'running' }, { observedAt: 'yesterday' }, { workerId: 'bad' }, { summary: 'x'.repeat(4001) }]) {
+    for (const patch of [{ status: INVALID_WORKER_OUTCOME_STATUS }, { observedAt: 'yesterday' }, { workerId: 'bad' }, { summary: 'x'.repeat(4001) }]) {
       expect(workerOutcomeSchema.safeParse({ ...outcome, ...patch }).success).toBe(false);
     }
     for (const patch of [{ requestedAt: 'yesterday' }, { phase: 'done' }, { remaining: ['cwd'] }, { error: 'x'.repeat(2001) }]) {
