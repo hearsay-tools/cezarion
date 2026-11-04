@@ -15,10 +15,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import type { AgentEvent } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 import {
+  PLAN_STATUSES,
   createOpencodeUiState,
   mapOpencodeEvent,
   opencodeSessionStarted,
@@ -28,6 +30,8 @@ import {
 } from './opencode-ui-mapper.ts';
 import { OpencodeServerRunner } from './opencode-server-runner.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
+
+const PLAN_STATUS = z.enum(PLAN_STATUSES).enum;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(HERE, '__fixtures__', 'opencode');
@@ -302,12 +306,12 @@ describe('mapOpencodeEvent edge cases', () => {
         tool: 'todowrite',
         state: {
           status: 'completed',
-          input: { todos: [{ content: 'ok', status: 'pending' }, { status: 'pending' }, 'junk'] },
+          input: { todos: [{ content: 'ok', status: PLAN_STATUS.pending }, { status: PLAN_STATUS.pending }, 'junk'] },
         },
       }),
       state,
     );
-    expect(mapped.events).toContainEqual({ type: 'plan.updated', entries: [{ content: 'ok', status: 'pending' }] });
+    expect(mapped.events).toContainEqual({ type: 'plan.updated', entries: [{ content: 'ok', status: PLAN_STATUS.pending }] });
     const noPlan = mapOpencodeEvent(
       part({ id: 'prt_td2', type: 'tool', tool: 'todowrite', state: { status: 'completed', input: { todos: 'nope' } } }),
       state,
@@ -328,7 +332,7 @@ describe('mapOpencodeEvent edge cases', () => {
           input: {
             todos: [
               { content: 'Ship the fix', status: 'completed', priority: 'high' },
-              { content: 'Rework the parser', status: 'cancelled', priority: 'low' },
+              { content: 'Rework the parser', status: PLAN_STATUS.cancelled, priority: 'low' },
             ],
           },
         },
@@ -339,7 +343,7 @@ describe('mapOpencodeEvent edge cases', () => {
       type: 'plan.updated',
       entries: [
         { content: 'Ship the fix', status: 'completed', priority: 'high' },
-        { content: 'Rework the parser', status: 'cancelled', priority: 'low' },
+        { content: 'Rework the parser', status: PLAN_STATUS.cancelled, priority: 'low' },
       ],
     });
   });
@@ -354,7 +358,7 @@ describe('mapOpencodeEvent edge cases', () => {
       }),
       startedState(),
     );
-    expect(mapped.events).toContainEqual({ type: 'plan.updated', entries: [{ content: 'Odd one', status: 'pending' }] });
+    expect(mapped.events).toContainEqual({ type: 'plan.updated', entries: [{ content: 'Odd one', status: PLAN_STATUS.pending }] });
   });
 
   // opencode publishes the tool part BEFORE the arguments finish parsing, with

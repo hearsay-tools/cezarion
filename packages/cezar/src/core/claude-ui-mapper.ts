@@ -415,7 +415,7 @@ function editArtifacts(
   return { diffs: [diff], locations };
 }
 
-const PLAN_STATUSES: readonly PlanStatus[] = ['pending', 'in_progress', 'completed'];
+export const PLAN_STATUSES: readonly PlanStatus[] = ['pending', 'in_progress', 'completed'];
 
 /** `TaskUpdate.status` is `pending | in_progress | completed | deleted`. `deleted`
  *  is handled by the caller — it drops the entry, since PlanStatus has no such

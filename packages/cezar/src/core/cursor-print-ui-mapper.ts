@@ -462,7 +462,7 @@ function toolOutput(parsed: ParsedTool): string | undefined {
   }
 }
 
-const PLAN_STATUSES: readonly PlanStatus[] = ['pending', 'in_progress', 'completed', 'cancelled'];
+export const PLAN_STATUSES: readonly PlanStatus[] = ['pending', 'in_progress', 'completed', 'cancelled'];
 
 function nativeTodoUpdate(input: unknown, prior: ReadonlyMap<string, PlanEntry>): Map<string, PlanEntry> | undefined {
   if (!isRecord(input) || !Array.isArray(input.todos)) return undefined;
