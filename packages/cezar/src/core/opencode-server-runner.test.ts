@@ -359,7 +359,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   /** Fake spawn failure: the process never started, so the runner only ever
    *  sees the ENOENT `error` event plus the immediate death (the shape node
    *  produces for a binary that is not on PATH). */
-  function enoentChild(): ChildProcessWithoutNullStreams {
+  function enoentChild({ exit = true }: { exit?: boolean } = {}): ChildProcessWithoutNullStreams {
     const emitter = new EventEmitter();
     const child = Object.assign(emitter, {
       stdin: new PassThrough(),
@@ -378,11 +378,13 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     });
     process.nextTick(() => {
       emitter.emit('error', err);
-      Object.assign(child, { exitCode: 1 });
-      emitter.emit('exit', 1, null);
+      if (exit) {
+        Object.assign(child, { exitCode: 1 });
+        emitter.emit('exit', 1, null);
+      }
       (child.stdout as PassThrough).end();
       (child.stderr as PassThrough).end();
-      emitter.emit('close', 1, null);
+      emitter.emit('close', exit ? 1 : -2, null);
     });
     return child;
   }
@@ -854,6 +856,26 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       await expect(session.result).rejects.toThrow(errors[0]!.message);
       expect(events.at(-1)?.type).toBe('error');
       expect(events.some(event => event.type === 'turn-end' || event.type === 'done')).toBe(false);
+    } finally {
+      spawnHook.override = null;
+    }
+  });
+
+  // hearsay-tools/cezarion#895: node reports a missing binary with `error` and `close` only, never
+  // `exit`. The server URL wait must end on that, not on its start timeout.
+  it('reports a missing binary without waiting for the server start timeout', async () => {
+    const child = enoentChild({ exit: false });
+    spawnHook.override = () => child;
+    const events: AgentEvent[] = [];
+    try {
+      const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs: 600_000, serverStartTimeoutMs: 600_000 })
+        .startSession({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'go', cwd: process.cwd() }, event => events.push(event));
+      const hung = new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 5_000).unref()); // bound: hang guard; the fix settles on the next ticks
+      const outcome = await Promise.race([session.result.then(() => 'resolved', (err: Error) => err), hung]);
+      expect(outcome).toBeInstanceOf(Error);
+      expect((outcome as Error).message).toContain('`opencode` not found on PATH');
+      expect(events.filter(event => event.type === 'error')).toHaveLength(1);
+      expect(events.some(event => event.type === 'note' && /retrying/.test(event.message))).toBe(false);
     } finally {
       spawnHook.override = null;
     }
