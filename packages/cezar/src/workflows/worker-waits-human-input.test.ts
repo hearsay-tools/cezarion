@@ -29,7 +29,9 @@ describe('human messages beside an owed timer wait', { timeout: 45_000 }, () => 
     const timer = entryOf(p.id, answer.wait_id)!;
     if (timer.kind === 'human') throw Error('unexpected human wait');
     await restart();
-    await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(blocker.id)?.sessionEverOpened === true);
+    await until(() => {
+      return (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(blocker.id)?.sessionEverOpened === true;
+    });
     runInternals(manager).waitWatches.waitTimers.get(timer.id)!.timer._onTimeout();
     await until(() => store.getRun(p.id)?.status === 'queued');
     expect(entryOf(p.id, timer.id)?.phase).toBe('resolved');

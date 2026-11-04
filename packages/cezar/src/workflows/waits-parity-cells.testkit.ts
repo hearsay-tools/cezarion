@@ -552,8 +552,10 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       it('runs every runner\'s cells from its own file', () => {
         const files = readdirSync(new URL('.', import.meta.url)).filter(file =>
           /^waits-.*-parity\.test\.ts$/.test(file) && readFileSync(new URL(`./${file}`, import.meta.url), 'utf8').includes('describeWaitParity('));
-        expect(files.sort()).toEqual(RUNNER_IDS.flatMap(runner => (Object.keys(WAIT_PARITY_FILES) as WaitParityPart[])
-          .filter(part => !splitPart(runner, part)).map(part => WAIT_PARITY_FILES[part](runner))).sort());
+        expect(files.sort()).toEqual(RUNNER_IDS.flatMap(runner => {
+          return (Object.keys(WAIT_PARITY_FILES) as WaitParityPart[])
+            .filter(part => !splitPart(runner, part)).map(part => WAIT_PARITY_FILES[part](runner));
+        }).sort());
         for (const runner of RUNNER_IDS) for (const file of Object.values(WAIT_PARITY_FILES)) {
           expect(existsSync(new URL(`./${file(runner)}`, import.meta.url)), file(runner)).toBe(true);
         }
