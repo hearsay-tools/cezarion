@@ -798,7 +798,7 @@ OS ownership, binary launch and child-process effects remain on real probes.
 | `WORKTREE_SETUP_CRITERIA` R58 | Same `core/worktree-setup-parity.test.ts` native opening-message setup note |
 | PR1/PR2 task reference declarations | Same harness native multi-pr-refs cells retain first-seen order across chunks/repeats, exclude tool/reasoning/child text, append on Continue and preserve the scalar selection |
 | R97–R99 merge waits | Same `workflows/pr-merge-wait-parity.test.ts` real metadata parser and native fresh/Continue/recovery delivery assertions |
-| R101 completion controls | Same `workflows/completion-options-parity.test.ts` merge intent recorded before archive; both defaults remain off |
+| R101 completion controls | Same `workflows/completion-options-merge-parity.test.ts` merge intent recorded before archive; both defaults remain off |
 | R35 and R125 shipped tool/env gates | Same harness tool-list admission and preview CDP on/off probes; real child NODE_OPTIONS/environment observations remain real |
 | R36–R40 monitoring prompt and wake | Same native fresh/Continue/recovery recordings and timer-result instruction delivery; ordinary completion prose never grants completion |
 | R41/R42 selected worker skill | Same native system-prompt assertions: explicit child skill is installed and parent skill is not inherited |
