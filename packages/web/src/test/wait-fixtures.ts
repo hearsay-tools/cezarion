@@ -1,3 +1,9 @@
+import {
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import type { Wait } from '@open-mercato/cezar-api-client'
 
 /**
@@ -9,8 +15,8 @@ import type { Wait } from '@open-mercato/cezar-api-client'
 /** The agent's open wait on one worker; `requestIds` with empty `workerIds` waits on replies. */
 export function workerWait(over: Record<string, unknown> = {}): Wait {
   return {
-    kind: 'worker', id: '00000000-0000-4000-8000-0000000000e1', source: 'agent', via: 'cez-worker-wait',
-    registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-06T00:00:00.000Z', phase: 'open', turnId: 'turn-1',
+    kind: WAIT_KIND.worker, id: '00000000-0000-4000-8000-0000000000e1', source: WAIT_SOURCE.agent, via: WAIT_VIA['cez-worker-wait'],
+    registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-06T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1',
     timeoutSeconds: 600, workerIds: ['00000000-0000-4000-8000-000000000001'], revisions: [], outcomes: [],
     ...over,
   } as Wait
@@ -19,8 +25,8 @@ export function workerWait(over: Record<string, unknown> = {}): Wait {
 /** The agent's open monitoring-line timer: the run reads `monitoring`. */
 export function timerWait(over: Record<string, unknown> = {}): Wait {
   return {
-    kind: 'timer', id: '00000000-0000-4000-8000-0000000000d1', source: 'agent', via: 'monitoring-line',
-    registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-05T00:05:00.000Z', phase: 'open', turnId: 'turn-1', seconds: 300,
+    kind: WAIT_KIND.timer, id: '00000000-0000-4000-8000-0000000000d1', source: WAIT_SOURCE.agent, via: WAIT_VIA['monitoring-line'],
+    registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-05T00:05:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', seconds: 300,
     ...over,
   } as Wait
 }

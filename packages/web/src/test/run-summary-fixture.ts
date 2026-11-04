@@ -1,3 +1,9 @@
+import {
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { runDelegationSummarySchema } from '@open-mercato/cezar-api-client/contract/delegation'
 import { runWorkflowLabel } from '@open-mercato/cezar-api-client/contract/run-labels'
 import type { HumanWaitEntry, RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
@@ -26,8 +32,8 @@ export function summaryOf(run: RunRecord): RunSummary {
  *  hearsay-tools/cezarion#1236). `askSeq` marks a question the user already sees. */
 export function openHumanWait(askSeq?: number): HumanWaitEntry {
   return {
-    id: '00000000-0000-4000-8000-0000000000ac', kind: 'human', source: 'agent', via: 'cezar_ask',
-    registeredAt: '2026-09-16T00:00:00.000Z', phase: 'open', turnId: 'turn-1',
+    id: '00000000-0000-4000-8000-0000000000ac', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask,
+    registeredAt: '2026-09-16T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1',
     ...(askSeq === undefined ? {} : { askSeq }),
   }
 }

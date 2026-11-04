@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { projectAddress } from './run-address'
 import { configureLiveSession, resetLiveSession } from './live-coordinator'
 import { focusManager, QueryClientProvider } from '@tanstack/react-query'
@@ -828,7 +829,7 @@ describe('usePutAgentConfigFile', () => {
 
 describe('useRuns', () => {
   it('goes loading → data', async () => {
-    fetchMock.mockResolvedValue(json([{ id: 'run-1', title: 'Fix it', status: 'running' }]))
+    fetchMock.mockResolvedValue(json([{ id: 'run-1', title: 'Fix it', status: RUN_STATUS.running }]))
     const { result } = renderHook(() => useRuns(), { wrapper: wrapper() })
 
     expect(result.current.isPending).toBe(true)
@@ -863,7 +864,7 @@ describe('useMarkRunSeen', () => {
     title: 'mock:limit ship it',
     workflow: 'quick-task',
     task: 'mock:limit ship it',
-    status: 'failed',
+    status: RUN_STATUS.failed,
     createdAt: '2026-08-03T19:23:00.000Z',
     finishedAt: '2026-08-03T19:23:13.000Z',
     tokensUsed: 0,
@@ -916,7 +917,7 @@ describe('useMarkRunSeen', () => {
     fetchMock.mockResolvedValue(json({ ...RUN, seenAt: '2026-08-03T19:23:14.000Z' }))
     const client = createQueryClient()
     client.setQueryData(workspaceQueryKeys.runsIndex, {
-      runs: [{ projectId: 'api', id: 'run-1', title: 'x', status: 'done', createdAt: RUN.createdAt, archived: false, workflow: 'quick-task' }],
+      runs: [{ projectId: 'api', id: 'run-1', title: 'x', status: RUN_STATUS.done, createdAt: RUN.createdAt, archived: false, workflow: 'quick-task' }],
       perProjectLimit: 200,
       truncated: [],
     })
@@ -957,7 +958,7 @@ describe('useMarkRunUnseen', () => {
     title: 'mock:limit ship it',
     workflow: 'quick-task',
     task: 'mock:limit ship it',
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: '2026-08-03T19:23:00.000Z',
     finishedAt: '2026-08-03T19:23:13.000Z',
     seenAt: '2026-08-03T19:23:14.000Z',
@@ -1411,7 +1412,7 @@ describe('GitHub list freshness (#152)', () => {
 
 describe('read receipts keep their invocation scope across navigation', () => {
   afterEach(() => setApiScope(null))
-  const run = { id: 'same-id', status: 'done', finishedAt: '2026-09-01T00:00:00.000Z', tokensUsed: 1 }
+  const run = { id: 'same-id', status: RUN_STATUS.done, finishedAt: '2026-09-01T00:00:00.000Z', tokensUsed: 1 }
   const receipt = '2026-09-29T00:00:00.000Z'
 
   it('keeps receipt callbacks stable for effects and preserves mutateAsync string callbacks', async () => {
@@ -1496,7 +1497,7 @@ describe('useArchivedRuns', () => {
 
   it('never shows one project\'s archived pages under another (#864)', async () => {
     setApiScope('proj-a')
-    fetchMock.mockResolvedValue(json({ runs: [{ id: 'a-old', title: 'A', status: 'done', createdAt: '2025-01-01T00:00:00Z', archived: true, workflow: 'quick-task', workflowLabel: 'quick-task', tokensUsed: 0 }], nextCursor: null, total: 1 }))
+    fetchMock.mockResolvedValue(json({ runs: [{ id: 'a-old', title: 'A', status: RUN_STATUS.done, createdAt: '2025-01-01T00:00:00Z', archived: true, workflow: 'quick-task', workflowLabel: 'quick-task', tokensUsed: 0 }], nextCursor: null, total: 1 }))
     const { result, rerender } = renderHook(({ enabled }) => useArchivedRuns('', enabled), { wrapper: wrapper(), initialProps: { enabled: true } })
     await waitFor(() => expect(result.current.data?.pages[0]?.runs.map((run) => run.id)).toEqual(['a-old']))
     // Project B's window is not full, so its archived query stays off.
@@ -1507,7 +1508,7 @@ describe('useArchivedRuns', () => {
 
   it('keeps the previous search\'s pages while the next one loads, within one project', async () => {
     setApiScope('proj-a')
-    const page = (id: string) => json({ runs: [{ id, title: id, status: 'done', createdAt: '2025-01-01T00:00:00Z', archived: true, workflow: 'quick-task', workflowLabel: 'quick-task', tokensUsed: 0 }], nextCursor: null, total: 1 })
+    const page = (id: string) => json({ runs: [{ id, title: id, status: RUN_STATUS.done, createdAt: '2025-01-01T00:00:00Z', archived: true, workflow: 'quick-task', workflowLabel: 'quick-task', tokensUsed: 0 }], nextCursor: null, total: 1 })
     fetchMock.mockResolvedValueOnce(page('first')).mockReturnValueOnce(new Promise(() => {}))
     const { result, rerender } = renderHook(({ q }) => useArchivedRuns(q, true), { wrapper: wrapper(), initialProps: { q: 'one' } })
     await waitFor(() => expect(result.current.data?.pages[0]?.runs[0]?.id).toBe('first'))

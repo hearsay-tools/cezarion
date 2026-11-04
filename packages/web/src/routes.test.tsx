@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router'
@@ -495,7 +496,7 @@ describe('legacy flat URLs redirect to the boot project', () => {
     runs: rows.map((row) => ({
       ...row,
       title: `Task ${row.id}`,
-      status: 'done' as const,
+      status: RUN_STATUS.done,
       createdAt: '2026-10-08T08:00:00Z',
       archived: false,
       workflow: 'quick-task',

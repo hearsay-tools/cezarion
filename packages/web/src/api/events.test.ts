@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 // @vitest-environment node
 
 import { describe, expect, it, vi } from 'vitest'
@@ -19,7 +20,7 @@ function run(id: string, over: Partial<RunRecord> = {}): RunRecord {
     title: id,
     workflow: 'quick-task',
     task: 'do it',
-    status: 'running',
+    status: RUN_STATUS.running,
     createdAt: '2026-07-14T10:00:00.000Z',
     tokensUsed: 0,
     archived: false,
@@ -115,7 +116,7 @@ describe('applyRunEvent', () => {
     const next = applyRunEvent([], run('r1', {
       workflow: '(planned)',
       systemPrompt: 'be brief',
-      steps: [{ id: 'a', name: 'Fix bug', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0 }],
+      steps: [{ id: 'a', name: 'Fix bug', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0 }],
     }))
     const row = next?.[0] as Record<string, unknown> | undefined
     for (const key of ['task', 'steps', 'systemPrompt']) expect(row).not.toHaveProperty(key)
@@ -131,14 +132,14 @@ describe('applyRunEvent', () => {
   })
 
   it('keeps the cached live usage when the streamed record carries none', () => {
-    const next = applyRunEvent([{ ...summary('r1'), usage: SAMPLE }], run('r1', { status: 'review' }))
+    const next = applyRunEvent([{ ...summary('r1'), usage: SAMPLE }], run('r1', { status: RUN_STATUS.review }))
     expect(next?.[0]?.usage).toEqual(SAMPLE)
     expect(next?.[0]?.status).toBe('review')
   })
 
   it('updates an existing run in place — one run stays one row', () => {
-    const list: RunSummary[] = [summary('r1', { status: 'queued' }), summary('r2')]
-    const next = applyRunEvent(list, run('r1', { status: 'done', tokensUsed: 99 }))
+    const list: RunSummary[] = [summary('r1', { status: RUN_STATUS.queued }), summary('r2')]
+    const next = applyRunEvent(list, run('r1', { status: RUN_STATUS.done, tokensUsed: 99 }))
 
     expect(next).toHaveLength(2)
     expect(next?.map((r) => r.id)).toEqual(['r1', 'r2'])
@@ -174,9 +175,9 @@ describe('applyRunEvent', () => {
   })
 
   it('never mutates the list it was given', () => {
-    const list: RunSummary[] = [summary('r1', { status: 'queued' })]
+    const list: RunSummary[] = [summary('r1', { status: RUN_STATUS.queued })]
     const frozen = Object.freeze([...list])
-    applyRunEvent(frozen as RunSummary[], run('r1', { status: 'done' }))
+    applyRunEvent(frozen as RunSummary[], run('r1', { status: RUN_STATUS.done }))
     applyRunEvent(frozen as RunSummary[], run('r2'))
     expect(list[0]?.status).toBe('queued')
     expect(frozen).toHaveLength(1)
@@ -184,7 +185,7 @@ describe('applyRunEvent', () => {
 
   it('keeps the usage the GET attached — the stream record simply has no such field', () => {
     const list: RunSummary[] = [{ ...summary('r1'), usage: SAMPLE }]
-    const next = applyRunEvent(list, run('r1', { status: 'done' }))
+    const next = applyRunEvent(list, run('r1', { status: RUN_STATUS.done }))
     expect(next?.[0]?.usage).toEqual(SAMPLE)
     expect(next?.[0]?.status).toBe('done')
   })
@@ -192,7 +193,7 @@ describe('applyRunEvent', () => {
 
 describe('mergeRun', () => {
   it('carries usage over, and invents none when there was none', () => {
-    expect(mergeRun({ ...run('r1'), usage: SAMPLE }, run('r1', { status: 'done' })).usage).toEqual(SAMPLE)
+    expect(mergeRun({ ...run('r1'), usage: SAMPLE }, run('r1', { status: RUN_STATUS.done })).usage).toEqual(SAMPLE)
     expect(mergeRun(run('r1'), run('r1')).usage).toBeUndefined()
     expect(mergeRun(undefined, run('r1')).usage).toBeUndefined()
   })
