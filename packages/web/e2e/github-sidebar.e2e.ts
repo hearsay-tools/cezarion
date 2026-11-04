@@ -1,3 +1,4 @@
+import { githubItemSchema } from '@open-mercato/cezar-api-client/contract/github'
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -66,7 +67,7 @@ const issue = (number: number, extra: Record<string, unknown> = {}) => ({
   labels: [], body: `Body of issue ${number}`, url: `https://github.com/${REPO}/issues/${number}`, comments: 0, ...extra,
 })
 const pr = (number: number, extra: Record<string, unknown> = {}) => ({
-  kind: 'pr', number, title: `Fixture pull request ${number}`, author: 'alice', createdAt: ago(3_600_000),
+  kind: githubItemSchema.shape.kind.enum.pr, number, title: `Fixture pull request ${number}`, author: 'alice', createdAt: ago(3_600_000),
   labels: [], body: `Body of pull request ${number}`, url: `https://github.com/${REPO}/pull/${number}`, comments: 0,
   isDraft: false, additions: 3, deletions: 1, checks: null, ...extra,
 })

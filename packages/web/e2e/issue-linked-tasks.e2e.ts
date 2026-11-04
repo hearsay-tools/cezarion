@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
 import { artifactsDir, createGitHubFixture, type GitHubFixture, type GithubPayload } from './github-fixture'
@@ -14,7 +15,7 @@ it.each(['light', 'dark'] as const)('discloses parent tasks with pointer and key
   const runs = [
     { id: 'linked-parent', title: 'Archived parent task with a long title that wraps on a narrow screen', archived: true },
     { id: 'linked-worker', title: 'Owned worker must stay hidden', delegation: { role: 'worker', parentRunId: 'linked-parent' } },
-  ].map(run => ({ task: run.title, workflow: 'quick-task', status: 'done', createdAt: '2026-10-01T12:00:00Z', tokensUsed: 0, steps: [], issueNumber: number, ...run }))
+  ].map(run => ({ task: run.title, workflow: 'quick-task', status: RUN_STATUS.done, createdAt: '2026-10-01T12:00:00Z', tokensUsed: 0, steps: [], issueNumber: number, ...run }))
   const toggle = '[data-slot="gh-detail"] h3 button[aria-expanded]'
   browser.routeJson('*/run-summaries*', runs)
   // Registered after the list's pattern, which also matches it: the archived page past the list's

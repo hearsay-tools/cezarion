@@ -1,3 +1,4 @@
+import { RUN_STATUS, WAIT_KIND, WAIT_SOURCE, WAIT_VIA, WAIT_PHASE } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -25,21 +26,21 @@ const repository = `${'long-owner-'.repeat(3)}/${'long-repository-'.repeat(5)}`
 type CiWait = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'pr' }>
 type TimerWait = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'timer' }>
 const wait: CiWait = {
-  id: '00000000-0000-4000-8000-000000000474', kind: 'pr', source: 'agent', via: 'cezar_wait',
+  id: '00000000-0000-4000-8000-000000000474', kind: WAIT_KIND.pr, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
   generation: 'generation', turnId: 'turn', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
   repository, prNumber: 474, prUrl: 'https://github.com/owner/repo/pull/474',
   headSha: '123456789abcdef', registeredAt: '2026-09-22T12:00:00.000Z',
-  deadline: '2026-09-22T12:30:00.000Z', phase: 'open',
+  deadline: '2026-09-22T12:30:00.000Z', phase: WAIT_PHASE.open,
 }
 const timer: TimerWait = {
-  id: '00000000-0000-4000-8000-000000000005', kind: 'timer', source: 'agent', via: 'cezar_wait',
+  id: '00000000-0000-4000-8000-000000000005', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
   turnId: 'turn', seconds: 300, registeredAt: '2026-09-22T12:00:00.000Z',
-  deadline: '2026-09-22T12:05:00.000Z', phase: 'open',
+  deadline: '2026-09-22T12:05:00.000Z', phase: WAIT_PHASE.open,
   note: `Re-check ${'the-staging-deployment-'.repeat(4)}after the migration finishes`,
 }
 const run: ApiRun = {
   id: 'ci-browser', task: 'Wait for checks', title: 'Wait for checks', workflow: 'quick-task',
-  status: 'waiting', createdAt: wait.registeredAt,
+  status: RUN_STATUS.waiting, createdAt: wait.registeredAt,
   archived: false, tokensUsed: 0, steps: [], waits: [wait],
 }
 let browser: AgentBrowser
@@ -125,10 +126,10 @@ describe('CI header browser accessibility', () => {
   }
 
   it('updates from an open wait to a resolved one without losing the PR link', () => {
-    browser.evaluate(`window.setCiRun(${JSON.stringify({ ...run, status: 'running', waits: [wait] })})`)
+    browser.evaluate(`window.setCiRun(${JSON.stringify({ ...run, status: RUN_STATUS.running, waits: [wait] })})`)
     browser.waitForFunction(`document.querySelector('${status}').textContent.includes('Waiting for CI')`)
     expect(browser.text(status)).not.toContain('waiting for capacity')
-    browser.evaluate(`window.setCiRun(${JSON.stringify({ ...run, waits: [{ ...wait, phase: 'resolved' }] })})`)
+    browser.evaluate(`window.setCiRun(${JSON.stringify({ ...run, waits: [{ ...wait, phase: WAIT_PHASE.resolved }] })})`)
     browser.waitForFunction(`document.querySelector('${status}').textContent.includes('CI result ready — waiting for capacity')`)
     expect(browser.count(link)).toBe(1)
     expect(browser.count('[data-slot="monitoring-schedule"]')).toBe(0)
@@ -136,7 +137,7 @@ describe('CI header browser accessibility', () => {
   it('keeps a settled result linked while continuation admission is queued or waiting', () => {
     for (const runStatus of ['queued', 'waiting']) {
       browser.evaluate(`window.setCiRun(${JSON.stringify({ ...run, status: runStatus,
-        waits: [{ ...wait, phase: 'resolved' }] })})`)
+        waits: [{ ...wait, phase: WAIT_PHASE.resolved }] })})`)
       browser.waitForFunction(`document.querySelector('${status}').textContent.includes('CI result ready — waiting for capacity')`)
       expect(browser.count(link)).toBe(1)
     }
@@ -144,7 +145,7 @@ describe('CI header browser accessibility', () => {
 
   it('keeps a cancelled CI wait beside an open timer and its note, and clears it on a new registration', () => {
     const cancelled = { ...run, waits: [timer],
-      lastWaits: [{ ...wait, phase: 'cancelled', cancelledAt: '2026-09-22T12:03:00.000Z' }] }
+      lastWaits: [{ ...wait, phase: WAIT_PHASE.cancelled, cancelledAt: '2026-09-22T12:03:00.000Z' }] }
     for (const theme of ['light', 'dark']) {
       browser.setViewport(360, 640)
       browser.evaluate(`document.documentElement.style.zoom = '1'; document.documentElement.classList.toggle('light', ${theme === 'light'}); window.setCiRun(${JSON.stringify(cancelled)})`)
@@ -165,7 +166,7 @@ describe('CI header browser accessibility', () => {
   })
 
   it('retains a readable recovery error without fabricating a PR link', () => {
-    const recovered = { ...run, status: 'done', waits: undefined,
+    const recovered = { ...run, status: RUN_STATUS.done, waits: undefined,
       lastWaitsError: 'CI wait unavailable — saved observation is unreadable; register a new wait.' }
     browser.setViewport(360, 640)
     browser.evaluate(`document.documentElement.style.zoom = '1'; window.setCiRun(${JSON.stringify(recovered)})`)

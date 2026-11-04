@@ -1,3 +1,5 @@
+import { STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+
 /**
  * The synthetic LARGE transcript for the virtualization e2e (thread-scroll.e2e.ts): a
  * legitimate synthetic load, never fake product data — every line reuses the verbatim wire
@@ -21,7 +23,7 @@ export function largeThreadEvents(turnCount: number): Array<Line & { seq: number
   const lines: Line[] = [
     { type: 'lifecycle', message: 'run started — workflow "quick-task" (runner: claude)' },
     { type: 'note', message: 'worktree ready — branch cez/1a2b3c4d (base main)' },
-    { type: 'step-start', stepId: 'task', name: 'Do the task', kind: 'agent', iteration: 1 },
+    { type: 'step-start', stepId: 'task', name: 'Do the task', kind: STEP_KIND.agent, iteration: 1 },
     { type: 'session.started', sessionId: 'a0000000-0000-4000-8000-000000000001', backend: 'claude', stepId: 'task' },
   ]
 
@@ -72,7 +74,7 @@ export function largeThreadEvents(turnCount: number): Array<Line & { seq: number
 
   lines.push(
     { type: 'session.ended', reason: 'end_turn', stepId: 'task' },
-    { type: 'step-end', stepId: 'task', status: 'done' },
+    { type: 'step-end', stepId: 'task', status: STEP_STATUS.done },
     { type: 'lifecycle', message: 'goal achieved — session closed' },
   )
 

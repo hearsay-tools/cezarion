@@ -105,7 +105,8 @@ export interface UiToolItem {
 }
 
 /** How a native hook run ended — see the server's `ui-events.ts` (#961). */
-export type HookStatus = 'completed' | 'failed' | 'blocked' | 'cancelled'
+export const HOOK_STATUSES = ['completed', 'failed', 'blocked', 'cancelled'] as const
+export type HookStatus = (typeof HOOK_STATUSES)[number]
 
 /** The role of one piece of hook output — codex `HookOutputEntryKind` verbatim. */
 export type HookEntryKind = 'context' | 'feedback' | 'warning' | 'error' | 'stop'

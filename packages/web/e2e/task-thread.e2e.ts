@@ -1,3 +1,4 @@
+import { HOOK_STATUSES } from '@open-mercato/cezar-api-client/protocol/ui-events'
 import type { ChildProcess } from 'node:child_process'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -25,6 +26,8 @@ import {
 } from './contrast'
 import recordJson from './fixtures/thread-run.record.json'
 // fixture-server starts: 1
+
+const HOOK_STATUS = Object.fromEntries(HOOK_STATUSES.map(status => [status, status])) as { [Status in (typeof HOOK_STATUSES)[number]]: Status }
 
 const record = recordedRun(recordJson)
 
@@ -77,7 +80,7 @@ const HOOK_LINES = [
   { type: 'item.completed', ts: '2026-07-14T20:27:40.000Z', stepId: 'task', item: { kind: 'hook', id: 'hook_ctx', event: 'PostToolBatch', status: 'completed',
     entries: [{ kind: 'context', text: 'SQUEAL · revision 4\n✗ thread-items.test.tsx › ToolCard renders hook rows — new failure' }],
     stdout: '{"hookSpecificOutput":{"hookEventName":"PostToolBatch","additionalContext":"SQUEAL · revision 4"}}', exitCode: 0 } },
-  { type: 'item.completed', ts: '2026-07-14T20:27:40.000Z', stepId: 'task', item: { kind: 'hook', id: 'hook_fail', event: 'Stop', status: 'failed',
+  { type: 'item.completed', ts: '2026-07-14T20:27:40.000Z', stepId: 'task', item: { kind: 'hook', id: 'hook_fail', event: 'Stop', status: HOOK_STATUS.failed,
     entries: [{ kind: 'error', text: 'squeal status timed out after 2000 ms' }], stderr: 'squeal status timed out after 2000 ms\n', exitCode: 1,
     source: '/home/agent/.claude/plugins/squeal/hooks/stop.sh' } },
 ]
