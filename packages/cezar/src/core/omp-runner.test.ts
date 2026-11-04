@@ -30,6 +30,15 @@ import { ompProviderErrorMessage } from './omp-ui-mapper.js';
 import { createRunner } from './runner-factory.js';
 import { allowedToolsForStep, DEFAULT_ALLOWED_TOOLS } from '../workflows/types.js';
 import { readPids } from '../pid-file.testkit.js';
+import { z } from 'zod';
+import { STATUS_MAP as CODEX_TOOL_STATUS_MAP } from './codex-ui-mapper.ts';
+import { STATUS_MAP as OPENCODE_TOOL_STATUS_MAP } from './opencode-ui-mapper.ts';
+
+const TOOL_STATUS = z.enum([
+  ...Object.values(CODEX_TOOL_STATUS_MAP),
+  ...Object.values(OPENCODE_TOOL_STATUS_MAP),
+]).enum;
+
 
 /** The OMP (Oh My Pi) runner (#595): argv, tool mapping, and the persistent RPC session. */
 
@@ -1147,14 +1156,6 @@ await import(${JSON.stringify(MOCK)});
       const bin = join(dir, 'pid-omp.mjs');
       writeFileSync(bin, `#!/usr/bin/env node
 import { appendFileSync } from 'node:fs';
-import { z } from 'zod';
-import { STATUS_MAP as CODEX_TOOL_STATUS_MAP } from './codex-ui-mapper.ts';
-import { STATUS_MAP as OPENCODE_TOOL_STATUS_MAP } from './opencode-ui-mapper.ts';
-
-const TOOL_STATUS = z.enum([
-  ...Object.values(CODEX_TOOL_STATUS_MAP),
-  ...Object.values(OPENCODE_TOOL_STATUS_MAP),
-]).enum;
 appendFileSync(${JSON.stringify(join(dir, 'pids.txt'))}, process.pid + '\\n');
 await import(${JSON.stringify(MOCK)});
 `, { mode: 0o755 });
