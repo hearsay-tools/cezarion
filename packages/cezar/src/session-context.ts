@@ -36,10 +36,13 @@ export interface SessionContextRule {
   template: string;
 }
 
+export const SESSION_CONTEXT_REPORT_STATUSES = ['applied', 'skipped'] as const;
+export type SessionContextReportStatus = (typeof SESSION_CONTEXT_REPORT_STATUSES)[number];
+
 /** One rule's outcome for one launch. `applied` means "in the launch prompt", not "delivered". */
 export interface SessionContextReport {
   id: string;
-  status: 'applied' | 'skipped';
+  status: SessionContextReportStatus;
   /** Files the block read: the handoff's absolute path, or a rule's paths as written. */
   sources: string[];
   /** UTF-8 bytes of the block as rendered, when it was rendered. */

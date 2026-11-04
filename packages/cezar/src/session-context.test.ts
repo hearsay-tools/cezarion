@@ -11,6 +11,11 @@ import {
   loadSessionContextRules,
   type SessionContextInput,
 } from './session-context.ts';
+import { z } from 'zod';
+import { SESSION_CONTEXT_REPORT_STATUSES } from './session-context.ts';
+
+const REPORT_STATUS = z.enum(SESSION_CONTEXT_REPORT_STATUSES).enum;
+
 
 let root: string;
 let project: string;
@@ -67,7 +72,7 @@ describe('session context: handoff', () => {
     rmSync(handoff);
     const context = buildSessionContext(input());
     expect(context).toMatchObject({ prefix: '', handoffInjected: false });
-    expect(byId(context, 'handoff')).toMatchObject({ status: 'skipped', reason: 'not found' });
+    expect(byId(context, 'handoff')).toMatchObject({ status: REPORT_STATUS.skipped, reason: 'not found' });
   });
 
   it('skips an oversized handoff whole and still applies later rules', () => {
@@ -75,13 +80,13 @@ describe('session context: handoff', () => {
     rules(`version: 1\nrules:\n${rule('vision', 'Vision text')}`);
     const context = buildSessionContext(input());
     expect(context.handoffInjected).toBe(false);
-    expect(byId(context, 'handoff')).toMatchObject({ status: 'skipped' });
+    expect(byId(context, 'handoff')).toMatchObject({ status: REPORT_STATUS.skipped });
     expect(context.prefix).toBe(`<cezar-context id="vision">\nVision text\n</cezar-context>${SESSION_CONTEXT_SEPARATOR}`);
   });
 
   it('skips a handoff that is not valid UTF-8', () => {
     writeFileSync(handoff, Buffer.from([0xff, 0xfe, 0x00]));
-    expect(byId(buildSessionContext(input()), 'handoff')).toMatchObject({ status: 'skipped', reason: 'not valid UTF-8' });
+    expect(byId(buildSessionContext(input()), 'handoff')).toMatchObject({ status: REPORT_STATUS.skipped, reason: 'not valid UTF-8' });
   });
 });
 
@@ -105,7 +110,7 @@ describe('session context: budget', () => {
     writeFileSync(join(worktree, 'fill.txt'), fill(SESSION_CONTEXT_LIMIT_BYTES + 1));
     rules(`version: 1\nrules:\n${rule('fill', '{{file:fill.txt}}')}${rule('small', 'Small rule')}`);
     const context = buildSessionContext(input());
-    expect(byId(context, 'fill')).toMatchObject({ status: 'skipped', reason: expect.stringContaining('limit') });
+    expect(byId(context, 'fill')).toMatchObject({ status: REPORT_STATUS.skipped, reason: expect.stringContaining('limit') });
     expect(byId(context, 'small')?.status).toBe('applied');
     expect(context.prefix).not.toContain('xxxx');
   });
@@ -145,13 +150,13 @@ describe('session context: configuration', () => {
     rules(yaml);
     const context = buildSessionContext(input());
     expect(context.handoffInjected).toBe(true);
-    expect(byId(context, 'context.yaml')).toMatchObject({ status: 'skipped', reason: expect.stringMatching(reason) });
+    expect(byId(context, 'context.yaml')).toMatchObject({ status: REPORT_STATUS.skipped, reason: expect.stringMatching(reason) });
   });
 
   it('skips a context.yaml that is not readable', () => {
     mkdirSync(join(project, '.ai/cezar/context.yaml'));
     expect(loadSessionContextRules(project).reports).toEqual([
-      expect.objectContaining({ id: 'context.yaml', status: 'skipped', reason: expect.stringContaining('is a directory') }),
+      expect.objectContaining({ id: 'context.yaml', status: REPORT_STATUS.skipped, reason: expect.stringContaining('is a directory') }),
     ]);
   });
 
@@ -174,12 +179,12 @@ describe('session context: configuration', () => {
       rule('kept', 'Kept rule'),
     ].join('\n'));
     const context = buildSessionContext(input());
-    expect(byId(context, 'no-template')).toMatchObject({ status: 'skipped', reason: expect.stringContaining('template') });
-    expect(byId(context, 'first-edit')).toMatchObject({ status: 'skipped', reason: expect.stringContaining('on must be session_start') });
+    expect(byId(context, 'no-template')).toMatchObject({ status: REPORT_STATUS.skipped, reason: expect.stringContaining('template') });
+    expect(byId(context, 'first-edit')).toMatchObject({ status: REPORT_STATUS.skipped, reason: expect.stringContaining('on must be session_start') });
     expect(context.reports.filter((report) => report.id === 'handoff').map((report) => report.status)).toEqual(['applied', 'skipped']);
     expect(context.reports.filter((report) => report.id === 'twice')).toHaveLength(2);
     expect(context.reports.filter((report) => report.id === 'twice').every((report) => report.reason === 'duplicate id')).toBe(true);
-    expect(byId(context, 'rules[5]')).toMatchObject({ status: 'skipped' });
+    expect(byId(context, 'rules[5]')).toMatchObject({ status: REPORT_STATUS.skipped });
     expect(byId(context, 'kept')?.status).toBe('applied');
     expect(context.prefix).toContain('Kept rule');
     expect(context.prefix).not.toContain('mine');
@@ -213,8 +218,8 @@ describe('session context: templates', () => {
   it('skips a rule with an unknown or unavailable variable, without guessing', () => {
     rules(`version: 1\nrules:\n${rule('unknown', '{{branch}}')}${rule('absent', '{{step.id}}')}`);
     const context = buildSessionContext(input({ variables: { task: 't' } }));
-    expect(byId(context, 'unknown')).toMatchObject({ status: 'skipped', reason: 'unknown variable {{branch}}' });
-    expect(byId(context, 'absent')).toMatchObject({ status: 'skipped', reason: 'variable {{step.id}} is not available for this launch' });
+    expect(byId(context, 'unknown')).toMatchObject({ status: REPORT_STATUS.skipped, reason: 'unknown variable {{branch}}' });
+    expect(byId(context, 'absent')).toMatchObject({ status: REPORT_STATUS.skipped, reason: 'variable {{step.id}} is not available for this launch' });
   });
 
   it('keeps tokens inside variable values and file contents literal', () => {
@@ -249,9 +254,9 @@ describe('session context: templates', () => {
       rule('inner-link', '{{file:inside-link.txt}}'),
     ].join('')}`);
     const context = buildSessionContext(input());
-    expect(byId(context, 'absolute')).toMatchObject({ status: 'skipped', reason: expect.stringContaining('absolute paths are not allowed') });
-    expect(byId(context, 'dotdot')).toMatchObject({ status: 'skipped', reason: expect.stringContaining('outside the worktree') });
-    expect(byId(context, 'symlink')).toMatchObject({ status: 'skipped', reason: expect.stringContaining('outside the worktree') });
+    expect(byId(context, 'absolute')).toMatchObject({ status: REPORT_STATUS.skipped, reason: expect.stringContaining('absolute paths are not allowed') });
+    expect(byId(context, 'dotdot')).toMatchObject({ status: REPORT_STATUS.skipped, reason: expect.stringContaining('outside the worktree') });
+    expect(byId(context, 'symlink')).toMatchObject({ status: REPORT_STATUS.skipped, reason: expect.stringContaining('outside the worktree') });
     expect(byId(context, 'inner-link')?.status).toBe('applied');
     expect(context.prefix).not.toContain('OUTSIDE');
   });
@@ -261,10 +266,10 @@ describe('session context: templates', () => {
     chmodSync(join(worktree, 'locked.txt'), 0o000);
     rules(`version: 1\nrules:\n${rule('missing', '{{file:nope.md}}')}${rule('locked', '{{file:locked.txt}}')}${rule('dir', '{{file:.}}')}`);
     const context = buildSessionContext(input());
-    expect(byId(context, 'missing')).toMatchObject({ status: 'skipped', sources: ['nope.md'], reason: 'file nope.md: not found' });
+    expect(byId(context, 'missing')).toMatchObject({ status: REPORT_STATUS.skipped, sources: ['nope.md'], reason: 'file nope.md: not found' });
     // Root can read a mode-000 file; the rule then applies, which is still not a crash.
-    if (process.getuid?.() !== 0) expect(byId(context, 'locked')).toMatchObject({ status: 'skipped', reason: expect.stringContaining('unreadable') });
-    expect(byId(context, 'dir')).toMatchObject({ status: 'skipped', reason: expect.stringContaining('outside the worktree') });
+    if (process.getuid?.() !== 0) expect(byId(context, 'locked')).toMatchObject({ status: REPORT_STATUS.skipped, reason: expect.stringContaining('unreadable') });
+    expect(byId(context, 'dir')).toMatchObject({ status: REPORT_STATUS.skipped, reason: expect.stringContaining('outside the worktree') });
   });
 });
 
@@ -274,7 +279,7 @@ describe.skipIf(process.platform === 'win32')('session context: special files', 
   it('refuses a FIFO as context.yaml, as an included file and as the handoff, without blocking', () => {
     execFileSync('mkfifo', [join(project, '.ai/cezar/context.yaml')]);
     expect(loadSessionContextRules(project).reports).toEqual([
-      expect.objectContaining({ id: 'context.yaml', status: 'skipped', reason: 'not a regular file; custom rules skipped' }),
+      expect.objectContaining({ id: 'context.yaml', status: REPORT_STATUS.skipped, reason: 'not a regular file; custom rules skipped' }),
     ]);
     rmSync(join(project, '.ai/cezar/context.yaml'));
     execFileSync('mkfifo', [join(worktree, 'pipe')]);
@@ -282,9 +287,9 @@ describe.skipIf(process.platform === 'win32')('session context: special files', 
     rmSync(handoff);
     execFileSync('mkfifo', [handoff]);
     const context = buildSessionContext(input());
-    expect(byId(context, 'pipe')).toMatchObject({ status: 'skipped', reason: 'file pipe: not a regular file' });
+    expect(byId(context, 'pipe')).toMatchObject({ status: REPORT_STATUS.skipped, reason: 'file pipe: not a regular file' });
     expect(context).toMatchObject({ prefix: '', handoffInjected: false });
-    expect(byId(context, 'handoff')).toMatchObject({ status: 'skipped', reason: 'not a regular file' });
+    expect(byId(context, 'handoff')).toMatchObject({ status: REPORT_STATUS.skipped, reason: 'not a regular file' });
   });
 });
 

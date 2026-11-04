@@ -57,10 +57,13 @@ export interface WorktreeSetupCommandResult {
   spawnError?: string;
 }
 
+export const WORKTREE_SETUP_STATUSES = ['done', 'failed', 'stopped', 'invalid'] as const;
+export type WorktreeSetupStatus = (typeof WORKTREE_SETUP_STATUSES)[number];
+
 export type WorktreeSetupOutcome =
-  | { status: 'done'; commands: string[]; durationMs: number }
+  | { status: Extract<WorktreeSetupStatus, 'done'>; commands: string[]; durationMs: number }
   | {
-      status: 'failed';
+      status: Extract<WorktreeSetupStatus, 'failed'>;
       reason: 'exit' | 'timeout' | 'spawn';
       failed: WorktreeSetupCommandResult;
       /** The commands after the failed one, which did not run. */
@@ -68,8 +71,8 @@ export type WorktreeSetupOutcome =
       timeoutSeconds: number;
       durationMs: number;
     }
-  | { status: 'stopped'; durationMs: number }
-  | { status: 'invalid'; issue: string };
+  | { status: Extract<WorktreeSetupStatus, 'stopped'>; durationMs: number }
+  | { status: Extract<WorktreeSetupStatus, 'invalid'>; issue: string };
 
 /**
  * Run the commands in order in `cwd`, stopping at the first one that fails, times out or cannot

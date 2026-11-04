@@ -14,6 +14,11 @@ import {
   type WorktreeSetupCommandResult,
   type WorktreeSetupOutcome,
 } from './worktree-setup.ts';
+import { z } from 'zod';
+import { WORKTREE_SETUP_STATUSES } from './worktree-setup.ts';
+
+const SETUP_STATUS = z.enum(WORKTREE_SETUP_STATUSES).enum;
+
 
 /**
  * Worktree setup (#917, spec `.ai/specs/2026-10-07-worktree-setup.md`). The resolver decides
@@ -93,20 +98,20 @@ describe('runWorktreeSetup', () => {
   it('runs commands in order in the cwd', async () => {
     const { cwd, results, outcome } = await run(['echo one >> log', 'echo two >> log']);
     expect(readFileSync(join(cwd, 'log'), 'utf8')).toBe('one\ntwo\n');
-    expect(outcome).toMatchObject({ status: 'done', commands: ['echo one >> log', 'echo two >> log'] });
+    expect(outcome).toMatchObject({ status: SETUP_STATUS.done, commands: ['echo one >> log', 'echo two >> log'] });
     expect(results.map((r) => r.exitCode)).toEqual([0, 0]);
   });
 
   it('stops at the first failure and lists the rest as skipped', async () => {
     const { results, outcome } = await run(['exit 3', 'echo never']);
     expect(results).toHaveLength(1);
-    expect(outcome).toMatchObject({ status: 'failed', reason: 'exit', skipped: ['echo never'] });
+    expect(outcome).toMatchObject({ status: SETUP_STATUS.failed, reason: 'exit', skipped: ['echo never'] });
     expect(outcome.status === 'failed' && outcome.failed.exitCode).toBe(3);
   });
 
   it('a timeout fails with reason timeout', async () => {
     const { outcome } = await run(['sleep 5'], { timeoutSeconds: 1 });
-    expect(outcome).toMatchObject({ status: 'failed', reason: 'timeout', timeoutSeconds: 1 });
+    expect(outcome).toMatchObject({ status: SETUP_STATUS.failed, reason: 'timeout', timeoutSeconds: 1 });
     expect(outcome.status === 'failed' && outcome.failed.timedOut).toBe(true);
   }, 20_000);
 
@@ -138,15 +143,15 @@ describe('worktree setup copy', () => {
   const failedResult = (over: Partial<WorktreeSetupCommandResult> = {}): WorktreeSetupCommandResult => ({
     command: 'npm ci', exitCode: 1, timedOut: false, durationMs: 12_000, output: 'npm ERR! boom', ...over,
   });
-  const done: WorktreeSetupOutcome = { status: 'done', commands: ['npm ci', 'cp a b'], durationMs: 41_000 };
+  const done: WorktreeSetupOutcome = { status: SETUP_STATUS.done, commands: ['npm ci', 'cp a b'], durationMs: 41_000 };
   const exited: WorktreeSetupOutcome = {
-    status: 'failed', reason: 'exit', failed: failedResult(), skipped: ['cp a b'], timeoutSeconds: 900, durationMs: 12_000,
+    status: SETUP_STATUS.failed, reason: 'exit', failed: failedResult(), skipped: ['cp a b'], timeoutSeconds: 900, durationMs: 12_000,
   };
   const timedOut: WorktreeSetupOutcome = {
-    status: 'failed', reason: 'timeout', failed: failedResult({ exitCode: null, timedOut: true }), skipped: [], timeoutSeconds: 900, durationMs: 900_000,
+    status: SETUP_STATUS.failed, reason: 'timeout', failed: failedResult({ exitCode: null, timedOut: true }), skipped: [], timeoutSeconds: 900, durationMs: 900_000,
   };
   const spawn: WorktreeSetupOutcome = {
-    status: 'failed', reason: 'spawn', failed: failedResult({ exitCode: null, spawnError: 'spawn bash ENOENT' }), skipped: [], timeoutSeconds: 900, durationMs: 5,
+    status: SETUP_STATUS.failed, reason: 'spawn', failed: failedResult({ exitCode: null, spawnError: 'spawn bash ENOENT' }), skipped: [], timeoutSeconds: 900, durationMs: 5,
   };
   const invalid: WorktreeSetupOutcome = { status: 'invalid', issue: 'commands: Expected array, received string' };
 
@@ -180,7 +185,7 @@ describe('worktree setup copy', () => {
 
   it('shortens long commands in notes to 120 characters', () => {
     const long = 'x'.repeat(200);
-    const note = worktreeSetupAgentNote({ status: 'done', commands: [long], durationMs: 1000 })!;
+    const note = worktreeSetupAgentNote({ status: SETUP_STATUS.done, commands: [long], durationMs: 1000 })!;
     expect(note).toContain(`\`${'x'.repeat(119)}…\``);
   });
 

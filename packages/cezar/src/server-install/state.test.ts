@@ -15,6 +15,11 @@ import {
   saveServerState,
 } from './state.ts';
 import { freshServerState } from './types.ts';
+import { z } from 'zod';
+import { STEP_STATUSES } from './types.ts';
+
+const STEP_STATUS = z.enum(STEP_STATUSES).enum;
+
 
 const UNKNOWN_FUTURE_INSTALLER_STATUS = 'running';
 
@@ -44,7 +49,7 @@ describe('server state', () => {
   it('round-trips and writes 0600', () => {
     const s = freshServerState();
     s.platform = 'ubuntu-vps';
-    s.steps.deps = { status: 'done', created: null };
+    s.steps.deps = { status: STEP_STATUS.done, created: null };
     saveServerState(s);
     const mode = statSync(serverStatePath()).mode & 0o777;
     expect(mode).toBe(0o600);
@@ -54,9 +59,9 @@ describe('server state', () => {
   it('firstIncompleteStep skips done and skipped, stops at pending/failed', () => {
     const s = freshServerState();
     s.steps = {
-      a: { status: 'done', created: null },
-      b: { status: 'skipped', created: null },
-      c: { status: 'failed', created: null },
+      a: { status: STEP_STATUS.done, created: null },
+      b: { status: STEP_STATUS.skipped, created: null },
+      c: { status: STEP_STATUS.failed, created: null },
     };
     expect(firstIncompleteStep(['a', 'b', 'c', 'd'], s)).toBe('c');
     expect(isResolved(s.steps.a)).toBe(true);
@@ -156,7 +161,7 @@ describe('server state', () => {
         primaryPort: 4321,
         futureField: { keep: 'me' },
         steps: {
-          deps: { status: 'done', created: { artifacts: [] } },
+          deps: { status: STEP_STATUS.done, created: { artifacts: [] } },
           'future-step': { status: UNKNOWN_FUTURE_INSTALLER_STATUS, created: null }, // unknown status
         },
       }),
