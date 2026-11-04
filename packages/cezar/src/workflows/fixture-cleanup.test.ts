@@ -121,30 +121,33 @@ it.each(['root', 'continuation'] as const)('keeps the repo until a real %s sessi
   const track = vi.spyOn(fixtureWork(root), 'track');
   const workflow = { name: 'cleanup', source: 'built-in' as const, steps: [{ id: 'work', prompt: '{{task}}' }] };
   let id: string;
-  if (mode === 'root') id = manager.startRun(workflow, { task: 'hello', worktree: true }).id;
+  if (mode === 'root') id = manager.startRun(workflow, { task: 'hello', worktree: false }).id;
   else {
     const record = store.createRun({ title: 'resume', task: 'hello', workflow: 'cleanup', runner: 'claude', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });
-    id = record.id;
-    const tree = join(root, 'task-tree');
-    execFileSync('git', ['worktree', 'add', '-qb', 'task-branch', tree], { cwd: root });
-    store.updateStep(id, 'work', { sessionId: 'prior-session', backend: 'claude' });
-    store.updateRun(id, { status: RUN_STATUS.done, worktreePath: tree, branch: 'task-branch', baseBranch: 'main' });
+    id = record.id; store.updateStep(id, 'work', { sessionId: 'prior-session', backend: 'claude' }); store.updateRun(id, { status: RUN_STATUS.done, worktree: false });
     expect(manager.continueRun(id, { text: 'hello' })).toEqual({ ok: true });
   }
   await vi.waitFor(() => expect(store.getRun(id)?.status).toBe('waiting'), { timeout: 10_000 });
   expect(track.mock.calls.some(([label]) => label === (mode === 'root' ? 'execute' : 'runContinuation'))).toBe(true);
   expect(track.mock.calls.some(([label]) => label === 'session')).toBe(true);
-  // Delay the real final autosave at its filesystem boundary, after the real
-  // session has been interrupted. Removal must not race this closing write.
-  const save = git.autosaveCommit;
+  // Root-directory runs have a no-op autosave. Extend its owned promise with the same
+  // delayed filesystem write this fixture used to inject at the autosave method.
+  // The real session must close before that tracked final write can settle.
+  const work = fixtureWork(root);
+  const realTrack = TrackedWork.prototype.track.bind(work);
   let release!: () => void;
   let entered!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const saving = new Promise<void>(resolve => { entered = resolve; });
-  const saveSpy = vi.spyOn(git, 'autosaveCommit').mockImplementation(async (...args) => { entered(); await gate; writeFileSync(join(args[0], 'late'), 'final write'); return save(...args); });
+  track.mockImplementation((label, promise) => {
+    if (label !== 'saveWorktree') return realTrack(label, promise);
+    return realTrack(label, promise.then(async value => {
+      entered(); await gate; writeFileSync(join(root, 'late'), 'final write'); return value;
+    }));
+  });
   manager.cancel(id);
   await saving;
-  expect(saveSpy).toHaveBeenCalled();
+  expect(track.mock.calls.some(([label]) => label === 'saveWorktree')).toBe(true);
   const removing = removeFixtureRepo(root);
   try {
     await new Promise(resolve => setImmediate(resolve));
@@ -153,7 +156,7 @@ it.each(['root', 'continuation'] as const)('keeps the repo until a real %s sessi
     await removing;
     expect(manager.isActive(id)).toBe(false);
     expect(existsSync(root)).toBe(false);
-  } finally { release(); await removing; saveSpy.mockRestore(); }
+  } finally { release(); await removing; track.mockRestore(); }
 }, 20_000);
 
 it('retains the repository and reports an ownership timeout', async () => {
@@ -300,7 +303,7 @@ it('keeps a session until close, interrupts it after dispose, and shares ownersh
   expect(work.pending.get(promise)).toBe('session');
   expect(work.liveSessions.has(session)).toBe(true);
   const recovered = createFixtureManager(store, root);
-  expect(fixtureWork(root)).toBe(work);
+  expect(fixtureWork(recovered)).toBe(work);
   await removeFixtureRepo(root);
   expect(session.interrupt).toHaveBeenCalledTimes(1);
   expect(work.liveSessions.size).toBe(0);
@@ -308,11 +311,11 @@ it('keeps a session until close, interrupts it after dispose, and shares ownersh
 });
 
 it('waits for detached work and new work it creates across managers', async () => {
-  const { root, store, manager } = fixture();
+  const { root, store } = fixture();
   const work = fixtureWork(root);
   const first = barrier(), second = barrier();
   const recovered = createFixtureManager(store, root);
-  const same = fixtureWork(root);
+  const same = fixtureWork(recovered);
   const child = first.held.then(() => same.track('namer', second.held));
   work.track('bookkeeping', child);
   let settled = false;
@@ -325,7 +328,7 @@ it('waits for detached work and new work it creates across managers', async () =
 });
 
 it('reports the label of held work on a drain timeout', async () => {
-  const { root, manager } = fixture();
+  const { root } = fixture();
   const held = barrier();
   fixtureWork(root).track('held-namer', held.held);
   try {
