@@ -1,4 +1,4 @@
-import { runInternals } from '../workflows/run-internals.testkit.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CredentialRegistry } from '../delegation/credentials.ts';
@@ -12,6 +12,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 for (const backend of RUNNER_IDS) {
   it.each(['live', 'restart'] as const)(`${backend}: %s parent resume executes its message once without human input`, async mode => {
+    const semaphore = new WorkspaceSemaphore();
     await withOwnedInputRun(backend, 'baseline', async fixture => {
       const { repoRoot, runId, parentRunId } = fixture;
       let { store, manager } = fixture;
@@ -30,15 +31,16 @@ for (const backend of RUNNER_IDS) {
       const request = { id: randomUUID(), recipientRunId: runId, kind: 'request' as const, timeoutSeconds: 600,
         resume: true, text: 'mock:agent-echo Check the corrected result' };
       try {
-        const pump = mode === 'restart' ? vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue() : undefined;
+        const held = mode === 'restart' ? vi.spyOn(semaphore, 'maxParallel').mockReturnValue(0) : undefined;
         const first = await service.send(caller, request);
         expect(first.message).toMatchObject({ state: 'accepted', resumed: true });
         if (mode === 'restart') {
-          expect(pump).toHaveBeenCalled();
           expect(store.getRun(runId)?.status).toBe('queued');
           store.updateRun(runId, { task: 'Amended task before capacity admission', queuedMessages: [{ id: randomUUID(),
             text: 'Keep the later human context', createdAt: new Date().toISOString() }] });
           ({ store, manager } = await fixture.restart());
+          held!.mockRestore();
+          await semaphore.release();
           service = new DelegationService();
           service.registerProject({ id: 'project', root: repoRoot, store, manager });
         }
@@ -49,7 +51,6 @@ for (const backend of RUNNER_IDS) {
         expect(echoed)
           .toEqual([expect.objectContaining({ text: expect.stringContaining(request.id) })]);
         if (mode === 'restart') {
-          expect(pump).toHaveBeenCalled();
           expect(String(echoed[0]!.text)).toContain('Amended task before capacity admission');
           expect(String(echoed[0]!.text)).toContain('Keep the later human context');
         }
@@ -63,6 +64,6 @@ for (const backend of RUNNER_IDS) {
         expect(store.getRun(runId)?.delegation).toEqual(revision);
         expect(store.getRun(runId)?.steps.filter(step => step.synthetic === 'continuation')).toHaveLength(1);
       } finally { credentials.close(); }
-    });
+    }, { semaphore });
   }, 60_000);
 }

@@ -1,4 +1,3 @@
-import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -129,7 +128,7 @@ describe('Git rediscovery for a project opened before its first commit (hearsay-
     await waitFor(() => settled.includes(p.store.getRun(second.id)?.status ?? ''), 'the queued task to finish', 30_000);
     expect(p.store.getRun(second.id)?.status).toBe('done');
     expect(p.store.getRun(first.id)?.status).toBe('running');
-    expect(runInternals(p.manager).active.has(first.id)).toBe(true);
+    expect(p.manager.isActive(first.id)).toBe(true);
   }, 45_000);
 
   it.each([
