@@ -13,6 +13,19 @@ import type { RunModuleContext } from './run/types.ts';
 import type { Execution, ExecutionLaunch, StepLoop as LoopOutcome } from './run/types.ts';
 import { UiEventSink } from '../runs/ui-event-sink.ts';
 
+function unused<T extends object>(name: string, values: Partial<T> = {}): T {
+  return new Proxy(values, { get(target, key) {
+    if (key in target) return Reflect.get(target, key);
+    throw new Error(`unused collaborator ${name}.${String(key)}`);
+  } }) as T;
+}
+
+function fakeState(root: string): ActiveRun {
+  const state = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false });
+  state.completedStepId = step.id;
+  return state;
+}
+
 const step = { id: 'work', prompt: 'work' };
 const next = { id: 'tail', prompt: 'tail' };
 
@@ -32,18 +45,24 @@ describe('step completion mark at settlement callers', () => {
     context = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work: new TrackedWork(),
       semaphore: new WorkspaceSemaphore(), disposed: () => false };
     type SettlementArgs = ConstructorParameters<typeof RunSettlement>;
-    settlement = new RunSettlement(context, {} as SettlementArgs[1], { supersedeWorkerFallback: vi.fn() } as unknown as SettlementArgs[2], {} as SettlementArgs[3],
-      {} as SettlementArgs[4], {} as SettlementArgs[5], {} as SettlementArgs[6], {} as SettlementArgs[7],
-      { active, holdsAgentWaits: () => false } as unknown as SettlementArgs[8],
-      { move: (id, exit, patch) => store.move(id, exit, patch) } as SettlementArgs[9], '', '');
+    settlement = new RunSettlement(context, unused<SettlementArgs[1]>('line'),
+      unused<SettlementArgs[2]>('humanWaits', { supersedeWorkerFallback: vi.fn() }),
+      unused<SettlementArgs[3]>('autoResume'), unused<SettlementArgs[4]>('bookkeeper'),
+      unused<SettlementArgs[5]>('workerExecutions'), unused<SettlementArgs[6]>('workerQuestions'),
+      unused<SettlementArgs[7]>('subagentWaits'),
+      unused<SettlementArgs[8]>('gate', { active, holdsAgentWaits: () => false }),
+      unused<SettlementArgs[9]>('host', { move: (id, exit, patch) => store.move(id, exit, patch) }), '', '');
     type LoopArgs = ConstructorParameters<typeof StepLoop>;
-    stepLoop = new StepLoop(context, { active, executionBlockedByRootFinish: () => false, owesDelivery: () => false, closingWakeDecision: () => 'settle' } as unknown as LoopArgs[1], {} as LoopArgs[2], {} as LoopArgs[3], { withdrawCezarHumanWaits: vi.fn() } as unknown as LoopArgs[4],
-      settlement, {} as LoopArgs[6], { holdsAgentWaits: () => false } as unknown as LoopArgs[7], '');
+    stepLoop = new StepLoop(context,
+      unused<LoopArgs[1]>('loopHost', { active, executionBlockedByRootFinish: () => false,
+        owesDelivery: () => false, closingWakeDecision: () => 'settle' }),
+      unused<LoopArgs[2]>('line'), unused<LoopArgs[3]>('autosave'),
+      unused<LoopArgs[4]>('humanWaits', { withdrawCezarHumanWaits: vi.fn() }), settlement,
+      unused<LoopArgs[6]>('stepSession'), unused<LoopArgs[7]>('gate', { holdsAgentWaits: () => false }), '');
     runId = store.createRun({ title: 'mark', task: 'work', workflow: 'chain', steps: [] }).id;
     store.addStep(runId, { id: step.id, name: step.id, kind: STEP_KIND.agent });
     store.updateRun(runId, { status: RUN_STATUS.running });
-    state = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false });
-    state.completedStepId = step.id;
+    state = fakeState(root);
   });
 
   afterEach(() => {
