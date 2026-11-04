@@ -11,6 +11,12 @@ on:
         description: Full PR head commit SHA
         required: true
         type: string
+      suite:
+        description: Probe scheduling or run one four-shard workload
+        required: true
+        default: smoke
+        type: choice
+        options: [smoke, browser, vitest]
 
 permissions: {}
 
@@ -56,7 +62,7 @@ jobs:
 
   prove-runner:
     needs: admit
-    if: needs.admit.result == 'success' && needs.admit.outputs.head != ''
+    if: needs.admit.result == 'success' && needs.admit.outputs.head != '' && inputs.suite == 'smoke'
     runs-on:
       group: cezarion-lxc-canary
       labels: cezarion-lxc-canary
@@ -64,3 +70,78 @@ jobs:
     steps:
       - name: Prove scheduling without running repository code
         run: uname -sm
+
+  trial:
+    name: LXC ${{ inputs.suite }} shard ${{ matrix.shard }}/4
+    needs: admit
+    if: needs.admit.result == 'success' && needs.admit.outputs.head != '' && (inputs.suite == 'browser' || inputs.suite == 'vitest')
+    runs-on:
+      group: cezarion-lxc-canary
+      labels: cezarion-lxc-canary
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the admitted PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.admit.outputs.head }}
+          persist-credentials: false
+      - name: Verify the checked-out commit
+        env:
+          EXPECTED_HEAD: ${{ needs.admit.outputs.head }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: '12.11.2'
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          check-latest: true
+      - name: Locate the pnpm store
+        id: store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - name: Restore the trial dependency cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.store.outputs.path }}
+          key: cezarion-lxc-trial-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run Cockpit browser E2E
+        if: inputs.suite == 'browser'
+        run: |
+          set -o pipefail
+          npm run test:e2e -- --allow-skip --shard=${{ matrix.shard }}/4 2>&1 | tee e2e.log
+          node .github/scripts/require-e2e-passed.cjs < e2e.log
+      - name: Upload the browser shard log
+        if: inputs.suite == 'browser' && !cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lxc-browser-shard-${{ matrix.shard }}
+          path: e2e.log
+          if-no-files-found: warn
+          retention-days: 3
+      - name: Build server dependencies
+        if: inputs.suite == 'vitest'
+        run: npm run build:server
+      - name: Run Vitest with coverage
+        if: inputs.suite == 'vitest'
+        env:
+          VITEST_FILE_DURATION_CAP: '1'
+        run: npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4 --coverage.enabled
+      - name: Upload the Vitest shard coverage
+        if: inputs.suite == 'vitest'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lxc-vitest-coverage-shard-${{ matrix.shard }}
+          path: .ai/qa/coverage/coverage-final.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
