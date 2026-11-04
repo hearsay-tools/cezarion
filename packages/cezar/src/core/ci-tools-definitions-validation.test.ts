@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { globSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CI_NATIVE_GROUPS, registerCiDefinitionsAndInjection, registerCiValidation } from './ci-tools.testkit.ts';
 
@@ -12,7 +12,10 @@ function assertNativeCoverage(sources: readonly string[]) {
 }
 
 describe('native CI tool row coverage', () => {
-  const sources = ['ci-tools-wait-cancel.test.ts', 'ci-tools-ask-done.test.ts'].map(file => readFileSync(new URL(file, import.meta.url), 'utf8'));
+  const sourceRoot = new URL('../', import.meta.url);
+  const sources = globSync('**/*.test.ts', { cwd: sourceRoot })
+    .map(file => readFileSync(new URL(file, sourceRoot), 'utf8'))
+    .filter(source => /registerCiNativeTools\(CI_NATIVE_GROUPS\./.test(source));
   it('registers each native tool group in exactly one source file', () => {
     assertNativeCoverage(sources);
   });
