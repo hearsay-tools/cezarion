@@ -324,4 +324,16 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(provisionMatrixCounts([`${call}; ${call};`]).governedIntent).toBe(2);
   });
 
+  for (const source of [
+    'it.each?.(PROVISION_ROWS.governedIntent)',
+    'const r = it.each',
+    'it.each.call(null, PROVISION_ROWS.governedIntent)',
+    'consume(it.each)',
+    'it.each.apply(null, [PROVISION_ROWS.governedIntent])',
+    'it.each.bind(null)',
+    'it["each"](PROVISION_ROWS.governedIntent)',
+  ]) it(`rejects unaccounted provision registration reference ${source}`, () => {
+    expect(() => provisionMatrixCounts([`${source};`], ['reference.test.ts'])).toThrow('reference.test.ts: unsupported');
+  });
+
 });

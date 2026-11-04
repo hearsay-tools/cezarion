@@ -62,4 +62,22 @@ describe('native CI tool row coverage', () => {
     expect(() => assertNativeCoverage([...sources, 'function later() { registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel); }'])).toThrow();
     expect(() => nativeGroups('function later() { registerCiNativeTools(group); }', 'nested.test.ts')).toThrow('nested.test.ts: unsupported');
   });
+  it.each([
+    'registerCiNativeTools?.(CI_NATIVE_GROUPS.waitCancel)',
+    'const r = registerCiNativeTools',
+    'registerCiNativeTools.call(null, CI_NATIVE_GROUPS.waitCancel)',
+    'consume(registerCiNativeTools)',
+    'registerCiNativeTools.apply(null, [CI_NATIVE_GROUPS.waitCancel])',
+    'registerCiNativeTools.bind(null)',
+    'tools["registerCiNativeTools"](CI_NATIVE_GROUPS.waitCancel)',
+    'export { registerCiNativeTools as other }',
+    'import { registerCiNativeTools as other } from "./tools"',
+  ])('rejects unaccounted native registration reference %s', source => {
+    expect(() => nativeGroups(`${source};`, 'reference.test.ts')).toThrow('reference.test.ts: unsupported');
+  });
+  it('allows unchanged imports, declarations and exports', () => {
+    expect(nativeGroups('import { registerCiNativeTools } from "./tools";')).toEqual([]);
+    expect(nativeGroups('export function registerCiNativeTools() {}')).toEqual([]);
+    expect(nativeGroups('export { registerCiNativeTools };')).toEqual([]);
+  });
 });
