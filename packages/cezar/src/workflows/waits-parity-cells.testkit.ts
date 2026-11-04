@@ -17,7 +17,7 @@ import { ToolsUnavailableError } from '../ci-wait/controller.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
 import { parkNoticeId } from '../delegation/park-notice.ts';
 import { checkpoint, collect, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
-import { timed, type TimedWait } from './waits.testkit.ts';
+import { fireCapturedTimer, timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingAskOf } from '@open-mercato/cezar-contract/pending-ask';
 import { handoffPath } from '../handoff.ts';
@@ -112,7 +112,7 @@ function expectHeldAtTheBound(id: string, waitId: string, { error = /^continue f
   expect(manager.isActive(id)).toBe(false);
   expect(runInternals(manager).retries.wakeBackoffs.has(id)).toBe(false);
 }
-const fireTimer = (waitId: string) => runInternals(manager).waitWatches.waitTimers.get(waitId)!.timer._onTimeout();
+const fireTimer = (waitId: string) => fireCapturedTimer(waitId);
 const flushMicrotasks = async () => { for (let n = 0; n < 5; n++) await Promise.resolve(); };
 const turnEnds = (id: string) => store.readEvents(id).filter(event => event.type === 'turn-end').length;
 const viaOf = (id: string, via: Wait['via']) => store.getRun(id)?.waits?.find((wait): wait is TimedWait => wait.via === via && wait.kind !== 'human');

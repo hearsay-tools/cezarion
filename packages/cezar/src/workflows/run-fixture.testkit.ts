@@ -1,11 +1,14 @@
-import { runInternals } from './run-internals.testkit.ts';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWork } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeEach, vi } from 'vitest';
+import { observationClock } from '../core/observation-clock.testkit.ts';
+import { IDLE_TIMEOUT_MS } from './run/constants.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
+import type { UiEvent } from '../core/ui-events.ts';
 import type { AgentRunner } from '../core/agent-runner.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunManager } from './run.ts';
@@ -15,19 +18,30 @@ import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit'
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 
-const hoistedRunnerHook = vi.hoisted(() => ({ runner: undefined as AgentRunner | undefined }));
+const hoistedRunnerHook = vi.hoisted(() => ({ runner: undefined as AgentRunner | undefined, ui: undefined as ((event: UiEvent) => void) | undefined }));
 
 vi.mock('../core/runner-factory.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../core/runner-factory.ts')>();
+  const originalStarts = new WeakMap<AgentRunner, AgentRunner['startSession']>();
   return {
     ...actual,
-    createRunner: (...args: Parameters<typeof actual.createRunner>) => hoistedRunnerHook.runner ?? actual.createRunner(...args),
+    createRunner: (...args: Parameters<typeof actual.createRunner>) => {
+      const runner = hoistedRunnerHook.runner ?? actual.createRunner(...args);
+      const start = originalStarts.get(runner) ?? runner.startSession.bind(runner);
+      originalStarts.set(runner, start);
+      runner.startSession = (spec, ...rest) => {
+        hoistedRunnerHook.ui = rest[1]?.onUiEvent;
+        return start(spec, ...rest);
+      };
+      return runner;
+    },
   };
 });
 
 export const runnerHook = {
+  uiEvent(event: UiEvent) { if (!hoistedRunnerHook.ui) throw new Error("No runner UI channel observed"); hoistedRunnerHook.ui(event); },
   get runner(): AgentRunner | undefined { return hoistedRunnerHook.runner; },
-  set runner(value: AgentRunner | undefined) { hoistedRunnerHook.runner = value; },
+  set runner(value: AgentRunner | undefined) { hoistedRunnerHook.runner = value; hoistedRunnerHook.ui = undefined; },
 };
 
 // Naming has its own suite; no background LLM call may outlive these fixtures. The mocks answer
@@ -71,7 +85,7 @@ export function waitForProduct(manager: RunManager, store: RunStore, predicate: 
       queued = true;
       queueMicrotask(check);
     };
-    const offWork = runInternals(manager).context.work.onSettle(schedule);
+    const offWork = fixtureWork(manager).onSettle(schedule);
     // bound: preserve the caller's original per-transition hang guard without polling.
     const timer = setTimeout(() => finish(new Error('condition not met in time')), ms);
     store.on('run', schedule);
@@ -91,7 +105,9 @@ export function setupMonitoringFixture() {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
+  let semaphore: WorkspaceSemaphore;
   let currentId: string | undefined;
+  const clocks: Array<ReturnType<typeof observationClock>> = [];
   const savedEnv: Record<string, string | undefined> = {};
   const SINGLE_STEP: WorkflowDef = {
     name: 'quick-task',
@@ -111,12 +127,14 @@ export function setupMonitoringFixture() {
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot);
+    semaphore = new WorkspaceSemaphore();
+    manager = createFixtureManager(store, repoRoot, { semaphore });
     currentId = undefined;
   });
 
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
+    for (const clock of clocks.splice(0)) clock.restore();
     runnerHook.runner = undefined;
     if (currentId) manager.cancel(currentId); // release the session + repo lock
     for (const [key, value] of Object.entries(savedEnv)) {
@@ -148,10 +166,6 @@ export function setupMonitoringFixture() {
   /** The run's open timer: a `cezar_wait` timer or a monitoring one. */
   const openTimer = (r: RunRecord | undefined): TimerWaitEntry | undefined =>
     r?.waits?.find((wait): wait is TimerWaitEntry => wait.kind === 'timer' && wait.phase === 'open');
-  const armedTimer = (id: string) => {
-    const wait = openTimer(store.getRun(id));
-    return wait ? runInternals(manager).waitWatches.waitTimers.get(wait.id)?.timer as (NodeJS.Timeout & { _onTimeout(): void }) | undefined : undefined;
-  };
 
   const persistedRun = (id: string): RunRecord => {
     const records = readPersistedRuns(join(repoRoot, '.ai/cezar')) as RunRecord[];
@@ -165,9 +179,36 @@ export function setupMonitoringFixture() {
     get repoRoot() { return repoRoot; },
     get store() { return store; },
     get manager() { return manager; },
+    get semaphore() { return semaphore; },
     set manager(value: RunManager) { manager = value; },
     get currentId() { return currentId; },
     set currentId(value: string | undefined) { currentId = value; },
-    SINGLE_STEP, waitFor, publishedWaiting, openTimer, armedTimer, persistedRun,
+    observeWakeTimers() {
+      let arming: TimerWaitEntry | undefined;
+      const clock = observationClock(delay => {
+        if (!arming || delay === undefined || delay <= 0 || delay > arming.seconds * 1000) return false;
+        arming = undefined;
+        return true;
+      });
+      clocks.push(clock);
+      const commit = store.commitWait.bind(store);
+      vi.spyOn(store, 'commitWait').mockImplementation((...args) => {
+        const result = commit(...args);
+        const wait = args[1];
+        if (wait.kind === 'timer') {
+          arming = wait;
+          // The armer follows the synchronous checkpoint; other turns cannot claim this timer.
+          queueMicrotask(() => { if (arming === wait) arming = undefined; });
+        }
+        return result;
+      });
+      return clock;
+    },
+    observeIdleTimers() {
+      const clock = observationClock(delay => delay === IDLE_TIMEOUT_MS);
+      clocks.push(clock);
+      return clock;
+    },
+    SINGLE_STEP, waitFor, publishedWaiting, openTimer, persistedRun,
   };
 }

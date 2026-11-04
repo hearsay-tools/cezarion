@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as worktrees from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
+import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { HARNESS_ADAPTERS, withOwnedInputRun, withoutTaskScenario, waitFor } from './harness-parity.testkit.ts';
 import { readPid, requirePid } from '../pid-file.testkit.ts';
@@ -197,7 +198,7 @@ async function recoverWithReplacement({ store, manager, runId, repoRoot, adoptCo
   await waitFor(() => readlinkSync(`/proc/${holder!}/cwd`) === bin);
   manager.dispose(); store.close();
   const reopened = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-  const replacement = { store: reopened, manager: new RunManager(reopened, repoRoot) };
+  const replacement = { store: reopened, manager: createFixtureManager(reopened, repoRoot) };
   setReplacement(replacement);
   await adoptContext(replacement);
   expect(replacement.manager.continueRun(runId, { text: 'after replacement' }).ok).toBe(false);

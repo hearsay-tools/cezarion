@@ -1,5 +1,4 @@
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
 import { crashStore, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { RUN_IN_USE_ELSEWHERE, RunStore } from '../runs/store.ts';
-import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager, fixtureWork, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { RunManager } from '../workflows/run.ts';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -138,7 +137,7 @@ describe('adopting a dead owner\'s run for a control', () => {
     store = RunStore.open(dataDir, { keepLive: true });
     manager = createFixtureManager(store, repoRoot, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }) });
     started = [];
-    const work = runInternals(manager).context.work;
+    const work = fixtureWork(repoRoot);
     const realTrack = work.track.bind(work);
     vi.spyOn(work, 'track').mockImplementation((label, promise) => {
       if (label === 'execute' || label === 'runContinuation') started.push(label);

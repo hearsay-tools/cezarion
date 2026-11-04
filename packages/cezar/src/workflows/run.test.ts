@@ -21,7 +21,7 @@ import { type WorkflowDef } from './types.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createWorktree } from '../git-worktree.ts';
 import { resolveAttachmentPath } from './attachment-path.ts';
-import { monitoringTimerOf, monitoringWakeOf } from './waits.testkit.ts';
+import { monitoringTimerWait, monitoringWakeOf } from './waits.testkit.ts';
 import { registerRunProcess, unregisterRunProcess } from '../core/process-usage.ts';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { asksQuestion } from '@open-mercato/cezar-contract/waits';
@@ -1034,7 +1034,7 @@ describe('RunManager monitoring turns', () => {
     const internals = runInternals(fixture.manager);
     const state = internals.active.get(record.id);
     if (!state) throw new Error('active run state missing');
-    const wakeTimer = monitoringTimerOf(fixture.manager, record.id);
+    const wakeTimer = monitoringTimerWait(fixture.store.getRun(record.id));
     const deadline = monitoringWakeOf(fixture.store.getRun(record.id));
     const sink = makeUiSink(internals.context, internals.sessionHelperHost, record.id, 'task');
     const inject = (event: UiEvent) => handleRunnerUiEvent(internals.context, internals.sessionHelperHost, record.id, state, sink, event);
@@ -1085,7 +1085,7 @@ describe('RunManager monitoring turns', () => {
 
     expect(fixture.store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.waiting });
     expect(monitoringWakeOf(fixture.store.getRun(record.id))).toBe(deadline);
-    expect(monitoringTimerOf(fixture.manager, record.id)).toBe(wakeTimer);
+    expect(monitoringTimerWait(fixture.store.getRun(record.id))).toEqual(wakeTimer);
     expect(runInternals(fixture.manager).line.waiting.has(record.id)).toBe(true);
     expect(runInternals(fixture.manager).line.monitoring.has(record.id)).toBe(true);
     expect(runInternals(fixture.manager).line.busySlots()).toBe(0);
@@ -1121,7 +1121,7 @@ describe('RunManager monitoring turns', () => {
     // what it waits on next: a new monitoring line or wait, else the no-wait nudge.
     expect(fixture.store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.running });
     expect(monitoringWakeOf(fixture.store.getRun(record.id))).toBeUndefined();
-    expect(monitoringTimerOf(fixture.manager, record.id)).toBeUndefined();
+    expect(monitoringTimerWait(fixture.store.getRun(record.id))).toBeUndefined();
     expect(fixture.store.getRun(record.id)?.lastWaits?.filter(wait => wait.kind === WAIT_KIND.timer).map(wait => wait.phase)).toEqual([WAIT_PHASE.cancelled]);
     expect(runInternals(fixture.manager).line.waiting.has(record.id)).toBe(false);
     expect(runInternals(fixture.manager).line.monitoring.has(record.id)).toBe(true);
@@ -1137,7 +1137,7 @@ describe('RunManager monitoring turns', () => {
       active: Map<string, { idleTimer?: NodeJS.Timeout }>;
     }).active.get(record.id);
     expect(state?.idleTimer).toBeDefined(); // genuine user waits still expire after IDLE_TIMEOUT_MS
-    expect(monitoringTimerOf(fixture.manager, record.id)).toBeUndefined();
+    expect(monitoringTimerWait(fixture.store.getRun(record.id))).toBeUndefined();
   }, 30_000);
 });
 

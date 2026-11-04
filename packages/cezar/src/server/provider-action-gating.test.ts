@@ -1,5 +1,4 @@
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -431,6 +430,7 @@ describe('provider availability preserves existing execution', () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
+  let semaphore: WorkspaceSemaphore;
   let runId: string | undefined;
   const savedDryRun = process.env.CEZ_DRY_RUN;
   const savedCodexBin = process.env.CEZ_CODEX_BIN;
@@ -445,7 +445,8 @@ describe('provider availability preserves existing execution', () => {
     );
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-provider-continuity-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot);
+    semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 1, memoryLimitMb: 0 }) });
+    manager = createFixtureManager(store, repoRoot, { semaphore });
   });
 
   afterEach(async () => {
@@ -487,8 +488,7 @@ describe('provider availability preserves existing execution', () => {
       ],
     };
 
-    const engine = runInternals(manager).line;
-    const pausedPump = vi.spyOn(engine, 'pump').mockResolvedValue();
+    const admissionReads = vi.spyOn(semaphore, 'maxParallel');
     const run = manager.startRun(workflow, {
       task: 'mock:native-codex-ask choose a library',
       runner: 'claude',
@@ -503,8 +503,11 @@ describe('provider availability preserves existing execution', () => {
       body: JSON.stringify({ enabled: false }),
     });
     expect(disabled.status).toBe(200);
-    expect(pausedPump).toHaveBeenCalled(); pausedPump.mockRestore();
-    void engine.pump();
+    // bound: admission awaits repository discovery before reading capacity.
+    await vi.waitFor(() => expect(admissionReads).toHaveBeenCalled(), { timeout: 10_000 });
+    expect(semaphore.busy()).toBe(0);
+    await semaphore.refresh();
+    await semaphore.release();
 
     await waitFor(() => {
       const current = store.getRun(run.id);

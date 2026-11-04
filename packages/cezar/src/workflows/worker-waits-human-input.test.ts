@@ -1,4 +1,4 @@
-import { runInternals } from './run-internals.testkit.ts';
+import { fireCapturedTimer } from './waits.testkit.ts';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -32,7 +32,7 @@ describe('human messages beside an owed timer wait', { timeout: 45_000 }, () => 
     await until(() => {
       return (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(blocker.id)?.sessionEverOpened === true;
     });
-    runInternals(manager).waitWatches.waitTimers.get(timer.id)!.timer._onTimeout();
+    fireCapturedTimer(timer.id);
     await until(() => store.getRun(p.id)?.status === 'queued');
     expect(entryOf(p.id, timer.id)?.phase).toBe('resolved');
     return { p, blocker, timer };

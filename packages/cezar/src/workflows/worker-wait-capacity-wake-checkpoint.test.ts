@@ -63,7 +63,8 @@ it('an actual session close during a nonfinal wait cannot advance a check or ret
     const engine = manager as unknown as { active: Map<string, { sessionEverOpened?: boolean; session?: { end(): void } }> };
     await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
     const w = await worker(run.id, 'mock:slow'); register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
-    await until(() => parkedOnWorkers(run.id));
+    // A stored park precedes slot release; worker startup proves admission completed.
+    await until(() => parkedOnWorkers(run.id) && !!store.getRun(w.id)?.steps.some(step => !!step.sessionId));
     engine.active.get(run.id)!.session!.end();
     // hearsay-tools/cezarion#1235: a clean close with a worker wait open parks, recoverably (spec
     // "Session failure and close"); it used to fail the run.

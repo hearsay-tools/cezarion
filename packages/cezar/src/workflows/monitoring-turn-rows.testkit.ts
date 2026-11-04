@@ -1,3 +1,4 @@
+import { fireCapturedTimer } from './waits.testkit.ts';
 import { MONITORING_PARTITIONS, type MonitoringPartitionName } from './monitoring-turn-partitions.testkit.ts';
 import { RUN_STATUS, WAIT_KIND, WAIT_VIA, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
@@ -58,10 +59,8 @@ async function monitoringSurvivesAck({ runId, send, attention, run }: RowContext
   await send(script(WAIT, thenSay(ACK_TEXT)));
   attention('monitoring', false);
   const wait = expectAgentTimer(run());
-  const timer = runInternals(manager).waitWatches.waitTimers.get(wait.id)!.timer as NodeJS.Timeout & { _onTimeout(): void };
-  expect(timer).toBeDefined();
   const boundaries = store.readEvents(runId).filter(event => event.type === 'turn-end').length;
-  const expire = timer._onTimeout; clearTimeout(timer); expire();
+  fireCapturedTimer(wait.id);
   await until(() => store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('automatic timer wake-up (1/')));
   // The fired timer reads `waiting` until its wake is admitted; the wake's own turn ends it.
   // Its mock response names no wait or done.

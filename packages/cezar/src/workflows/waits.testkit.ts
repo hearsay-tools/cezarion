@@ -1,5 +1,8 @@
 import type { RunManager } from './run.ts';
-import { runInternals } from './run-internals.testkit.ts';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { afterEach, expect, vi } from 'vitest';
+import type { RunStore } from '../runs/store.ts';
+import { observationClock } from '../core/observation-clock.testkit.ts';
 import type { TimerWaitEntry, Wait } from '@open-mercato/cezar-contract';
 import { isMonitoringTimer } from './waits.ts';
 
@@ -23,8 +26,68 @@ export function monitoringWakeOf(run?: { waits?: Wait[] | undefined }): string |
   return monitoringTimerWait(run)?.deadline;
 }
 
-/** The timer RunManager armed for the run's open monitoring timer wait. */
-export function monitoringTimerOf(manager: RunManager, runId: string): NodeJS.Timeout & { _onTimeout(): void } | undefined {
-  const id = monitoringTimerWait(runInternals(manager).context.store.getRun(runId))?.id;
-  return id ? runInternals(manager).waitWatches.waitTimers.get(id)?.timer as NodeJS.Timeout & { _onTimeout(): void } | undefined : undefined;
+type TimerCapture = { id?: string; active: boolean; now: number; delay: number; indices: number[] };
+const registering = new AsyncLocalStorage<TimerCapture[]>();
+let clock: ReturnType<typeof observationClock> | undefined;
+let restoreDateNow: (() => void) | undefined;
+const capturedTimers = new Map<string, number>();
+
+function registrationClock() {
+  if (!clock) {
+    clock = observationClock(delay => {
+      const pending = registering.getStore()?.find(entry => entry.active && delay === entry.delay);
+      if (!pending) return false;
+      pending.indices.push(clock!.captured);
+      return true;
+    });
+    const now = Date.now.bind(Date);
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => registering.getStore()?.find(capture => capture.active)?.now ?? now());
+    restoreDateNow = () => spy.mockRestore();
+  }
+  return clock;
+}
+
+afterEach(() => { clock?.restore(); clock = undefined; restoreDateNow?.(); restoreDateNow = undefined; capturedTimers.clear(); });
+
+/** Own timers at the public registration boundary, including a restart's restored waits. */
+export function observeWaitTimers(manager: RunManager, store: RunStore): void {
+  const register = manager.registerWait.bind(manager);
+  vi.spyOn(manager, 'registerWait').mockImplementation(async (...args) => {
+    if (args[1].kind !== 'timer') return register(...args);
+    registrationClock();
+    const capture: TimerCapture = { active: true, now: Date.now(), delay: args[1].seconds * 1000, indices: [] };
+    const wait = await registering.run([capture], () => register(...args)).finally(() => { capture.active = false; });
+    if (capture.indices.length > 1) throw new Error('ambiguous wait timer');
+    if (!capturedTimers.has(wait.id)) {
+      expect(capture.indices).toHaveLength(1);
+      capturedTimers.set(wait.id, capture.indices[0]!);
+    }
+    return wait;
+  });
+  const recover = manager.recover.bind(manager);
+  vi.spyOn(manager, 'recover').mockImplementation(async (...args) => {
+    const now = Date.now();
+    const captures = store.listRunIds().flatMap(id => { const run = store.getRun(id); return run && ['running', 'waiting', 'queued'].includes(run.status) ? run.waits ?? [] : []; })
+      .filter((wait): wait is TimerWaitEntry => wait.kind === 'timer' && wait.phase === 'open' && Date.parse(wait.deadline) > Date.now())
+      .map(wait => ({ id: wait.id, active: true, now, delay: Date.parse(wait.deadline) - now, indices: [] as number[] }));
+    if (!captures.length) return recover(...args);
+    const deadlines = captures.map(capture => capture.delay);
+    if (new Set(deadlines).size !== deadlines.length) throw new Error('ambiguous recovered timer: give recovered waits distinct deadlines');
+    registrationClock();
+    await registering.run(captures, () => recover(...args)).finally(() => { for (const capture of captures) capture.active = false; });
+    for (const capture of captures) {
+      // Recovery may keep a blocked run's wait open without arming it.
+      if (capture.indices.length) {
+        expect(capture.indices).toHaveLength(1);
+        capturedTimers.set(capture.id, capture.indices[0]!);
+      }
+    }
+  });
+}
+
+/** Fire one timer captured during this test's own registration, then assert its durable result. */
+export function fireCapturedTimer(waitId: string): void {
+  const index = capturedTimers.get(waitId);
+  if (!clock || index === undefined) throw new Error(`No timer registration captured for ${waitId}`);
+  clock.fire(index);
 }

@@ -1,5 +1,4 @@
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { registerPreviewServer } from '../preview/run-tools.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -9,10 +8,34 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutomationStore } from '../automations/store.ts';
 import { emitUsageForTest } from '../core/process-usage.ts';
+import type { RunManager } from '../workflows/run.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContextSource } from './project-context.ts';
 import { seedRuns, readPersistedRuns } from '../runs/run-store.testkit.ts';
+
+const observed = vi.hoisted(() => ({
+  options: new WeakMap<object, ConstructorParameters<typeof RunManager>[2]>(),
+  subscriptions: [] as Array<{ listener: ReturnType<typeof vi.fn>; unsubscribe: ReturnType<typeof vi.fn> }>,
+}));
+vi.mock('../workflows/run.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('../workflows/run.ts')>();
+  return { ...actual, RunManager: class extends actual.RunManager {
+    constructor(...args: ConstructorParameters<typeof RunManager>) {
+      super(...args);
+      observed.options.set(this, args[2]);
+    }
+  } };
+});
+vi.mock('../core/process-usage.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('../core/process-usage.ts')>();
+  return { ...actual, onUsage: (listener: Parameters<typeof actual.onUsage>[0]) => {
+    const observedListener = vi.fn(listener);
+    const unsubscribe = vi.fn(actual.onUsage(observedListener));
+    observed.subscriptions.push({ listener: observedListener, unsubscribe });
+    return unsubscribe;
+  } };
+});
 
 /**
  * Lazy per-project context map (spec 2026-07-20-multi-project-workspace,
@@ -26,6 +49,7 @@ describe('ProjectContexts', () => {
   let rootB: string;
 
   beforeEach(() => {
+    observed.subscriptions.length = 0;
     rootA = mkdtempSync(join(tmpdir(), 'cez-ctx-a-'));
     rootB = mkdtempSync(join(tmpdir(), 'cez-ctx-b-'));
   });
@@ -127,8 +151,8 @@ describe('ProjectContexts', () => {
       ctx.store.updateRun(run.id, { worktreePath: rootA });
       // Without the host every registration answers `headless`, and without the port getter the
       // cockpit's own port registers.
-      expect((await registerPreviewServer(ctx.store, ctx.manager.previewHost, runInternals(ctx.manager).cezarPort, () => runInternals(ctx.manager).disposed, run.id, { command: 'npm run dev', port: 4321 })).code).toBe('cezar_port');
-      expect((await registerPreviewServer(ctx.store, ctx.manager.previewHost, runInternals(ctx.manager).cezarPort, () => runInternals(ctx.manager).disposed, run.id, { command: 'npm run dev', port: 5173 })).code).toBe('registered');
+      expect((await registerPreviewServer(ctx.store, ctx.manager.previewHost, observed.options.get(ctx.manager)?.cezarPort, () => false, run.id, { command: 'npm run dev', port: 4321 })).code).toBe('cezar_port');
+      expect((await registerPreviewServer(ctx.store, ctx.manager.previewHost, observed.options.get(ctx.manager)?.cezarPort, () => false, run.id, { command: 'npm run dev', port: 5173 })).code).toBe('registered');
       ctx.store.deleteRun(run.id);
       expect(release).toHaveBeenCalledWith(run.id, { deleteProfile: true, dataDir: ctx.dataDir });
     } finally {
@@ -230,19 +254,14 @@ describe('ProjectContexts', () => {
     const contexts = makeContexts([{ id: 'a', root: rootA, status: 'not-git' }]);
     const ctx = await contexts.context('a');
     const run = ctx.store.createRun({ title: 'pending', workflow: 'w', task: 't', steps: [] });
-    // The constructor's onUsage listener calls `this.enforceMemoryLimit` —
-    // spy on the instance and drive the fan-out directly, the way the shared
-    // `ps` sampler would. An empty snapshot keeps the real method a sync no-op.
-    const spy = vi.spyOn(
-      ctx.manager as unknown as { enforceMemoryLimit: (s: Record<string, never>) => Promise<void> },
-      'enforceMemoryLimit',
-    );
+    const { listener: spy, unsubscribe } = observed.subscriptions.at(-1)!;
 
     emitUsageForTest({});
     expect(spy).toHaveBeenCalledTimes(1);
 
     expect(contexts.dispose('a')).toBe(true);
     emitUsageForTest({});
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalledTimes(1); // unsubscribed — no further ticks
     // Store closed: the pending row landed on disk despite the debounced save, and a late write
     // to the disposed store saves nothing.
@@ -292,21 +311,16 @@ describe('ProjectContexts', () => {
       { id: 'a', root: rootA, status: 'not-git' },
       { id: 'b', root: rootB, status: 'not-git' },
     ]);
-    const a = await contexts.context('a');
-    const b = await contexts.context('b');
-    const spyA = vi.spyOn(
-      a.manager as unknown as { enforceMemoryLimit: (s: Record<string, never>) => Promise<void> },
-      'enforceMemoryLimit',
-    );
-    const spyB = vi.spyOn(
-      b.manager as unknown as { enforceMemoryLimit: (s: Record<string, never>) => Promise<void> },
-      'enforceMemoryLimit',
-    );
+    await contexts.context('a');
+    await contexts.context('b');
+    const [subscriptionA, subscriptionB] = observed.subscriptions.slice(-2);
 
     contexts.disposeAll();
     expect(contexts.ids()).toEqual([]);
     emitUsageForTest({});
-    expect(spyA).not.toHaveBeenCalled();
-    expect(spyB).not.toHaveBeenCalled();
+    expect(subscriptionA!.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(subscriptionB!.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(subscriptionA!.listener).not.toHaveBeenCalled();
+    expect(subscriptionB!.listener).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { runInternals } from './run-internals.testkit.ts';
+import { fireCapturedTimer } from './waits.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerCancelWaitResultSchema, workerWaitResultSchema } from '@open-mercato/cezar-contract/delegation';
@@ -214,7 +214,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     if (!workers.ok || !timer.ok) throw Error('refused');
     release();
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    runInternals(manager).waitWatches.waitTimers.get(timer.wait_id)!.timer._onTimeout();
+    fireCapturedTimer(timer.wait_id);
     await until(() => settledOf(p.id, timer.wait_id)?.phase === 'delivered' && store.getRun(p.id)?.status === 'waiting');
     expect(inputOf(p.id, timer.wait_id)?.deliveredAt).toBeDefined();
     expect(entryOf(p.id, workers.wait_id)).toMatchObject({ kind: WAIT_KIND.worker, phase: WAIT_PHASE.open, workerIds: [w.id] });

@@ -6,7 +6,8 @@ import {
   WAIT_VIA,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { openTestRunStore } from '../runs/run-store.testkit.ts';
-import { runInternals } from '../workflows/run-internals.testkit.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
+import { defaultWorkspaceConfig } from '../workspace/config.ts';
 import { createFixtureManager, drainFixtureManagers, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -104,13 +105,14 @@ afterAll(() => {
   if (repositoryTemplate) rmSync(repositoryTemplate.root, { recursive: true, force: true });
 });
 
-export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha: string; store: RunStore; manager: RunManager; parent: RunRecord; credentials: CredentialRegistry; caller: Caller; token: string; service: DelegationService; close(): Promise<void> } {
+export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha: string; store: RunStore; manager: RunManager; parent: RunRecord; credentials: CredentialRegistry; caller: Caller; token: string; service: DelegationService; releaseAdmission(): Promise<void>; close(): Promise<void> } {
   const root = mkdtempSync(join(tmpdir(), 'cez-delegation-service-'));
   const sha = copyServiceRepository(root);
   const store = openTestRunStore(join(root, '.ai/cezar'), { keepLive: true });
-  const manager = createFixtureManager(store, root);
-  // Scheduler admission is deliberately held: service acceptance must be durable before it.
-  const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();
+  // Scheduler admission is held so acceptance is durable before execution starts.
+  const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => defaultWorkspaceConfig().resources });
+  const manager = createFixtureManager(store, root, { semaphore });
+  const admissionReads = vi.spyOn(semaphore, 'maxParallel');
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', runner: 'claude', model: 'opus', effort: 'high', steps: [] });
   store.updateRun(parent.id, { status: RUN_STATUS.running, worktreePath: root, delegation: { role: 'root', permissions: ['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'wait'], receipts: [] } });
   const credentials = new CredentialRegistry();
@@ -118,14 +120,22 @@ export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha
   const caller = credentials.authenticate(token)!;
   vi.spyOn(manager, 'delegationExecutionSettings').mockReturnValue({ cwd: root, runner: 'claude', model: 'opus', effort: 'high', agentProfile: 'default', accountBinding: { provider: 'claude', profileId: 'default', homePath: root, claudeLayout: { kind: 'relocated' } } });
   const service = new DelegationService(options);
+  let admissionHeld = true;
   const spawn = service.spawn.bind(service);
   vi.spyOn(service, 'spawn').mockImplementation(async (...args) => {
+    const existingWorkers = new Set(store.listWorkerIds());
+    const readsBefore = admissionReads.mock.calls.length;
     const result = await spawn(...args);
-    if (store.getRun(result.workerId)?.status === 'queued') expect(pump).toHaveBeenCalled();
+    if (admissionHeld && store.getRun(result.workerId)?.status === 'queued') {
+      // bound: the requested pump awaits repository discovery before reading capacity.
+      await vi.waitFor(() => expect(admissionReads.mock.calls.length).toBeGreaterThan(existingWorkers.has(result.workerId) ? 0 : readsBefore), { timeout: 10_000 });
+      expect(semaphore.busy()).toBe(0);
+    }
     return result;
   });
   const unregister = service.registerProject({ id: 'project', root, store, manager });
   return { root, sha, store, manager, parent, credentials, caller, token, service,
+    async releaseAdmission() { admissionHeld = false; await semaphore.refresh(); await semaphore.release(); },
     async close() {
       unregister();
       credentials.close();

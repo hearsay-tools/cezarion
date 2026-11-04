@@ -1,3 +1,4 @@
+import { fireCapturedTimer } from './waits.testkit.ts';
 import {
   WAIT_KIND,
   RUN_STATUS,
@@ -65,7 +66,7 @@ async function parkedOnTimers<const T extends readonly { seconds: number; note: 
   const waits = timers.map(timer => store.getRun(run.id)!.waits!.find(wait => wait.kind === 'timer' && wait.note === timer.note)!) as { [K in keyof T]: Wait };
   return { run, waits };
 }
-const fireTimer = (waitId: string) => runInternals(manager).waitWatches.waitTimers.get(waitId)!.timer._onTimeout();
+const fireTimer = (waitId: string) => fireCapturedTimer(waitId);
 const turnStarted = (id: string) => store.readEvents(id).some(event => event.type === 'turn.started');
 const turnEnds = (id: string) => store.readEvents(id).filter(event => event.type === 'turn-end').length;
 const asks = (id: string) => store.readEvents(id).filter(event => event.type === 'ask.requested');

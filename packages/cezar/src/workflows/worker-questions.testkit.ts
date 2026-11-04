@@ -1,4 +1,3 @@
-import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -6,7 +5,6 @@ import { readFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { afterEach, expect, vi } from 'vitest';
-import { inspectGeneration } from '../delegation/process-liveness.ts';
 import { CredentialRegistry, type Caller } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { bookkeeping, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
@@ -25,7 +23,10 @@ export const closedAs = (runId: string) => eventsOf(runId, 'human-ask-closed').m
 
 export const noHumanCard = (runId: string) => {
     expect(eventsOf(runId, 'worker-question-fallback')).toEqual([]);
-    if (hasPendingAsk(store, runId)) expect(runInternals(manager).workerQuestions.answeredElsewhere(runId)).toBe(true);
+    if (hasPendingAsk(store, runId)) {
+      const ask = store.transcriptFacts(runId).pendingAsk!;
+      expect(!ask.fallback && !!ask.routedMessageId || store.getRun(runId)?.agentInputs?.some(input => !input.deliveredAt && input.purpose === 'undelivered-question')).toBe(true);
+    }
   };
 
 export async function steeringParent(task = 'mock:hold') {
@@ -101,7 +102,7 @@ export async function replyAfterRestart(crashed: boolean, holdResources = false)
       // Routing and recovery can wake the parent. Finish that turn's real Git
       // bookkeeping before testing a one-shot reply into a quiescent worktree.
       // Recovery leaves a monitoring park inactive on its persisted timer (hearsay-tools/cezarion#1233).
-      await until(() => runInternals(manager).line.waiting.has(f.p.id) || (!manager.isActive(f.p.id) && !!monitoringWakeOf(store.getRun(f.p.id))));
+      await until(() => store.getRun(f.p.id)?.status === 'waiting' || (!manager.isActive(f.p.id) && !!monitoringWakeOf(store.getRun(f.p.id))));
       await Promise.all(bookkeeping);
     };
     await parentIdle();
@@ -154,11 +155,9 @@ export async function replyAfterRestart(crashed: boolean, holdResources = false)
         // Wait for that physical precondition without finalizing the proof,
         // suppressing any PIDs, or retrying the answer under test.
         await until(() => {
-          const orphan = runInternals(manager).orphans.orphanedWorkerGeneration(f.w.id);
-          if (orphan) return inspectGeneration(orphan).liveness === 'gone';
           const proof = store.readWorkerExecution(f.w.id);
           const delegation = store.getRun(f.w.id)?.delegation;
-          return proof?.phase === 'complete' && delegation?.role === 'worker' &&
+          return !!proof && delegation?.role === 'worker' &&
             store.workerResourcesSafe(f.w.id, proof.generation, delegation.workspace.resourceId);
         });
       }

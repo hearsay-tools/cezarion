@@ -1,4 +1,4 @@
-import { runInternals } from './run-internals.testkit.ts';
+import { fireCapturedTimer } from './waits.testkit.ts';
 import { spawn } from 'node:child_process';
 import * as fc from 'fast-check';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -170,9 +170,7 @@ class ResolveWait implements Command {
     const turns = endTurn(m, 'nothing');
     const wait = store.getRun(r.id)!.waits!.find((entry) => entry.kind === this.kind && entry.phase === 'open')!;
     if (this.kind === 'timer') {
-      const armed = runInternals(manager).waitWatches.waitTimers.get(wait.id);
-      expect(armed, 'the table promises the timer the engine arms').toBeDefined();
-      armed!.timer._onTimeout();
+      fireCapturedTimer(wait.id);
     } else if (this.kind === 'pr') {
       ciWatches.at(-1)!({ outcome: 'passed', headSha: identity.headSha, observedAt: new Date().toISOString(), checks: [], totalChecks: 1, truncated: false });
     } else {
