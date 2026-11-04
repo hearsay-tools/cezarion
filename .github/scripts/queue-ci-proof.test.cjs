@@ -125,6 +125,9 @@ const BASE = 'b'.repeat(40);
 // The queue run as GitHub lists it when its `if` skipped both suites.
 function skippedSuites(state) {
   state.run.head_branch = `gh-readonly-queue/main/pr-7-${BASE}`;
+  skipSuiteJobs(state);
+}
+function skipSuiteJobs(state) {
   state.jobs = state.jobs.filter(job => !/shard \d\/4$/.test(job.name));
   state.jobs.push(...SKIPPED_SUITE_JOBS.map((name, i) => ({ id: 300 + i, name, status: 'completed', conclusion: 'skipped' })));
 }
@@ -227,4 +230,21 @@ test('a push of entry 1 ignores the newer queue run of entry 2', async () => {
   const { h, first } = speculative(); h.options.sha = first; h.state.runs[1].status = 'in_progress';
   const proof = await queueCiProof(h.options);
   assert.equal(proof.verified, true); assert.equal(proof.runId, 20);
+});
+test('a docs-only entry 2 reuses its skipped-suite run when its first parent is entry 1\'s group head', async () => {
+  const r = gitRepo(); const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'queue-proof-tmp-'));
+  try {
+    const first = r.commit({ 'src/app.ts': 'code\n' }), second = r.commit({ 'docs/a.md': 'x\n' });
+    const { h } = speculative(); skipSuiteJobs(h.state);
+    Object.assign(h.state.runs[0], { head_sha: first });
+    Object.assign(h.state.runs[1], { head_sha: second, head_branch: `gh-readonly-queue/main/pr-7-${first}` });
+    h.options.sha = second; const bases = [];
+    h.options.surfaceOf = base => { bases.push(base); return mainCommitSurface({ sha: second, base, cwd: r.dir, tmpDir }); };
+    const proof = await queueCiProof(h.options);
+    assert.equal(proof.verified, true); assert.equal(proof.runId, 21); assert.equal(proof.suites, 'skipped');
+    // The ref base is entry 1's group head, so entry 1's code change is not in entry 2's diff.
+    assert.deepEqual(bases, [first]);
+  } finally {
+    r.cleanup(); fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });

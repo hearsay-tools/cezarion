@@ -858,7 +858,7 @@ its head SHA and fails closed.
 | 16 | Ruleset set to 3 or more, or batching enabled, without a spec change | Owner edits ruleset | Owner | Admission rejects every entry. The queue fails every build until the owner reverts the setting or this spec and the allowlist change | Same |
 | 17 | `main` moves outside the queue | Push with bypass | Nobody: the ruleset has no bypass actors | Cannot happen. If it did, GitHub rebuilds every group on the new `main` | Same |
 | 18 | Admission API error, deadline or changing evidence | GitHub API | Actions | Entry fails closed and is removed, so it counts as a queue failure. The PR stays open | As today |
-| 19 | Docs-only entry at position 2 (once hearsay-tools/cezarion#2615 lands) | PR content | Classifier | The group diff `base..head` is that PR's own diff, so the skip is valid. Main proof: first parent = ref base | As today |
+| 19 | Docs-only entry at position 2 | PR content | Classifier | The group diff `base..head` is that PR's own diff, so the skip is valid. Main proof: first parent = ref base | As today |
 | 20 | Entry at position 2, native suites passed | — | `pr-test-proof` | Base is not `main`, so full suites run | Cannot happen |
 | 21 | Entry at position 1 on `main`, PR up to date, entries behind it | — | `pr-test-proof` | Reuse allowed (before hearsay-tools/cezarion#2624: blocked by the entries behind) | Reuse allowed |
 | 22 | An invalidated run finishes green later | Old run completes | Actions | Its group never merges, and its SHA never reaches `main`. It is counted as waste in the pilot metric | Cannot happen |
