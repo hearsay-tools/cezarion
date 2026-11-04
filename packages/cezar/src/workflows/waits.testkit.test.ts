@@ -1,5 +1,5 @@
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { makeRunRecord, makeTimerWait, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { makeRunRecord, makeTimerWait, RUN_STATUS, WAIT_KIND, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { RunStore } from '../runs/store.ts';
 import type { RunManager } from './run.ts';
 import { unused } from './fixture-cleanup.testkit.ts';
@@ -25,7 +25,7 @@ describe('owned wait timer identity', () => {
     });
     const store = unused<RunStore>('store', { getRun: () => run });
     observeWaitTimers(manager, store);
-    const registered = await manager.registerWait(run.id, { kind: 'timer', seconds: 120, note: 'check' }, WAIT_VIA.cezar_wait, 'generation');
+    const registered = await manager.registerWait(run.id, { kind: WAIT_KIND.timer, seconds: 120, note: 'check' }, WAIT_VIA.cezar_wait, 'generation');
     expect(registered.id).toBe(later.id);
     fireCapturedTimer(registered.id);
     expect(fired).toEqual([later.id]);
@@ -42,7 +42,7 @@ describe('owned wait timer identity', () => {
       recover: async () => {},
     });
     observeWaitTimers(manager, unused<RunStore>('store'));
-    await expect(manager.registerWait('run', { kind: 'timer', seconds: 120 }, WAIT_VIA.cezar_wait, 'generation'))
+    await expect(manager.registerWait('run', { kind: WAIT_KIND.timer, seconds: 120 }, WAIT_VIA.cezar_wait, 'generation'))
       .rejects.toThrow('ambiguous wait timer');
   });
 
@@ -50,7 +50,7 @@ describe('owned wait timer identity', () => {
     const deadline = new Date(Date.now() + 120_000).toISOString();
     const a = makeTimerWait({ id: 'wait-A', deadline });
     const b = makeTimerWait({ id: 'wait-B', deadline });
-    const runs = [makeRunRecord({ id: 'A', status: 'waiting', waits: [a] }), makeRunRecord({ id: 'B', status: 'waiting', waits: [b] })];
+    const runs = [makeRunRecord({ id: 'A', status: RUN_STATUS.waiting, waits: [a] }), makeRunRecord({ id: 'B', status: RUN_STATUS.waiting, waits: [b] })];
     let recoveries = 0;
     const manager = unused<RunManager>('manager', {
       registerWait: async () => a,
@@ -69,7 +69,7 @@ describe('owned wait timer identity', () => {
     const now = Date.now();
     const a = makeTimerWait({ id: 'wait-A', deadline: new Date(now + 120_000).toISOString() });
     const b = makeTimerWait({ id: 'wait-B', deadline: new Date(now + 180_000).toISOString() });
-    const runs = [makeRunRecord({ id: 'A', status: 'waiting', waits: [a] }), makeRunRecord({ id: 'B', status: 'waiting', waits: [b] })];
+    const runs = [makeRunRecord({ id: 'A', status: RUN_STATUS.waiting, waits: [a] }), makeRunRecord({ id: 'B', status: RUN_STATUS.waiting, waits: [b] })];
     const fired: string[] = [];
     const manager = unused<RunManager>('manager', {
       registerWait: async () => a,
