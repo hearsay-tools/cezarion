@@ -10,8 +10,8 @@ const PROOF_JOB = 'Verify exact queue CI evidence';
 // On a main push, Typecheck runs only when the queue proof did not verify.
 const FALLBACK_JOB = 'Typecheck';
 const REUSE_STEP = 'Reuse verified native PR suite';
-// Q3: failure rate above 30%, or runner-minutes per merge above 128 × 1.4.
-const LIMITS = { failureRate: 0.3, runnerMinutesPerMerge: 179 };
+// Q3: failure rate above 30%, or runner-minutes per merge more than 40% above the serial baseline of 128.
+const LIMITS = { failureRate: 0.3, runnerMinutesPerMerge: 128 * 1.4 };
 // Spec § Rollout, "How the failure rate is counted".
 const FAILED = new Set(['failure', 'cancelled', 'timed_out']);
 const REMOVAL_BATCH = 25;
@@ -184,10 +184,12 @@ async function readRemovals(api, repo, window, numbers) {
   return removals;
 }
 
-const proofJob = jobs => jobs.find(job => job.name === PROOF_JOB);
+// filter=all lists the jobs of every attempt; the run's latest attempt produced its outcome.
+const attemptJobs = push => push.jobs.filter(job => job.run_attempt === push.run.run_attempt);
+const proofJob = push => attemptJobs(push).find(job => job.name === PROOF_JOB);
 // A cancelled run skips Typecheck even when the proof did not verify, and then no fallback ran.
-function isFallback(jobs) {
-  const fallbackJob = jobs.find(job => job.name === FALLBACK_JOB);
+function isFallback(push) {
+  const fallbackJob = attemptJobs(push).find(job => job.name === FALLBACK_JOB);
   return fallbackJob !== undefined && fallbackJob.conclusion !== 'skipped';
 }
 
@@ -222,7 +224,7 @@ async function readEvidence(api, repo, window, lookahead) {
   const queueJobs = {};
   await mapLimit(completedQueue, async run => { queueJobs[run.id] = await readJobs(api, repo, run.id); });
   const pushes = await mapLimit(completedPush, async run => ({ run, jobs: await readJobs(api, repo, run.id) }));
-  await mapLimit(pushes.filter(push => isFallback(push.jobs)), async push => {
+  await mapLimit(pushes.filter(isFallback), async push => {
     push.evidence = await readProofEvidence(api, repo, push, queueJobs);
   });
   const queuePrs = [...new Set(queueRuns.map(run => groupRef(run.head_branch)?.pr).filter(Boolean))].sort((a, b) => a - b);
@@ -324,7 +326,7 @@ function mergeMetrics(raw) {
 // The proof's own reason is in its job summary, which the API does not return.
 // This rebuilds it from the evidence queue-ci-proof.cjs reads.
 function proofReason(push) {
-  const proof = proofJob(push.jobs);
+  const proof = proofJob(push);
   if (!proof) return 'proof-job-missing';
   if (proof.conclusion !== 'success') return `proof-job-${proof.conclusion}`;
   const { queueRun, queueJobs } = push.evidence ?? {};
@@ -338,7 +340,7 @@ function proofReason(push) {
 function pushMetrics(raw) {
   const reasons = {};
   const unexplained = [];
-  const fallbacks = raw.pushes.filter(push => isFallback(push.jobs));
+  const fallbacks = raw.pushes.filter(isFallback);
   for (const push of fallbacks) {
     const reason = proofReason(push);
     reasons[reason] = (reasons[reason] ?? 0) + 1;

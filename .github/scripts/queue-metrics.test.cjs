@@ -52,7 +52,7 @@ test('recorded window prints every pilot metric and both rollback verdicts', asy
     'Main-push proof fallbacks: 2 of 4 pushes; reasons: source-not-successful 1, unexplained 1',
     `  unexplained: read the "${PROOF_JOB}" job summary at https://github.com/hearsay-tools/cezarion/actions/runs/41326268652`,
     'Verdict, queue failure rate: 40.0% against 30.0%: above limit: roll back',
-    'Verdict, runner-minutes per merge: 102.5 against 179: within limit',
+    'Verdict, runner-minutes per merge: 102.5 against 179.2: within limit',
     'Note: the rollback limits apply to a rolling 7 days; this window is 0.21 days.',
     '',
   ].join('\n'));
@@ -246,7 +246,7 @@ test('a run rebuilt on another base counts as invalidated waste', () => {
   assert.equal(metrics.merges.enqueueP50, 30);
   assert.equal(metrics.merges.perDay['2026-11-08'], 0);
   assert.deepEqual(metrics.verdicts.failureRate, { value: 1 / 2, limit: 0.3, verdict: 'above limit: roll back' });
-  assert.deepEqual(metrics.verdicts.runnerMinutesPerMerge, { value: 270, limit: 179, verdict: 'above limit: roll back' });
+  assert.deepEqual(metrics.verdicts.runnerMinutesPerMerge, { value: 270, limit: 179.2, verdict: 'above limit: roll back' });
 });
 
 test('no merges and no runs print n/a and no verdict', () => {
@@ -278,6 +278,25 @@ test('a main push counts as a fallback only when Typecheck ran', () => {
     removals: {}, merges: [], pushes: [push(1, 'cancelled', 'skipped'), push(2, 'success', 'skipped'), push(3, 'failure', 'success'),
       push(4, 'success', 'failure')] });
   assert.deepEqual(metrics.mainPush, { pushes: 4, fallbacks: 2, reasons: { 'proof-job-failure': 1, 'no-exact-queue-run': 1 }, unexplained: [] });
+});
+
+test('the runner-minute limit is 128 x 1.4 = 179.2', () => {
+  const merge = number => ({ number, mergedAt: '2026-11-02T12:00:00Z', enqueuedAt: ['2026-11-02T11:00:00Z'] });
+  const metrics = computeMetrics({ repo: 'o/r', from: '2026-11-02T00:00:00Z', to: '2026-11-03T00:00:00Z', pushes: [], removals: {},
+    queueRuns: [queueRun(1, 'success', SHA('c1'))], queueJobs: { 1: [jobFor(1791)] },
+    merges: Array.from({ length: 10 }, (_, i) => merge(i + 1)) });
+  assert.deepEqual(metrics.verdicts.runnerMinutesPerMerge, { value: 179.1, limit: 179.2, verdict: 'within limit' });
+});
+
+test('a re-run main push is classified by its latest attempt', () => {
+  const job = (name, attempt, conclusion) => ({ name, run_attempt: attempt, conclusion, completed_at: '2026-11-02T01:00:00Z' });
+  const push = (id, jobs) => ({ run: { id, run_attempt: 2, html_url: `u${id}` }, jobs, evidence: { queueRun: null, queueJobs: [] } });
+  const metrics = computeMetrics({ repo: 'o/r', from: '2026-11-02T00:00:00Z', to: '2026-11-03T00:00:00Z', queueRuns: [], queueJobs: {},
+    removals: {}, merges: [], pushes: [
+      push(1, [job(FALLBACK_JOB, 1, 'success'), job(PROOF_JOB, 1, 'failure'), job(PROOF_JOB, 2, 'success'), job(FALLBACK_JOB, 2, 'skipped')]),
+      push(2, [job(PROOF_JOB, 1, 'success'), job(FALLBACK_JOB, 1, 'skipped'), job(PROOF_JOB, 2, 'cancelled'), job(FALLBACK_JOB, 2, 'success')]),
+    ] });
+  assert.deepEqual(metrics.mainPush, { pushes: 2, fallbacks: 1, reasons: { 'proof-job-cancelled': 1 }, unexplained: [] });
 });
 
 test('group refs name their PR and base', () => {
