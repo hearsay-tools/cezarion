@@ -1,3 +1,4 @@
+import { voiceStatusSchema } from '@open-mercato/cezar-api-client/contract/voice'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import type { KeyboardEvent } from 'react'
@@ -179,7 +180,7 @@ describe('useVoiceCommand', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]?.input).toEqual({ text: 'open the next failed task', sidebarView: 'active', view: 'other' })
 
-    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: voiceStatusSchema.enum.failed, position: 'next', confidence: 0.9 })
 
     expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Open “Fix flaky shard” — next failed' })
     expect(harness.result.current.voice.mode).toBe('preview')
@@ -197,10 +198,10 @@ describe('useVoiceCommand', () => {
     expect(calls).toHaveLength(2)
 
     // The aborted request answers late anyway: it must not reach the row.
-    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: voiceStatusSchema.enum.failed, position: 'next', confidence: 0.9 })
     expect(harness.result.current.voice.row).toEqual(READING)
 
-    await answer(calls[1], { action: 'open', decisionId: DECISION_ID(2), status: 'done', position: 1, confidence: 0.9 })
+    await answer(calls[1], { action: 'open', decisionId: DECISION_ID(2), status: voiceStatusSchema.enum.done, position: 1, confidence: 0.9 })
     expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Open “Bravo” — first done' })
   })
 
@@ -216,7 +217,7 @@ describe('useVoiceCommand', () => {
     expect(calls).toHaveLength(1)
     expect(mocks.navigate).not.toHaveBeenCalled()
 
-    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: voiceStatusSchema.enum.failed, position: 'next', confidence: 0.9 })
 
     expect(mocks.navigate).toHaveBeenCalledTimes(1)
     expect(mocks.navigate).toHaveBeenCalledWith('/tasks/a')
@@ -245,7 +246,7 @@ describe('useVoiceCommand', () => {
     expect(event.preventDefault).not.toHaveBeenCalled()
     expect(calls).toHaveLength(0)
     await advance(300)
-    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: voiceStatusSchema.enum.failed, position: 'next', confidence: 0.9 })
     expect(mocks.navigate).not.toHaveBeenCalled()
   })
 
@@ -255,7 +256,7 @@ describe('useVoiceCommand', () => {
     type(harness, 'open the next failed task')
     await advance(300)
     select(harness, 'task Alpha a')
-    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: voiceStatusSchema.enum.failed, position: 'next', confidence: 0.9 })
 
     expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Open “Alpha” — next failed' })
     expect(enter(harness).handled).toBe(false)
@@ -271,7 +272,7 @@ describe('useVoiceCommand', () => {
 
     expect(enter(harness).handled).toBe(true)
     select(harness, 'view Skills')
-    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: voiceStatusSchema.enum.failed, position: 'next', confidence: 0.9 })
 
     expect(mocks.navigate).not.toHaveBeenCalled()
     expect(mocks.reportVoiceOutcome).not.toHaveBeenCalledWith(DECISION_ID(1), 'executed')
@@ -286,7 +287,7 @@ describe('useVoiceCommand', () => {
     expect(enter(harness).handled).toBe(true)
     select(harness, 'view Skills')
     select(harness, VOICE_ROW_VALUE)
-    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: voiceStatusSchema.enum.failed, position: 'next', confidence: 0.9 })
 
     expect(mocks.navigate).not.toHaveBeenCalled()
     // A fresh Return on the Will do row commits again, and acts on the decision it already has.
@@ -302,7 +303,7 @@ describe('useVoiceCommand', () => {
     ]
     const harness = setup({ text: 'open the first failed task' })
     enter(harness)
-    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 1, confidence: 0.9 })
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: voiceStatusSchema.enum.failed, position: 1, confidence: 0.9 })
     expect(mocks.navigate).toHaveBeenCalledWith('/tasks/g1')
   })
 
@@ -310,12 +311,12 @@ describe('useVoiceCommand', () => {
     mocks.runs = [failed({ id: 'a' })]
     const harness = setup({ text: 'open the next done task' })
     enter(harness)
-    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'done', position: 'next', confidence: 0.9 })
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: voiceStatusSchema.enum.done, position: 'next', confidence: 0.9 })
     expect(harness.result.current.voice.row).toEqual({ kind: 'notice', text: 'No done tasks.' })
 
     type(harness, 'open the third failed task')
     enter(harness)
-    await answer(calls[1], { action: 'open', decisionId: DECISION_ID(2), status: 'failed', position: 3, confidence: 0.9 })
+    await answer(calls[1], { action: 'open', decisionId: DECISION_ID(2), status: voiceStatusSchema.enum.failed, position: 3, confidence: 0.9 })
     expect(harness.result.current.voice.row).toEqual({ kind: 'notice', text: 'No third failed task.' })
 
     type(harness, 'open the next waiting for ci task')
@@ -519,11 +520,11 @@ describe('useVoiceCommand', () => {
     await answer(calls[0], {
       action: 'open',
       decisionId: DECISION_ID(1),
-      status: 'failed',
+      status: voiceStatusSchema.enum.failed,
       position: 'next',
       confidence: 0.4,
       // The second resolves to nothing and is left out.
-      alternatives: [{ status: 'done', position: 1 }, { status: 'queued', position: 1 }],
+      alternatives: [{ status: voiceStatusSchema.enum.done, position: 1 }, { status: voiceStatusSchema.enum.queued, position: 1 }],
     })
 
     expect(harness.result.current.voice.mode).toBe('choosing')
@@ -624,7 +625,7 @@ describe('useVoiceCommand', () => {
     mocks.runs = [failed({ id: 'a' })]
     const harness = setup({ text: 'open the next failed task' })
     await advance(300)
-    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: voiceStatusSchema.enum.failed, position: 'next', confidence: 0.9 })
 
     act(() => harness.result.current.voice.onClose())
     harness.unmount()
@@ -760,7 +761,7 @@ describe('useVoiceCommand', () => {
     expect(calls[0]?.signal?.aborted).toBe(true)
     expect(click).toHaveBeenCalledTimes(1)
     // The decision that arrives after the bound does nothing.
-    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: voiceStatusSchema.enum.failed, position: 'next', confidence: 0.9 })
     expect(mocks.navigate).not.toHaveBeenCalled()
     expect(mocks.reportVoiceOutcome).not.toHaveBeenCalled()
     expect(click).toHaveBeenCalledTimes(1)
@@ -803,10 +804,10 @@ describe('useVoiceCommand', () => {
     await answer(calls[0], {
       action: 'open',
       decisionId: DECISION_ID(1),
-      status: 'failed',
+      status: voiceStatusSchema.enum.failed,
       position: 'next',
       confidence: 0.4,
-      alternatives: [{ status: 'done', position: 1 }],
+      alternatives: [{ status: voiceStatusSchema.enum.done, position: 1 }],
     })
     expect(harness.result.current.voice.row?.choices).toHaveLength(2)
 
@@ -831,10 +832,10 @@ describe('useVoiceCommand', () => {
     await answer(calls[0], {
       action: 'open',
       decisionId: DECISION_ID(1),
-      status: 'failed',
+      status: voiceStatusSchema.enum.failed,
       position: 'next',
       confidence: 0.4,
-      alternatives: [{ status: 'done', position: 1 }],
+      alternatives: [{ status: voiceStatusSchema.enum.done, position: 1 }],
     })
     expect(harness.result.current.voice.mode).toBe('choosing')
 
@@ -902,10 +903,10 @@ describe('useVoiceCommand', () => {
     await answer(calls[0], {
       action: 'open',
       decisionId: DECISION_ID(1),
-      status: 'failed',
+      status: voiceStatusSchema.enum.failed,
       position: 'next',
       confidence: 0.4,
-      alternatives: [{ status: 'done', position: 1 }],
+      alternatives: [{ status: voiceStatusSchema.enum.done, position: 1 }],
     })
     expect(harness.result.current.voice.mode).toBe('choosing')
 
@@ -968,10 +969,10 @@ describe('useVoiceCommand', () => {
     await answer(calls[0], {
       action: 'open',
       decisionId: DECISION_ID(1),
-      status: 'failed',
+      status: voiceStatusSchema.enum.failed,
       position: 'next',
       confidence: 0.4,
-      alternatives: [{ status: 'done', position: 1 }],
+      alternatives: [{ status: voiceStatusSchema.enum.done, position: 1 }],
     })
     expect(harness.result.current.voice.row).toMatchObject({ text: 'Which one?' })
 
@@ -985,10 +986,10 @@ describe('useVoiceCommand', () => {
     await answer(calls[1], {
       action: 'open',
       decisionId: DECISION_ID(2),
-      status: 'failed',
+      status: voiceStatusSchema.enum.failed,
       position: 'next',
       confidence: 0.4,
-      alternatives: [{ status: 'done', position: 1 }],
+      alternatives: [{ status: voiceStatusSchema.enum.done, position: 1 }],
     })
     expect(harness.result.current.voice.mode).toBe('choosing')
     mocks.projectId = 'proj-a'
