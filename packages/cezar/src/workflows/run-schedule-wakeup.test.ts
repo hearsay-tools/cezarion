@@ -10,18 +10,24 @@ describe('RunManager schedule wakeup', () => {
   const { SINGLE_STEP, waitFor, openTimer } = fixture;
   it('a cezar_wait timer turn-end parks the run on an open timer', async () => {
     const idle = fixture.observeIdleTimers();
+    const wakes = fixture.observeWakeTimers();
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:cezar-wait keep going', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(openTimer(r)));
     const parked = fixture.store.getRun(record.id);
     expect(parked?.waits?.find(wait => wait.phase === 'open')).toMatchObject({ kind: WAIT_KIND.timer, via: WAIT_VIA.cezar_wait });
     expect(deriveAttention(parked!).label).toBe('monitoring');
-    expect(openTimer(fixture.store.getRun(record.id))).toBeDefined();
+    const timer = openTimer(fixture.store.getRun(record.id))!;
+    expect(wakes.captured).toBe(1);
+    wakes.fire(0);
+    await waitFor(record.id, run => run?.lastWaits?.some(wait => wait.id === timer.id && wait.phase === 'delivered') === true);
+    expect(fixture.store.getRun(record.id)?.agentInputs?.filter(input => input.id === timer.id)).toHaveLength(1);
     expect(idle.pending).toBe(0); // durable monitors do not inherit the 15-minute user-wait timer
   }, 30_000);
 
   it('a Claude ScheduleWakeup turn-end parks on a schedule-wakeup timer without a text marker', async () => {
     const idle = fixture.observeIdleTimers();
+    const wakes = fixture.observeWakeTimers();
     const record = fixture.manager.startRun(SINGLE_STEP, {
       task: 'mock:schedule-wakeup keep going',
       runner: 'claude',
@@ -47,10 +53,16 @@ describe('RunManager schedule wakeup', () => {
     expect(fixture.store.getRun(record.id)?.waits?.find(wait => wait.phase === 'open')?.id).toBe(timer!.id);
     expect(idle.pending).toBe(0);
     expect(monitoringTimerWait(fixture.store.getRun(record.id))).toBeDefined();
+    const wake = openTimer(fixture.store.getRun(record.id))!;
+    expect(wakes.captured).toBe(1);
+    wakes.fire(0);
+    await waitFor(record.id, run => run?.lastWaits?.some(wait => wait.id === wake.id && wait.phase === 'delivered') === true);
+    expect(fixture.store.getRun(record.id)?.agentInputs?.filter(input => input.id === wake.id)).toHaveLength(1);
   }, 30_000);
 
   it('recognizes Claude ScheduleWakeup on a reopened continuation too', async () => {
     const idle = fixture.observeIdleTimers();
+    const wakes = fixture.observeWakeTimers();
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'finish the first turn', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting');
@@ -62,6 +74,11 @@ describe('RunManager schedule wakeup', () => {
     expect(fixture.store.getRun(record.id)?.waits?.find(wait => wait.phase === 'open')).toMatchObject({ kind: WAIT_KIND.timer, via: WAIT_VIA['schedule-wakeup'] });
     expect(idle.pending).toBe(0);
     expect(monitoringTimerWait(fixture.store.getRun(record.id))).toBeDefined();
+    const wake = openTimer(fixture.store.getRun(record.id))!;
+    expect(wakes.captured).toBe(1);
+    wakes.fire(0);
+    await waitFor(record.id, run => run?.lastWaits?.some(wait => wait.id === wake.id && wait.phase === 'delivered') === true);
+    expect(fixture.store.getRun(record.id)?.agentInputs?.filter(input => input.id === wake.id)).toHaveLength(1);
   }, 40_000);
 
   it('keeps cezar_done ahead of Claude ScheduleWakeup', async () => {

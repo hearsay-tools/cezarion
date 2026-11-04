@@ -22,15 +22,17 @@ const hoistedRunnerHook = vi.hoisted(() => ({ runner: undefined as AgentRunner |
 
 vi.mock('../core/runner-factory.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../core/runner-factory.ts')>();
+  const originalStarts = new WeakMap<AgentRunner, AgentRunner['startSession']>();
   return {
     ...actual,
     createRunner: (...args: Parameters<typeof actual.createRunner>) => {
       const runner = hoistedRunnerHook.runner ?? actual.createRunner(...args);
-      const start = runner.startSession.bind(runner);
-      vi.spyOn(runner, 'startSession').mockImplementation((spec, ...rest) => {
+      const start = originalStarts.get(runner) ?? runner.startSession.bind(runner);
+      originalStarts.set(runner, start);
+      runner.startSession = (spec, ...rest) => {
         hoistedRunnerHook.ui = rest[1]?.onUiEvent;
         return start(spec, ...rest);
-      });
+      };
       return runner;
     },
   };
@@ -181,6 +183,27 @@ export function setupMonitoringFixture() {
     set manager(value: RunManager) { manager = value; },
     get currentId() { return currentId; },
     set currentId(value: string | undefined) { currentId = value; },
+    observeWakeTimers() {
+      let arming: TimerWaitEntry | undefined;
+      const clock = observationClock(delay => {
+        if (!arming || delay === undefined || delay <= 0 || delay > arming.seconds * 1000) return false;
+        arming = undefined;
+        return true;
+      });
+      clocks.push(clock);
+      const commit = store.commitWait.bind(store);
+      vi.spyOn(store, 'commitWait').mockImplementation((...args) => {
+        const result = commit(...args);
+        const wait = args[1];
+        if (wait.kind === 'timer') {
+          arming = wait;
+          // The armer follows the synchronous checkpoint; other turns cannot claim this timer.
+          queueMicrotask(() => { if (arming === wait) arming = undefined; });
+        }
+        return result;
+      });
+      return clock;
+    },
     observeIdleTimers() {
       const clock = observationClock(delay => delay === IDLE_TIMEOUT_MS);
       clocks.push(clock);
