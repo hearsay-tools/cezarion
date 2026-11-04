@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
-import { manager, store, root, parent, controlledWire, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, store, root, parent, controlledWire, until, useWorkerWaitFixture, toolGenerationOf } from './worker-wait.testkit.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import * as runners from '../core/runner-factory.ts';
 import { createActiveRun } from './active-run.ts';
@@ -23,15 +23,9 @@ type GuardCode = typeof codes[number];
 const moduleRow = (code: GuardCode, duringLookup: boolean) =>
   ['session_replaced', 'run_cancelled', 'finish_requested'].includes(code) || (code === 'generation_mismatch' && duringLookup);
 
-/** Public capability construction records the generation without reading manager state. */
+/** Capture the public runner session for session-close guard cases. */
 function observeSession() {
-  let generation = '';
   let session: AgentSession | undefined;
-  const tools = manager.cezarToolHandlers.bind(manager);
-  vi.spyOn(manager, 'cezarToolHandlers').mockImplementation((id, current) => {
-    generation = current;
-    return tools(id, current);
-  });
   const create = runners.createRunner;
   vi.spyOn(runners, 'createRunner').mockImplementation((...args) => {
     const runner = create(...args);
@@ -44,7 +38,7 @@ function observeSession() {
     }
     return runner;
   });
-  return { generation: () => generation, session: () => session! };
+  return { session: () => session! };
 }
 
 /** Any undeclared collaborator read fails the focused policy case. */
@@ -91,7 +85,7 @@ describe('CI registration guards before and after metadata lookup', { timeout: 3
       return identity;
     });
     vi.spyOn(CiWatcherSupervisor.prototype, 'watch').mockReturnValue(new Promise(() => {}));
-    const generation = code === 'generation_mismatch' ? 'different' : observed.generation();
+    const generation = code === 'generation_mismatch' ? 'different' : toolGenerationOf(run.id);
     const call = () => manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 30 }, 'cezar_wait', generation, capability.signal);
     const pending = duringLookup ? call() : undefined;
     const assertion = pending ? expect(pending).rejects.toMatchObject({ code }) : undefined;
@@ -159,14 +153,13 @@ describe('CI registration guards before and after metadata lookup', { timeout: 3
   it('registers CI and a timer with an unanswered human question in the record', async () => {
     const gate = join(root, 'end-turn');
     const wire = controlledWire({ firstResultGate: gate });
-    const observed = observeSession();
     const run = await parent(); await until(wire.initialReceived);
     vi.spyOn(CiWatcherSupervisor.prototype, 'resolve').mockResolvedValue(identity);
     vi.spyOn(CiWatcherSupervisor.prototype, 'watch').mockReturnValue(new Promise(() => {}));
     store.appendEvent(run.id, { type: 'ask.requested', requestId: 'unanswered-question', questions: [{ header: 'Review', question: 'Approve?' }] });
     try {
-      const ci = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 30 }, 'cezar_wait', observed.generation());
-      const timer = await manager.registerWait(run.id, { kind: WAIT_KIND.timer, seconds: 60 }, 'cezar_wait', observed.generation());
+      const ci = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 30 }, 'cezar_wait', toolGenerationOf(run.id));
+      const timer = await manager.registerWait(run.id, { kind: WAIT_KIND.timer, seconds: 60 }, 'cezar_wait', toolGenerationOf(run.id));
       expect(store.getRun(run.id)?.waits?.map(wait => wait.id)).toEqual([ci.id, timer.id]);
     } finally { vi.restoreAllMocks(); writeFileSync(gate, ''); }
   });
@@ -179,7 +172,6 @@ describe('PR wait targets', { timeout: 30_000 }, () => {
   it('opens a checks wait and a merge wait on one PR as two waits, and shares one lookup for a repeat', async () => {
     const gate = join(root, 'end-turn');
     const wire = controlledWire({ firstResultGate: gate });
-    const observed = observeSession();
     const run = await parent(); await until(wire.initialReceived);
     let lookups = 0;
     let release!: () => void;
@@ -187,7 +179,7 @@ describe('PR wait targets', { timeout: 30_000 }, () => {
     const watched: unknown[] = [];
     vi.spyOn(CiWatcherSupervisor.prototype, 'watch').mockImplementation(wait => { watched.push(wait); return new Promise(() => {}); });
     try {
-      const generation = observed.generation();
+      const generation = toolGenerationOf(run.id);
       const checks = manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr }, 'cezar_wait', generation);
       await until(() => lookups === 1); release();
       const first = await checks;
