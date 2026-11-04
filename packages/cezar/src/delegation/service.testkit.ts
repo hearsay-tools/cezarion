@@ -10,10 +10,10 @@ import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, vi } from 'vitest';
+import { afterAll, expect, vi } from 'vitest';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { CredentialRegistry, type Caller } from './credentials.ts';
@@ -77,14 +77,36 @@ export function scheduledDestroyAttempts(service: DelegationService): Array<Prom
   return started;
 }
 
+let repositoryTemplate: { root: string; sha: string } | undefined;
+
+/** Copy only the empty base repository; stores and worktrees always belong to each fixture. */
+function copyServiceRepository(destination: string): string {
+  if (!repositoryTemplate) {
+    const root = mkdtempSync(join(tmpdir(), 'cez-service-template-'));
+    try {
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
+      // Auto-gc detaches after commit and writes into `.git` while recursive removal walks it.
+      execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });
+      execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
+      execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
+      const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+      repositoryTemplate = { root, sha };
+    } catch (error) {
+      rmSync(root, { recursive: true, force: true });
+      throw error;
+    }
+  }
+  cpSync(repositoryTemplate.root, destination, { recursive: true });
+  return repositoryTemplate.sha;
+}
+
+afterAll(() => {
+  if (repositoryTemplate) rmSync(repositoryTemplate.root, { recursive: true, force: true });
+});
+
 export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha: string; store: RunStore; manager: RunManager; parent: RunRecord; credentials: CredentialRegistry; caller: Caller; token: string; service: DelegationService; close(): Promise<void> } {
   const root = mkdtempSync(join(tmpdir(), 'cez-delegation-service-'));
-  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
-  // Auto-gc detaches after commit and writes into `.git` while recursive removal walks it.
-  execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });
-  execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
-  execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
-  const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  const sha = copyServiceRepository(root);
   const store = openTestRunStore(join(root, '.ai/cezar'), { keepLive: true });
   const manager = createFixtureManager(store, root);
   // Scheduler admission is deliberately held: service acceptance must be durable before it.
