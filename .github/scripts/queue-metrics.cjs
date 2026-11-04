@@ -193,9 +193,16 @@ function isFallback(push) {
   return fallbackJob !== undefined && fallbackJob.conclusion !== 'skipped';
 }
 
+// The proof read the newest exact queue run that existed when it ran; a later run was not its evidence.
+function evidenceRun(runs, proof) {
+  const done = Date.parse(proof?.completed_at);
+  const seen = Number.isFinite(done) ? runs.filter(run => Date.parse(run.created_at) <= done) : runs;
+  return seen.reduce((latest, run) => (!latest || run.id > latest.id ? run : latest), null);
+}
+
 async function readProofEvidence(api, repo, push, queueJobs) {
   const runs = (await api.list(`repos/${repo}/actions/workflows/ci.yml/runs?event=merge_group&head_sha=${push.run.head_sha}`, 'workflow_runs')).map(trimRun);
-  const newest = runs.reduce((latest, run) => (!latest || run.id > latest.id ? run : latest), null);
+  const newest = evidenceRun(runs, proofJob(push));
   const jobs = newest ? queueJobs[newest.id] ?? await readJobs(api, repo, newest.id) : [];
   return { queueRun: newest, queueJobs: jobs };
 }
@@ -428,5 +435,5 @@ async function main(argv, { gh = defaultGh, stdout = text => process.stdout.writ
 
 if (require.main === module) main(process.argv.slice(2)).then(code => { process.exitCode = code; });
 
-module.exports = { main, parseOptions, readAll, computeMetrics, formatReport, percentile, runnerMinutes, proofReason,
+module.exports = { main, parseOptions, readAll, computeMetrics, formatReport, percentile, runnerMinutes, proofReason, evidenceRun,
   groupRef, LIMITS, PROOF_JOB, FALLBACK_JOB, REUSE_STEP };

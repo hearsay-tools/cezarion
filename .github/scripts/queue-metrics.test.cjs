@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { main, parseOptions, computeMetrics, percentile, runnerMinutes, proofReason, groupRef,
+const { main, parseOptions, computeMetrics, percentile, runnerMinutes, proofReason, evidenceRun, groupRef,
   PROOF_JOB, FALLBACK_JOB, REUSE_STEP } = require('./queue-metrics.cjs');
 const { REQUIRED_QUEUE_JOBS } = require('./queue-ci-proof.cjs');
 
@@ -297,6 +297,15 @@ test('a re-run main push is classified by its latest attempt', () => {
       push(2, [job(PROOF_JOB, 1, 'success'), job(FALLBACK_JOB, 1, 'skipped'), job(PROOF_JOB, 2, 'cancelled'), job(FALLBACK_JOB, 2, 'success')]),
     ] });
   assert.deepEqual(metrics.mainPush, { pushes: 2, fallbacks: 1, reasons: { 'proof-job-cancelled': 1 }, unexplained: [] });
+});
+
+test('fallback evidence is the newest exact queue run that existed when the proof ran', () => {
+  const run = (id, createdAt) => ({ id, created_at: createdAt });
+  const proof = { completed_at: '2026-11-02T01:00:00Z' };
+  const runs = [run(1, '2026-11-02T00:10:00Z'), run(2, '2026-11-02T00:40:00Z'), run(3, '2026-11-02T01:30:00Z')];
+  assert.equal(evidenceRun(runs, proof).id, 2);
+  assert.equal(evidenceRun([runs[2]], proof), null);
+  assert.equal(evidenceRun(runs, undefined).id, 3);
 });
 
 test('group refs name their PR and base', () => {
