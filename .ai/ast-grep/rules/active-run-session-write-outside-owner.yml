@@ -190,12 +190,14 @@ utils:
                 any:
                   - all:
                       - { kind: pair_pattern }
-                      - { has: { field: key, regex: ^(liveSession|liveSession)$ } }
+                      - has:
+                          field: key
+                          regex: ^(liveSession|liveSession|delegationSettings|pendingPermissions|accountBinding|claudeLayout|allowedTools|bashAllowlist)$
                       - { has: { field: value, pattern: $DESTRUCTURED_REF } }
                   - all:
                       - { kind: shorthand_property_identifier_pattern }
                       - { pattern: $DESTRUCTURED_REF }
-                      - { regex: ^(liveSession|liveSession)$ }
+                      - regex: ^(liveSession|liveSession|delegationSettings|pendingPermissions|accountBinding|claudeLayout|allowedTools|bashAllowlist)$
             all: [ { has: { field: value, any: [ { matches: group-base-reference }, { matches: container-reference } ] } } ]
           any: [ { kind: statement_block }, { kind: program } ]
   group-reference:
