@@ -4039,12 +4039,7 @@ export function createApp(deps: ServerDeps) {
         const run = store.getRun(id);
         if (!run) return c.json({ error: 'not found' }, 404);
         if (!run.worktreePath || !existsSync(run.worktreePath) || !run.branch) {
-          return c.json(
-            {
-              error: 'no worktree/branch to publish — this task ran in the repo working tree',
-            },
-            400,
-          );
+          return c.json({ error: 'no worktree/branch to publish — this task ran in the repo working tree' }, 400);
         }
         const outcome = await resolveForgeRoot(repoRoot, deps.forgeFactory).createPR({
           repoRoot,

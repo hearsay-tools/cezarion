@@ -43,7 +43,7 @@ import {
   TIMER_MIN_SECONDS,
   WAIT_LIMIT,
 } from '@open-mercato/cezar-contract/waits';
-import { engineOwnsRun, isSweepable, UNREAD_RUN_RULE, SWEEPABLE_RUN_RULE, RETENTION_RUN_RULE, REFERENCED_RUN_RULE } from '@open-mercato/cezar-contract/run-predicates';
+import { isSweepable, UNREAD_RUN_RULE, SWEEPABLE_RUN_RULE, RETENTION_RUN_RULE, REFERENCED_RUN_RULE } from '@open-mercato/cezar-contract/run-predicates';
 import type { ArchiveFinishedScope, ArchivedRunsResponse, ArchivePullRequestIdentity, CiWait, PrWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, MergedPullRequest, RunPullRequest, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry, WorkerWait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { matchesRunSearch, sqlPrefilterTokens, type AutomationNames } from '@open-mercato/cezar-contract/run-search';
 import { storedDelegationStateSchema } from './delegation-state.ts';
@@ -73,6 +73,7 @@ import {
   type RunConflictEvidence, type RunDatabaseChanges, type RunDatabaseCommit, type RunFenceClaim, type RunRow, type RunRowInput, type RunWriteFence,
 } from './run-database.ts';
 import { restoreLostReferencedPullRequest } from './loaded-run-healing.ts';
+import { failLoadedInterruptedRun, restoreLoadedUsageLimitHold, settleLoadedStop } from './loaded-run-exits.ts';
 import { encodeRunRow, isLiveRecord, isLiveStatus } from './run-row.ts';
 import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.ts';
 import { ColdReadCache, storedRow, type StoredRow } from './cold-reads.ts';
@@ -320,7 +321,6 @@ function legacyWaitId(name: string): string {
  *  park from running to waiting, resume from waiting to running. The caller has read the row's status. */
 function setLiveStatus(row: Record<string, unknown>, exit: 'park' | 'resume'): void {
   const [from, to] = exit === 'park' ? ['running', 'waiting'] : ['waiting', 'running'];
-  // The status and the owner only: this writer settles the raw row's steps itself, below.
   Object.assign(row, applyExit({ status: row.status, delegation: row.delegation } as Pick<RunRecord, 'status' | 'delegation'>, exit));
   if (Array.isArray(row.steps)) for (const step of row.steps) {
     if (step && typeof step === 'object' && (step as { status?: unknown }).status === from) (step as { status: string }).status = to;
@@ -677,31 +677,6 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
   // the read-only index applies its cached handle to these fresh records (#97). This ordering
   // also scopes any referenced PR restored above without filtering candidate evidence first.
   return run;
-}
-
-function settleLoadedStop(run: RunRecord): void {
-  // An accepted Stop is durable intent, never an interrupted run to auto-resume. It can meet a run
-  // that settled before the Stop did (the engine's own late Stop), so it takes `cancel-late`.
-  if (run.stopping) Object.assign(run, applyExit(run, 'cancel-late'));
-  run.stopping = undefined;
-}
-
-function restoreLoadedUsageLimitHold(run: RunRecord): void {
-  // A usage-limited run is waiting for its resume (hearsay-tools/cezarion#1236, phase 4a). Rows a
-  // schema-7 cezar wrote kept it failed with the appointment; they read as the waiting run they are.
-  if (run.status === 'failed' && run.autoResumeAt !== undefined) Object.assign(run, applyExit(run, 'hold'));
-}
-
-function failLoadedInterruptedRun(run: RunRecord, opts?: { keepLive?: boolean }): void {
-  // A run that was live when the previous process exited can never finish —
-  // surface that instead of a forever-"running" ghost. `review` survives
-  // restarts on purpose: the gate is pure data (worktree + branch + record)
-  // with no live process, so the diff panel, Send back (resume) and Draft PR
-  // all still work.
-  // A usage-limit hold runs no process, so no exit interrupted it: its appointment stands.
-  if (!opts?.keepLive && engineOwnsRun(run)) {
-    Object.assign(run, applyExit(run, 'fail-interrupted'));
-  }
 }
 
 function clearLoadedStaleResume(run: RunRecord): void {
@@ -1249,13 +1224,11 @@ export class RunStore extends EventEmitter {
     if (!wasCancelled && run.status === 'cancelled') this.loadCancellations.push(run.id);
   }
 
-  /** The `run cancelled` event of each run this load cancelled (a Stop accepted before the process
-   *  exited, or an untouched orphan), as a cancel exit writes it (Table B12). Best-effort: a
-   *  transcript that cannot be written must not stop the store from opening. */
+  /** The `run cancelled` event of each run this load cancelled, as a cancel exit writes it (Table
+   *  B12). Best-effort: a transcript that cannot be written must not stop the store from opening. */
   private writeLoadCancellations(): void {
     for (const id of this.loadCancellations.splice(0)) {
-      try { this.appendEvent(id, { type: 'lifecycle', message: RUN_CANCELLED }); }
-      catch (error) { console.warn(`[cez] run ${id}: the load-time cancellation event was not written: ${error instanceof Error ? error.message : String(error)}`); }
+      try { this.appendEvent(id, { type: 'lifecycle', message: RUN_CANCELLED }); } catch (error) { console.warn(`[cez] run ${id}: no load-time cancellation event: ${String(error)}`); }
     }
   }
 
@@ -2704,24 +2677,20 @@ export class RunStore extends EventEmitter {
    *  of the lifecycle event it writes after the write (`exitEvent`). */
   move(id: string, exit: RunExitId, extras: RunPatch = {}, call: ExitCall = {}): RunRecord | undefined {
     const spec: RunExitSpec = RUN_EXITS[exit];
+    const guarded = Boolean(spec.guard || spec.settle);
+    const run = guarded ? this.peek(id) : this.record(id);
+    if (!run || spec.guard?.(run) === false) {
+      if (spec.refused) throw new Error(spec.refused);
+      return undefined;
+    }
+    const event = exitEvent(exit, run.status, call);
+    // Redacted first: a step the exit settles takes the run's error.
+    const redacted = this.redactPatch(extras) as RunPatch;
     let moved: RunRecord | undefined;
-    let event: string | undefined;
-    if (!spec.guard && !spec.settle) {
-      const run = this.record(id);
-      if (!run) return undefined;
-      event = exitEvent(exit, run.status, call);
-      // Redacted first: a step the exit settles takes the run's error.
-      moved = this.writeRun(id, run, applyExit(run, exit, this.redactPatch(extras) as RunPatch, call), exitDurability(exit, run));
-    } else {
-      const run = this.peek(id);
-      if (!run || (spec.guard && !spec.guard(run))) {
-        if (spec.refused) throw new Error(spec.refused);
-        return undefined;
-      }
-      event = exitEvent(exit, run.status, call);
-      const input = { ...run, ...this.redactPatch(extras) };
-      const settled = spec.settle ? spec.settle(input, { ...call, now: new Date().toISOString() }) : input;
-      this.commitIndex(new Map([[id, { ...settled, ...applyExit(run, exit, {}, call) }]]));
+    if (!guarded) moved = this.writeRun(id, run, applyExit(run, exit, redacted, call), exitDurability(exit, run));
+    else {
+      const input = { ...run, ...redacted };
+      this.commitIndex(new Map([[id, { ...(spec.settle?.(input, { ...call, now: new Date().toISOString() }) ?? input), ...applyExit(run, exit, {}, call) }]]));
       moved = this.peek(id);
     }
     if (event) this.appendEvent(id, { type: 'lifecycle', message: event });
