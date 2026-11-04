@@ -3,7 +3,7 @@ import type { StopReason } from './ui-events.ts';
 export const CODEX_TURN_STATUSES = ['interrupted', 'failed'] as const;
 export type CodexTurnStatus = (typeof CODEX_TURN_STATUSES)[number];
 
-const CODEX_TURN_STATUS = {
+const CODEX_TURN_STATUS: { [Status in CodexTurnStatus]: Status } = {
   interrupted: CODEX_TURN_STATUSES[0],
   failed: CODEX_TURN_STATUSES[1],
 };
