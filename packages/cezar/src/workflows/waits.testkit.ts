@@ -34,16 +34,17 @@ const capturedTimers = new Map<string, number>();
 
 function registrationClock() {
   if (!clock) {
+    clock = observationClock(delay => {
+      const pending = registering.getStore()?.find(entry => entry.active && entry.indices.length === 0 && delay !== undefined && entry.due() !== undefined && delay === Math.max(0, entry.due()! - entry.now));
+      if (!pending) return false;
+      pending.indices.push(clock!.captured);
+      return true;
+    });
     const now = Date.now.bind(Date);
     const spy = vi.spyOn(Date, 'now').mockImplementation(() => registering.getStore()?.find(capture => capture.active)?.now ?? now());
     restoreDateNow = () => spy.mockRestore();
   }
-  return clock ??= observationClock(delay => {
-    const pending = registering.getStore()?.find(entry => entry.active && entry.indices.length === 0 && delay !== undefined && entry.due() !== undefined && delay === Math.max(0, entry.due()! - entry.now));
-    if (!pending) return false;
-    pending.indices.push(clock!.captured);
-    return true;
-  });
+  return clock;
 }
 
 afterEach(() => { clock?.restore(); clock = undefined; restoreDateNow?.(); restoreDateNow = undefined; capturedTimers.clear(); });
