@@ -12,15 +12,16 @@ function allowedDeclaration(node: Node, parent: Node | undefined): boolean {
   return false;
 }
 
+export const NATIVE_TOOL_REGISTRATION = 'registerCiNativeTools';
+
 function registrationReference(node: Node, parent: Node | undefined, callee: string): Node | undefined {
-  const [owner, member] = callee.split('.');
-  const name = member ?? owner;
+  const name = callee.split('.').at(-1);
   if (node.type === 'Identifier' && node.name === name) {
-    if (!member) return node;
-    if (parent?.type === 'MemberExpression' && parent.property === node) return parent;
+    if (callee.includes('.') && parent?.type === 'MemberExpression' && parent.property === node) return parent;
     return node;
   }
-  if (node.type === 'StringLiteral' && node.value === name && parent?.type === 'MemberExpression' && parent.property === node) return parent;
+  if (node.type === 'StringLiteral' && node.value === name) return node;
+  if (node.type === 'TemplateElement' && (node.value.raw === name || node.value.cooked === name)) return node;
   return undefined;
 }
 

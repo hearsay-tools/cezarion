@@ -336,4 +336,17 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(() => provisionMatrixCounts([`${source};`], ['reference.test.ts'])).toThrow('reference.test.ts: unsupported');
   });
 
+  for (const source of [
+    'it?.["each"](PROVISION_ROWS.governedIntent)',
+    'it["each"](PROVISION_ROWS.governedIntent)',
+    'it[`each`](PROVISION_ROWS.governedIntent)',
+    'const key = "each"',
+    'const key = `each`',
+  ]) it(`rejects exact provision registration-name literals ${source}`, () => {
+    expect(() => provisionMatrixCounts([`${source};`], ['literal.test.ts'])).toThrow('literal.test.ts: unsupported');
+  });
+  it('ignores comments and longer literals containing the provision registration name', () => {
+    expect(provisionMatrixCounts(['// each\n/* each */\nconst text = "prefix each suffix"; const template = `prefix each suffix`;']).governedIntent).toBe(0);
+  });
+
 });

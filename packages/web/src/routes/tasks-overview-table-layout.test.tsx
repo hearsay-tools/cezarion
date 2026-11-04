@@ -1073,9 +1073,11 @@ describe('TasksOverview — mobile cards and FAB', () => {
 })
 
 it('hides owned worker rows without changing ordinary titles', () => {
-  renderOverview({ runs: [run({ id: 'worker', title: 'Investigate', delegation: { role: 'worker' as const, permissions: [], parentRunId: 'parent', workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated' as const, path: '/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) } } }), run({ id: 'ordinary', title: 'Ordinary' })] })
-  expect(tableRow('worker')).toBeNull()
-  expect(card('worker')).toBeNull()
+  const workerId = '11111111-1111-4111-8111-111111111111'
+  const parentId = '22222222-2222-4222-8222-222222222222'
+  renderOverview({ runs: [run({ id: workerId, title: 'Investigate', delegation: { role: 'worker' as const, permissions: [], parentRunId: parentId, workspace: { ownerRunId: workerId, resourceId: workerId, kind: 'owned-isolated' as const, path: '/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) } } }), run({ id: 'ordinary', title: 'Ordinary' })] })
+  expect(tableRow(workerId)).toBeNull()
+  expect(card(workerId)).toBeNull()
   expect(screen.getAllByRole('link', { name: /Ordinary/ }).length).toBeGreaterThan(0)
 })
 

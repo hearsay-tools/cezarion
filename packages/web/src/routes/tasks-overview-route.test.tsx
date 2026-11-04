@@ -182,7 +182,8 @@ describe('TasksOverviewRoute — wired to the app', () => {
       const url = String(input)
       if (url === '/api/v1/health') return json({ capabilities: { automations: true } })
       if (url === '/api/v1/run-summaries?archived=recent') return json(window)
-      if (url === '/api/v1/run-summaries/archived?limit=200') return json({ runs: [...window, older], nextCursor: null, total: 201 })
+      if (url === '/api/v1/run-summaries/archived?limit=200') return json({ runs: window, nextCursor: 'c1', total: 201 })
+      if (url === '/api/v1/run-summaries/archived?before=c1&limit=200') return json({ runs: [older], nextCursor: null, total: 201 })
       if (url.includes('/automations')) {
         return json({ available: true, timeZone: 'UTC', scheduler: { state: 'idle' }, automations: [{ id: 'nightly', name: 'Nightly sweep', counts: {} }] })
       }
@@ -193,6 +194,8 @@ describe('TasksOverviewRoute — wired to the app', () => {
         <MemoryRouter initialEntries={['/?archived=1']}><ListViewProvider><TasksOverviewRoute /></ListViewProvider></MemoryRouter>
       </QueryClientProvider>,
     )
+    await waitFor(() => expect(overviewTab('archived').textContent).toBe('Archived · 201'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Show older archived' }))
     await waitFor(() => expect(tableRow('older-auto')).not.toBeNull())
     await waitFor(() => expect(tableRow('older-auto')!.textContent).toContain('Nightly sweep'))
   })

@@ -1,5 +1,5 @@
 import { globSync, readFileSync } from 'node:fs';
-import { registrationGroups } from './registration-coverage.testkit.ts';
+import { NATIVE_TOOL_REGISTRATION, registrationGroups } from './registration-coverage.testkit.ts';
 import { describe, expect, it } from 'vitest';
 import { CI_NATIVE_GROUPS, registerCiDefinitionsAndInjection, registerCiValidation } from './ci-tools.testkit.ts';
 
@@ -7,7 +7,7 @@ registerCiDefinitionsAndInjection();
 registerCiValidation();
 
 function nativeGroups(source: string, file = 'inline-native.test.ts'): string[] {
-  return registrationGroups(source, file, 'registerCiNativeTools', 'CI_NATIVE_GROUPS', Object.keys(CI_NATIVE_GROUPS));
+  return registrationGroups(source, file, NATIVE_TOOL_REGISTRATION, 'CI_NATIVE_GROUPS', Object.keys(CI_NATIVE_GROUPS));
 }
 
 function assertNativeCoverage(sources: readonly string[]) {
@@ -79,5 +79,18 @@ describe('native CI tool row coverage', () => {
     expect(nativeGroups('import { registerCiNativeTools } from "./tools";')).toEqual([]);
     expect(nativeGroups('export function registerCiNativeTools() {}')).toEqual([]);
     expect(nativeGroups('export { registerCiNativeTools };')).toEqual([]);
+  });
+  it.each([
+    'ci?.["registerCiNativeTools"](CI_NATIVE_GROUPS.waitCancel)',
+    'ci["registerCiNativeTools"](CI_NATIVE_GROUPS.waitCancel)',
+    'ci[`registerCiNativeTools`](CI_NATIVE_GROUPS.waitCancel)',
+    'const key = "registerCiNativeTools"',
+    'const key = `registerCiNativeTools`',
+  ])('rejects exact registration-name literals %s', source => {
+    expect(() => nativeGroups(`${source};`, 'literal.test.ts')).toThrow('literal.test.ts: unsupported');
+  });
+  it('ignores comments and longer literal text containing a registration name', () => {
+    expect(nativeGroups('// registerCiNativeTools\n/* registerCiNativeTools */')).toEqual([]);
+    expect(nativeGroups('const text = "prefix registerCiNativeTools suffix"; const template = `prefix registerCiNativeTools suffix`;')).toEqual([]);
   });
 });
