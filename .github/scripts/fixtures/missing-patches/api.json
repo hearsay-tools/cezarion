@@ -27,7 +27,8 @@
         "raw_url": "https://github.com/hearsay-tools/cezarion/raw/0d93febf2f3946779215999af1a21086ad8fb820/packages%2Fweb%2Fsrc%2Froutes%2Fnew-task.test.tsx",
         "contents_url": "https://api.github.com/repos/hearsay-tools/cezarion/contents/packages%2Fweb%2Fsrc%2Froutes%2Fnew-task.test.tsx?ref=0d93febf2f3946779215999af1a21086ad8fb820"
       }
-    ]
+    ],
+    "source": "Compare API at the recorded looping head; selected entries match the missing-patch table on hearsay-tools/cezarion#2647."
   },
   {
     "pr": "hearsay-tools/cezarion#2633",
@@ -58,7 +59,8 @@
         "raw_url": "https://github.com/hearsay-tools/cezarion/raw/a070592ad8b07483aece59d2212af6a84d7e8a6b/packages%2Fcezar%2Fsrc%2Fworkflows%2Frun.test.ts",
         "contents_url": "https://api.github.com/repos/hearsay-tools/cezarion/contents/packages%2Fcezar%2Fsrc%2Fworkflows%2Frun.test.ts?ref=a070592ad8b07483aece59d2212af6a84d7e8a6b"
       }
-    ]
+    ],
+    "source": "Compare API at the recorded looping head; selected entries match the missing-patch table on hearsay-tools/cezarion#2647."
   },
   {
     "pr": "hearsay-tools/cezarion#847",

@@ -695,6 +695,17 @@ test('baseline growth is required through trusted classify-pr with default PR ev
   assert.equal(ci.on.pull_request_target.types, undefined, 'label changes must not cancel and restart CI');
 });
 
+test('the patch check runs trusted workflow code after the history fetch for every PR base', async () => {
+  const job = workflow().jobs['classify-pr'];
+  const checkIndex = job.steps.findIndex(step => step.name === 'Require GitHub patches for changed text files');
+  const historyIndex = job.steps.findIndex(step => step.name === 'Fetch the history the baseline check compares');
+  assert.ok(historyIndex >= 0 && checkIndex > historyIndex);
+  const check = job.steps[checkIndex];
+  assert.equal(check.if, "github.event_name == 'pull_request_target'");
+  assert.equal(check.with.retries, 0);
+  assert.deepEqual(await baselineGateSources(check.with.script, 'pull_request_target'), ['workflow-sha:.github/scripts/missing-patches.cjs']);
+});
+
 test('the complexity gate runs the workflow commit and reads the pull request head as Git data', () => {
   const ci = workflow();
   const job = ci.jobs['complexity-gate'];

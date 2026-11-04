@@ -230,7 +230,7 @@ jobs:
             const { checkPullRequest } = require(gate);
             await checkPullRequest({ github, context, core });
       - name: Require GitHub patches for changed text files
-        if: github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main'
+        if: github.event_name == 'pull_request_target'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           retries: 0
