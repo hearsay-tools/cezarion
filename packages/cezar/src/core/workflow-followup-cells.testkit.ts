@@ -434,13 +434,18 @@ export const WORKFLOW_FOLLOWUP_GROUPS = {
   'late-ack-continuation': { rows: ['H5'], modes: ['continuation'] },
 } as const;
 
-export function describeWorkflowFollowup(group: keyof typeof WORKFLOW_FOLLOWUP_GROUPS, registration = { describe, it }) {
+export function describeWorkflowFollowup(
+  group: keyof typeof WORKFLOW_FOLLOWUP_GROUPS,
+  registration = { describe, it },
+  resolveExemption: typeof exemptionFor = exemptionFor,
+) {
   const { describe, it } = registration;
 describe('mid-turn human follow-up parity — #486', () => {
   for (const backend of RUNNER_IDS) {
     for (const row of FOLLOWUP_CRITERIA.filter(row => { return (WORKFLOW_FOLLOWUP_GROUPS[group].rows as readonly string[]).includes(row.id); })) {
-      const exemption = exemptionFor(row.id, backend);
+      const exemption = resolveExemption(row.id, backend);
       if (exemption) {
+        if (!(WORKFLOW_FOLLOWUP_GROUPS[group].modes as readonly string[]).includes('fresh')) continue;
         it(`${backend} ${row.id} exemption — ${exemption.reason}`, async () => {
           await withMockLogs(async ({ argsFile, stdinFile, releaseFile, files, release }) => {
             await driveRun(backend, row.scenario, run =>

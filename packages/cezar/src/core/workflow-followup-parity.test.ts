@@ -31,4 +31,27 @@ describe('workflow followup family registration', () => {
     expect(names.sort()).toEqual(expectedNames.sort());
     expect(new Set(names).size).toBe(names.length);
   });
+
+  it('registers mode-less late-start exemptions only in the fresh-owning files', () => {
+    const owners: string[] = [];
+    const syntheticReason = 'synthetic mode-split exemption';
+    const resolveExemption: typeof exemptionFor = (criterion, backend) => {
+      if (criterion !== 'H4' && criterion !== 'H5') return exemptionFor(criterion, backend);
+      return { ...exemptionFor('H2', 'codex')!, criterion, backend, reason: syntheticReason };
+    };
+    const groups = Object.keys(WORKFLOW_FOLLOWUP_GROUPS) as Array<keyof typeof WORKFLOW_FOLLOWUP_GROUPS>;
+    for (const group of groups) {
+      describeWorkflowFollowup(group, {
+        describe: ((_name: string, body: () => void) => body()) as typeof describe,
+        it: ((name: string) => {
+          if (name.endsWith(syntheticReason)) owners.push(`${group}: ${name}`);
+        }) as typeof it,
+      }, resolveExemption);
+    }
+    const expected = RUNNER_IDS.flatMap(runner => [
+      `late-start-fresh: ${runner} H4 exemption — ${syntheticReason}`,
+      `late-ack-fresh: ${runner} H5 exemption — ${syntheticReason}`,
+    ]);
+    expect(owners.sort()).toEqual(expected.sort());
+  });
 });
