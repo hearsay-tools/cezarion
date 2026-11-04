@@ -20,6 +20,7 @@ import { z } from 'zod';
 import type { AgentEvent } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 import {
+  STATUS_MAP as OPENCODE_TOOL_STATUS_MAP,
   PLAN_STATUSES,
   createOpencodeUiState,
   mapOpencodeEvent,
@@ -29,7 +30,14 @@ import {
   type OpencodeUiMapping,
 } from './opencode-ui-mapper.ts';
 import { OpencodeServerRunner } from './opencode-server-runner.ts';
+import { STATUS_MAP as CODEX_TOOL_STATUS_MAP } from './codex-ui-mapper.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
+
+const TOOL_STATUS = z.enum([
+  ...Object.values(OPENCODE_TOOL_STATUS_MAP),
+  ...Object.values(CODEX_TOOL_STATUS_MAP),
+]).enum;
+const WIRE_TOOL_STATUS = z.enum(Object.keys(OPENCODE_TOOL_STATUS_MAP)).enum;
 
 const PLAN_STATUS = z.enum(PLAN_STATUSES).enum;
 
@@ -212,45 +220,45 @@ describe('mapOpencodeEvent edge cases', () => {
   it('opencode is the only backend with a real pending phase — first sight of a pending tool emits status pending', () => {
     const state = startedState();
     const [started] = mapOpencodeEvent(
-      part({ id: 'prt_b', type: 'tool', tool: 'bash', state: { status: 'pending', input: { command: 'ls' } } }),
+      part({ id: 'prt_b', type: 'tool', tool: 'bash', state: { status: WIRE_TOOL_STATUS.pending, input: { command: 'ls' } } }),
       state,
     ).events;
     expect(started).toEqual({
       type: 'item.started',
-      item: { kind: 'tool', id: 'prt_b', name: 'bash', toolKind: 'execute', title: 'Ran ls', status: 'pending', input: { command: 'ls' } },
+      item: { kind: 'tool', id: 'prt_b', name: 'bash', toolKind: 'execute', title: 'Ran ls', status: TOOL_STATUS.pending, input: { command: 'ls' } },
     });
   });
 
   it('tool state carries across updates: pending→running flips via item.updated, error settles as failed', () => {
     let state = startedState();
     state = mapOpencodeEvent(
-      part({ id: 'prt_b', type: 'tool', tool: 'bash', state: { status: 'pending', input: { command: 'ls' } } }),
+      part({ id: 'prt_b', type: 'tool', tool: 'bash', state: { status: WIRE_TOOL_STATUS.pending, input: { command: 'ls' } } }),
       state,
     ).state;
     const running = mapOpencodeEvent(
-      part({ id: 'prt_b', type: 'tool', tool: 'bash', state: { status: 'running', input: { command: 'ls' }, title: 'ls', time: { start: 1 } } }),
+      part({ id: 'prt_b', type: 'tool', tool: 'bash', state: { status: WIRE_TOOL_STATUS.running, input: { command: 'ls' }, title: 'ls', time: { start: 1 } } }),
       state,
     );
     expect(running.events).toEqual([
       {
         type: 'item.updated',
-        item: { kind: 'tool', id: 'prt_b', name: 'bash', toolKind: 'execute', title: 'ls', status: 'running', input: { command: 'ls' } },
+        item: { kind: 'tool', id: 'prt_b', name: 'bash', toolKind: 'execute', title: 'ls', status: TOOL_STATUS.running, input: { command: 'ls' } },
       },
     ]);
     state = running.state;
     // A repeated running update with the same title is a no-op…
     expect(mapOpencodeEvent(
-      part({ id: 'prt_b', type: 'tool', tool: 'bash', state: { status: 'running', input: { command: 'ls' }, title: 'ls' } }),
+      part({ id: 'prt_b', type: 'tool', tool: 'bash', state: { status: WIRE_TOOL_STATUS.running, input: { command: 'ls' }, title: 'ls' } }),
       state,
     ).events).toEqual([]);
     // …but a new live title re-renders the card.
     expect(mapOpencodeEvent(
-      part({ id: 'prt_b', type: 'tool', tool: 'bash', state: { status: 'running', input: { command: 'ls' }, title: 'ls -la' } }),
+      part({ id: 'prt_b', type: 'tool', tool: 'bash', state: { status: WIRE_TOOL_STATUS.running, input: { command: 'ls' }, title: 'ls -la' } }),
       state,
     ).events).toEqual([
       {
         type: 'item.updated',
-        item: { kind: 'tool', id: 'prt_b', name: 'bash', toolKind: 'execute', title: 'ls -la', status: 'running', input: { command: 'ls' } },
+        item: { kind: 'tool', id: 'prt_b', name: 'bash', toolKind: 'execute', title: 'ls -la', status: TOOL_STATUS.running, input: { command: 'ls' } },
       },
     ]);
     const failed = mapOpencodeEvent(
@@ -260,7 +268,7 @@ describe('mapOpencodeEvent edge cases', () => {
     expect(failed.events).toEqual([
       {
         type: 'item.completed',
-        item: { kind: 'tool', id: 'prt_b', name: 'bash', toolKind: 'execute', title: 'ls', status: 'failed', input: { command: 'ls' }, error: 'killed' },
+        item: { kind: 'tool', id: 'prt_b', name: 'bash', toolKind: 'execute', title: 'ls', status: TOOL_STATUS.failed, input: { command: 'ls' }, error: 'killed' },
       },
     ]);
     // A duplicate settled snapshot emits nothing.
@@ -282,7 +290,7 @@ describe('mapOpencodeEvent edge cases', () => {
     let state = startedState();
     const todos = { todos: [{ id: '1', content: 'Fix it', status: 'in_progress', priority: 'high' }] };
     const first = mapOpencodeEvent(
-      part({ id: 'prt_td', type: 'tool', tool: 'todowrite', state: { status: 'pending', input: todos } }),
+      part({ id: 'prt_td', type: 'tool', tool: 'todowrite', state: { status: WIRE_TOOL_STATUS.pending, input: todos } }),
       state,
     );
     expect(first.events).toContainEqual({
@@ -291,7 +299,7 @@ describe('mapOpencodeEvent edge cases', () => {
     });
     state = first.state;
     const second = mapOpencodeEvent(
-      part({ id: 'prt_td', type: 'tool', tool: 'todowrite', state: { status: 'running', input: todos } }),
+      part({ id: 'prt_td', type: 'tool', tool: 'todowrite', state: { status: WIRE_TOOL_STATUS.running, input: todos } }),
       state,
     );
     expect(second.events.filter((e) => e.type === 'plan.updated')).toHaveLength(0);
@@ -365,7 +373,7 @@ describe('mapOpencodeEvent edge cases', () => {
   // `input: {}` — that must not wipe the plan the previous snapshot established.
   it('a pending part with unparsed input emits no plan', () => {
     const mapped = mapOpencodeEvent(
-      part({ id: 'prt_td', type: 'tool', tool: 'todowrite', state: { status: 'pending', input: {}, raw: '' } }),
+      part({ id: 'prt_td', type: 'tool', tool: 'todowrite', state: { status: WIRE_TOOL_STATUS.pending, input: {}, raw: '' } }),
       startedState(),
     );
     expect(mapped.events.filter((e) => e.type === 'plan.updated')).toHaveLength(0);
@@ -672,14 +680,14 @@ describe('mapOpencodeEvent edge cases', () => {
         id: 'prt_task',
         type: 'tool',
         tool: 'task',
-        state: { status: 'running', input: { description: 'Dig in', prompt: 'dig', subagent_type: 'general' } },
+        state: { status: WIRE_TOOL_STATUS.running, input: { description: 'Dig in', prompt: 'dig', subagent_type: 'general' } },
       }),
       state,
     );
     expect(started.events).toEqual([
       {
         type: 'item.started',
-        item: expect.objectContaining({ kind: 'tool', id: 'prt_task', name: 'task', toolKind: 'task', status: 'running' }),
+        item: expect.objectContaining({ kind: 'tool', id: 'prt_task', name: 'task', toolKind: 'task', status: TOOL_STATUS.running }),
       },
     ]);
     state = mapOpencodeEvent(
@@ -712,7 +720,7 @@ describe('mapOpencodeEvent edge cases', () => {
   it('a task tool that settles releases its scope so the child idle does not re-complete it', () => {
     let state = startedState();
     state = mapOpencodeEvent(
-      part({ id: 'prt_task', type: 'tool', tool: 'task', state: { status: 'running', input: { description: 'Dig in' } } }),
+      part({ id: 'prt_task', type: 'tool', tool: 'task', state: { status: WIRE_TOOL_STATUS.running, input: { description: 'Dig in' } } }),
       state,
     ).state;
     state = mapOpencodeEvent(
@@ -749,7 +757,7 @@ describe('mapOpencodeEvent edge cases', () => {
       ['prt_task_b', 'Task B'],
     ] as const) {
       state = mapOpencodeEvent(
-        part({ id, type: 'tool', tool: 'task', state: { status: 'running', input: { description } } }),
+        part({ id, type: 'tool', tool: 'task', state: { status: WIRE_TOOL_STATUS.running, input: { description } } }),
         state,
       ).state;
     }
@@ -818,9 +826,9 @@ describe('mapOpencodeEvent edge cases', () => {
   it('a task scope follows later tool snapshots, so completion carries the final title and input', () => {
     let state = startedState();
     // OpenCode publishes the tool part before its arguments finish parsing.
-    state = mapOpencodeEvent(part({ id: 'prt_task', type: 'tool', tool: 'task', state: { status: 'pending', input: {} } }), state).state;
+    state = mapOpencodeEvent(part({ id: 'prt_task', type: 'tool', tool: 'task', state: { status: WIRE_TOOL_STATUS.pending, input: {} } }), state).state;
     state = mapOpencodeEvent(
-      part({ id: 'prt_task', type: 'tool', tool: 'task', state: { status: 'running', input: { description: 'Dig in', prompt: 'dig' } } }),
+      part({ id: 'prt_task', type: 'tool', tool: 'task', state: { status: WIRE_TOOL_STATUS.running, input: { description: 'Dig in', prompt: 'dig' } } }),
       state,
     ).state;
     state = mapOpencodeEvent(
@@ -881,12 +889,12 @@ describe('mapOpencodeEvent edge cases', () => {
   it('a task scope picks up an input-only snapshot that emits no item event', () => {
     let state = startedState();
     state = mapOpencodeEvent(
-      part({ id: 'prt_task', type: 'tool', tool: 'task', state: { status: 'running', input: { description: 'Dig in' } } }),
+      part({ id: 'prt_task', type: 'tool', tool: 'task', state: { status: WIRE_TOOL_STATUS.running, input: { description: 'Dig in' } } }),
       state,
     ).state;
     // Same status, same derived title, richer input: no UI event, but the scope must follow.
     const quiet = mapOpencodeEvent(
-      part({ id: 'prt_task', type: 'tool', tool: 'task', state: { status: 'running', input: { description: 'Dig in', prompt: 'dig' } } }),
+      part({ id: 'prt_task', type: 'tool', tool: 'task', state: { status: WIRE_TOOL_STATUS.running, input: { description: 'Dig in', prompt: 'dig' } } }),
       state,
     );
     expect(quiet.events).toEqual([]);
@@ -907,7 +915,7 @@ describe('mapOpencodeEvent edge cases', () => {
     let state = startedState();
     // Task B is queued first with no wire link; task A arrives with its child session id.
     state = mapOpencodeEvent(
-      part({ id: 'prt_task_b', type: 'tool', tool: 'task', state: { status: 'running', input: { description: 'Task B' } } }),
+      part({ id: 'prt_task_b', type: 'tool', tool: 'task', state: { status: WIRE_TOOL_STATUS.running, input: { description: 'Task B' } } }),
       state,
     ).state;
     state = mapOpencodeEvent(
@@ -915,7 +923,7 @@ describe('mapOpencodeEvent edge cases', () => {
         id: 'prt_task_a',
         type: 'tool',
         tool: 'task',
-        state: { status: 'running', input: { description: 'Task A' }, metadata: { parentSessionId: SESSION_ID, sessionId: 'ses_child_a' } },
+        state: { status: WIRE_TOOL_STATUS.running, input: { description: 'Task A' }, metadata: { parentSessionId: SESSION_ID, sessionId: 'ses_child_a' } },
       }),
       state,
     ).state;
@@ -947,12 +955,12 @@ describe('mapOpencodeEvent edge cases', () => {
         id: 'prt_task_a',
         type: 'tool',
         tool: 'task',
-        state: { status: 'running', input: { description: 'Task A' }, metadata: { sessionId: 'ses_child_a' } },
+        state: { status: WIRE_TOOL_STATUS.running, input: { description: 'Task A' }, metadata: { sessionId: 'ses_child_a' } },
       }),
       state,
     ).state;
     state = mapOpencodeEvent(
-      part({ id: 'prt_task_b', type: 'tool', tool: 'task', state: { status: 'running', input: { description: 'Task B' } } }),
+      part({ id: 'prt_task_b', type: 'tool', tool: 'task', state: { status: WIRE_TOOL_STATUS.running, input: { description: 'Task B' } } }),
       state,
     ).state;
     // Task A settles with no event from child A having arrived.
@@ -994,7 +1002,7 @@ describe('mapOpencodeEvent edge cases', () => {
         id: 'prt_task_a',
         type: 'tool',
         tool: 'task',
-        state: { status: 'running', input: { description: 'Task A' }, metadata: { sessionId: 'ses_child_a' } },
+        state: { status: WIRE_TOOL_STATUS.running, input: { description: 'Task A' }, metadata: { sessionId: 'ses_child_a' } },
       }),
       state,
     ).state;
@@ -1010,7 +1018,7 @@ describe('mapOpencodeEvent edge cases', () => {
         sessionID: 'ses_child_a',
         type: 'tool',
         tool: 'task',
-        state: { status: 'running', input: { description: 'Task AA' }, metadata: { sessionId: 'ses_grandchild' } },
+        state: { status: WIRE_TOOL_STATUS.running, input: { description: 'Task AA' }, metadata: { sessionId: 'ses_grandchild' } },
       }),
       state,
     );
@@ -1112,7 +1120,7 @@ describe('OpencodeServerRunner v2 wiring (against the bundled mock server)', () 
     const pending = v2.find(
       (e): e is Extract<UiEvent, { type: 'item.started' }> => e.type === 'item.started' && e.item.id === 'prt_mock_c1',
     );
-    expect(pending?.item).toMatchObject({ kind: 'tool', name: 'bash', status: 'pending' });
+    expect(pending?.item).toMatchObject({ kind: 'tool', name: 'bash', status: TOOL_STATUS.pending });
     const cmdDone = v2.find(
       (e): e is Extract<UiEvent, { type: 'item.completed' }> => e.type === 'item.completed' && e.item.id === 'prt_mock_c1',
     );

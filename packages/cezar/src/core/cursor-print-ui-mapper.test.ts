@@ -6,6 +6,13 @@ import { z } from 'zod';
 import type { UiEvent } from './ui-events.ts';
 import { PLAN_STATUSES, createCursorPrintUiState, mapCursorPrintMessage, mapCursorPrintStreamEvent } from './cursor-print-ui-mapper.ts';
 
+import { STATUS_MAP as OPENCODE_TOOL_STATUS_MAP } from './opencode-ui-mapper.ts';
+import { STATUS_MAP as CODEX_TOOL_STATUS_MAP } from './codex-ui-mapper.ts';
+const TOOL_STATUS = z.enum([
+  ...Object.values(OPENCODE_TOOL_STATUS_MAP),
+  ...Object.values(CODEX_TOOL_STATUS_MAP),
+]).enum;
+
 const PLAN_STATUS = z.enum(PLAN_STATUSES).enum;
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), '__fixtures__', 'cursor');
@@ -59,7 +66,7 @@ describe('Cursor print mapper', () => {
     const question = events.filter(event => event.type === 'item.completed' && event.item.kind === 'tool');
     expect(question).toHaveLength(1);
     expect(question[0]).toMatchObject({ type: 'item.completed', item: {
-      id: 'call_question_1', status: 'failed',
+      id: 'call_question_1', status: TOOL_STATUS.failed,
       error: 'Cursor skipped this native question in headless print mode',
     } });
     expect(events.filter(event => event.type === 'ask.requested')).toHaveLength(0);

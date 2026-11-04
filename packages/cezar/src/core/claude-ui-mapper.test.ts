@@ -26,7 +26,15 @@ import {
   type ClaudeUiMapping,
 } from './claude-ui-mapper.ts';
 import { ClaudeCliRunner } from './claude-cli-runner.ts';
+import { STATUS_MAP as OPENCODE_TOOL_STATUS_MAP } from './opencode-ui-mapper.ts';
+import { STATUS_MAP as CODEX_TOOL_STATUS_MAP, HOOK_STATUS as CODEX_HOOK_STATUS_MAP } from './codex-ui-mapper.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
+
+const TOOL_STATUS = z.enum([
+  ...Object.values(OPENCODE_TOOL_STATUS_MAP),
+  ...Object.values(CODEX_TOOL_STATUS_MAP),
+]).enum;
+const HOOK_STATUS = z.enum(Object.values(CODEX_HOOK_STATUS_MAP)).enum;
 
 const PLAN_STATUS = z.enum(PLAN_STATUSES).enum;
 
@@ -196,7 +204,7 @@ describe('claude hook_response (#961)', () => {
   });
 
   it('maps a failing hook with no output to failed', () => {
-    expect(only(response({ exit_code: 1, outcome: 'error' }))).toMatchObject({ status: 'failed', entries: [] });
+    expect(only(response({ exit_code: 1, outcome: 'error' }))).toMatchObject({ status: HOOK_STATUS.failed, entries: [] });
   });
 
   it('maps systemMessage to a warning entry', () => {
@@ -298,7 +306,7 @@ describe('mapClaudeMessage edge cases', () => {
     expect(mapped.events).toEqual([
       {
         type: 'item.completed',
-        item: { kind: 'tool', id: 'toolu_ghost', name: 'unknown', toolKind: 'other', title: 'Tool', status: 'failed', error: 'late' },
+        item: { kind: 'tool', id: 'toolu_ghost', name: 'unknown', toolKind: 'other', title: 'Tool', status: TOOL_STATUS.failed, error: 'late' },
       },
     ]);
   });
@@ -809,7 +817,7 @@ describe('ClaudeCliRunner v2 wiring (against the bundled mock CLI)', () => {
         (e): e is Extract<UiEvent, { type: 'item.started' }> =>
           e.type === 'item.started' && e.item.kind === 'tool' && e.item.name === 'Bash',
       );
-      expect(bashStart?.item).toMatchObject({ toolKind: 'execute', title: 'Ran git status --short', status: 'running' });
+      expect(bashStart?.item).toMatchObject({ toolKind: 'execute', title: 'Ran git status --short', status: TOOL_STATUS.running });
       const bashDone = v2.find(
         (e): e is Extract<UiEvent, { type: 'item.completed' }> =>
           e.type === 'item.completed' && e.item.kind === 'tool' && e.item.name === 'Bash',
