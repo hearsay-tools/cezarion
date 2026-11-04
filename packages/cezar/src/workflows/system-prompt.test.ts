@@ -279,6 +279,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
       seamRoot = await seedRepo('cez-sysprompt-seams-');
       seamStore = RunStore.open(join(seamRoot, '.ai/cezar'));
       seamManager = createFixtureManager(seamStore, seamRoot, {
+        work: seamWork,
         semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }),
       });
       const context: RunModuleContext = { store: seamStore, repoRoot: seamRoot, dataDir: join(seamRoot, '.ai/cezar'),
