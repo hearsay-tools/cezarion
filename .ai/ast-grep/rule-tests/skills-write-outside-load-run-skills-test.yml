@@ -1,24 +1,26 @@
 id: skills-write-outside-load-run-skills
 valid:
+  - 'class A { async loadRunSkills(state: ActiveRun) { skillsWrites.catalog(state.skills, await discovery); } }'
   # The one owner.
-  - 'class A { private async loadRunSkills(state: ActiveRun) { state.skills = await this.discoverSkills() } }'
+  - 'class A { private async loadRunSkills(state: ActiveRun) { state.skills.catalog = await this.discoverSkills() } }'
   # A read is the other rule's business.
-  - 'const x = state.skills'
-  # Not an ActiveRun: `launch.skills` and a bare local are other objects' fields, and another map's
+  - 'const x = state.skills.catalog'
+  # Not an ActiveRun: `launch.skills.catalog` and a bare local are other objects' fields, and another map's
   # lookup is not the live map's.
-  - 'launch.skills = []'
+  - 'launch.skills.catalog = []'
   - 'const skills = await this.discoverSkills()'
-  - 'this.pending.get(runId).skills = skills'
+  - 'this.pending.get(runId).skills.catalog = skills'
   - 'state.session = undefined'
 invalid:
-  - 'state.skills = []'
-  - 'state.skills = skills'
-  - 'state.skills ??= []'
-  - 'state.skills += more'
-  - "state['skills'] = []"
-  - 'active.skills = skills'
-  - 'execution.state.skills = skills'
-  - 'this.active.get(runId).skills = skills'
-  - 'this.active.get(runId)!.skills = skills'
-  - 'class A { other(state: ActiveRun) { state.skills = [] } }'
-  - 'class A { async runContinuation(state: ActiveRun) { state.skills = await this.discoverSkills() } }'
+  - 'state.skills.catalog = []'
+  - 'state.skills.catalog = skills'
+  - 'state.skills.catalog ??= []'
+  - 'state.skills.catalog += more'
+  - "state['skills']['catalog'] = []"
+  - 'active.skills.catalog = skills'
+  - 'execution.state.skills.catalog = skills'
+  - 'this.active.get(runId).skills.catalog = skills'
+  - 'this.active.get(runId)!.skills.catalog = skills'
+  - 'class A { other(state: ActiveRun) { state.skills.catalog = [] } }'
+  - 'class A { async runContinuation(state: ActiveRun) { state.skills.catalog = await this.discoverSkills() } }'
+  - 'class A { async other(state: ActiveRun) { skillsWrites.catalog(state.skills, await discovery); } }'

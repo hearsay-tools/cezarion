@@ -1,5 +1,4 @@
 import { skillSchema } from '@open-mercato/cezar-contract/skills';
-import { runInternals } from './run-internals.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,18 +6,26 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  SUBAGENT_STATUS,
   RUN_STATUS,
   STEP_KIND,
   STEP_STATUS,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { RunStore } from '../runs/store.ts';
-import type { Skill } from '../skills.ts';
+import { discoverSkills, type Skill } from '../skills.ts';
+import { RunSkills } from './run/run-skills.ts';
+import { TrackedWork } from './run/tracked-work.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { createActiveRun } from './active-run.ts';
 import { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 
+vi.mock('../skills.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../skills.ts')>();
+  return { ...actual, discoverSkills: vi.fn(actual.discoverSkills) };
+});
+
+const unused = (): never => { throw new Error('unused RunSkills host method called'); };
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 
@@ -41,8 +48,8 @@ describe('createActiveRun', () => {
     // The keys the `execute` and `runContinuation` literals both set. A field added to `ActiveRun`
     // as required fails to compile in the factory; an optional one lands here.
     expect(Object.keys(state).sort()).toEqual([
-      'autonomous', 'backgroundChildren', 'cancelled', 'cwd', 'delegationSettings', 'interrupt', 'pendingHumanAsk',
-      'pendingPermissions', 'revokeDelegation',
+      'autonomous', 'cancelled', 'children', 'cwd', 'delegationSettings', 'interrupt', 'pendingHumanAsk',
+      'pendingPermissions', 'revokeDelegation', 'skills', 'usage',
     ]);
     expect(state).toMatchObject({ cwd: '/work/tree', pendingHumanAsk: true, autonomous: true, cancelled: false });
     expect(state.delegationSettings).toBeUndefined();
@@ -50,9 +57,9 @@ describe('createActiveRun', () => {
     expect(state.interrupt()).toBeUndefined();
     expect(state.pendingPermissions).toEqual(new Set());
     // No native subagent is known before a session reports one (hearsay-tools/cezarion#2431).
-    expect(state.backgroundChildren).toEqual(new Map());
+    expect([...state.children.backgroundChildren]).toEqual([]);
     // The registry is loaded after the run is registered, by `loadRunSkills`, never by the factory.
-    expect(state.skills).toBeUndefined();
+    expect(state.skills.catalog).toBeUndefined();
   });
 
   it('takes cwd, the pending ask and the mode from its caller, and shares no mutable state', () => {
@@ -62,77 +69,80 @@ describe('createActiveRun', () => {
     expect(second).toMatchObject({ cwd: '/b', pendingHumanAsk: true, autonomous: true });
     first.pendingPermissions?.add('p');
     expect(second.pendingPermissions?.size).toBe(0);
-    first.backgroundChildren.set('child', { session: undefined, status: SUBAGENT_STATUS.running });
-    expect(second.backgroundChildren.size).toBe(0);
+    expect(first.children).not.toBe(second.children);
+    expect(first.children.backgroundChildren).not.toBe(second.children.backgroundChildren);
+    expect(second.children.backgroundChildren.size).toBe(0);
   });
 });
 
 describe('loading a run\'s skill registry', () => {
   let repoRoot: string;
   let store: RunStore;
-  let manager: RunManager;
   const skill = (name: string): Skill => ({ name, description: name, body: `${name} body`, path: `/skills/${name}.md`, source: skillSchema.shape.source.enum.cezar });
-  const internals = () => runInternals(manager).runSkills;
+  let runSkills: RunSkills;
+  const loader = () => runSkills;
   const freshState = () => createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false });
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-1806-loader-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot);
+    runSkills = new RunSkills({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+      semaphore: new WorkspaceSemaphore(), work: new TrackedWork(), disposed: () => false }, {
+      builtinSkills: () => [], workerExecutionStopped: unused, isCurrentState: unused, flushAgentInputs: unused,
+    });
   });
 
-  afterEach(async () => {
-    await drainFixtureManagers(repoRoot);
-    const discover = runInternals(manager).runSkills.discoverSkills;
-    if (vi.isMockFunction(discover)) expect(discover).toHaveBeenCalled();
+  afterEach(() => {
+    expect(discoverSkills).toHaveBeenCalled();
+    vi.mocked(discoverSkills).mockReset();
     vi.restoreAllMocks();
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
   it('stores the discovered registry', async () => {
-    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValue([skill('a')]);
+    vi.mocked(discoverSkills).mockResolvedValue([skill('a')]);
     const state = freshState();
-    await internals().loadRunSkills(state, 'throw');
-    expect(internals().enabledSkills(state).map((s) => s.name)).toEqual(['a']);
+    await loader().loadRunSkills(state, 'throw');
+    expect(loader().enabledSkills(state).map((s) => s.name)).toEqual(['a']);
   });
 
   it("a failed discovery with 'throw' rejects and leaves the registry as it was (a fresh run fails, as before)", async () => {
-    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValueOnce([skill('a')]).mockRejectedValueOnce(new Error('boom'));
+    vi.mocked(discoverSkills).mockResolvedValueOnce([skill('a')]).mockRejectedValueOnce(new Error('boom'));
     const state = freshState();
-    await internals().loadRunSkills(state, 'throw');
-    await expect(internals().loadRunSkills(state, 'throw')).rejects.toThrow('boom');
-    expect(internals().enabledSkills(state).map((s) => s.name)).toEqual(['a']);
+    await loader().loadRunSkills(state, 'throw');
+    await expect(loader().loadRunSkills(state, 'throw')).rejects.toThrow('boom');
+    expect(loader().enabledSkills(state).map((s) => s.name)).toEqual(['a']);
   });
 
   it("a failed discovery with 'ignore' resolves and keeps the registry it had (a Continue never breaks)", async () => {
-    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValueOnce([skill('a')]).mockRejectedValueOnce(new Error('boom'));
+    vi.mocked(discoverSkills).mockResolvedValueOnce([skill('a')]).mockRejectedValueOnce(new Error('boom'));
     const state = freshState();
-    await internals().loadRunSkills(state, 'ignore');
-    await expect(internals().loadRunSkills(state, 'ignore')).resolves.toBeUndefined();
-    expect(internals().enabledSkills(state).map((s) => s.name)).toEqual(['a']);
+    await loader().loadRunSkills(state, 'ignore');
+    await expect(loader().loadRunSkills(state, 'ignore')).resolves.toBeUndefined();
+    expect(loader().enabledSkills(state).map((s) => s.name)).toEqual(['a']);
   });
 
   it('a team source disabled after the registry loaded drops its skills (hearsay-tools/cezarion#279)', async () => {
     const team = (name: string, repo: string): Skill => ({
       ...skill(name), source: 'team', team: { repo, ref: 'main', path: `commands/${name}.md`, dir: false },
     });
-    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValue([skill('a'), team('t', 'acme/one'), team('u', 'acme/two')]);
+    vi.mocked(discoverSkills).mockResolvedValue([skill('a'), team('t', 'acme/one'), team('u', 'acme/two')]);
     const state = freshState();
-    await internals().loadRunSkills(state, 'throw');
-    expect(internals().enabledSkills(state).map((s) => s.name)).toEqual(['a', 't', 'u']);
+    await loader().loadRunSkills(state, 'throw');
+    expect(loader().enabledSkills(state).map((s) => s.name)).toEqual(['a', 't', 'u']);
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({
       skillsRepos: [{ repo: 'acme/one', enabled: false }, { repo: 'acme/two' }],
     }));
-    expect(internals().enabledSkills(state).map((s) => s.name)).toEqual(['a', 'u']);
+    expect(loader().enabledSkills(state).map((s) => s.name)).toEqual(['a', 'u']);
   });
 
   it("a failed first discovery with 'ignore' leaves an empty registry", async () => {
-    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockRejectedValue(new Error('boom'));
+    vi.mocked(discoverSkills).mockRejectedValue(new Error('boom'));
     const state = freshState();
-    await expect(internals().loadRunSkills(state, 'ignore')).resolves.toBeUndefined();
-    expect(internals().enabledSkills(state)).toEqual([]);
+    await expect(loader().loadRunSkills(state, 'ignore')).resolves.toBeUndefined();
+    expect(loader().enabledSkills(state)).toEqual([]);
   });
 });
 
@@ -171,8 +181,8 @@ describe('every entry path loads the registry, with no live session before it (o
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
     if (runId) manager.cancel(runId);
-    const discover = runInternals(manager).runSkills.discoverSkills;
-    if (vi.isMockFunction(discover)) expect(discover).toHaveBeenCalled();
+    expect(discoverSkills).toHaveBeenCalled();
+    vi.mocked(discoverSkills).mockReset();
     vi.restoreAllMocks();
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
     else process.env.CEZ_DRY_RUN = savedDryRun;
@@ -197,10 +207,6 @@ describe('every entry path loads the registry, with no live session before it (o
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line) as { type: string; text?: string; stepId?: string });
-  const registryOf = (id: string): string[] | undefined => {
-    const live = (manager as unknown as { active: Map<string, { skills?: Skill[] }> }).active.get(id);
-    return live?.skills?.map((s) => s.name);
-  };
   const expandedFollowUp = (id: string) =>
     eventsOf(id).some((e) => e.type === 'text' && e.text?.includes('Selected skill: /demo-review'));
 
@@ -208,7 +214,8 @@ describe('every entry path loads the registry, with no live session before it (o
     const record = manager.startRun(SINGLE_STEP, { task: 'do the first thing', worktree: false });
     runId = record.id;
     await waitFor(() => store.getRun(record.id)?.status === 'waiting');
-    expect(registryOf(record.id)).toContain('demo-review');
+    expect(manager.sendMessage(record.id, [{ type: 'text', text: '/demo-review now review it' }])).toBe(true);
+    await waitFor(() => expandedFollowUp(record.id));
   }, 40_000);
 
   it('a Continue of a finished run, which has no live session, loads it', async () => {
@@ -217,11 +224,12 @@ describe('every entry path loads the registry, with no live session before it (o
     await waitFor(() => store.getRun(record.id)?.status === 'waiting');
     expect(manager.finish(record.id)).toBe(true);
     await waitFor(() => ['done', 'review'].includes(store.getRun(record.id)?.status ?? ''));
-    expect((manager as unknown as { active: Map<string, unknown> }).active.has(record.id)).toBe(false);
+    expect(store.getRun(record.id)?.currentStepId).toBeUndefined();
 
     expect(manager.continueRun(record.id, { text: 'keep going' })).toEqual({ ok: true });
     await waitFor(() => store.getRun(record.id)?.status === 'waiting');
-    expect(registryOf(record.id)).toContain('demo-review');
+    expect(manager.sendMessage(record.id, [{ type: 'text', text: '/demo-review now review it' }])).toBe(true);
+    await waitFor(() => expandedFollowUp(record.id));
   }, 40_000);
 
   it('restart recovery of an interrupted run, in a manager that never held it, loads it', async () => {
@@ -234,11 +242,10 @@ describe('every entry path loads the registry, with no live session before it (o
     runId = record.id;
     store.updateRun(record.id, { status: RUN_STATUS.running, currentStepId: 'task', workflowDef: SINGLE_STEP });
     store.updateStep(record.id, 'task', { status: STEP_STATUS.running, sessionId: 'sess-interrupted', backend: 'claude' });
-    expect((manager as unknown as { active: Map<string, unknown> }).active.has(record.id)).toBe(false);
+    expect(store.getRun(record.id)?.currentStepId).toBe('task');
 
     await manager.recover();
-    await waitFor(() => registryOf(record.id) !== undefined && store.getRun(record.id)?.status === 'waiting');
-    expect(registryOf(record.id)).toContain('demo-review');
+    await waitFor(() => store.getRun(record.id)?.status === 'waiting');
     expect(expandedFollowUp(record.id)).toBe(false);
     // The registry is what expands a follow-up: without it the backend answers "Unknown skill".
     expect(manager.sendMessage(record.id, [{ type: 'text', text: '/demo-review now review it' }])).toBe(true);
@@ -246,7 +253,7 @@ describe('every entry path loads the registry, with no live session before it (o
   }, 60_000);
 
   it('a failed discovery fails a fresh run, as before the loader', async () => {
-    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockRejectedValue(new Error('discovery boom'));
+    vi.mocked(discoverSkills).mockRejectedValue(new Error('discovery boom'));
     const record = manager.startRun(SINGLE_STEP, { task: 'do the first thing', worktree: false });
     runId = record.id;
     await waitFor(() => store.getRun(record.id)?.status === 'failed');
@@ -260,10 +267,12 @@ describe('every entry path loads the registry, with no live session before it (o
     expect(manager.finish(record.id)).toBe(true);
     await waitFor(() => ['done', 'review'].includes(store.getRun(record.id)?.status ?? ''));
 
-    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockRejectedValue(new Error('discovery boom'));
+    vi.mocked(discoverSkills).mockRejectedValue(new Error('discovery boom'));
     expect(manager.continueRun(record.id, { text: 'keep going' })).toEqual({ ok: true });
     await waitFor(() => store.getRun(record.id)?.status === 'waiting');
     expect(store.getRun(record.id)?.error).toBeUndefined();
-    expect(registryOf(record.id) ?? []).toEqual([]);
+    expect(manager.sendMessage(record.id, [{ type: 'text', text: '/demo-review now review it mock:agent-echo' }])).toBe(true);
+    await waitFor(() => eventsOf(record.id).some((event) => event.type === 'text' && event.text?.includes('/demo-review now review it mock:agent-echo')));
+    expect(expandedFollowUp(record.id)).toBe(false);
   }, 40_000);
 });

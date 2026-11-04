@@ -10,36 +10,47 @@ files:
   - packages/cezar/src/workflows/run.ts
   - packages/cezar/src/workflows/run/**
 utils:
-  # The ways run.ts reaches an ActiveRun, as in skills-read-outside-enabled-skills.yml: the `state`
-  # and `active` parameters, `execution.state`, and a direct lookup in the live map, bare or with a
-  # `!`. Not every `.skills`: `launch.skills` is another object's field. A write through a cast or a
-  # differently named local is not matched: the rule sees names, not types. A write with no
-  # assignment to `.skills` (`Object.assign(state, { skills })`, or the `skills` key of a literal)
-  # is not matched either; the only literal is createActiveRun's, which sets no registry.
+  # Preserve the existing named ActiveRun receivers, now followed by the skills group.
+  # The new ActiveRun skills owner rule also guards aliases and runtime escape syntax.
   active-run:
     any:
       - { kind: identifier, regex: '^(state|active)$' }
       - { kind: member_expression, has: { field: property, regex: '^state$' } }
       - pattern: this.active.get($$$)
       - { kind: non_null_expression, has: { pattern: this.active.get($$$) } }
+  skills-group:
+    any:
+      - all:
+          - kind: member_expression
+          - has: { field: object, matches: active-run }
+          - has: { field: property, regex: '^skills$' }
+      - all:
+          - kind: subscript_expression
+          - has: { field: object, matches: active-run }
+          - has: { field: index, regex: '^.skills.$' }
+  catalog-assignment:
+    all:
+      - any:
+          # `state.skills.catalog`, `state?.skills.catalog`, `state['skills']['catalog']`
+          - all:
+              - kind: member_expression
+              - has: { field: object, matches: skills-group }
+              - has: { field: property, regex: '^catalog$' }
+          - all:
+              - kind: subscript_expression
+              - has: { field: object, matches: skills-group }
+              - has: { field: index, regex: '^.catalog.$' }
+      # …as the target of `=`, or of `??=`, `||=`, `+=` and the like.
+      - inside:
+          any:
+            - { kind: assignment_expression }
+            - { kind: augmented_assignment_expression }
+          field: left
 rule:
   all:
     - any:
-        # `state.skills`, `state?.skills`, `state['skills']`
-        - all:
-            - kind: member_expression
-            - has: { field: object, matches: active-run }
-            - has: { field: property, regex: '^skills$' }
-        - all:
-            - kind: subscript_expression
-            - has: { field: object, matches: active-run }
-            - has: { field: index, regex: '^.skills.$' }
-    # …as the target of `=`, or of `??=`, `||=`, `+=` and the like.
-    - inside:
-        any:
-          - { kind: assignment_expression }
-          - { kind: augmented_assignment_expression }
-        field: left
+        - pattern: skillsWrites.catalog($$$)
+        - matches: catalog-assignment
     - not:
         inside:
           kind: method_definition

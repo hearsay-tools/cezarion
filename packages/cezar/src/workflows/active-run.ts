@@ -1,15 +1,15 @@
-import type { SubagentChild } from '@open-mercato/cezar-contract/waits';
+import { createChildrenGroup, type ChildrenGroup } from './run/subagent-waits.ts';
 import type { AgentSession, InputDelivery } from '../core/agent-runner.ts';
-import type { Skill } from '../skills.ts';
+import { createSkillsGroup, type SkillsGroup } from './run/run-skills.ts';
 import type { DelegationExecutionSettings } from './run/types.ts';
+import { createUsageGroup, type UsageGroup } from './run/usage-accounting.ts';
 
 /**
  * The in-memory state of a run this manager is executing, and the one place it is built
  * (hearsay-tools/cezarion#1806). `RunManager` registers every instance through `activate`.
  */
 export interface ActiveRun {
-  /** Last cumulative Claude report per provider session during this process. */
-  reportedClaudeCost?: Map<string, number>;
+  readonly usage: UsageGroup;
   delegationSettings?: DelegationExecutionSettings | undefined;
   revokeDelegation?: (() => void) | undefined;
   revokeCiTools?: (() => void) | undefined;
@@ -109,34 +109,18 @@ export interface ActiveRun {
   /** Session whose turn that just ended answered a refusal nudge (hearsay-tools/cezarion#1301): a
    *  blocked done at this turn end takes the second step. Every turn end sets or clears it. */
   completionNudgeAnswered?: AgentSession | undefined;
-  /** Registry snapshot used to expand `/skill` follow-ups before a backend can
-   *  mistake them for its own slash commands (hearsay-tools/cezarion#676). Only `RunSkills.loadRunSkills` writes it,
-   *  and only `RunSkills.enabledSkills` reads it. */
-  skills?: Skill[];
-  /** The install a live `/name` started after its message went out (hearsay-tools/cezarion#1408); tests await it. */
-  liveSkillProvisioning?: Promise<void>;
+  readonly skills: SkillsGroup;
   /** Release for exclusive execution in the user's repository working tree.
    *  Worktree-backed runs never need it; root runs ordinarily do unless the
    *  explicit unsafe bypass is active. */
   releaseRepoRoot?: (() => void) | undefined;
-  /** Durable directional-usage accounting state for the current runner
-   * invocation. Provider-local turn ids are unique only within this epoch. */
-  /** Native subagents a session started in the background (hearsay-tools/cezarion#2431), by the
-   *  runner's root task item id: the session that holds each, and its last status. */
-  backgroundChildren: Map<string, { session: AgentSession | undefined; status: SubagentChild['status'] }>;
+  readonly children: ChildrenGroup;
   /** Cezar is writing input into the session now: a parent turn that starts during the write is
    *  Cezar's, not one the runner started itself (hearsay-tools/cezarion#2431). */
   writingInput?: boolean | undefined;
   /** A park for the user kept the session and its slot for running native subagents
    *  (hearsay-tools/cezarion#2431): their last end gives both back. */
   heldForSubagents?: boolean | undefined;
-  usageInvocation?: {
-    stepId: string;
-    epoch: number;
-    observed: boolean;
-    startedTurns: Set<string>;
-    recordedTurns: Set<string>;
-  };
 }
 
 /** Run Cezar's own write into the session: a parent turn the runner starts during it is Cezar's
@@ -170,12 +154,18 @@ export interface ActiveRunInit {
  * `RunSkills.loadRunSkills` loads it, from the same two callers.
  */
 export function createActiveRun(init: ActiveRunInit): ActiveRun {
-  return {
+  const state = {
+    usage: createUsageGroup(),
     delegationSettings: undefined, revokeDelegation: undefined,
     cancelled: false, interrupt: () => undefined, cwd: init.cwd,
     pendingHumanAsk: init.pendingHumanAsk,
-    pendingPermissions: new Set(),
-    backgroundChildren: new Map(),
+    pendingPermissions: new Set<string>(),
+    children: createChildrenGroup(),
+    skills: createSkillsGroup(),
     autonomous: init.autonomous,
   };
+  Object.defineProperty(state, 'usage', { writable: false, configurable: false });
+  Object.defineProperty(state, 'children', { writable: false, configurable: false });
+  Object.defineProperty(state, 'skills', { writable: false, configurable: false });
+  return state;
 }

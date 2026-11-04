@@ -21,7 +21,8 @@ import { discoverSkills } from '../skills.ts';
 import { bareDirFor, refreshTeamSkills } from '../skills-remote.ts';
 import { seedTeamDirSkillClone, writeSkillsReposConfig } from '../skills-remote.testkit.ts';
 import { RunManager } from './run.ts';
-import { runInternals } from './run-internals.testkit.ts';
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
+import type { CezarToolHandlers } from '../ci-wait/controller.ts';
 import { plannedWorkflow, skillTaskSteps, type WorkflowDef } from './types.ts';
 
 const LAUNCH_WAIT_MS = 15_000;
@@ -39,6 +40,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
   let store: RunStore;
   let manager: RunManager;
   let launches: AgentRunSpec[];
+  let tools: Map<string, CezarToolHandlers>;
   let sessions: Array<(done?: boolean) => Promise<void>>;
   let sent: string[];
   let cleanup: string[];
@@ -63,6 +65,11 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     await execFileAsync('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
     manager = createFixtureManager(store, repoRoot);
+    tools = new Map();
+    const handlers = manager.cezarToolHandlers.bind(manager);
+    vi.spyOn(manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
+      const value = handlers(id, generation); tools.set(id, value); return value;
+    });
     vi.spyOn(runners, 'createRunner').mockImplementation((backend) => ({
       backend: backend ?? 'claude',
       specSupport: CLAUDE_SPEC_SUPPORT,
@@ -96,9 +103,9 @@ describe('team directory skills never land in the main checkout (#1024)', { time
         sessions.push(async (done = true) => {
           try {
             const runId = spec.env?.CEZ_TASK_ID;
-            const generation = runId === undefined ? undefined : runInternals(manager).active.get(runId)?.ciGeneration;
-            if (open && done && runId !== undefined && generation !== undefined) {
-              await manager.cezarToolHandlers(runId, generation).finishTurn({}, new AbortController().signal);
+            const tool = runId === undefined ? undefined : tools.get(runId);
+            if (open && done && runId !== undefined && tool !== undefined) {
+              await tool.finishTurn({}, new AbortController().signal);
               onEvent?.({ type: 'text', text: 'ok' });
               onEvent?.({ type: 'turn-end' });
             }
@@ -413,8 +420,11 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     const run = await launch(promptWorkflow, 'go');
     switchOff(repo);
     expect(manager.sendMessage(run.id, [{ type: 'text', text: '/lead-1494 now' }])).toBe(true);
-    await (manager as unknown as { active: Map<string, { liveSkillProvisioning?: Promise<void> }> })
-      .active.get(run.id)?.liveSkillProvisioning;
+    // The durable install notification follows the whole provisioning pass.
+    // bound: the real git/cache install must finish before checking the companion's absence.
+    await vi.waitFor(() => expect(store.readEvents(run.id).some((event) =>
+      event.type === 'agent-input' && agentInputSchema.parse(event.input).text.includes('Skills installed for /lead-1494:'))).toBe(true),
+    { timeout: LAUNCH_WAIT_MS });
     for (const agentDir of AGENT_SKILL_DIRS) {
       expect(existsSync(join(run.spec.cwd, agentDir, 'skills', 'lead-1494')), `${agentDir} lead`).toBe(true);
       expect(existsSync(join(run.spec.cwd, agentDir, 'skills', TEAM_SKILL)), `${agentDir} team`).toBe(false);

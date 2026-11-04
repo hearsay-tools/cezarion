@@ -1,3 +1,4 @@
+import { ReadonlyMapView, ReadonlySetView } from './readonly-collections.ts';
 import type { RunnerId } from '../../core/agent-runner.ts';
 import { unregisterRunProcess } from '../../core/process-usage.ts';
 import type { UiEvent } from '../../core/ui-events.ts';
@@ -7,6 +8,74 @@ import type { ActiveRun } from '../active-run.ts';
 export interface UsageAccountingHost {
   isDisposedDelegatedRun(runId: string): boolean;
 }
+
+// These capabilities stay in this module. Static initialization grants access to private
+// state without adding a public mutation method to a group, invocation or read facade.
+let invocationWrites: {
+  start(invocation: UsageInvocation, turnId: string): void;
+  record(invocation: UsageInvocation, turnId: string): void;
+};
+
+/** Durable directional-usage accounting state for the current runner
+ * invocation. Provider-local turn ids are unique only within this epoch. */
+export class UsageInvocation {
+  #stepId: string;
+  #epoch: number;
+  #observed = false;
+  #startedTurns = new Set<string>();
+  #recordedTurns = new Set<string>();
+  #startedView = new ReadonlySetView(this.#startedTurns);
+  #recordedView = new ReadonlySetView(this.#recordedTurns);
+  constructor(stepId: string, epoch: number) {
+    this.#stepId = stepId; this.#epoch = epoch; Object.freeze(this);
+  }
+  get stepId(): string { return this.#stepId; }
+  get epoch(): number { return this.#epoch; }
+  get observed(): boolean { return this.#observed; }
+  get startedTurns(): ReadonlySet<string> { return this.#startedView; }
+  get recordedTurns(): ReadonlySet<string> { return this.#recordedView; }
+  static {
+    invocationWrites = {
+      start(invocation, turnId) { invocation.#startedTurns.add(turnId); invocation.#observed = true; },
+      record(invocation, turnId) { invocation.#recordedTurns.add(turnId); },
+    };
+  }
+}
+
+let usageWrites: {
+  begin(group: UsageGroup, stepId: string, epoch: number): void;
+  costs(group: UsageGroup): Map<string, number>;
+};
+
+/** Accounting state has one writer; every public property is a live read view. */
+export class UsageGroup {
+  #reportedClaudeCost: Map<string, number> | undefined;
+  #costView: ReadonlyMapView<string, number> | undefined;
+  #usageInvocation: UsageInvocation | undefined;
+  constructor() { Object.freeze(this); }
+  /** Last cumulative Claude report per provider session during this process. */
+  get reportedClaudeCost(): ReadonlyMap<string, number> | undefined { return this.#costView; }
+  get usageInvocation(): UsageInvocation | undefined { return this.#usageInvocation; }
+  static {
+    usageWrites = {
+      begin(group, stepId, epoch) { group.#usageInvocation = new UsageInvocation(stepId, epoch); },
+      costs(group) {
+        if (!group.#reportedClaudeCost) {
+          group.#reportedClaudeCost = new Map();
+          group.#costView = new ReadonlyMapView(group.#reportedClaudeCost);
+        }
+        return group.#reportedClaudeCost;
+      },
+    };
+  }
+}
+
+for (const type of [UsageGroup, UsageInvocation]) {
+  Object.freeze(type.prototype);
+  Object.freeze(type);
+}
+
+export function createUsageGroup(): UsageGroup { return new UsageGroup(); }
 
 /** Persist the invocation checkpoint before launching a runner. A throw or
  * process exit before `turn.started` therefore leaves a durable mismatch. */
@@ -18,13 +87,7 @@ export function beginUsageInvocation(store: RunStore, runId: string, state: Acti
     usageInvocationEpoch: epoch,
     usageInvocationsStarted: (step.usageInvocationsStarted ?? 0) + 1,
   });
-  state.usageInvocation = {
-    stepId,
-    epoch,
-    observed: false,
-    startedTurns: new Set(),
-    recordedTurns: new Set(),
-  };
+  usageWrites.begin(state.usage, stepId, epoch);
 }
 
 /** Claude's `total_cost_usd` is cumulative for the conversation, including
@@ -37,13 +100,13 @@ export function recordReportedCost(store: RunStore, runId: string, stepId: strin
   let delta = reportedUsd;
   if (backend === 'claude') {
     const sessionKey = step.sessionId ?? step.id;
-    state.reportedClaudeCost ??= new Map();
-    let previous = state.reportedClaudeCost.get(sessionKey);
+    const costs = usageWrites.costs(state.usage);
+    let previous = costs.get(sessionKey);
     if (previous === undefined) {
       previous = restoreReportedClaudeCost(store, runId, stepId, run, step, reportedUsd);
     }
     delta = Math.max(0, reportedUsd - previous);
-    state.reportedClaudeCost.set(sessionKey, Math.max(previous, reportedUsd));
+    costs.set(sessionKey, Math.max(previous, reportedUsd));
   }
   store.updateStep(runId, stepId, { costUsd: (step.costUsd ?? 0) + delta });
 }
@@ -103,16 +166,15 @@ function restoreReportedClaudeCost(
  * once. Invocation/turn counters are written before the event reaches the
  * NDJSON sink so crashes cannot preserve a falsely complete subtotal. */
 export function recordUsageUiEvent(store: RunStore, runId: string, state: ActiveRun, event: UiEvent): void {
-  const invocation = state.usageInvocation;
+  const invocation = state.usage.usageInvocation;
   if (!invocation) return;
   const step = store.getRun(runId)?.steps.find((candidate) => candidate.id === invocation.stepId);
   if (!step) return;
 
   if (event.type === 'turn.started') {
     if (invocation.startedTurns.has(event.turnId)) return;
-    invocation.startedTurns.add(event.turnId);
     const firstObservedTurn = !invocation.observed;
-    invocation.observed = true;
+    invocationWrites.start(invocation, event.turnId);
     persistUsageCheckpoint(store, runId, invocation.stepId, {
       usageTurnsStarted: (step.usageTurnsStarted ?? 0) + 1,
       ...(firstObservedTurn
@@ -130,7 +192,7 @@ export function recordUsageUiEvent(store: RunStore, runId: string, state: Active
 function recordCompletedTurnUsage(
   store: RunStore,
   runId: string,
-  invocation: NonNullable<ActiveRun['usageInvocation']>,
+  invocation: UsageInvocation,
   step: StepState,
   event: Extract<UiEvent, { type: 'turn.completed' }>,
 ): void {
@@ -147,7 +209,7 @@ function recordCompletedTurnUsage(
   ) {
     return;
   }
-  invocation.recordedTurns.add(event.turnId);
+  invocationWrites.record(invocation, event.turnId);
   persistUsageCheckpoint(store, runId, invocation.stepId, {
     inputTokens: (step.inputTokens ?? 0) + input,
     outputTokens: (step.outputTokens ?? 0) + output,

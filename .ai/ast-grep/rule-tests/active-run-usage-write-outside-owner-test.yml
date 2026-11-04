@@ -1,0 +1,87 @@
+id: active-run-usage-write-outside-owner
+valid:
+  - const value = state.usage.usageInvocation?.observed
+  - const view = state.usage.startedTurns; view.has("turn")
+  - 'const { startedTurns: turns } = invocation; turns.has("turn")'
+  - const snapshot = { ...state.usage }
+  - "const unrelated = {}; Object.assign(unrelated, { observed: true })"
+  - "event.usage = { input: 1, output: 2 }"
+  - "const value = event.usage as { input: number }"
+  - "class UsageGroup { #cost = new Map(); get cost() { return this.#cost; } }"
+  - "function createActiveRun() { Object.defineProperty(container, 'usage', {
+    value: new UsageGroup(), writable: false, configurable: false }); return
+    container; }"
+  - "function f(state: ActiveRun) { state.cancelled = true;
+    state.pendingPermissions?.add('x'); }"
+  - const state = createActiveRun(init); state.cancelled = true;
+    state.pendingPermissions?.add('x');
+  - "function f(state: ActiveRun) { const alias = state; alias.cancelled = true;
+    alias.pendingPermissions?.add('x'); }"
+  - "const value = event.usage; event.usage = { input: 1, output: 2 };"
+  - "const value = event['usage']; event['usage'] = { input: 1, output: 2 };"
+  - "function owner(group: UsageGroup) { group.#cost = 1; group.#costs.set('x',
+    1); }"
+  - "function owner(invocation: UsageInvocation) { invocation.#observed = true;
+    invocation.#startedTurns.add('x'); }"
+invalid:
+  - "function f(state: ActiveRun) { state.usage = other.usage; }"
+  - 'function f(state: ActiveRun) { state["usage"] = other.usage; }'
+  - "function f(state: ActiveRun) { delete state.usage; }"
+  - "function f(state: ActiveRun) { state.usage ??= other.usage; }"
+  - state.usage.usageInvocation.observed = true
+  - state.usage.usageInvocation.epoch++
+  - state.usage.reportedClaudeCost.set("session", 1)
+  - state.usage.usageInvocation.startedTurns.add("turn")
+  - state.usage.usageInvocation.recordedTurns.clear()
+  - state.usage.usageInvocation.startedTurns["add"]("turn")
+  - const view = state.usage.reportedClaudeCost; view.set("session", 1)
+  - "const { reportedClaudeCost: costs } = state.usage; costs.clear()"
+  - const { startedTurns } = state.usage.usageInvocation;
+    startedTurns.add("turn")
+  - 'function f(view: ReadonlySetView) { view.add("turn"); }'
+  - "function f(view: ReadonlySetView) { Object.assign(view, {}); }"
+  - 'import type { ReadonlySetView as Turns } from "./usage-accounting.ts";
+    function f(view: Turns) { Reflect.set(view, "size", 1); }'
+  - state.usage.reportedClaudeCost as Map<string, number>
+  - state.usage.usageInvocation.startedTurns as Set<string>
+  - state.usage as any
+  - state.usage as unknown
+  - state.usage as unknown as MutableUsage
+  - <Map<string, number>>state.usage.reportedClaudeCost
+  - const view = state.usage.usageInvocation; view as any
+  - "const { usageInvocation: view } = state.usage; view as unknown as
+    MutableUsage"
+  - ({ ...state.usage }) as UsageGroup
+  - "Object.assign(state.usage, { usageInvocation: other })"
+  - "const view = state.usage.usageInvocation; Object.assign(view, { observed:
+    true })"
+  - 'Object.defineProperty(state.usage, "usageInvocation", { value: other })'
+  - "Object.defineProperties(state.usage, { usageInvocation: { value: other } })"
+  - 'Reflect.defineProperty(state.usage, "usageInvocation", { value: other })'
+  - Reflect.set(state.usage, "usageInvocation", other)
+  - Object.setPrototypeOf(state.usage, other)
+  - Reflect.setPrototypeOf(state.usage, other)
+  - Reflect.deleteProperty(state.usage, "usageInvocation")
+  - Object.assign(state.usage, { ...other })
+  - "function f(state: ActiveRun) { Object.assign(state, { usage: other.usage
+    }); }"
+  - "const state = createActiveRun(init); Object.assign(state, { usage:
+    other.usage })"
+  - 'function f(state: ActiveRun) { Object.defineProperty(state, "usage", {
+    value: other.usage }); }'
+  - "function f(target: ActiveRun, key: string, replacement: UsageGroup) {
+    Object.assign(target, { [key]: replacement }); }"
+  - "function f(target: ActiveRun, key: string, replacement: UsageGroup) {
+    Reflect.set(target, key, replacement); }"
+  - class UsageGroup { mutable = {}; }
+  - class UsageInvocation { readonly mutable = new Set(); }
+  - class ReadonlyMapView { backing = new Map(); }
+  - class ReadonlySetView { backing = new Set(); }
+  - "function f(state: ActiveRun) { const alias = state; alias.usage =
+    other.usage; }"
+  - "function f(state: ActiveRun) { const alias = state; Object.assign(alias, {
+    usage: other.usage }); }"
+  - "function f(group: UsageGroup) { group.reportedClaudeCost.clear(); }"
+  - "function f(invocation: UsageInvocation) { invocation.observed = true; }"
+  - 'const view = new ReadonlyMapView(backing); view as Map<string, number>'
+  - 'const view = createUsageGroup(); Object.assign(view, { usageInvocation: other })'

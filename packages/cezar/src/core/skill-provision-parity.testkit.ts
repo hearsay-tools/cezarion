@@ -1,3 +1,5 @@
+import { observationClock } from './observation-clock.testkit.ts';
+import { IDLE_TIMEOUT_MS } from '../workflows/run/constants.ts';
 import { partitionParity, type ParityPart, type ParityCollector } from './parity-partition.testkit.ts';
 /**
  * hearsay-tools/cezarion#1408 (port of upstream open-mercato/cezar#1429): a task's selected skill and the
@@ -10,6 +12,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { setImmediate as nextMacrotask } from 'node:timers/promises';
 import { afterEach, expect, vi } from 'vitest';
 import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { HARNESS_ADAPTERS, SKILL_PROVISION_CRITERIA, promptFor, waitFor } from './harness-parity.testkit.ts';
@@ -20,6 +23,17 @@ import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture
 import type { RunManager } from '../workflows/run.ts';
 import { plannedWorkflow, skillTaskSteps } from '../workflows/types.ts';
 
+const observedProvisioning = vi.hoisted(() => ({
+  promises: Array<ReturnType<typeof import('../skills-provision.ts').provisionSkills>>(),
+}));
+vi.mock('../skills-provision.ts', async original => {
+  const actual = await original<typeof import('../skills-provision.ts')>();
+  return { ...actual, provisionSkills: (...args: Parameters<typeof actual.provisionSkills>) => {
+    const result = actual.provisionSkills(...args);
+    observedProvisioning.promises.push(result); return result;
+  } };
+});
+
 const execFileAsync = promisify(execFile);
 const GIT_IDENTITY = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 const AGENT_DIRS = ['.claude', '.agents', '.cursor'];
@@ -29,7 +43,7 @@ const LIVE = 'live-1408';
 const EXTRA = 'extra-1408';
 const LIVE_NOTE = `Skills installed for /${LIVE}: ${LIVE}, ${EXTRA}.`;
 
-afterEach(() => { vi.restoreAllMocks(); });
+afterEach(() => { observedProvisioning.promises.length = 0; vi.restoreAllMocks(); });
 
 const fileText = (path: string) => existsSync(path) ? readFileSync(path, 'utf8') : '';
 
@@ -46,16 +60,6 @@ function removeInstalled(worktree: string, name: string): void {
   for (const dir of AGENT_DIRS) rmSync(join(worktree, dir, 'skills', name), { recursive: true, force: true });
 }
 
-async function idleClose(manager: RunManager, runId: string): Promise<void> {
-  type State = { idleTimer?: NodeJS.Timeout & { _onTimeout?: () => void } };
-  const stateOf = () => {
-    return (manager as unknown as { active: Map<string, State> }).active.get(runId);
-  };
-  await waitFor(() => typeof stateOf()?.idleTimer?._onTimeout === 'function');
-  stateOf()!.idleTimer!._onTimeout!();
-  await waitFor(() => !manager.isActive(runId));
-}
-
 interface Fixture {
   repoRoot: string;
   runId: string;
@@ -64,6 +68,7 @@ interface Fixture {
   readonly manager: RunManager;
   wire(): string;
   restart(): Promise<void>;
+  closeIdle(): Promise<void>;
 }
 
 async function withProvisionRun(
@@ -86,6 +91,7 @@ async function withProvisionRun(
   remember('CEZ_MOCK_ARGS_FILE', argsFile);
   remember('CEZ_MOCK_STDIN_FILE', stdinFile);
   remember('CEZ_DRY_RUN', undefined);
+  const clock = observationClock(delay => delay === IDLE_TIMEOUT_MS);
   let store: RunStore | undefined;
   let manager: RunManager | undefined;
   try {
@@ -128,10 +134,16 @@ async function withProvisionRun(
       get manager() { return manager!; },
       wire: () => fileText(argsFile) + fileText(stdinFile),
       restart,
+      closeIdle: async () => {
+        await waitFor(() => clock.captured > 0);
+        await clock.advance(IDLE_TIMEOUT_MS);
+        await waitFor(() => !manager!.isActive(started.id));
+      },
     });
   } finally {
     await drainFixtureManagers(repoRoot);
     store?.close();
+    clock.restore();
     for (const [name, value] of saved.reverse()) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
@@ -142,9 +154,12 @@ async function withProvisionRun(
 
 const parked = (fixture: Fixture) => fixture.store.getRun(fixture.runId)?.status === 'waiting' && fixture.manager.isActive(fixture.runId);
 
-function liveProvisioning(fixture: Fixture): Promise<void> | undefined {
-  return (fixture.manager as unknown as { active: Map<string, { liveSkillProvisioning?: Promise<void> }> })
-    .active.get(fixture.runId)?.liveSkillProvisioning;
+async function liveProvisioning(after: number): Promise<void> {
+  await waitFor(() => observedProvisioning.promises.length > after);
+  await observedProvisioning.promises[after];
+  // The owning closure resumes after this dependency. Its no-install path then
+  // returns without a durable notification; let that continuation finish too.
+  await nextMacrotask();
 }
 
 const PARTS: Readonly<Record<string, readonly string[]>> = {
@@ -207,7 +222,7 @@ describe('harness parity — skill provisioning (#1408)', () => {
 
     it(`${backend} R93 provisions the selected skill's companions on an ordinary Continue`, async () => {
       await withProvisionRun(backend, async (fixture) => {
-        await idleClose(fixture.manager, fixture.runId);
+        await fixture.closeIdle();
         removeInstalled(fixture.worktree, HELPER);
         expect(fixture.manager.continueRun(fixture.runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
         await waitFor(() => parked(fixture), 30_000);
@@ -217,7 +232,7 @@ describe('harness parity — skill provisioning (#1408)', () => {
 
     it(`${backend} R94 provisions them when recover() resumes a continuation with no live session`, async () => {
       await withProvisionRun(backend, async (fixture) => {
-        await idleClose(fixture.manager, fixture.runId);
+        await fixture.closeIdle();
         removeInstalled(fixture.worktree, HELPER);
         expect(fixture.manager.continueRun(fixture.runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
         expect(fixture.store.getRun(fixture.runId)?.continuationMessage).toBeDefined();
@@ -229,13 +244,15 @@ describe('harness parity — skill provisioning (#1408)', () => {
 
     it(`${backend} R95 delivers a live /name, then one input naming what was installed`, async () => {
       await withProvisionRun(backend, async (fixture) => {
+        const firstPass = observedProvisioning.promises.length;
         expect(fixture.manager.sendMessage(fixture.runId, [{ type: 'text', text: `/${LIVE} go${backend === 'codex' ? ' mock:steer-race' : ''}` }])).toBe(true);
-        await liveProvisioning(fixture);
+        await liveProvisioning(firstPass);
         expect(installed(fixture.worktree, EXTRA)).toBe(true);
         // A fast mock turn can park on a new question first; the input then waits for its answer,
         // which this second message is. Nothing new installs for it, so no second input follows.
+        const secondPass = observedProvisioning.promises.length;
         expect(fixture.manager.sendMessage(fixture.runId, [{ type: 'text', text: `/${LIVE} again` }])).toBe(true);
-        await liveProvisioning(fixture);
+        await liveProvisioning(secondPass);
         await waitFor(() => fixture.wire().includes(LIVE_NOTE) && fixture.wire().includes('again'), 30_000);
         await waitFor(() => parked(fixture), 30_000);
         const notes = fixture.store.getRun(fixture.runId)?.agentInputs?.filter(input => input.text === LIVE_NOTE);

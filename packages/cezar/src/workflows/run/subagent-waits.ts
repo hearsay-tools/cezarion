@@ -1,10 +1,11 @@
+import { ReadonlyMapView } from './readonly-collections.ts';
 import { randomUUID } from 'node:crypto';
 import {
   SUBAGENT_WAIT_CHILD_LIMIT, SUBAGENT_WAIT_DEADLINE_SECONDS, SUBAGENT_WAIT_GRACE_SECONDS,
   type SubagentChild, type SubagentWaitEntry, type SubagentWaitResult, type Wait,
 } from '@open-mercato/cezar-contract/waits';
 import type { UiEvent, UiToolItem } from '../../core/ui-events.ts';
-import type { RunnerId } from '../../core/agent-runner.ts';
+import type { AgentSession, RunnerId } from '../../core/agent-runner.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import type { ActiveRun } from '../active-run.ts';
 import { openWaits } from '../waits.ts';
@@ -20,6 +21,24 @@ import type { RunModuleContext } from './types.ts';
  */
 
 type SubagentStatus = SubagentChild['status'];
+type BackgroundChild = Readonly<{ session: AgentSession | undefined; status: SubagentStatus }>;
+let observeBackgroundChild: (group: ChildrenGroup, id: string, child: BackgroundChild) => void;
+
+/** Native subagents a session started in the background (hearsay-tools/cezarion#2431), by the
+ * runner's root task item id: the session that holds each, and its last status. */
+export class ChildrenGroup {
+  #backgroundChildren = new Map<string, BackgroundChild>();
+  #view = new ReadonlyMapView(this.#backgroundChildren);
+  constructor() { Object.freeze(this); }
+  get backgroundChildren(): ReadonlyMap<string, BackgroundChild> { return this.#view; }
+  static {
+    observeBackgroundChild = (group, id, child) => { group.#backgroundChildren.set(id, Object.freeze(child)); };
+  }
+}
+Object.freeze(ChildrenGroup.prototype);
+Object.freeze(ChildrenGroup);
+export function createChildrenGroup(): ChildrenGroup { return new ChildrenGroup(); }
+
 /** How long a failed interruption waits before it writes the children's ends again: at most half the deadline, so it comes first. */
 const INTERRUPT_RETRY_MS = 60_000;
 type ChildEvent = { id: string; status: SubagentStatus; background: boolean };
@@ -60,7 +79,7 @@ export function backgroundChildEvent(event: UiEvent): ChildEvent | undefined {
 /** The live children of the session the run holds now. */
 export function liveSubagents(state: ActiveRun): number {
   let live = 0;
-  for (const child of state.backgroundChildren.values()) if (child.session === state.session && child.status === 'running') live += 1;
+  for (const child of state.children.backgroundChildren.values()) if (child.session === state.session && child.status === 'running') live += 1;
   return live;
 }
 
@@ -87,10 +106,10 @@ export class SubagentWaits {
   trackEvent(runId: string, state: ActiveRun, event: UiEvent): void {
     const child = backgroundChildEvent(event);
     if (!child) return;
-    const known = state.backgroundChildren.get(child.id);
+    const known = state.children.backgroundChildren.get(child.id);
     if (!known && !child.background) return;
     if (known && (known.status !== 'running' || known.status === child.status)) return;
-    state.backgroundChildren.set(child.id, { session: known ? known.session : state.session, status: child.status });
+    observeBackgroundChild(state.children, child.id, { session: known ? known.session : state.session, status: child.status });
     // A child that runs again voids the grace: the next time none runs, a full grace starts.
     const live = liveSubagents(state);
     if (live) this.clearGrace(runId);
@@ -135,7 +154,7 @@ export class SubagentWaits {
   /** The children the wait saves: the session's own, the running ones first, then the latest ends,
    *  within the bound. */
   private children(state: ActiveRun): SubagentChild[] {
-    const own = [...state.backgroundChildren].filter(([, child]) => child.session === state.session).map(([id, child]) => ({ id, status: child.status }));
+    const own = [...state.children.backgroundChildren].filter(([, child]) => child.session === state.session).map(([id, child]) => ({ id, status: child.status }));
     const running = own.filter(child => child.status === 'running').slice(0, SUBAGENT_WAIT_CHILD_LIMIT);
     const room = SUBAGENT_WAIT_CHILD_LIMIT - running.length;
     return [...running, ...(room > 0 ? own.filter(child => child.status !== 'running').slice(-room) : [])];

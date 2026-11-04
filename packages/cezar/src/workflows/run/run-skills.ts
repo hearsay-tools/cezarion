@@ -13,6 +13,61 @@ import type { ActiveRun } from '../active-run.ts';
 import { leadingSlashSkillName } from './prompts.ts';
 import type { RunModuleContext } from './types.ts';
 
+/** A live team record view. Shared catalog records remain owned by discovery. */
+export class SkillTeamView {
+  #skill: Skill;
+  constructor(skill: Skill) { this.#skill = skill; Object.freeze(this); }
+  get repo(): string { return this.#skill.team!.repo; }
+  get ref(): string { return this.#skill.team!.ref; }
+  get path(): string { return this.#skill.team!.path; }
+  get dir(): boolean { return this.#skill.team!.dir; }
+  get commit(): string | undefined { return this.#skill.team!.commit; }
+}
+
+/** Each getter reads the shared entry, without granting writes to that entry. */
+export class SkillView {
+  #skill: Skill;
+  #team: SkillTeamView;
+  constructor(skill: Skill) {
+    this.#skill = skill; this.#team = new SkillTeamView(skill);
+    Object.freeze(this);
+  }
+  get name(): string { return this.#skill.name; }
+  get description(): string | undefined { return this.#skill.description; }
+  get interactive(): true | undefined { return this.#skill.interactive; }
+  get body(): string { return this.#skill.body; }
+  get path(): string { return this.#skill.path; }
+  get source(): Skill['source'] { return this.#skill.source; }
+  get team(): SkillTeamView | undefined { return this.#skill.team ? this.#team : undefined; }
+}
+
+let skillsWrites: {
+  catalog(group: SkillsGroup, catalog: Skill[]): void;
+  provisioning(group: SkillsGroup, pending: Promise<void>): void;
+};
+export class SkillsGroup {
+  #catalog: readonly SkillView[] | undefined;
+  #liveSkillProvisioning: Promise<void> | undefined;
+  constructor() { Object.freeze(this); }
+  /** Registry snapshot used to expand `/skill` follow-ups before a backend can
+   *  mistake them for its own slash commands (hearsay-tools/cezarion#676). Only `RunSkills.loadRunSkills` writes it,
+   *  and only `RunSkills.enabledSkills` reads it. */
+  get catalog(): readonly SkillView[] | undefined { return this.#catalog; }
+  /** The install a live `/name` started after its message went out (hearsay-tools/cezarion#1408); tests await it. */
+  get liveSkillProvisioning(): Promise<void> | undefined { return this.#liveSkillProvisioning; }
+  static {
+    skillsWrites = {
+      catalog(group, catalog) { group.#catalog = Object.freeze(catalog.map((skill) => new SkillView(skill))); },
+      provisioning(group, pending) { group.#liveSkillProvisioning = pending; },
+    };
+  }
+}
+for (const type of [SkillTeamView, SkillView, SkillsGroup]) {
+  Object.freeze(type.prototype);
+  Object.freeze(type);
+}
+export function createSkillsGroup(): SkillsGroup { return new SkillsGroup(); }
+
 interface RunSkillsHost {
   builtinSkills(): Skill[];
   workerExecutionStopped(runId: string): boolean;
@@ -29,7 +84,7 @@ export class RunSkills {
   }
 
   /**
-   * Load the run's skill registry: the ONLY writer of `state.skills` (hearsay-tools/cezarion#1806).
+   * Load the run's skill registry: the ONLY writer of `state.skills.catalog` (hearsay-tools/cezarion#1806).
    * `execute` and `runContinuation` both call it, once the run is registered and after the awaits
    * that precede its first prompt. `'throw'` lets a failed discovery fail the run, as a fresh run
    * always did; `'ignore'` keeps the registry the run already has, or none, because discovery must
@@ -40,15 +95,15 @@ export class RunSkills {
     // `.catch` too, and still fails the caller.
     const discovery = this.discoverSkills();
     try {
-      state.skills = await discovery;
+      skillsWrites.catalog(state.skills, await discovery);
     } catch (error) {
       if (onFailure === 'throw') throw error;
     }
   }
   /**
    * The run's skill registry minus the project's off-list as it is now (hearsay-tools/cezarion#1494): the ONLY reader of
-   * `state.skills`. The registry is discovered when the run starts or continues, so a team skill
-   * switched off since then is still in `state.skills`; every prompt a step, a Continue or a live
+   * `state.skills.catalog`. The registry is discovered when the run starts or continues, so a team skill
+   * switched off since then is still in `state.skills.catalog`; every prompt a step, a Continue or a live
    * `/name` builds reads this instead. A caller that already read the off-list passes it as
    * `disabled`, so that both see one list. A team source disabled since then
    * (hearsay-tools/cezarion#279) drops its skills here too.
@@ -57,7 +112,7 @@ export class RunSkills {
     state: ActiveRun,
     disabled = readDisabledTeamSkills(readProjectUiStateSync(this.context.repoRoot)),
   ): Skill[] {
-    const sources = filterDisabledTeamSources(state.skills ?? [], readDisabledSkillsReposSync(this.context.repoRoot));
+    const sources = filterDisabledTeamSources(state.skills.catalog ?? [], readDisabledSkillsReposSync(this.context.repoRoot));
     return filterDisabledTeamSkills(sources, disabled);
   }
   /**
@@ -73,7 +128,7 @@ export class RunSkills {
     const name = first?.type === 'text' ? leadingSlashSkillName(first.text) : undefined;
     if (!name) return;
     const session = state.session;
-    state.liveSkillProvisioning = (async () => {
+    skillsWrites.provisioning(state.skills, (async () => {
       const { filesDir, installed } = await this.provisionRunSkills(runId, state, { slash: name });
       const dir = filesDir.get(name);
       if (installed.length === 0 && !dir) return;
@@ -88,7 +143,7 @@ export class RunSkills {
       this.context.store.commitAgentInputs(runId, enqueueAgentInput(this.context.store.getRun(runId)!, input));
       this.context.store.appendEvent(runId, { type: 'agent-input', input });
       this.host.flushAgentInputs(runId);
-    })().catch(() => undefined);
+    })().catch(() => undefined));
   }
 
   /**
