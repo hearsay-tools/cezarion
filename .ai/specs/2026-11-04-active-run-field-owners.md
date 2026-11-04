@@ -143,8 +143,11 @@ Migrate one group per PR. Each group is a class defined in its owner module. Its
 state lives in ES `#private` fields. `ActiveRun` holds each group in a readonly property.
 Only its owner module implements the class's commands. Do not export writable backing records.
 P5 removes the last flat field and makes `createActiveRun` return `Object.freeze(container)`.
-Freeze only the ActiveRun group-slot container, never the group instances. Their private state
-remains live and mutable through owner commands. Before P5, each migrated group's rule rejects
+Freeze the ActiveRun group-slot container. Each owner class and each nested class also calls
+`Object.freeze(this)` at the end of its constructor, after all public getters/methods and
+private state are initialized. Freezing an instance prevents own-property additions and getter
+shadowing; its ES private fields remain writable through owner commands. Freeze live read-view
+facade instances too. Never freeze a backing Map/Set or an AgentSession. Before P5, each migrated group's rule rejects
 whole-container target writes through Object.assign, Object.defineProperty, bracket replacement
 and spread-into-target assignment, including ActiveRun aliases. Add an invalid fixture for
 `Object.assign(state, { usage: other.usage })` and a valid constructor composition. At P5,
@@ -164,6 +167,9 @@ Getters preserve the current values and live collection order. They do not copy 
 on each access or snapshot it at a new time. Their types use `ReadonlyMap`/`ReadonlySet` and
 read-only nested records. AgentSession is still a runner capability, not owned runner internals.
 A session getter returns that same session object; comparisons keep their identity meaning.
+P1 proves that frozen group/nested/view instances still accept owner updates to private state
+and expose those updates through the same live views. It also proves an aliased getter cannot
+be shadowed with defineProperties or Reflect.defineProperty, even without a cast.
 
 Owners expose `attachSession`, `retireSession`, `recordConsumed`, `acknowledgeFlight`,
 `rotateCiTurn`, and `clearAutosave`. Commands name an operation, not a generic patch. Cross-group
@@ -239,7 +245,8 @@ ES private fields make `s.#value`, `s['#value']`, a renamed receiver, destructur
 parameter unable to reach the backing state. Getter-only interfaces refuse direct assignments,
 delete, updates, augmented assignments and collection mutation calls. A helper must accept a
 read view or call an owner operation. It cannot accept a writable backing type that is not exported.
-Runtime getter-only nested classes/frozen value records also stop aliased Object.assign from
+Runtime frozen getter-only group/nested/view instances and frozen value records also stop
+aliased Object.assign or property-definition/prototype operations from
 changing an owned record. Do not claim the compiler alone rejects Object.assign.
 
 The syntax rule guards the remaining escapes. This is the exact pattern family to instantiate
@@ -257,6 +264,11 @@ any:
   # Target-copy escapes. Include direct getter, bracket getter, and local alias cases.
   - pattern: Object.assign($VIEW, $$$ARGS)
   - pattern: Object.defineProperty($VIEW, $$$ARGS)
+  - pattern: Object.defineProperties($VIEW, $$$ARGS)
+  - pattern: Reflect.defineProperty($VIEW, $$$ARGS)
+  - pattern: Reflect.set($VIEW, $$$ARGS)
+  - pattern: Object.setPrototypeOf($VIEW, $$$ARGS)
+  - pattern: Reflect.setPrototypeOf($VIEW, $$$ARGS)
   # Public class fields: only #private state and get accessors are valid storage.
   - kind: public_field_definition
 ```
@@ -281,7 +293,8 @@ It is not authorized by this spec and is not a dependency of P1–P6.
 P1 prototypes this on the usage group first. Compile direct/alias/destructuring/helper/bracket
 mutation fixtures as expected errors. Exercise runtime attempts against nested getters and
 frozen values to prove no owner state changes. Test `as Map`, `as Set`, `as any`, double casts,
-angle assertions, getter aliases, helper parameters, Object.assign, spread-into-target, and a
+angle assertions, getter aliases, helper parameters, Object.assign, Object.defineProperties,
+Reflect.defineProperty, Reflect.set, Object/Reflect.setPrototypeOf, spread-into-target, and a
 new public mutable field in the group's rule cases. Use unrelated objects and plain read aliases
 as valid cases. A test-only injected cast write must make the usage rule fail; remove it and
 require the zero-match scan. No new compiler-library dependency is needed.
@@ -388,12 +401,41 @@ category; do not add it during extraction. Outcome includes the current heartbea
 | tool done (`run-finish.ts:40–65`) | accepted/refused/stale | session check → root Finish gate → question gate → completion refusal → retain done request | new `done admission keeps gates before boundary request` plus U20/U22/R13/R17 |
 | nudge (`turn-nudges.ts:129–216`) | send/refuse/content/expiry | latch update → submit → existing bound/charge/note, or retain readiness; reply content cancels bound before resume; expiry clears bound before park | `autonomous-nudge-guards.test.ts`: `text before the reply timer is armed means the nudge was answered`, `expiry opens the no-wait human wait and the run waits for the user`; new order log for refusal |
 | launch/reset/close (`step-session.ts:105–125,265–317`, `continuation-session.ts:498–604,637–638`) | fresh/Continue/setup failure | preserve session/step/input setup order; attach session → next-step scope → ever-opened → interrupt; close after receipts/ACK; reset handles at current finally points | `input-receipt-boundaries.test.ts`; new `fresh and continued attach and retire keep boundary reset order` |
+| native ask (`session-events.ts:326–337`) | worker with parent on expired usage hold | create/show native ask and park worker → releaseSlot → first participant synchronously reconciles auto-resumes (parent hold withdraws to failed) → routeWorkerQuestion reads parent status → close worker ask as parent-stopped; no routed request/input | new `native ask routes only after synchronous release withdraws expired parent hold`; preserve 4.2 decisive-boundary outcomes below |
+| slot release | valid future hold / due-now hold / 25-hour-missed hold, no live session | release → synchronous first-participant reconciliation → arm future/zero-delay timer or withdraw missed hold → return before any callback microtask | new `release arms future hold timer before return`, `release arms due-now timer before return`, `release withdraws missed hold before return` |
 | human/child/wake/mode commands | human alias, child end, admitted wake, memory guard | keep caller's existing decision → boundary fact write → existing park/release/note order | new `boundary fact commands preserve human child wake and memory-guard order`; U3w/U9w/U15 |
 
 P5 extends the existing call-log/Proxy tests for all new rows. A pure field-write assertion is
 not enough: assert input delivery, timer registration, gate calls, durable writes and emitted
 notes/heartbeat in order. For each moved site, name its table row in the migration ledger.
 A site without a row blocks P5. Preserve synchronous return values and throw boundaries.
+
+### Synchronous release regression cases required in P5
+
+Slice 4.2 was excluded after paired probes showed an observable change. See
+[its Decisive boundary and P5 test shapes](2026-11-04-slot-release-marks-pump-due.md#decisive-boundary),
+reviewed on branch `cez/115618f4` at `5a0d41801`. The probes are investigation evidence;
+P5 commits their test forms before deleting the handler-order block. No deferred drain ships.
+
+Use a real temporary RunStore, RunManager, normal composition and active-state factory. Use
+one first-sorted manager, an idle semaphore and no in-flight sweep. Launch no runner. Assert
+before yielding, not after the eventual state converges:
+
+| Case | Seed and trigger | Required result at synchronous return | Regression test |
+| --- | --- | --- | --- |
+| Native ask | parent root has unarmed 25-hour-missed usage hold; running worker has pending native ask; call handleNativeAskRequested | parent failed, deadline absent, zero parent conversation messages, zero parent inputs; worker human-ask-closed with parent-stopped; no worker-question-routed event | `native ask routes only after synchronous release withdraws expired parent hold` |
+| Future hold | valid future hold without timer, no active session; release slot | timer already armed; row still waiting with deadline | `release arms future hold timer before return` |
+| Due-now hold | valid deadline due now, fake timeout control prevents callback; release slot | zero-delay timer armed; row waiting. Then advance timer and assert ordinary continuation/refusal from the fixture | `release arms due-now timer before return` |
+| Missed hold | unarmed deadline missed by 25 hours; release slot | row already failed, deadline absent, no timer | `release withdraws missed hold before return` |
+
+Put these in new `workflows/native-ask-release-order.test.ts` and
+`workflows/slot-release-return-boundary.test.ts`. Use the product signal for positive effects;
+these immediate negative/count assertions need no elapsed-time wait. Record red results using
+the test-only deferred-drain spike, then green results with the unchanged synchronous release.
+The native-ask and timer tests must fail under that spike even if eventual rows converge.
+Run parity for the touched run paths. A future-timer test does not replace the due-now case.
+Do not change messages, timer delays or expected outcomes to make the excluded drain pass.
+P5's changed files and focused-test set include both new files and the native-ask handler region.
 
 ## Implementation PRs
 
@@ -466,7 +508,7 @@ Replacement: one boundary writer and one transition entry point, plus an entry/c
 ledger locked by the call-log tests above. Outside entry paths cannot mutate boundary facts.
 P5 deletes **both** `List each handler's side effects, in order...` and its
 `<!-- until: hearsay-tools/cezarion#2520 -->` marker in the same PR that moves the last write.
-The new ACK/UI/timer/launch rows are required. Current `turn-settler.test.ts` alone is insufficient.
+The new ACK/UI/timer/launch rows and the native-ask/release return-boundary cases are required. Current `turn-settler.test.ts` alone is insufficient.
 A swapped checkpoint/timer/ask operation must fail its order test; a restored outside write must
 fail the owner guard. If any path lacks that proof, keep the block and report P5 incomplete.
 
@@ -527,7 +569,8 @@ New tests below live in `workflows/run/launch-read-resolver.test.ts` and
 | Task text | LI | message content/durable input queue at send time; task record is not rewritten | new `live text delivery leaves task record unchanged` |
 | Attachments | TH | original live blocks when available, otherwise persisted URLs; stacked URLs re-read and stat-checked at hydration (`queued-input.ts:75–92,134–160`) | new `task head honors attachment removal and replacement`; include persistence-failed live-block path |
 | Attachments | SO | prepared attachment set at current step call point, not an eager new disk scan | new `step attachment read stays at its current point` |
-| Attachments | C | persisted queued URLs read at continuation hydration (`queued-input.ts:114–126`) | new `queued Continue omits deleted attachment` |
+| Attachments | C: hydration | only stacked queued-message attachments are read at hydration (`queued-input.ts:114–123`); this does not read checkpoint continuation images | new `queued Continue omits deleted queued attachment at hydration` |
+| Attachments | C: opening | after awaited worktree setup and skill discovery (`continuation-session.ts:454–466`), continuationOpening calls continuationImages: read checkpoint.images when checkpoint.id matches stepId, kind continuation (`opening.ts:63–67`); prefer live input images for image blocks, append hydrated queued images/attachments | new `Continue deletes checkpoint attachment between hydration and opening`; new `Continue opening prefers live images and appends queued attachments` |
 | Attachments | LI | current pasted blocks persisted by current message path | new `live attachment uses current message content` |
 | Runner | TH | accepted `input.runner` else config default at `step-loop.ts:64–71`; account hold gate reads fallback during pump (`run-line.ts:246–257`) | new `held task reads current default runner but retains an explicit runner`; keep two separate read points |
 | Runner | SO | authored `step.runner ?? taskBackend` (`step-session.ts:88`) and worker step identity | new `step runner override remains pinned` |
@@ -547,7 +590,7 @@ New tests below live in `workflows/run/launch-read-resolver.test.ts` and
 | Effort | LI | ordinary live messages do not reselect effort; delegation selection stays a separate existing operation | new `ordinary live input does not resolve effort again` |
 | Agent profile | TH | per-run account pin persisted at enqueue (`run-start.ts:76–79`), current account/hold check at pump and startExecution | new `held task retains per-task account while current hold changes`; keep both gates |
 | Agent profile | SO | worker step identity first; otherwise matching run account pin (only when step backend matches run runner), then project/default (`launch-context.ts:65–75`). Fresh `step-session.ts:97` passes stepId, not recordedProfileId. It must not reuse the prior step profile on retry | `agent-profile-wiring.test.ts`: `resolves each step of a MIXED-backend workflow against its own provider`; new `fresh step retry uses current run pin or project default instead of prior recorded profile`; keep deleted-account fallback test |
-| Agent profile | C | owning recorded profile wins; continuation passes existing step/session identity at `continuation-session.ts:293` | `agent-profile-wiring.test.ts`: `keeps a Continue on the account the step recorded, whatever the project uses now` |
+| Agent profile | C | worker step identity account wins first (`launch-context.ts:65–70`); otherwise recorded owning-step profile, then matching run pin, then project/default (`:72–75`). Continue passes owningStep.profileId and toolsStep.id (`continuation-session.ts:293–295`) | new `Continue worker identity wins over conflicting recorded profile`; `agent-profile-wiring.test.ts`: `keeps a Continue on the account the step recorded, whatever the project uses now` for non-worker path |
 | Agent profile | LI | current session profile; no ordinary message account reselection | new `live input keeps current session account` |
 | Skills | TH | discover run registry at existing start point (`run-skills.ts:38–46`), selected skill reads remain at prompt preparation | new `held task discovers current skill body and source availability` |
 | Skills | SO | current off-list/source filtering on run registry at each prompt (`run-skills.ts:56–61`; `step-session.ts:160,179`) | `team-skill-materialize.test.ts`: `a later step does not run a skill switched off while an earlier step ran` |
@@ -588,7 +631,8 @@ Baseline regions: `run-line.ts:140–171,200–269,288–310,375–382`;
 `run-start.ts:61–105,164–191`; `queued-input.ts:68–160`;
 `step-loop.ts:60–99`; `step-session.ts:88–105,150–180`;
 `continuation-session.ts:160–185,240–335`; `launch-settings.ts:14–190`;
-`session-events.ts:164–182`; `launch-context.ts:55–82`; `run-skills.ts:27–61,125–153`.
+`session-events.ts:164–182`; `opening.ts:20–67`; `continuation-session.ts:445–466`;
+`launch-context.ts:55–82`; `run-skills.ts:27–61,125–153`.
 Add `launch-read-resolver.ts`, its rule/fixtures, `launch-read-resolver.test.ts`, and
 `launch-read-boundaries.test.ts`. Re-measure all regions on P6's starting main. P6 runs after
 P5; do not edit these hot regions in parallel with 4.2 or overlapping 4.3 batches.
@@ -619,12 +663,12 @@ source-selection and read-timing protection. The resolver is not an eager cache 
 
 ## Interactions
 
-- **Slice 4.2, hearsay-tools/cezarion#2521:** `RunLine` continues to own queue, starting,
-  waiting, monitoring and wake admission. This spec needs its caller/case table and baseline
-  timer-before-return evidence before P5 lands. It must avoid changing the point where an
-  ownership command releases a slot, pumping reentrancy or an existing timer set. 4.1 does
-  not adopt `pumpDue`, defer a drain, or move a release call. Reserve overlapping compose,
-  settler and input regions through the coordinator.
+- **Slice 4.2, hearsay-tools/cezarion#2521:** excluded: deferred drain changed the timer set at
+  return and native-question routing history. Keep synchronous release/pumping exactly as
+  shipped. P5 adopts the native-ask, future/due/missed-hold probes as committed regression tests
+  above. Its handler-order block cannot be deleted without them. RunLine retains queue/slot
+  collections; 4.1 adds no pumpDue flag, deferred drain or moved release call. Reserve overlapping
+  compose, settler, native-ask and input regions through the coordinator.
 - **Slice 4.3, hearsay-tools/cezarion#2522:** tests often read
   `runInternals(m).active.get(id)` fields. Search all old field names, new group paths and
   `runInternals(` before each group moves. 4.3 should assert store/events or a narrow public
