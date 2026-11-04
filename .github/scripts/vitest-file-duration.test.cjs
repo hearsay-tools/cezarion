@@ -1,6 +1,6 @@
-const test = require('node:test');
+const { test, mock } = require('node:test');
 const assert = require('node:assert/strict');
-const { mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync } = require('node:fs');
+const { mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync, existsSync } = require('node:fs');
 const { join, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { spawnSync } = require('node:child_process');
@@ -26,29 +26,50 @@ async function completed(duration) {
   return instance;
 }
 
+
+function finish(instance) {
+  const previous = process.exitCode;
+  const output = [];
+  const error = mock.method(console, 'error', message => output.push(message));
+  try {
+    process.exitCode = 0;
+    instance.onTestRunEnd();
+    return { exitCode: process.exitCode, output: output.join('\n') };
+  } finally {
+    error.mock.restore();
+    process.exitCode = previous;
+  }
+}
+
+function assertFailure(instance, pattern) {
+  const result = finish(instance);
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, pattern);
+}
+
 test('59,999 ms passes while exactly 60,000 ms fails', async () => {
   const below = await completed(59_999);
-  assert.doesNotThrow(() => below.onTestRunEnd());
+  assert.deepEqual(finish(below), { exitCode: 0, output: '' });
   const boundary = await completed(60_000);
-  assert.throws(() => boundary.onTestRunEnd(), /hooks\.test\.ts: 60000 ms; limit 60000 ms/);
+  assertFailure(boundary, /hooks\.test\.ts: 60000 ms; limit 60000 ms/);
 });
 
 test('60,001 ms fails and identifies the file, measurement and limit', async () => {
   const instance = await completed(60_001);
-  assert.throws(() => instance.onTestRunEnd(), /\/repo\/hooks\.test\.ts: 60001 ms; limit 60000 ms/);
+  assertFailure(instance, /\/repo\/hooks\.test\.ts: 60001 ms; limit 60000 ms/);
 });
 
 test('a collected module without completion fails instead of passing with zero duration', async () => {
   const instance = await reporter();
   instance.onTestModuleCollected(moduleResult(0, 'pending'));
-  assert.throws(() => instance.onTestRunEnd(), /hooks\.test\.ts: no completed result.*limit 60000 ms/);
+  assertFailure(instance, /hooks\.test\.ts: no completed result.*limit 60000 ms/);
 });
 
 test('an end event without a completed state or valid measurement fails', async () => {
   for (const [duration, state] of [[0, 'pending'], [NaN, 'passed'], [Infinity, 'passed'], [-1, 'passed']]) {
     const instance = await reporter();
     instance.onTestModuleEnd(moduleResult(duration, state));
-    assert.throws(() => instance.onTestRunEnd(), /no completed result/);
+    assertFailure(instance, /no completed result/);
   }
 });
 
@@ -77,12 +98,14 @@ export default defineConfig({ test: {
 `);
     for (const [duration, expected] of [[59_999, 0], [60_000, 1]]) {
       rmSync(join(probe, 'teardown'), { force: true });
+      rmSync(join(probe, 'coverage'), { recursive: true, force: true });
       const result = spawnSync(join(root, 'node_modules/.bin/vitest'), ['run', '--config', join(probe, 'vitest.config.mjs'), '--coverage.enabled'], {
         cwd: probe, encoding: 'utf8', env: { ...process.env, PROBE_DURATION: String(duration) },
       });
       const output = result.stdout + result.stderr;
       assert.equal(result.status, expected, output);
       if (expected) assert.match(output, /one\.test\.ts: 60000 ms; limit 60000 ms/);
+      assert.ok(existsSync(join(probe, 'coverage/coverage-final.json')), 'coverage artifact missing');
     }
   } finally {
     rmSync(probe, { recursive: true, force: true });

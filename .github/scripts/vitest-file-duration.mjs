@@ -30,7 +30,8 @@ export default class FileDurationReporter {
       this.failures.push(`${module.moduleId}: no completed result (unmeasured ms; limit ${FILE_DURATION_LIMIT_MS} ms)`);
     }
     if (this.failures.length) {
-      throw new Error(`Vitest file duration cap failed:\n${this.failures.join('\n')}`);
+      console.error(`Vitest file duration cap failed:\n${this.failures.join('\n')}`);
+      process.exitCode = 1;
     }
   }
 }
