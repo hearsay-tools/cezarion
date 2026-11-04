@@ -2,18 +2,6 @@
   "$comment": "Matches the rule found when it landed (hearsay-tools/cezarion#1802), keyed by file and the first line of the match so a moved line does not churn it. This list only shrinks: fix a match, then run AST_GREP_RULES_UPDATE=1 npm run lint. Rules: .ai/ast-grep/README.md.",
   "sites": [
     {
-      "file": "packages/cezar/src/server/forge/github-coalescing.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'cancelled'",
-      "count": 2
-    },
-    {
-      "file": "packages/cezar/src/server/forge/github.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind: 'pr'",
-      "count": 5
-    },
-    {
       "file": "packages/contract/src/github.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'pr'",
