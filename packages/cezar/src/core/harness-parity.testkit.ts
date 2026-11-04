@@ -1431,6 +1431,7 @@ async function teardownOwnedInputRun(
       await waitFor(() => !state.manager!.isActive(state.runId!));
     }
     await state.drainBookkeeping();
+    await drainFixtureManagers(repoRoot);
     state.manager?.dispose();
     state.store?.close();
     restoreEnvironment();
@@ -1546,6 +1547,7 @@ export async function withSkillParentRun(
     if (manager && store) await waitFor(() => store!.listRunIds().every(id => !manager!.isActive(id)), 30_000);
     await drainBookkeeping();
     await controller?.close();
+    await drainFixtureManagers(repoRoot);
     manager?.dispose();
     store?.close();
     for (const [name, value] of saved) {
