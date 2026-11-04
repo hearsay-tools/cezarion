@@ -125,6 +125,9 @@ const BASE = 'b'.repeat(40);
 // The queue run as GitHub lists it when its `if` skipped both suites.
 function skippedSuites(state) {
   state.run.head_branch = `gh-readonly-queue/main/pr-7-${BASE}`;
+  skipSuiteJobs(state);
+}
+function skipSuiteJobs(state) {
   state.jobs = state.jobs.filter(job => !/shard \d\/4$/.test(job.name));
   state.jobs.push(...SKIPPED_SUITE_JOBS.map((name, i) => ({ id: 300 + i, name, status: 'completed', conclusion: 'skipped' })));
 }
@@ -191,5 +194,57 @@ test('mainCommitSurface classifies the queued commit from its group base with th
   } finally {
     for (const r of repos) r.cleanup();
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+// Two speculative builds: entry 2's group is based on entry 1's group head, not on the old main tip.
+function speculative() {
+  const h = fixture(); const first = 'c'.repeat(40), second = SHA;
+  const entry1 = { ...h.state.run, id: 20, head_sha: first, head_branch: `gh-readonly-queue/main/pr-6-${'d'.repeat(40)}` };
+  const entry2 = { ...h.state.run, id: 21, head_sha: second, head_branch: `gh-readonly-queue/main/pr-7-${first}` };
+  h.state.runs = [entry1, entry2];
+  const request = h.options.github.request;
+  h.options.github = { request: async (route, args) => {
+    const response = await request(route, args);
+    if (route.endsWith('/workflows/{workflow_id}/runs')) {
+      const runs = response.data.workflow_runs.filter(run => !args.head_sha || run.head_sha === args.head_sha);
+      response.data = { total_count: runs.length, workflow_runs: runs };
+    }
+    if (route.endsWith('/runs/{run_id}')) response.data = structuredClone(h.state.runs.find(run => run.id === args.run_id));
+    return response;
+  } };
+  return { h, first, second };
+}
+test('a push of a group head based on the previous group head reuses its own queue run', async () => {
+  const { h, second } = speculative(); h.options.sha = second;
+  const proof = await queueCiProof(h.options);
+  assert.equal(proof.verified, true); assert.equal(proof.runId, 21); assert.equal(proof.sha, second);
+  for (const { route, args } of h.state.calls) if (route.endsWith('/runs')) assert.equal(args.head_sha, second);
+});
+test('a push over two group heads cannot reuse the skipped head\'s run', async () => {
+  const { h, second } = speculative(); h.options.sha = second; h.state.runs[1].conclusion = 'failure';
+  assert.equal((await queueCiProof(h.options)).verified, false);
+  assert.ok(!h.state.calls.some(({ args }) => args.run_id === 20));
+});
+test('a push of entry 1 ignores the newer queue run of entry 2', async () => {
+  const { h, first } = speculative(); h.options.sha = first; h.state.runs[1].status = 'in_progress';
+  const proof = await queueCiProof(h.options);
+  assert.equal(proof.verified, true); assert.equal(proof.runId, 20);
+});
+test('a docs-only entry 2 reuses its skipped-suite run when its first parent is entry 1\'s group head', async () => {
+  const r = gitRepo(); const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'queue-proof-tmp-'));
+  try {
+    const first = r.commit({ 'src/app.ts': 'code\n' }), second = r.commit({ 'docs/a.md': 'x\n' });
+    const { h } = speculative(); skipSuiteJobs(h.state);
+    Object.assign(h.state.runs[0], { head_sha: first });
+    Object.assign(h.state.runs[1], { head_sha: second, head_branch: `gh-readonly-queue/main/pr-7-${first}` });
+    h.options.sha = second; const bases = [];
+    h.options.surfaceOf = base => { bases.push(base); return mainCommitSurface({ sha: second, base, cwd: r.dir, tmpDir }); };
+    const proof = await queueCiProof(h.options);
+    assert.equal(proof.verified, true); assert.equal(proof.runId, 21); assert.equal(proof.suites, 'skipped');
+    // The ref base is entry 1's group head, so entry 1's code change is not in entry 2's diff.
+    assert.deepEqual(bases, [first]);
+  } finally {
+    r.cleanup(); fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

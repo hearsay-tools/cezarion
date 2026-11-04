@@ -24,24 +24,37 @@ function fixture() {
       return { data: structuredClone(route.endsWith('/git/ref/{ref}') ? { object: { sha: s.main } } : s.commits[args.commit_sha]) };
     }
     const response = await h.github.request(route, args);
-    if (route === 'POST /graphql' && args.query.includes('mergeQueue(')) response.data.data.repository.mergeQueue.entries.pageInfo.hasNextPage = s.hasNextPage;
+    if (route === 'POST /graphql' && args.query.includes('mergeQueue(')) {
+      response.data.data.repository.mergeQueue.entries.pageInfo.hasNextPage = s.hasNextPage;
+      if (s.queueErrors?.shift()) response.data.errors = [{ message: 'partial queue' }];
+    }
     return response;
   } };
   const options = { github, owner: 'o', repo: 'r', eventName: 'merge_group', group: s.group };
   return { s, options, run: () => prTestProof(options) };
 }
-test('reuses only complete attested native suites for the single unchanged queue entry', async () => {
+test('reuses only complete attested native suites for the unchanged first queue entry', async () => {
   const h = fixture(); const result = await h.run();
   assert.equal(result.verified, true); assert.equal(result.runId, 20); assert.equal(result.attempt, 1);
   assert.equal(result.base, BASE); assert.equal(result.head, HEAD);
   assert.match(result.url, /actions\/runs\/20\/attempts\/1$/);
 });
+const behind = s => ({ ...s.entry, id: 'next', position: 2, headCommit: { oid: MAIN }, baseCommit: { oid: SHA } });
 for (const [name, mutate] of Object.entries({
-  'more entries': s => { s.hasNextPage = true; },
-  'entry behind': s => { s.entries = [s.entry, { ...s.entry, id: 'next', position: 2, headCommit: { oid: MAIN }, baseCommit: { oid: SHA } }]; },
-  'entry 2 built on entry 1': s => { secondEntry(s); s.main = MAIN; s.rules[0].parameters.max_entries_to_build = 2; },
-  'unknown pagination': s => { s.hasNextPage = undefined; },
+  'one entry behind': s => { s.entries = [s.entry, behind(s)]; },
+  'more entries behind': s => { s.entries = [s.entry, behind(s)]; s.hasNextPage = true; },
+  'entries behind at build concurrency 2': s => { s.entries = [s.entry, behind(s)]; s.hasNextPage = true; s.rules[0].parameters.max_entries_to_build = 2; },
+})) test(`entry 1 on main reuses native suites with ${name}`, async () => {
+  const h = fixture(); mutate(h.s); const result = await h.run();
+  assert.equal(result.verified, true); assert.equal(result.runId, 20); assert.equal(result.base, BASE);
+});
+test('entry 2 runs the full suites even with complete native evidence', async () => {
+  const h = fixture(); secondEntry(h.s); h.s.main = MAIN; h.s.rules[0].parameters.max_entries_to_build = 2;
+  assert.deepEqual(await h.run(), { verified: false, reason: 'native-proof-unavailable' });
+});
+for (const [name, mutate] of Object.entries({
   'no queue entry': s => { s.entries = []; },
+  'partial first queue read': s => { s.queueErrors = [true]; },
   'multiple entry records': s => { s.entries = [s.entry, s.entry]; },
   'wrong queue head': s => { s.entry.headCommit.oid = BASE; },
   'wrong queue base': s => { s.entry.baseCommit.oid = SHA; },
@@ -83,16 +96,16 @@ for (const [name, mutate] of Object.entries({
 })) test(`full queue test fallback: ${name}`, async () => {
   const h = fixture(); mutate(h.s); assert.equal((await h.run()).verified, false);
 });
-for (const target of ['main', 'entry', 'head', 'attempt', 'newer-run', 'pagination']) test(`proof reread catches moving ${target}`, async () => {
+for (const target of ['main', 'entry', 'head', 'attempt', 'newer-run', 'stale']) test(`proof reread catches moving ${target}`, async () => {
   const h = fixture(); let count = 0;
   h.s.onRead = route => {
     const matching = target === 'main' ? route.endsWith('/git/ref/{ref}')
-      : ['entry', 'pagination'].includes(target) ? route === 'POST /graphql'
+      : ['entry', 'stale'].includes(target) ? route === 'POST /graphql'
         : ['head'].includes(target) ? route.endsWith('/pulls/{pull_number}') : route.endsWith('/runs/{run_id}');
-    if (matching && ++count === (['entry', 'pagination'].includes(target) ? 4 : 3)) {
+    if (matching && ++count === (['entry', 'stale'].includes(target) ? 4 : 3)) {
       if (target === 'main') h.s.main = HEAD;
       if (target === 'entry') h.s.entry.id = 'changed';
-      if (target === 'pagination') h.s.hasNextPage = true;
+      if (target === 'stale') h.s.entries = [{ ...h.s.entry, headCommit: { oid: MAIN } }];
       if (target === 'head') h.s.pr.head.sha = BASE;
       if (target === 'attempt') h.s.run.run_attempt++;
       if (target === 'newer-run') h.s.runs = [h.s.run, { ...h.s.run, id: 21, conclusion: 'failure' }];
