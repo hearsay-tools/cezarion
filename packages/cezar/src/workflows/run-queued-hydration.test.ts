@@ -1,12 +1,13 @@
 import './run-fixture.testkit.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
+import { resolveAttachmentPath } from './attachment-path.ts';
 describe('QueuedInput.hydrateQueuedInput (#472)', () => {
   let repoRoot: string;
   let store: RunStore;
@@ -106,13 +107,12 @@ describe('QueuedInput.hydrateQueuedInput (#472)', () => {
     const dir = join(repoRoot, '.ai/cezar/runs', `${r.id}-images`);
     mkdirSync(dir, { recursive: true });
     const path = join(dir, 'pasted-1.pdf');
-    writeFileSync(path, 'private document');
-    chmodSync(path, 0);
-    try {
-      store.updateRun(r.id, { taskImages: [`/api/v1/runs/${r.id}/images/pasted-1.pdf`] });
-      expect(hydrate(r.id, r.task).task).toBe('keep text');
-      expect(store.readEvents(r.id).some((e) => e.type === 'note' && String(e.message).includes('pasted-1.pdf'))).toBe(true);
-    } finally { chmodSync(path, 0o600); }
+    // A directory is never a document, including for users that bypass file permissions.
+    mkdirSync(path);
+    expect(resolveAttachmentPath(join(repoRoot, '.ai/cezar'), r.id, 'pasted-1.pdf')).toBeNull();
+    store.updateRun(r.id, { taskImages: [`/api/v1/runs/${r.id}/images/pasted-1.pdf`] });
+    expect(hydrate(r.id, r.task).task).toBe('keep text');
+    expect(store.readEvents(r.id).some((e) => e.type === 'note' && String(e.message).includes('pasted-1.pdf'))).toBe(true);
   });
 
   it('re-encodes initial task images from disk after a queued-run restart (#612)', () => {
