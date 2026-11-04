@@ -10,6 +10,7 @@ import { mergeNumberParams, prChangesParams, prChangesQuery, mergeBodySchema } f
 import { gitCommitSchema, reclaimBodySchema, repoBranchSchema } from '@open-mercato/cezar-contract/repo-requests';
 import { setConfigSchema, setAgentConfigSchema } from '@open-mercato/cezar-contract/config-requests';
 import { saveWorkflowInputSchema as saveWorkflowSchema } from '@open-mercato/cezar-contract/workflows';
+import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { patchRunInputSchema as patchRunSchema, messageInputSchema as messageSchema } from '@open-mercato/cezar-contract/runs';
 import { checkoutProjectInputSchema as checkoutSchema, registerProjectInputSchema as registerProjectSchema } from '@open-mercato/cezar-contract/projects';
 import { setWorkspaceConfigInputSchema as workspaceConfigUpdateSchema } from '@open-mercato/cezar-contract/workspace';
@@ -4024,8 +4025,11 @@ export function createApp(deps: ServerDeps) {
     .post('/runs/:id/pr', async (c) => {
       const { root: repoRoot, dataDir, store, manager } = c.get('project');
       const id = c.req.param('id');
-      if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
+      const held = store.getRun(id);
+      if (!held) return c.json({ error: 'not found' }, 404);
       if (manager.isActive(id)) return c.json({ error: 'run is still active — wait for the review gate' }, 409);
+      // A usage-limit hold is live: done would drop its booked resume (spec S7, Table B13).
+      if (isUsageLimitHold(held)) return c.json({ error: 'run is waiting on a usage-limit hold — wait for its resume, or Stop it first' }, 409);
       const release = manager.claimForPublish(id);
       if (!release) return c.json({ error: 'its worktree or branch is being cleaned up — retry in a moment' }, 409);
       try {

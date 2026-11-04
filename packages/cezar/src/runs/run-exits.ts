@@ -163,7 +163,7 @@ export const RUN_EXITS = {
   'succeed-root-review': { durability: 'committed', from: ['waiting'], to: 'review', guard: rootFinishWaiting, fields: succeeded, steps: succeededStep },
   'accept-review': { durability: 'debounced', from: ['review'], to: 'done' },
   // Draft PR (`POST /runs/:id/pr`): the cockpit offers it on review and on settled runs, so a
-  // settled run that is published reads done too. A usage-limit hold is not declared (spec B13).
+  // settled run that is published reads done too. The route refuses a usage-limit hold (spec B13).
   'draft-pr': { durability: 'debounced', from: ['review', 'done', 'failed', 'cancelled'], to: 'done' },
   'fail-start': { durability: 'debounced', from: ['queued', 'running'], to: 'failed', steps: failedStep },
   fail: { durability: 'debounced', from: ['running', 'waiting'], to: 'failed', steps: failedStep },

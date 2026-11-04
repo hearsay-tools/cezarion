@@ -22,8 +22,10 @@ import { createApp } from './server.ts';
 
 const PR_URL = 'https://github.com/acme/demo/pull/777';
 const FINISHED_AT = '2026-11-01T10:00:00.000Z';
-const forgeFactory: ForgeFactory = (root) => ({ ...resolveForgeRoot(root), createPR: async () => ({ ok: true, url: PR_URL, dryRun: false }) });
-const manager = { isActive: () => false, claimForPublish: () => () => {} } as unknown as RunManager;
+let claims = 0;
+let published = 0;
+const forgeFactory: ForgeFactory = (root) => ({ ...resolveForgeRoot(root), createPR: async () => { published++; return { ok: true, url: PR_URL, dryRun: false }; } });
+const manager = { isActive: () => false, claimForPublish: () => { claims++; return () => {}; } } as unknown as RunManager;
 
 describe('the Draft PR route', () => {
   let dir: string;
@@ -31,6 +33,8 @@ describe('the Draft PR route', () => {
   let app: Hono;
 
   beforeEach(() => {
+    claims = 0;
+    published = 0;
     dir = mkdtempSync(join(tmpdir(), 'cez-draft-pr-'));
     mkdirSync(join(dir, '.ai/cezar'), { recursive: true });
     mkdirSync(join(dir, 'worktree'));
@@ -61,5 +65,18 @@ describe('the Draft PR route', () => {
     const res = await apiRequest(app, `/api/v1/runs/${id}/pr`, { method: 'POST' });
     expect(res.status).toBe(201);
     expect(store.getRun(id)).toMatchObject({ status: RUN_STATUS.done, pullRequestUrl: PR_URL, finishedAt: FINISHED_AT });
+  });
+
+  // Table B row B13 (S7): the cockpit offers no Draft PR on a usage-limit hold, and writing done on
+  // it would silently drop the booked resume. The route refuses it before any write.
+  it('refuses a usage-limit hold with 409 before any write', async () => {
+    const id = seed(RUN_STATUS.waiting);
+    store.updateRun(id, { autoResumeAt: '2099-01-01T00:00:00.000Z' });
+    const before = structuredClone(store.getRun(id));
+    const res = await apiRequest(app, `/api/v1/runs/${id}/pr`, { method: 'POST' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: expect.stringContaining('usage-limit hold') });
+    expect(store.getRun(id)).toEqual(before);
+    expect([claims, published]).toEqual([0, 0]);
   });
 });
