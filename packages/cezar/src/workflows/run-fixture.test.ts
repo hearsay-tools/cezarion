@@ -13,10 +13,10 @@ it('calls the original session start when two factory calls reuse one runner', (
     sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages() {},
     holdsHumanInput: () => false, end() {}, interrupt() {},
   };
-  const start = vi.fn(() => session);
+  const start = vi.fn<AgentRunner['startSession']>(() => session);
   const runner: AgentRunner = {
     backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
-    startSession: start, run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => {},
+    startSession: (...args) => start(...args), run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => {},
   };
   runnerHook.runner = runner;
   const spec = { userPrompt: 'hello', cwd: '/tmp', toolGrant: UNSET_TOOL_GRANT };
