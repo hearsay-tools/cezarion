@@ -1,0 +1,197 @@
+{
+  "queue-proof": {
+    "name": "Verify exact queue CI evidence",
+    "needs": [],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "change-surface": {
+    "name": "Classify pull request change surface",
+    "needs": [],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "classify-pr": {
+    "name": "Classify PR shape",
+    "needs": [],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "complexity-gate": {
+    "name": "Check function complexity",
+    "needs": [],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "clone-gate": {
+    "name": "Check new code clones",
+    "needs": [],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "typecheck": {
+    "name": "Typecheck",
+    "needs": [
+      "queue-proof"
+    ],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "preflight": {
+    "name": "Review preflight",
+    "needs": [
+      "queue-proof",
+      "change-surface",
+      "classify-pr",
+      "complexity-gate",
+      "clone-gate",
+      "typecheck"
+    ],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "build-and-package": {
+    "name": "Unit, build, and package",
+    "needs": [
+      "queue-proof",
+      "preflight",
+      "review-result"
+    ],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "vitest": {
+    "name": "Vitest shard ${{ matrix.shard }}/4",
+    "needs": [
+      "queue-proof",
+      "change-surface",
+      "classify-pr",
+      "preflight",
+      "review-result",
+      "pr-test-input",
+      "pr-test-proof"
+    ],
+    "matrix": {
+      "shard": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "reviewResultGate": null
+  },
+  "vitest-coverage-merge": {
+    "name": "Merge Vitest coverage",
+    "needs": [
+      "vitest"
+    ],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "cockpit-browser": {
+    "name": "Cockpit browser E2E shard ${{ matrix.shard }}/4",
+    "needs": [
+      "queue-proof",
+      "change-surface",
+      "classify-pr",
+      "preflight",
+      "review-result",
+      "pr-test-input",
+      "pr-test-proof"
+    ],
+    "matrix": {
+      "shard": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "reviewResultGate": null
+  },
+  "verify": {
+    "name": "Unit, build, E2E, and package",
+    "needs": [
+      "queue-proof",
+      "change-surface",
+      "classify-pr",
+      "complexity-gate",
+      "clone-gate",
+      "typecheck",
+      "preflight",
+      "review-result",
+      "build-and-package",
+      "vitest",
+      "cockpit-browser"
+    ],
+    "matrix": null,
+    "reviewResultGate": {
+      "name": "Require every verification job",
+      "sha256": "b0b34fb3539e78e32b7974c40b2125dcb8b37042cf3587cbe9f624190bbfef49"
+    }
+  },
+  "queue-admission": {
+    "name": "Validate reviewed queue entry",
+    "needs": [
+      "verify"
+    ],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "review-result": {
+    "name": "${{ (github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main') && 'Automated Code Review' || 'PR review (not applicable)' }}",
+    "needs": [
+      "preflight"
+    ],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "queue-review-result": {
+    "name": "${{ github.event_name == 'merge_group' && 'Automated Code Review' || 'Queue review (not applicable)' }}",
+    "needs": [
+      "verify",
+      "queue-admission"
+    ],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "publish-snapshot": {
+    "name": "Publish npm snapshot",
+    "needs": [
+      "verify"
+    ],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "prepare-pr-snapshot": {
+    "name": "Prepare PR snapshot archives",
+    "needs": [
+      "verify"
+    ],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "pr-test-input": {
+    "name": "Resolve immutable PR test inputs",
+    "needs": [],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "pr-test-attestation": {
+    "name": "Attest PR test inputs / ${{ github.workflow_sha }} / ${{ github.event.pull_request.head.sha }}",
+    "needs": [
+      "pr-test-input",
+      "vitest",
+      "cockpit-browser"
+    ],
+    "matrix": null,
+    "reviewResultGate": null
+  },
+  "pr-test-proof": {
+    "name": "Verify native PR test evidence",
+    "needs": [],
+    "matrix": null,
+    "reviewResultGate": null
+  }
+}

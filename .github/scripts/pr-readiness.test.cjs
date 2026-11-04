@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const yaml = require('yaml');
+const { dependentJobs, namesFor } = require('./readiness-history.cjs');
 const path = require('node:path');
 const readiness = require('./pr-readiness.cjs');
 const {
@@ -61,6 +63,8 @@ function fakeGithub(state = {}) {
       calls.push(['request', route, params.branch]);
       if (route.endsWith('/rules/branches/{branch}')) return { data: s.rules };
       if (route.endsWith('/check-runs/{check_run_id}/annotations')) return { data: s.annotations ?? [] };
+      if (route.endsWith('/attempts/{attempt_number}/jobs')) return { data: { total_count: (s.priorJobsByAttempt?.[params.attempt_number] ?? s.priorJobs ?? []).length, jobs: s.priorJobsByAttempt?.[params.attempt_number] ?? s.priorJobs ?? [] } };
+      if (route.endsWith('/attempts/{attempt_number}')) return { data: s.priorRun ?? {} };
       s.pr = s.live?.(params.pull_number ?? 7) ?? s.pulls.find(p => p.number === (params.pull_number ?? 7)) ?? s.pulls[0];
       return { data: structuredClone(reviewData(s, route, params)) };
     },
@@ -700,33 +704,78 @@ test('a pending re-review cannot promote a draft using an earlier success', asyn
   assert.deepEqual(flips(github), []);
 });
 
-for (const scenario of ['queued admission', 'running admission', 'provider timeout', 'missing notice', 'ambiguous notice', 'other step failed', 'other native failure', 'other required check failed', 'partial notice', 'duplicate notice', 'wrong check URL']) {
+function nativeRerunFixture(github, scenario, running) {
+  const graph = require('./readiness-graph.json');
+  const dependents = dependentJobs();
+  github.state.jobs = Object.entries(graph).flatMap(([id, job]) => {
+    const names = namesFor(id, job);
+    const expanded = job.matrix ? names.filter(name => !name.includes('${{')) : [names.at(-1)];
+    return expanded.map(name => ({ id: 200 + Object.keys(graph).indexOf(id) * 10 + expanded.indexOf(name), name,
+      run_attempt: 1, head_sha: sha, status: 'completed', conclusion: 'success', steps: [], graphId: id }));
+  });
+  github.state.priorRun = { ...github.state.run, run_attempt: 1, status: 'completed', conclusion: 'success' };
+  github.state.priorJobs = structuredClone(github.state.jobs);
+  github.state.run.run_attempt = 2;
+  github.state.run.status = running ? 'in_progress' : 'completed';
+  github.state.run.conclusion = running ? null : 'failure';
+  for (const job of github.state.jobs) {
+    if (!dependents.has(job.graphId)) continue;
+    job.id += 1000; job.run_attempt = 2;
+    job.status = running ? 'queued' : 'completed';
+    job.conclusion = running ? null : 'skipped';
+  }
+  const gate = github.state.jobs.find(job => job.name === REVIEW_CHECK);
+  const aggregate = github.state.jobs.find(job => job.name === VERIFY);
+  aggregate.conclusion = running ? null : 'failure';
+  aggregate.steps = [{ name: 'Require every verification job', status: aggregate.status, conclusion: aggregate.conclusion }];
+  github.state.checkRuns[0].status = aggregate.status;
+  github.state.checkRuns[0].conclusion = aggregate.conclusion;
+  gate.status = running ? (scenario === 'queued admission' ? 'queued' : 'in_progress') : 'completed';
+  gate.conclusion = running ? null : 'failure';
+  gate.check_run_url = 'https://api.github.com/repos/o/r/check-runs/2';
+  gate.steps = [
+    { name: 'Checkout trusted review gate', status: 'completed', conclusion: 'success' },
+    { name: 'Require fresh CodeRabbit admission and resolved threads', status: gate.status, conclusion: gate.conclusion },
+    { name: 'Reject a cancelled run', status: running ? 'queued' : 'completed', conclusion: running ? null : 'skipped' },
+  ];
+  github.state.checkRuns[1].status = gate.status;
+  github.state.checkRuns[1].conclusion = gate.conclusion;
+  return { gate, aggregate };
+}
+
+for (const scenario of ['queued admission', 'running admission', 'provider timeout', 'missing notice', 'ambiguous notice', 'other step failed', 'other native failure', 'other required check failed', 'partial notice', 'duplicate notice', 'wrong check URL', 'prior missing', 'independent changed', 'dependent own failure', 'carried review', 'review recovered']) {
   test(`pending re-review with native revocation: ${scenario}`, async () => {
     const github = fakeGithub({ pulls: [pullFixture({ draft: false })] });
     github.state.checks.push({ ...github.state.checks[0], id: 101, status: 'in_progress', conclusion: null });
-    const running = ['queued admission', 'running admission'].includes(scenario);
-    const gate = github.state.jobs[0];
-    gate.status = running ? (scenario === 'queued admission' ? 'queued' : 'in_progress') : 'completed';
-    gate.conclusion = running ? null : 'failure';
-    gate.check_run_url = 'https://api.github.com/repos/o/r/check-runs/2';
-    gate.steps = [
-      { name: 'Checkout trusted review gate', status: 'completed', conclusion: 'success' },
-      { name: 'Require fresh CodeRabbit admission and resolved threads', status: gate.status, conclusion: gate.conclusion },
-      { name: 'Reject a cancelled run', status: running ? 'queued' : 'completed', conclusion: running ? null : 'skipped' },
-    ];
-    github.state.checkRuns[1].status = gate.status;
-    github.state.checkRuns[1].conclusion = gate.conclusion;
+    const running = ['queued admission', 'running admission', 'carried review', 'review recovered'].includes(scenario);
+    const { gate, aggregate } = nativeRerunFixture(github, scenario, running);
     github.state.annotations = [{ annotation_level: 'notice', message: 'CodeRabbit admission blocked: provider-wait-timeout. CodeRabbit did not settle within the 20-minute review wait. Inspect the provider check; reconciliation can retry after it completes. The reconciler refreshes this job after provider/CI/review events. For eventless thread resolution, dispatch Reconcile CodeRabbit admission with pr_number.' }];
     if (scenario === 'missing notice') github.state.annotations = [];
     if (scenario === 'ambiguous notice') github.state.annotations.push({ annotation_level: 'failure', message: 'Unhandled script error' });
     if (scenario === 'other step failed') gate.steps[0].conclusion = 'failure';
-    if (scenario === 'other native failure') github.state.jobs[2].conclusion = 'failure';
-    if (scenario === 'other required check failed') github.state.checkRuns[0].conclusion = 'failure';
+    if (scenario === 'other native failure') github.state.jobs.find(job => job.name === 'Typecheck').conclusion = 'failure';
+    if (scenario === 'other required check failed') {
+      github.state.rules[0].parameters.required_status_checks.push({ context: 'Typecheck' });
+      github.state.checkRuns.push(checkRun(3, 'Typecheck', 'failure'));
+    }
     if (scenario === 'partial notice') github.state.annotations[0].message = 'CodeRabbit admission blocked: provider-wait-timeout.';
     if (scenario === 'duplicate notice') github.state.annotations.push({ ...github.state.annotations[0] });
     if (scenario === 'wrong check URL') gate.check_run_url = 'https://api.github.com/repos/other/repo/check-runs/2';
-    await completeRun(github);
-    assert.equal(github.state.pulls[0].draft, !['queued admission', 'running admission', 'provider timeout'].includes(scenario));
+    if (scenario === 'review recovered') {
+      gate.status = 'completed'; gate.conclusion = 'success';
+      github.state.checkRuns[1].status = 'completed'; github.state.checkRuns[1].conclusion = 'success';
+    }
+    if (scenario === 'carried review') {
+      github.state.run.run_attempt = 3;
+      github.state.priorRun.run_attempt = 2;
+      github.state.priorJobsByAttempt = { 1: github.state.priorJobs,
+        2: [{ ...github.state.priorJobs.find(job => job.name === VERIFY), run_attempt: 2 }] };
+    }
+    if (scenario === 'prior missing') github.state.priorRun = {};
+    if (scenario === 'independent changed') github.state.jobs.find(job => job.name === 'Typecheck').run_attempt = 2;
+    if (scenario === 'dependent own failure') aggregate.steps[0].name = 'Own failure';
+    await handleEvent({ github, eventName: 'check_run', payload: { action: 'created' } });
+    assert.equal(github.state.pulls[0].draft, !['queued admission', 'running admission', 'provider timeout', 'carried review', 'review recovered'].includes(scenario));
   });
 }
 
@@ -743,4 +792,31 @@ test('retained readiness cannot promote a PR drafted during its final read', asy
   await completeRun(github);
   assert.equal(github.state.pulls[0].draft, true);
   assert.deepEqual(flips(github), []);
+});
+
+test('readiness dependency graph matches the real CI workflow', () => {
+  const ci = yaml.parseDocument(fs.readFileSync(path.join(__dirname, '../workflows/ci.yml'), 'utf8')).toJS();
+  const actual = Object.fromEntries(Object.entries(ci.jobs).map(([id, job]) => [id, {
+    name: job.name ?? id, needs: [job.needs ?? []].flat(), matrix: job.strategy?.matrix ?? null,
+    reviewResultGate: (() => {
+      const gate = job.steps?.find(step => step.env?.REVIEW_RESULT === '${{ needs.review-result.result }}');
+      return gate ? { name: gate.name, sha256: require('node:crypto').createHash('sha256').update(JSON.stringify(gate)).digest('hex') } : null;
+    })(),
+  }]));
+  assert.deepEqual(require('./readiness-graph.json'), actual);
+  const dependent = dependentJobs(actual);
+  assert.ok(dependent.has('review-result'));
+  for (const [id, job] of Object.entries(actual)) {
+    assert.equal(dependent.has(id), id === 'review-result' || job.needs.some(parent => dependent.has(parent)));
+  }
+  // The sole tolerated failed dependent gate checks REVIEW_RESULT before any
+  // other result that could fail. Changes to that order require a new proof.
+  const step = ci.jobs.verify.steps.find(step => step.name === 'Require every verification job');
+  assert.equal(step.env.REVIEW_RESULT, '${{ needs.review-result.result }}');
+  assert.ok(step.run.startsWith(`test "$CANCELLED" = false
+test "$PREFLIGHT_RESULT" = success
+if [ "$EVENT_NAME" = pull_request_target ] && [ "$BASE_REF" = main ]; then
+  test "$REVIEW_RESULT" = success
+fi
+`));
 });
