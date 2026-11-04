@@ -1662,13 +1662,15 @@ an actual native exit callback after an outside SIGKILL on every `RUNNER_IDS`
 wire. The exact OS status still fails the session when EOF cleanup runs first.
 Pi also pins self-exit 143 with the same scheduling fault. Claude, Codex and Pi
 retain bounded live-EOF cleanup and SIGKILL escalation when process evidence is
-unreadable. S34 also denies every process probe. Confirmed exit may suppress a
-cleanup signal; unknown evidence may not. Automatic cleanup with unknown evidence
+unreadable in `core/runner-shutdown-eof-evidence-parity.test.ts`. S34 also denies
+every process probe. Confirmed exit may suppress a cleanup signal; unknown evidence may not. Automatic cleanup with unknown evidence
 fails nonzero/signal exits, including on Windows without a live-state probe.
 Positive live evidence permits successful teardown but cannot prove causation
 against a later external signal. Explicit end/interrupt before native exit takes
-precedence without extending an active cleanup deadline. The same file tests intent
-before EOF, during the probe and after TERM. No wire exemptions or synthetic
+precedence without extending an active cleanup deadline.
+`core/runner-shutdown-eof-intent-parity.test.ts` tests intent before EOF, during
+the probe and after TERM; `core/runner-shutdown-eof-deadline-parity.test.ts` pins
+the earlier KILL deadline. No wire exemptions or synthetic
 normalized events.
 
 **S29** (hearsay-tools/cezarion#906, hearsay-tools/cezarion#969), in `core/omp-input-pipe.test.ts`, closes each
