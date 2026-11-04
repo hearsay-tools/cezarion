@@ -88,7 +88,7 @@ function executesRegistration(call: Node, path: readonly Node[], callee: string)
 }
 
 /** Every reference must be an unchanged declaration/import/export or a supported plain call. */
-export function registrationGroups(source: string, file: string, callee: string, catalog: string, knownGroups: readonly string[]): string[] {
+function registrationArguments(source: string, file: string, callee: string, argumentValue: (call: Node) => string | undefined): string[] {
   const groups: string[] = [];
   const tree = parse(source, { sourceType: 'module', plugins: ['typescript'], allowUndeclaredExports: true });
   traverse(tree, (node, ancestors) => {
@@ -100,7 +100,7 @@ export function registrationGroups(source: string, file: string, callee: string,
       && reference.property.type === 'Identifier' && `${reference.object.name}.${reference.property.name}` === callee;
     const plainCallee = reference.type === 'Identifier' && reference.name === callee;
     const group = call?.type === 'CallExpression' && call.callee === reference && (plainCallee || plainMember)
-      ? supportedGroup(call, catalog, knownGroups) : undefined;
+      ? argumentValue(call) : undefined;
     const path = ancestors.map(ancestor => ancestor.node).concat(node);
     if (group === undefined || !call || !executesRegistration(call, path, callee)) {
       const form = call ?? reference;
@@ -109,4 +109,18 @@ export function registrationGroups(source: string, file: string, callee: string,
     groups.push(group);
   });
   return groups;
+}
+
+/** Scan catalog-member registrations with the same reference and execution rules. */
+export function registrationGroups(source: string, file: string, callee: string, catalog: string, knownGroups: readonly string[]): string[] {
+  return registrationArguments(source, file, callee, call => supportedGroup(call, catalog, knownGroups));
+}
+
+/** Literal partitions only: other arguments and every unsupported reference are errors. */
+export function registrationStrings(source: string, file: string, callee: string): string[] {
+  return registrationArguments(source, file, callee, call => {
+    if (call.type !== 'CallExpression' || call.arguments.length !== 1) return undefined;
+    const argument = call.arguments[0];
+    return argument?.type === 'StringLiteral' ? argument.value : undefined;
+  });
 }
