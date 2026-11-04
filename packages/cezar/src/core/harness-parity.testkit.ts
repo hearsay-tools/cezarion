@@ -1,4 +1,3 @@
-import { runInternals } from '../workflows/run-internals.testkit.ts';
 /**
  * Shared fixtures for the harness parity matrix (`harness-parity.test.ts`,
  * spec `.ai/specs/2026-09-04-harness-parity-matrix.md`, #68).
@@ -35,7 +34,7 @@ import { createRunner } from './runner-factory.ts';
 import type { UiEvent } from './ui-events.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
-import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWork } from '../workflows/fixture-cleanup.testkit.ts';
 import { DelegationController } from '../delegation/provision.ts';
 import { plannedWorkflow, skillTaskSteps } from '../workflows/types.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
@@ -1259,7 +1258,7 @@ function readRunEvents(repoRoot: string, runId: string): Record<string, unknown>
 /** Observe, do not replace, the manager's fire-and-forget Git bookkeeping so
  * test-owned directories outlive every real write. */
 function trackTurnBookkeeping(manager: RunManager): () => Promise<void> {
-  const work = runInternals(manager).context.work;
+  const work = fixtureWork(manager);
   return async () => {
     for (;;) {
       const pending = [...work.pending].filter(([, label]) => label === 'recordTurnEnd');
@@ -1417,7 +1416,7 @@ async function restartOwnedInputRun(
   for (const id of [parentRunId, state.runId!]) rmSync(historyPaths(dataDir, id).facts, { force: true });
   beforeOpen?.(join(repoRoot, '.ai/cezar'));
   state.store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-  state.manager = new RunManager(state.store, repoRoot, options);
+  state.manager = createFixtureManager(state.store, repoRoot, options);
   state.drainBookkeeping = trackTurnBookkeeping(state.manager);
   await state.manager.recover();
   return { store: state.store, manager: state.manager };
@@ -1478,7 +1477,7 @@ export async function withOwnedInputRun(
     const parent = createOwnedInputParent(state.store);
     state.runId = randomUUID();
     await createOwnedInputWorker(state.store, repoRoot, state.runId, parent.id, sha, backend, scenario, options);
-    state.manager = new RunManager(state.store, repoRoot, options);
+    state.manager = createFixtureManager(state.store, repoRoot, options);
     state.drainBookkeeping = trackTurnBookkeeping(state.manager);
     const adoptContext = async (context: { store: RunStore; manager: RunManager }) => {
       await state.drainBookkeeping();
@@ -1527,7 +1526,7 @@ export async function withSkillParentRun(
     mkdirSync(skillsDir, { recursive: true });
     writeFileSync(join(skillsDir, 'parent-skill.md'), 'PARENT SKILL BODY 778');
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot);
     drainBookkeeping = trackTurnBookkeeping(manager);
     controller = await DelegationController.start();
     controller.attachProject({ id: 'project', root: repoRoot, store, manager });
