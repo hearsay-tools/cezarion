@@ -42,6 +42,7 @@ for (const source of [
 
 for (const source of [
   "describeFixtureParity('first');",
+  "import { describeFixtureParity } from './unrelated.testkit.ts'; describeFixtureParity('first');",
   "import type { describeFixtureParity } from './fixture.testkit.ts'; describeFixtureParity('first');",
   "function describeFixtureParity() {} describeFixtureParity('first');",
   "import { describeFixtureParity } from './fixture.testkit.ts'; describe('local', () => { function describeFixtureParity() {} describeFixtureParity('first'); });",

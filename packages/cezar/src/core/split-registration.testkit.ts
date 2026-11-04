@@ -18,5 +18,5 @@ export function registrationCollector(names: string[]): typeof it {
 export function registrationCalls(directory: URL, prefix: string, registration: string): string[] {
   return readdirSync(directory).filter(file => file.startsWith(prefix) && file.endsWith('.test.ts')
     && !file.endsWith('-registration.test.ts') && !file.endsWith('-registration-parity.test.ts'))
-    .flatMap(file => registrationStrings(readFileSync(new URL(file, directory), 'utf8'), file, registration));
+    .flatMap(file => registrationStrings(readFileSync(new URL(file, directory), 'utf8'), file, registration, `./${prefix.replace(/-$/, '')}.testkit.ts`));
 }

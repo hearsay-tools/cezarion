@@ -54,7 +54,7 @@ export function checkParityRegistration(
     .map(file => {
       const source = readFileSync(new URL(file, directory), 'utf8');
       let imported = false;
-      const calls = registrationStrings(source, file, register.name, () => { imported = true; });
+      const calls = registrationStrings(source, file, register.name, `./${family}.testkit.ts`, () => { imported = true; });
       return { file, source, calls, imported };
     })
     .filter(entry => entry.imported || entry.calls.length > 0);

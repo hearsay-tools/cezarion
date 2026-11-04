@@ -122,11 +122,11 @@ export function registrationGroups(source: string, file: string, callee: string,
   return registrationArguments(source, file, callee, call => supportedGroup(call, catalog, knownGroups));
 }
 
-function importedLiteral(call: Node, path: readonly Node[], callee: string): string | undefined {
+function importedLiteral(call: Node, path: readonly Node[], callee: string, moduleSpecifier: string): string | undefined {
   const statement = path.at(-3);
   const program = path.at(-4);
   if (program?.type !== 'Program' || statement?.type !== 'ExpressionStatement' || statement.expression !== call) return undefined;
-  const imported = program.body.some(entry => entry.type === 'ImportDeclaration' && entry.importKind !== 'type' && entry.specifiers.some(specifier =>
+  const imported = program.body.some(entry => entry.type === 'ImportDeclaration' && entry.importKind !== 'type' && entry.source.value === moduleSpecifier && entry.specifiers.some(specifier =>
     specifier.type === 'ImportSpecifier' && specifier.importKind !== 'type' && specifier.imported.type === 'Identifier'
     && specifier.imported.name === callee && specifier.local.name === callee));
   if (!imported || call.type !== 'CallExpression' || call.arguments.length !== 1) return undefined;
@@ -135,6 +135,6 @@ function importedLiteral(call: Node, path: readonly Node[], callee: string): str
 }
 
 /** Literal partitions require their unchanged module import and a top-level call. */
-export function registrationStrings(source: string, file: string, callee: string, onImport?: () => void): string[] {
-  return registrationArguments(source, file, callee, (call, path) => importedLiteral(call, path, callee), onImport);
+export function registrationStrings(source: string, file: string, callee: string, moduleSpecifier: string, onImport?: () => void): string[] {
+  return registrationArguments(source, file, callee, (call, path) => importedLiteral(call, path, callee, moduleSpecifier), onImport);
 }

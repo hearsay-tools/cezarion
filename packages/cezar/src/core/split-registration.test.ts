@@ -28,6 +28,7 @@ const template = \`registerGroup('template')\`;
 
 for (const source of [
   "registerGroup(part);",
+  "import { registerGroup } from './unrelated.testkit.ts'; registerGroup('first');",
   "registerGroup('first');",
   "function registerGroup() {} registerGroup('first');",
   "import { registerGroup as hidden } from './family.testkit.ts'; hidden('first');",
