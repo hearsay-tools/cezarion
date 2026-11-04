@@ -317,12 +317,6 @@ export class RunSettlement {
 
   /** The cancelled settlement: the run and its running and waiting steps become cancelled. */
   settleCancelledRun(runId: string): void {
-    const run = this.context.store.getRun(runId);
-    for (const s of run?.steps ?? []) {
-      if (s.status === 'running' || s.status === 'waiting') {
-        this.context.store.updateStep(runId, s.id, { status: 'cancelled' });
-      }
-    }
     this.host.move(runId, 'cancel');
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
   }
@@ -364,7 +358,7 @@ export class RunSettlement {
     const current = this.context.store.getRun(runId);
     if (!current || this.successSuperseded(runId, current.status, state, continuationGeneration)) return;
     if (state?.cancelled) {
-      this.settleCancelledSuccess(runId, current);
+      this.settleCancelledSuccess(runId);
       return;
     }
     // A worker's accepted continuation or a new child can defer parent completion.
@@ -420,14 +414,8 @@ export class RunSettlement {
 
   /** A Stop accepted while the success settlement read the diff: the run and its running and
    *  waiting steps become cancelled, and a step keeps a finish time it already has. */
-  settleCancelledSuccess(runId: string, current: RunRecord): void {
-    const finishedAt = new Date().toISOString();
-    for (const step of current.steps) {
-      if (step.status === 'running' || step.status === 'waiting') {
-        this.context.store.updateStep(runId, step.id, { status: 'cancelled', finishedAt: step.finishedAt ?? finishedAt });
-      }
-    }
-    this.host.move(runId, 'cancel', { finishedAt });
+  settleCancelledSuccess(runId: string): void {
+    this.host.move(runId, 'cancel');
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
   }
 

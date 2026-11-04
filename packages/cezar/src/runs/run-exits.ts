@@ -107,6 +107,11 @@ const openStep = (step: StepState) => step.status === 'running' || step.status =
 const succeededStep = (step: StepState, _run: ExitRead, { finishedAt, stepId }: StepSettlement): StepState =>
   openStep(step) && step.id !== stepId ? { ...step, status: 'done', finishedAt: step.finishedAt ?? finishedAt } : step;
 
+/** A cancelled run has no live step (B10): its running and waiting steps settle cancelled at the
+ *  run's time. */
+const cancelledStep = (step: StepState, _run: ExitRead, { finishedAt }: StepSettlement): StepState =>
+  openStep(step) ? { ...step, status: 'cancelled', finishedAt: step.finishedAt ?? finishedAt } : step;
+
 /** A park settles its step waiting in the same write (B8): the step the caller names, else the
  *  run's current step. A step that already ended (a failed attempt a park keeps for its wakes)
  *  stays as it is. */
@@ -156,17 +161,17 @@ export const RUN_EXITS = {
   // A crash right after the withdrawal must not find it on disk (hearsay-tools/cezarion#1236).
   'withdraw-hold': { durability: 'committed', from: ['waiting'], to: 'failed', guard: isUsageLimitHold,
     settle: run => ({ ...run, autoResumeAt: undefined, autoResumeAttempts: undefined }) },
-  cancel: { durability: 'debounced', from: ['queued', 'running', 'waiting'], to: 'cancelled' },
+  cancel: { durability: 'debounced', from: ['queued', 'running', 'waiting'], to: 'cancelled', steps: cancelledStep },
   // Cancellation supersedes a root's pending Finish; from cancelled it repairs a snapshot an older
   // controller left with the intent.
   'cancel-root': { durability: 'committed', from: ['waiting', 'cancelled'], to: 'cancelled',
-    guard: run => (run.status === 'waiting' || run.status === 'cancelled') && rootFinishPending(run) },
+    guard: run => (run.status === 'waiting' || run.status === 'cancelled') && rootFinishPending(run), steps: cancelledStep },
   // Must hit disk before queued no-start evidence authorizes cleanup.
   'stop-worker': { durability: 'committed', from: ['queued', 'running', 'waiting', 'review', 'done', 'failed'], to: 'cancelled',
-    guard: run => run.delegation?.role === 'worker', refused: 'Worker not found' },
+    guard: run => run.delegation?.role === 'worker', refused: 'Worker not found', steps: cancelledStep },
   // A Stop that lands after the run settled. A Stop accepted before an exit (`stopping` on load)
   // can meet any status, as the engine's late Stop can.
-  'cancel-late': { durability: 'debounced', from: ['queued', 'running', 'waiting', 'done', 'review', 'failed'], to: 'cancelled' },
+  'cancel-late': { durability: 'debounced', from: ['queued', 'running', 'waiting', 'done', 'review', 'failed'], to: 'cancelled', steps: cancelledStep },
 } as const satisfies Record<string, RunExitSpec>;
 export type RunExitId = keyof typeof RUN_EXITS;
 

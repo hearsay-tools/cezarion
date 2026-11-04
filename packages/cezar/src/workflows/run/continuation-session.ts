@@ -413,7 +413,8 @@ export class ContinuationSession {
 
   /** A Stop before the Continue's session spawned: cancel the step and the run. */
   private settleContinuationPrelaunchCancel(runId: string, stepId: string, state: ActiveRun): void {
-    this.context.store.updateStep(runId, stepId, { status: 'cancelled' });
+    // Its own step may not have started: the exit settles only running and waiting steps (B10).
+    this.context.store.updateStep(runId, stepId, { status: 'cancelled', finishedAt: new Date().toISOString() });
     this.host.move(runId, 'cancel');
     clearAutosaveTimer(state); this.host.dropActive(runId);
   }

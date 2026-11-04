@@ -682,12 +682,7 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
 function settleLoadedStop(run: RunRecord): void {
   // An accepted Stop is durable intent, never an interrupted run to auto-resume. It can meet a run
   // that settled before the Stop did (the engine's own late Stop), so it takes `cancel-late`.
-  if (run.stopping) {
-    Object.assign(run, applyExit(run, 'cancel-late'));
-    for (const step of run.steps) {
-      if (step.status === 'running' || step.status === 'waiting') step.status = 'cancelled';
-    }
-  }
+  if (run.stopping) Object.assign(run, applyExit(run, 'cancel-late'));
   run.stopping = undefined;
 }
 

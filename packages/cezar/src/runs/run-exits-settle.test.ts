@@ -198,3 +198,32 @@ describe('B8: park settles the current step to waiting in the same write', () =>
     expect(statuses(store.move(id, 'park')!)).toEqual([STEP_STATUS.pending, STEP_STATUS.failed, STEP_STATUS.pending]);
   });
 });
+
+// B10: a cancelled run has no live step (hearsay-tools/cezarion#2590 reuses this rule at load).
+describe('B10: every exit to cancelled settles running and waiting steps to cancelled, finishedAt ??= its time', () => {
+  const CANCELLING = SETTLING.filter(exit => RUN_EXITS[exit].to === RUN_STATUS.cancelled);
+
+  it.each(CANCELLING)('%s', (exit) => {
+    const { store, root, worker } = setup();
+    const id = exit === 'stop-worker' ? worker(exit) : root(exit);
+    store.updateStep(id, 'a', { status: STEP_STATUS.running, finishedAt: EARLIER });
+    store.updateStep(id, 'b', { status: STEP_STATUS.waiting });
+    store.move(id, exit);
+    const run = store.getRun(id)!;
+    expect(run.steps.map(step => [step.status, step.finishedAt])).toEqual([
+      [STEP_STATUS.cancelled, EARLIER], [STEP_STATUS.cancelled, run.finishedAt], [STEP_STATUS.pending, undefined]]);
+  });
+
+  it('the store\'s load-time Stop settles them too, at the run\'s first finish time', () => {
+    const { dir, store, root } = setup();
+    const stopped = root('cancel', { status: RUN_STATUS.running, stopping: true, finishedAt: EARLIER });
+    store.updateStep(stopped, 'b', { status: STEP_STATUS.running });
+    store.flush();
+    store.close();
+    const reopened = RunStore.open(dir, { keepLive: true });
+    try {
+      expect(reopened.getRun(stopped)?.steps.map(step => [step.status, step.finishedAt])).toEqual([
+        [STEP_STATUS.pending, undefined], [STEP_STATUS.cancelled, EARLIER], [STEP_STATUS.pending, undefined]]);
+    } finally { reopened.close(); }
+  });
+});
