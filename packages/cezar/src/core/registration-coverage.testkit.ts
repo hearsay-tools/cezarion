@@ -33,6 +33,60 @@ function supportedGroup(node: Node, catalog: string, knownGroups: readonly strin
   return knownGroups.includes(argument.property.name) ? argument.property.name : undefined;
 }
 
+function declaresTest(call: Node, path: readonly Node[], callee: string): Node | undefined {
+  if (callee !== 'it.each') return call;
+  const outer = path[path.indexOf(call) - 1];
+  if (outer?.type !== 'CallExpression' || outer.callee !== call || outer.arguments.length !== 2) return undefined;
+  const [name, callback] = outer.arguments;
+  if (name?.type !== 'StringLiteral' || !callback || !['ArrowFunctionExpression', 'FunctionExpression'].includes(callback.type)) return undefined;
+  return outer;
+}
+
+function suiteOptions(suite: Node): boolean {
+  if (suite.type !== 'CallExpression') return false;
+  if (suite.arguments.length === 2) return true;
+  const options = suite.arguments[1];
+  return suite.arguments.length === 3 && options?.type === 'ObjectExpression' && options.properties.every(property =>
+    property.type === 'ObjectProperty' && !property.computed && property.key.type === 'Identifier'
+    && property.key.name === 'timeout' && property.value.type === 'NumericLiteral');
+}
+
+function synchronousSuiteCallback(callback: Node | undefined, body: Node): boolean {
+  if (!callback || (callback.type !== 'ArrowFunctionExpression' && callback.type !== 'FunctionExpression')) return false;
+  if (callback.async || callback.generator || callback.params.length !== 0 || callback.body !== body) return false;
+  let abrupt = false;
+  traverse(body, (node, ancestors) => {
+    if (node.type !== 'ReturnStatement' && node.type !== 'ThrowStatement') return;
+    const nestedFunction = ancestors.some(ancestor => ['ArrowFunctionExpression', 'FunctionExpression', 'FunctionDeclaration', 'ObjectMethod', 'ClassMethod'].includes(ancestor.node.type));
+    if (!nestedFunction) abrupt = true;
+  });
+  return !abrupt;
+}
+
+/** Only module statements and synchronous describe callbacks execute at collection time. */
+function collectionStatement(statement: Node, path: readonly Node[]): boolean {
+  if (statement.type !== 'ExpressionStatement') return false;
+  const containerIndex = path.indexOf(statement) - 1;
+  const container = path[containerIndex];
+  if (container?.type === 'Program') return true;
+  if (container?.type !== 'BlockStatement') return false;
+  const callback = path[containerIndex - 1];
+  if (!synchronousSuiteCallback(callback, container)) return false;
+  const suite = path[containerIndex - 2];
+  if (suite?.type !== 'CallExpression' || suite.callee.type !== 'Identifier' || suite.callee.name !== 'describe'
+    || !suiteOptions(suite) || suite.arguments.at(-1) !== callback || suite.arguments[0]?.type !== 'StringLiteral') return false;
+  const suiteStatement = path[containerIndex - 3];
+  return suiteStatement?.type === 'ExpressionStatement' && suiteStatement.expression === suite
+    && collectionStatement(suiteStatement, path);
+}
+
+function executesRegistration(call: Node, path: readonly Node[], callee: string): boolean {
+  const declaration = declaresTest(call, path, callee);
+  if (!declaration) return false;
+  const statement = path[path.indexOf(declaration) - 1];
+  return statement?.type === 'ExpressionStatement' && statement.expression === declaration && collectionStatement(statement, path);
+}
+
 /** Every reference must be an unchanged declaration/import/export or a supported plain call. */
 export function registrationGroups(source: string, file: string, callee: string, catalog: string, knownGroups: readonly string[]): string[] {
   const groups: string[] = [];
@@ -47,7 +101,8 @@ export function registrationGroups(source: string, file: string, callee: string,
     const plainCallee = reference.type === 'Identifier' && reference.name === callee;
     const group = call?.type === 'CallExpression' && call.callee === reference && (plainCallee || plainMember)
       ? supportedGroup(call, catalog, knownGroups) : undefined;
-    if (group === undefined) {
+    const path = ancestors.map(ancestor => ancestor.node).concat(node);
+    if (group === undefined || !call || !executesRegistration(call, path, callee)) {
       const form = call ?? reference;
       throw new Error(`${file}: unsupported ${callee} registration: ${source.slice(form.start!, form.end!)}`);
     }

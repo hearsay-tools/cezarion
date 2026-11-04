@@ -75,6 +75,24 @@ describe('native CI tool row coverage', () => {
   ])('rejects unaccounted native registration reference %s', source => {
     expect(() => nativeGroups(`${source};`, 'reference.test.ts')).toThrow('reference.test.ts: unsupported');
   });
+  it.each([
+    'function later() { registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel); }',
+    'if (false) { registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel); }',
+    'false && registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel)',
+    'const value = registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel)',
+    "it('later', () => { registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel); })",
+    "describe('suite', { skip: true }, () => { registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel); })",
+    "describe('suite', () => { return; registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel); })",
+    "describe('suite', () => { if (true) return; registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel); })",
+    "describe.skip('suite', () => { registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel); })",
+    "describe('suite', async () => { registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel); })",
+  ])('rejects native calls outside collection statements %s', source => {
+    expect(() => nativeGroups(source, 'unexecuted.test.ts')).toThrow('unexecuted.test.ts: unsupported');
+  });
+  it('accepts module and nested synchronous suite registration statements', () => {
+    expect(nativeGroups("describe('outer', () => { describe('inner', () => { registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel); }); });")).toEqual(['waitCancel']);
+    expect(nativeGroups('registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel);')).toEqual(['waitCancel']);
+  });
   it('allows unchanged imports, declarations and exports', () => {
     expect(nativeGroups('import { registerCiNativeTools } from "./tools";')).toEqual([]);
     expect(nativeGroups('export function registerCiNativeTools() {}')).toEqual([]);

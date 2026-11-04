@@ -318,10 +318,23 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   });
   it('checks nested provision registrations and ignores non-code text', () => {
     const call = 'it.each(PROVISION_ROWS.governedIntent)';
-    expect(provisionMatrixCounts([`function later() { ${call}; }`]).governedIntent).toBe(1);
+    expect(() => provisionMatrixCounts([`function later() { ${call}; }`])).toThrow();
     expect(() => provisionMatrixCounts(['function later() { it.each(rows); }'], ['nested.test.ts'])).toThrow('nested.test.ts: unsupported');
     expect(provisionMatrixCounts([`// ${call}\n/* ${call} */\nconst text = "${call}"; const template = \`${call}\`;`]).governedIntent).toBe(0);
-    expect(provisionMatrixCounts([`${call}; ${call};`]).governedIntent).toBe(2);
+    const declaration = `${call}('row', () => {});`;
+    expect(provisionMatrixCounts([`${declaration} ${declaration}`]).governedIntent).toBe(2);
+    expect(provisionMatrixCounts([`describe('suite', () => { ${declaration} });`]).governedIntent).toBe(1);
+  });
+
+  for (const source of [
+    "it.each(PROVISION_ROWS.governedIntent);",
+    "it.each(PROVISION_ROWS.governedIntent)('row');",
+    "it.each(PROVISION_ROWS.governedIntent)('row', callback);",
+    "function later() { it.each(PROVISION_ROWS.governedIntent)('row', () => {}); }",
+    "if (false) { it.each(PROVISION_ROWS.governedIntent)('row', () => {}); }",
+    "it('later', () => { it.each(PROVISION_ROWS.governedIntent)('row', () => {}); });",
+  ]) it(`rejects provision calls that do not declare tests ${source}`, () => {
+    expect(() => provisionMatrixCounts([source], ['unexecuted.test.ts'])).toThrow('unexecuted.test.ts: unsupported');
   });
 
   for (const source of [
