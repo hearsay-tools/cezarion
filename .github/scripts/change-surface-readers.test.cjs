@@ -31,8 +31,7 @@ const mentionedOnly = [
   { file: 'packages/cezar/src/runs/store-database.test.ts', markdown: 'docs/run-history-recovery.md', reason: 'asserts that a warning names the doc' },
   { file: 'packages/cezar/src/server/checkout.test.ts', markdown: 'README.md', reason: 'reads README.md in a temporary checkout, never this one' },
   { file: 'packages/cezar/src/skills-remote.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
-  { file: 'packages/cezar/src/workflows/run-queued-delivery.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
-  { file: 'packages/cezar/src/workflows/run-skill-chain.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
+  { file: 'packages/cezar/src/workflows/run.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
   { file: 'packages/cezar/src/workflows/system-prompt.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
   { file: 'packages/cezar/src/workflows/team-skill-materialize.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
 ];

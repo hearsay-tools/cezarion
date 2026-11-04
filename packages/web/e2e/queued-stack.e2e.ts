@@ -191,7 +191,7 @@ describe('a queued run’s prompt is amendable (#472)', () => {
    * The whole point: whatever is stacked when the slot frees must survive into the run.
    *
    * Delivery of the folded `{{task}}` to the backend is asserted at the engine level in
-   * `src/workflows/run-queued-delivery.test.ts`, which reads the mock's own record of the prompt it was
+   * `src/workflows/run.test.ts`, which reads the mock's own record of the prompt it was
    * handed. Here the browser proves the UI half: the amendment survives the transition, the
    * record still holds the prompt and its stack SEPARATELY (hydration is read-only, so the
    * prompt never absorbs its stack and cannot compound across restarts), and the thread
