@@ -195,19 +195,22 @@ state has an automatic exit or a recorded human-only reason.
 
 ### Table B targets (S7)
 
-| # | Target rule | Reason |
-|---|---|---|
-| B1, B2, B3 | Every settling exit (one that writes done, review, failed or cancelled) clears `currentStepId` and retires the root's Finish intent. `review` is not final (it has `accept-review` and Continue exits); `succeed-review` already does both | A settled run points at no step; a Finish intent has no meaning once the run settled. The family reconciler stops being the repair path for cancel |
-| B4 | A settling exit keeps an existing `finishedAt` (`??=`); `continue-*` and `hold` clear it | The first settlement time is the fact; a later writer on a settled run only repairs |
-| B5 | Both success paths clear `activity` and settle running or waiting steps in the same write | One exit, one result |
-| B6 | accept-review and draft-pr set `finishedAt ??= now` and retire the Finish intent | As B3 and B4 |
-| B7 | The usage-limit Continue writes `continue-line` once | The second write repeats the first |
-| B8 | `park` settles the current step to waiting in the same write | As B5 |
-| B9 | Kept; recorded only. The follow-up `flush()` stays until S6 gives each exit its durability | S6 decides it |
-| B10 | Every exit to cancelled settles running and waiting steps to cancelled, with `finishedAt ??= now` | A cancelled run has no live step. The load-time repair (hearsay-tools/cezarion#2590) reuses this rule |
-| B11 | Every exit to failed settles open steps to failed for a root run; an owned worker keeps its re-entry step `waiting` (hearsay-tools/cezarion#1620) | A failed root has no live step; a parent resume re-enters the worker's step |
-| B12 | The cancel exits write the `run cancelled` event once, at every site | The web header (hearsay-tools/cezarion#2589) and the timeline read one event for one cancellation |
-| B13 | S7 decides whether the Draft PR route refuses a usage-limit hold, or `draft-pr` declares it | Until then the raw route records a violation; the cockpit offers no Draft PR on a hold |
+S7 commits one row (or row group) at a time, each with a regression test that fails without it
+(`runs/run-exits-settle.test.ts`). The S7 column marks the rows that landed.
+
+| # | Target rule | Reason | S7 |
+|---|---|---|---|
+| B1, B2, B3 | Every settling exit (one that writes done, review, failed or cancelled) clears `currentStepId` and retires the root's Finish intent. `review` is not final (it has `accept-review` and Continue exits); `succeed-review` already does both | A settled run points at no step; a Finish intent has no meaning once the run settled. The family reconciler stops being the repair path for cancel | done |
+| B4 | A settling exit keeps an existing `finishedAt` (`??=`); `continue-*` and `hold` clear it | The first settlement time is the fact; a later writer on a settled run only repairs | |
+| B5 | Both success paths clear `activity` and settle running or waiting steps in the same write | One exit, one result | |
+| B6 | accept-review and draft-pr set `finishedAt ??= now` and retire the Finish intent | As B3 and B4 | |
+| B7 | The usage-limit Continue writes `continue-line` once | The second write repeats the first | |
+| B8 | `park` settles the current step to waiting in the same write | As B5 | |
+| B9 | Kept; recorded only. The follow-up `flush()` stays until S6 gives each exit its durability | S6 decides it | |
+| B10 | Every exit to cancelled settles running and waiting steps to cancelled, with `finishedAt ??= now` | A cancelled run has no live step. The load-time repair (hearsay-tools/cezarion#2590) reuses this rule | |
+| B11 | Every exit to failed settles open steps to failed for a root run; an owned worker keeps its re-entry step `waiting` (hearsay-tools/cezarion#1620) | A failed root has no live step; a parent resume re-enters the worker's step | |
+| B12 | The cancel exits write the `run cancelled` event once, at every site | The web header (hearsay-tools/cezarion#2589) and the timeline read one event for one cancellation | |
+| B13 | S7 decides whether the Draft PR route refuses a usage-limit hold, or `draft-pr` declares it | Until then the raw route records a violation; the cockpit offers no Draft PR on a hold | |
 
 ## Open decisions
 

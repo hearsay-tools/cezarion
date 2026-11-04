@@ -193,7 +193,7 @@ export class RunSettlement {
   /** A Stop ended the Continue's session: cancel its step and the run. */
   settleCancelledContinuation(runId: string, stepId: string): void {
     this.context.store.updateStep(runId, stepId, { status: 'cancelled', finishedAt: new Date().toISOString() });
-    this.host.move(runId, 'cancel', { finishedAt: new Date().toISOString(), currentStepId: undefined });
+    this.host.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
   }
 
@@ -324,7 +324,7 @@ export class RunSettlement {
         this.context.store.updateStep(runId, s.id, { status: 'cancelled' });
       }
     }
-    this.host.move(runId, 'cancel', { finishedAt, currentStepId: undefined });
+    this.host.move(runId, 'cancel', { finishedAt });
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
   }
 
@@ -428,7 +428,7 @@ export class RunSettlement {
         this.context.store.updateStep(runId, step.id, { status: 'cancelled', finishedAt: step.finishedAt ?? finishedAt });
       }
     }
-    this.host.move(runId, 'cancel', { finishedAt, currentStepId: undefined });
+    this.host.move(runId, 'cancel', { finishedAt });
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
   }
 

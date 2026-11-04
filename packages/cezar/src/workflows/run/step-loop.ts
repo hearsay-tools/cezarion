@@ -162,7 +162,7 @@ export class StepLoop {
       const message = err instanceof Error ? err.message : String(err);
       const error = `worktree creation failed: ${message}`;
       emit({ type: 'note', message: `${error} — task stopped before workflow execution` });
-      this.host.move(runId, 'fail-start', { error, currentStepId: undefined });
+      this.host.move(runId, 'fail-start', { error });
       emit({ type: 'lifecycle', message: `run failed — ${error}` });
       this.host.dropActive(runId);
       return false;
