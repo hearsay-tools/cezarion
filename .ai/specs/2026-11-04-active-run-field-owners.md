@@ -142,6 +142,24 @@ one writer, including construction. It keeps one ActiveRun construction site.
 Migrate one group per PR. Each group is a class defined in its owner module. Its writable
 state lives in ES `#private` fields. `ActiveRun` holds each group in a readonly property.
 Only its owner module implements the class's commands. Do not export writable backing records.
+P5 removes the last flat field and makes `createActiveRun` return `Object.freeze(container)`.
+Freeze only the ActiveRun group-slot container, never the group instances. Their private state
+remains live and mutable through owner commands. Before P5, each migrated group's rule rejects
+whole-container target writes through Object.assign, Object.defineProperty, bracket replacement
+and spread-into-target assignment, including ActiveRun aliases. Add an invalid fixture for
+`Object.assign(state, { usage: other.usage })` and a valid constructor composition. At P5,
+prove at runtime that whole-slot replacement cannot change the frozen container.
+
+Replace all Object.assign/createActiveRun and spread replacement fixtures before that freeze;
+P1 starts this migration and each later PR updates its own remaining fixture uses. Also replace
+`ci-wait-registration.test.ts:69` restoring state with Object.assign. Use explicit owner commands
+or a fresh factory object; do not unfreeze a fixture. The baseline AST write census found only
+the 59 declared field targets. A grep for bracket writes, delete, Object.assign and
+Object.defineProperty found no production code adding an undeclared ActiveRun property after
+construction. P5 repeats both checks on its starting main, including alias receivers. Freezing
+thus removes no declared product write path; constructor values, keys and slot identity stay
+the same. Do not freeze earlier while flat fields still have legitimate writers.
+
 Getters preserve the current values and live collection order. They do not copy a map/set
 on each access or snapshot it at a new time. Their types use `ReadonlyMap`/`ReadonlySet` and
 read-only nested records. AgentSession is still a runner capability, not owned runner internals.
@@ -395,7 +413,7 @@ repo parity command for its required gate. Every new guard/test gets recorded re
 | P2: session ownership | `active-run.ts` session fields; `run.ts:260–276,400–408`; `run/step-session.ts:105–125,244–269,304–317`; `run/continuation-session.ts:331,431,498–521,583–604,637–638`; `run/step-loop.ts:143,220,278–306,504`; `run/run-cancel.ts:55–59`; `run/launch-context.ts:164–172`; `run/repo-root-lease.ts:38–59`; `run/drop-active.ts:6–10`; `run/session-events.ts:103–190,280–302`; new `run/live-session-state.ts` | session rule | fresh/Continue receipt boundaries, cancellation, root lease, no-session cancellation and run-exit tests; parity U6s/U9w/U22. Move only session-group writes in listed regions | None |
 | P3: input ownership | `active-run.ts:24–61,131–133,144–149`; `workflows/input-acknowledgement.ts:23`; `run/input-delivery.ts:86–101,229–299,332–434`; `run/input-receipts.ts:26–139`; `run/input-timers.ts:1–14`; `run/opening.ts:29`; `run/compose.ts:265`; fresh/Continue input setup `:125`/`:521` | input rule | input receipt/ACK tests, input consumption, held-human liveness, queued input, input-ready tests; parity U3w/U9w/U15 and input-delivery cells for each runner | None |
 | P4: wait identity and autosave | `run/wait-registry.ts:95,118,152,213,247`; `run/cezar-tools.ts:123`; `run/session-events.ts:155`; `run/input-timers.ts:45`; `run/worktree-autosave.ts:138`; ActiveRun factory/view; callers clearing autosave | wait, autosave rules | wait/tool-generation and autosave tests; parity wait registration/cancel/restart cells on each runner. Keep actual timer clear at current teardown position | None |
-| P5: boundary owner | new `run/turn-boundary.ts`; `run/turn-settler.ts:54–497`; `run/turn-nudges.ts:44–216`; `workflows/completion-policy.ts:52–65`; `run/input-delivery.ts:179–180,253–254,355,519–522,605–615`; `run/input-timers.ts:30–37`; `run/session-events.ts:153–155,272–274,318`; `run/step-session.ts:112,266,310–314`; Continue next-step and pending-ask writes `:469,602`; `run/human-waits.ts:28–29,105`; `run/run-finish.ts:62`; `run/run-settlement.ts:131`; `run/step-loop.ts:391`; `run/wake-admission.ts:414`; `run/subagent-waits.ts:131`; `run/memory-guard.ts:56`; `run/compose.ts:266`; skill block at baseline `load-bearing-change/SKILL.md:65–71` | boundary rule, all entry-path order tests | full order table; `autonomous-nudge-guards.test.ts`, `held-human-input-liveness.test.ts`, `input-receipt-boundaries.test.ts`; parity U6s/U15/U20/U22/U22s/U3w/U9w/R13/R17 plus existing wait/done cells on every runner | Handler-order block and its marker, only after every row and zero outside writes pass |
+| P5: boundary owner | new `run/turn-boundary.ts`; `run/turn-settler.ts:54–497`; `run/turn-nudges.ts:44–216`; `workflows/completion-policy.ts:52–65`; `run/input-delivery.ts:179–180,253–254,355,519–522,605–615`; `run/input-timers.ts:30–37`; `run/session-events.ts:153–155,272–274,318`; `run/step-session.ts:112,266,310–314`; Continue next-step and pending-ask writes `:469,602`; `run/human-waits.ts:28–29,105`; `run/run-finish.ts:62`; `run/run-settlement.ts:131`; `run/step-loop.ts:391`; `run/wake-admission.ts:414`; `run/subagent-waits.ts:131`; `run/memory-guard.ts:56`; `run/compose.ts:266`; skill block at baseline `load-bearing-change/SKILL.md:65–71` | boundary rule, all entry-path order tests | full order table; `autonomous-nudge-guards.test.ts`, `held-human-input-liveness.test.ts`, `input-receipt-boundaries.test.ts`; parity U6s/U15/U20/U22/U22s/U3w/U9w/R13/R17 plus existing wait/done cells on every runner | Handler-order block and its marker, only after every row and zero outside writes pass; freeze the group-slot container after fixture migration |
 | P6: launch read ownership | New `run/launch-read-resolver.ts`; source regions, read forms and tests listed in the P6 section below; skill queue-head block at baseline `:35–42` | `launch-read-outside-resolver`, source-capability/alias fixtures | held-head and phase-gate fixtures for every mutable source; unchanged `team-skill-materialize.test.ts`, `agent-profile-wiring.test.ts`, model identity and queued input tests; `npm run test:parity` | Queue-head block and its marker, with zero off-owner reads and timing proof |
 
 Each PR re-measures its regions on the current main it starts from; the baseline regions are
@@ -519,12 +537,16 @@ New tests below live in `workflows/run/launch-read-resolver.test.ts` and
 | systemPrompt | SO | existing launch/step prompt assembly, same extra prompt value and selected skill reads | new `step prompt preserves task extra-prompt pin` |
 | systemPrompt | C | current continuation setup reads recorded/worker settings at its current point | new `Continue keeps recorded extra prompt and worker pin` |
 | systemPrompt | LI | current slash expansion/message; no session system prompt rewrite | new `live input does not replace opening system prompt` |
-| Model/effort | TH | accepted model/effort pins plus live model-lock/provider lookup; `step-loop.ts:81`, `launch-settings.ts:115–128` | new `held task preserves model pin and reads provider policy at launch` |
-| Model/effort | SO | worker step identity else authored step override else accepted input; live provider/lock lookup (`launch-settings.ts:140–190`) | `model-identity-wiring.test.ts`; new `step open reads provider policy after preceding step` |
-| Model/effort | C | stored owning step/run pin and live lock/provider lookup (`launch-settings.ts:35–81`) | `model-identity-wiring.test.ts`; new `Continue retains authored model and reads current policy` |
-| Model/effort | LI | no model reselection in ordinary message send; child delegation selection is its existing separate operation | new `ordinary live input does not resolve a model again` |
+| Model | TH | accepted model pin plus live model-lock/provider lookup; `step-loop.ts:81`, `launch-settings.ts:115–128` | new `held task preserves model pin and reads provider policy at launch` |
+| Model | SO | worker step identity else authored step override else accepted input; live provider/lock lookup (`launch-settings.ts:140–190`) | `model-identity-wiring.test.ts`; new `step open reads provider policy after preceding step` |
+| Model | C | stored owning step/run pin and live lock/provider lookup (`launch-settings.ts:35–81`) | `model-identity-wiring.test.ts`; new `Continue retains authored model and reads current policy` |
+| Model | LI | no model reselection in ordinary message send; child delegation selection is its existing separate operation | new `ordinary live input does not resolve a model again` |
+| Effort | TH | accepted input effort is persisted on the run at enqueue (`run-start.ts:74`); task-level model identity does not resolve effort. Do not add an eager effort read here | new `task head does not snapshot effort before step selection` |
+| Effort | SO | model lock returns undefined; otherwise worker step identity, then authored step effort (including explicit unset semantics), then current `store.getRun(runId)?.effort ?? input.effort` (`launch-settings.ts:168–179`). The current record wins over the accepted input fallback | new `step open uses amended run effort ahead of original input`; new `authored and worker effort retain precedence over run amendments` |
+| Effort | C | live model lock, else worker identity, else authored owning-step effort, else current continued record effort (`launch-settings.ts:64–81`); preserve parsing/error behavior | new `Continue uses current record effort after owning-step precedence` |
+| Effort | LI | ordinary live messages do not reselect effort; delegation selection stays a separate existing operation | new `ordinary live input does not resolve effort again` |
 | Agent profile | TH | per-run account pin persisted at enqueue (`run-start.ts:76–79`), current account/hold check at pump and startExecution | new `held task retains per-task account while current hold changes`; keep both gates |
-| Agent profile | SO | recorded step profile/worker identity, then project/default resolution at `session-events.ts:164–182`, called by `step-session.ts:97` | `agent-profile-wiring.test.ts`: `a RECORDED step profile wins over everything — resume must not follow a changed default`; new `step open sees changed default and deleted account fallback` |
+| Agent profile | SO | worker step identity first; otherwise matching run account pin (only when step backend matches run runner), then project/default (`launch-context.ts:65–75`). Fresh `step-session.ts:97` passes stepId, not recordedProfileId. It must not reuse the prior step profile on retry | `agent-profile-wiring.test.ts`: `resolves each step of a MIXED-backend workflow against its own provider`; new `fresh step retry uses current run pin or project default instead of prior recorded profile`; keep deleted-account fallback test |
 | Agent profile | C | owning recorded profile wins; continuation passes existing step/session identity at `continuation-session.ts:293` | `agent-profile-wiring.test.ts`: `keeps a Continue on the account the step recorded, whatever the project uses now` |
 | Agent profile | LI | current session profile; no ordinary message account reselection | new `live input keeps current session account` |
 | Skills | TH | discover run registry at existing start point (`run-skills.ts:38–46`), selected skill reads remain at prompt preparation | new `held task discovers current skill body and source availability` |
@@ -566,7 +588,7 @@ Baseline regions: `run-line.ts:140–171,200–269,288–310,375–382`;
 `run-start.ts:61–105,164–191`; `queued-input.ts:68–160`;
 `step-loop.ts:60–99`; `step-session.ts:88–105,150–180`;
 `continuation-session.ts:160–185,240–335`; `launch-settings.ts:14–190`;
-`session-events.ts:164–182`; `run-skills.ts:27–61,125–153`.
+`session-events.ts:164–182`; `launch-context.ts:55–82`; `run-skills.ts:27–61,125–153`.
 Add `launch-read-resolver.ts`, its rule/fixtures, `launch-read-resolver.test.ts`, and
 `launch-read-boundaries.test.ts`. Re-measure all regions on P6's starting main. P6 runs after
 P5; do not edit these hot regions in parallel with 4.2 or overlapping 4.3 batches.
@@ -575,7 +597,7 @@ Held-head fixtures use a product release gate: hold the first task, queue the se
 the source, release, and observe the second task's actual runner input/store/events. For workflow
 and explicit input pins, assert the accepted value survives catalog changes. For task text and
 queued input, edit and remove queued messages. For attachments, replace and remove persisted
-files and cover the original-live-block fallback. For runner/systemPrompt/model policy/profile,
+files and cover the original-live-block fallback. For runner/systemPrompt/model policy/profile and current run effort,
 change the default and remove the selected resource where supported; keep explicit pins and
 current fallback/error behavior. For skills, edit body, remove a source, and deselect skill/source.
 Repeat for queued Continue. For SO and LI reads, add a second release gate at the current phase,
