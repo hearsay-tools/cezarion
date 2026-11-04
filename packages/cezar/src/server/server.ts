@@ -4028,8 +4028,8 @@ export function createApp(deps: ServerDeps) {
       const held = store.getRun(id);
       if (!held) return c.json({ error: 'not found' }, 404);
       if (manager.isActive(id)) return c.json({ error: 'run is still active — wait for the review gate' }, 409);
-      // A usage-limit hold is live: done would drop its booked resume (spec S7, Table B13).
-      if (isUsageLimitHold(held)) return c.json({ error: 'run is waiting on a usage-limit hold — wait for its resume, or Stop it first' }, 409);
+      // A hold is live: done would drop its resume (S7 B13). Don’t resume (DELETE …/auto-resume) settles it failed.
+      if (isUsageLimitHold(held)) return c.json({ error: 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry Draft PR' }, 409);
       const release = manager.claimForPublish(id);
       if (!release) return c.json({ error: 'its worktree or branch is being cleaned up — retry in a moment' }, 409);
       try {

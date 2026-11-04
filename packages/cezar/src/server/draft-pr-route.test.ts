@@ -75,7 +75,8 @@ describe('the Draft PR route', () => {
     const before = structuredClone(store.getRun(id));
     const res = await apiRequest(app, `/api/v1/runs/${id}/pr`, { method: 'POST' });
     expect(res.status).toBe(409);
-    expect(await res.json()).toEqual({ error: expect.stringContaining('usage-limit hold') });
+    // The hold's own way out is the thread's Don’t resume, which settles it failed; Stop may leave it.
+    expect(await res.json()).toEqual({ error: 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry Draft PR' });
     expect(store.getRun(id)).toEqual(before);
     expect([claims, published]).toEqual([0, 0]);
   });
