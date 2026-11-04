@@ -1,4 +1,3 @@
-import { describeWaitParity } from './waits-parity-cells.testkit.ts';
+import { describeWaitParityFamily, WAIT_PARITY_FAMILIES } from './waits-parity-cells.testkit.ts';
 
-// The wait list's RUNNER_IDS turn-end entry cells on the cursor wire (hearsay-tools/cezarion#1525).
-describeWaitParity({ runner: 'cursor', part: 'entries' });
+describeWaitParityFamily(WAIT_PARITY_FAMILIES.cursorEntriesRefusals);

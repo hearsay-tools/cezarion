@@ -1,3 +1,3 @@
-import { describeWaitParity } from './waits-parity-cells.testkit.ts';
+import { describeWaitParityFamily, WAIT_PARITY_FAMILIES } from './waits-parity-cells.testkit.ts';
 
-describeWaitParity({ runner: 'cursor', part: 'mixed' });
+describeWaitParityFamily(WAIT_PARITY_FAMILIES.cursorMixedWaits);

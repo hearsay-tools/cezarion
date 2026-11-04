@@ -1,3 +1,4 @@
+import { registrationGroups } from '../core/registration-coverage.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { runInternals } from './run-internals.testkit.ts';
 import { spawn } from 'node:child_process';
@@ -463,7 +464,82 @@ export const WAIT_PARITY_FILES = Object.fromEntries(
   Object.keys(WAIT_PARITY_CELLS).map(part => [part, (runner: RunnerId) => `waits-${runner}-${part}-parity.test.ts`]),
 ) as Record<WaitParityPart, (runner: RunnerId) => string>;
 
-export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPart } | 'once'): void {
+// Only the measured residual runner/part pairs use smaller row families.
+export const WAIT_PARITY_FAMILIES = {
+  cursorMixedWaits: { runner: 'cursor', part: 'mixed', family: 'waits' },
+  cursorMixedNotices: { runner: 'cursor', part: 'mixed', family: 'notices' },
+  cursorEntriesRefusals: { runner: 'cursor', part: 'entries', family: 'refusals' },
+  cursorEntriesNoWait: { runner: 'cursor', part: 'entries', family: 'no-wait' },
+  cursorEntriesCompletion: { runner: 'cursor', part: 'entries', family: 'completion' },
+  cursorEntriesTimer: { runner: 'cursor', part: 'entries', family: 'timer' },
+  opencodeEntriesRefusals: { runner: 'opencode', part: 'entries', family: 'refusals' },
+  opencodeEntriesNoWait: { runner: 'opencode', part: 'entries', family: 'no-wait' },
+  opencodeEntriesCompletion: { runner: 'opencode', part: 'entries', family: 'completion' },
+  opencodeEntriesTimer: { runner: 'opencode', part: 'entries', family: 'timer' },
+} as const;
+type WaitParityFamily = typeof WAIT_PARITY_FAMILIES[keyof typeof WAIT_PARITY_FAMILIES];
+
+/** Register a strict catalog reference, so the coverage scanner can prove every leaf call. */
+export function describeWaitParityFamily(scope: WaitParityFamily): void {
+  describeWaitParity(scope);
+}
+
+function rowFamily(part: WaitParityPart, title: string): WaitParityFamily['family'] {
+  const words = title.split(' ');
+  if (part === 'mixed') {
+    if (['U3w', 'U3n', 'U3r', 'U3d'].includes(words[1]!)) return 'notices';
+    if (['U2w', 'U2t', 'U2c', 'U7w'].includes(words[1]!)) return 'waits';
+    throw Error(`Unclassified mixed wait parity row: ${title}`);
+  }
+  if (words[2] === 'U6') return 'completion';
+  if (words[2] === 'U11') return 'timer';
+  if (words[2] === 'U20' || words[2] === 'U20u') return 'refusals';
+  if (words[2] === 'U5' || words[2] === 'accepted') return 'no-wait';
+  throw Error(`Unclassified wait parity row: ${title}`);
+}
+
+function familyTest(scope: WaitParityFamily, register: typeof registerTest): typeof registerTest {
+  return ((title: string, body: () => Promise<void>) => {
+    if (rowFamily(scope.part, title) === scope.family) register(title, body);
+  }) as typeof registerTest;
+}
+
+function splitPart(runner: RunnerId, part: WaitParityPart): boolean {
+  return Object.values(WAIT_PARITY_FAMILIES).some(scope => scope.runner === runner && scope.part === part);
+}
+
+function expectPartLeaf(runner: RunnerId, part: WaitParityPart): void {
+  if (splitPart(runner, part)) return; // Full-title family coverage is checked separately below.
+  const file = WAIT_PARITY_FILES[part](runner);
+  const source = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8');
+  expect(source.match(/describeWaitParity\([^;]+\)/g), file).toEqual([`describeWaitParity({ runner: '${runner}', part: '${part}' })`]);
+}
+
+function familyCalls(): string[] {
+  return readdirSync(new URL('.', import.meta.url)).filter(file => file.endsWith('.test.ts')).flatMap(file =>
+    registrationGroups(readFileSync(new URL(`./${file}`, import.meta.url), 'utf8'), file,
+      'describeWaitParityFamily', 'WAIT_PARITY_FAMILIES', Object.keys(WAIT_PARITY_FAMILIES)));
+}
+
+function expectWaitParityFamilies(): void {
+  const calls = familyCalls();
+  expect(calls.slice().sort()).toEqual(Object.keys(WAIT_PARITY_FAMILIES).sort());
+  for (const runner of RUNNER_IDS) {
+    for (const part of ['mixed', 'entries'] as const) {
+      if (!splitPart(runner, part)) continue;
+      const expected: string[] = [], actual: string[] = [];
+      const collect = (names: string[]) => ((title: string) => { names.push(title); }) as typeof registerTest;
+      WAIT_PARITY_CELLS[part]([runner], collect(expected));
+      for (const name of calls) {
+        const scope = WAIT_PARITY_FAMILIES[name as keyof typeof WAIT_PARITY_FAMILIES];
+        if (scope.runner === runner && scope.part === part) WAIT_PARITY_CELLS[part]([runner], familyTest(scope, collect(actual)));
+      }
+      expect(actual.sort(), `${runner} ${part}: each full row exactly once`).toEqual(expected.sort());
+    }
+  }
+}
+
+export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPart; family?: WaitParityFamily['family'] } | 'once'): void {
   const runnersFor = (part: WaitParityPart): RunnerId[] => scope !== 'once' && scope.part === part ? [scope.runner] : [];
   describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', { timeout: 45_000 }, () => {
     useWorkerWaitFixture();
@@ -474,7 +550,8 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       it('runs every runner\'s cells from its own file', () => {
         const files = readdirSync(new URL('.', import.meta.url)).filter(file =>
           /^waits-.*-parity\.test\.ts$/.test(file) && readFileSync(new URL(`./${file}`, import.meta.url), 'utf8').includes('describeWaitParity('));
-        expect(files.sort()).toEqual(RUNNER_IDS.flatMap(runner => Object.values(WAIT_PARITY_FILES).map(file => file(runner))).sort());
+        expect(files.sort()).toEqual(RUNNER_IDS.flatMap(runner => (Object.keys(WAIT_PARITY_FILES) as WaitParityPart[])
+          .filter(part => !splitPart(runner, part)).map(part => WAIT_PARITY_FILES[part](runner))).sort());
         for (const runner of RUNNER_IDS) for (const file of Object.values(WAIT_PARITY_FILES)) {
           expect(existsSync(new URL(`./${file(runner)}`, import.meta.url)), file(runner)).toBe(true);
         }
@@ -488,9 +565,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
             const collect = ((title: string) => { criteria.add(title.split(' ')[1]!); }) as typeof registerTest;
             WAIT_PARITY_CELLS[part]([runner], collect);
             for (const criterion of criteria) owners.set(criterion, [...(owners.get(criterion) ?? []), part]);
-            const file = WAIT_PARITY_FILES[part](runner);
-            const source = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8');
-            expect(source.match(/describeWaitParity\([^;]+\)/g), file).toEqual([`describeWaitParity({ runner: '${runner}', part: '${part}' })`]);
+            expectPartLeaf(runner, part);
           }
           expect([...owners.keys()].sort()).toEqual(WAIT_CRITERIA.map(row => row.id).sort());
           for (const [criterion, parts] of owners) expect(parts, `${runner} ${criterion}`).toHaveLength(1);
@@ -502,10 +577,13 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
 
+      it('registers every split row exactly once', expectWaitParityFamilies);
+
       singleRunnerCells();
     }
 
-    for (const part of Object.keys(WAIT_PARITY_CELLS) as WaitParityPart[]) WAIT_PARITY_CELLS[part](runnersFor(part));
+    for (const part of Object.keys(WAIT_PARITY_CELLS) as WaitParityPart[]) WAIT_PARITY_CELLS[part](runnersFor(part),
+      scope !== 'once' && scope.family ? familyTest(scope as WaitParityFamily, registerTest) : registerTest);
   });
 }
 
