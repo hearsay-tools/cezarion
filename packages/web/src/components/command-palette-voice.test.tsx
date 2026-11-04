@@ -1,3 +1,4 @@
+import { voiceStatusSchema } from '@open-mercato/cezar-api-client/contract/voice'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { summaryOf } from '@/test/run-summary-fixture'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -148,7 +149,7 @@ describe('palette voice mode', () => {
     mocks.voiceDecide.mockResolvedValue({
       action: 'open',
       decisionId: '00000000-0000-4000-8000-000000000001',
-      status: 'failed',
+      status: voiceStatusSchema.enum.failed,
       position: 'next',
       confidence: 0.9,
     } satisfies VoiceDecision)
@@ -170,7 +171,7 @@ describe('palette voice mode', () => {
     mocks.voiceDecide.mockResolvedValue({
       action: 'open',
       decisionId: '00000000-0000-4000-8000-000000000001',
-      status: 'failed',
+      status: voiceStatusSchema.enum.failed,
       position: 'next',
       confidence: 0.9,
     } satisfies VoiceDecision)
@@ -192,10 +193,10 @@ describe('palette voice mode', () => {
     mocks.voiceDecide.mockResolvedValue({
       action: 'open',
       decisionId: '00000000-0000-4000-8000-000000000003',
-      status: 'failed',
+      status: voiceStatusSchema.enum.failed,
       position: 'next',
       confidence: 0.4,
-      alternatives: [{ status: 'done', position: 1 }],
+      alternatives: [{ status: voiceStatusSchema.enum.done, position: 1 }],
     } satisfies VoiceDecision)
     renderPalette({
       voice: true,
@@ -218,7 +219,7 @@ describe('palette voice mode', () => {
     mocks.voiceDecide.mockResolvedValue({
       action: 'open',
       decisionId: '00000000-0000-4000-8000-000000000004',
-      status: 'done',
+      status: voiceStatusSchema.enum.done,
       position: 1,
       confidence: 0.9,
     } satisfies VoiceDecision)
@@ -247,7 +248,7 @@ describe('palette voice mode', () => {
     mocks.voiceDecide.mockResolvedValue({
       action: 'open',
       decisionId: '00000000-0000-4000-8000-000000000005',
-      status: 'done',
+      status: voiceStatusSchema.enum.done,
       position: 1,
       confidence: 0.9,
     } satisfies VoiceDecision)

@@ -1,3 +1,4 @@
+import { voiceStatusSchema } from '@open-mercato/cezar-api-client/contract/voice'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 // @vitest-environment node
 
@@ -15,7 +16,7 @@ describe('resolveOpenTarget', () => {
     const a = failed({ id: 'a', createdAt: '2026-07-14T10:00:00.000Z' })
     const b = failed({ id: 'b', createdAt: '2026-07-14T11:00:00.000Z' })
     const c = failed({ id: 'c', createdAt: '2026-07-14T12:00:00.000Z' })
-    const args = { runs: [a, b, c], sidebarView: 'active' as const, status: 'failed' as const }
+    const args = { runs: [a, b, c], sidebarView: 'active' as const, status: voiceStatusSchema.enum.failed }
     expect(resolveOpenTarget({ ...args, openRunId: 'c', position: 'next' })).toEqual({ kind: 'run', runId: 'b' })
     expect(resolveOpenTarget({ ...args, openRunId: 'b', position: 'previous' })).toEqual({ kind: 'run', runId: 'c' })
   })
@@ -23,7 +24,7 @@ describe('resolveOpenTarget', () => {
   it('next when the open task is not in the list is the first', () => {
     const a = failed({ id: 'a' })
     const other = voiceRun({ id: 'other', status: RUN_STATUS.running })
-    const args = { runs: [a, other], sidebarView: 'active' as const, status: 'failed' as const }
+    const args = { runs: [a, other], sidebarView: 'active' as const, status: voiceStatusSchema.enum.failed }
     expect(resolveOpenTarget({ ...args, openRunId: 'other', position: 'next' })).toEqual({ kind: 'run', runId: 'a' })
     expect(resolveOpenTarget({ ...args, openRunId: null, position: 'next' })).toEqual({ kind: 'run', runId: 'a' })
     expect(resolveOpenTarget({ ...args, openRunId: 'other', position: 'previous' })).toEqual({ kind: 'run', runId: 'a' })
@@ -32,14 +33,14 @@ describe('resolveOpenTarget', () => {
   it('previous without a current row is the last', () => {
     const a = failed({ id: 'a', createdAt: '2026-07-14T10:00:00.000Z' })
     const b = failed({ id: 'b', createdAt: '2026-07-14T11:00:00.000Z' })
-    const args = { runs: [a, b], sidebarView: 'active' as const, status: 'failed' as const, openRunId: null }
+    const args = { runs: [a, b], sidebarView: 'active' as const, status: voiceStatusSchema.enum.failed, openRunId: null }
     expect(resolveOpenTarget({ ...args, position: 'previous' })).toEqual({ kind: 'run', runId: 'a' })
   })
 
   it('next after the last is past-end, previous before the first is past-end', () => {
     const a = failed({ id: 'a', createdAt: '2026-07-14T10:00:00.000Z' })
     const b = failed({ id: 'b', createdAt: '2026-07-14T11:00:00.000Z' })
-    const args = { runs: [a, b], sidebarView: 'active' as const, status: 'failed' as const }
+    const args = { runs: [a, b], sidebarView: 'active' as const, status: voiceStatusSchema.enum.failed }
     expect(resolveOpenTarget({ ...args, openRunId: 'a', position: 'next' })).toEqual({ kind: 'past-end' })
     expect(resolveOpenTarget({ ...args, openRunId: 'b', position: 'previous' })).toEqual({ kind: 'past-end' })
   })
@@ -47,7 +48,7 @@ describe('resolveOpenTarget', () => {
   it('the third', () => {
     const runs = ['a', 'b', 'c', 'd'].map((id, i) => failed({ id, createdAt: `2026-07-14T1${i}:00:00.000Z` }))
     // Sidebar order is d, c, b, a.
-    const args = { runs, sidebarView: 'active' as const, status: 'failed' as const, openRunId: null }
+    const args = { runs, sidebarView: 'active' as const, status: voiceStatusSchema.enum.failed, openRunId: null }
     expect(resolveOpenTarget({ ...args, position: 3 })).toEqual({ kind: 'run', runId: 'b' })
     expect(resolveOpenTarget({ ...args, position: 5 })).toEqual({ kind: 'past-end' })
     expect(resolveOpenTarget({ ...args, position: 'last' })).toEqual({ kind: 'run', runId: 'a' })
@@ -74,7 +75,7 @@ describe('resolveOpenTarget', () => {
       delegation: { role: 'worker', parentRunId: 'parent', permissions: [], receipts: [] },
     } as unknown as Partial<RunRecord>)
     const next = failed({ id: 'next', createdAt: '2026-07-14T11:00:00.000Z' })
-    const args = { runs: [parent, worker, next], sidebarView: 'active' as const, status: 'failed' as const }
+    const args = { runs: [parent, worker, next], sidebarView: 'active' as const, status: voiceStatusSchema.enum.failed }
     expect(resolveOpenTarget({ ...args, openRunId: 'worker', position: 'next' })).toEqual({ kind: 'run', runId: 'next' })
     expect(resolveOpenTarget({ ...args, openRunId: null, position: 'last' })).toEqual({ kind: 'run', runId: 'next' })
     expect(resolveOpenTarget({ ...args, openRunId: 'parent', position: 2 })).toEqual({ kind: 'run', runId: 'next' })
@@ -84,7 +85,7 @@ describe('resolveOpenTarget', () => {
     const a = failed({ id: 'ga', groupId: 'g1', variant: 'A', createdAt: '2026-07-14T12:00:00.000Z' })
     const b = voiceRun({ id: 'gb', groupId: 'g1', variant: 'B', status: RUN_STATUS.done, createdAt: '2026-07-14T12:01:00.000Z' })
     const solo = failed({ id: 'solo', createdAt: '2026-07-14T09:00:00.000Z' })
-    const args = { runs: [a, b, solo], sidebarView: 'active' as const, status: 'failed' as const, openRunId: null }
+    const args = { runs: [a, b, solo], sidebarView: 'active' as const, status: voiceStatusSchema.enum.failed, openRunId: null }
     expect(resolveOpenTarget({ ...args, position: 'next' })).toEqual({ kind: 'run', runId: 'ga' })
     // A done sibling neither matches `failed` nor stands in for the failed run.
     expect(resolveOpenTarget({ ...args, openRunId: 'ga', position: 'next' })).toEqual({ kind: 'run', runId: 'solo' })
@@ -113,7 +114,7 @@ describe('resolveOpenTarget', () => {
   it('automations tab walks only automation tasks', () => {
     const auto = failed({ id: 'auto', automationId: 'au1' } as Partial<RunRecord>)
     const manual = failed({ id: 'manual' })
-    const args = { runs: [auto, manual], sidebarView: 'automations' as const, openRunId: null, status: 'failed' as const }
+    const args = { runs: [auto, manual], sidebarView: 'automations' as const, openRunId: null, status: voiceStatusSchema.enum.failed }
     expect(resolveOpenTarget({ ...args, position: 'next' })).toEqual({ kind: 'run', runId: 'auto' })
     expect(resolveOpenTarget({ ...args, position: 'last' })).toEqual({ kind: 'run', runId: 'auto' })
     expect(resolveOpenTarget({ ...args, sidebarView: 'active', position: 'last' })).toEqual({ kind: 'run', runId: 'manual' })
@@ -121,7 +122,7 @@ describe('resolveOpenTarget', () => {
 
   it('no rows is empty', () => {
     const args = { runs: [voiceRun({ status: RUN_STATUS.done })], sidebarView: 'active' as const, openRunId: null }
-    expect(resolveOpenTarget({ ...args, status: 'failed', position: 'next' })).toEqual({ kind: 'empty' })
+    expect(resolveOpenTarget({ ...args, status: voiceStatusSchema.enum.failed, position: 'next' })).toEqual({ kind: 'empty' })
     expect(resolveOpenTarget({ ...args, status: 'archived', position: 'last' })).toEqual({ kind: 'empty' })
     expect(resolveOpenTarget({ runs: [], sidebarView: 'active', openRunId: null, status: 'unread', position: 1 })).toEqual({
       kind: 'empty',
