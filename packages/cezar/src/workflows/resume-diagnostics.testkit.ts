@@ -1,5 +1,4 @@
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it as registerTest, vi } from 'vitest';
@@ -126,7 +125,7 @@ function restartContext(runner: RunnerId, it: typeof registerTest = registerTest
         failure: { stepId: failed.id, error: failed.error }, restarted: true,
       } });
       held.mockRestore();
-      await (runInternals(manager).line).pump();
+      await semaphore.release();
       await until(() => messages().length > before);
       const prompt = messages()[before]!;
       expect(prompt.split('\n')[0]).toContain(failed.error);
@@ -148,7 +147,7 @@ function restartContext(runner: RunnerId, it: typeof registerTest = registerTest
       expect(checkpoint.continuationMessage).toMatchObject({ text: 'Continue.', origin: 'lifecycle', resumeContext: { restarted: true } });
       await restart();
       held.mockRestore();
-      await (runInternals(manager).line).pump();
+      await semaphore.release();
       await until(() => messages().length > before);
       const prompt = messages()[before]!;
       expect(prompt.match(/cezar process restarted/g)).toHaveLength(1);
@@ -176,7 +175,7 @@ function savedContinuation(runner: RunnerId, it: typeof registerTest = registerT
         const disk = readPersistedRuns(join(root, '.ai/cezar')).find(run => run.id === id)!;
         expect(disk.continuationMessage).toMatchObject({ text, resumeContext: { restarted: true } });
         held.mockRestore();
-        await (runInternals(manager).line).pump();
+        await semaphore.release();
         await until(() => messages().length > before);
         const prompt = messages()[before]!;
         expect(prompt.split('\n')[0]).toContain('cezar process restarted');
