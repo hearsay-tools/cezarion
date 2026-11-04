@@ -1,0 +1,66 @@
+name: LXC admission canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Open cezarion PR number
+        required: true
+        type: string
+      expected_head:
+        description: Full PR head commit SHA
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  admit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      pull-requests: read
+    outputs:
+      head: ${{ steps.gate.outputs.head }}
+    steps:
+      - id: gate
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0, as pinned in origin CI
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+        with:
+          retries: 0
+          script: |
+            const repoId = 1352758052;
+            const authorId = 1118683;
+            const n = process.env.PR_NUMBER;
+            const sha = process.env.EXPECTED_HEAD;
+            const fail = () => core.setFailed('LXC admission denied');
+            if (context.eventName !== 'workflow_dispatch' ||
+                context.ref !== 'refs/heads/main' ||
+                context.payload.repository?.id !== repoId ||
+                context.payload.sender?.id !== authorId ||
+                context.repo.owner !== 'hearsay-tools' ||
+                context.repo.repo !== 'cezarion' ||
+                !/^[1-9][0-9]*$/.test(n) || !Number.isSafeInteger(Number(n)) ||
+                !/^[a-f0-9]{40}$/.test(sha)) return fail();
+
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo, pull_number: Number(n),
+            });
+            if (pr.number !== Number(n) || pr.state !== 'open' ||
+                pr.user?.id !== authorId || pr.base?.repo?.id !== repoId ||
+                pr.base?.ref !== 'main' || pr.head?.repo?.id !== repoId ||
+                pr.head?.sha !== sha) return fail();
+            core.setOutput('head', sha);
+
+  prove-runner:
+    needs: admit
+    if: needs.admit.result == 'success' && needs.admit.outputs.head != ''
+    runs-on:
+      group: cezarion-lxc-canary
+      labels: cezarion-lxc-canary
+    timeout-minutes: 2
+    steps:
+      - name: Prove scheduling without running repository code
+        run: uname -sm
