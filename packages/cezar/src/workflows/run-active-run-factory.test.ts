@@ -49,7 +49,7 @@ describe('createActiveRun', () => {
     // as required fails to compile in the factory; an optional one lands here.
     expect(Object.keys(state).sort()).toEqual([
       'autonomous', 'cancelled', 'children', 'cwd', 'delegationSettings', 'interrupt', 'pendingHumanAsk',
-      'pendingPermissions', 'revokeDelegation', 'usage',
+      'pendingPermissions', 'revokeDelegation', 'skills', 'usage',
     ]);
     expect(state).toMatchObject({ cwd: '/work/tree', pendingHumanAsk: true, autonomous: true, cancelled: false });
     expect(state.delegationSettings).toBeUndefined();
@@ -59,7 +59,7 @@ describe('createActiveRun', () => {
     // No native subagent is known before a session reports one (hearsay-tools/cezarion#2431).
     expect([...state.children.backgroundChildren]).toEqual([]);
     // The registry is loaded after the run is registered, by `loadRunSkills`, never by the factory.
-    expect(state.skills).toBeUndefined();
+    expect(state.skills.catalog).toBeUndefined();
   });
 
   it('takes cwd, the pending ask and the mode from its caller, and shares no mutable state', () => {

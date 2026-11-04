@@ -31,7 +31,7 @@ export interface Skill {
     dir: boolean;
     /** The exact commit `ref` resolved to when the skill was read (#428). */
     commit?: string | undefined;
-  };
+  } | undefined;
 }
 
 /* Precedence order — earlier dirs win name collisions. `npx skills` writes

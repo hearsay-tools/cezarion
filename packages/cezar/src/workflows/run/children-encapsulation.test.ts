@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,7 +41,7 @@ it('keeps a live read view, immutable child records and independent owner state'
   expect(liveSubagents(state)).toBe(1);
   expect(Object.isFrozen(child)).toBe(true);
   expect(Object.isFrozen(session)).toBe(false);
-  const mutate = (target: object) => Object.assign(target, { status: 'failed' });
+  const mutate = (target: object) => Object.assign(target, { status: RUN_STATUS.failed });
   expect(() => mutate(child)).toThrow(TypeError);
   expect(() => Map.prototype.set.call(view, 'forged', child)).toThrow(TypeError);
   owner.trackEvent('run', state, event('completed'));

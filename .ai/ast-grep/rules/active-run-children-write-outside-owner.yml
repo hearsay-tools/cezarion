@@ -2,7 +2,7 @@
 id: active-run-children-write-outside-owner
 language: typescript
 severity: warning
-message: Change ActiveRun children only through subagent-waits.ts. Usage groups and their live views expose no writable
+message: Change ActiveRun children only through subagent-waits.ts. Groups and their live views expose no writable
   storage (hearsay-tools/cezarion#2520).
 files: [ packages/cezar/src/**/*.ts ]
 utils:
@@ -215,7 +215,9 @@ utils:
           - { not: { has: { stopBy: end, kind: private_property_identifier } } }
           - { has: { stopBy: end, any: [ { matches: group-bound-reference }, { matches: destructured-reference } ] } }
   protected-reference: { any: [ { matches: group-reference }, { matches: container-reference } ] }
-  protected-member:
+  indexed-group-member: { all: [ { kind: subscript_expression }, { has: { field: object, matches: group-reference } } ] }
+  protected-member: { any: [ { matches: indexed-group-member }, { matches: named-group-member } ] }
+  named-group-member:
     all:
       - any:
           - kind: member_expression
@@ -243,11 +245,15 @@ rule:
             any:
               - all:
                   - { kind: member_expression }
-                  - { has: { field: property, regex: ^(set|add|delete|clear)$ } }
+                  - has:
+                      field: property
+                      regex: ^(set|add|delete|clear|push|pop|shift|unshift|splice|sort|reverse|fill|copyWithin)$
                   - { has: { field: object, matches: group-reference } }
               - all:
                   - { kind: subscript_expression }
-                  - { has: { field: index, regex: "^[\"'](set|add|delete|clear)[\"']$" } }
+                  - has:
+                      field: index
+                      regex: ^["'](set|add|delete|clear|push|pop|shift|unshift|splice|sort|reverse|fill|copyWithin)["']$
                   - { has: { field: object, matches: group-reference } }
     - any:
         - { all: [ { kind: as_expression }, { has: { nthChild: 1, matches: group-reference } } ] }

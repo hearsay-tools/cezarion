@@ -3,7 +3,7 @@ language: typescript
 severity: warning
 message: >-
   Read a run's skills through RunSkills.enabledSkills(state) (workflows/run/run-skills.ts), which applies the project's
-  off-list (hearsay-tools/cezarion#1494). Only RunSkills.loadRunSkills writes `state.skills`
+  off-list (hearsay-tools/cezarion#1494). Only RunSkills.loadRunSkills writes `state.skills.catalog`
   (skills-write-outside-load-run-skills).
 files:
   - packages/cezar/src/workflows/run.ts
@@ -19,25 +19,36 @@ utils:
       - { kind: member_expression, has: { field: property, regex: '^state$' } }
       - pattern: this.active.get($$$)
       - { kind: non_null_expression, has: { pattern: this.active.get($$$) } }
+  skills-group:
+    any:
+      - all:
+          - kind: member_expression
+          - has: { field: object, matches: active-run }
+          - has: { field: property, regex: '^skills$' }
+      - all:
+          - kind: subscript_expression
+          - has: { field: object, matches: active-run }
+          - has: { field: index, regex: '^.skills.$' }
+
 rule:
   all:
     - any:
-        # `state.skills`, `state?.skills`. The target of a plain `=` is a write, not a read.
+        # `state.skills.catalog`, `state?.skills.catalog`. The target of a plain `=` is a write, not a read.
         - all:
             - kind: member_expression
-            - has: { field: object, matches: active-run }
-            - has: { field: property, regex: '^skills$' }
+            - has: { field: object, matches: skills-group }
+            - has: { field: property, regex: '^catalog$' }
             - not: { inside: { kind: assignment_expression, field: left } }
         - all:
             - kind: subscript_expression
-            - has: { field: object, matches: active-run }
-            - has: { field: index, regex: '^.skills.$' }
+            - has: { field: object, matches: skills-group }
+            - has: { field: index, regex: '^.catalog.$' }
             - not: { inside: { kind: assignment_expression, field: left } }
-        # `const { skills } = state`
+        # `const { catalog } = state.skills`
         - all:
             - kind: variable_declarator
-            - has: { field: name, has: { regex: '^skills$' } }
-            - has: { field: value, matches: active-run }
+            - has: { field: name, has: { regex: '^catalog$' } }
+            - has: { field: value, matches: skills-group }
     - not:
         inside:
           kind: method_definition

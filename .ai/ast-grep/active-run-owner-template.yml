@@ -1,7 +1,7 @@
 id: active-run-__SLOT__-write-outside-owner
 language: typescript
 severity: warning
-message: Change ActiveRun __SLOT__ only through __OWNER__. Usage groups and their live views expose no writable storage
+message: Change ActiveRun __SLOT__ only through __OWNER__. Groups and their live views expose no writable storage
   (hearsay-tools/cezarion#2520).
 files:
   - packages/cezar/src/**/*.ts
@@ -362,7 +362,17 @@ utils:
     any:
       - matches: group-reference
       - matches: container-reference
+  indexed-group-member:
+    all:
+      - kind: subscript_expression
+      - has:
+          field: object
+          matches: group-reference
   protected-member:
+    any:
+      - matches: indexed-group-member
+      - matches: named-group-member
+  named-group-member:
     all:
       - any:
           - kind: member_expression
@@ -419,7 +429,7 @@ rule:
                   - kind: member_expression
                   - has:
                       field: property
-                      regex: ^(set|add|delete|clear)$
+                      regex: ^(set|add|delete|clear|push|pop|shift|unshift|splice|sort|reverse|fill|copyWithin)$
                   - has:
                       field: object
                       matches: group-reference
@@ -427,7 +437,7 @@ rule:
                   - kind: subscript_expression
                   - has:
                       field: index
-                      regex: ^["'](set|add|delete|clear)["']$
+                      regex: ^["'](set|add|delete|clear|push|pop|shift|unshift|splice|sort|reverse|fill|copyWithin)["']$
                   - has:
                       field: object
                       matches: group-reference

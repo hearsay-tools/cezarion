@@ -10,6 +10,12 @@ export const ownerGroups = {
     getters: ['reportedClaudeCost', 'usageInvocation', 'startedTurns', 'recordedTurns'],
     fields: ['usage', 'reportedClaudeCost', 'usageInvocation', 'observed', 'epoch', 'stepId', 'startedTurns', 'recordedTurns', 'size'],
   },
+  skills: {
+    owner: 'run-skills.ts', factory: 'createSkillsGroup',
+    types: ['SkillsGroup', 'SkillView', 'SkillTeamView'],
+    getters: ['catalog', 'liveSkillProvisioning'],
+    fields: ['skills', 'catalog', 'liveSkillProvisioning', 'team', 'name', 'description', 'interactive', 'body', 'path', 'source', 'repo', 'ref', 'dir', 'commit', 'length'],
+  },
   children: {
     owner: 'subagent-waits.ts', factory: 'createChildrenGroup',
     types: ['ChildrenGroup', 'ReadonlyMapView'],
