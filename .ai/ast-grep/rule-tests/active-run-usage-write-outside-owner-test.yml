@@ -38,9 +38,9 @@ invalid:
   - "const { reportedClaudeCost: costs } = state.usage; costs.clear()"
   - const { startedTurns } = state.usage.usageInvocation;
     startedTurns.add("turn")
-  - 'function f(view: UsageSetView) { view.add("turn"); }'
-  - "function f(view: UsageSetView) { Object.assign(view, {}); }"
-  - 'import type { UsageSetView as Turns } from "./usage-accounting.ts";
+  - 'function f(view: ReadonlySetView) { view.add("turn"); }'
+  - "function f(view: ReadonlySetView) { Object.assign(view, {}); }"
+  - 'import type { ReadonlySetView as Turns } from "./usage-accounting.ts";
     function f(view: Turns) { Reflect.set(view, "size", 1); }'
   - state.usage.reportedClaudeCost as Map<string, number>
   - state.usage.usageInvocation.startedTurns as Set<string>
@@ -75,11 +75,13 @@ invalid:
     Reflect.set(target, key, replacement); }"
   - class UsageGroup { mutable = {}; }
   - class UsageInvocation { readonly mutable = new Set(); }
-  - class UsageMapView { backing = new Map(); }
-  - class UsageSetView { backing = new Set(); }
+  - class ReadonlyMapView { backing = new Map(); }
+  - class ReadonlySetView { backing = new Set(); }
   - "function f(state: ActiveRun) { const alias = state; alias.usage =
     other.usage; }"
   - "function f(state: ActiveRun) { const alias = state; Object.assign(alias, {
     usage: other.usage }); }"
   - "function f(group: UsageGroup) { group.reportedClaudeCost.clear(); }"
   - "function f(invocation: UsageInvocation) { invocation.observed = true; }"
+  - 'const view = new ReadonlyMapView(backing); view as Map<string, number>'
+  - 'const view = createUsageGroup(); Object.assign(view, { usageInvocation: other })'

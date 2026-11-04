@@ -1,3 +1,4 @@
+import { ReadonlyMapView, ReadonlySetView } from './readonly-collections.ts';
 import type { RunnerId } from '../../core/agent-runner.ts';
 import { unregisterRunProcess } from '../../core/process-usage.ts';
 import type { UiEvent } from '../../core/ui-events.ts';
@@ -8,36 +9,6 @@ export interface UsageAccountingHost {
   isDisposedDelegatedRun(runId: string): boolean;
 }
 
-/** A stable live facade. Its callback receives the facade, never the backing map. */
-class UsageMapView<K, V> implements ReadonlyMap<K, V> {
-  #map: Map<K, V>;
-  constructor(map: Map<K, V>) { this.#map = map; Object.freeze(this); }
-  get size(): number { return this.#map.size; }
-  get(key: K): V | undefined { return this.#map.get(key); }
-  has(key: K): boolean { return this.#map.has(key); }
-  entries(): MapIterator<[K, V]> { return this.#map.entries(); }
-  keys(): MapIterator<K> { return this.#map.keys(); }
-  values(): MapIterator<V> { return this.#map.values(); }
-  [Symbol.iterator](): MapIterator<[K, V]> { return this.entries(); }
-  forEach(callback: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: unknown): void {
-    this.#map.forEach((value, key) => callback.call(thisArg, value, key, this));
-  }
-}
-
-class UsageSetView<T> implements ReadonlySet<T> {
-  #set: Set<T>;
-  constructor(set: Set<T>) { this.#set = set; Object.freeze(this); }
-  get size(): number { return this.#set.size; }
-  has(value: T): boolean { return this.#set.has(value); }
-  entries(): SetIterator<[T, T]> { return this.#set.entries(); }
-  keys(): SetIterator<T> { return this.#set.keys(); }
-  values(): SetIterator<T> { return this.#set.values(); }
-  [Symbol.iterator](): SetIterator<T> { return this.values(); }
-  forEach(callback: (value: T, key: T, set: ReadonlySet<T>) => void, thisArg?: unknown): void {
-    this.#set.forEach((value) => callback.call(thisArg, value, value, this));
-  }
-}
-
 // These capabilities stay in this module. Static initialization grants access to private
 // state without adding a public mutation method to a group, invocation or read facade.
 let invocationWrites: {
@@ -45,14 +16,16 @@ let invocationWrites: {
   record(invocation: UsageInvocation, turnId: string): void;
 };
 
+/** Durable directional-usage accounting state for the current runner
+ * invocation. Provider-local turn ids are unique only within this epoch. */
 export class UsageInvocation {
   #stepId: string;
   #epoch: number;
   #observed = false;
   #startedTurns = new Set<string>();
   #recordedTurns = new Set<string>();
-  #startedView = new UsageSetView(this.#startedTurns);
-  #recordedView = new UsageSetView(this.#recordedTurns);
+  #startedView = new ReadonlySetView(this.#startedTurns);
+  #recordedView = new ReadonlySetView(this.#recordedTurns);
   constructor(stepId: string, epoch: number) {
     this.#stepId = stepId; this.#epoch = epoch; Object.freeze(this);
   }
@@ -77,9 +50,10 @@ let usageWrites: {
 /** Accounting state has one writer; every public property is a live read view. */
 export class UsageGroup {
   #reportedClaudeCost: Map<string, number> | undefined;
-  #costView: UsageMapView<string, number> | undefined;
+  #costView: ReadonlyMapView<string, number> | undefined;
   #usageInvocation: UsageInvocation | undefined;
   constructor() { Object.freeze(this); }
+  /** Last cumulative Claude report per provider session during this process. */
   get reportedClaudeCost(): ReadonlyMap<string, number> | undefined { return this.#costView; }
   get usageInvocation(): UsageInvocation | undefined { return this.#usageInvocation; }
   static {
@@ -88,7 +62,7 @@ export class UsageGroup {
       costs(group) {
         if (!group.#reportedClaudeCost) {
           group.#reportedClaudeCost = new Map();
-          group.#costView = new UsageMapView(group.#reportedClaudeCost);
+          group.#costView = new ReadonlyMapView(group.#reportedClaudeCost);
         }
         return group.#reportedClaudeCost;
       },
@@ -96,7 +70,7 @@ export class UsageGroup {
   }
 }
 
-for (const type of [UsageGroup, UsageInvocation, UsageMapView, UsageSetView]) {
+for (const type of [UsageGroup, UsageInvocation]) {
   Object.freeze(type.prototype);
   Object.freeze(type);
 }

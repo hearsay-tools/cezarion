@@ -1,4 +1,4 @@
-import type { SubagentChild } from '@open-mercato/cezar-contract/waits';
+import { createChildrenGroup, type ChildrenGroup } from './run/subagent-waits.ts';
 import type { AgentSession, InputDelivery } from '../core/agent-runner.ts';
 import type { Skill } from '../skills.ts';
 import type { DelegationExecutionSettings } from './run/types.ts';
@@ -119,11 +119,7 @@ export interface ActiveRun {
    *  Worktree-backed runs never need it; root runs ordinarily do unless the
    *  explicit unsafe bypass is active. */
   releaseRepoRoot?: (() => void) | undefined;
-  /** Durable directional-usage accounting state for the current runner
-   * invocation. Provider-local turn ids are unique only within this epoch. */
-  /** Native subagents a session started in the background (hearsay-tools/cezarion#2431), by the
-   *  runner's root task item id: the session that holds each, and its last status. */
-  backgroundChildren: Map<string, { session: AgentSession | undefined; status: SubagentChild['status'] }>;
+  readonly children: ChildrenGroup;
   /** Cezar is writing input into the session now: a parent turn that starts during the write is
    *  Cezar's, not one the runner started itself (hearsay-tools/cezarion#2431). */
   writingInput?: boolean | undefined;
@@ -169,9 +165,10 @@ export function createActiveRun(init: ActiveRunInit): ActiveRun {
     cancelled: false, interrupt: () => undefined, cwd: init.cwd,
     pendingHumanAsk: init.pendingHumanAsk,
     pendingPermissions: new Set(),
-    backgroundChildren: new Map(),
+    children: createChildrenGroup(),
     autonomous: init.autonomous,
   };
   Object.defineProperty(state, 'usage', { writable: false, configurable: false });
+  Object.defineProperty(state, 'children', { writable: false, configurable: false });
   return state;
 }
