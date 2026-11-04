@@ -1,3 +1,5 @@
+const UNSUPPORTED_HUMAN_WAIT_KIND = 'human';
+const UNSUPPORTED_HUMAN_ASK_KIND = 'human';
 import { describe, expect, it } from 'vitest';
 import type { RunRecord } from './runs.ts';
 import {
@@ -268,7 +270,7 @@ describe('cezar_wait request', () => {
   it('accepts the ci and timer request shapes and refuses the rest', () => {
     expect(cezarWaitRequestSchema.parse({ kind: WAIT_KIND.pr, pr: 'https://github.com/o/r/pull/1' })).toMatchObject({ timeout_seconds: 1800 });
     // hearsay-tools/cezarion#1234: the user is asked through cezar_ask, never cezar_wait.
-    expect(cezarWaitRequestSchema.safeParse({ kind: 'human', questions: CARD }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: UNSUPPORTED_HUMAN_WAIT_KIND, questions: CARD }).success).toBe(false);
     expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.timer, seconds: 59 }).success).toBe(false);
     expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.timer, seconds: 7201 }).success).toBe(false);
     expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker }).success).toBe(false); // phase 3
@@ -305,7 +307,7 @@ describe('answers', () => {
     const human = { wait_id: HUMAN_ID, kind: WAIT_KIND.human, summary: 'human: Which module?' };
     expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: CI_ID, kind: WAIT_KIND.pr, deadline: openWait.deadline, open_waits: [openWait, human] }).ok).toBe(true);
     // cezar_wait opens no human wait, so its answer never names one.
-    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, kind: 'human', open_waits: [human] }).success).toBe(false);
+    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, kind: UNSUPPORTED_HUMAN_WAIT_KIND, open_waits: [human] }).success).toBe(false);
     for (const kind of ['pr', 'timer'] as const) {
       expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, open_waits: [] }).success).toBe(false);
       expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, deadline: openWait.deadline, open_waits: [{ ...openWait, kind, deadline: undefined }] }).success).toBe(false);
@@ -363,7 +365,7 @@ describe('cezar_ask', () => {
     expect(cezarAskRequestSchema.safeParse({ context: 'c', questions: [] }).success).toBe(false);
     const five = Array.from({ length: 5 }, (_, n) => ({ ...CARD[0]!, question: `Question ${n}?` }));
     expect(cezarAskRequestSchema.safeParse({ context: 'c', questions: five }).success).toBe(false);
-    expect(cezarAskRequestSchema.safeParse({ kind: 'human', context: 'c', questions: CARD }).success).toBe(false);
+    expect(cezarAskRequestSchema.safeParse({ kind: UNSUPPORTED_HUMAN_ASK_KIND, context: 'c', questions: CARD }).success).toBe(false);
   });
 
   it('takes an open question as a question without options', () => {
@@ -376,7 +378,7 @@ describe('cezar_ask', () => {
   });
 
   it('answers with the wait id and the open waits, or a refusal the agent can act on', () => {
-    expect(cezarAskAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, kind: 'human', open_waits: [] }).success).toBe(false);
+    expect(cezarAskAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, kind: UNSUPPORTED_HUMAN_ASK_KIND, open_waits: [] }).success).toBe(false);
     expect(cezarAskAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, deadline: '2026-10-17T15:40:00.000Z', open_waits: [] }).success).toBe(false);
     expect(cezarAskAnswerSchema.parse({ ok: false, code: 'autonomous_run', message: 'm' }).ok).toBe(false);
     expect(askErrorCodeSchema.options).toEqual(expect.arrayContaining(['invalid_request', 'capacity', 'autonomous_run', 'session_closed', 'worker_wait_pending', 'unavailable']));
