@@ -131,7 +131,7 @@ export class ContinuationSession {
    *  becomes active. */
   settleStoppedContinuation(runId: string): boolean {
     if (!this.context.store.getRun(runId)?.stopping) return false;
-    this.host.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
+    this.host.move(runId, 'cancel');
     this.line.unmarkStarting(runId);
     this.host.dropActive(runId);
     return true;
@@ -158,7 +158,7 @@ export class ContinuationSession {
   /** Wait for the repository-root lease; a Stop during the wait cancels the run. */
   private async acquireContinuationRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
     if (await this.repoRootLease.acquireRepoRoot(runId, state)) return true;
-    this.host.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
+    this.host.move(runId, 'cancel');
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
     this.host.dropActive(runId);
     return false;
@@ -414,7 +414,7 @@ export class ContinuationSession {
   /** A Stop before the Continue's session spawned: cancel the step and the run. */
   private settleContinuationPrelaunchCancel(runId: string, stepId: string, state: ActiveRun): void {
     this.context.store.updateStep(runId, stepId, { status: 'cancelled' });
-    this.host.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
+    this.host.move(runId, 'cancel');
     clearAutosaveTimer(state); this.host.dropActive(runId);
   }
 
@@ -647,7 +647,7 @@ export class ContinuationSession {
     if (state.cancelled) {
       close.resumeWorkflow = undefined;
       if (this.context.store.getRun(runId)?.status !== 'cancelled') {
-        this.host.move(runId, 'cancel-late', { finishedAt: new Date().toISOString() });
+        this.host.move(runId, 'cancel-late');
         this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
       }
     }

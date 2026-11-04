@@ -63,7 +63,7 @@ export class StepLoop {
     // the config default. Per-step `runner` can still override it at the step.
     const config = await loadConfig(this.context.repoRoot);
     if (state.cancelled || this.context.store.getRun(runId)?.stopping) {
-      this.host.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
+      this.host.move(runId, 'cancel');
       this.host.dropActive(runId);
       return undefined;
     }
@@ -80,7 +80,7 @@ export class StepLoop {
       : resolveExtraSystemPrompt(input.systemPrompt, config.systemPrompt);
     const modelIdentity = await taskModelIdentity(this.context.repoRoot, taskBackend, input);
     if (state.cancelled) {
-      this.host.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
+      this.host.move(runId, 'cancel');
       this.host.dropActive(runId);
       return undefined;
     }

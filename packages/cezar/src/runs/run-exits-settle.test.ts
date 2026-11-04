@@ -117,3 +117,30 @@ describe('B6: accept-review and draft-pr set finishedAt ??= now and retire the F
     expect(settle(root(exit, { finishedAt: EARLIER }), exit).finishedAt).toBe(EARLIER);
   });
 });
+
+// B4: the first settlement time is the fact; a later writer on a settled run only repairs.
+describe('B4: a settling exit keeps an existing finishedAt; continue-* and hold clear it', () => {
+  const B4 = SETTLING.filter(exit => exit !== 'accept-review' && exit !== 'draft-pr');
+  it.each(B4)('%s keeps the finishedAt the run already has, over the site\'s own time', (exit) => {
+    const { store, root, worker, committed } = setup();
+    const id = exit === 'stop-worker' ? worker(exit, { finishedAt: EARLIER }) : root(exit, { finishedAt: EARLIER });
+    store.move(id, exit, RUN_EXITS[exit].durability === 'committed' ? {} : { finishedAt: new Date().toISOString() });
+    store.flush();
+    expect(committed(id)).toMatchObject({ status: RUN_EXITS[exit].to, finishedAt: EARLIER });
+  });
+
+  it.each(B4)('%s sets finishedAt on a run without one', (exit) => {
+    const { root, worker, settle } = setup();
+    const id = exit === 'stop-worker' ? worker(exit) : root(exit);
+    expect(settle(id, exit).finishedAt).toEqual(expect.any(String));
+  });
+
+  it.each(['continue-line', 'continue-now', 'hold'] as const)('%s clears it', (exit) => {
+    const { store, committed } = setup();
+    const { id } = store.createRun({ title: 'settle', task: 'settle', workflow: 'quick-task', steps: [] });
+    store.updateRun(id, { status: RUN_STATUS.failed, finishedAt: EARLIER });
+    store.move(id, exit);
+    store.flush();
+    expect(committed(id)).not.toHaveProperty('finishedAt');
+  });
+});

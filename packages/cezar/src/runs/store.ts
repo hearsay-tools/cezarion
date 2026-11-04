@@ -682,7 +682,7 @@ function settleLoadedStop(run: RunRecord): void {
   // An accepted Stop is durable intent, never an interrupted run to auto-resume. It can meet a run
   // that settled before the Stop did (the engine's own late Stop), so it takes `cancel-late`.
   if (run.stopping) {
-    Object.assign(run, applyExit(run, 'cancel-late', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
+    Object.assign(run, applyExit(run, 'cancel-late'));
     for (const step of run.steps) {
       if (step.status === 'running' || step.status === 'waiting') step.status = 'cancelled';
     }
@@ -704,7 +704,7 @@ function failLoadedInterruptedRun(run: RunRecord, opts?: { keepLive?: boolean })
   // all still work.
   // A usage-limit hold runs no process, so no exit interrupted it: its appointment stands.
   if (!opts?.keepLive && engineOwnsRun(run)) {
-    Object.assign(run, applyExit(run, 'fail-interrupted', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
+    Object.assign(run, applyExit(run, 'fail-interrupted'));
     for (const step of run.steps) {
       if (step.status === 'running' || step.status === 'waiting') step.status = 'failed';
     }
@@ -724,7 +724,7 @@ export function settleOrphanedRun(run: RunRecord, opts: { stop?: boolean | undef
   if (opts.stop && (run.status === 'queued' || run.status === 'running' || run.status === 'waiting')) run.stopping = true;
   if (run.status === 'queued' && !run.startedAt && run.workflowDef !== undefined &&
     run.steps.every((step) => step.status === 'pending' && !step.startedAt && !step.sessionId)) {
-    Object.assign(run, applyExit(run, 'cancel', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
+    Object.assign(run, applyExit(run, 'cancel'));
   }
   return reconcileLoadedRun(run, { keepLive: false });
 }
@@ -2690,11 +2690,11 @@ export class RunStore extends EventEmitter {
   /** Move run `id` by `exit` (ADR 0056): its status and `extras` in one write, checked against the
    *  record that write changes. A run this store cannot write is neither checked nor written. The
    *  exit decides how the write persists (`exitDurability`), never the extras. A guarded exit (one
-   *  with `settle`) commits at once, and writes nothing when its guard fails: undefined, or its
+   *  with a `guard` or a `settle`) commits at once, and writes nothing when its guard fails: undefined, or its
    *  `refused` error. `stepId` names the step its settle sets. */
   move(id: string, exit: RunExitId, extras: RunPatch = {}, stepId?: string): RunRecord | undefined {
     const spec: RunExitSpec = RUN_EXITS[exit];
-    if (!spec.settle) {
+    if (!spec.guard && !spec.settle) {
       const run = this.record(id);
       return run && this.writeRun(id, run, applyExit(run, exit, extras), exitDurability(exit, run));
     }
@@ -2703,7 +2703,8 @@ export class RunStore extends EventEmitter {
       if (spec.refused) throw new Error(spec.refused);
       return undefined;
     }
-    const settled = spec.settle({ ...run, ...this.redactPatch(extras) }, { now: new Date().toISOString(), stepId });
+    const input = { ...run, ...this.redactPatch(extras) };
+    const settled = spec.settle ? spec.settle(input, { now: new Date().toISOString(), stepId }) : input;
     this.commitIndex(new Map([[id, { ...settled, ...applyExit(run, exit) }]]));
     return this.peek(id);
   }

@@ -130,10 +130,11 @@ describe('run exits settle the fields all their sites agree on (S5)', () => {
     }
   }
 
-  // B1-B3: a settling exit without fields still writes what every settling exit writes.
-  it('leaves the exits whose sites disagree, or that settle through their guard, without fields', () => {
+  // B1-B3, B4: a settling exit without fields still writes what every settling exit writes, and
+  // the exits that set only `finishedAt` need no fields of their own.
+  it('leaves the exits whose sites disagree, that settle through their guard, or that settle only what every settling exit does, without fields', () => {
     const fieldless = Object.entries(RUN_EXITS).filter(([, spec]) => !('fields' in spec)).map(([id]) => id);
-    expect(fieldless.sort()).toEqual(['cancel', 'cancel-late', 'cancel-root', 'park', 'park-for-wake', 'park-release',
+    expect(fieldless.sort()).toEqual(['accept-review', 'cancel', 'cancel-late', 'cancel-root', 'draft-pr', 'fail', 'fail-continue', 'fail-crash', 'fail-start', 'park', 'park-for-wake', 'park-release',
       'resume', 'start', 'start-held', 'stop-worker', 'succeed-root', 'succeed-root-review', 'withdraw-hold']);
     for (const id of fieldless as RunExitId[]) {
       const run = rootWithIntent(RUN_EXITS[id].from[0]!);

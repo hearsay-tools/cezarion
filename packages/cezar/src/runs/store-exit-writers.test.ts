@@ -34,7 +34,9 @@ describe('applyExit', () => {
   });
 
   it('records an exit that does not leave from the record\'s status', () => {
-    expect(applyExit(makeRunRecord({ status: RUN_STATUS.queued }), 'accept-review')).toEqual({ status: RUN_STATUS.done });
+    // B1-B3 and B6 (S7): accept-review settles the run, so it also leaves the step and sets finishedAt.
+    expect(applyExit(makeRunRecord({ status: RUN_STATUS.queued }), 'accept-review'))
+      .toEqual({ currentStepId: undefined, finishedAt: expect.any(String), status: RUN_STATUS.done });
     expect(takeRunExitViolations()).toEqual(['undeclared run transition: exit accept-review from queued (declare it in runs/run-exits.ts)']);
   });
 });

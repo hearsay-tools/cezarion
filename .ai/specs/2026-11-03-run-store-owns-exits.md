@@ -201,7 +201,7 @@ S7 commits one row (or row group) at a time, each with a regression test that fa
 | # | Target rule | Reason | S7 |
 |---|---|---|---|
 | B1, B2, B3 | Every settling exit (one that writes done, review, failed or cancelled) clears `currentStepId` and retires the root's Finish intent. `review` is not final (it has `accept-review` and Continue exits); `succeed-review` already does both | A settled run points at no step; a Finish intent has no meaning once the run settled. The family reconciler stops being the repair path for cancel | done |
-| B4 | A settling exit keeps an existing `finishedAt` (`??=`); `continue-*` and `hold` clear it | The first settlement time is the fact; a later writer on a settled run only repairs | |
+| B4 | A settling exit keeps an existing `finishedAt` (`??=`); `continue-*` and `hold` clear it | The first settlement time is the fact; a later writer on a settled run only repairs | done |
 | B5 | Both success paths clear `activity` and settle running or waiting steps in the same write | One exit, one result | |
 | B6 | accept-review and draft-pr set `finishedAt ??= now` and retire the Finish intent | As B3 and B4 | done: the Finish intent with B1-B3 |
 | B7 | The usage-limit Continue writes `continue-line` once | The second write repeats the first | |

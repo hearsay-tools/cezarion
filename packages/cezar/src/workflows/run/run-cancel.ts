@@ -72,7 +72,7 @@ export class RunCancel {
   private cancelQueuedRun(runId: string, queuedAt: number): void {
     this.line.takeAt(queuedAt);
     this.line.takePending(runId);
-    this.host.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
+    this.host.move(runId, 'cancel');
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'cancelled while queued' });
     this.context.store.flush();
     if (this.workerExecutions.admitted(runId) === false) void this.workerExecutions.finishWorkerExecution(runId);
@@ -96,7 +96,7 @@ export class RunCancel {
       return true;
     }
     if (run && (run.delegation || hadWaits) && ['queued', 'running', 'waiting'].includes(run.status)) {
-      this.host.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
+      this.host.move(runId, 'cancel');
       return true;
     }
     return false;

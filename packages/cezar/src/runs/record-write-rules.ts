@@ -348,7 +348,7 @@ export function redactPatch(
 function withdrawHold(run: RunRecord): void {
   // A withdrawn appointment settles the run failed with its kept error (hearsay-tools/cezarion#1236),
   // the state a usage-limited run was in before it waited.
-  if (isUsageLimitHold(run)) Object.assign(run, applyExit(run, 'withdraw-hold', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
+  if (isUsageLimitHold(run)) Object.assign(run, applyExit(run, 'withdraw-hold'));
   run.autoResumeAt = undefined;
   run.autoResumeAttempts = undefined;
 }
