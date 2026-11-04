@@ -111,6 +111,7 @@ export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha
   // Scheduler admission is held so acceptance is durable before execution starts.
   const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 1, memoryLimitMb: 0 }) });
   const manager = createFixtureManager(store, root, { semaphore });
+  const admissionReads = vi.spyOn(semaphore, 'maxParallel');
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', runner: 'claude', model: 'opus', effort: 'high', steps: [] });
   store.updateRun(parent.id, { status: RUN_STATUS.running, worktreePath: root, delegation: { role: 'root', permissions: ['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'wait'], receipts: [] } });
   const credentials = new CredentialRegistry();
@@ -120,8 +121,14 @@ export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha
   const service = new DelegationService(options);
   const spawn = service.spawn.bind(service);
   vi.spyOn(service, 'spawn').mockImplementation(async (...args) => {
+    const existingWorkers = new Set(store.listWorkerIds());
+    const readsBefore = admissionReads.mock.calls.length;
     const result = await spawn(...args);
-    if (store.getRun(result.workerId)?.status === 'queued') expect(semaphore.busy()).toBe(0);
+    if (store.getRun(result.workerId)?.status === 'queued') {
+      // bound: the requested pump awaits repository discovery before reading capacity.
+      await vi.waitFor(() => expect(admissionReads.mock.calls.length).toBeGreaterThan(existingWorkers.has(result.workerId) ? 0 : readsBefore), { timeout: 10_000 });
+      expect(semaphore.busy()).toBe(0);
+    }
     return result;
   });
   const unregister = service.registerProject({ id: 'project', root, store, manager });
