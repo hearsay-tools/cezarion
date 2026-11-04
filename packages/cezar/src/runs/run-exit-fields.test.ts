@@ -32,6 +32,8 @@ function oldManagerPatch(run: ExitRead, exit: RunExitId, patch: RunPatch): RunPa
 const S7_ROWS = {
   // B1-B3: every settling exit clears `currentStepId` and retires the root's Finish intent.
   'B1-B3': (run: ExitRead, old: RunPatch): RunPatch => ({ ...old, currentStepId: undefined, ...retiredFinishPatch(run) }),
+  // B6: accept-review and draft-pr set `finishedAt ??= now`.
+  B6: (run: ExitRead, old: RunPatch): RunPatch => ({ ...old, finishedAt: run.finishedAt ?? NOW }),
 } satisfies Record<string, (run: ExitRead, old: RunPatch) => RunPatch>;
 type S7Row = keyof typeof S7_ROWS;
 
@@ -79,7 +81,9 @@ const SITES: Site[] = [
   // succeed, succeed-review, accept-review
   ...(['succeed', 'succeed-review'] as const).map((exit): Site => ({ site: `commitOrdinarySuccess (${exit})`, exit, from: 'running', manager: false,
     before: run => ({ ...retired(run), finishedAt: SHARED, currentStepId: u, autoResumeAttempts: u }), after: () => ({ finishedAt: SHARED }), s7: ['B1-B3'] })),
-  { site: 'finish at review', exit: 'accept-review', from: 'review', manager: true, before: run => retired(run), after: () => ({}), s7: ['B1-B3'] },
+  { site: 'finish at review', exit: 'accept-review', from: 'review', manager: true, before: run => retired(run), after: () => ({}), s7: ['B1-B3', 'B6'] },
+  { site: 'POST /runs/:id/pr', exit: 'draft-pr', from: 'review', manager: false,
+    before: run => ({ pullRequestUrl: 'u', finishedAt: run.finishedAt ?? NOW }), after: () => ({ pullRequestUrl: 'u' }), s7: ['B1-B3'] },
   // fail-start
   { site: 'checkpointQueuedWorker', exit: 'fail-start', from: 'queued', manager: true,
     before: () => ({ error: 'e', finishedAt: NOW }), after: () => ({ error: 'e' }), s7: ['B1-B3'] },
@@ -129,7 +133,7 @@ describe('run exits settle the fields all their sites agree on (S5)', () => {
   // B1-B3: a settling exit without fields still writes what every settling exit writes.
   it('leaves the exits whose sites disagree, or that settle through their guard, without fields', () => {
     const fieldless = Object.entries(RUN_EXITS).filter(([, spec]) => !('fields' in spec)).map(([id]) => id);
-    expect(fieldless.sort()).toEqual(['accept-review', 'cancel', 'cancel-late', 'cancel-root', 'draft-pr', 'park', 'park-for-wake', 'park-release',
+    expect(fieldless.sort()).toEqual(['cancel', 'cancel-late', 'cancel-root', 'park', 'park-for-wake', 'park-release',
       'resume', 'start', 'start-held', 'stop-worker', 'succeed-root', 'succeed-root-review', 'withdraw-hold']);
     for (const id of fieldless as RunExitId[]) {
       const run = rootWithIntent(RUN_EXITS[id].from[0]!);

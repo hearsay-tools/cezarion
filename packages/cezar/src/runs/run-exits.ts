@@ -31,7 +31,7 @@ export type ExitSettlement = { now: string; stepId?: string | undefined };
 export type ExitDurability = 'debounced' | 'committed';
 
 /** What an exit's `fields` read off the record a write applies it to. */
-export type ExitRead = Pick<RunRecord, 'status' | 'delegation'>;
+export type ExitRead = Pick<RunRecord, 'status' | 'delegation'> & Partial<Pick<RunRecord, 'finishedAt'>>;
 
 /**
  * One kind of status write: the statuses it may leave from and the one it writes. `fields` are
@@ -76,6 +76,9 @@ export function settlesRun(exit: RunExitId): boolean {
 /** What every settling exit writes over its caller's extras (Table B targets, B1-B3): a settled
  *  run points at no step, and a root's Finish intent means nothing once the run settled. */
 const settledRun = (run: ExitRead): RunPatch => ({ ...retiredFinishPatch(run), currentStepId: undefined });
+
+/** A run settled at its first settlement time, else now. */
+const keptFinish = (run: ExitRead, { now }: ExitSettlement): RunPatch => ({ finishedAt: run.finishedAt ?? now });
 
 /** A run settled now. */
 const settledNow = (_run: ExitRead, { now }: ExitSettlement): RunPatch => ({ finishedAt: now });
@@ -123,11 +126,10 @@ export const RUN_EXITS = {
   // A root's durable Finish: a concurrent explicit cancellation is never overwritten.
   'succeed-root': { durability: 'committed', from: ['waiting'], to: 'done', guard: rootFinishWaiting, settle: settleRootFinish },
   'succeed-root-review': { durability: 'committed', from: ['waiting'], to: 'review', guard: rootFinishWaiting, settle: settleRootFinish },
-  // Sets no `finishedAt` (Table B6).
-  'accept-review': { durability: 'debounced', from: ['review'], to: 'done' },
+  'accept-review': { durability: 'debounced', from: ['review'], to: 'done', fields: keptFinish },
   // Draft PR (`POST /runs/:id/pr`): the cockpit offers it on review and on settled runs, so a
   // settled run that is published reads done too. A usage-limit hold is not declared (spec B13).
-  'draft-pr': { durability: 'debounced', from: ['review', 'done', 'failed', 'cancelled'], to: 'done' },
+  'draft-pr': { durability: 'debounced', from: ['review', 'done', 'failed', 'cancelled'], to: 'done', fields: keptFinish },
   'fail-start': { durability: 'debounced', from: ['queued', 'running'], to: 'failed', fields: settledNow },
   fail: { durability: 'debounced', from: ['running', 'waiting'], to: 'failed', fields: settledNow },
   // settleFailedContinuation alone: a worker Stop can record cancelled before it settles.

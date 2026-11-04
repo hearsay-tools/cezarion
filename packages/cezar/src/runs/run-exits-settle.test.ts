@@ -16,6 +16,7 @@ import { RunStore } from './store.ts';
  * it pass by writing the field itself.
  */
 
+const EARLIER = '2026-11-01T10:00:00.000Z';
 const ROOT = { role: 'root' as const, permissions: [], receipts: [] };
 const SETTLED: readonly RunStatus[] = [RUN_STATUS.done, RUN_STATUS.review, RUN_STATUS.failed, RUN_STATUS.cancelled];
 /** Every exit that settles a run: it writes done, review, failed or cancelled. */
@@ -99,5 +100,20 @@ describe('B1-B3: every settling exit clears currentStepId and retires the root\'
     const id = root('cancel');
     store.move(id, 'cancel');
     expect(store.move(id, 'cancel-root')).toBeUndefined();
+  });
+});
+
+// B6: as B3 and B4, for the two exits a human takes on a run at review or settled.
+describe('B6: accept-review and draft-pr set finishedAt ??= now and retire the Finish intent', () => {
+  it.each(['accept-review', 'draft-pr'] as const)('%s sets finishedAt on a run without one and retires the intent', (exit) => {
+    const { root, settle } = setup();
+    const row = settle(root(exit), exit);
+    expect(row.finishedAt).toEqual(expect.any(String));
+    expect(row.delegation).toEqual(ROOT);
+  });
+
+  it.each(['accept-review', 'draft-pr'] as const)('%s keeps the finishedAt the run already has', (exit) => {
+    const { root, settle } = setup();
+    expect(settle(root(exit, { finishedAt: EARLIER }), exit).finishedAt).toBe(EARLIER);
   });
 });
