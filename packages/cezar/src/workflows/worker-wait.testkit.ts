@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { observeWaitTimers } from './waits.testkit.ts';
 import { TrackedWork } from './run/tracked-work.ts';
@@ -333,11 +334,13 @@ export async function restart(fakeClock = false, diskCheckpoint?: readonly unkno
 
 // Legacy lifecycle fixtures publish settled workers without launching a process.
 // Supply the private completion boundary too; status alone is intentionally insufficient.
-export function fixtureUpdateRun(id: string, patch: Parameters<RunStore['updateRun']>[1]) {
+export function fixtureUpdateRun(id: string, patch: NonNullable<Parameters<typeof setRunStatus>[3]> & { status?: Parameters<typeof setRunStatus>[2] }) {
   const run = store.getRun(id);
   const generation = run?.delegation?.role === 'worker' && patch.status && terminal.includes(patch.status)
     ? store.commitWorkerExecutionStart(id) : undefined;
-  store.updateRun(id, patch);
+  const { status, ...extras } = patch;
+  if (status === undefined) store.updateRun(id, extras);
+  else setRunStatus(store, id, status, extras);
   if (generation) expect(store.commitWorkerExecutionComplete(id, generation)).toBe(true);
 }
 export async function collect(id: string) {

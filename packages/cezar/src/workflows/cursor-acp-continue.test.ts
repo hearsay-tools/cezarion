@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
@@ -57,7 +58,7 @@ describe('Continue on a legacy ACP Cursor session', () => {
       title: 't', workflow: 'quick-task', task: 'do the thing', runner: 'cursor',
       steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
-    store.updateRun(record.id, { status: RUN_STATUS.review, finishedAt: new Date().toISOString() });
+    setRunStatus(store, record.id, RUN_STATUS.review, { finishedAt: new Date().toISOString() });
     store.updateStep(record.id, 'work', {
       status: STEP_STATUS.done, sessionId: 'legacy-acp-session', backend: 'cursor', ...(sessionTransport ? { sessionTransport } : {}),
     });

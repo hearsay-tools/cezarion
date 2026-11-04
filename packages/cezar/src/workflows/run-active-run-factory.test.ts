@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { skillSchema } from '@open-mercato/cezar-contract/skills';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -240,7 +241,7 @@ describe('every entry path loads the registry, with no live session before it (o
       steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
     });
     runId = record.id;
-    store.updateRun(record.id, { status: RUN_STATUS.running, currentStepId: 'task', workflowDef: SINGLE_STEP });
+    setRunStatus(store, record.id, RUN_STATUS.running, { currentStepId: 'task', workflowDef: SINGLE_STEP });
     store.updateStep(record.id, 'task', { status: STEP_STATUS.running, sessionId: 'sess-interrupted', backend: 'claude' });
     expect(store.getRun(record.id)?.currentStepId).toBe('task');
 

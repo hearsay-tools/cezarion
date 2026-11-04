@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
@@ -36,7 +37,7 @@ function archivedFinished(store: RunStore) {
     steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
   });
   store.updateStep(run.id, 'work', { status: STEP_STATUS.done, sessionId: 'old-session' });
-  store.updateRun(run.id, { status: RUN_STATUS.done });
+  setRunStatus(store, run.id, RUN_STATUS.done);
   store.setArchived(run.id, true);
   return run;
 }
@@ -75,7 +76,7 @@ describe('continueRun unarchives', () => {
       steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
     store.updateStep(run.id, 'work', { status: STEP_STATUS.done });
-    store.updateRun(run.id, { status: RUN_STATUS.done });
+    setRunStatus(store, run.id, RUN_STATUS.done);
     store.setArchived(run.id, true);
 
     expect(manager.continueRun(run.id, { text: 'keep going' })).toMatchObject({ ok: false });
@@ -89,7 +90,7 @@ describe('continueRun unarchives', () => {
       title: 'parent', task: 'parent', workflow: 'original',
       steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
-    store.updateRun(parent.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    setRunStatus(store, parent.id, RUN_STATUS.waiting, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const workerId = randomUUID();
     const worker = store.createOwnedRun(
       { title: 'worker', task: 'worker', workflow: 'quick-task', runner: 'claude',
@@ -102,7 +103,7 @@ describe('continueRun unarchives', () => {
       'a'.repeat(64),
     );
     store.updateStep(worker.id, 'task', { status: STEP_STATUS.done, sessionId: 'old-session' });
-    store.updateRun(worker.id, { status: RUN_STATUS.done });
+    setRunStatus(store, worker.id, RUN_STATUS.done);
     store.setArchived(worker.id, true);
     const commit = vi.spyOn(store, 'commitWorkerContinuation').mockImplementation(() => {
       throw new Error('checkpoint failed');

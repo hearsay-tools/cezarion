@@ -1,5 +1,5 @@
 import { workerCollectedResultSchema } from '@open-mercato/cezar-contract/delegation';
-import { runPersistence } from '../runs/run-store.testkit.ts';
+import { setRunStatus, runPersistence } from '../runs/run-store.testkit.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
@@ -51,7 +51,7 @@ describe('verified destruction retains results through explicit history deletion
     const workspace = await ensureOwnedWorkspace(f.root, run);
     writeFileSync(join(workspace.path, 'result.txt'), 'retained patch');
     f.store.appendEvent(workerId, { type: 'text', text: 'Completed implementation' });
-    f.store.updateRun(workerId, { status: RUN_STATUS.review, worktreePath: workspace.path, branch: workspace.branch });
+    setRunStatus(f.store, workerId, RUN_STATUS.review, { worktreePath: workspace.path, branch: workspace.branch });
     expect(f.store.commitWorkerExecutionComplete(workerId, generation)).toBe(true);
     const files = join(f.root, '.ai/cezar/runs');
     mkdirSync(join(files, `${workerId}-images`));
@@ -215,7 +215,7 @@ describe('verified destruction retains results through explicit history deletion
     f.store.updateRun(workerId, { createdAt: '2000-01-01T00:00:00.000Z' });
     f.store.updateRun(f.parent.id, { createdAt: '2000-01-01T00:00:00.000Z' });
     const ordinary = f.store.createRun({ task: 'old', title: 'old', workflow: 'quick-task', steps: [] });
-    f.store.updateRun(ordinary.id, { createdAt: '2000-01-01T00:00:00.000Z', status: RUN_STATUS.done });
+    setRunStatus(f.store, ordinary.id, RUN_STATUS.done, { createdAt: '2000-01-01T00:00:00.000Z' });
     for (let i = 0; i < 302; i++) f.store.createRun({ task: 'new', title: 'new', workflow: 'quick-task', steps: [] });
     expect(f.store.getRun(ordinary.id)).toMatchObject({ archived: true });
     expect(f.store.getRun(workerId)).toBeDefined();
@@ -243,7 +243,7 @@ describe('verified destruction retains results through explicit history deletion
     if (parent.delegation?.role !== 'root') throw Error('fixture');
     f.store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, finishRequestedAt: new Date().toISOString() } }]);
     expect(f.store.canDeleteRun(parent.id)).toBe(false);
-    f.store.updateRun(parent.id, { status: RUN_STATUS.done });
+    setRunStatus(f.store, parent.id, RUN_STATUS.done);
     expect(f.store.deleteRun(parent.id)).toBe(true);
   });
   it('denies parent deletion when a missing child has a result but no completed deletion receipt', async () => {
@@ -267,7 +267,7 @@ describe('verified destruction retains results through explicit history deletion
       deadline: new Date(Date.now() + 600_000).toISOString(), timeoutSeconds: 600, phase: WAIT_PHASE.open, turnId: 'turn-1', mode: 'all',
       workerIds: [workerId, other.workerId], revisions: [{ workerId, revision: 1 }, { workerId: other.workerId, revision: 0 }], outcomes: [] });
     // Parked on the wait with no session, as the product holds it: a running run always has one.
-    f.store.updateRun(parent.id, { status: RUN_STATUS.waiting });
+    setRunStatus(f.store, parent.id, RUN_STATUS.waiting);
     const entry = () => f.store.getRun(parent.id)?.waits?.find(wait => wait.id === waitId);
     await f.service.destroy(f.caller, { workerId }); expect(f.store.deleteRun(workerId)).toBe(true);
     f.manager.reconcileWorkerWaits();
@@ -303,7 +303,7 @@ describe('verified destruction retains results through explicit history deletion
     vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     f.store.addStep(f.parent.id, { id: 'task', name: 'Task', kind: STEP_KIND.agent });
     f.store.updateStep(f.parent.id, 'task', { status: STEP_STATUS.done, sessionId: 'mock-prior', backend: 'claude' });
-    f.store.updateRun(f.parent.id, { status: RUN_STATUS.done, workflowDef: QUICK_TASK_WORKFLOW, task: 'mock:cezar-done', worktreePath: undefined });
+    setRunStatus(f.store, f.parent.id, RUN_STATUS.done, { workflowDef: QUICK_TASK_WORKFLOW, task: 'mock:cezar-done', worktreePath: undefined });
     vi.mocked(rmSync).mockImplementationOnce(() => { throw Error('history temporarily busy'); });
     expect(f.store.deleteRun(f.parent.id)).toBe(false);
     expect(f.store.getRun(f.parent.id)?.delegation).toMatchObject({ historyDeletion: 'pending' });
@@ -315,13 +315,13 @@ describe('verified destruction retains results through explicit history deletion
     expect(f.store.deleteRun(f.parent.id)).toBe(true);
   });
   it('refuses spawn under a deleting parent even when its persisted public status is active', async () => {
-    interruptedParentDeletion(); f.store.updateRun(f.parent.id, { status: RUN_STATUS.running });
+    interruptedParentDeletion(); setRunStatus(f.store, f.parent.id, RUN_STATUS.running);
     await expect(f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() })).rejects.toMatchObject({ code: 'incompatible_state' });
     expect(f.store.listRuns()).toHaveLength(1);
     expect(f.store.deleteRun(f.parent.id)).toBe(true);
   });
   it.each(['queued', 'running'] as const)('does not revive a %s parent with interrupted deletion on restart', async status => {
-    interruptedParentDeletion(); f.store.updateRun(f.parent.id, { status }); f.store.close();
+    interruptedParentDeletion(); setRunStatus(f.store, f.parent.id, status); f.store.close();
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     const manager = createFixtureManager(reopened, f.root);
     const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();

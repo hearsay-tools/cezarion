@@ -8,7 +8,7 @@ import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { findColdRunByCheckout, readRunIndexFromDisk, searchRunIndexFromDisk } from './run-index.ts';
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase } from './run-database.ts';
 import { encodeRunRow } from './run-row.ts';
-import { readPersistedRuns, seedRuns } from './run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns, seedRuns } from './run-store.testkit.ts';
 import { RunStore, type RunRecord } from './store.ts';
 
 const handle = { owner: 'local', name: 'repo' };
@@ -314,7 +314,7 @@ describe('cold reads of runs.db', () => {
     it('reads through a writer\'s WAL, creating nothing', () => {
       const store = RunStore.open(dir);
       const run = store.createRun({ title: 'live writer', workflow: 'w', task: 't', steps: [] });
-      store.updateRun(run.id, { status: RUN_STATUS.done });
+      setRunStatus(store, run.id, RUN_STATUS.done);
       store.flush();
       const before = readdirSync(dir).sort();
       chmodSync(dir, 0o555);

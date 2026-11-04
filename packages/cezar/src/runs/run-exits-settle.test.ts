@@ -7,7 +7,7 @@ import type { RunStatus } from '@open-mercato/cezar-contract';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 import { RUN_EXITS, takeRunExitViolations, type RunExitId } from './run-exits.ts';
-import { readPersistedRuns } from './run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns } from './run-store.testkit.ts';
 import { RunStore } from './store.ts';
 
 /**
@@ -36,24 +36,30 @@ function setup() {
   const steps = [{ id: 'a', name: 'a', kind: STEP_KIND.agent }, { id: 'b', name: 'b', kind: STEP_KIND.agent }, { id: 'c', name: 'c', kind: STEP_KIND.agent }];
   /** A root with a pending Finish intent on step b, at the first status `exit` leaves from (a
    *  usage-limit hold for `withdraw-hold`). */
-  const root = (exit: RunExitId, patch: Parameters<RunStore['updateRun']>[1] = {}) => {
+  const root = (exit: RunExitId, patch: NonNullable<Parameters<typeof setRunStatus>[3]> & { status?: Parameters<typeof setRunStatus>[2] } = {}) => {
     const { id } = store.createRun({ title: 'settle', task: 'settle', workflow: 'quick-task', steps });
-    store.updateRun(id, { status: RUN_STATUS.waiting, delegation: ROOT });
+    setRunStatus(store, id, RUN_STATUS.waiting, { delegation: ROOT });
     store.commitRootFinishIntent(id);
     const from = exit === 'withdraw-hold' ? RUN_STATUS.waiting : RUN_EXITS[exit].from[0]!;
-    store.updateRun(id, { status: from, currentStepId: 'b', ...(exit === 'withdraw-hold' ? { autoResumeAt: '2099-01-01T00:00:00.000Z' } : {}), ...patch });
+    {
+      const { status: fixtureStatus, ...fixtureExtras }: NonNullable<Parameters<typeof setRunStatus>[3]> & { status: Parameters<typeof setRunStatus>[2] } = { status: from, currentStepId: 'b', ...(exit === 'withdraw-hold' ? { autoResumeAt: '2099-01-01T00:00:00.000Z' } : {}), ...patch };
+      setRunStatus(store, id, fixtureStatus, fixtureExtras);
+    }
     return id;
   };
   /** An owned worker on step b, at the first status `exit` leaves from. */
-  const worker = (exit: RunExitId, patch: Parameters<RunStore['updateRun']>[1] = {}) => {
+  const worker = (exit: RunExitId, patch: NonNullable<Parameters<typeof setRunStatus>[3]> & { status?: Parameters<typeof setRunStatus>[2] } = {}) => {
     const parentId = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] }).id;
-    store.updateRun(parentId, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    setRunStatus(store, parentId, RUN_STATUS.waiting, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const workerId = randomUUID();
     const { id } = store.createOwnedRun({ title: 'worker', task: 'worker', workflow: 'quick-task', runner: 'claude', steps }, parentId, randomUUID(), {
       role: 'worker', permissions: [], parentRunId: parentId,
       workspace: { ownerRunId: workerId, resourceId: randomUUID(), kind: 'owned-isolated', path: join(dir, 'absent-worktree'), branch: `cez/${workerId.slice(0, 8)}`, baselineSha: 'a'.repeat(40) },
     }, 'a'.repeat(64));
-    store.updateRun(id, { status: RUN_EXITS[exit].from[0]!, currentStepId: 'b', ...patch });
+    {
+      const { status: fixtureStatus, ...fixtureExtras }: NonNullable<Parameters<typeof setRunStatus>[3]> & { status: Parameters<typeof setRunStatus>[2] } = { status: RUN_EXITS[exit].from[0]!, currentStepId: 'b', ...patch };
+      setRunStatus(store, id, fixtureStatus, fixtureExtras);
+    }
     return id;
   };
   /** Move `id` by `exit`, then read the record the save wrote. */
@@ -138,7 +144,7 @@ describe('B4: a settling exit keeps an existing finishedAt; continue-* and hold 
   it.each(['continue-line', 'continue-now', 'hold'] as const)('%s clears it', (exit) => {
     const { store, committed } = setup();
     const { id } = store.createRun({ title: 'settle', task: 'settle', workflow: 'quick-task', steps: [] });
-    store.updateRun(id, { status: RUN_STATUS.failed, finishedAt: EARLIER });
+    setRunStatus(store, id, RUN_STATUS.failed, { finishedAt: EARLIER });
     store.move(id, exit);
     store.flush();
     expect(committed(id)).not.toHaveProperty('finishedAt');

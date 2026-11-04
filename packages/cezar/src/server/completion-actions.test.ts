@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { RunStore, type RunRecord } from '../runs/store.ts';
-import { seedRuns, readPersistedRuns, blockRunWrites } from '../runs/run-store.testkit.ts';
+import { setRunStatus, seedRuns, readPersistedRuns, blockRunWrites } from '../runs/run-store.testkit.ts';
 import type { ForgeDriver, ForgeMergeInput, ForgePrMergeState, ForgePrMergeStateResult } from './forge/types.ts';
 import { type CompletionActionDeps, CompletionActionCoordinator } from './completion-actions.ts';
 
@@ -76,7 +76,7 @@ it.each(['disable', 'continue', 'restore', 'stop', 'branch'] as const)('invalida
   const f = fixture(), c = f.coordinator();
   f.read.mockImplementationOnce(async () => {
     if (change === 'disable') f.store().updateRun(f.id, { autoMergePr: false });
-    if (change === 'continue') f.store().updateRun(f.id, { status: RUN_STATUS.running });
+    if (change === 'continue') setRunStatus(f.store(), f.id, RUN_STATUS.running);
     if (change === 'restore') { f.store().setArchived(f.id, true); f.store().setArchived(f.id, false); }
     if (change === 'stop') c.stop();
     if (change === 'branch') f.store().updateRun(f.id, { branch: 'changed' });

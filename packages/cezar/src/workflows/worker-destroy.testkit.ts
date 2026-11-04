@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, fixtureWorkSettled, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
@@ -38,7 +39,7 @@ export function useWorkerDestroyFixture(): void {
     manager = createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }) });
 
     parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(parent.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    setRunStatus(store, parent.id, RUN_STATUS.waiting, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
   });
   afterEach(async () => {
     for (const release of releases.splice(0)) release();

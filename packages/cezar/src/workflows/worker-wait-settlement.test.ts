@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { RUN_STATUS, makeWorkerWait } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { type RunRecord } from '../runs/store.ts';
 import { collect, fixtureUpdateRun, manager, parent, register, restart, root, store, until, useWorkerWaitFixture, waitOf, lastWaitOf, worker } from './worker-wait.testkit.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -51,7 +51,7 @@ it('readiness ready human Finish retires an accepted wait before closing its ses
 it('readiness discards cached unsettled observations lacking current private proof', async () => {
     const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
     const generation = store.commitWorkerExecutionStart(first.id);
-    store.updateRun(first.id, { status: RUN_STATUS.cancelled });
+    setRunStatus(store, first.id, RUN_STATUS.cancelled);
     // An agent's worker wait is a list entry (hearsay-tools/cezarion#1301).
     const now = Date.now();
     store.commitWait(p.id, makeWorkerWait({ registeredAt: new Date(now).toISOString(),

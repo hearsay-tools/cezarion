@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,12 +29,15 @@ describe('peer conversations', () => {
   /** Another root task of the project. `provisioned: false` is a top-level run that never opened a session. */
   function peer(status: RunRecord['status'] = RUN_STATUS.running, provisioned = true) {
     const run = f.store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
-    f.store.updateRun(run.id, { status, ...(provisioned ? { delegation: { role: 'root', permissions: [...permissions], receipts: [] } } : {}) });
+    {
+      const { status: fixtureStatus, ...fixtureExtras }: NonNullable<Parameters<typeof setRunStatus>[3]> & { status: Parameters<typeof setRunStatus>[2] } = { status, ...(provisioned ? { delegation: { role: 'root', permissions: [...permissions], receipts: [] } } : {}) };
+      setRunStatus(f.store, run.id, fixtureStatus, fixtureExtras);
+    }
     return { id: run.id, caller: f.credentials.authenticate(f.credentials.issue('project', run.id, randomUUID()))! };
   }
   async function worker(parent = f.caller) {
     const { workerId } = await f.service.spawn(parent, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
-    f.store.updateRun(workerId, { status: RUN_STATUS.running });
+    setRunStatus(f.store, workerId, RUN_STATUS.running);
     return { id: workerId, caller: f.credentials.authenticate(f.credentials.issue('project', workerId, randomUUID()))! };
   }
   const message = (recipientRunId: string, kind: ConversationSendRequest['kind'] = 'request', extra: Partial<ConversationSendRequest> = {}): ConversationSendRequest =>
@@ -136,10 +140,10 @@ describe('peer conversations', () => {
     'R8 R17 an open request to a peer that settles at %s settles %s at once', async (status, outcome) => {
       const b = peer();
       const sent = await f.service.send(f.caller, message(b.id));
-      f.store.updateRun(b.id, { status });
+      setRunStatus(f.store, b.id, status);
       expect((await f.service.conversation(f.caller, { recipientRunId: b.id })).outcomes).toEqual([expect.objectContaining({ requestId: sent.message.id, status: outcome })]);
       // A reply after a human continues the peer is recorded late and reopens nothing.
-      f.store.updateRun(b.id, { status: RUN_STATUS.running });
+      setRunStatus(f.store, b.id, RUN_STATUS.running);
       const late = await f.service.reply(b.caller, message(f.parent.id, 'reply', { requestId: sent.message.id }));
       expect(late).toMatchObject({ message: { state: 'late' }, outcome: { status: outcome } });
     });
@@ -235,7 +239,7 @@ describe('peer conversations', () => {
     const b = peer(RUN_STATUS.review); const c = peer();
     const id = randomUUID();
     expect((await f.service.send(f.caller, message(b.id, 'progress', { id }))).delivery).toBe('not-delivered');
-    f.store.updateRun(b.id, { status: RUN_STATUS.running });
+    setRunStatus(f.store, b.id, RUN_STATUS.running);
     await expect(f.service.send(c.caller, message(b.id, 'progress', { id }))).rejects.toMatchObject({ code: 'invalid_input' });
     expect(ledger(c.id)).toBeUndefined();
   });
@@ -276,9 +280,9 @@ describe('peer conversations', () => {
     'R17 a requester resting at review, out of memory, settles its request when the peer reaches %s, with no read', async (status, outcome) => {
       const b = peer();
       const open = await f.service.send(f.caller, message(b.id));
-      f.store.updateRun(f.parent.id, { status: RUN_STATUS.review });
+      setRunStatus(f.store, f.parent.id, RUN_STATUS.review);
       vi.spyOn(f.store, 'listRuns').mockReturnValue([]);
-      f.store.updateRun(b.id, { status: RUN_STATUS[status] });
+      setRunStatus(f.store, b.id, RUN_STATUS[status]);
       expect(ledger(f.parent.id)?.outcomes).toEqual([expect.objectContaining({ requestId: open.message.id, status: outcome })]);
       expect(projections(f.parent.id)).toContain(`request-outcome:${open.message.id}`);
     });
@@ -288,7 +292,7 @@ describe('peer conversations', () => {
     const parked = () => {
       const run = f.store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', kind: STEP_KIND.agent, name: 'Task' }] });
       f.store.updateStep(run.id, 'task', { status: STEP_STATUS.running, sessionId: 'previous-session', backend: 'claude' });
-      f.store.updateRun(run.id, { status: RUN_STATUS.waiting, currentStepId: 'task', delegation: { role: 'root', permissions: [...permissions], receipts: [] } });
+      setRunStatus(f.store, run.id, RUN_STATUS.waiting, { currentStepId: 'task', delegation: { role: 'root', permissions: [...permissions], receipts: [] } });
       return run;
     };
     const b = parked();
@@ -326,7 +330,7 @@ describe('peer conversations', () => {
   it.each(['done', 'failed', 'cancelled'] as const)('§ 5 a sender that ends %s settles its open peer request sender-closed', async status => {
     const b = peer();
     const open = await f.service.send(f.caller, message(b.id));
-    f.store.updateRun(f.parent.id, { status: RUN_STATUS[status] });
+    setRunStatus(f.store, f.parent.id, RUN_STATUS[status]);
     expect(ledger(f.parent.id)?.outcomes).toEqual([expect.objectContaining({ requestId: open.message.id, status: 'sender-closed' })]);
     // The peer's late reply is recorded and reopens nothing.
     expect((await f.service.reply(b.caller, message(f.parent.id, 'reply', { requestId: open.message.id }))).outcome).toMatchObject({ status: 'sender-closed' });
@@ -335,7 +339,7 @@ describe('peer conversations', () => {
   it('R15 a requester resting at review, out of memory, settles its request deleted when the peer is deleted, with no read', async () => {
     const b = peer();
     const open = await f.service.send(f.caller, message(b.id));
-    f.store.updateRun(f.parent.id, { status: RUN_STATUS.review });
+    setRunStatus(f.store, f.parent.id, RUN_STATUS.review);
     // The requester has left the live set the run manager's global pass reads.
     vi.spyOn(f.store, 'listRuns').mockReturnValue([]);
     expect(f.store.deleteRun(b.id)).toBe(true);
@@ -349,7 +353,7 @@ describe('peer conversations', () => {
     // C's and D's ledgers hold conversations that never name B. C has left memory; D is held.
     await f.service.send(c.caller, message(d.id, 'progress'));
     await f.service.send(d.caller, message(c.id, 'progress'));
-    f.store.updateRun(c.id, { status: RUN_STATUS.done });
+    setRunStatus(f.store, c.id, RUN_STATUS.done);
     f.store.flush();
     expect(f.store.heldIds()).not.toContain(c.id);
     expect(f.store.listConversationRootIds(b.id)).toEqual([f.parent.id]);
@@ -363,13 +367,13 @@ describe('peer conversations', () => {
   it('R15 a sender deleted before the first inbox reserve, or between reserve and acknowledge, leaves the recipient\'s batch whole', async () => {
     const b = peer(); const c = peer();
     const fromB = await f.service.send(b.caller, message(f.parent.id, 'progress', { text: 'from B' }));
-    f.store.updateRun(b.id, { status: RUN_STATUS.done });
+    setRunStatus(f.store, b.id, RUN_STATUS.done);
     expect(f.store.deleteRun(b.id)).toBe(true);
     const fromC = await f.service.send(c.caller, message(f.parent.id, 'progress', { text: 'from C' }));
     const batch = await f.service.inbox(f.caller);
     expect(batch.messages.map(entry => [entry.id, entry.text])).toEqual([[fromB.message.id, 'from B'], [fromC.message.id, 'from C']]);
     expect(batch.receiptId).toBeDefined();
-    f.store.updateRun(c.id, { status: RUN_STATUS.done });
+    setRunStatus(f.store, c.id, RUN_STATUS.done);
     expect(f.store.deleteRun(c.id)).toBe(true);
     expect(await f.service.ackInbox(f.caller, { receiptId: batch.receiptId! })).toEqual({ receiptId: batch.receiptId, status: 'acknowledged' });
     expect(f.store.getRun(f.parent.id)?.agentInputs?.every(input => !!input.deliveredAt)).toBe(true);
@@ -409,7 +413,7 @@ describe('peer conversations', () => {
   it('R15 a reply to a deleted sender\'s request is refused', async () => {
     const b = peer();
     const request = await f.service.send(b.caller, message(f.parent.id));
-    f.store.updateRun(b.id, { status: RUN_STATUS.done });
+    setRunStatus(f.store, b.id, RUN_STATUS.done);
     expect(f.store.deleteRun(b.id)).toBe(true);
     await expect(f.service.reply(f.caller, message(b.id, 'reply', { requestId: request.message.id }))).rejects.toMatchObject({ code: 'denied_scope' });
   });

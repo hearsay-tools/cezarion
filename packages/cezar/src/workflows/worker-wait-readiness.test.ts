@@ -7,8 +7,8 @@ import * as runnerFactory from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { COMPLETION_WILL_WAIT } from './run.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
-import { manager, parent, register, restart, root, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { fixtureUpdateRun, manager, parent, register, restart, root, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { completionNudges } from './worker-wait-readiness.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
@@ -17,6 +17,14 @@ import { completionNudges } from './worker-wait-readiness.testkit.ts';
 // Real Git, durable checkpoints and native process shutdown retain their original budgets.
 describe('worker waits: readiness', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
+  it('fixture status seeding commits worker execution completion before publication is consumed', async () => {
+    const p = await parent();
+    const w = await worker(p.id);
+    expect(store.readWorkerExecution(w.id)?.phase).toBe('queued');
+    fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
+    expect(store.getRun(w.id)?.status).toBe(RUN_STATUS.done);
+    expect(store.readWorkerExecution(w.id)?.phase).toBe('complete');
+  });
 
 it('readiness closed session reopens to refuse a successful done with outstanding workers', async () => {
     const p = await parent(); const w = await worker(p.id);
@@ -69,7 +77,7 @@ it('readiness public cancellation does not wake until private completion is dura
     const generation = store.commitWorkerExecutionStart(w.id);
     const wait = register(p.id, [w.id]);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    store.updateRun(w.id, { status: RUN_STATUS.cancelled }); manager.reconcileWorkerWaits();
+    setRunStatus(store, w.id, RUN_STATUS.cancelled); manager.reconcileWorkerWaits();
     expect(waitOf(store.getRun(p.id))?.phase).toBe('parked');
     expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
     expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
@@ -106,11 +114,11 @@ it('readiness review cancels a live worker, live and through recovery', async ()
     await until(() => store.getRun(p.id)?.status === RUN_STATUS.waiting);
     store.flush(); const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
     for (const run of disk) if (run.id === p.id) run.status = RUN_STATUS.review;
-    store.updateRun(p.id, { status: RUN_STATUS.review }); manager.reconcileWorkerWaits();
+    setRunStatus(store, p.id, RUN_STATUS.review); manager.reconcileWorkerWaits();
     expect(store.getRun(w.id)?.status).toBe('cancelled');
     // A reviewing parent holds no session, but this one is live: the old manager stops the session
     // from the park it really has (hearsay-tools/cezarion#1804).
-    store.updateRun(p.id, { status: RUN_STATUS.waiting });
+    setRunStatus(store, p.id, RUN_STATUS.waiting);
     await restart(false, disk);
     await until(() => store.getRun(w.id)?.status === 'cancelled');
   });

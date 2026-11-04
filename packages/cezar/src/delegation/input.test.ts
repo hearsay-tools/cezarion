@@ -19,7 +19,7 @@ import { RunManager } from '../workflows/run.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { enqueueAgentInput, nextAgentInput, agentInputBatch } from './input.ts';
-import { blockRunWrites } from '../runs/run-store.testkit.ts';
+import { setRunStatus, blockRunWrites } from '../runs/run-store.testkit.ts';
 
 it('bounds batches without splitting messages or crossing lifecycle inputs', () => {
   const make = (text: string): AgentInput => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: randomUUID(), text, createdAt: new Date().toISOString(),
@@ -127,7 +127,7 @@ async function withLiveInputRun(check: (fixture: LiveInputRun) => Promise<void> 
       steps: [{ id: 'work', name: 'work', kind: STEP_KIND.agent }] })
     : manager.startRun(workflow, { task: 'test input transport', worktree: false, runner: 'claude' });
   if (opening) {
-    store.updateRun(record.id, { status: RUN_STATUS.review, workflowDef: workflow });
+    setRunStatus(store, record.id, RUN_STATUS.review, { workflowDef: workflow });
     store.updateStep(record.id, 'work', { status: STEP_STATUS.done, sessionId: 'previous-session' });
     store.commitAgentInputs(record.id, [opening]);
     expect(manager.continueRun(record.id, { text: opening.text, answerInputId: opening.id })).toEqual({ ok: true });
@@ -275,7 +275,7 @@ it.each(['replacement session', 'replacement state'] as const)(
     const state = createActiveRun({ cwd: dir, pendingHumanAsk: false, autonomous: false });
     state.session = session;
     const record = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
-    store.updateRun(record.id, { status: RUN_STATUS.running }); store.commitAgentInputs(record.id, [input]);
+    setRunStatus(store, record.id, RUN_STATUS.running); store.commitAgentInputs(record.id, [input]);
     const active = new Map([[record.id, state]]), move = vi.fn();
     const owner = new InputDelivery({ store, repoRoot: dir, dataDir: dir, semaphore: new WorkspaceSemaphore(),
       work: new TrackedWork(), disposed: () => false }, unused<DeliveryHost>({
@@ -377,7 +377,7 @@ async function withInboxRun(check: (fixture: InboxFixture) => Promise<void> | vo
   const dir = mkdtempSync(join(tmpdir(), 'cez-inbox-durable-'));
   const store = RunStore.open(dir, { keepLive: true }), manager = new RunManager(store, dir);
   const record = store.createRun({ title: 'inbox', task: 'inbox', workflow: 'quick-task', steps: [] });
-  store.updateRun(record.id, { status: RUN_STATUS.running });
+  setRunStatus(store, record.id, RUN_STATUS.running);
   try { await check(inboxFixture(store, manager, dir, record.id, [])); }
   finally { manager.dispose(); store.close(); vi.useRealTimers(); rmSync(dir, { recursive: true, force: true }); }
 }
@@ -461,7 +461,7 @@ it.each(['live', 'expired'] as const)('restart recovers a %s receipt and expiry 
     const first = enqueue('recovered input'), generation = randomUUID();
     const receipt = manager.reserveInboxInputs(runId, generation, [first.id])!;
     // A restart: the old store goes too, or it would still own the run.
-    store.updateRun(runId, { status: RUN_STATUS.waiting }); store.close(); manager.dispose();
+    setRunStatus(store, runId, RUN_STATUS.waiting); store.close(); manager.dispose();
     vi.setSystemTime(Date.now() + (mode === 'live' ? 60_000 : 120_001));
     const reopened = RunStore.open(dir, { keepLive: true });
     const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 0, memoryLimitMb: null }) });
@@ -493,7 +493,7 @@ it('a continuation refused across several admission retries writes the retained 
   await withInboxRun(async ({ store, manager, dir, runId, enqueue }) => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     enqueue('owed message');
-    store.updateRun(runId, { status: RUN_STATUS.waiting }); store.close(); manager.dispose();
+    setRunStatus(store, runId, RUN_STATUS.waiting); store.close(); manager.dispose();
     const reopened = RunStore.open(dir, { keepLive: true });
     const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 0, memoryLimitMb: null }) });
     const recovered = new RunManager(reopened, dir, { semaphore });
@@ -568,7 +568,7 @@ it('restart after durable inbox ACK retires the wake without creating a continua
     store.claimInboxInputs(runId, [first.id], { receiptId, generation, expiresAt: new Date(Date.now() + 120_000).toISOString() });
     store.commitDelegation([{ id: runId, delegation: { role: 'root', permissions: [], receipts: [],
       wait: { id: randomUUID(), workerIds: [], outcomes: [], deadline: new Date().toISOString(), phase: 'wake-pending', reason: 'message', wakeId: first.id } } }]);
-    store.updateRun(runId, { status: RUN_STATUS.waiting });
+    setRunStatus(store, runId, RUN_STATUS.waiting);
     // Simulate the crash boundary after the atomic ACK and before manager reconciliation.
     store.ackInboxInputs(runId, receiptId, generation, new Date().toISOString());
     manager.dispose(); store.close();

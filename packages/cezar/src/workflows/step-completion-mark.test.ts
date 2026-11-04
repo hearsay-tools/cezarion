@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -61,7 +62,7 @@ describe('step completion mark at settlement callers', () => {
       unused<LoopArgs[6]>('stepSession'), unused<LoopArgs[7]>('gate', { holdsAgentWaits: () => false }), '');
     runId = store.createRun({ title: 'mark', task: 'work', workflow: 'chain', steps: [] }).id;
     store.addStep(runId, { id: step.id, name: step.id, kind: STEP_KIND.agent });
-    store.updateRun(runId, { status: RUN_STATUS.running });
+    setRunStatus(store, runId, RUN_STATUS.running);
     state = fakeState(root);
   });
 

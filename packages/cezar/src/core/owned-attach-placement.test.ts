@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
@@ -163,7 +164,7 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     expect(await f.manager.awaitRunTermination(workerId, 15_000)).toBe(true);
     // The durable shape a restart re-queues: the first step done, the second still pending.
     f.store.updateStep(workerId, 'second', { status: STEP_STATUS.pending, finishedAt: undefined });
-    f.store.updateRun(workerId, { status: RUN_STATUS.queued, finishedAt: undefined, error: undefined });
+    setRunStatus(f.store, workerId, RUN_STATUS.queued, { finishedAt: undefined, error: undefined });
     await (f.manager as unknown as { reviveQueuedRun(run: unknown, reason: string): Promise<void> }).reviveQueuedRun(f.store.getRun(workerId), 'cezar restarted');
     await (runInternals(f.manager).line).pump();
     await until(() => seen.length === 3);

@@ -10,7 +10,7 @@ import { clearProjectProbeCache, listProjects, registerProject } from '../worksp
 import { ProjectContexts } from './project-context.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp, projectRouteManifest, type ProjectRouteInfo } from './server.ts';
-import { seedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, seedRuns } from '../runs/run-store.testkit.ts';
 
 /**
  * Alias parity for the mirrored project-route table (spec
@@ -247,7 +247,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
   });
 
   it('pins through every boot alias and isolates colliding IDs in another project', async () => {
-    store.updateRun(runId, { status: RUN_STATUS.done });
+    setRunStatus(store, runId, RUN_STATUS.done);
     store.flush();
     seedRuns(join(otherRoot, '.ai/cezar'), [store.getRun(runId)!]);
     const other = await registerProject(otherRoot);

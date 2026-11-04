@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -43,7 +44,7 @@ describe('claims that admit work on a finished run', () => {
     const run = store.createRun({ title: 'settled', workflow: 'quick-task', task: 'settled', steps: [] });
     // A materialized worktree, so worktree reclaim has something to claim.
     const worktreePath = join(root, `wt-${run.id.slice(0, 8)}`); mkdirSync(worktreePath);
-    store.updateRun(run.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString(), branch: `cez/${run.id.slice(0, 8)}`, worktreePath });
+    setRunStatus(store, run.id, RUN_STATUS.done, { finishedAt: new Date().toISOString(), branch: `cez/${run.id.slice(0, 8)}`, worktreePath });
     store.flush();
     return run.id;
   }

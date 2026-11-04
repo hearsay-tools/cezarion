@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { agentTmpDir } from '../runs/agent-tmpdir.ts';
 import { RUNS_DB_FILE, RunDatabase } from '../runs/run-database.ts';
-import { crashStore } from '../runs/run-store.testkit.ts';
+import { setRunStatus, crashStore } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
@@ -57,12 +57,12 @@ describe('a crashed owner\'s claim on a settled family', () => {
       { role: 'worker', permissions: [], parentRunId: parent.id, workspace }, 'a'.repeat(64));
     owner.commitWorkerExecutionStart(worker.id);
     const finishedAt = new Date().toISOString();
-    owner.updateRun(worker.id, { status: RUN_STATUS.done, finishedAt });
-    owner.updateRun(parent.id, { status: RUN_STATUS.done, finishedAt });
+    setRunStatus(owner, worker.id, RUN_STATUS.done, { finishedAt });
+    setRunStatus(owner, parent.id, RUN_STATUS.done, { finishedAt });
     // An ordinary settled run with a materialized worktree, a branch and agent scratch.
     const plain = owner.createRun({ title: 'plain', workflow: 'quick-task', task: 'plain', steps: [] });
     const worktree = join(root, 'plain-worktree'); mkdirSync(worktree);
-    owner.updateRun(plain.id, { status: RUN_STATUS.done, finishedAt, worktreePath: worktree, branch: `cez/${plain.id.slice(0, 8)}` });
+    setRunStatus(owner, plain.id, RUN_STATUS.done, { finishedAt, worktreePath: worktree, branch: `cez/${plain.id.slice(0, 8)}` });
     const scratch = agentTmpDir(dataDir, plain.id); mkdirSync(scratch, { recursive: true });
     // The process dies while both families are still in its memory: their claims stay behind.
     owner.pin(parent.id, 'cleanup'); owner.pin(plain.id, 'cleanup'); owner.flush();

@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -147,7 +148,7 @@ describe('application update routes', () => {
     const store = RunStore.open(dataDir, { keepLive: true });
     const ids = ['queued', 'waiting', 'running'].map((status) => {
       const run = store.createRun({ title: status, workflow: 'quick-task', task: status, steps: [] });
-      store.updateRun(run.id, { status: status as 'queued' | 'waiting' | 'running' });
+      setRunStatus(store, run.id, status as 'queued' | 'waiting' | 'running');
       return run.id;
     });
     const server = startServer({ repoRoot: root, store, manager: {} as RunManager, version: '1.0.0' }, 0);

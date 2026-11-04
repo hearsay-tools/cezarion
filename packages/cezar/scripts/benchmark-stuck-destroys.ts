@@ -1,3 +1,4 @@
+import { setRunStatus } from '../src/runs/run-store.testkit.ts';
 /**
  * Stuck-destroy benchmark (hearsay-tools/cezarion#879): what permanently stuck worker destroys
  * cost an otherwise idle cezar. Run it unchanged before and after a change to the cleanup loops.
@@ -85,7 +86,7 @@ try {
   const service = new DelegationService();
   detach = service.registerProject({ id: 'bench', root, store, manager });
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-  store.updateRun(parent.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+  setRunStatus(store, parent.id, 'waiting', { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
 
   const hold = (cwd: string) => { holders.push(spawn('sleep', ['86400'], { cwd, stdio: 'ignore' })); };
   const ids: string[] = [];
@@ -96,7 +97,7 @@ try {
       parent.id, randomUUID(), { role: 'worker', permissions: [], parentRunId: parent.id, workspace }, 'a'.repeat(64));
     const generation = store.commitWorkerExecutionStart(id);
     const created = await ensureOwnedWorkspace(root, store.getRun(id)!);
-    store.updateRun(id, { status: 'review', worktreePath: created.path, branch: created.branch });
+    setRunStatus(store, id, 'review', { worktreePath: created.path, branch: created.branch });
     if (!store.commitWorkerExecutionComplete(id, generation)) throw new Error(`worker ${id} did not complete`);
     const scratch = agentTmpDir(dataDir, id);
     mkdirSync(scratch, { recursive: true });

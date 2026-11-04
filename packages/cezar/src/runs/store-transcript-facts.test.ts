@@ -11,7 +11,7 @@ import { TranscriptFactsQueue } from './transcript-facts-queue.ts';
 import { RunStore } from './store.ts';
 import { countTranscriptReads, restoreTranscriptReads } from './transcript-reads.testkit.ts';
 import { seedSettledFamily } from '../workflows/delegation-reconcile.testkit.ts';
-import { hasPendingAsk } from './run-store.testkit.ts';
+import { setRunStatus, hasPendingAsk } from './run-store.testkit.ts';
 
 const questions = [{ header: 'Pick', question: 'Which one?', options: [{ label: 'A' }, { label: 'B' }] }];
 const dirs: string[] = [];
@@ -85,7 +85,7 @@ describe('RunStore transcript facts (#880)', () => {
     const { dir, store } = openStore();
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     store.appendEvent(run.id, { type: 'conversation-message', projectionId: 'p:before' });
-    store.updateRun(run.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
+    setRunStatus(store, run.id, RUN_STATUS.done, { finishedAt: new Date().toISOString() });
     store.setArchived(run.id, true);
     await store.historyIdle();
     expect(existsSync(historyPaths(dir, run.id).plain)).toBe(false);
@@ -129,7 +129,7 @@ describe('RunStore transcript facts off the request path (#880)', () => {
     const { dir, store } = openStore();
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     store.appendEvent(run.id, { type: 'conversation-message', projectionId: 'p:1' });
-    store.updateRun(run.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
+    setRunStatus(store, run.id, RUN_STATUS.done, { finishedAt: new Date().toISOString() });
     store.setArchived(run.id, true);
     await store.historyIdle();
     const { compressed, facts } = historyPaths(dir, run.id);
@@ -194,9 +194,9 @@ describe('off-loop store readiness (hearsay-tools/cezarion#906)', () => {
     const { dir, store } = openStore();
     const historical = seedSettledFamily(store, dir);
     const other = store.createRun({ title: 'other', task: 'task', workflow: 'w', steps: [] });
-    store.updateRun(other.id, { status: RUN_STATUS.done });
+    setRunStatus(store, other.id, RUN_STATUS.done);
     const live = seedSettledFamily(store, dir);
-    store.updateRun(live.parentId, { status: RUN_STATUS.waiting });
+    setRunStatus(store, live.parentId, RUN_STATUS.waiting);
     const ids = [historical.parentId, historical.workerId, other.id, live.parentId, live.workerId];
     for (const id of ids) store.appendEvent(id, { type: 'text', text: id });
     store.close(); stores.pop();
@@ -216,7 +216,7 @@ describe('off-loop store readiness (hearsay-tools/cezarion#906)', () => {
     const { dir, store } = openStore();
     const family = seedSettledFamily(store, dir);
     const others = Array.from({ length: 120 }, () => store.createRun({ title: 'other', task: 'task', workflow: 'w', steps: [] }).id);
-    for (const id of others) store.updateRun(id, { status: RUN_STATUS.done });
+    for (const id of others) setRunStatus(store, id, RUN_STATUS.done);
     store.close(); stores.pop();
     const requested: string[] = [];
     const request = TranscriptFactsQueue.prototype.request;

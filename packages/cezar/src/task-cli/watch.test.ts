@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import {
   RUN_STATUS,
   WAIT_KIND,
@@ -35,7 +36,10 @@ describe('cez task watching', () => {
   // run parks, so no poll reads a `waiting` run without it.
   const parkOn = (id: string, wait: Wait, over: Partial<RunRecord> = {}) => {
     harness.store.commitWait(id, wait);
-    harness.store.updateRun(id, { status: RUN_STATUS.waiting, ...over });
+    {
+      const { status: fixtureStatus, ...fixtureExtras }: NonNullable<Parameters<typeof setRunStatus>[3]> & { status: Parameters<typeof setRunStatus>[2] } = { status: RUN_STATUS.waiting, ...over };
+      setRunStatus(harness.store, id, fixtureStatus, fixtureExtras);
+    }
   };
   const parkOnWorkers = (id: string, asks = false) => parkOn(id, {
     kind: WAIT_KIND.worker, id: '00000000-0000-4000-8000-0000000000aa', source: WAIT_SOURCE.agent, via: WAIT_VIA['cez-worker-wait'], registeredAt: '2026-09-05T00:00:00.000Z',
@@ -52,14 +56,14 @@ describe('cez task watching', () => {
   describe('wait', () => {
     it('exits 0 once the run reaches review', async () => {
       const id = create();
-      later(60, () => harness.store.updateRun(id, { status: RUN_STATUS.review }));
+      later(60, () => setRunStatus(harness.store, id, RUN_STATUS.review));
       expect(await run(['wait', id, '--timeout-seconds', '10'])).toBe(0);
       expect(last()).toMatchObject({ timedOut: false, runs: [{ id, status: RUN_STATUS.review }] });
     });
 
     it('exits 1 when the run fails', async () => {
       const id = create();
-      later(60, () => harness.store.updateRun(id, { status: RUN_STATUS.failed }));
+      later(60, () => setRunStatus(harness.store, id, RUN_STATUS.failed));
       expect(await run(['wait', id, '--timeout-seconds', '10'])).toBe(1);
       expect(last()).toMatchObject({ runs: [{ id, status: RUN_STATUS.failed }] });
     });
@@ -71,17 +75,17 @@ describe('cez task watching', () => {
     it('--mode any returns on the first settled run, --mode all waits for every run', async () => {
       const a = create('a');
       const b = create('b');
-      later(40, () => harness.store.updateRun(a, { status: RUN_STATUS.done }));
+      later(40, () => setRunStatus(harness.store, a, RUN_STATUS.done));
       expect(await run(['wait', a, b, '--mode', 'any', '--timeout-seconds', '10'])).toBe(0);
       expect(last()).toMatchObject({ timedOut: false });
-      later(40, () => harness.store.updateRun(b, { status: RUN_STATUS.cancelled }));
+      later(40, () => setRunStatus(harness.store, b, RUN_STATUS.cancelled));
       expect(await run(['wait', a, b, '--mode', 'all', '--timeout-seconds', '10'])).toBe(1);
       expect((last().runs as Array<{ status: string }>).map((entry) => entry.status)).toEqual(['done', 'cancelled']);
     });
 
     it('--until attention also stops on waiting', async () => {
       const id = create();
-      later(40, () => harness.store.updateRun(id, { status: RUN_STATUS.waiting }));
+      later(40, () => setRunStatus(harness.store, id, RUN_STATUS.waiting));
       expect(await run(['wait', id, '--until', 'attention', '--timeout-seconds', '10'])).toBe(0);
       expect(last()).toMatchObject({ until: 'attention', runs: [{ id, status: RUN_STATUS.waiting, attention: 'waiting', attentionLabel: 'needs you' }] });
     });
@@ -96,7 +100,7 @@ describe('cez task watching', () => {
 
       it('ends the default wait as soon as an interactive task parks, exit 0, with "needs you"', async () => {
         const id = create();
-        later(40, () => harness.store.updateRun(id, { status: RUN_STATUS.waiting }));
+        later(40, () => setRunStatus(harness.store, id, RUN_STATUS.waiting));
         const started = Date.now();
         expect(await run(['wait', id, '--timeout-seconds', '10'])).toBe(0);
         expect(Date.now() - started).toBeLessThan(5_000);
@@ -118,24 +122,24 @@ describe('cez task watching', () => {
         later(40, () => parkOnTimer(id));
         expect(await run(['wait', id, '--timeout-seconds', '1'])).toBe(3);
         expect(last()).toMatchObject({ timedOut: true, runs: [{ id, status: RUN_STATUS.waiting, attention: 'running', attentionLabel: 'monitoring' }] });
-        harness.store.updateRun(id, { status: RUN_STATUS.running });
+        setRunStatus(harness.store, id, RUN_STATUS.running);
         expect(await run(['wait', id, '--timeout-seconds', '1'])).toBe(3);
         expect(last()).toMatchObject({ timedOut: true, runs: [{ id, status: RUN_STATUS.running, attention: 'running', attentionLabel: 'running' }] });
       });
 
       it('--until settled is unchanged: it waits through a waiting park and stops on a terminal status', async () => {
         const id = create();
-        later(40, () => harness.store.updateRun(id, { status: RUN_STATUS.waiting }));
+        later(40, () => setRunStatus(harness.store, id, RUN_STATUS.waiting));
         expect(await run(['wait', id, '--until', 'settled', '--timeout-seconds', '1'])).toBe(3);
         expect(last()).toMatchObject({ until: 'settled', timedOut: true, runs: [{ id, status: RUN_STATUS.waiting, attention: 'waiting', attentionLabel: 'needs you' }] });
-        later(40, () => harness.store.updateRun(id, { status: RUN_STATUS.done }));
+        later(40, () => setRunStatus(harness.store, id, RUN_STATUS.done));
         expect(await run(['wait', id, '--until', 'settled', '--timeout-seconds', '10'])).toBe(0);
         expect(last()).toMatchObject({ until: 'settled', timedOut: false, runs: [{ id, status: RUN_STATUS.done, attention: 'none', attentionLabel: 'done' }] });
       });
 
       it('stops on a failed run under either until, exit 1, with the error bucket', async () => {
         const id = create();
-        later(40, () => harness.store.updateRun(id, { status: RUN_STATUS.failed }));
+        later(40, () => setRunStatus(harness.store, id, RUN_STATUS.failed));
         expect(await run(['wait', id, '--timeout-seconds', '10'])).toBe(1);
         expect(last()).toMatchObject({ runs: [{ id, status: RUN_STATUS.failed, attention: 'error', attentionLabel: 'failed' }] });
       });
@@ -162,7 +166,7 @@ describe('cez task watching', () => {
       const waiting = run(['start', 'go', '--wait', '--timeout-seconds', '10']);
       const poll = setInterval(() => {
         const created = harness.store.listRuns()[0];
-        if (created) { harness.store.updateRun(created.id, { status: RUN_STATUS.done }); clearInterval(poll); }
+        if (created) { setRunStatus(harness.store, created.id, RUN_STATUS.done); clearInterval(poll); }
       }, 20);
       expect(await waiting).toBe(0);
       expect(out).toHaveLength(1);
@@ -173,7 +177,7 @@ describe('cez task watching', () => {
       const waiting = run(['start', 'go', '--wait', '--timeout-seconds', '10']);
       const poll = setInterval(() => {
         const created = harness.store.listRuns()[0];
-        if (created) { harness.store.updateRun(created.id, { status: RUN_STATUS.waiting }); clearInterval(poll); }
+        if (created) { setRunStatus(harness.store, created.id, RUN_STATUS.waiting); clearInterval(poll); }
       }, 20);
       const started = Date.now();
       expect(await waiting).toBe(0);
@@ -185,7 +189,7 @@ describe('cez task watching', () => {
       const waiting = run(['start', 'go', '--wait', '--until', 'settled', '--timeout-seconds', '1']);
       const poll = setInterval(() => {
         const created = harness.store.listRuns()[0];
-        if (created) { harness.store.updateRun(created.id, { status: RUN_STATUS.waiting }); clearInterval(poll); }
+        if (created) { setRunStatus(harness.store, created.id, RUN_STATUS.waiting); clearInterval(poll); }
       }, 20);
       expect(await waiting).toBe(3);
       expect(last()).toMatchObject({ created: true, status: RUN_STATUS.waiting, timedOut: true, until: 'settled' });
@@ -226,7 +230,7 @@ describe('cez task watching', () => {
       const id = create();
       harness.store.appendEvent(id, { type: 'text', text: 'before' });
       later(100, () => harness.store.appendEvent(id, { type: 'text', text: 'during' }));
-      later(200, () => harness.store.updateRun(id, { status: RUN_STATUS.done }));
+      later(200, () => setRunStatus(harness.store, id, RUN_STATUS.done));
       expect(await run(['log', id, '--follow', '--timeout-seconds', '10'])).toBe(0);
       const texts = lines().filter((line) => line.type === 'text').map((line) => line.text);
       expect(texts).toEqual(['before', 'during']);
@@ -255,7 +259,7 @@ describe('cez task watching', () => {
         const id = create();
         harness.store.appendEvent(id, { type: 'text', text: 'before' });
         later(100, () => harness.store.appendEvent(id, { type: 'text', text: 'during' }));
-        later(200, () => harness.store.updateRun(id, { status: RUN_STATUS.waiting }));
+        later(200, () => setRunStatus(harness.store, id, RUN_STATUS.waiting));
         const started = Date.now();
         expect(await run(['log', id, '--follow', '--timeout-seconds', '10'])).toBe(0);
         expect(Date.now() - started).toBeLessThan(5_000);
@@ -266,7 +270,7 @@ describe('cez task watching', () => {
       it('ends at the replay boundary when the task is already parked', async () => {
         const id = create();
         harness.store.appendEvent(id, { type: 'text', text: 'turn' });
-        harness.store.updateRun(id, { status: RUN_STATUS.waiting });
+        setRunStatus(harness.store, id, RUN_STATUS.waiting);
         expect(await run(['log', id, '--follow', '--timeout-seconds', '10'])).toBe(0);
         expect(lines().map((line) => line.text ?? line.status)).toEqual(['turn', 'waiting']);
         expect(last()).toMatchObject({ attention: 'waiting', until: 'attention', timedOut: false });
@@ -292,7 +296,7 @@ describe('cez task watching', () => {
 
       it.each(['attention', 'settled'])('reports a run deleted mid-follow as missing, exit 1, under --until %s', async (until) => {
         const id = create();
-        harness.store.updateRun(id, { status: RUN_STATUS.running });
+        setRunStatus(harness.store, id, RUN_STATUS.running);
         harness.store.appendEvent(id, { type: 'text', text: 'before' });
         // Under load a 200ms timer can fire before SSE replays `before`, so the cell
         // asserts [] instead of a mid-follow delete. Wait for the replay, then delete.
@@ -308,10 +312,10 @@ describe('cez task watching', () => {
 
       it('--until settled waits through a park and ends on a terminal status', async () => {
         const id = create();
-        later(40, () => harness.store.updateRun(id, { status: RUN_STATUS.waiting }));
+        later(40, () => setRunStatus(harness.store, id, RUN_STATUS.waiting));
         expect(await run(['log', id, '--follow', '--until', 'settled', '--timeout-seconds', '1'])).toBe(3);
         expect(last()).toMatchObject({ id, status: RUN_STATUS.waiting, attention: 'waiting', until: 'settled', timedOut: true });
-        later(200, () => harness.store.updateRun(id, { status: RUN_STATUS.cancelled }));
+        later(200, () => setRunStatus(harness.store, id, RUN_STATUS.cancelled));
         expect(await run(['log', id, '--follow', '--until', 'settled', '--timeout-seconds', '10'])).toBe(1);
         expect(last()).toEqual({ id, status: RUN_STATUS.cancelled, attention: 'none', attentionLabel: 'cancelled', until: 'settled', timedOut: false });
       });

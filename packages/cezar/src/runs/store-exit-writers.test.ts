@@ -1,3 +1,4 @@
+import { setRunStatus } from './run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -139,7 +140,7 @@ describe('withdrawHold on archive (hold.archive)', () => {
   it('settles an archived usage-limit hold failed, its appointment and error kept as before', () => {
     const store = open();
     const id = store.createRun({ title: 'hold', task: 'hold', workflow: 'quick-task', steps: [] }).id;
-    store.updateRun(id, { status: RUN_STATUS.failed, error: 'usage limit', finishedAt: FINISHED_AT });
+    setRunStatus(store, id, RUN_STATUS.failed, { error: 'usage limit', finishedAt: FINISHED_AT });
     store.move(id, 'hold', { finishedAt: undefined, autoResumeAt: '2026-11-04T10:00:00.000Z', autoResumeAttempts: 1 });
     store.updateRun(id, { archived: true });
     expect(store.getRun(id)).toMatchObject({ status: RUN_STATUS.failed, error: 'usage limit', finishedAt: expect.any(String),
@@ -149,7 +150,7 @@ describe('withdrawHold on archive (hold.archive)', () => {
   it('keeps the finishedAt of an archived hold that has one', () => {
     const store = open();
     const id = store.createRun({ title: 'hold', task: 'hold', workflow: 'quick-task', steps: [] }).id;
-    store.updateRun(id, { status: RUN_STATUS.failed });
+    setRunStatus(store, id, RUN_STATUS.failed);
     store.move(id, 'hold', { finishedAt: FINISHED_AT, autoResumeAt: '2026-11-04T10:00:00.000Z' });
     store.updateRun(id, { archived: true });
     expect(store.getRun(id)).toMatchObject({ status: RUN_STATUS.failed, finishedAt: FINISHED_AT, autoResumeAt: undefined });

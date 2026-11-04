@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createActiveRun } from './active-run.ts';
 import { runInternals } from './run-internals.testkit.ts';
@@ -403,7 +404,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
         sessionId: `session-${suffix}`,
         backend: 'claude',
       });
-      store.updateRun(record.id, { status: RUN_STATUS.running, currentStepId: 'task' });
+      setRunStatus(store, record.id, RUN_STATUS.running, { currentStepId: 'task' });
     }
 
     // Hold the first admitted continuation open. This isolates scheduler
@@ -417,7 +418,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
         }
       ).runContinuation = async (runId: string, stepId: string) => {
         store.updateStep(runId, stepId, { status: STEP_STATUS.running });
-        store.updateRun(runId, { status: RUN_STATUS.running, currentStepId: stepId });
+        setRunStatus(store, runId, RUN_STATUS.running, { currentStepId: stepId });
         await held;
       };
     };
@@ -472,7 +473,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
 
       // Terminal records prevent another admission when the held continuations settle.
       for (const run of store.listRuns()) {
-        store.updateRun(run.id, { status: RUN_STATUS.cancelled, finishedAt: new Date().toISOString() });
+        setRunStatus(store, run.id, RUN_STATUS.cancelled, { finishedAt: new Date().toISOString() });
       }
     } finally { releaseContinuation(); }
   });
@@ -498,7 +499,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
       sessionId: 'session-interrupted',
       backend: 'claude',
     });
-    store.updateRun(record.id, { status: RUN_STATUS.running, currentStepId: 'task' });
+    setRunStatus(store, record.id, RUN_STATUS.running, { currentStepId: 'task' });
 
     await manager.recover();
     await waitFor(

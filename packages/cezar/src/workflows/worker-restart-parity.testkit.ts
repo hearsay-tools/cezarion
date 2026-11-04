@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -37,7 +38,7 @@ it.each(RUNNER_IDS)('%s R60 cold terminal starting-proof recovery repairs execut
     process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
     const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(p.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+    setRunStatus(store, p.id, RUN_STATUS.waiting, { delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
     const w = await worker(p.id, adapter.scenarios.baseline!);
     store.updateRun(w.id, { runner }); manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'waiting');
@@ -49,8 +50,8 @@ it.each(RUNNER_IDS)('%s R60 cold terminal starting-proof recovery repairs execut
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
     await Promise.all(executions.splice(0)); await Promise.all(bookkeeping.splice(0)); manager.dispose();
     // Public completion can be durable before its private completion checkpoint.
-    store.updateRun(w.id, { status: RUN_STATUS.done, stopping: undefined });
-    store.updateRun(p.id, { status: RUN_STATUS.done });
+    setRunStatus(store, w.id, RUN_STATUS.done, { stopping: undefined });
+    setRunStatus(store, p.id, RUN_STATUS.done);
     for (const id of [p.id, w.id]) expect(isLiveRecord(store.getRun(id)!)).toBe(false);
     const dataDir = join(root, '.ai/cezar'); const files = join(dataDir, 'runs');
     const before = store.readEvents(w.id);
@@ -85,7 +86,7 @@ it.each(RUNNER_IDS)('%s R60 cold terminal starting-proof recovery repairs execut
       process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
       const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
       const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-      store.updateRun(p.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+      setRunStatus(store, p.id, RUN_STATUS.waiting, { delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
       const w = await worker(p.id, adapter.scenarios.baseline!);
       store.updateRun(w.id, { runner }); manager.enqueueOwnedRun(w.id);
       await until(() => store.getRun(w.id)?.status === 'waiting');
@@ -129,7 +130,7 @@ it.each(RUNNER_IDS)('%s R60 cold terminal starting-proof recovery repairs execut
         return cwd;
       }) as typeof fs.readlinkSync);
       syncBuiltinESMExports();
-      store.updateRun(w.id, { status: RUN_STATUS.waiting }); store.flush(); reopenRuntime();
+      setRunStatus(store, w.id, RUN_STATUS.waiting); store.flush(); reopenRuntime();
       const service = new DelegationService({ terminationTimeoutMs: 4_000 }); const detach = service.registerProject({ id: 'project', root, store, manager });
       try {
         destroying = true;
@@ -151,7 +152,7 @@ it.each(RUNNER_IDS)('%s settles a same-boot crash as gone once recorded processe
     process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
     const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [{ id: 'task', kind: STEP_KIND.agent, name: 'Task' }] });
-    store.updateRun(p.id, { status: RUN_STATUS.waiting, currentStepId: 'task', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+    setRunStatus(store, p.id, RUN_STATUS.waiting, { currentStepId: 'task', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
     const w = await worker(p.id, adapter.scenarios.baseline!);
     store.updateRun(w.id, { runner }); manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'waiting');
@@ -181,7 +182,7 @@ it.each(RUNNER_IDS)('%s settles a same-boot crash as gone once recorded processe
     syncBuiltinESMExports();
     writeFileSync(join(files, `${w.id}.processes.json`), JSON.stringify({ ...ledger,
       processes: [...ledger.processes, { pid: descendant.pid, startToken: processStartToken(descendant.pid) }] }));
-    store.updateRun(w.id, { status: RUN_STATUS.waiting }); store.flush(); reopenRuntime();
+    setRunStatus(store, w.id, RUN_STATUS.waiting); store.flush(); reopenRuntime();
     const credentials = new CredentialRegistry();
     const caller = credentials.authenticate(credentials.issue('project', p.id, 'test'))!;
     let service = new DelegationService(); let detach = service.registerProject({ id: 'project', root, store, manager });

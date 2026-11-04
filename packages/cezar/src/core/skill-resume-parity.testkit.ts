@@ -22,7 +22,7 @@ import {
   promptFor,
   waitFor,
 } from './harness-parity.testkit.ts';
-import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { RunManager, skillSystemPrompt } from '../workflows/run.ts';
@@ -535,10 +535,7 @@ describe('harness parity — skill system prompt on Continue (#790)', () => {
         });
         // A user's Continue checkpoints its message before the session opens; it answers the
         // question the run parked on (hearsay-tools/cezarion#1234).
-        fixture.store.updateRun(fixture.runId, {
-          status: RUN_STATUS.running, currentStepId: 'continue-1', finishedAt: undefined,
-          continuationMessage: { id: 'continue-1', text: promptFor(backend, 'baseline'), origin: 'human', createdAt: new Date().toISOString() },
-        });
+        setRunStatus(fixture.store, fixture.runId, RUN_STATUS.running, { currentStepId: 'continue-1', finishedAt: undefined, continuationMessage: { id: 'continue-1', text: promptFor(backend, 'baseline'), origin: 'human', createdAt: new Date().toISOString() } });
         expect(fixture.store.readEvents(fixture.runId).some(event =>
           event.type === 'session' && event.stepId === 'continue-1')).toBe(false);
         const marked = fixture.markWire();

@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -53,11 +54,7 @@ describe('per-task auto-resume cancellation', () => {
    *  (hearsay-tools/cezarion#1236). */
   function limited(): string {
     const run = store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] });
-    store.updateRun(run.id, {
-      status: RUN_STATUS.waiting,
-      error: 'Claude AI usage limit reached|1785782478',
-      autoResumeAt: '2026-08-03T18:41:48.000Z',
-    });
+    setRunStatus(store, run.id, RUN_STATUS.waiting, { error: 'Claude AI usage limit reached|1785782478', autoResumeAt: '2026-08-03T18:41:48.000Z' });
     return run.id;
   }
 

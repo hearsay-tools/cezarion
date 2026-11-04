@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,12 +14,12 @@ describe('peer discovery lifecycle', () => {
   it.each([
     ['queued', true], ['running', true], ['waiting', true], ['review', false], ['done', false], ['failed', false], ['cancelled', false],
   ] as const)('reports %s admission without an active session', async (status, accepts) => {
-    const run = create(); f.store.updateRun(run.id, { status });
+    const run = create(); setRunStatus(f.store, run.id, status);
     expect(await tasks()).toEqual([expect.objectContaining({ id: run.id, status, accepts })]);
   });
   it('refuses stopping and finishing peers and omits deletion-pending roots', async () => {
-    const stopping = create(); f.store.updateRun(stopping.id, { status: RUN_STATUS.running, stopping: true });
-    const finishing = create(); f.store.updateRun(finishing.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: [], receipts: [], finishRequestedAt: new Date().toISOString() } });
+    const stopping = create(); setRunStatus(f.store, stopping.id, RUN_STATUS.running, { stopping: true });
+    const finishing = create(); setRunStatus(f.store, finishing.id, RUN_STATUS.waiting, { delegation: { role: 'root', permissions: [], receipts: [], finishRequestedAt: new Date().toISOString() } });
     const deleting = create(); f.store.updateRun(deleting.id, { delegation: { role: 'root', permissions: [], receipts: [], historyDeletion: 'pending' } });
     const list = await tasks();
     expect(list.map(run => run.id)).not.toContain(deleting.id);

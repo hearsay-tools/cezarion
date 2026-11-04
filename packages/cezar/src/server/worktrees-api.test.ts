@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
@@ -73,7 +74,7 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
   ): Promise<string> {
     const wt = await createWorktree(repoRoot, id, 'main');
     const rec = store.createRun({ title: `run ${id.slice(0, 4)}`, workflow: 'w', task: 't', steps: [] });
-    store.updateRun(rec.id, { status, finishedAt, worktreePath: wt.path, branch: wt.branch });
+    setRunStatus(store, rec.id, status, { finishedAt, worktreePath: wt.path, branch: wt.branch });
     return rec.id;
   }
 
@@ -180,7 +181,7 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
   it('lists a finished worker as reclaimable and Reclaim now frees it when over keep (#575)', async () => {
     writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({ worktreeRetention: 1 }), 'utf8');
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(parent.id, { status: RUN_STATUS.done, finishedAt: '2026-07-09T00:00:00Z', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    setRunStatus(store, parent.id, RUN_STATUS.done, { finishedAt: '2026-07-09T00:00:00Z', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const sha = (await run('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
     const oldWorkspace = await createOwnedWorkspace(repoRoot, randomUUID(), sha);
     const newWorkspace = await createOwnedWorkspace(repoRoot, randomUUID(), sha);
@@ -188,8 +189,8 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
       { role: 'worker', parentRunId: parent.id, permissions: [], workspace: oldWorkspace }, 'a'.repeat(64));
     const newWorker = store.createOwnedRun({ title: 'new worker', task: 'worker', workflow: 'quick-task', steps: [] }, parent.id, randomUUID(),
       { role: 'worker', parentRunId: parent.id, permissions: [], workspace: newWorkspace }, 'b'.repeat(64));
-    store.updateRun(oldWorker.id, { status: RUN_STATUS.done, finishedAt: '2026-07-01T00:00:00Z', worktreePath: oldWorkspace.path, branch: oldWorkspace.branch });
-    store.updateRun(newWorker.id, { status: RUN_STATUS.done, finishedAt: '2026-07-09T00:00:00Z', worktreePath: newWorkspace.path, branch: newWorkspace.branch });
+    setRunStatus(store, oldWorker.id, RUN_STATUS.done, { finishedAt: '2026-07-01T00:00:00Z', worktreePath: oldWorkspace.path, branch: oldWorkspace.branch });
+    setRunStatus(store, newWorker.id, RUN_STATUS.done, { finishedAt: '2026-07-09T00:00:00Z', worktreePath: newWorkspace.path, branch: newWorkspace.branch });
 
     const listed = await getWorktrees();
     const byRun = Object.fromEntries(listed.worktrees.map((w) => [w.runId, w]));
@@ -209,14 +210,14 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
 
   it('the row reclaim keeps a dirty owned-worker checkout: its diff snapshot would drop binary bytes', async () => {
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(parent.id, { status: RUN_STATUS.done, finishedAt: '2026-07-09T00:00:00Z', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    setRunStatus(store, parent.id, RUN_STATUS.done, { finishedAt: '2026-07-09T00:00:00Z', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const sha = (await run('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
     const dirty = await createOwnedWorkspace(repoRoot, randomUUID(), sha);
     const clean = await createOwnedWorkspace(repoRoot, randomUUID(), sha);
     const worker = (workspace: typeof dirty, seal: string) => {
       const rec = store.createOwnedRun({ title: 'worker', task: 'worker', workflow: 'quick-task', steps: [] }, parent.id, randomUUID(),
         { role: 'worker', parentRunId: parent.id, permissions: [], workspace }, seal);
-      store.updateRun(rec.id, { status: RUN_STATUS.done, finishedAt: '2026-07-01T00:00:00Z', worktreePath: workspace.path, branch: workspace.branch });
+      setRunStatus(store, rec.id, RUN_STATUS.done, { finishedAt: '2026-07-01T00:00:00Z', worktreePath: workspace.path, branch: workspace.branch });
       return rec.id;
     };
     const dirtyId = worker(dirty, 'c'.repeat(64));
@@ -232,11 +233,7 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
 
   it('does not mark a finished worker reclaimable while its parent is live without a worktree dir', async () => {
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(parent.id, {
-      status: RUN_STATUS.waiting,
-      worktree: false,
-      delegation: { role: 'root', permissions: ['spawn'], receipts: [] },
-    });
+    setRunStatus(store, parent.id, RUN_STATUS.waiting, { worktree: false, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const sha = (await run('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
     const workspace = await createOwnedWorkspace(repoRoot, randomUUID(), sha);
     const worker = store.createOwnedRun(
@@ -246,12 +243,7 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
       { role: 'worker', parentRunId: parent.id, permissions: [], workspace },
       'a'.repeat(64),
     );
-    store.updateRun(worker.id, {
-      status: RUN_STATUS.done,
-      finishedAt: '2026-07-01T00:00:00Z',
-      worktreePath: workspace.path,
-      branch: workspace.branch,
-    });
+    setRunStatus(store, worker.id, RUN_STATUS.done, { finishedAt: '2026-07-01T00:00:00Z', worktreePath: workspace.path, branch: workspace.branch });
     const listed = await getWorktrees();
     const byRun = Object.fromEntries(listed.worktrees.map((w) => [w.runId, w]));
     expect(byRun[worker.id]?.reclaimable).toBe(false);
@@ -260,12 +252,12 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
 
   it('human deletion and worktree removal preserve worker and parent ownership evidence', async () => {
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(parent.id, { status: RUN_STATUS.done, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    setRunStatus(store, parent.id, RUN_STATUS.done, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const sha = (await run('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
     const workspace = await createOwnedWorkspace(repoRoot, randomUUID(), sha);
     const worker = store.createOwnedRun({ title: 'worker', task: 'worker', workflow: 'quick-task', steps: [] }, parent.id, randomUUID(),
       { role: 'worker', parentRunId: parent.id, permissions: [], workspace }, 'a'.repeat(64));
-    store.updateRun(worker.id, { status: RUN_STATUS.cancelled, worktreePath: workspace.path, branch: workspace.branch });
+    setRunStatus(store, worker.id, RUN_STATUS.cancelled, { worktreePath: workspace.path, branch: workspace.branch });
     store.appendEvent(worker.id, { type: 'note', message: 'preserved worker history' });
     for (const id of [worker.id, parent.id]) {
       expect((await apiRequest(app, `/api/v1/runs/${id}`, { method: 'DELETE' })).status).toBe(409);
@@ -316,7 +308,7 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
       const wt = await createWorktree(repoRoot, randomUUID(), 'main');
       const rec = store.createRun({ title: 'resumable', workflow: 'w', task: 't', steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
       store.updateStep(rec.id, 'task', { status: STEP_STATUS.done, sessionId: 'sess-1', backend: 'claude' });
-      store.updateRun(rec.id, { status: RUN_STATUS.done, finishedAt: '2026-07-01T00:00:00Z', worktreePath: wt.path, branch: wt.branch });
+      setRunStatus(store, rec.id, RUN_STATUS.done, { finishedAt: '2026-07-01T00:00:00Z', worktreePath: wt.path, branch: wt.branch });
       return rec.id;
     };
     const savedDryRun = process.env.CEZ_DRY_RUN;
@@ -394,7 +386,7 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
       // The checkout under the run's OWN id, as a real task has it — what re-materializing rebuilds.
       const id = store.createRun({ title: 'reclaimed', workflow: 'w', task: 't', steps: [] }).id;
       const wt = await createWorktree(repoRoot, id, 'main');
-      store.updateRun(id, { status: RUN_STATUS.done, finishedAt: '2026-07-01T00:00:00Z', worktreePath: wt.path, branch: wt.branch, baseBranch: 'main' });
+      setRunStatus(store, id, RUN_STATUS.done, { finishedAt: '2026-07-01T00:00:00Z', worktreePath: wt.path, branch: wt.branch, baseBranch: 'main' });
       const { worktreePath, branch } = store.getRun(id)!;
       writeFileSync(join(worktreePath!, 'work.txt'), 'task work\n');
       await run('git', ['add', '-A'], { cwd: worktreePath! });

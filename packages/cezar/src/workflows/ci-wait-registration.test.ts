@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
@@ -51,7 +52,7 @@ function unused<T extends object>(members: Partial<T> = {}): T {
 
 function registrationFixture() {
   const run = store.createRun({ title: 'registration', task: 'guard', workflow: 'quick-task', steps: [] });
-  store.updateRun(run.id, { status: RUN_STATUS.running });
+  setRunStatus(store, run.id, RUN_STATUS.running);
   const state = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false });
   state.session = unused<AgentSession>({ open: true });
   state.ciGeneration = 'generation';
@@ -106,7 +107,7 @@ describe('CI registration guards before and after metadata lookup', { timeout: 3
           break;
         }
         case 'root_finish_pending':
-          store.updateRun(run.id, { status: RUN_STATUS.waiting });
+          setRunStatus(store, run.id, RUN_STATUS.waiting);
           store.commitRootFinishIntent(run.id);
           break;
       }

@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 
@@ -31,7 +32,7 @@ export async function settled(hold = true) {
     const { workerId } = await f.service.spawn(f.caller, input());
     const generation = f.store.commitWorkerExecutionStart(workerId);
     const workspace = await ensureOwnedWorkspace(f.root, f.store.getRun(workerId)!);
-    f.store.updateRun(workerId, { status: RUN_STATUS.review, worktreePath: workspace.path, branch: workspace.branch });
+    setRunStatus(f.store, workerId, RUN_STATUS.review, { worktreePath: workspace.path, branch: workspace.branch });
     expect(f.store.commitWorkerExecutionComplete(workerId, generation)).toBe(true);
     const holder = hold ? await readableHolder(workspace.path) : undefined;
     if (holder) onTestFinished(() => holder.close());

@@ -1,4 +1,4 @@
-import { openTestRunStore, runPersistence } from '../runs/run-store.testkit.ts';
+import { setRunStatus, openTestRunStore, runPersistence } from '../runs/run-store.testkit.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -268,10 +268,9 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     // launched: a pending synthetic `continue-1` step and its message, on a `queued` record.
     const worker = f.store.getRun(a.child.workerId)!;
     f.store.addStep(worker.id, { id: 'continue-1', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation' });
-    f.store.updateRun(worker.id, { status: RUN_STATUS.queued, finishedAt: undefined,
-      continuationMessage: { id: 'continue-1', text: 'again', origin: 'human', createdAt: new Date().toISOString() } });
+    setRunStatus(f.store, worker.id, RUN_STATUS.queued, { finishedAt: undefined, continuationMessage: { id: 'continue-1', text: 'again', origin: 'human', createdAt: new Date().toISOString() } });
     f.manager.dispose(); sessions[0]!.finish();
-    f.store.updateRun(a.parent.id, { status: RUN_STATUS.waiting }); f.store.close();
+    setRunStatus(f.store, a.parent.id, RUN_STATUS.waiting); f.store.close();
     const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true });
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
     controller.attachProject({ id: 'restarted', root: f.root, store, manager });

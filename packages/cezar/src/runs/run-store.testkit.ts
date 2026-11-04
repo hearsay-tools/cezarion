@@ -176,3 +176,15 @@ export function commitStagedRuns(store: RunStore, staged: Map<string, RunRecord>
   const commit = Reflect.get(store, 'commitIndex') as (staged: Map<string, RunRecord>) => void;
   commit.call(store, staged);
 }
+
+/** Seed a fixture status through the ordinary update path, including its persistence rules.
+ * Tests may construct states that no run exit can reach. Production must use store.move. */
+export function setRunStatus(
+  store: Pick<RunStore, 'updateRun'>,
+  id: string,
+  status: RunRecord['status'],
+  extras: Partial<Omit<RunRecord, 'id' | 'steps' | 'status'>> = {},
+): RunRecord | undefined {
+  const update = store.updateRun as (id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>) => RunRecord | undefined;
+  return update.call(store, id, { ...extras, status });
+}

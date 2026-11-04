@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -49,7 +50,7 @@ describe('the Draft PR route', () => {
 
   const seed = (status: RunStatus, finishedAt?: string) => {
     const id = store.createRun({ title: 'publish', task: 'publish', workflow: 'quick-task', steps: [] }).id;
-    store.updateRun(id, { status, finishedAt, worktreePath: join(dir, 'worktree'), branch: 'cez/publish' });
+    setRunStatus(store, id, status, { finishedAt, worktreePath: join(dir, 'worktree'), branch: 'cez/publish' });
     return id;
   };
 

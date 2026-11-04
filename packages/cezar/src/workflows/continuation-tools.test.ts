@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
@@ -131,13 +132,16 @@ describe('a resumed session keeps its workflow step tools', () => {
       ...(runner ? { runner } : {}),
       steps: input.steps.map((s) => ({ id: s.id, name: s.id, kind: STEP_KIND.agent })),
     });
-    store.updateRun(record.id, {
+    {
+      const { status: fixtureStatus, ...fixtureExtras }: NonNullable<Parameters<typeof setRunStatus>[3]> & { status: Parameters<typeof setRunStatus>[2] } = {
       status: input.status ?? 'done',
       ...(input.status === 'waiting' ? {} : { finishedAt: new Date().toISOString() }),
       workflowDef: input.def,
       error: input.error,
       autoResumeAt: input.autoResumeAt,
-    });
+    };
+      setRunStatus(store, record.id, fixtureStatus, fixtureExtras);
+    }
     for (const s of input.steps) {
       store.updateStep(record.id, s.id, {
         status: STEP_STATUS.done,

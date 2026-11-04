@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { execFileSync } from 'node:child_process';
@@ -163,7 +164,7 @@ export function describeSessionContext(rows: readonly string[], suite = { descri
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['cezar-done']!, runner, worktree: false });
         await finished(run.id);
         store.updateStep(run.id, 'task', { status: STEP_STATUS.running, finishedAt: undefined });
-        store.updateRun(run.id, { status: RUN_STATUS.running, currentStepId: 'task', finishedAt: undefined, continuationMessage: undefined });
+        setRunStatus(store, run.id, RUN_STATUS.running, { currentStepId: 'task', finishedAt: undefined, continuationMessage: undefined });
         const before = messages().length;
         const held = vi.spyOn(semaphore, 'maxParallel').mockReturnValue(0);
         await restart();

@@ -1,4 +1,4 @@
-import { openTestRunStore } from '../runs/run-store.testkit.ts';
+import { setRunStatus, openTestRunStore } from '../runs/run-store.testkit.ts';
 import * as executionSettings from './execution-settings.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
@@ -182,9 +182,8 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(worker.id, 15000)).toBe(true);
     // Persist a queued Continue, then restart through recover(), rather than checking reload alone.
     f.store.addStep(worker.id, { id: 'continue-2', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation' });
-    f.store.updateRun(worker.id, { status: RUN_STATUS.queued, finishedAt: undefined, currentStepId: undefined,
-      continuationMessage: { id: 'continue-2', text: 'recover legacy', origin: 'human', createdAt: new Date().toISOString() } });
-    f.store.updateRun(f.parent.id, { status: RUN_STATUS.waiting }); f.store.close(); f.manager.dispose();
+    setRunStatus(f.store, worker.id, RUN_STATUS.queued, { finishedAt: undefined, currentStepId: undefined, continuationMessage: { id: 'continue-2', text: 'recover legacy', origin: 'human', createdAt: new Date().toISOString() } });
+    setRunStatus(f.store, f.parent.id, RUN_STATUS.waiting); f.store.close(); f.manager.dispose();
     const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true }); recoveredStores.push(store);
     expect(store.getRun(worker.id)?.systemPrompt).toBe(legacyPrompt);
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager);
@@ -267,12 +266,12 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const token = delegationToken(sessions[0]!.spec);
     vi.spyOn(sessions[0]!.session, 'interrupt').mockImplementation(() => {});
     if (transition === 'cancel') f.manager.cancel(run.id);
-    else f.store.updateRun(run.id, { status: transition });
+    else setRunStatus(f.store, run.id, transition);
     expect(sessions[0]!.session.open).toBe(true);
     expect(controller.credentials.authenticate(token)).toBeUndefined();
     // The session stays open, which a settled run never has: back to running before teardown
     // stops it (hearsay-tools/cezarion#1804).
-    if (transition !== 'cancel') f.store.updateRun(run.id, { status: RUN_STATUS.running });
+    if (transition !== 'cancel') setRunStatus(f.store, run.id, RUN_STATUS.running);
   });
   it('root session wait returns immediately, then controller shutdown revokes without terminalizing persisted work', async () => {
     const run = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner: 'claude', worktree: false });

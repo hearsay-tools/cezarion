@@ -32,7 +32,7 @@ import {
   type ServerDeps,
   type UpdateProjectResponse,
 } from './server.ts';
-import { seedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, seedRuns } from '../runs/run-store.testkit.ts';
 
 /**
  * Multi-project workspace API (spec 2026-07-20-multi-project-workspace, step
@@ -536,7 +536,7 @@ describe('workspace projects API', () => {
 
       // Settle the run and the same call succeeds — the 409 is about live work, not about the
       // project having history.
-      ctx!.store.updateRun(run.id, { status: RUN_STATUS.done });
+      setRunStatus(ctx!.store, run.id, RUN_STATUS.done);
       const allowed = await del(other.id, { contexts });
       expect(allowed.status).toBe(200);
       // The store/manager handles are dropped with the entry (step 2.1's dispose).

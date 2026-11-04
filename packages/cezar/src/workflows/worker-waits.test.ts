@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { fireCapturedTimer } from './waits.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -155,13 +156,13 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
         .toThrow(expect.objectContaining({ code: 'incompatible_state', message: expect.stringContaining('finish is pending') }));
       // The finish settles the root (`settleRequestedRootFinish` → `settleSuccess`); its terminal
       // status is what cancels every wait it still holds.
-      store.updateRun(p.id, { status: RUN_STATUS.done });
+      setRunStatus(store, p.id, RUN_STATUS.done);
       expect(entryOf(p.id, entry.id)).toBeUndefined();
       expect(settledOf(p.id, entry.id)?.phase).toBe('cancelled');
       expect(inputOf(p.id, entry.id)).toBeUndefined();
       // Its session is still live, which a done root never has (finishDecision): back to running
       // before teardown stops it (hearsay-tools/cezarion#1804).
-      store.updateRun(p.id, { status: RUN_STATUS.running });
+      setRunStatus(store, p.id, RUN_STATUS.running);
     } finally { release(); }
   });
 

@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -97,7 +98,7 @@ describe('task message command family', () => {
   it('pages peer discovery, hides caller, workers and archives, and reports shared attention', async () => {
     const workers = await f.service.spawn(f.caller, { task: 'worker', baseline: 'parent-head', requestId: randomUUID() });
     const archived = peer(); f.store.updateRun(archived.id, { archived: true });
-    const review = peer(); f.store.updateRun(review.id, { status: RUN_STATUS.review });
+    const review = peer(); setRunStatus(f.store, review.id, RUN_STATUS.review);
     for (let index = 0; index < 32; index++) peer();
     expect(await message(['tasks'])).toBe(0);
     expect(json().tasks).toHaveLength(32); expect(json().nextOffset).toBe(32);

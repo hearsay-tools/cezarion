@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA, WORKER_OUTCOME_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
@@ -56,7 +57,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       const prior = store.readWorkerExecution(w.id)!;
       expect(prior.phase).toBe('starting');
       expect(readRecord(w.id)).toMatchObject({ generation: prior.generation, controller: { pid: process.pid }, processes: [{ pid: first!.proc.pid }] });
-      manager.dispose(); store.updateRun(w.id, { status }); store.flush();
+      manager.dispose(); setRunStatus(store, w.id, status); store.flush();
       setController(w.id, { pid: await deadPid(), startToken: '1' });
       store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
       const service = new DelegationService(); service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
@@ -109,7 +110,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       // so the fixture cannot launch an autosave while destroy probes the orphan.
       await ensureOwnedWorkspace(root, w);
       store.commitWorkerExecutionStart(w.id);
-      store.updateRun(w.id, { status: RUN_STATUS.failed }); store.flush();
+      setRunStatus(store, w.id, RUN_STATUS.failed); store.flush();
       manager.dispose();
       const signalSensitive = "process.on('SIGTERM',()=>process.exit(42)); console.log('ready'); setInterval(()=>{},1000)";
       const worktreeHolder = await spawnReady(workspace(w).path, signalSensitive);
@@ -331,7 +332,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       for (let i = 0; i < 2; i++) {
         const w = await worker(); store.commitWorkerExecutionStart(w.id);
         const created = await ensureOwnedWorkspace(root, store.getRun(w.id)!);
-        store.updateRun(w.id, { status: RUN_STATUS.failed, worktreePath: created.path, branch: created.branch });
+        setRunStatus(store, w.id, RUN_STATUS.failed, { worktreePath: created.path, branch: created.branch });
         rmSync(recordPath(w.id), { force: true }); // legacy: the cwd scan is the only evidence
         holders.push(await spawnReady(created.path)); ids.push(w.id);
       }
@@ -376,7 +377,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
     it.runIf(process.platform === 'linux')('an unreadable process in the worktree is no evidence: destroy finalizes a legacy generation without signalling it (hearsay-tools/cezarion#889)', async () => {
       const w = await worker(); await ensureOwnedWorkspace(root, w);
-      store.commitWorkerExecutionStart(w.id); store.updateRun(w.id, { status: RUN_STATUS.failed }); store.flush();
+      store.commitWorkerExecutionStart(w.id); setRunStatus(store, w.id, RUN_STATUS.failed); store.flush();
       manager.dispose(); store.close(); rmSync(recordPath(w.id)); // an absent legacy ledger leaves the scan as the only evidence
       const holder = await nonDumpableHolder(workspace(w).path);
       const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);

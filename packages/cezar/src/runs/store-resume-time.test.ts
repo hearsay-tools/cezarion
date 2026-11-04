@@ -12,7 +12,7 @@ import {
   WAIT_VIA,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
 
-import { readPersistedRuns } from './run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns } from './run-store.testkit.ts';
 import { RunStore } from './store.ts';
 
 /**
@@ -32,7 +32,10 @@ function setup() {
   const store = RunStore.open(dir, { keepLive: true });
   cleanups.push(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
   const hold = (id: string, extra: Parameters<RunStore['updateRun']>[1] = {}) => {
-    store.updateRun(id, { status: RUN_STATUS.waiting, autoResumeAt: AT, autoResumeAttempts: 2, ...extra });
+    {
+      const { status: fixtureStatus, ...fixtureExtras }: NonNullable<Parameters<typeof setRunStatus>[3]> & { status: Parameters<typeof setRunStatus>[2] } = { status: RUN_STATUS.waiting, autoResumeAt: AT, autoResumeAttempts: 2, ...extra };
+      setRunStatus(store, id, fixtureStatus, fixtureExtras);
+    }
     store.flush();
     expect(committed(id)).toMatchObject({ status: RUN_STATUS.waiting, autoResumeAt: AT });
   };

@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { automationCheckSchema } from '@open-mercato/cezar-contract/automations';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { SCHEDULED_TASK_NOTE } from '@open-mercato/cezar-contract/scheduled-tasks';
@@ -108,7 +109,7 @@ describe('GitHub automation API', () => {
       } : {
         automation: { automationId, automationRevision: 1, receiptId: 'shared-variant-receipt', event: 'issue.opened', githubUrl: 'https://github.com/acme/demo/issues/1' },
       });
-      store.updateRun(run.id, { status: RUN_STATUS.done });
+      setRunStatus(store, run.id, RUN_STATUS.done);
       return run;
     };
     const first = createTask(definition.id);
@@ -118,7 +119,7 @@ describe('GitHub automation API', () => {
     createTask(scheduled.id, true);
     createTask('another-automation');
     store.createRun({ title: 'manual task', workflow: 'quick-task', task: 'Go', steps: [] });
-    store.updateRun(first.id, { status: RUN_STATUS.done, archived: true });
+    setRunStatus(store, first.id, RUN_STATUS.done, { archived: true });
     await automationStore.appendLog({ automationId: definition.id, revision: 1, result: 'launched', runId: first.id });
     for (let i = 0; i < 101; i++) {
       await automationStore.appendLog({ automationId: definition.id, revision: 1, result: i === 100 ? 'no-match' : 'duplicate' });

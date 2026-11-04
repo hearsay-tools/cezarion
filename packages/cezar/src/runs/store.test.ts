@@ -10,7 +10,7 @@ import { historyPaths } from './history-file.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
 import { RUNS_DB_FILE, RunDatabase } from './run-database.ts';
 import { RunStore, runRecordSchema } from './store.ts';
-import { blockRunWrites, readPersistedRuns, readPersistedText, seedRuns } from './run-store.testkit.ts';
+import { setRunStatus, blockRunWrites, readPersistedRuns, readPersistedText, seedRuns } from './run-store.testkit.ts';
 import {
   STEP_KIND,
   RUN_STATUS,
@@ -427,7 +427,7 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
   it("reads a stored activity:'monitoring' as a waiting park (#490, store schema 4)", () => {
     const store = RunStore.open(dataDir);
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
-    store.updateRun(run.id, { status: RUN_STATUS.running });
+    setRunStatus(store, run.id, RUN_STATUS.running);
     store.close();
     // An older cezar stored the park as `activity` (phase 4b dropped it from the schema).
     seedRuns(dataDir, readPersistedRuns(dataDir).map((row) => ({ ...row, activity: 'monitoring' })));
@@ -444,10 +444,10 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
   it('leaves open waits for RunManager to cancel on terminal writes', () => {
     const store = RunStore.open(dataDir);
     const run = store.createRun({ title: 'monitor', task: 'monitor', workflow: 'quick-task', steps: [] });
-    store.updateRun(run.id, { status: RUN_STATUS.running });
+    setRunStatus(store, run.id, RUN_STATUS.running);
     store.commitWait(run.id, { id: '44444444-4444-4444-8444-444444444444', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
       registeredAt: '2026-07-25T10:10:00.000Z', deadline: '2026-07-25T10:15:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn', seconds: 300 });
-    store.updateRun(run.id, { status: RUN_STATUS.done });
+    setRunStatus(store, run.id, RUN_STATUS.done);
     expect(store.getRun(run.id)).toMatchObject({ status: RUN_STATUS.done, waits: [{ phase: WAIT_PHASE.open }] });
   });
 
@@ -893,11 +893,7 @@ describe('RunStore — secret redaction before persistence (#427)', () => {
     delete process.env.CEZ_REDACT_SECRETS;
     const store = RunStore.open(dataDir);
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
-    store.updateRun(run.id, {
-      titleSummary: 'Catch AuthError in the login handler',
-      status: RUN_STATUS.done,
-      diffStat: { adds: 1, dels: 2, files: 3 },
-    });
+    setRunStatus(store, run.id, RUN_STATUS.done, { titleSummary: 'Catch AuthError in the login handler', diffStat: { adds: 1, dels: 2, files: 3 } });
     const loaded = store.getRun(run.id);
     expect(loaded?.titleSummary).toBe('Catch AuthError in the login handler');
     expect(loaded?.status).toBe('done');
@@ -1482,7 +1478,7 @@ describe('RunStore — referenced-issue discovery (spec 2026-07-21-report-ref-di
 
   it('does not decode normalized issue history on repeated store opens', () => {
     const { store, run } = freshRun('Fix issue #1200');
-    store.updateRun(run.id, { status: RUN_STATUS.done, issueNumber: 1200 });
+    setRunStatus(store, run.id, RUN_STATUS.done, { issueNumber: 1200 });
     store.applyMarkerRefs(run.id, { issue: 1216 });
     store.close();
     const scan = vi.spyOn(RunDatabase.prototype, 'listWhere');
@@ -1947,7 +1943,7 @@ describe("RunStore — a task never adopts another repository's ref (#945)", () 
         expected: { referencedPullRequestUrl: undefined, referencedIssueUrl: undefined, referencedPrCandidates: [foreignPr, secondPr],
           referencedIssueCandidates: [foreignIssue, secondIssue], issueNumber: undefined, referencedIssueNumberSeeded: undefined } },
     ] as const;
-    const writePaths: Array<{ path: string; extra: Partial<RunRecord> }> = [
+    const writePaths: Array<{ path: string; extra: Parameters<RunStore['updateRun']>[1] }> = [
       { path: 'debounced', extra: {} },
       { path: 'durable', extra: { handoffRecords: { autosave: [] } } },
     ];
@@ -2084,7 +2080,7 @@ describe("RunStore — a task never adopts another repository's ref (#945)", () 
   describe('healing records the un-scoped rule already poisoned', () => {
     /** Persist one record, then reopen and arm — what a cockpit restart does. */
     const reopenArmed = (
-      record: Partial<RunRecord> & { task: string },
+      record: Parameters<RunStore['updateRun']>[1] & { task: string },
       handle: typeof HANDLE | null = HANDLE,
     ) => {
       const seed = RunStore.open(dataDir);
@@ -2384,7 +2380,7 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
   const FINISHED_AT = '2020-01-01T00:00:00.000Z';
   function finishedRun(store: RunStore, status: 'done' | 'failed' | 'cancelled'): string {
     const run = store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] });
-    store.updateRun(run.id, { status, finishedAt: FINISHED_AT });
+    setRunStatus(store, run.id, status, { finishedAt: FINISHED_AT });
     return run.id;
   }
 
@@ -2480,11 +2476,7 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
     const store = RunStore.open(dataDir);
     const limited = () => {
       const id = finishedRun(store, 'failed');
-      store.updateRun(id, {
-        status: RUN_STATUS.waiting,
-        autoResumeAt: '2026-08-03T18:41:48.000Z',
-        autoResumeAttempts: 2,
-      });
+      setRunStatus(store, id, RUN_STATUS.waiting, { autoResumeAt: '2026-08-03T18:41:48.000Z', autoResumeAttempts: 2 });
       return id;
     };
     const one = limited();
@@ -2528,7 +2520,7 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
     // task the UI never presented as unread, and reported a count larger than the badge showed.
     const store = RunStore.open(dataDir);
     const scheduled = finishedRun(store, 'failed');
-    store.updateRun(scheduled, { status: RUN_STATUS.waiting, autoResumeAt: '2026-08-03T18:41:48.000Z', autoResumeAttempts: 1 });
+    setRunStatus(store, scheduled, RUN_STATUS.waiting, { autoResumeAt: '2026-08-03T18:41:48.000Z', autoResumeAttempts: 1 });
     const ordinary = finishedRun(store, 'done');
 
     // The count is the badge's number: one, not two.
@@ -2542,14 +2534,14 @@ describe('RunStore — read receipts (#unread-done-items)', () => {
     // status retires the appointment, so a failed run never carries one.
     const store = RunStore.open(dataDir);
     const id = finishedRun(store, 'failed');
-    store.updateRun(id, { status: RUN_STATUS.waiting, autoResumeAt: '2026-08-03T18:41:48.000Z' });
+    setRunStatus(store, id, RUN_STATUS.waiting, { autoResumeAt: '2026-08-03T18:41:48.000Z' });
     expect(store.getRun(id)?.autoResumeAt).toBe('2026-08-03T18:41:48.000Z');
-    store.updateRun(id, { status: RUN_STATUS.failed });
+    setRunStatus(store, id, RUN_STATUS.failed);
     expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
     store.updateRun(id, { autoResumeAt: '2026-08-03T18:41:48.000Z' });
     expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
-    store.updateRun(id, { status: RUN_STATUS.waiting, autoResumeAt: '2026-08-03T18:41:48.000Z' });
-    store.updateRun(id, { status: RUN_STATUS.running });
+    setRunStatus(store, id, RUN_STATUS.waiting, { autoResumeAt: '2026-08-03T18:41:48.000Z' });
+    setRunStatus(store, id, RUN_STATUS.running);
     expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
     expect(store.markAllRead()).toBe(0);
   });
@@ -2703,7 +2695,7 @@ describe('RunStore — pinned tasks (#935)', () => {
   it('is idempotent and unconditional — every status can be pinned', () => {
     const store = RunStore.open(dataDir);
     const id = newRun(store);
-    store.updateRun(id, { status: RUN_STATUS.running });
+    setRunStatus(store, id, RUN_STATUS.running);
     expect(store.setPinned(id, true)?.pinned).toBe(true);
     expect(store.setPinned(id, true)?.pinned).toBe(true);
     // Unpinning something that was never pinned is legal too, and changes nothing.
@@ -2743,7 +2735,7 @@ describe('RunStore — pinned tasks (#935)', () => {
     expect(store.getRun(one)?.pinnedAt).toBeUndefined();
 
     const swept = newRun(store);
-    store.updateRun(swept, { status: RUN_STATUS.done, finishedAt: '2026-08-29T10:00:00.000Z' });
+    setRunStatus(store, swept, RUN_STATUS.done, { finishedAt: '2026-08-29T10:00:00.000Z' });
     store.setPinned(swept, true);
     expect(store.archiveFinished().archived).toBeGreaterThanOrEqual(1);
     expect(store.getRun(swept)?.archived).toBe(true);
@@ -2782,11 +2774,7 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
       title: 'parent', task: 'parent', workflow: 'quick-task',
       steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
-    store.updateRun(parent.id, {
-      status: RUN_STATUS.done,
-      finishedAt: '2020-01-01T00:00:00.000Z',
-      delegation: { role: 'root', permissions: ['spawn'], receipts: [] },
-    });
+    setRunStatus(store, parent.id, RUN_STATUS.done, { finishedAt: '2020-01-01T00:00:00.000Z', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const workerId = randomUUID();
     const worker = store.createOwnedRun(
       {
@@ -2810,7 +2798,7 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
       },
       'a'.repeat(64),
     );
-    store.updateRun(worker.id, { status: workerStatus });
+    setRunStatus(store, worker.id, workerStatus);
     return { parent, worker };
   }
 
@@ -2818,11 +2806,7 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
     const store = RunStore.open(dataDir);
     const { parent, worker } = parentWithWorker(store, 'running');
     store.setPinned(worker.id, true);
-    store.updateRun(worker.id, {
-      status: RUN_STATUS.waiting,
-      autoResumeAt: '2026-08-03T18:41:48.000Z',
-      autoResumeAttempts: 1,
-    });
+    setRunStatus(store, worker.id, RUN_STATUS.waiting, { autoResumeAt: '2026-08-03T18:41:48.000Z', autoResumeAttempts: 1 });
     const touched: string[] = [];
     store.on('run', (run) => touched.push(run.id));
 
@@ -2890,7 +2874,10 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
     function fixture(store: RunStore) {
       const mk = (status: RunRecord['status']): string => {
         const run = store.createRun({ title: 't', task: 't', workflow: 'quick-task', steps: [] });
-        store.updateRun(run.id, { status, ...(status === 'running' ? {} : { finishedAt: '2020-01-01T00:00:00.000Z' }) });
+        {
+          const { status: fixtureStatus, ...fixtureExtras }: NonNullable<Parameters<typeof setRunStatus>[3]> & { status: Parameters<typeof setRunStatus>[2] } = { status, ...(status === 'running' ? {} : { finishedAt: '2020-01-01T00:00:00.000Z' }) };
+          setRunStatus(store, run.id, fixtureStatus, fixtureExtras);
+        }
         return run.id;
       };
       const unpinned = { done: mk('done'), failed: mk('failed'), cancelled: mk('cancelled') };
@@ -2899,14 +2886,14 @@ describe('RunStore — archive cascades to owned workers (#250)', () => {
       const pinnedRunning = mk('running');
       store.setPinned(pinnedRunning, true);
       const scheduled = mk('failed');
-      store.updateRun(scheduled, { status: RUN_STATUS.waiting, autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
+      setRunStatus(store, scheduled, RUN_STATUS.waiting, { autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
       const scheduledPinned = mk('failed');
-      store.updateRun(scheduledPinned, { status: RUN_STATUS.waiting, autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
+      setRunStatus(store, scheduledPinned, RUN_STATUS.waiting, { autoResumeAt: SCHEDULED_AT, autoResumeAttempts: 1 });
       store.setPinned(scheduledPinned, true);
       const running = mk('running');
       const { parent, worker } = parentWithWorker(store, 'running');
       const lone = parentWithWorker(store, 'done');
-      store.updateRun(lone.parent.id, { status: RUN_STATUS.running, finishedAt: undefined });
+      setRunStatus(store, lone.parent.id, RUN_STATUS.running, { finishedAt: undefined });
       return { unpinned, pinnedDone, pinnedRunning, scheduled, scheduledPinned, running, parent, worker, lone };
     }
 

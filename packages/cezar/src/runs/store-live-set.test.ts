@@ -5,7 +5,7 @@ import {
   WAIT_SOURCE,
   WAIT_VIA,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { commitStagedRuns } from './run-store.testkit.ts';
+import { setRunStatus, commitStagedRuns } from './run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -244,7 +244,7 @@ describe('the live set stays in memory', () => {
     const run = record({ status: RUN_STATUS.running });
     seedRuns(dataDir, [run]);
     const store = open({ keepLive: true });
-    store.updateRun(run.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
+    setRunStatus(store, run.id, RUN_STATUS.done, { finishedAt: new Date().toISOString() });
     expect(held(store)).toEqual([run.id]);
     store.flush();
     expect(held(store)).toEqual([]);
@@ -258,7 +258,7 @@ describe('the live set stays in memory', () => {
     const store = open({ keepLive: true });
     expect(held(store)).toEqual(ids([root!, ...workers, ...others]));
     const live = workers[1]!;
-    store.updateRun(live.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
+    setRunStatus(store, live.id, RUN_STATUS.done, { finishedAt: new Date().toISOString() });
     store.flush();
     expect(held(store)).toEqual(ids(others));
   });

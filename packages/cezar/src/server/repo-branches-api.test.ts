@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -93,7 +94,7 @@ describe('the repo branches API', () => {
       await git(repoRoot, 'commit', '-q', '-m', `work ${i}`);
     }
     await git(repoRoot, 'checkout', '-q', 'main');
-    store.updateRun(rec.id, { status: RUN_STATUS.done, branch, baseBranch: 'main' });
+    setRunStatus(store, rec.id, RUN_STATUS.done, { branch, baseBranch: 'main' });
     return { id: rec.id, branch };
   }
 
@@ -111,7 +112,7 @@ describe('the repo branches API', () => {
 
   it('GET /repo carries tracking (null without an upstream) and attributes a squash commit to its task', async () => {
     const rec = store.createRun({ title: 'the squashed one', workflow: 'w', task: 't', steps: [] });
-    store.updateRun(rec.id, { status: RUN_STATUS.done, pullRequestUrl: 'https://github.com/acme/demo/pull/42' });
+    setRunStatus(store, rec.id, RUN_STATUS.done, { pullRequestUrl: 'https://github.com/acme/demo/pull/42' });
     writeFileSync(join(repoRoot, 'squash.txt'), 'x\n');
     await git(repoRoot, 'add', '-A');
     await git(repoRoot, 'commit', '-q', '-m', 'feat: squashed (#42)');

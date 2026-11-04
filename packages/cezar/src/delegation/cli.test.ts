@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
@@ -110,7 +111,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     await f.manager.awaitRunTermination(workerId, 10_000);
     f.store.updateStep(workerId, 'task', { status: STEP_STATUS.done, sessionId: 'previous-session', backend: 'claude' });
     const generation = f.store.commitWorkerExecutionStart(workerId);
-    f.store.updateRun(workerId, { status: RUN_STATUS.done });
+    setRunStatus(f.store, workerId, RUN_STATUS.done);
     f.store.commitWorkerExecutionComplete(workerId, generation);
     expect(await runWorkerCommand(['resume', ...args.slice(1)], env)).toBe(0);
     const sent = json();
@@ -235,7 +236,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
   });
   it('can replay the same stable message after an unacknowledged receipt expires', async () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
-    f.store.updateRun(workerId, { status: RUN_STATUS.running });
+    setRunStatus(f.store, workerId, RUN_STATUS.running);
     const worker = f.credentials.authenticate(f.credentials.issue('project', workerId, randomUUID()))!;
     const id = randomUUID();
     await f.service.send(worker, { id, recipientRunId: f.parent.id, kind: 'progress', text: 'Replay me', timeoutSeconds: 600 });

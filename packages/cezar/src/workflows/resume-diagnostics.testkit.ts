@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it as registerTest, vi } from 'vitest';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { ciNativeMessages } from './waits-parity.testkit.ts';
 import { manager, restart, root, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
@@ -140,7 +140,7 @@ function restartContext(runner: RunnerId, it: typeof registerTest = registerTest
       const messages = native(runner);
       const id = await start(runner, 'cezar-done');
       store.updateStep(id, 'task', { status: STEP_STATUS.running, finishedAt: undefined });
-      store.updateRun(id, { status: RUN_STATUS.running, currentStepId: 'task', finishedAt: undefined, continuationMessage: undefined });
+      setRunStatus(store, id, RUN_STATUS.running, { currentStepId: 'task', finishedAt: undefined, continuationMessage: undefined });
       const before = messages().length;
       const held = vi.spyOn(semaphore, 'maxParallel').mockReturnValue(0);
       await restart();
@@ -166,11 +166,7 @@ function savedContinuation(runner: RunnerId, it: typeof registerTest = registerT
         const text = 'Saved human text.\nDo not change it.';
         store.addStep(id, { id: 'continue-1', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation' });
         store.updateStep(id, 'continue-1', { status: status === RUN_STATUS.queued ? STEP_STATUS.pending : STEP_STATUS.running });
-        store.updateRun(id, {
-          status, currentStepId: status === RUN_STATUS.running ? 'continue-1' : undefined,
-          finishedAt: undefined, error: undefined,
-          continuationMessage: { id: 'continue-1', text, createdAt: new Date().toISOString(), origin: 'human' },
-        });
+        setRunStatus(store, id, status, { currentStepId: status === RUN_STATUS.running ? 'continue-1' : undefined, finishedAt: undefined, error: undefined, continuationMessage: { id: 'continue-1', text, createdAt: new Date().toISOString(), origin: 'human' } });
         expect(original.sessionId).toBeTruthy();
         const before = messages().length;
         // Two cold recoveries before admission must keep the original body and one context.

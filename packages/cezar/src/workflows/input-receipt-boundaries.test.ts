@@ -11,7 +11,7 @@ import type { AgentRunner, AgentSession, AgentRunResult, SessionOptions } from '
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import * as processes from '../core/process-usage.ts';
 import { RunStore } from '../runs/store.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import type { ActiveRun } from './active-run.ts';
 import { createFixtureManager, drainFixtureManagers, fixtureWorkSettled } from './fixture-cleanup.testkit.ts';
 import type { RunManager } from './run.ts';
@@ -77,7 +77,7 @@ function launch(mode: 'fresh' | 'continuation') {
     steps: [{ id: 'work', name: 'work', kind: STEP_KIND.agent }], runner: 'claude' });
   // Seed a completed task; Continue must use its own launch path.
   store.updateStep(record.id, 'work', { status: RUN_STATUS.done, sessionId: randomUUID() });
-  store.updateRun(record.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
+  setRunStatus(store, record.id, RUN_STATUS.done, { finishedAt: new Date().toISOString() });
   const continued = manager.continueRun(record.id, { text: 'continue receipts' });
   expect(continued, JSON.stringify(continued)).toMatchObject({ ok: true });
   return record.id;

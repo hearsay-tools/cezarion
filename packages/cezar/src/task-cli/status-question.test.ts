@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import {
   RUN_STATUS,
   WAIT_KIND,
@@ -46,7 +47,7 @@ describe('cez task status — the pending question', () => {
     const id = (JSON.parse(out.at(-1)!) as { id: string }).id;
     for (const event of events) store.appendEvent(id, { type: 'ask.requested', ...event });
     store.commitWait(id, { id: randomUUID(), kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask, registeredAt: new Date().toISOString(), phase: WAIT_PHASE.open, turnId: 'turn-1' });
-    store.updateRun(id, { status: RUN_STATUS.waiting });
+    setRunStatus(store, id, RUN_STATUS.waiting);
     return id;
   };
 

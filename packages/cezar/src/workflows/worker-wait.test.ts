@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -41,23 +42,23 @@ for (const mode of ['fresh', 'continuation'] as const) {
 it.each(['review', 'done', 'failed'] as const)('readiness worker Continue requires continuing a %s parent first', async status => {
     const p = await parent(); const w = await worker(p.id);
     await until(() => store.getRun(p.id)?.status === RUN_STATUS.waiting);
-    store.updateRun(w.id, { status: RUN_STATUS.done });
+    setRunStatus(store, w.id, RUN_STATUS.done);
     store.updateStep(w.id, 'task', { status: STEP_STATUS.done, sessionId: randomUUID(), backend: 'claude' });
     const generation = store.commitWorkerExecutionStart(w.id); store.commitWorkerExecutionComplete(w.id, generation);
-    store.updateRun(p.id, { status: RUN_STATUS[status] });
+    setRunStatus(store, p.id, RUN_STATUS[status]);
     const before = JSON.stringify(store.getRun(w.id));
     expect(manager.continueRun(w.id, { text: 'more' })).toEqual({ ok: false, error: `Parent task ${p.id} is ${status}; continue the parent before its worker.` });
     expect(JSON.stringify(store.getRun(w.id))).toBe(before);
     // Its session is still live, which a reviewing parent never has: back to its park before
     // teardown stops it (hearsay-tools/cezarion#1804).
-    store.updateRun(p.id, { status: RUN_STATUS.waiting });
+    setRunStatus(store, p.id, RUN_STATUS.waiting);
   });
 it.each(['review', 'failed', 'cancelled'] as const)('readiness requires settled collection of %s and accepts partial failures', async status => {
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id);
     const generation = store.commitWorkerExecutionStart(w.id);
-    store.updateRun(w.id, { status });
+    setRunStatus(store, w.id, status);
     await collect(w.id); // Same status/revision, but the process is still unproven.
     expect(manager.finish(p.id)).toBe(false);
     expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);

@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RUNS_DB_FILE, RunConflictError, RunDatabase } from './run-database.ts';
 import { encodeRunRow } from './run-row.ts';
-import { blockRunWrites, crashStore, readPersistedRuns, seedRuns } from './run-store.testkit.ts';
+import { setRunStatus, blockRunWrites, crashStore, readPersistedRuns, seedRuns } from './run-store.testkit.ts';
 import { agentTmpDir } from './agent-tmpdir.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
 import { RUN_IN_USE_ELSEWHERE, RunStore, RunWriteRefusedError, type RunRecord } from './store.ts';
@@ -79,10 +79,10 @@ describe('open leaves another live store\'s runs alone', () => {
     // turn serve's parked run into `failed` for good once serve restarted.
     const serve = open({ keepLive: true });
     const parked = serve.createRun({ title: 'parked', workflow: 'w', task: 't', steps: [] });
-    serve.updateRun(parked.id, { status: RUN_STATUS.waiting });
+    setRunStatus(serve, parked.id, RUN_STATUS.waiting);
     const monitoring = serve.createRun({ title: 'monitoring', workflow: 'w', task: 't', steps: [] });
     // A monitoring park as store schema 4 writes it: waiting, with an open timer.
-    serve.updateRun(monitoring.id, { status: RUN_STATUS.waiting });
+    setRunStatus(serve, monitoring.id, RUN_STATUS.waiting);
     serve.commitWait(monitoring.id, { id: '33333333-3333-4333-8333-333333333333', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA['monitoring-line'],
       registeredAt: '2026-10-05T11:55:00.000Z', deadline: '2026-10-05T12:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn', seconds: 300 });
     serve.flush();
@@ -141,7 +141,7 @@ describe('another store\'s runs are readable and refuse writes', () => {
   it('sweeps skip another store\'s finished runs until it lets them go', () => {
     const owner = open({ keepLive: true });
     const run = owner.createRun({ title: 'done there', workflow: 'w', task: 't', steps: [] });
-    owner.updateRun(run.id, { status: RUN_STATUS.done, finishedAt: '2026-10-05T10:00:00.000Z' });
+    setRunStatus(owner, run.id, RUN_STATUS.done, { finishedAt: '2026-10-05T10:00:00.000Z' });
     owner.pin(run.id, 'active'); // still settling there
     owner.flush();
     const other = open({ keepLive: true });
@@ -371,7 +371,7 @@ describe('a run nobody alive owns', () => {
   it('a live row without a live owner is orphaned: writes leave it alone until it is adopted', () => {
     const gone = open({ keepLive: true });
     const run = gone.createRun({ title: 'left running', workflow: 'w', task: 't', steps: [] });
-    gone.updateRun(run.id, { status: RUN_STATUS.running });
+    setRunStatus(gone, run.id, RUN_STATUS.running);
     gone.flush();
     const store = open({ keepLive: true });
     expect(store.runOwnership(run.id)).toBe('foreign');
@@ -410,7 +410,7 @@ describe('a run nobody alive owns', () => {
   it('keeps another live process\'s agent scratch when it sweeps for orphans', () => {
     const owner = open({ keepLive: true });
     const run = owner.createRun({ title: 'theirs', workflow: 'w', task: 't', steps: [] });
-    owner.updateRun(run.id, { status: RUN_STATUS.running });
+    setRunStatus(owner, run.id, RUN_STATUS.running);
     owner.flush();
     const scratch = agentTmpDir(dataDir, run.id);
     mkdirSync(scratch, { recursive: true });

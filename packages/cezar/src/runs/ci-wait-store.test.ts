@@ -1,5 +1,5 @@
 import { RUN_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { openTestRunStore, runPersistence } from './run-store.testkit.ts';
+import { setRunStatus, openTestRunStore, runPersistence } from './run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,7 +21,7 @@ describe('atomic CI wait checkpoints', () => {
     directory = mkdtempSync(join(tmpdir(), 'cez-ci-store-'));
     store = openTestRunStore(directory, { keepLive: true });
     id = store.createRun({ title: 'CI', workflow: 'quick-task', task: 'wait', steps: [] }).id;
-    store.updateRun(id, { status: RUN_STATUS.running });
+    setRunStatus(store, id, RUN_STATUS.running);
     wait = { id: randomUUID(), generation: 'session', turnId: 'turn', prUrl: 'https://github.com/acme/repo/pull/12',
       repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40), registeredAt: new Date().toISOString(),
       deadline: new Date(Date.now() + 30_000).toISOString(), timeoutSeconds: 30, until: 'checks' as const, wakeOnConflict: true, phase: 'registered' };
@@ -81,7 +81,7 @@ describe('atomic CI wait checkpoints', () => {
   });
   it.each(['running', 'done'] as const)('retains an unreadable previous observation for %s runs across repeated reads', (status) => {
     // The reopen below is a restart: this store goes first, or it still owns the running run.
-    store.updateRun(id, { status }); store.close();
+    setRunStatus(store, id, status); store.close();
     const records = readPersistedRuns(directory);
     records[0].lastCiWait = { ...wait, phase: WAIT_PHASE.delivered, result: { outcome: 'passed' } };
     seedRuns(directory, records);

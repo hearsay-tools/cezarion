@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { describe, expect, it } from 'vitest';
@@ -12,10 +13,10 @@ describe('a held worker\'s human Continue', () => {
     const p = await parent();
     const child = await worker(p.id, 'mock:cezar-done ok');
     store.updateStep(child.id, 'task', { status: STEP_STATUS.failed, sessionId: 'sess-held', backend: 'claude' });
-    store.updateRun(child.id, { status: RUN_STATUS.waiting, autoResumeAt: new Date(Date.now() + 3_600_000).toISOString() });
+    setRunStatus(store, child.id, RUN_STATUS.waiting, { autoResumeAt: new Date(Date.now() + 3_600_000).toISOString() });
     // Another run's deadline on the same account keeps the continuation in the line.
     const holder = store.createRun({ title: 'holder', workflow: 'w', task: 't', runner: 'claude', steps: [] });
-    store.updateRun(holder.id, { status: RUN_STATUS.waiting, autoResumeAt: new Date(Date.now() + 3_600_000).toISOString() });
+    setRunStatus(store, holder.id, RUN_STATUS.waiting, { autoResumeAt: new Date(Date.now() + 3_600_000).toISOString() });
 
     expect(manager.continueRun(child.id, { text: 'mock:cezar-done carry on' })).toEqual({ ok: true });
     expect(store.getRun(child.id)?.status).toBe('queued');

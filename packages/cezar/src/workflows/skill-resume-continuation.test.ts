@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { skillSchema } from '@open-mercato/cezar-contract/skills';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 /**
@@ -157,11 +158,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
       systemPrompt: extra,
       steps: [{ id: 'task', name: skillName, kind: STEP_KIND.agent }],
     });
-    store.updateRun(record.id, {
-      status: RUN_STATUS.done,
-      finishedAt: new Date().toISOString(),
-      workflowDef: def,
-    });
+    setRunStatus(store, record.id, RUN_STATUS.done, { finishedAt: new Date().toISOString(), workflowDef: def });
     store.updateStep(record.id, 'task', {
       status: STEP_STATUS.done,
       sessionId: 'sess-skill',
@@ -350,7 +347,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     writeFileSync(join(repoRoot, '.ai/cezar/skills', `${WORKER_SKILL}.md`), WORKER_SKILL_BODY);
     const workflowDef = plannedWorkflow(skillTaskSteps(WORKER_SKILL));
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(parent.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    setRunStatus(store, parent.id, RUN_STATUS.waiting, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const workerId = randomUUID();
     const sha = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
     const workspace = await planOwnedWorkspace(repoRoot, workerId, sha);

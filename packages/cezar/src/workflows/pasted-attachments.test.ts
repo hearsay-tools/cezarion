@@ -10,7 +10,7 @@ import type { ContentBlock } from '../core/agent-runner.ts';
 import { shellQuote } from '../core/shell-env.ts';
 import { handoffInstructions } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
-import { crashStore } from '../runs/run-store.testkit.ts';
+import { setRunStatus, crashStore } from '../runs/run-store.testkit.ts';
 import type { WorkflowDef } from './types.ts';
 import {
   RunManager,
@@ -578,7 +578,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     const record = store.createRun({ title: 'image failure', workflow: 'image failure', task: 'original', steps: [] });
     store.addStep(record.id, { id: 'work', name: 'work', kind: STEP_KIND.agent });
     store.updateStep(record.id, 'work', { status: STEP_STATUS.done, sessionId: 'previous-session', backend: 'claude' });
-    store.updateRun(record.id, { status: RUN_STATUS.done, worktree: false });
+    setRunStatus(store, record.id, RUN_STATUS.done, { worktree: false });
     writeFileSync(join(dataDir, 'runs', `${record.id}-images`), 'not a directory');
     expect(manager.continueRun(record.id, {
       text: 'view this unsaved image',
@@ -596,7 +596,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
       const record = store.createRun({ title: 'restart', workflow: 'restart', task: 'original', steps: [] });
       store.addStep(record.id, { id: 'work', name: 'work', kind: STEP_KIND.agent });
       store.updateStep(record.id, 'work', { status: STEP_STATUS.done, sessionId: 'previous-session', backend: 'claude' });
-      store.updateRun(record.id, { status: RUN_STATUS.done, worktree: false });
+      setRunStatus(store, record.id, RUN_STATUS.done, { worktree: false });
       const launcher = createFixtureManager(store, repoRoot);
       // Stop at the boundary before any asynchronous startup or runner invocation.
       (launcher as unknown as { runContinuation(): Promise<void> }).runContinuation = async () => {};

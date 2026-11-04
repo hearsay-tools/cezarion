@@ -1,4 +1,4 @@
-import { openTestRunStore, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, openTestRunStore, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -35,7 +35,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true });
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
     // Keep root live without restarting its old session; this case concerns only the worker.
-    store.updateRun(a.parent.id, { status: RUN_STATUS.waiting });
+    setRunStatus(store, a.parent.id, RUN_STATUS.waiting);
     controller.attachProject({ id: 'grants-reopened', root: f.root, store, manager });
     if (mode === 'continue') expect(manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true);
     else await manager.recover();
