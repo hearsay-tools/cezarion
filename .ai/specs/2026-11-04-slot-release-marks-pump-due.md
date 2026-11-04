@@ -62,8 +62,9 @@ At shipped defaults auto-resume is on. Reconciliation scans durable holds:
   withdrawal to `failed` and clears deadline and attempt fields before clearing
   its timer. The note follows the commit. Store notifications can run listeners
   synchronously. The settling exit also settles the fields ADR 0056 assigns it.
-- An already armed valid hold is unchanged. The on path does not generally clean
-  stale timer-map entries whose records are no longer holds.
+- An already armed valid hold is unchanged. When auto-resume is enabled,
+  reconciliation does not generally clean stale timer-map entries whose records
+  are no longer holds.
 - With the optional switch off, reconciliation withdraws every published or
   armed appointment, including stale deadlines. This branch is not needed for
   the exclusion verdict.
