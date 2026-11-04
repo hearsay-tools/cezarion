@@ -1,3 +1,5 @@
+import { THREAD_CONVERSATION_PENDING_STATUSES } from './thread-state'
+const CONVERSATION_PENDING_STATUS = Object.fromEntries(THREAD_CONVERSATION_PENDING_STATUSES.map(status => [status, status])) as { [Status in (typeof THREAD_CONVERSATION_PENDING_STATUSES)[number]]: Status }
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { summaryOf } from '@/test/run-summary-fixture'
 import { describe, expect, it } from 'vitest'
@@ -66,7 +68,7 @@ describe('conversation presentation titles', () => {
   })
 
   it('falls back to the terminal delivery only for a request that can never settle', () => {
-    expect(conversationStatusLabel({ messageKind: 'request', delivery: 'queued', outcome: { status: 'pending' } })).toBe('Pending')
+    expect(conversationStatusLabel({ messageKind: 'request', delivery: 'queued', outcome: { status: CONVERSATION_PENDING_STATUS.pending } })).toBe('Pending')
     expect(conversationStatusLabel({ messageKind: 'request', delivery: 'not-delivered', outcome: { status: 'sender-closed' } })).toBe('Sender closed')
     expect(conversationStatusLabel({ messageKind: 'request', delivery: 'not-delivered' })).toBe('Not delivered')
     expect(conversationStatusLabel({ messageKind: 'progress', delivery: 'not-delivered' })).toBe('Not delivered')

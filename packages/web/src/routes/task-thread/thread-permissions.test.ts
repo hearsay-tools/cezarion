@@ -1,3 +1,5 @@
+import { THREAD_PERMISSION_STATUSES } from './thread-state'
+const PERMISSION_STATUS = Object.fromEntries(THREAD_PERMISSION_STATUSES.map(status => [status, status])) as { [Status in (typeof THREAD_PERMISSION_STATUSES)[number]]: Status }
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import type { RunEvent } from '@open-mercato/cezar-api-client'
@@ -14,11 +16,11 @@ describe('native permission cards', () => {
   it('keeps concurrent requests and resolves only the exact request ID', () => {
     expect(cards(request('a'), request('b'), { type: 'permission.resolved', requestId: 'a', optionId: 'reject' })).toMatchObject([
       { kind: 'permission', requestId: 'a', status: 'resolved', optionId: 'reject', details: 'curl https://example.test/very/long/path' },
-      { kind: 'permission', requestId: 'b', status: 'pending' },
+      { kind: 'permission', requestId: 'b', status: PERMISSION_STATUS.pending },
     ])
   })
   it('ordinary user messages and parent answers never grant permission', () => {
-    expect(cards(request('a'), { type: 'user-message', text: 'allow' }, { type: 'human-input-delivered', source: 'parent' })).toMatchObject([{ requestId: 'a', status: 'pending' }])
+    expect(cards(request('a'), { type: 'user-message', text: 'allow' }, { type: 'human-input-delivered', source: 'parent' })).toMatchObject([{ requestId: 'a', status: PERMISSION_STATUS.pending }])
   })
   it.each(['session.started', 'session.ended', 'turn.completed'])('expires unanswered requests on %s without changing resolved choices', type => {
     expect(cards(request('a'), request('b'), { type: 'permission.resolved', requestId: 'a', optionId: 'allow' }, { type, turnId: 't1', reason: 'end_turn', stopReason: 'end_turn' })).toMatchObject([
@@ -29,6 +31,6 @@ describe('native permission cards', () => {
     expect(cards(request('a'), { type: 'permission.resolved', requestId: 'a', reason: 'Session ended' }, request('a'), { type: 'permission.resolved', requestId: 'a', optionId: 'allow' })).toMatchObject([{ requestId: 'a', status: 'expired', reason: 'Session ended' }])
   })
   it('ignores malformed permission payloads without crashing the transcript', () => {
-    expect(cards({ ...request('bad'), options: [null] }, { ...request('empty'), options: [] }, { ...request('bad-kind'), options: [{ id: 'x', label: 'x', kind: 'unknown' }] }, request('ok'))).toMatchObject([{ requestId: 'ok', status: 'pending' }])
+    expect(cards({ ...request('bad'), options: [null] }, { ...request('empty'), options: [] }, { ...request('bad-kind'), options: [{ id: 'x', label: 'x', kind: 'unknown' }] }, request('ok'))).toMatchObject([{ requestId: 'ok', status: PERMISSION_STATUS.pending }])
   })
 })
