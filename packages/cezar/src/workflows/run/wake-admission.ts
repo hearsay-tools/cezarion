@@ -9,7 +9,7 @@ import { accountHeldFor, sessionlessWakePrompt } from '../run-scheduling.ts';
 import { executionAccount } from '../execution-account.ts';
 import { chargesBudgetMessage, isMonitoringTimer, openWaits, resolvedWaits, waitInputId, waitResultText } from '../waits.ts';
 import { runsAwaitingPeer } from '../wait-scope.ts';
-import type { RunExitId } from '../../runs/run-exits.ts';
+import type { RunExitId, ExitCall, RunPatch } from '../../runs/run-exits.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import type { ActiveRun } from '../active-run.ts';
 import { liveSubagents } from './subagent-waits.ts';
@@ -31,7 +31,7 @@ interface WakeAdmissionHost {
   active: ReadonlyMap<string, ActiveRun>;
   retries: WakeRetries; line: RunLine; waitWatches: WaitWatches; waitRegistry: WaitRegistry;
   inboxClaims: InboxClaims; workerQuestions: WorkerQuestions; humanWaits: HumanWaits;
-  isActive(id: string): boolean; move(id: string, exit: RunExitId): unknown;
+  isActive(id: string): boolean; move(id: string, exit: RunExitId, patch?: RunPatch, call?: ExitCall): unknown;
   recoveringRun(run: RunRecord | string | undefined): boolean;
   continueRun(id: string, opts: ContinueRunOptions, defer: boolean): { ok: boolean; error?: string };
   disarmWait(id: string): void; reconcileWorkerWaits(id?: string): void; releaseSlot(): void;
@@ -173,10 +173,8 @@ export class WakeAdmission {
     const top = computeWaitingOn(run)?.kind;
     const { holdsSubagents, keepsSlot } = parkHold(run, state, top);
     // A park that frees its slot publishes the intent first: a refused write throws and keeps it.
-    if (keepsSlot) {
-      this.host.move(runId, 'park');
-      if (state.currentStepId) this.context.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
-    } else this.context.store.move(runId, 'park-release', {}, { stepId: state.currentStepId });
+    if (keepsSlot) this.host.move(runId, 'park', {}, { stepId: state.currentStepId });
+    else this.context.store.move(runId, 'park-release', {}, { stepId: state.currentStepId });
     this.host.line.park(runId);
     if (keepsSlot) this.host.line.joinPool(runId); else this.leaveMonitoringPool(runId);
     if (!holdsSubagents && (top === 'workers' || top === 'peers')) this.host.armIdleTimer(runId, state);

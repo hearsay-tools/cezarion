@@ -320,7 +320,8 @@ function legacyWaitId(name: string): string {
  *  park from running to waiting, resume from waiting to running. The caller has read the row's status. */
 function setLiveStatus(row: Record<string, unknown>, exit: 'park' | 'resume'): void {
   const [from, to] = exit === 'park' ? ['running', 'waiting'] : ['waiting', 'running'];
-  Object.assign(row, applyExit(row as Pick<RunRecord, 'status' | 'delegation'>, exit));
+  // The status and the owner only: this writer settles the raw row's steps itself, below.
+  Object.assign(row, applyExit({ status: row.status, delegation: row.delegation } as Pick<RunRecord, 'status' | 'delegation'>, exit));
   if (Array.isArray(row.steps)) for (const step of row.steps) {
     if (step && typeof step === 'object' && (step as { status?: unknown }).status === from) (step as { status: string }).status = to;
   }

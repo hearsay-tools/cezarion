@@ -297,13 +297,16 @@ describe('turn settler carrier orders', () => {
     expect(f.host.settledTurnOutcome).not.toHaveBeenCalled();
   });
 
+  // B8 (S7, .ai/specs/2026-11-03-run-store-owns-exits.md): the park exit settles its step in the
+  // same write, so no step update follows the move.
   it('user park updates and flushes waiting before line, pool, idle bound, release and wake', () => {
     vi.useFakeTimers();
     const f = fixture();
     const arm = f.settler.armIdleTimer.bind(f.settler);
     vi.spyOn(f.settler, 'armIdleTimer').mockImplementation((id, state) => { f.log.push('idle'); arm(id, state); });
     f.settler.parkForUser('run', f.state, 'step');
-    order(f, ['move', 'step', 'flush', 'parkLine', 'leavePool', 'idle', 'release', 'wake']);
+    order(f, ['move', 'flush', 'parkLine', 'leavePool', 'idle', 'release', 'wake']);
+    expect(f.host.move).toHaveBeenCalledWith('run', 'park', {}, { stepId: 'step' });
     expect(f.state.idleTimer).toBeDefined();
   });
 });

@@ -205,8 +205,8 @@ S7 commits one row (or row group) at a time, each with a regression test that fa
 | B5 | Both success paths clear `activity` and settle running or waiting steps in the same write | One exit, one result | done |
 | B6 | accept-review and draft-pr set `finishedAt ??= now` and retire the Finish intent | As B3 and B4 | done: the Finish intent with B1-B3 |
 | B7 | The usage-limit Continue writes `continue-line` once | The second write repeats the first | done |
-| B8 | `park` settles the current step to waiting in the same write | As B5 | |
-| B9 | Kept; recorded only. The follow-up `flush()` stays until S6 gives each exit its durability | S6 decides it | |
+| B8 | `park` settles the current step to waiting in the same write | As B5 | done, `park-release` too |
+| B9 | Kept; recorded only. The follow-up `flush()` stays until S6 gives each exit its durability | S6 decides it | no change |
 | B10 | Every exit to cancelled settles running and waiting steps to cancelled, with `finishedAt ??= now` | A cancelled run has no live step. The load-time repair (hearsay-tools/cezarion#2590) reuses this rule | |
 | B11 | Every exit to failed settles open steps to failed for a root run; an owned worker keeps its re-entry step `waiting` (hearsay-tools/cezarion#1620) | A failed root has no live step; a parent resume re-enters the worker's step | |
 | B12 | The cancel exits write the `run cancelled` event once, at every site | The web header (hearsay-tools/cezarion#2589) and the timeline read one event for one cancellation | |

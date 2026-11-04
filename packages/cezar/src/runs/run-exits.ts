@@ -37,7 +37,7 @@ export type StepSettlement = ExitSettlement & { finishedAt: string };
 export type ExitDurability = 'debounced' | 'committed';
 
 /** What an exit's `fields` and `steps` read off the record a write applies it to. */
-export type ExitRead = Pick<RunRecord, 'status' | 'delegation'> & Partial<Pick<RunRecord, 'finishedAt'>> & { steps?: readonly StepState[] };
+export type ExitRead = Pick<RunRecord, 'status' | 'delegation'> & Partial<Pick<RunRecord, 'finishedAt' | 'currentStepId'>> & { steps?: readonly StepState[] };
 
 /**
  * One kind of status write: the statuses it may leave from and the one it writes. `fields` are
@@ -107,10 +107,15 @@ const openStep = (step: StepState) => step.status === 'running' || step.status =
 const succeededStep = (step: StepState, _run: ExitRead, { finishedAt, stepId }: StepSettlement): StepState =>
   openStep(step) && step.id !== stepId ? { ...step, status: 'done', finishedAt: step.finishedAt ?? finishedAt } : step;
 
-/** A released park: the legacy `activity` cleared and the named step waiting. */
-function settleParkRelease(run: RunRecord, { stepId }: ExitSettlement): RunRecord {
-  const settled: WithLegacyActivity = { ...run, activity: undefined,
-    ...(stepId ? { steps: run.steps.map(step => step.id === stepId ? { ...step, status: 'waiting' as const } : step) } : {}) };
+/** A park settles its step waiting in the same write (B8): the step the caller names, else the
+ *  run's current step. A step that already ended (a failed attempt a park keeps for its wakes)
+ *  stays as it is. */
+const parkedStep = (step: StepState, run: ExitRead, { stepId }: StepSettlement): StepState =>
+  step.id === (stepId ?? run.currentStepId) && (step.status === 'running' || step.status === 'pending') ? { ...step, status: 'waiting' } : step;
+
+/** A released park: the legacy `activity` cleared. */
+function settleParkRelease(run: RunRecord): RunRecord {
+  const settled: WithLegacyActivity = { ...run, activity: undefined };
   return settled;
 }
 
@@ -125,10 +130,10 @@ export const RUN_EXITS = {
   // The step it runs is the caller's: `currentStepId` is an extra.
   'continue-now': { durability: 'debounced', from: ['waiting', 'review', 'done', 'failed', 'cancelled'], to: 'running',
     fields: () => ({ error: undefined, finishedAt: undefined }) },
-  park: { durability: 'debounced', from: ['running', 'queued', 'waiting'], to: 'waiting' },
+  park: { durability: 'debounced', from: ['running', 'queued', 'waiting'], to: 'waiting', steps: parkedStep },
   // A park that gives up its slot (hearsay-tools/cezarion#1235): committed at once, so a refused
   // write throws with nothing changed and the caller keeps the slot.
-  'park-release': { durability: 'committed', from: ['running', 'queued', 'waiting'], to: 'waiting', settle: settleParkRelease },
+  'park-release': { durability: 'committed', from: ['running', 'queued', 'waiting'], to: 'waiting', settle: settleParkRelease, steps: parkedStep },
   'park-for-wake': { durability: 'debounced', from: ['queued', 'waiting'], to: 'waiting' },
   hold: { durability: 'debounced', from: ['failed', 'waiting'], to: 'waiting', fields: () => ({ finishedAt: undefined }) },
   resume: { durability: 'debounced', from: ['waiting'], to: 'running' },

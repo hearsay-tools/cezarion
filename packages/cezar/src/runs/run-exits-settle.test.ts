@@ -171,3 +171,30 @@ describe('B5: both success paths clear activity and settle running or waiting st
     expect(statuses(moved)).toEqual([STEP_STATUS.waiting, STEP_STATUS.done, STEP_STATUS.pending]);
   });
 });
+
+// B8: as B5. A park settles the step it parks in the same write, not by a side call after it.
+describe('B8: park settles the current step to waiting in the same write', () => {
+  const statuses = (run: { steps: Array<{ status: string }> }) => run.steps.map(step => step.status);
+
+  it.each(['park', 'park-release'] as const)('%s parks the run\'s current step', (exit) => {
+    const { store, root } = setup();
+    const id = root('park', { status: RUN_STATUS.running });
+    store.updateStep(id, 'a', { status: STEP_STATUS.done });
+    store.updateStep(id, 'b', { status: STEP_STATUS.running });
+    expect(statuses(store.move(id, exit)!)).toEqual([STEP_STATUS.done, STEP_STATUS.waiting, STEP_STATUS.pending]);
+  });
+
+  it('parks the step the caller names', () => {
+    const { store, root } = setup();
+    const id = root('park', { status: RUN_STATUS.running });
+    store.updateStep(id, 'c', { status: STEP_STATUS.running });
+    expect(statuses(store.move(id, 'park', {}, { stepId: 'c' })!)).toEqual([STEP_STATUS.pending, STEP_STATUS.pending, STEP_STATUS.waiting]);
+  });
+
+  it('leaves a current step that already ended', () => {
+    const { store, root } = setup();
+    const id = root('park', { status: RUN_STATUS.running });
+    store.updateStep(id, 'b', { status: STEP_STATUS.failed });
+    expect(statuses(store.move(id, 'park')!)).toEqual([STEP_STATUS.pending, STEP_STATUS.failed, STEP_STATUS.pending]);
+  });
+});

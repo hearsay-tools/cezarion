@@ -8,7 +8,7 @@ import { artifactInstructions } from '../../artifacts/lifecycle.ts';
 import { handoffInstructions } from '../../handoff.ts';
 import type { SessionContext } from '../../session-context.ts';
 import type { UiEvent } from '../../core/ui-events.ts';
-import type { RunExitId } from '../../runs/run-exits.ts';
+import type { RunExitId, ExitCall } from '../../runs/run-exits.ts';
 import { openWaitsFooter } from '../waits.ts';
 import { composeSystemPrompt, withResumeContext } from './prompts.ts';
 import { isDisposedDelegatedRun } from './run-guards.ts';
@@ -110,7 +110,7 @@ export interface SessionHelperHost {
   line: RunLine;
   humanWaits: HumanWaits;
   inputReceiptHost: inputReceipts.InputReceiptsHost;
-  move(runId: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>): RunRecord | undefined;
+  move(runId: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>, call?: ExitCall): RunRecord | undefined;
   workerExecutionStopped(runId: string): boolean;
   executionBlockedByRootFinish(run: RunRecord): boolean;
   agentEnvForStep(runId: string, backend: RunnerId, options: { recordedProfileId?: string | undefined; stepId?: string | undefined }): Promise<StepProfile>;
@@ -307,8 +307,7 @@ export function handlePermissionRequested(context: RunModuleContext, host: Sessi
   clearHeldHumanInputTimer(state);
   host.line.leavePool(runId); // released below; its waits stay open
   host.line.park(runId);
-  host.move(runId, 'park', { hasPendingPermission: true });
-  if (state.currentStepId) context.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
+  host.move(runId, 'park', { hasPendingPermission: true }, { stepId: state.currentStepId });
   host.releaseSlot();
   // Authorization is the human's, even when this run is an owned worker.
 }
@@ -333,8 +332,7 @@ export function handleNativeAskRequested(context: RunModuleContext, host: Sessio
   clearIdleTimer(state);
   host.line.leavePool(runId); // released below; its waits stay open
   host.line.park(runId);
-  host.move(runId, 'park');
-  if (state.currentStepId) context.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
+  host.move(runId, 'park', {}, { stepId: state.currentStepId });
   host.releaseSlot();
   host.routeWorkerQuestion(runId);
 }

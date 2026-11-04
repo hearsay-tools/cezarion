@@ -51,7 +51,7 @@ import { AutoResumeScheduler } from './auto-resume.ts';
 import type { RunModuleContext } from './types.ts';
 import * as launchContext from './launch-context.ts';
 import { clearUnreadInputTimer, clearHeldHumanInputTimer } from './input-timers.ts';
-import type { RunExitId } from '../../runs/run-exits.ts';
+import type { RunExitId, ExitCall } from '../../runs/run-exits.ts';
 import { type PreviewHostLike } from '../../preview/registration.ts';
 import { acquireCiResources } from '../../ci-wait/resources.ts';
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
@@ -129,7 +129,7 @@ export interface FacadeHost {
   ciResources: ReturnType<typeof acquireCiResources>;
   cezarToolHandlers(runId: string, generation: string): CezarToolHandlers;
   delegationProvisioner?: DelegationProvisioner | undefined;
-  move(runId: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>): RunRecord | undefined;
+  move(runId: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>, call?: ExitCall): RunRecord | undefined;
   isActive(runId: string): boolean;
   workerExecutionStopped(runId: string): boolean;
   resumableSessionId(runId: string, sessionStep: StepState | undefined): string | undefined;
@@ -431,7 +431,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
   modules.wakeAdmission = new WakeAdmission(context, {
     active: host.active, retries: modules.retries, line: modules.line, waitWatches: modules.waitWatches, waitRegistry: modules.waitRegistry,
     inboxClaims: modules.inboxClaims, workerQuestions: modules.workerQuestions, humanWaits: modules.humanWaits,
-    isActive: id => host.isActive(id), move: (id, exit) => host.move(id, exit),
+    isActive: id => host.isActive(id), move: (...args) => host.move(...args),
     recoveringRun: run => modules.recovery.recoveringRun(run),
     continueRun: (id, opts, defer) => host.continueRun(id, opts, defer), disarmWait: id => host.disarmWait(id),
     reconcileWorkerWaits: id => host.reconcileWorkerWaits(id), releaseSlot: () => modules.line.releaseSlot(),
@@ -503,7 +503,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
   modules.turnSettler = new TurnSettler(context, {
     humanWaits: modules.humanWaits, line: modules.line, waitWatches: modules.waitWatches, waitRegistry: modules.waitRegistry,
     workerQuestions: modules.workerQuestions, completionGateHost: modules.completionGateHost, subagentWaits: modules.subagentWaits,
-    move: (id, exit) => host.move(id, exit), releaseSlot: () => modules.line.releaseSlot(), completionGate: id => modules.runFinish.completionGate(id),
+    move: (...args) => host.move(...args), releaseSlot: () => modules.line.releaseSlot(), completionGate: id => modules.runFinish.completionGate(id),
     cancelOpenWaits: id => modules.wakeAdmission.cancelOpenWaits(id), countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id),
     workerExecutionStopped: id => host.workerExecutionStopped(id), executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run),
     submitAgentInput: (id, state, content) => modules.inputDelivery.submitAgentInput(id, state, content), flushAgentInputs: id => modules.inputDelivery.flushAgentInputs(id),
@@ -517,7 +517,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     settledTurnOutcome: (id, entry, outcome) => host.settledTurnOutcome(id, entry, outcome),
   }, IDLE_TIMEOUT_MS, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT, SCHEDULE_WAKEUP_MAX_SECONDS);
   modules.runFinish = new RunFinish(context, modules.completionGateHost, modules.runSettlement, modules.turnSettler, modules.turnNudges, modules.line, {
-    move: (id, exit, patch) => host.move(id, exit, patch), dropActive: id => host.dropActive(id),
+    move: (...args) => host.move(...args), dropActive: id => host.dropActive(id),
     cancelOpenWaits: id => modules.wakeAdmission.cancelOpenWaits(id), reconcileWorkerWaits: id => host.reconcileWorkerWaits(id),
     executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run), hasUnansweredHumanAsk: id => host.hasUnansweredHumanAsk(id),
   });

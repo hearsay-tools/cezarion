@@ -5,7 +5,7 @@ import type { ContentBlock } from '../../core/agent-runner.ts';
 import type { AskRequest } from '../../core/ask.ts';
 import type { UiEventSink } from '../../runs/ui-event-sink.ts';
 import type { RunRecord } from '../../runs/store.ts';
-import type { RunExitId } from '../../runs/run-exits.ts';
+import type { RunExitId, ExitCall, RunPatch } from '../../runs/run-exits.ts';
 import type { ActiveRun } from '../active-run.ts';
 import { openCompletionRequests, sentRequestInstructions, type CompletionRefusal } from '../completion-policy.ts';
 import { NO_WAIT_NOTE, COMPLETION_NUDGE_NOTE, decideTurnEnd, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from '../turn-end.ts';
@@ -38,7 +38,7 @@ type TurnEndCarriers = { [K in TurnEndDecision['kind']]: (carry: TurnEndCarry, d
 interface TurnSettlerHost {
   humanWaits: HumanWaits; line: RunLine; waitWatches: WaitWatches; waitRegistry: WaitRegistry; workerQuestions: WorkerQuestions; completionGateHost: CompletionGateHost;
   subagentWaits: SubagentWaits;
-  move(id: string, exit: RunExitId): unknown; releaseSlot(): void; completionGate(id: string): 'accept' | 'held' | CompletionRefusal;
+  move(id: string, exit: RunExitId, patch?: RunPatch, call?: ExitCall): unknown; releaseSlot(): void; completionGate(id: string): 'accept' | 'held' | CompletionRefusal;
   cancelOpenWaits(id: string): void; countAutomaticWakes(id: string): number; workerExecutionStopped(id: string): boolean; executionBlockedByRootFinish(run: RunRecord): boolean;
   submitAgentInput(id: string, state: ActiveRun, content: ContentBlock[]): boolean; flushAgentInputs(id: string): boolean; hasQueuedAgentInputs(id: string, except?: readonly string[]): boolean;
   armUnreadInputTimer(id: string, state: ActiveRun): void; armHeldHumanInputTimer(id: string, state: ActiveRun): void;
@@ -422,8 +422,7 @@ export class TurnSettler {
   /** The turn-end tail's park for the user: `waiting` with the idle timer, no slot. A result
    *  already in (a pending question beside a resolved wait) still queues its wake. */
   parkForUser(runId: string, state: ActiveRun, stepId: string | undefined): void {
-    this.host.move(runId, 'park');
-    if (stepId) this.context.store.updateStep(runId, stepId, { status: 'waiting' });
+    this.host.move(runId, 'park', {}, { stepId });
     this.context.store.flush();
     this.host.line.park(runId);
     // Native subagents still running in this session keep it and its slot beside the question.
