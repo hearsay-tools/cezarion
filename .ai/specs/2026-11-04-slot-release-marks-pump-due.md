@@ -1,8 +1,11 @@
 # Slot release marking the pump due: slice 4.2 case table
 
-Slice 4.2 is excluded. Row C5 changes stored messages and events. Rows C1–C15 can
-also change the auto-resume timer set before return. A microtask drain does not meet
-the behavior-neutral condition for hearsay-tools/cezarion#2521.
+Slice 4.2 is excluded. Row C5 changes stored messages and events. Each C1–C15 call
+can also change auto-resume state before return when no workspace sweep is active
+and the first sorted participant is live, is not recovering and owns an unarmed
+hold that reconciliation arms or withdraws. A valid hold's timer set then differs
+at return. A microtask drain does not meet the behavior-neutral condition for
+hearsay-tools/cezarion#2521.
 
 This is evidence and a design decision, not an implementation plan. It supports
 phase 4 of hearsay-tools/cezarion#2487. No product code or skill change ships with it.
@@ -54,7 +57,7 @@ At shipped defaults auto-resume is on. Reconciliation scans durable holds:
 - A valid unarmed deadline calls `armAutoResume`: apply the `hold` exit, publish
   `autoResumeAt`, create an unref'ed timeout and add it to `autoResumeTimers`.
   A deadline due now creates a zero-delay timer. It does not fire inline.
-- An archived, unreadable-deadline or exhausted hold is withdrawn. A hold missed
+- An unarmed archived, unreadable-deadline or exhausted hold is withdrawn. A hold missed
   by more than 24 hours is withdrawn with an expiry note. The store commits the
   withdrawal to `failed` and clears deadline and attempt fields before clearing
   its timer. The note follows the commit. Store notifications can run listeners
@@ -262,18 +265,50 @@ condition also fails for a first participant with an unarmed valid hold. Do not
 create an implementation PR for this mechanism. No source, test, expected outcome,
 configuration or skill text changes in this PR.
 
-Keep the existing `load-bearing-change/SKILL.md` paragraph **“List each handler's
-side effects, in order, before you merge handlers into one.”** It protects exactly
-this release-before-routing order. Keep **“Preserve queue-head reads when changing
-queue boundaries.”** for the delayed participant snapshot and queue eligibility
-reads. Their current expiry comments name hearsay-tools/cezarion#2520. There is no
-separate pump-specific paragraph to delete for hearsay-tools/cezarion#2521. This
-exclusion adds no workaround rule; it records why the approved cleanup cannot land.
+The existing `load-bearing-change/SKILL.md` paragraph **“List each handler's
+side effects, in order, before you merge handlers into one.”** stays until slice
+4.1 P5 pins the order this investigation found: park the worker, release with
+synchronous reconciliation, then let `routeWorkerQuestion` read the parent's
+status. P5 also needs tests for X4's future timer and X6's due timer at return.
+Those tests are the input P5 needs before it deletes the handler-order block.
+Excluding slice 4.2 does not block that separate replacement of prose with tests.
+
+The paragraph **“Preserve queue-head reads when changing queue boundaries.”**
+stays until slice 4.1 P6 supplies its queue-head tests. P6 owns its retirement;
+this spec does not keep it forever. The paragraph protects the participant
+snapshot and queue eligibility reads discussed here. Both paragraphs' current
+expiry comments name hearsay-tools/cezarion#2520. There is no separate pump-specific
+paragraph to delete for hearsay-tools/cezarion#2521. This exclusion adds no
+workaround rule; it records why the approved cleanup cannot land.
 
 Slice 4.1 (hearsay-tools/cezarion#2520) can group `ActiveRun` fields and queue/slot
 ownership without changing this synchronous release boundary. Its spec must keep
 the store-owned hold writes and the first-participant reconciliation order. An
 owner move does not establish that a deferred drain is safe.
+
+Commit the native-ask and future-hold probes as regression tests in the P5 PR
+that deletes the handler-order paragraph. Use a real temporary `RunStore`, a real
+`RunManager`, the existing active-state factory and normal composition. Launch no
+runner. Keep a single first-sorted manager and no in-flight sweep so the boundary
+is deterministic. Assert these outcomes before yielding:
+
+- For C5, seed an unarmed 25-hour-missed parent hold, a running worker and its
+  pending native ask. Call the native-ask handler. Assert parent status failed,
+  deadline absent, zero parent conversation messages and zero parent inputs.
+  Assert the worker has `human-ask-closed` with `parent-stopped`, and no
+  `worker-question-routed` event. These assertions fail under the deferred drain.
+- For X4, seed a valid future hold without a timer and no live session. Release
+  the slot. Assert the timer exists immediately, before an await or a microtask.
+  Assert the row remains waiting with its deadline. This fails under the drain.
+- For X6, use the same fixture with a deadline due now. Use fake timeout control
+  so the callback cannot run before the assertion. Assert a zero-delay timer is
+  armed at return and the hold remains waiting. Then let the callback run and
+  assert the ordinary queued continuation or documented refusal, as the fixture
+  permits. Do not treat the future-hold probe as proof of this unmeasured row.
+
+P5 must record red results under the deferred-drain spike and green results with
+today's synchronous release. The current probes are investigation evidence, not
+committed regression tests. P5 owns adding and maintaining those tests.
 
 Slice 4.3 can remove `runInternals(` assertions on `line.pump`, `line.queue` and
 `line.busySlots`, but it must keep their outcomes: workspace order and caps,
