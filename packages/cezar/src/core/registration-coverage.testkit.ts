@@ -12,6 +12,12 @@ function allowedDeclaration(node: Node, parent: Node | undefined): boolean {
   return false;
 }
 
+function registrationDeclaration(node: Node, parent: Node | undefined, onImport?: () => void): boolean {
+  if (!allowedDeclaration(node, parent)) return false;
+  if (parent?.type === 'ImportSpecifier') onImport?.();
+  return true;
+}
+
 export const NATIVE_TOOL_REGISTRATION = 'registerCiNativeTools';
 
 function registrationReference(node: Node, parent: Node | undefined, callee: string): Node | undefined {
@@ -88,13 +94,13 @@ function executesRegistration(call: Node, path: readonly Node[], callee: string)
 }
 
 /** Every reference must be an unchanged declaration/import/export or a supported plain call. */
-function registrationArguments(source: string, file: string, callee: string, argumentValue: (call: Node) => string | undefined): string[] {
+function registrationArguments(source: string, file: string, callee: string, argumentValue: (call: Node) => string | undefined, onImport?: () => void): string[] {
   const groups: string[] = [];
   const tree = parse(source, { sourceType: 'module', plugins: ['typescript'], allowUndeclaredExports: true });
   traverse(tree, (node, ancestors) => {
     const parent = ancestors.at(-1)?.node;
     const reference = registrationReference(node, parent, callee);
-    if (!reference || allowedDeclaration(node, parent)) return;
+    if (!reference || registrationDeclaration(node, parent, onImport)) return;
     const call = reference === parent ? ancestors.at(-2)?.node : parent;
     const plainMember = reference.type === 'MemberExpression' && !reference.computed && reference.object.type === 'Identifier'
       && reference.property.type === 'Identifier' && `${reference.object.name}.${reference.property.name}` === callee;
@@ -117,10 +123,10 @@ export function registrationGroups(source: string, file: string, callee: string,
 }
 
 /** Literal partitions only: other arguments and every unsupported reference are errors. */
-export function registrationStrings(source: string, file: string, callee: string): string[] {
+export function registrationStrings(source: string, file: string, callee: string, onImport?: () => void): string[] {
   return registrationArguments(source, file, callee, call => {
     if (call.type !== 'CallExpression' || call.arguments.length !== 1) return undefined;
     const argument = call.arguments[0];
     return argument?.type === 'StringLiteral' ? argument.value : undefined;
-  });
+  }, onImport);
 }

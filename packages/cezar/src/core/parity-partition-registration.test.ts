@@ -24,10 +24,12 @@ function scratchGuard(extra: string, check: (run: () => void) => void, reformatt
 }
 
 it('discovers reformatted imports and preserves literal registrations', () => {
-  scratchGuard("import {\n describeFixtureParity\n} from './fixture.testkit.ts';", run => expect(run).not.toThrow(), true);
+  scratchGuard("const unrelated = 'ordinary fixture';", run => expect(run).not.toThrow(), true);
 });
 
 for (const source of [
+  "import { describeFixtureParity } from './fixture.testkit.ts';",
+  "import {\n describeFixtureParity\n} from './fixture.testkit.ts';",
   "import { describeFixtureParity } from './fixture.testkit.ts';\ndescribeFixtureParity('missing');",
   "import {\n describeFixtureParity\n} from './fixture.testkit.ts'; describeFixtureParity(part);",
   "import { describeFixtureParity as hidden } from './fixture.testkit.ts'; hidden('first');",

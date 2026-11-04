@@ -53,9 +53,11 @@ export function checkParityRegistration(
   const entries = readdirSync(directory).filter(file => file.endsWith('.test.ts') && !file.endsWith('-registration-parity.test.ts'))
     .map(file => {
       const source = readFileSync(new URL(file, directory), 'utf8');
-      return { file, source, calls: registrationStrings(source, file, register.name) };
+      let imported = false;
+      const calls = registrationStrings(source, file, register.name, () => { imported = true; });
+      return { file, source, calls, imported };
     })
-    .filter(entry => entry.calls.length > 0);
+    .filter(entry => entry.imported || entry.calls.length > 0);
   expect(entries.length, family).toBeGreaterThan(1);
   for (const { file, source, calls } of entries) {
     expect(calls, file).toHaveLength(1);
