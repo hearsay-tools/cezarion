@@ -63,7 +63,7 @@ import { workflowDefSchema } from '../workflows/types.ts';
 
 import { applyOutcomes, type OutcomeDependencies, type OutcomeReceipt, type RunOutcome } from './outcome-commit.ts';
 import { ISSUE_URL_RE, originatingIssue, PR_URL_RE, refUrlNumber, referencedPrDeclaration, rescopeRun, resolveIssueReference, resolveReferencedRef, restoreOriginatingIssue, trackReferencedIssues, trackReferencedPrs } from './run-references.ts';
-import { applyExit, doneCommits, exitDurability, exitEvent, RUN_CANCELLED, RUN_EXITS, type ExitCall, type ExitDurability, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
+import { applyExit, doneCommits, exitDurability, RUN_EXITS, type ExitCall, type ExitDurability, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
 import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
 export { ConversationIdInUseError } from './conversation-identity.ts';
 
@@ -74,6 +74,7 @@ import {
 } from './run-database.ts';
 import { restoreLostReferencedPullRequest } from './loaded-run-healing.ts';
 import { failLoadedInterruptedRun, restoreLoadedUsageLimitHold, settleLoadedStop } from './loaded-run-exits.ts';
+import { ExitEvents } from './exit-events.ts';
 import { encodeRunRow, isLiveRecord, isLiveStatus } from './run-row.ts';
 import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.ts';
 import { ColdReadCache, storedRow, type StoredRow } from './cold-reads.ts';
@@ -1011,8 +1012,8 @@ export class RunStore extends EventEmitter {
   private persistence: RunStorePersistence | undefined;
   /** Runs whose held record is ahead of its row; the next save or commit writes them. */
   private readonly dirty = new Set<string>();
-  /** Runs this store's load cancelled: their lifecycle event waits until transcripts are readable. */
-  private readonly loadCancellations: string[] = [];
+  /** The lifecycle events run exits write (B12). */
+  private readonly exitEvents = new ExitEvents((id, event) => this.appendEvent(id, event));
   /** Runs gone from memory whose rows the next save or commit deletes. */
   private readonly deleted = new Set<string>();
   /** Deleted runs whose history files (events, handoff, images, artifacts) go once the delete of
@@ -1112,7 +1113,7 @@ export class RunStore extends EventEmitter {
       if (!maintenance) {
         store.loadHeldRows();
         store.warmTranscriptFacts();
-        store.writeLoadCancellations();
+        store.exitEvents.writeLoaded();
       }
     } catch (error) {
       if (store.owner) {
@@ -1221,15 +1222,7 @@ export class RunStore extends EventEmitter {
     this.held.set(run.id, run);
     this.base.set(run.id, { revision: row.revision, seq: row.seq, data: row.data, extras });
     if (changed) this.dirty.add(run.id);
-    if (!wasCancelled && run.status === 'cancelled') this.loadCancellations.push(run.id);
-  }
-
-  /** The `run cancelled` event of each run this load cancelled, as a cancel exit writes it (Table
-   *  B12). Best-effort: a transcript that cannot be written must not stop the store from opening. */
-  private writeLoadCancellations(): void {
-    for (const id of this.loadCancellations.splice(0)) {
-      try { this.appendEvent(id, { type: 'lifecycle', message: RUN_CANCELLED }); } catch (error) { console.warn(`[cez] run ${id}: no load-time cancellation event: ${String(error)}`); }
-    }
+    if (!wasCancelled && run.status === 'cancelled') this.exitEvents.loadCancelled(run.id);
   }
 
   /**
@@ -1366,7 +1359,7 @@ export class RunStore extends EventEmitter {
     const family = this.db?.familyOf(id);
     if (family === undefined || !this.claimFamilies([family], { allowLive: true, wait: true }).has(family)) return undefined;
     this.holdFamily(family, undefined, true, opts.stop ? id : undefined);
-    this.writeLoadCancellations();
+    this.exitEvents.writeLoaded();
     return family;
   }
 
@@ -2363,6 +2356,7 @@ export class RunStore extends EventEmitter {
       executionStartSeq: this.transcriptFacts(id).lastSeq,
     });
     const staged = new Map<string, RunRecord>();
+    this.exitEvents.started(id);
     const next: RunRecord = { ...run, ...applyExit(run, exit, this.redactPatch(patch) as RunPatch), delegation,
       ...(step ? { steps: [...run.steps, { ...step, status: 'pending' as const, iterations: 0, tokensUsed: 0 }] } : {}),
     };
@@ -2683,7 +2677,7 @@ export class RunStore extends EventEmitter {
       if (spec.refused) throw new Error(spec.refused);
       return undefined;
     }
-    const event = exitEvent(exit, run.status, call);
+    const event = this.exitEvents.owed(id, exit, run.status, call);
     // Redacted first: a step the exit settles takes the run's error.
     const redacted = this.redactPatch(extras) as RunPatch;
     let moved: RunRecord | undefined;
@@ -2693,7 +2687,7 @@ export class RunStore extends EventEmitter {
       this.commitIndex(new Map([[id, { ...(spec.settle?.(input, { ...call, now: new Date().toISOString() }) ?? input), ...applyExit(run, exit, {}, call) }]]));
       moved = this.peek(id);
     }
-    if (event) this.appendEvent(id, { type: 'lifecycle', message: event });
+    if (event) this.exitEvents.write(id, event);
     return moved;
   }
 

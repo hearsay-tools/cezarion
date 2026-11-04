@@ -310,3 +310,33 @@ describe('B12: the cancel exits write the run cancelled event once, at every sit
     } finally { again.close(); }
   });
 });
+
+// B12, review round 1: one cancellation keeps one event through its own teardown. A worker Stop
+// records cancelled, its failed Continue session records failed, and the late Stop records
+// cancelled again; a later Continue starts a new execution, whose Stop writes its own event.
+describe('B12: one cancellation, one event, through the teardown that settles it', () => {
+  const cancelled = (store: RunStore, id: string) => store.readEvents(id)
+    .filter(event => event.type === 'lifecycle' && /cancelled/.test(String(event.message))).map(event => event.message);
+
+  it('stop-worker, fail-continue, then cancel-late write one event; a Stop after a Continue writes another', () => {
+    const { store, worker } = setup();
+    const id = worker('stop-worker', { status: RUN_STATUS.running });
+    store.move(id, 'stop-worker');
+    store.move(id, 'fail-continue', { error: 'continue failed: interrupted' });
+    store.move(id, 'cancel-late');
+    expect(cancelled(store, id)).toEqual(['run cancelled']);
+    store.commitWorkerContinuation(id, 'continue-line');
+    store.move(id, 'start');
+    store.move(id, 'stop-worker');
+    expect(cancelled(store, id)).toEqual(['run cancelled', 'run cancelled']);
+  });
+
+  it('a root\'s Stop after a Continue writes its own event', () => {
+    const { store, root } = setup();
+    const id = root('cancel', { status: RUN_STATUS.running });
+    store.move(id, 'cancel');
+    store.move(id, 'continue-now', { currentStepId: 'b' });
+    store.move(id, 'cancel');
+    expect(cancelled(store, id)).toEqual(['run cancelled', 'run cancelled']);
+  });
+});

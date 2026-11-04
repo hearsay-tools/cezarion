@@ -23,6 +23,9 @@ interface RunCancelHost {
   move(id: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>): RunRecord | undefined;
 }
 
+/** The cancellation event of a run Stop takes out of the line. */
+const CANCELLED_WHILE_QUEUED = 'cancelled while queued';
+
 export class RunCancel {
   constructor(private readonly context: RunModuleContext, private readonly line: RunLine,
     private readonly workerExecutions: WorkerExecutions, private readonly wakeAdmission: WakeAdmission,
@@ -61,7 +64,8 @@ export class RunCancel {
   private cancelWorkerExecution(runId: string): void {
     if (this.context.store.getRun(runId)?.delegation?.role === 'worker') {
       const proof = this.context.store.readWorkerExecution(runId);
-      this.context.store.move(runId, 'stop-worker');
+      // The first cancel write names the cancellation's one event, a queued worker's too (B12).
+      this.context.store.move(runId, 'stop-worker', {}, this.line.indexOf(runId) >= 0 ? { event: CANCELLED_WHILE_QUEUED } : {});
       this.workerExecutions.markStopped(runId);
       if (!this.workerExecutions.has(runId) && !this.host.active.has(runId) && !this.line.hasStarting(runId) && proof?.phase === 'queued') {
         this.context.store.commitWorkerExecutionComplete(runId, proof.generation);
@@ -73,7 +77,7 @@ export class RunCancel {
     this.line.takeAt(queuedAt);
     this.line.takePending(runId);
     // The exit writes the cancellation's one lifecycle event; a queued run's says so (B12).
-    this.context.store.move(runId, 'cancel', {}, { event: 'cancelled while queued' });
+    this.context.store.move(runId, 'cancel', {}, { event: CANCELLED_WHILE_QUEUED });
     this.context.store.flush();
     if (this.workerExecutions.admitted(runId) === false) void this.workerExecutions.finishWorkerExecution(runId);
   }
