@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { execFileSync } from 'node:child_process';
@@ -48,7 +49,7 @@ function register(id: string): Promise<Wait> {
 
 async function ownedChain(runner: RunnerId, workflow: WorkflowDef) {
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-  store.updateRun(parent.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+  setRunStatus(store, parent.id, RUN_STATUS.waiting, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
   const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const workspace = await planOwnedWorkspace(root, randomUUID(), sha);
   const account = { provider: runner, profileId: 'default',

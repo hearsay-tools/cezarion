@@ -6,7 +6,7 @@ import {
   WAIT_PHASE,
   WAIT_VIA,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { openTestRunStore, runPersistence } from './run-store.testkit.ts';
+import { setRunStatus, openTestRunStore, runPersistence } from './run-store.testkit.ts';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -366,7 +366,7 @@ describe('debounced saves write only what changed', () => {
   it('stores the record, its toRunSummary projection and the query columns', () => {
     const store = open();
     const run = store.createRun({ title: 'summary', workflow: '(planned)', task: 't', steps: [{ id: 's', name: 'Planner', kind: STEP_KIND.agent }] });
-    store.updateRun(run.id, { status: RUN_STATUS.waiting, autoResumeAt: '2026-10-06T00:00:00.000Z', error: 'usage limit' });
+    setRunStatus(store, run.id, RUN_STATUS.waiting, { autoResumeAt: '2026-10-06T00:00:00.000Z', error: 'usage limit' });
     store.setArchived(run.id, false);
     store.flush();
     const saved = row(run.id)!;

@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -26,7 +27,7 @@ describe("worker waits through RunManager", { timeout: 30_000 }, () => {
 it('restart with an empty human-origin checkpoint preserves the ask without a synthetic answer', async () => {
     const p = await parent('mock:cezar-ask');
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    store.updateRun(p.id, { status: RUN_STATUS.running, continuationMessage: {
+    setRunStatus(store, p.id, RUN_STATUS.running, { continuationMessage: {
       id: randomUUID(), text: '', origin: 'human', createdAt: new Date().toISOString(),
     } });
     await restart();

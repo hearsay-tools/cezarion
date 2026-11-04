@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { describe, expect, it } from 'vitest';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { parent, restart, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
@@ -17,7 +18,10 @@ describe('restart recovery of a closed waiting worker', { timeout: 30_000 }, () 
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === RUN_STATUS.waiting);
     const w = await worker(p.id);
-    store.updateRun(w.id, { status: RUN_STATUS.waiting, currentStepId: 'task', ...(invalidAsk ? { invalidAsk: true } : {}) });
+    {
+      const { status: fixtureStatus, ...fixtureExtras }: NonNullable<Parameters<typeof setRunStatus>[3]> & { status: Parameters<typeof setRunStatus>[2] } = { status: RUN_STATUS.waiting, currentStepId: 'task', ...(invalidAsk ? { invalidAsk: true } : {}) };
+      setRunStatus(store, w.id, fixtureStatus, fixtureExtras);
+    }
     store.updateStep(w.id, 'task', { status: STEP_STATUS.waiting, iterations: 1 });
     store.flush();
     return w.id;

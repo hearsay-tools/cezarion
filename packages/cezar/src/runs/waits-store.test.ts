@@ -1,5 +1,5 @@
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
-import { openTestRunStore, runPersistence } from './run-store.testkit.ts';
+import { setRunStatus, openTestRunStore, runPersistence } from './run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -215,7 +215,7 @@ describe('wait checkpoints', () => {
     directory = mkdtempSync(join(tmpdir(), 'cez-waits-store-'));
     store = openTestRunStore(directory, { keepLive: true });
     id = store.createRun({ title: 'Waits', workflow: 'quick-task', task: 'wait', steps: [] }).id;
-    store.updateRun(id, { status: RUN_STATUS.waiting });
+    setRunStatus(store, id, RUN_STATUS.waiting);
   });
   afterEach(() => { vi.restoreAllMocks(); store.flush(); rmSync(directory, { recursive: true, force: true }); });
   const input = (waitId: string, text = 'wake'): AgentInput => ({ id: waitId, parentRunId: id, source: 'lifecycle', text, createdAt: new Date().toISOString() });

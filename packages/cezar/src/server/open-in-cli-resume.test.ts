@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -113,7 +114,7 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
       runner,
       steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
-    store.updateRun(run.id, { status: RUN_STATUS.done });
+    setRunStatus(store, run.id, RUN_STATUS.done);
     if (sessionId) store.updateStep(run.id, 'work', { sessionId });
     return run;
   };
@@ -234,7 +235,7 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
     'a %s run launches fresh — never a second CLI on the session the engine is driving',
     async (status) => {
       const run = makeRun('claude', 'sess-1');
-      store.updateRun(run.id, { status });
+      setRunStatus(store, run.id, status);
       const res = await openIn(run.id, 'cli:claude');
       expect(res.status).toBe(200);
       expect(((await res.json()) as { command: string }).command).toBe('claude');
@@ -246,7 +247,7 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
     'a %s run still resumes — the engine has let go of the session',
     async (status) => {
       const run = makeRun('claude', 'sess-1');
-      store.updateRun(run.id, { status });
+      setRunStatus(store, run.id, status);
       const res = await openIn(run.id, 'cli:claude');
       expect(((await res.json()) as { command: string }).command).toBe('claude --resume sess-1');
     },
@@ -256,7 +257,7 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
   // the engine has let go of the session, as the cockpit's `cliTargetResumes` says.
   it('a run held for its usage-limit resume still resumes its session', async () => {
     const run = makeRun('claude', 'sess-1');
-    store.updateRun(run.id, { status: RUN_STATUS.waiting, autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
+    setRunStatus(store, run.id, RUN_STATUS.waiting, { autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
     const res = await openIn(run.id, 'cli:claude');
     expect(((await res.json()) as { command: string }).command).toBe('claude --resume sess-1');
   });

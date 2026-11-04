@@ -10,7 +10,7 @@ import { RUN_STATUS, STEP_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA } from '@open-
 import type { RunRecord } from '../runs/store.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { MAX_AUTO_CONTINUES } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { stateOf } from './run-states.ts';
@@ -56,7 +56,10 @@ function conversations() {
 /** Another root task of the project; `provisioned: false` is a top-level run with no delegation record. */
 function peer(status: RunRecord['status'] = RUN_STATUS.running, provisioned = true): string {
   const run = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
-  store.updateRun(run.id, { status, ...(provisioned ? { delegation: { role: 'root', permissions: ['spawn', 'wait', 'steer'], receipts: [] } } : {}) });
+  {
+    const { status: fixtureStatus, ...fixtureExtras }: NonNullable<Parameters<typeof setRunStatus>[3]> & { status: Parameters<typeof setRunStatus>[2] } = { status, ...(provisioned ? { delegation: { role: 'root', permissions: ['spawn', 'wait', 'steer'], receipts: [] } } : {}) };
+    setRunStatus(store, run.id, fixtureStatus, fixtureExtras);
+  }
   return run.id;
 }
 
@@ -136,7 +139,7 @@ describe('peer waits (R9)', { timeout: 45_000 }, () => {
 
   it.each([RUN_STATUS.review, RUN_STATUS.done, RUN_STATUS.failed, RUN_STATUS.cancelled])('a named peer that settles %s resolves the wait as settled', async status => {
     const { a, b, entry } = await parkedOnPeer();
-    store.updateRun(b, { status });
+    setRunStatus(store, b, status);
     await until(() => anyOf(a, entry.id)?.phase !== WAIT_PHASE.open);
     expect(anyOf(a, entry.id)).toMatchObject({ result: { reason: 'settled', peerRunId: b } });
   });

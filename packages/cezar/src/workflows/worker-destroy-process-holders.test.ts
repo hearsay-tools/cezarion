@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
@@ -28,7 +29,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       // Admission runs before the worktree exists, so it never scans an ambient holder.
       const generation = store.commitWorkerExecutionStart(w.id);
       await ensureOwnedWorkspace(root, w);
-      store.updateRun(w.id, { status: RUN_STATUS.done }); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
+      setRunStatus(store, w.id, RUN_STATUS.done); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
       const service = new DelegationService(); const detach = service.registerProject({ id: 'p', root, store, manager });
       return { w, service, detach };
     }
@@ -67,7 +68,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       releases.push(() => recorded.kill('SIGKILL'));
       await new Promise(resolve => recorded.stdout!.once('data', resolve));
       expect(store.appendWorkerProcess(w.id, generation, recorded.pid!)).toBe(true);
-      store.updateRun(w.id, { status: RUN_STATUS.done }); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
+      setRunStatus(store, w.id, RUN_STATUS.done); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
       const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
       // No cwd scan exists on win32 (hearsay-tools/cezarion#889). Before, an `unknown` scan refused
       // every materialized worker's next generation, so Continue never worked there.
@@ -166,7 +167,7 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin
     it.skipIf(process.platform === 'win32')("destroy reaps a crashed generation's recorded group after its leader died", async () => {
       const { w, leader, member } = await groupedWorker({ member: 'group', leader: 'stay' });
       await until(() => existsSync(recordPath(w.id)) && readRecord(w.id).processes.length === 1);
-      manager.dispose(); store.updateRun(w.id, { status: RUN_STATUS.failed }); store.flush();
+      manager.dispose(); setRunStatus(store, w.id, RUN_STATUS.failed); store.flush();
       const corpse = spawn(process.execPath, ['-e', '']); await new Promise(resolve => corpse.once('exit', resolve));
       writeFileSync(recordPath(w.id), JSON.stringify({ ...readRecord(w.id), controller: { pid: corpse.pid!, startToken: '1' } }));
       // Only the leader dies: its member keeps the group, and the worktree, alive.
@@ -184,7 +185,7 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin
       const w = await worker();
       const generation = store.commitWorkerExecutionStart(w.id);
       await ensureOwnedWorkspace(root, w);
-      store.updateRun(w.id, { status: RUN_STATUS.done }); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
+      setRunStatus(store, w.id, RUN_STATUS.done); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
       // An unrelated group whose number equals the recorded leader's pid, its leader already gone:
       // the shape a double-fork daemon leaves once a freed number is reused.
       const script = `const m = require('child_process').spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)"], { stdio: 'ignore' }); console.log(String(m.pid)); m.unref(); setTimeout(() => process.exit(0), 50);`;

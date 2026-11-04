@@ -1,3 +1,4 @@
+import { setRunStatus } from './run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -71,7 +72,7 @@ function openStore(existing?: string): { dir: string; store: RunStore } {
 }
 
 function finish(store: RunStore, id: string): void {
-  store.updateRun(id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
+  setRunStatus(store, id, RUN_STATUS.done, { finishedAt: new Date().toISOString() });
 }
 
 function br(data: string | Buffer): Buffer {
@@ -125,7 +126,7 @@ describe('RunStore history compression', () => {
     const { dir, store } = openStore();
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     store.appendEvent(run.id, { type: 'note', message: 'live' });
-    store.updateRun(run.id, { status: RUN_STATUS.running });
+    setRunStatus(store, run.id, RUN_STATUS.running);
     store.setArchived(run.id, true);
     await store.historyIdle();
     const { plain, compressed } = historyPaths(dir, run.id);
@@ -203,7 +204,7 @@ describe('RunStore history compression', () => {
     });
     store.updateStep(run.id, 'work', { status: STEP_STATUS.done, sessionId: 'old-session' });
     const first = store.appendEvent(run.id, { type: 'note', message: 'before' });
-    store.updateRun(run.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
+    setRunStatus(store, run.id, RUN_STATUS.done, { finishedAt: new Date().toISOString() });
     store.setArchived(run.id, true);
     await store.historyIdle();
     const { plain, compressed } = historyPaths(join(root, '.ai/cezar'), run.id);
@@ -303,7 +304,7 @@ describe('RunStore history compression', () => {
     const { dir, store } = openStore();
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     store.appendEvent(run.id, { type: 'note', message: 'live' });
-    store.updateRun(run.id, { status: RUN_STATUS.running });
+    setRunStatus(store, run.id, RUN_STATUS.running);
     store.setArchived(run.id, true);
     await store.historyIdle();
     const { plain, compressed } = historyPaths(dir, run.id);
@@ -384,7 +385,7 @@ describe('RunStore history compression', () => {
       throw new Error('restore failed');
     });
     try {
-      expect(() => store.updateRun(run.id, { archived: false, status: RUN_STATUS.queued })).toThrow(/restore failed/);
+      expect(() => setRunStatus(store, run.id, RUN_STATUS.queued, { archived: false })).toThrow(/restore failed/);
       const after = store.getRun(run.id)!;
       expect(after.status).toBe(before.status);
       expect(after.archived).toBe(true);
@@ -469,10 +470,7 @@ describe('RunStore history compression', () => {
   it('commitWorkerContinuation restores the plain file', async () => {
     const { dir, store } = openStore();
     const parent = store.createRun({ title: 'parent', workflow: 'w', task: 'parent', steps: [] });
-    store.updateRun(parent.id, {
-      status: RUN_STATUS.waiting,
-      delegation: { role: 'root', permissions: ['spawn'], receipts: [] },
-    });
+    setRunStatus(store, parent.id, RUN_STATUS.waiting, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const workerId = randomUUID();
     const worker = store.createOwnedRun(
       {
@@ -498,7 +496,7 @@ describe('RunStore history compression', () => {
     );
     store.appendEvent(worker.id, { type: 'note', message: 'old' });
     store.updateStep(worker.id, 'task', { status: STEP_STATUS.done, sessionId: 'old-session' });
-    store.updateRun(worker.id, { status: RUN_STATUS.done });
+    setRunStatus(store, worker.id, RUN_STATUS.done);
     store.setArchived(worker.id, true);
     await store.historyIdle();
     const { plain, compressed } = historyPaths(dir, worker.id);

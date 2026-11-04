@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
@@ -92,7 +93,7 @@ describe('recover() and the autonomous flag (#489)', () => {
     vi.stubEnv('CEZ_AUTONOMOUS_DEFAULT', autonomous ? '0' : '1');
     const id = queuedRun(autonomous);
     store.updateStep(id, 'work', { status: STEP_STATUS.done, sessionId: 'previous-session', backend: 'claude' });
-    store.updateRun(id, { status: RUN_STATUS.done, runner: 'claude' });
+    setRunStatus(store, id, RUN_STATUS.done, { runner: 'claude' });
     const manager = createFixtureManager(store, repoRoot, { semaphore: frozen() });
     try {
       expect(manager.continueRun(id, { text: 'Continue setup' }, true)).toEqual({ ok: true });

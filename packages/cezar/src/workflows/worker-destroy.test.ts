@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
@@ -45,9 +46,9 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(manager.requestWorkerStop(w.id).state).toBe('terminated');
     manager.dispose();
     replaceWorkerDestroyManager(createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) }));
-    store.updateRun(parent.id, { status: RUN_STATUS.review });
+    setRunStatus(store, parent.id, RUN_STATUS.review);
     expect(manager.continueRun(w.id)).toMatchObject({ ok: false });
-    store.updateRun(parent.id, { status: RUN_STATUS.waiting });
+    setRunStatus(store, parent.id, RUN_STATUS.waiting);
     expect(manager.continueRun(w.id, { text: 'keep working' })).toEqual({ ok: true });
     expect(store.getRun(w.id)?.status).toBe('queued');
     expect(store.getRun(w.id)?.steps.map(step => step.id)).toEqual(['task']);
@@ -113,7 +114,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   it('a checkpoint an older cezar abandoned still parses, keeps its flag and refuses resume (hearsay-tools/cezarion#889)', async () => {
     const w = await worker();
     const generation = store.commitWorkerExecutionStart(w.id);
-    store.updateRun(w.id, { status: RUN_STATUS.cancelled }); expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
+    setRunStatus(store, w.id, RUN_STATUS.cancelled); expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
     const path = join(root, '.ai/cezar/runs', `${w.id}.execution.json`);
     writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), abandoned: true }), { mode: 0o600 });
     expect(store.readWorkerExecution(w.id)).toMatchObject({ generation, phase: 'complete', abandoned: true });
@@ -222,7 +223,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   });
 
   it('terminal status without a private completion checkpoint never proves termination after restart', async () => {
-    const w = await worker(); store.updateRun(w.id, { status: RUN_STATUS.cancelled, startedAt: new Date().toISOString() }); store.flush();
+    const w = await worker(); setRunStatus(store, w.id, RUN_STATUS.cancelled, { startedAt: new Date().toISOString() }); store.flush();
     rmSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`));
     expect(await manager.awaitRunTermination(w.id, 10)).toBe(false);
     expect(manager.requestWorkerStop(w.id).state).toBe('stopping');
@@ -250,7 +251,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     const scratchDir = resolveAgentTmpDir(join(root, '.ai/cezar'), w.id);
     mkdirSync(scratchDir, { recursive: true });
     const scratch = join(scratchDir, 'retained.txt'); writeFileSync(scratch, 'old process scratch');
-    manager.dispose(); store.updateRun(w.id, { status }); store.flush();
+    manager.dispose(); setRunStatus(store, w.id, status); store.flush();
     store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
     try {
       await other.recover();
@@ -281,7 +282,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   });
 
   it('destroying and invalid ownership never continue, reclaim, rematerialize or erase history', async () => {
-    const w = await worker(); store.updateRun(w.id, { status: RUN_STATUS.done, worktreePath: workspace(w).path, worktreeReclaimedAt: new Date().toISOString() });
+    const w = await worker(); setRunStatus(store, w.id, RUN_STATUS.done, { worktreePath: workspace(w).path, worktreeReclaimedAt: new Date().toISOString() });
     destroy(w);
     expect(manager.continueRun(w.id, { text: 'resume' }).ok).toBe(false);
     expect(isReclaimable({ ...store.getRun(w.id)!, worktreeReclaimedAt: undefined })).toBe(false);
@@ -349,7 +350,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     manager.enqueueOwnedRun(w.id);
     expect(manager.enqueueMessage(w.id, [{ type: 'text', text: 'new work' }])).toBeNull();
     store.move(parent.id, 'cancel-root');
-    store.updateRun(parent.id, { status: RUN_STATUS.waiting });
+    setRunStatus(store, parent.id, RUN_STATUS.waiting);
     const another = await worker(); const hold = gate(); releases.push(hold.release);
     const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown>; };
     const real = engine.execute.bind(manager); engine.execute = async (...args) => { await hold.promise; return real(...args); };

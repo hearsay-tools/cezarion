@@ -40,7 +40,7 @@ import { plannedWorkflow, skillTaskSteps } from '../workflows/types.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { workerWorkflowHash, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { stepKind, type WorkflowDef } from '../workflows/types.ts';
-import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 import { historyPaths } from '../runs/history-file.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
@@ -1355,7 +1355,7 @@ function createOwnedInputParent(store: RunStore): RunRecord {
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
   // A live root with its own unanswered question survives recovery without
   // launching a parent process. A terminal root correctly cancels its workers.
-  store.updateRun(parent.id, { status: RUN_STATUS.waiting });
+  setRunStatus(store, parent.id, RUN_STATUS.waiting);
   // It may message its workers, as provisioned roots do, so it answers their questions
   // (hearsay-tools/cezarion#2410).
   store.commitDelegation([{ id: parent.id, delegation: { role: 'root', permissions: ['spawn', 'steer'], receipts: [] } }]);

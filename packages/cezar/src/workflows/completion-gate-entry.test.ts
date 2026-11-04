@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { runnerHook, setupMonitoringFixture, waitForProduct } from './run-fixture.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
@@ -88,7 +89,7 @@ describe('the completion gate outside a turn end', () => {
     root = mkdtempSync(join(tmpdir(), 'cez-gate-entry-'));
     store = RunStore.open(join(root, '.ai/cezar'));
     id = store.createRun({ title: 'gate', task: 'work', workflow: 'quick-task', steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] }).id;
-    store.updateRun(id, { status: RUN_STATUS.running, currentStepId: 'task' });
+    setRunStatus(store, id, RUN_STATUS.running, { currentStepId: 'task' });
     store.updateStep(id, 'task', { status: STEP_STATUS.running });
     await store.factsWarmIdle();
     active.clear(); vi.clearAllMocks();
@@ -111,7 +112,7 @@ describe('the completion gate outside a turn end', () => {
     });
 
     it.each(['done', 'review', 'failed', 'cancelled'] as const)('holds a stopped root at %s without reopening it', status => {
-      store.updateRun(id, { status });
+      setRunStatus(store, id, status);
       const queue = vi.spyOn(nudges, 'queueCompletionRefusal');
       expect(finish.completionGate(id)).toBe('held');
       expect(store.getRun(id)?.status).toBe(status);

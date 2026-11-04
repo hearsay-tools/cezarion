@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRunSpec } from '../core/agent-runner.ts';
 import { RunStore } from '../runs/store.ts';
-import { crashStore } from '../runs/run-store.testkit.ts';
+import { setRunStatus, crashStore } from '../runs/run-store.testkit.ts';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { RunManager } from './run.ts';
@@ -109,7 +109,7 @@ describe('stopped composer engine', { timeout: 15_000 }, () => {
     const { store, manager } = fixture();
     const run = store.createRun({ title: 'task', task: 'task', workflow: 'original', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });
     store.updateStep(run.id, 'work', { status: STEP_STATUS.done, sessionId: 'old-session' });
-    store.updateRun(run.id, { status: RUN_STATUS.done });
+    setRunStatus(store, run.id, RUN_STATUS.done);
     expect(manager.continueRun(run.id)).toEqual({ ok: true });
     expect(manager.continueRun(run.id)).toMatchObject({ ok: false });
     expect(manager.cancel(run.id)).toBe(true);
@@ -135,7 +135,7 @@ describe('stopped composer engine', { timeout: 15_000 }, () => {
   it('does not resume an accepted stop after a restart', () => {
     const { store, data } = fixture();
     const run = store.createRun({ title: 'task', task: 'task', workflow: 'original', steps: [] });
-    store.updateRun(run.id, { status: RUN_STATUS.running, stopping: true }); store.flush();
+    setRunStatus(store, run.id, RUN_STATUS.running, { stopping: true }); store.flush();
     expect(RunStore.open(data, { keepLive: true }).getRun(run.id)).toMatchObject({ status: RUN_STATUS.cancelled });
   });
 });

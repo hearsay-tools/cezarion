@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -58,7 +59,7 @@ describe('a failed Continue on a root parked at an earlier workflow step', () =>
   it('keeps the step waiting, and the next Continue resumes it and runs the next step', async () => {
     const { id } = store.createRun({ title: 'resume', task: 'mock:cezar-done step a', workflow: workflow.name, workflowDef: workflow,
       steps: workflow.steps.map(step => ({ id: step.id, name: step.name!, kind: STEP_KIND.agent })) });
-    store.updateRun(id, { status: RUN_STATUS.waiting, currentStepId: 'a', runner: 'claude', startedAt: new Date().toISOString() });
+    setRunStatus(store, id, RUN_STATUS.waiting, { currentStepId: 'a', runner: 'claude', startedAt: new Date().toISOString() });
     store.updateStep(id, 'a', { status: STEP_STATUS.waiting, iterations: 1, sessionId: '11111111-1111-4111-8111-111111111111', backend: 'claude' });
     store.flush();
     manager = createFixtureManager(store, repoRoot);

@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
@@ -85,11 +86,7 @@ describe('Continue after a Cursor bootstrap crash', () => {
       runner: 'cursor',
       steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
-    store.updateRun(record.id, {
-      status: RUN_STATUS.failed,
-      finishedAt: new Date().toISOString(),
-      error: 'Cursor ACP exited unexpectedly (1)',
-    });
+    setRunStatus(store, record.id, RUN_STATUS.failed, { finishedAt: new Date().toISOString(), error: 'Cursor ACP exited unexpectedly (1)' });
     store.updateStep(record.id, 'work', {
       status: STEP_STATUS.failed,
       sessionId,
@@ -159,7 +156,7 @@ describe('Continue after a Cursor bootstrap crash', () => {
     const id = failedCursorRun(CURSOR_SESSION_ID, true);
     store.updateStep(id, 'work', { sessionTransport: 'cursor-print' });
     store.addStep(id, { id: 'continue-1', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation' });
-    store.updateRun(id, { status: RUN_STATUS.queued, finishedAt: undefined });
+    setRunStatus(store, id, RUN_STATUS.queued, { finishedAt: undefined });
     await (manager as unknown as { reviveQueuedRun(run: NonNullable<ReturnType<RunStore['getRun']>>, reason: string): Promise<void> })
       .reviveQueuedRun(store.getRun(id)!, 'cezar restarted');
     expect(store.getRun(id)?.status).toBe('failed');

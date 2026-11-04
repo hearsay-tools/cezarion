@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -37,7 +38,7 @@ describe('read receipts (#unread-done-items)', () => {
   /** A finished run with a real finishedAt, so the unread rule has an instant to compare against. */
   function finished(status: 'done' | 'failed' | 'cancelled'): string {
     const run = store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] });
-    store.updateRun(run.id, { status, finishedAt: '2026-08-01T10:00:00.000Z' });
+    setRunStatus(store, run.id, status, { finishedAt: '2026-08-01T10:00:00.000Z' });
     return run.id;
   }
 

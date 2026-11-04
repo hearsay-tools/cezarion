@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { answerAsParent } from '../core/harness-parity.testkit.ts';
 import { grantSteer, eventCheckpoint, controlledWire, fixtureUpdateRun, manager, parent, register, restart, root, store, until, waitOf, worker } from './worker-wait.testkit.ts';
-import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { useWorkerCapacityFixture } from './worker-wait-capacity.testkit.ts';
 
 describe("worker waits through RunManager", { timeout: 30_000 }, () => {
@@ -69,7 +69,7 @@ for (const role of ['root', 'worker'] as const) {
       if (role === 'root') expect(manager.continueRun(target.id, { text: 'human answer mock:hold' }).ok).toBe(true);
       else await answerAsParent(store, manager, p.id, w.id, 'human answer mock:hold');
       await until(() => store.getRun(target.id)?.continuationMessage !== undefined);
-      if (role === 'root') store.updateRun(w.id, { status: RUN_STATUS.queued, finishedAt: undefined });
+      if (role === 'root') setRunStatus(store, w.id, RUN_STATUS.queued, { finishedAt: undefined });
       // The transcripts belong to the crash checkpoint too: the cancel below closes a worker's
       // question as it stops (hearsay-tools/cezarion#2410), which a crash never writes.
       store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar')); const events = eventCheckpoint();

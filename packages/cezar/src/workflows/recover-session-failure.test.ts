@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
@@ -62,7 +63,7 @@ describe('recover() contains backend session failures (#562)', () => {
       sessionId: 'missing-thread',
       backend: 'codex',
     });
-    store.updateRun(record.id, { status: RUN_STATUS.running, currentStepId: 'work' });
+    setRunStatus(store, record.id, RUN_STATUS.running, { currentStepId: 'work' });
 
     const firstManager = createFixtureManager(store, repoRoot);
     await firstManager.recover();

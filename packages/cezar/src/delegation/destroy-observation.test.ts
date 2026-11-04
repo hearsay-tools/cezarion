@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -20,7 +21,7 @@ describe('destroy observation (hearsay-tools/cezarion#879)', () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'HEAD', requestId: randomUUID() });
     const generation = f.store.commitWorkerExecutionStart(workerId);
     const workspace = await ensureOwnedWorkspace(f.root, f.store.getRun(workerId)!);
-    f.store.updateRun(workerId, { status: RUN_STATUS.review, worktreePath: workspace.path, branch: workspace.branch });
+    setRunStatus(f.store, workerId, RUN_STATUS.review, { worktreePath: workspace.path, branch: workspace.branch });
     expect(f.store.commitWorkerExecutionComplete(workerId, generation)).toBe(true);
     const dataDir = join(f.root, '.ai/cezar'), commonDir = await gitCommonDir(f.root);
     return { workerId, workspace, dataDir, commonDir, key: () => observeDestroy({ store: f.store, dataDir, commonDir, workerId }) };

@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
@@ -75,10 +76,10 @@ describe('RunManager.enqueueOwnedRun', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, (
     expect(() => manager.enqueueOwnedRun(randomUUID())).toThrowError(expect.objectContaining({ code: 'incompatible_state' }));
     const parentId = run.delegation?.role === 'worker' ? run.delegation.parentRunId : '';
     expect(() => manager.enqueueOwnedRun(parentId)).toThrowError(expect.objectContaining({ code: 'incompatible_state' }));
-    store.updateRun(run.id, { status: RUN_STATUS.done });
+    setRunStatus(store, run.id, RUN_STATUS.done);
     expect(() => manager.enqueueOwnedRun(run.id)).toThrowError(expect.objectContaining({ code: 'incompatible_state' }));
     if (run.delegation?.role !== 'worker') throw new Error('fixture');
-    store.updateRun(run.id, { status: RUN_STATUS.queued, delegation: { ...run.delegation, destroy: { requestedAt: new Date().toISOString(), phase: 'requested', remaining: ['worktree', 'branch'] } } });
+    setRunStatus(store, run.id, RUN_STATUS.queued, { delegation: { ...run.delegation, destroy: { requestedAt: new Date().toISOString(), phase: 'requested', remaining: ['worktree', 'branch'] } } });
     expect(() => manager.enqueueOwnedRun(run.id)).toThrowError(expect.objectContaining({ code: 'incompatible_state' }));
   });
 });
@@ -89,7 +90,7 @@ describe('owned workspace continuation and queued recovery', { timeout: WORKSPAC
     const { root, second } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), second);
     const { run, store } = durableRun(root, workspace);
-    store.updateRun(run.id, { status: RUN_STATUS.done, runner: 'claude', worktreePath: workspace.path, branch: workspace.branch, baseBranch: second, worktreeReclaimedAt: new Date().toISOString() });
+    setRunStatus(store, run.id, RUN_STATUS.done, { runner: 'claude', worktreePath: workspace.path, branch: workspace.branch, baseBranch: second, worktreeReclaimedAt: new Date().toISOString() });
     store.updateStep(run.id, 'task', { status: STEP_STATUS.done, sessionId: 'mock-prior-session', backend: 'claude' });
     if (failure === 'missing') git(root, 'worktree', 'remove', '--force', workspace.path);
     else await writeFile(join(git(workspace.path, 'rev-parse', '--absolute-git-dir'), 'cezar-owned-resource'), 'wrong');

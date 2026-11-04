@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readdirSync, readlinkSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -490,7 +491,7 @@ describe('cez task', () => {
     // attention (the monitoring park is a timer wait since hearsay-tools/cezarion#1301).
     it('carries the cockpit attention bucket and label, from the shared function', async () => {
       const id = await start();
-      store.updateRun(id, { status: RUN_STATUS.waiting });
+      setRunStatus(store, id, RUN_STATUS.waiting);
       expect(await run(['status', id])).toBe(0);
       expect(last()).toMatchObject({ status: RUN_STATUS.waiting, attention: 'waiting', attentionLabel: 'needs you' });
       store.commitWait(id, openTimer());
@@ -517,7 +518,7 @@ describe('cez task', () => {
       // Each task is valid at the API boundary; only the aggregate exceeds 3 MiB.
       const runs = Array.from({ length: 32 }, (_, index) => {
         const run = store.createRun({ title: `task ${index}`, workflow: 'quick-task', task: 'x'.repeat(100_000), steps: [] });
-        store.updateRun(run.id, { status: RUN_STATUS.done });
+        setRunStatus(store, run.id, RUN_STATUS.done);
         return run;
       });
       expect(await run(['list', '--limit', '100'])).toBe(0);
@@ -551,7 +552,7 @@ describe('cez task', () => {
       expect((last().runs as Array<{ id: string }>).map((row) => row.id).sort()).toEqual([a, b].sort());
       expect(await run(['list', '--all', '--limit', '1'])).toBe(0);
       expect(last().runs).toHaveLength(1);
-      store.updateRun(b, { status: RUN_STATUS.done });
+      setRunStatus(store, b, RUN_STATUS.done);
       expect(await run(['list', '--status', 'done'])).toBe(0);
       const rows = last().runs as Array<Record<string, unknown>>;
       expect(rows.map((row) => row.id)).toEqual([b]);
@@ -562,8 +563,8 @@ describe('cez task', () => {
     it('carries attention + attentionLabel on default rows only, never on --full rows (#609)', async () => {
       const a = await start('a');
       const b = await start('b');
-      store.updateRun(a, { status: RUN_STATUS.waiting });
-      store.updateRun(b, { status: RUN_STATUS.waiting });
+      setRunStatus(store, a, RUN_STATUS.waiting);
+      setRunStatus(store, b, RUN_STATUS.waiting);
       store.commitWait(b, openTimer());
       expect(await run(['list'])).toBe(0);
       const rows = last().runs as Array<Record<string, unknown>>;
@@ -593,10 +594,7 @@ describe('cez task', () => {
   describe('default output and help (#572, #573, #574)', () => {
     it.each(runStatusSchema.options)('prints only the next-action datum for %s rows', async (status) => {
       const id = await start();
-      store.updateRun(id, {
-        status, currentStepId: 'implement', pullRequestUrl: 'https://github.com/example/repo/pull/1',
-        error: 'failed step\nstack trace', branch: 'cez/test', diffStat: { adds: 1, dels: 2, files: 1 }, tokensUsed: 123,
-      });
+      setRunStatus(store, id, status, { currentStepId: 'implement', pullRequestUrl: 'https://github.com/example/repo/pull/1', error: 'failed step\nstack trace', branch: 'cez/test', diffStat: { adds: 1, dels: 2, files: 1 }, tokensUsed: 123 });
       expect(await run(['list'])).toBe(0);
       const datum = status === 'running' ? { currentStepId: 'implement' }
         : status === 'done' || status === 'review' ? { pullRequestUrl: 'https://github.com/example/repo/pull/1' }
@@ -621,7 +619,7 @@ describe('cez task', () => {
       ['long first line', `${'x'.repeat(200)}\nsecond line`, `${'x'.repeat(199)}…`],
     ])('caps list errors: %s; keeps status and --full errors intact', async (_label, error, expected) => {
       const id = await start();
-      store.updateRun(id, { status: RUN_STATUS.failed, error });
+      setRunStatus(store, id, RUN_STATUS.failed, { error });
       expect(await run(['list'])).toBe(0);
       expect((last().runs as Array<Record<string, unknown>>)[0]?.error).toBe(expected);
       expect(await run(['status', id])).toBe(0);
@@ -633,7 +631,7 @@ describe('cez task', () => {
 
     it.each(['running', 'review', 'failed'] as const)('omits absent next-action fields for %s', async (status) => {
       const id = await start();
-      store.updateRun(id, { status });
+      setRunStatus(store, id, status);
       expect(await run(['list'])).toBe(0);
       const row = (last().runs as Array<Record<string, unknown>>)[0]!;
       for (const field of ['currentStepId', 'pullRequestUrl', 'error', 'branch', 'diffStat', 'tokensUsed']) {
@@ -743,7 +741,7 @@ describe('cez task', () => {
     it('archives finished tasks and reports the count', async () => {
       const finished = await start('finished');
       const active = await start('active');
-      store.updateRun(finished, { status: RUN_STATUS.done });
+      setRunStatus(store, finished, RUN_STATUS.done);
       expect(await run(['archive-finished'])).toBe(0);
       expect(last()).toEqual({ archived: 1, ids: [finished], pinnedIds: [] });
       expect(store.getRun(finished)?.archived).toBe(true);
@@ -890,7 +888,7 @@ describe('cez task', () => {
     it('prints successful finish and the stored completion', async () => {
       const id = await start();
       manager.cancel(id);
-      store.updateRun(id, { status: RUN_STATUS.review });
+      setRunStatus(store, id, RUN_STATUS.review);
       expect(await run(['finish', id])).toBe(0);
       expect(last()).toEqual({ id, finished: true });
       expect(store.getRun(id)?.status).toBe(RUN_STATUS.done);
@@ -1018,9 +1016,9 @@ describe('cez task', () => {
       const a = await start('old done');
       const b = await start('queued');
       const c = await start('new done');
-      store.updateRun(a, { status: RUN_STATUS.done, createdAt: '2026-01-01T00:00:00.000Z' });
+      setRunStatus(store, a, RUN_STATUS.done, { createdAt: '2026-01-01T00:00:00.000Z' });
       store.updateRun(b, { createdAt: '2026-01-03T00:00:00.000Z' });
-      store.updateRun(c, { status: RUN_STATUS.done, createdAt: '2026-01-02T00:00:00.000Z' });
+      setRunStatus(store, c, RUN_STATUS.done, { createdAt: '2026-01-02T00:00:00.000Z' });
       const suffix = flags.length > 0 ? '/runs' : '/run-summaries?archived=recent';
       const response = await fetch(`${cockpit.api}${suffix}`);
       const rows = await response.json() as Array<{ createdAt: string }>;
@@ -1039,7 +1037,7 @@ describe('cez task', () => {
     ])('omits a question when history is unavailable: $status', async ({ status, context }) => {
       const id = await start();
       store.commitWait(id, makeHumanWait({ id: randomUUID() }));
-      store.updateRun(id, { status: RUN_STATUS.waiting });
+      setRunStatus(store, id, RUN_STATUS.waiting);
       store.appendEvent(id, { type: 'ask.requested', requestId: 'ask-1', questions: [{ header: 'Choice', question: 'Which module?' }] });
       const response = await fetch(`${cockpit.api}/runs/${id}/history-context`);
       const data: unknown = status === 503 ? await response.json() : context;
@@ -1310,8 +1308,8 @@ describe('cez task', () => {
     it('defaults wait mode to all when terminal runs have mixed results', async () => {
       const done = await start('done');
       const failed = await start('failed');
-      store.updateRun(done, { status: RUN_STATUS.done });
-      store.updateRun(failed, { status: RUN_STATUS.failed });
+      setRunStatus(store, done, RUN_STATUS.done);
+      setRunStatus(store, failed, RUN_STATUS.failed);
       expect(await run(['wait', done, failed, '--timeout-seconds', '1800'])).toBe(1);
       expect(last()).toMatchObject({ until: 'attention', timedOut: false, runs: [
         { id: done, status: RUN_STATUS.done }, { id: failed, status: RUN_STATUS.failed },
@@ -1320,7 +1318,7 @@ describe('cez task', () => {
 
     it.each(['attention', 'settled'])('accepts wait --until %s without a dependent flag', async (until) => {
       const id = await start();
-      store.updateRun(id, { status: RUN_STATUS.done });
+      setRunStatus(store, id, RUN_STATUS.done);
       expect(await run(['wait', id, '--until', until, '--mode', 'any', '--timeout-seconds', '1800'])).toBe(0);
       expect(last()).toMatchObject({ until, timedOut: false, runs: [{ id, status: RUN_STATUS.done }] });
     });
@@ -1331,7 +1329,7 @@ describe('cez task', () => {
         const response = await fetch(url, init);
         if (String(url) === `${cockpit.api}/runs` && init?.method === 'POST') {
           const created = await response.clone().json() as { id: string };
-          store.updateRun(created.id, { status: RUN_STATUS.done });
+          setRunStatus(store, created.id, RUN_STATUS.done);
         }
         return response;
       });
@@ -1344,7 +1342,7 @@ describe('cez task', () => {
     it.each(['attention', 'settled'])('accepts log --follow --until %s and inclusive numeric limits', async (until) => {
       const id = await start();
       store.appendEvent(id, { type: 'text', text: 'visible log line' });
-      store.updateRun(id, { status: RUN_STATUS.done });
+      setRunStatus(store, id, RUN_STATUS.done);
       const offset = out.length;
       expect(await run(['log', id, '--follow', '--until', until, '--since', '0', '--max-chars', '1000000', '--timeout-seconds', '1800'])).toBe(0);
       expect(out.slice(offset).join('\n')).toContain('visible log line');

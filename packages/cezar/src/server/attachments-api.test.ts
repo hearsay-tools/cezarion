@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -137,7 +138,7 @@ describe('attachment routes (#950)', () => {
   describe('POST /api/v1/runs/:id/messages', () => {
     it('accepts an attachment-only message and delivers it as a file block', async () => {
       const run = store.createRun({ title: 't', workflow: 'w', task: 'chat', steps: [] });
-      store.updateRun(run.id, { status: RUN_STATUS.waiting });
+      setRunStatus(store, run.id, RUN_STATUS.waiting);
       const res = await post(`/api/v1/runs/${run.id}/messages`, {
         images: [{ mediaType: 'text/plain', data: MD_B64 }],
       });
@@ -147,7 +148,7 @@ describe('attachment routes (#950)', () => {
 
     it('refuses a message that is empty in both text and attachments', async () => {
       const run = store.createRun({ title: 't', workflow: 'w', task: 'chat', steps: [] });
-      store.updateRun(run.id, { status: RUN_STATUS.waiting });
+      setRunStatus(store, run.id, RUN_STATUS.waiting);
       const res = await post(`/api/v1/runs/${run.id}/messages`, { text: '   ' });
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error: string }).error).toContain('at least one attachment');
@@ -158,10 +159,7 @@ describe('attachment routes (#950)', () => {
     async function request(images: Array<{ mediaType: string; data: string }>) {
       if (route === 'create') return post('/api/v1/runs', { ...base, images });
       const run = store.createRun({ title: 't', workflow: 'w', task: 'x', steps: [] });
-      store.updateRun(run.id, {
-        status: route === 'edit' ? 'queued' : route === 'continue' ? 'done' : 'waiting',
-        queuedMessages: [{ id: 'm1', text: 'queued', createdAt: '2026-09-05T00:00:00Z' }],
-      });
+      setRunStatus(store, run.id, route === 'edit' ? 'queued' : route === 'continue' ? 'done' : 'waiting', { queuedMessages: [{ id: 'm1', text: 'queued', createdAt: '2026-09-05T00:00:00Z' }] });
       if (route === 'edit') return apiRequest(app, `/api/v1/runs/${run.id}/queued-messages/m1`, {
         method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ images }),
       });

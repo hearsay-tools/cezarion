@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -79,7 +80,7 @@ describe('Stop before the first Codex turn (#493)', { timeout: 15_000 }, () => {
         steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
       });
       a.store.updateStep(prior.id, 'task', { status: STEP_STATUS.done, sessionId: 'prior-thread', backend: 'codex' });
-      a.store.updateRun(prior.id, { status: RUN_STATUS.done, workflowDef: workflow });
+      setRunStatus(a.store, prior.id, RUN_STATUS.done, { workflowDef: workflow });
       expect(a.manager.continueRun(prior.id)).toEqual({ ok: true });
       runId = prior.id;
     }

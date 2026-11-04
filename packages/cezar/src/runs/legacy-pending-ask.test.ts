@@ -12,7 +12,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { apiRunSchema, runIndexEntrySchema, toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { RunStore } from './store.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
-import { readPersistedRuns, seedRuns } from './run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns, seedRuns } from './run-store.testkit.ts';
 
 /**
  * Phase 4b (hearsay-tools/cezarion#1236): a pending question is an open human wait. The record no
@@ -23,7 +23,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'cez-legacy-ask-'));
   store = RunStore.open(dir);
   id = store.createRun({ title: 'Root', task: 'task', workflow: 'quick-task', steps: [] }).id;
-  store.updateRun(id, { status: RUN_STATUS.waiting });
+  setRunStatus(store, id, RUN_STATUS.waiting);
   store.close();
 });
 afterEach(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });

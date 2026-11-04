@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore, type RunRecord } from '../runs/store.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import {
   AUTO_RESUME_GRACE_MS,
@@ -282,20 +282,16 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // The moment the resume fires, `autoResumeAt` is gone — and if the hold ended there, every
     // queued task would dequeue and walk to the lease on EVERY cycle. That churn is what the
     // in-flight clause exists to stop, so the hold has to survive this state.
-    store.updateRun(record.id, {
-      status: RUN_STATUS.queued,
-      autoResumeAt: undefined,
-      autoResumeAttempts: 1,
-    });
+    setRunStatus(store, record.id, RUN_STATUS.queued, { autoResumeAt: undefined, autoResumeAttempts: 1 });
     // …now an IN-FLIGHT hold rather than a deadline one: it blocks fresh work, but not another
     // resume (see `accountHeldFor`).
     expect([...manager.accountHolds().inFlight]).toContain(account);
-    store.updateRun(record.id, { status: RUN_STATUS.running });
+    setRunStatus(store, record.id, RUN_STATUS.running);
     expect([...manager.accountHolds().inFlight]).toContain(account);
 
     // A completed turn is the only evidence the window reopened — that clears the counter and
     // the hold with it. (The engine does this at every turn end; done here as the state change.)
-    store.updateRun(record.id, { status: RUN_STATUS.waiting, autoResumeAttempts: undefined });
+    setRunStatus(store, record.id, RUN_STATUS.waiting, { autoResumeAttempts: undefined });
     const settled = manager.accountHolds();
     expect(settled.deadline.size + settled.inFlight.size).toBe(0);
   }, 30_000);
@@ -384,11 +380,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
 
     // Now the wedge: the holder keeps holding but has no deadline anyone is waiting for, and
     // nothing is running. Whatever caused it, the queue must not be stuck there.
-    store.updateRun(limited.id, {
-      status: RUN_STATUS.queued,
-      autoResumeAt: undefined,
-      autoResumeAttempts: 1,
-    });
+    setRunStatus(store, limited.id, RUN_STATUS.queued, { autoResumeAt: undefined, autoResumeAttempts: 1 });
     expect(manager.accountHolds().inFlight.size).toBe(1);
 
     await runInternals(manager).line.rescueStalledQueue();
@@ -413,11 +405,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     await expect.poll(() => store.getRun(waiting.id)?.status, { timeout: 10_000 }).toBe('queued');
 
     // Wedge it: the holder holds with no deadline anyone is waiting for, and nothing is running.
-    store.updateRun(limited.id, {
-      status: RUN_STATUS.queued,
-      autoResumeAt: undefined,
-      autoResumeAttempts: 1,
-    });
+    setRunStatus(store, limited.id, RUN_STATUS.queued, { autoResumeAt: undefined, autoResumeAttempts: 1 });
     expect(manager.accountHolds().inFlight.size).toBe(1);
 
     await runInternals(manager).line.rescueStalledQueue();
@@ -474,7 +462,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     first.dispose();
     // Back to `queued` with nobody holding the work item — exactly what the engine sees after
     // losing one, and what a restart would otherwise be the only cure for.
-    store.updateRun(record.id, { status: RUN_STATUS.queued, finishedAt: undefined, startedAt: undefined });
+    setRunStatus(store, record.id, RUN_STATUS.queued, { finishedAt: undefined, startedAt: undefined });
 
     manager = createFixtureManager(store, repoRoot); // deliberately NO recover()
     await runInternals(manager).line.rescueStalledQueue();
@@ -747,10 +735,10 @@ describe('a run stopped by a usage limit resumes itself', () => {
     const a = manager.startRun(workflow, { task: 'mock:limit probe a', worktree: false });
     await settle(a.id);
     // B starts on the same account only once A's hold is out of the way, then hits the limit too.
-    store.updateRun(a.id, { autoResumeAt: undefined, status: RUN_STATUS.failed });
+    setRunStatus(store, a.id, RUN_STATUS.failed, { autoResumeAt: undefined });
     const b = manager.startRun(workflow, { task: 'mock:limit probe b', worktree: false });
     await settle(b.id);
-    store.updateRun(a.id, { status: RUN_STATUS.waiting, finishedAt: undefined, autoResumeAt: new Date(Date.now() + 3_600_000).toISOString() });
+    setRunStatus(store, a.id, RUN_STATUS.waiting, { finishedAt: undefined, autoResumeAt: new Date(Date.now() + 3_600_000).toISOString() });
     store.updateRun(b.id, { task: 'mock:cezar-done ship it' });
 
     expect(manager.continueRun(b.id, { text: 'mock:cezar-done carry on' })).toEqual({ ok: true });

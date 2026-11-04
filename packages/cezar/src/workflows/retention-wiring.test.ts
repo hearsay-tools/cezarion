@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -115,6 +116,6 @@ async function seedWithId(
 ): Promise<{ recId: string; path: string }> {
   const wt = await createWorktree(repoRoot, id, 'main');
   const rec = store.createRun({ title: id, workflow: 'w', task: 't', steps: [] });
-  store.updateRun(rec.id, { status, finishedAt, worktreePath: wt.path, branch: wt.branch });
+  setRunStatus(store, rec.id, status, { finishedAt, worktreePath: wt.path, branch: wt.branch });
   return { recId: rec.id, path: wt.path };
 }

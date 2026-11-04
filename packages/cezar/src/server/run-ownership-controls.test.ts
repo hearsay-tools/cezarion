@@ -8,7 +8,7 @@ import { delegationErrorResponseSchema } from '@open-mercato/cezar-contract/dele
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
-import { crashStore, readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, crashStore, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { RUN_IN_USE_ELSEWHERE, RunStore } from '../runs/store.ts';
 import { createFixtureManager, fixtureWork, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { RunManager } from '../workflows/run.ts';
@@ -164,7 +164,7 @@ describe('adopting a dead owner\'s run for a control', () => {
     if (shape === 'running') {
       const at = new Date().toISOString();
       owner.updateStep(run.id, 'task', { status: STEP_STATUS.running, startedAt: at, sessionId: 'previous-session', backend: 'claude' });
-      owner.updateRun(run.id, { status: RUN_STATUS.running, startedAt: at, currentStepId: 'task' });
+      setRunStatus(owner, run.id, RUN_STATUS.running, { startedAt: at, currentStepId: 'task' });
     }
     owner.flush();
     crashStore(owner);

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { type RunRecord } from '../runs/store.ts';
 import { manager, parent, restart, root, store, until } from './worker-wait.testkit.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { useWorkerCapacityFixture } from './worker-wait-capacity.testkit.ts';
 
 describe("worker waits through RunManager", { timeout: 30_000 }, () => {
@@ -40,7 +40,7 @@ it.each(['delayed diff', 'failed diff'])('cancellation retires pending Finish af
 it('restart durably reconciles cancelled roots with superseded Finish intent', async () => {
     const p = await parent('mock:cezar-ask'); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
     store.commitRootFinishIntent(p.id);
-    store.updateRun(p.id, { status: RUN_STATUS.cancelled, finishedAt: new Date().toISOString() });
+    setRunStatus(store, p.id, RUN_STATUS.cancelled, { finishedAt: new Date().toISOString() });
     store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar'));
     await restart(false, checkpoint);
     expect(store.getRun(p.id)?.status).toBe('cancelled');

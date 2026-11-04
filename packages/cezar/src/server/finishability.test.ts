@@ -5,7 +5,7 @@ import { createApp } from './server.js';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.js';
 import { apiRequest } from './loopback-request.testkit.js';
 import { collect, manager, parent, root, store, until, useWorkerWaitFixture, worker } from '../workflows/worker-wait.testkit.js';
-import { hasPendingAsk } from '../runs/run-store.testkit.ts';
+import { setRunStatus, hasPendingAsk } from '../runs/run-store.testkit.ts';
 
 describe('authoritative finishability (#449)', () => {
   // The race below includes the final autosave, so its worktree keeps the mock's notes.md change.
@@ -34,7 +34,7 @@ describe('authoritative finishability (#449)', () => {
     const list = apiRunSchema.array().parse(await (await apiRequest(app(), '/api/v1/runs')).json());
     expect(list.every((run: object) => !('finishBlocked' in run))).toBe(true);
     const generation = store.commitWorkerExecutionStart(w.id);
-    store.updateRun(w.id, { status: RUN_STATUS.done });
+    setRunStatus(store, w.id, RUN_STATUS.done);
     store.commitWorkerExecutionComplete(w.id, generation);
     expect((await detail(p.id)).finishBlocked).toContain(w.id);
     await collect(w.id);
@@ -75,7 +75,7 @@ describe('authoritative finishability (#449)', () => {
   it.each(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled'] as const)(
     'inactive %s with no workflow or session never advertises a false success', async status => {
       const run = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
-      store.updateRun(run.id, { status });
+      setRunStatus(store, run.id, status);
       const verdict = (await detail(run.id)).finishBlocked;
       if (status === 'review') expect(verdict).toBeNull();
       else expect(verdict).toEqual(expect.any(String));
@@ -84,7 +84,7 @@ describe('authoritative finishability (#449)', () => {
 
   it('allows an inactive final-step root and POST finishes it', async () => {
     const p = store.createRun({ title: 'parent', task: 'task', workflow: 'quick-task', steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
-    store.updateRun(p.id, { status: RUN_STATUS.waiting, currentStepId: 'task', delegation: { role: 'root', permissions: [], receipts: [] } });
+    setRunStatus(store, p.id, RUN_STATUS.waiting, { currentStepId: 'task', delegation: { role: 'root', permissions: [], receipts: [] } });
     expect((await detail(p.id)).finishBlocked).toBeNull();
     expect((await apiRequest(app(), `/api/v1/runs/${p.id}/finish`, { method: 'POST' })).status).toBe(200);
     await until(() => store.getRun(p.id)?.status === 'done');
@@ -96,7 +96,7 @@ describe('authoritative finishability (#449)', () => {
     ] });
     store.updateStep(run.id, 'first', { status: STEP_STATUS.waiting });
     if (synthetic) store.addStep(run.id, { id: 'continue-1', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation' });
-    store.updateRun(run.id, { status: RUN_STATUS.waiting, currentStepId: synthetic ? 'continue-1' : 'first' });
+    setRunStatus(store, run.id, RUN_STATUS.waiting, { currentStepId: synthetic ? 'continue-1' : 'first' });
     const blocked = await detail(run.id);
     expect(blocked.finishBlocked).toMatch(/workflow/i);
     const response = await apiRequest(app(), `/api/v1/runs/${run.id}/finish`, { method: 'POST' });

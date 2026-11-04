@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -36,7 +37,7 @@ describe('queued prompt stack routes (#472)', () => {
     record = store.createRun({ title: 't', workflow: '(planned)', task: 'the task', steps: [] });
     // The record's own status now gates the early bounds checks (a finished run gets 409
     // rather than a bounds 400), so the fixture must look queued as well as answer on that rung.
-    store.updateRun(record.id, { status: RUN_STATUS.queued });
+    setRunStatus(store, record.id, RUN_STATUS.queued);
     rung = 'queued';
 
     manager = {
@@ -175,7 +176,7 @@ describe('queued prompt stack routes (#472)', () => {
     // over-long and the two cases differ only by status.
     expect((await post(overflowing)).status).toBe(400);
 
-    store.updateRun(record.id, { status: RUN_STATUS.done });
+    setRunStatus(store, record.id, RUN_STATUS.done);
     rung = 'closed';
     const res = await post(overflowing);
     expect(res.status).toBe(409);

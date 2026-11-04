@@ -20,7 +20,7 @@ import {
   workerDestroyResultSchema,
   workerListEntrySchema,
 } from '@open-mercato/cezar-contract/delegation';
-import { seedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, seedRuns } from '../runs/run-store.testkit.ts';
 
 describe('authenticated delegation HTTP family', () => {
   let f: ReturnType<typeof fixture>, app: ReturnType<typeof createDelegationRoutes>;
@@ -68,7 +68,7 @@ describe('authenticated delegation HTTP family', () => {
     const first = await spawn();
     const second = await spawn();
     const generation = f.store.commitWorkerExecutionStart(first.workerId);
-    f.store.updateRun(first.workerId, { status: RUN_STATUS.done });
+    setRunStatus(f.store, first.workerId, RUN_STATUS.done);
     expect(workerListResultSchema.parse(await (await request('/list')).json()).workers[0]).toMatchObject({ workerId: first.workerId, settled: false });
     expect(f.store.commitWorkerExecutionComplete(first.workerId, generation)).toBe(true);
     const result = workerListResultSchema.parse(await (await request('/list')).json());
@@ -133,7 +133,7 @@ describe('authenticated delegation HTTP family', () => {
     expect(conversationSendResultSchema.parse(await response.json())).toMatchObject({ message: { senderRunId: f.parent.id, recipientRunId: workerId, kind: 'request' }, delivery: 'queued' });
     const followup = await request('/follow-up', { id: randomUUID(), recipientRunId: workerId, kind: 'follow-up', requestId: input.id, text: 'More detail' });
     expect(followup.status).toBe(200); conversationSendResultSchema.parse(await followup.json());
-    const token = f.credentials.issue('project', workerId, randomUUID()); f.store.updateRun(workerId, { status: RUN_STATUS.running });
+    const token = f.credentials.issue('project', workerId, randomUUID()); setRunStatus(f.store, workerId, RUN_STATUS.running);
     const reply = await request('/reply', { id: randomUUID(), recipientRunId: f.parent.id, kind: 'reply', requestId: input.id, text: 'index.ts' }, { authorization: `Bearer ${token}` });
     expect(reply.status).toBe(200); expect(conversationSendResultSchema.parse(await reply.json()).outcome?.status).toBe('replied');
     const inspected = await request('/conversation', { recipientRunId: workerId });
@@ -142,7 +142,7 @@ describe('authenticated delegation HTTP family', () => {
     expect(requestOutcomeSchema.parse(await cancelled.json()).status).toBe('replied');
   });
   it('validates inbox bodies and scopes receipts to the authenticated session', async () => {
-    const { workerId } = await spawn(); f.store.updateRun(workerId, { status: RUN_STATUS.running });
+    const { workerId } = await spawn(); setRunStatus(f.store, workerId, RUN_STATUS.running);
     const workerToken = f.credentials.issue('project', workerId, randomUUID());
     const sent = await request('/send', { id: randomUUID(), recipientRunId: workerId, kind: 'progress', text: 'Read me' });
     expect(sent.status).toBe(200);
@@ -160,7 +160,7 @@ describe('authenticated delegation HTTP family', () => {
     expect((await request('/inbox/ack', { receiptId: batch.receiptId! }, { authorization: `Bearer ${currentToken}` })).status).toBe(403);
   });
   it('ACKs and releases only the supplied live receipt', async () => {
-    const { workerId } = await spawn(); f.store.updateRun(workerId, { status: RUN_STATUS.running });
+    const { workerId } = await spawn(); setRunStatus(f.store, workerId, RUN_STATUS.running);
     const token = f.credentials.issue('project', workerId, randomUUID());
     await request('/send', { id: randomUUID(), recipientRunId: workerId, kind: 'progress', text: 'First' });
     const first = inboxReserveResultSchema.parse(await (await request('/inbox', {}, { authorization: `Bearer ${token}` })).json());
@@ -292,7 +292,7 @@ describe('authenticated delegation HTTP family', () => {
       id: waitId, workerIds: [workerId], phase: 'wake-pending', reason: 'cancelled', wakeId: waitId,
       deadline: new Date().toISOString(), outcomes: [],
     } } }]);
-    f.store.updateRun(parent.id, { status: RUN_STATUS.queued });
+    setRunStatus(f.store, parent.id, RUN_STATUS.queued);
     const token = kind === 'worker' ? f.credentials.issue('project', workerId, randomUUID())
       : kind === 'foreign' ? f.credentials.issue('elsewhere', parent.id, randomUUID()) : f.token;
     const before = structuredClone(f.store.listRuns());

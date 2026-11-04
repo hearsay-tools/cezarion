@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { describe, expect, it, vi } from 'vitest';
 import { uuidFrom } from '../delegation/questions.ts';
@@ -54,7 +55,7 @@ it("sends a worker's cezar_ask question to its active parent as a request", asyn
     const askSeq = eventsOf(w.id, 'ask.requested')[0]!.seq;
     const id = uuidFrom(`worker-question:${w.id}:${askSeq}`);
     const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
-    store.updateRun(peer.id, { status: RUN_STATUS.running, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    setRunStatus(store, peer.id, RUN_STATUS.running, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     await service.send(callerFor(peer.id), { id, recipientRunId: p.id, kind: 'progress', text: 'Peer progress first', timeoutSeconds: 600 });
     expect(route).toHaveBeenCalledWith(w.id);
     route.mockRestore();

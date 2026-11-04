@@ -1,6 +1,6 @@
 import { registrationGroups } from '../core/registration-coverage.testkit.ts';
 import type { Caller } from './credentials.ts';
-import { openTestRunStore } from '../runs/run-store.testkit.ts';
+import { setRunStatus, openTestRunStore } from '../runs/run-store.testkit.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { createFixtureManager, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
@@ -90,7 +90,7 @@ export function provisionWorkflowFixture() {
     if (mode === 'restart') {
       // A restart: the old store goes too, or it would still own the parent's family.
       f.manager.dispose(); sessions[0]!.finish();
-      f.store.updateRun(accepted.parent.id, { status: RUN_STATUS.waiting }); f.store.close();
+      setRunStatus(f.store, accepted.parent.id, RUN_STATUS.waiting); f.store.close();
       const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true });
       const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
       controller.attachProject({ id: 'restarted', root: f.root, store, manager });

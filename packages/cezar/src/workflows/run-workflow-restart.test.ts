@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 import { describe, expect, it } from 'vitest';
@@ -30,7 +31,7 @@ describe('RunManager workflow restart', () => {
     fixture.store.addStep(record.id, { id: 'continue-1', name: 'Real numeric step', kind: STEP_KIND.check });
     fixture.store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.check });
     fixture.store.updateStep(record.id, 'task', { status: STEP_STATUS.done, finishedAt: new Date().toISOString() });
-    fixture.store.updateRun(record.id, { status: RUN_STATUS.queued, currentStepId: undefined, workflowDef: workflow });
+    setRunStatus(fixture.store, record.id, RUN_STATUS.queued, { currentStepId: undefined, workflowDef: workflow });
     fixture.store.flush();
 
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);
@@ -67,12 +68,9 @@ describe('RunManager workflow restart', () => {
     fixture.store.updateStep(record.id, 'previously-failed', { status: STEP_STATUS.failed, finishedAt: new Date().toISOString() });
     fixture.store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.check });
     fixture.store.updateStep(record.id, 'task', { status: STEP_STATUS.running, finishedAt: undefined });
-    fixture.store.updateRun(record.id, {
-      status: RUN_STATUS.running, currentStepId: 'task', workflowDef: workflow,
-      continuationMessage: {
+    setRunStatus(fixture.store, record.id, RUN_STATUS.running, { currentStepId: 'task', workflowDef: workflow, continuationMessage: {
         id: 'restart-task', text: 'mock:cezar-done recover', origin: 'lifecycle', createdAt: new Date().toISOString(),
-      },
-    });
+      } });
     fixture.store.flush();
 
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);

@@ -1,4 +1,4 @@
-import { openTestRunStore, runPersistence } from './run-store.testkit.ts';
+import { setRunStatus, openTestRunStore, runPersistence } from './run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -330,7 +330,7 @@ describe('RunStore durable delegation', () => {
 
   it('Finish cancellation atomically retires intent, fails closed on write failure and rejects late success', () => {
     const run = parent();
-    store.updateRun(run.id, { status: RUN_STATUS.waiting });
+    setRunStatus(store, run.id, RUN_STATUS.waiting);
     store.commitRootFinishIntent(run.id);
     const before = readPersistedText(dataDir);
     const snapshot = structuredClone(store.getRun(run.id));
@@ -349,7 +349,7 @@ describe('RunStore durable delegation', () => {
     expect(store.move(run.id, 'succeed-root')).toBeUndefined();
     expect(store.move(run.id, 'cancel-root')).toBeUndefined();
     // Even if a human continuation has already parked again, the old diff is obsolete.
-    store.updateRun(run.id, { status: RUN_STATUS.waiting });
+    setRunStatus(store, run.id, RUN_STATUS.waiting);
     expect(store.move(run.id, 'succeed-root-review')).toBeUndefined();
     expect(store.getRun(run.id)?.status).toBe('waiting');
   });

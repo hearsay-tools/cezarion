@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -43,7 +44,7 @@ describe.runIf(process.platform === 'linux' && process.getuid?.() !== 0)('R43 or
     const adapter = HARNESS_ADAPTERS[runner];
     process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = adapter.mockBin;
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [{ id: 'task', kind: STEP_KIND.agent, name: 'Task' }] });
-    store.updateRun(parent.id, { status: RUN_STATUS.waiting, currentStepId: 'task', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+    setRunStatus(store, parent.id, RUN_STATUS.waiting, { currentStepId: 'task', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
     const priorTmpdir = process.env.TMPDIR, oldRoot = mkdtempSync('/tmp/cez-old-');
     temporaryRoots.push(oldRoot); setTmpRoot(oldRoot);
     const run = await worker(parent.id, adapter.scenarios.baseline!);

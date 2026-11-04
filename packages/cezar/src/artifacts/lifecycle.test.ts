@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -19,7 +20,7 @@ function fixture() {
 it('removes published bytes when ordinary task history is deleted', () => {
   const { root, store, run, directory } = fixture();
   writeFileSync(join(directory, 'snapshot'), 'saved');
-  store.updateRun(run.id, { status: RUN_STATUS.done });
+  setRunStatus(store, run.id, RUN_STATUS.done);
   expect(store.deleteRun(run.id)).toBe(true);
   store.flush();
   expect(existsSync(directory)).toBe(false);

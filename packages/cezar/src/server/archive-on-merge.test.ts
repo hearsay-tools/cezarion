@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
-import { seedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, seedRuns } from '../runs/run-store.testkit.ts';
 import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
 import { fetchMergedPullRequests } from './forge/github.ts';
 
@@ -39,7 +39,7 @@ it.each(['disable', 'restore', 'stop', 'continue'] as const)('invalidates late n
   f.lookup.mockImplementationOnce(async (_root: string, identities: ArchivePullRequestIdentity[]) => {
     if (action === 'disable') f.disable();
     if (action === 'restore') { f.store.setArchived(f.id, true); f.store.setArchived(f.id, false); }
-    if (action === 'continue') f.store.updateRun(f.id, { status: RUN_STATUS.running });
+    if (action === 'continue') setRunStatus(f.store, f.id, RUN_STATUS.running);
     if (action === 'stop') f.coordinator.stop();
     return identities.map(pr => ({ ...pr, mergedAt: '2026-01-02T00:00:00.000Z' }));
   });

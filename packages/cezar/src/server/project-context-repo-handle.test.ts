@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readPersistedText } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedText } from '../runs/run-store.testkit.ts';
 
 import { resolveForgeRoot } from './forge/index.ts';
 const discoverRepoHandle = vi.fn();
@@ -39,7 +39,7 @@ describe('project repository discovery lifetime', () => {
       // Context construction must finish while the first lookup is still pending.
       const old = await contexts.context('project');
       const task = old.store.createRun({ title: 'old title', workflow: 'w', task: 'research', steps: [] });
-      old.store.updateRun(task.id, { status: RUN_STATUS.done, referencedPullRequestUrl: foreignPr });
+      setRunStatus(old.store, task.id, RUN_STATUS.done, { referencedPullRequestUrl: foreignPr });
       if (dispose === 'dispose') contexts.dispose('project');
       else contexts.disposeAll();
 
@@ -48,7 +48,7 @@ describe('project repository discovery lifetime', () => {
       expect(current.store.getRun(task.id)?.referencedPullRequestUrl).toBeUndefined();
       current.store.updateRun(task.id, { title: 'updated by current context' });
       const added = current.store.createRun({ title: 'new task', workflow: 'w', task: 'new task', steps: [] });
-      current.store.updateRun(added.id, { status: RUN_STATUS.done });
+      setRunStatus(current.store, added.id, RUN_STATUS.done);
       current.store.flush();
       const beforeLateLookup = readPersistedText(current.dataDir);
 

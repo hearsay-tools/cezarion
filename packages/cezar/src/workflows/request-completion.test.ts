@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { runnerHook } from './run-fixture.testkit.ts';
 import { completionRefusal, type CompletionGateHost } from './run/completion-gate.ts';
 import { TrackedWork } from './run/tracked-work.ts';
@@ -26,7 +27,7 @@ function rootTask() {
   const run = store.createRun({ title: 'root', task: 'root', workflow: 'quick-task', workflowDef: QUICK_TASK_WORKFLOW,
     steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
   store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['wait'], receipts: [] } }]);
-  store.updateRun(run.id, { status: RUN_STATUS.waiting, currentStepId: 'task' });
+  setRunStatus(store, run.id, RUN_STATUS.waiting, { currentStepId: 'task' });
   return run;
 }
 function obligation(senderRunId: string, recipientRunId: string, kind: 'request' | 'progress' = 'request') {
@@ -86,7 +87,7 @@ describe('root request completion without a live session', () => {
     const sender = rootTask(); const recipient = rootTask();
     const request = obligation(sender.id, recipient.id);
     store.commitConversation(sender.id, { messages: [request], outcomes: [] });
-    store.updateRun(sender.id, { status });
+    setRunStatus(store, sender.id, status);
     expect(manager.finishBlockedReason(sender.id)).toBeUndefined();
     expect(manager.finish(sender.id)).toBe(true);
     await until(() => store.getRun(sender.id)?.status === 'done');
@@ -107,7 +108,7 @@ describe('root request completion without a live session', () => {
       if (id === sender.id && (recipientStatus === RUN_STATUS.done || recipientStatus === RUN_STATUS.review)) terminalPasses.push(id);
       return reconcile(id);
     });
-    store.updateRun(recipient.id, { status });
+    setRunStatus(store, recipient.id, status);
     expect(manager.finish(recipient.id)).toBe(true);
     await until(() => store.getRun(sender.id)?.lastWaits?.some(entry => entry.id === wait.id && entry.phase === WAIT_PHASE.delivered) === true);
     expect(store.getRun(recipient.id)?.status).toBe('done');
@@ -134,7 +135,7 @@ describe('root request completion without a live session', () => {
     const sender = rootTask(); const recipient = rootTask();
     const request = obligation(sender.id, recipient.id);
     store.commitConversation(sender.id, { messages: [request], outcomes: [] });
-    store.updateRun(sender.id, { status });
+    setRunStatus(store, sender.id, status);
     const delegation = store.getRun(sender.id)!.delegation;
     if (delegation?.role !== 'root') throw Error('missing root');
     store.commitDelegation([{ id: sender.id, delegation: { ...delegation, finishRequestedAt: new Date().toISOString() } }]);
@@ -160,7 +161,7 @@ describe('root request completion without a live session', () => {
   });
   it('recovery retires an old failed Finish intent without changing the failure', async () => {
     const run = rootTask();
-    store.updateRun(run.id, { status: RUN_STATUS.failed, error: 'provider failed' });
+    setRunStatus(store, run.id, RUN_STATUS.failed, { error: 'provider failed' });
     const delegation = store.getRun(run.id)!.delegation;
     if (delegation?.role !== 'root') throw Error('missing root');
     store.commitDelegation([{ id: run.id, delegation: { ...delegation, finishRequestedAt: new Date().toISOString() } }]);

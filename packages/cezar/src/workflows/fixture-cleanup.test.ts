@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { AgentSession } from '../core/agent-runner.ts';
 import type { RunManager } from './run.ts';
@@ -72,7 +73,7 @@ function barrier() {
 it.each(['ordinary', 'delegated root'] as const)('drains detached Finish settlement for an inactive %s run', async mode => {
   const { root, store, manager } = fixture();
   const run = store.createRun({ title: 'idle closed', task: 'hello', workflow: 'cleanup', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });
-  store.updateRun(run.id, { status: RUN_STATUS.waiting, currentStepId: 'work', worktreePath: root, baseBranch: 'main' });
+  setRunStatus(store, run.id, RUN_STATUS.waiting, { currentStepId: 'work', worktreePath: root, baseBranch: 'main' });
   store.updateStep(run.id, 'work', { status: STEP_STATUS.waiting });
   if (mode === 'delegated root') store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: [], receipts: [] } }]);
   const boundary = barrier();
@@ -134,7 +135,7 @@ it.each(['root', 'continuation'] as const)('keeps the repo until a real %s sessi
   if (mode === 'root') id = manager.startRun(workflow, { task: 'hello', worktree: false }).id;
   else {
     const record = store.createRun({ title: 'resume', task: 'hello', workflow: 'cleanup', runner: 'claude', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });
-    id = record.id; store.updateStep(id, 'work', { sessionId: 'prior-session', backend: 'claude' }); store.updateRun(id, { status: RUN_STATUS.done, worktree: false });
+    id = record.id; store.updateStep(id, 'work', { sessionId: 'prior-session', backend: 'claude' }); setRunStatus(store, id, RUN_STATUS.done, { worktree: false });
     expect(manager.continueRun(id, { text: 'hello' })).toEqual({ ok: true });
   }
   await vi.waitFor(() => expect(store.getRun(id)?.status).toBe('waiting'), { timeout: 10_000 });
@@ -260,7 +261,7 @@ const ownedOperations: Array<{ label: string; invoke(context: RunModuleContext, 
 it.each(ownedOperations)('records module-owned $label before returning', async ({ label, invoke }) => {
   const { root, store, manager } = fixture();
   const run = store.createRun({ title: 'ownership', task: 'hello', workflow: 'cleanup', steps: [] });
-  store.updateRun(run.id, { status: RUN_STATUS.waiting });
+  setRunStatus(store, run.id, RUN_STATUS.waiting);
   const work = fixtureWork(root);
   const promise = invoke(moduleContext(root, store, manager, work), run.id);
   try { expect([...work.pending.values()]).toContain(label); }
@@ -276,7 +277,7 @@ it('records a queued continuation at launch', async () => {
   const track = vi.spyOn(work, 'track');
   const run = store.createRun({ title: 'resume', task: 'hello', workflow: 'cleanup', runner: 'claude', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });
   store.updateStep(run.id, 'work', { sessionId: 'prior-session', backend: 'claude' });
-  store.updateRun(run.id, { status: RUN_STATUS.done, worktree: false });
+  setRunStatus(store, run.id, RUN_STATUS.done, { worktree: false });
   expect(manager.continueRun(run.id, { text: 'hello' }, true)).toEqual({ ok: true });
   expect(store.getRun(run.id)?.status).toBe('queued');
   try {

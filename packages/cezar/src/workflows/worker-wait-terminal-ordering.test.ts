@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { RunStore } from '../runs/store.ts';
 import { captureState, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, store, timeline, until, useWorkerWaitFixture, waitOf, workerEntryOf, worker } from './worker-wait.testkit.ts';
-import { blockRunWrites } from '../runs/run-store.testkit.ts';
+import { setRunStatus, blockRunWrites } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
@@ -39,13 +39,13 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     it(`parent ${status} clears wait and cancels unfinished children, preserving terminal artifacts`, async () => {
       const p = await parent(); const w = await worker(p.id); const done = await worker(p.id);
       fixtureUpdateRun(done.id, { status: RUN_STATUS.review }); register(p.id, [w.id]);
-      store.updateRun(p.id, { status });
+      setRunStatus(store, p.id, status);
       await until(() => store.getRun(w.id)?.status === 'cancelled');
       expect(waitOf(store.getRun(p.id))).toBeUndefined(); expect(store.getRun(done.id)?.status).toBe('review');
       expect(store.getRun(w.id)?.delegation?.role).toBe('worker');
       // Its session is still live, which a settled parent never has: back to running before
       // teardown stops it (hearsay-tools/cezarion#1804).
-      store.updateRun(p.id, { status: RUN_STATUS.running });
+      setRunStatus(store, p.id, RUN_STATUS.running);
     });
   }
   it('persists lifecycle continuation origin through a queued restart', async () => {

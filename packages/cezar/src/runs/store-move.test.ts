@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 import { takeRunExitViolations } from './run-exits.ts';
-import { blockRunWrites, readPersistedRuns } from './run-store.testkit.ts';
+import { setRunStatus, blockRunWrites, readPersistedRuns } from './run-store.testkit.ts';
 import { RunStore } from './store.ts';
 
 /**
@@ -122,7 +122,10 @@ describe('RunStore.move with a guarded exit', () => {
       { id: 'a', name: 'a', kind: STEP_KIND.agent }, { id: 'b', name: 'b', kind: STEP_KIND.agent }, { id: 'c', name: 'c', kind: STEP_KIND.agent }] }).id;
     const finishing = (patch: Parameters<RunStore['updateRun']>[1] = {}) => {
       const id = withSteps();
-      store.updateRun(id, { status: RUN_STATUS.waiting, delegation: ROOT, ...patch });
+      {
+        const { status: fixtureStatus, ...fixtureExtras }: NonNullable<Parameters<typeof setRunStatus>[3]> & { status: Parameters<typeof setRunStatus>[2] } = { status: RUN_STATUS.waiting, delegation: ROOT, ...patch };
+        setRunStatus(store, id, fixtureStatus, fixtureExtras);
+      }
       store.commitRootFinishIntent(id);
       return id;
     };
@@ -154,11 +157,11 @@ describe('RunStore.move with a guarded exit', () => {
   it('a failed root Finish guard writes nothing: not waiting, not a root, or no intent', () => {
     const { store, created, finishing } = guarded();
     const cancelled = finishing();
-    store.updateRun(cancelled, { status: RUN_STATUS.cancelled });
+    setRunStatus(store, cancelled, RUN_STATUS.cancelled);
     const plain = created();
-    store.updateRun(plain, { status: RUN_STATUS.waiting });
+    setRunStatus(store, plain, RUN_STATUS.waiting);
     const noIntent = created();
-    store.updateRun(noIntent, { status: RUN_STATUS.waiting, delegation: ROOT });
+    setRunStatus(store, noIntent, RUN_STATUS.waiting, { delegation: ROOT });
     for (const id of [cancelled, plain, noIntent]) {
       const before = structuredClone(store.getRun(id));
       expect(store.move(id, 'succeed-root')).toBeUndefined();
@@ -175,7 +178,7 @@ describe('RunStore.move with a guarded exit', () => {
     expect(committed(waiting)).toMatchObject({ status: RUN_STATUS.cancelled, finishedAt: expect.any(String) });
     expect(committed(waiting).delegation).not.toHaveProperty('finishRequestedAt');
     const repaired = finishing();
-    store.updateRun(repaired, { status: RUN_STATUS.cancelled, finishedAt: EARLIER });
+    setRunStatus(store, repaired, RUN_STATUS.cancelled, { finishedAt: EARLIER });
     expect(store.move(repaired, 'cancel-root')).toBeDefined();
     expect(committed(repaired)).toMatchObject({ status: RUN_STATUS.cancelled, finishedAt: EARLIER });
     expect(committed(repaired).delegation).not.toHaveProperty('finishRequestedAt');
@@ -194,7 +197,7 @@ describe('RunStore.move with a guarded exit', () => {
   it('withdraw-hold settles a usage-limit hold failed at once, and commitAutoResumeWithdrawal leaves any other run\'s status', () => {
     const { store, created, committed } = guarded();
     const held = created();
-    store.updateRun(held, { status: RUN_STATUS.waiting, autoResumeAt: HOLD_AT, autoResumeAttempts: 2, finishedAt: EARLIER });
+    setRunStatus(store, held, RUN_STATUS.waiting, { autoResumeAt: HOLD_AT, autoResumeAttempts: 2, finishedAt: EARLIER });
     store.flush();
     store.commitAutoResumeWithdrawal(held);
     expect(committed(held)).toMatchObject({ status: RUN_STATUS.failed });
@@ -202,7 +205,7 @@ describe('RunStore.move with a guarded exit', () => {
     expect(committed(held).finishedAt).toBe(EARLIER);
     for (const key of ['autoResumeAt', 'autoResumeAttempts']) expect(committed(held)).not.toHaveProperty(key);
     const attemptsOnly = created();
-    store.updateRun(attemptsOnly, { status: RUN_STATUS.waiting, autoResumeAttempts: 2 });
+    setRunStatus(store, attemptsOnly, RUN_STATUS.waiting, { autoResumeAttempts: 2 });
     store.flush();
     store.commitAutoResumeWithdrawal(attemptsOnly);
     expect(committed(attemptsOnly)).toMatchObject({ status: RUN_STATUS.waiting });
@@ -214,7 +217,7 @@ describe('RunStore.move with a guarded exit', () => {
   it('park-release commits waiting, clears activity and parks the named step; a refused write throws with nothing changed', () => {
     const { dir, store, withSteps, withActivity, committed } = guarded();
     const id = withSteps();
-    store.updateRun(id, { status: RUN_STATUS.running });
+    setRunStatus(store, id, RUN_STATUS.running);
     withActivity(id);
     store.updateStep(id, 'b', { status: STEP_STATUS.running });
     store.flush();

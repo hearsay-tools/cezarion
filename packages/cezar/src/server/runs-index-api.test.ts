@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { runsIndexResponseSchema, runsSearchResponseSchema, type RunsIndexResponse } from '@open-mercato/cezar-contract/runs';
-import { readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
 import { resolveForgeRoot } from './forge/index.ts';
 const resolveRepoHandle = vi.fn();
 const cachedRefStatuses = vi.fn(() => ({ prs: {}, issues: {} }));
@@ -373,7 +373,7 @@ describe('workspace runs index API', () => {
     const workerId = '10000000-0000-4000-8000-000000000002';
     const live = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
     const wait = { id: workerId, workerIds: [workerId], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked' as const, outcomes: [] };
-    store.updateRun(live.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: [], receipts: [], wait } });
+    setRunStatus(store, live.id, RUN_STATUS.waiting, { delegation: { role: 'root', permissions: [], receipts: [], wait } });
     seedColdProject(otherRoot, [storedRun({ id: workerId, title: 'Worker', delegation: { role: 'worker', permissions: [], parentRunId: live.id, wait: { ...wait, workerIds: [], requestIds: [workerId] }, workspace: { kind: 'owned-isolated', ownerRunId: workerId, resourceId: workerId, path: '/managed/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) } } }), storedRun({ id: 'ordinary', title: 'Ordinary' })]);
     const body = await getIndex();
     expect(body.runs.find(run => run.id === live.id)).toHaveProperty('delegation', { role: 'root', wait: { phase: 'parked', workerIds: [workerId], outcomes: [] } });
@@ -395,7 +395,7 @@ describe('workspace runs index API', () => {
     const live = store.createRun({ title: 'Hot question', workflow: 'quick-task', task: 'task', steps: [] });
     const delegation = { role: 'root' as const, permissions: [], receipts: [], wait: { id: live.id, workerIds: [live.id], deadline: '2026-09-09T00:00:00.000Z', phase: 'parked' as const, outcomes: [] } };
     const question = { type: 'ask.requested', requestId: 'question', questions: [{ header: 'Choice', question: 'Which option?', options: [{ label: 'First' }, { label: 'Second' }] }] };
-    store.updateRun(live.id, { status: RUN_STATUS.waiting, delegation });
+    setRunStatus(store, live.id, RUN_STATUS.waiting, { delegation });
     store.appendEvent(live.id, question);
     // Every ask opens a human wait (phase 2); a cold row an older cezar stored keeps the summary,
     // which the read upgrades into one (phase 4b, hearsay-tools/cezarion#1236).

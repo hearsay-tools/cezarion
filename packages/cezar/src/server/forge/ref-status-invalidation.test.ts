@@ -1,3 +1,4 @@
+import { setRunStatus } from '../../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -137,7 +138,7 @@ describe('a reference cezar changes itself is forgotten, not waited out', () => 
     execFileSync('git', ['config', 'user.name', 'Test'], { cwd: worktree });
     execFileSync('git', ['commit', '--allow-empty', '-m', 'work'], { cwd: worktree });
     const run = store.createRun({ title: 'Ship it', task: 'ship it', workflow: 'quick-task', steps: [] });
-    store.updateRun(run.id, { status: RUN_STATUS.review, worktreePath: worktree, branch: 'cez/abc' });
+    setRunStatus(store, run.id, RUN_STATUS.review, { worktreePath: worktree, branch: 'cez/abc' });
 
     const created = await apiRequest(app, `/api/v1/runs/${run.id}/pr`, {
       method: 'POST',

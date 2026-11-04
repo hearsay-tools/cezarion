@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentSession, AgentEvent, AgentRunResult } from '../core/agent-runner.ts';
 import { RunStore } from '../runs/store.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { AUTONOMOUS_NUDGE, COMPLETION_NO_REPLY_NOTE, NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE, IDLE_TIMEOUT_MS } from './run.ts';
@@ -84,7 +84,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     root = mkdtempSync(join(tmpdir(), 'cez-autonomous-guards-'));
     store = RunStore.open(join(root, '.ai/cezar'));
     id = store.createRun({ title: 'guard', task: 'work', workflow: 'quick-task', autonomous: true, steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] }).id;
-    store.updateRun(id, { status: RUN_STATUS.running });
+    setRunStatus(store, id, RUN_STATUS.running);
     // Worker startup belongs to fixture setup, before policy tests replace timers.
     await store.factsWarmIdle();
     disposed = false; active.clear();

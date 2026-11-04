@@ -1,4 +1,4 @@
-import { crashStore } from '../runs/run-store.testkit.ts';
+import { setRunStatus, crashStore } from '../runs/run-store.testkit.ts';
 import { runnerHook, run, GIT_ID, waitForProduct, TURN_TEXT, setupMonitoringFixture, FINISHED_RUN_STATUSES } from './run-fixture.testkit.ts';
 import { handleRunnerUiEvent, makeUiSink } from './run/session-events.ts';
 import { beginUsageInvocation } from './run/usage-accounting.ts';
@@ -522,7 +522,7 @@ describe('RunManager.continueRun override', () => {
       model: 'sonnet',
       steps: [{ id: 's1', name: 'Work', kind: STEP_KIND.agent }],
     });
-    store.updateRun(record.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
+    setRunStatus(store, record.id, RUN_STATUS.done, { finishedAt: new Date().toISOString() });
     store.updateStep(record.id, 's1', { sessionId: 'sess-1' });
     return record.id;
   }
@@ -613,7 +613,7 @@ describe('RunManager.continueRun override', () => {
     // The stub bypasses startup teardown; simulate its completed lifecycle before
     // accepting a second Continue (terminal status alone never proves termination).
     runInternals(manager).line.starting.delete(id);
-    store.updateRun(id, { status: RUN_STATUS.done });
+    setRunStatus(store, id, RUN_STATUS.done);
 
     expect(manager.continueRun(id, { effort: 'xhigh' })).toEqual({ ok: true });
     expect(store.getRun(id)?.effort).toBe('xhigh');
@@ -683,7 +683,7 @@ describe('RunManager.continueRun override', () => {
       model: 'my-org/custom-tune',
       steps: [{ id: 's1', name: 'Work', kind: STEP_KIND.agent }],
     });
-    store.updateRun(record.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
+    setRunStatus(store, record.id, RUN_STATUS.done, { finishedAt: new Date().toISOString() });
     store.updateStep(record.id, 's1', { sessionId: 'sess-1' });
     expect(manager.continueRun(record.id, { runner: 'codex' })).toEqual({ ok: true });
     expect(store.getRun(record.id)?.model).toBe('my-org/custom-tune');
@@ -697,7 +697,7 @@ describe('RunManager.continueRun override', () => {
 
   it('guards legacy records too — no persisted runner resolves to claude, like runContinuation', () => {
     const record = store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [{ id: 's1', name: 'Work', kind: STEP_KIND.agent }] });
-    store.updateRun(record.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
+    setRunStatus(store, record.id, RUN_STATUS.done, { finishedAt: new Date().toISOString() });
     store.updateStep(record.id, 's1', { sessionId: 'sess-1' });
     const result = manager.continueRun(record.id, { model: 'gpt-5.1-codex' });
     expect(result.ok).toBe(false);
@@ -788,7 +788,7 @@ describe('RunManager.continueRun override', () => {
 
   it('refuses to continue a run with no resumable session (no override persisted)', () => {
     const record = store.createRun({ title: 't', workflow: 'quick-task', task: 't', runner: 'claude', steps: [] });
-    store.updateRun(record.id, { status: RUN_STATUS.done });
+    setRunStatus(store, record.id, RUN_STATUS.done);
     const result = manager.continueRun(record.id, { runner: 'codex' });
     expect(result.ok).toBe(false);
     expect(store.getRun(record.id)?.runner).toBe('claude');
@@ -836,7 +836,7 @@ describe('RunSettlement.settleSuccess — optional review gate', () => {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'task', autonomous, steps: [] });
     const wt = await createWorktree(repoRoot, record.id, 'main');
     // settleSuccess runs at a live turn's end, never on a queued run (hearsay-tools/cezarion#1804).
-    store.updateRun(record.id, { status: RUN_STATUS.running, worktreePath: wt.path, branch: wt.branch, baseBranch: wt.baseBranch });
+    setRunStatus(store, record.id, RUN_STATUS.running, { worktreePath: wt.path, branch: wt.branch, baseBranch: wt.baseBranch });
     writeFileSync(join(wt.path, 'a.txt'), 'one\nTWO\nthree\n');
     writeFileSync(join(wt.path, 'new.txt'), 'x\n');
     return store.getRun(record.id) as RunRecord;
@@ -846,7 +846,7 @@ describe('RunSettlement.settleSuccess — optional review gate', () => {
   async function cleanRun(): Promise<RunRecord> {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     const wt = await createWorktree(repoRoot, record.id, 'main');
-    store.updateRun(record.id, { status: RUN_STATUS.running, worktreePath: wt.path, branch: wt.branch, baseBranch: wt.baseBranch });
+    setRunStatus(store, record.id, RUN_STATUS.running, { worktreePath: wt.path, branch: wt.branch, baseBranch: wt.baseBranch });
     return store.getRun(record.id) as RunRecord;
   }
 
@@ -1413,7 +1413,7 @@ describe('RunManager check retry recovery', () => {
     fixture.currentId = record.id;
     fixture.store.updateStep(record.id, 'task', { status: STEP_STATUS.done, iterations: 1 });
     fixture.store.updateStep(record.id, 'verify', { status: STEP_STATUS.failed, iterations: 1, retriesUsed: 1 });
-    fixture.store.updateRun(record.id, { status: RUN_STATUS.queued, workflowDef: workflow });
+    setRunStatus(fixture.store, record.id, RUN_STATUS.queued, { workflowDef: workflow });
 
     await (fixture.manager as unknown as {
       execute(id: string, workflow: WorkflowDef, input: { task: string; worktree: boolean }, startAt: number): Promise<void>;
@@ -1444,7 +1444,7 @@ describe('RunManager check retry recovery', () => {
     fixture.currentId = record.id;
     fixture.store.updateStep(record.id, 'task', { status: STEP_STATUS.done, iterations: 1 });
     fixture.store.updateStep(record.id, 'gate', { status: STEP_STATUS.done, iterations: 1 });
-    fixture.store.updateRun(record.id, { status: RUN_STATUS.queued, workflowDef: workflow });
+    setRunStatus(fixture.store, record.id, RUN_STATUS.queued, { workflowDef: workflow });
 
     const flushes: RunRecord[] = [];
     const originalFlush = fixture.store.flush.bind(fixture.store);
@@ -1488,7 +1488,7 @@ describe('RunManager check retry recovery', () => {
     fixture.store.addStep(record.id, { id: 'verify', name: 'Verify', kind: STEP_KIND.check });
     fixture.store.updateStep(record.id, 'verify', { status: STEP_STATUS.failed, iterations: 1 });
     fixture.store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.check });
-    fixture.store.updateRun(record.id, { status: RUN_STATUS.failed, currentStepId: undefined, workflowDef: workflow });
+    setRunStatus(fixture.store, record.id, RUN_STATUS.failed, { currentStepId: undefined, workflowDef: workflow });
 
     expect(fixture.manager.continueRun(record.id, { text: 'mock:cezar-done inspect failure' })).toEqual({ ok: true });
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
@@ -1517,7 +1517,7 @@ describe('RunManager check retry recovery', () => {
     fixture.store.addStep(record.id, { id: 'verify', name: 'Verify', kind: STEP_KIND.check });
     fixture.store.updateStep(record.id, 'verify', { status: STEP_STATUS.running, iterations: 1 });
     fixture.store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.check });
-    fixture.store.updateRun(record.id, { status: RUN_STATUS.running, currentStepId: 'verify', workflowDef: workflow });
+    setRunStatus(fixture.store, record.id, RUN_STATUS.running, { currentStepId: 'verify', workflowDef: workflow });
     fixture.store.flush();
 
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);
@@ -1797,7 +1797,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
       task: 'original recovery goal',
       steps: [],
     });
-    store.updateRun(r.id, { status: RUN_STATUS.queued });
+    setRunStatus(store, r.id, RUN_STATUS.queued);
 
     const internals = manager as unknown as {
       runContinuation(
@@ -2309,13 +2309,9 @@ describe('recover() carries the queued stack exactly once (#472)', () => {
 
   it('folds once across repeated recoveries', async () => {
     const r = store.createRun({ title: 't', workflow: '(planned)', task: 'the original task', steps: [] });
-    store.updateRun(r.id, {
-      status: RUN_STATUS.queued,
-      workflowDef: WORKFLOW,
-      queuedMessages: [
+    setRunStatus(store, r.id, RUN_STATUS.queued, { workflowDef: WORKFLOW, queuedMessages: [
         { id: 'm1', text: 'the stacked bit', createdAt: '2026-07-21T10:00:00.000Z' },
-      ],
-    });
+      ] });
 
     const expected = 'the original task\n\nthe stacked bit';
     const jobsOf = (m: RunManager) =>

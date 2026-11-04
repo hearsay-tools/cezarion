@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { workerCollectedResultSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
@@ -35,7 +36,7 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (hear
     const adapter = HARNESS_ADAPTERS[runner];
     process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [{ id: 'task', kind: STEP_KIND.agent, name: 'Task' }] });
-    store.updateRun(p.id, { status: RUN_STATUS.waiting, currentStepId: 'task', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+    setRunStatus(store, p.id, RUN_STATUS.waiting, { currentStepId: 'task', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
     const orphan = await worker(p.id, adapter.scenarios.baseline!);
     store.updateRun(orphan.id, { runner }); manager.enqueueOwnedRun(orphan.id);
     await until(() => store.getRun(orphan.id)?.status === 'waiting');
@@ -147,7 +148,7 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (hear
     const adapter = HARNESS_ADAPTERS[runner];
     process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [{ id: 'task', kind: STEP_KIND.agent, name: 'Task' }] });
-    store.updateRun(p.id, { status: RUN_STATUS.waiting, currentStepId: 'task', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+    setRunStatus(store, p.id, RUN_STATUS.waiting, { currentStepId: 'task', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
     const w = await worker(p.id, adapter.scenarios.baseline!);
     store.updateRun(w.id, { runner }); manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'waiting');

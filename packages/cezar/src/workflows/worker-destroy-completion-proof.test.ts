@@ -13,7 +13,7 @@ import * as runners from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
 
-import { blockRunWrites } from '../runs/run-store.testkit.ts';
+import { setRunStatus, blockRunWrites } from '../runs/run-store.testkit.ts';
 
 import { HANG_GUARD_MS, until, gate, root, store, manager, releases, worker, workspace, useWorkerDestroyFixture } from "./worker-destroy.testkit.ts";
 
@@ -93,7 +93,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it('private completion does not publish when final index persistence fails', async () => {
     const w = await worker(); const generation = store.commitWorkerExecutionStart(w.id);
-    store.updateRun(w.id, { status: RUN_STATUS.done }); store.flush();
+    setRunStatus(store, w.id, RUN_STATUS.done); store.flush();
     const release = blockRunWrites(join(root, '.ai/cezar'));
     releases.push(release);
     expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(false);

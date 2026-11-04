@@ -6,7 +6,7 @@ import {
   WAIT_SOURCE,
   WAIT_VIA,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runPersistence } from '../runs/run-store.testkit.ts';
+import { setRunStatus, runPersistence } from '../runs/run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -78,7 +78,7 @@ describe('durable conversations', () => {
   });
   async function worker() {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
-    f.store.updateRun(workerId, { status: RUN_STATUS.running });
+    setRunStatus(f.store, workerId, RUN_STATUS.running);
     return { id: workerId, caller: f.credentials.authenticate(f.credentials.issue('project', workerId, randomUUID()))! };
   }
   it('reserves incoming messages across workers, preserves outcomes and acknowledges exact IDs', async () => {
@@ -150,7 +150,7 @@ describe('durable conversations', () => {
     await f.manager.awaitRunTermination(w.id, 5_000);
     f.store.updateStep(w.id, 'task', { status: STEP_STATUS.done, sessionId: 'previous-session', backend: 'claude' });
     const generation = f.store.commitWorkerExecutionStart(w.id);
-    f.store.updateRun(w.id, { status });
+    setRunStatus(f.store, w.id, status);
     f.store.commitWorkerExecutionComplete(w.id, generation);
     return w;
   }
@@ -189,7 +189,7 @@ describe('durable conversations', () => {
   });
   it.each(['queued', 'running', 'waiting'] as const)('refuses an extended --resume deadline for a %s worker without accepting input', async status => {
     const w = await worker();
-    f.store.updateRun(w.id, { status });
+    setRunStatus(f.store, w.id, status);
     await expect(f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'request',
       text: 'Review', resume: true, timeoutSeconds: 86400 })).rejects.toMatchObject({ code: 'incompatible_state' });
     expect(f.store.getRun(w.id)?.agentInputs ?? []).toEqual([]);
@@ -211,7 +211,7 @@ describe('durable conversations', () => {
         kind: 'request', text: 'Fix the review findings', resume: true, timeoutSeconds: 3600 });
       expect(sent.message.deadline).toBe('2026-10-18T11:00:00.000Z');
       expect(await f.service.send(f.caller, { id: sent.message.id, recipientRunId: w.id, kind: 'request', text: 'Fix the review findings', resume: true, timeoutSeconds: 3600 })).toEqual(sent);
-      f.store.updateRun(w.id, { status: RUN_STATUS.running });
+      setRunStatus(f.store, w.id, RUN_STATUS.running);
       vi.setSystemTime(new Date('2026-10-18T10:45:00.000Z'));
       expect((await f.service.conversation(f.caller, { recipientRunId: w.id })).outcomes).toEqual([]);
       const reply = await f.service.reply(w.caller, { id: randomUUID(), recipientRunId: f.parent.id,
@@ -275,7 +275,7 @@ describe('durable conversations', () => {
   });
   it('uses the new instruction when explicitly resuming a failed continuation', async () => {
     const w = await completedWorker();
-    f.store.updateRun(w.id, { status: RUN_STATUS.failed, continuationMessage: { id: 'old', text: 'Old failed prompt', origin: 'lifecycle', createdAt: new Date().toISOString() } });
+    setRunStatus(f.store, w.id, RUN_STATUS.failed, { continuationMessage: { id: 'old', text: 'Old failed prompt', origin: 'lifecycle', createdAt: new Date().toISOString() } });
     await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Correct the failed task', timeoutSeconds: 600, resume: true });
     expect(f.store.getRun(w.id)?.continuationMessage?.text).toContain('Correct the failed task');
   });
@@ -291,7 +291,7 @@ describe('durable conversations', () => {
     const w = await completedWorker();
     f.store.appendEvent(w.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{ header: 'Approval', question: 'May I proceed?', options: [{ label: 'Yes' }, { label: 'No' }] }] });
     await expect(f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Work', timeoutSeconds: 600, resume: true })).rejects.toThrow(/human question/);
-    f.store.updateRun(w.id, { status: RUN_STATUS.running });
+    setRunStatus(f.store, w.id, RUN_STATUS.running);
     await expect(f.service.send(w.caller, { id: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'Work', timeoutSeconds: 600, resume: true })).rejects.toMatchObject({ code: 'denied_scope' });
   });
   it('atomically accepts one obligation and input across concurrent retries and restart', async () => {
@@ -323,7 +323,7 @@ describe('durable conversations', () => {
     expect(f.store.getRun(b.id)?.agentInputs ?? []).toEqual([]);
   });
   it('records rejected terminal delivery without creating an obligation', async () => {
-    const w = await worker(); f.store.updateRun(w.id, { status: RUN_STATUS.review });
+    const w = await worker(); setRunStatus(f.store, w.id, RUN_STATUS.review);
     const sent = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'request', text: 'question', timeoutSeconds: 600 });
     expect(sent).toMatchObject({ delivery: 'not-delivered', message: { state: 'continuation-required' } });
     expect(f.store.getRun(w.id)?.agentInputs ?? []).toEqual([]);
@@ -350,10 +350,10 @@ describe('durable conversations', () => {
     await expect(f.service.stop(w.caller, { workerId: w.id })).rejects.toMatchObject({ code: 'denied_scope' });
   });
   it('keeps rejected receipts rejected after Continue and replays event projections without extra inputs', async () => {
-    const w = await worker(); f.store.updateRun(w.id, { status: RUN_STATUS.review });
+    const w = await worker(); setRunStatus(f.store, w.id, RUN_STATUS.review);
     const request = { id: randomUUID(), recipientRunId: w.id, kind: 'request' as const, text: 'question', timeoutSeconds: 600 };
     const first = await f.service.send(f.caller, request);
-    f.store.updateRun(w.id, { status: RUN_STATUS.running });
+    setRunStatus(f.store, w.id, RUN_STATUS.running);
     expect(await f.service.send(f.caller, request)).toEqual(first);
     expect(f.store.getRun(w.id)?.agentInputs ?? []).toEqual([]);
     expect(f.store.readEvents(w.id).filter(event => event.type === 'conversation-message')).toHaveLength(1);
@@ -375,7 +375,7 @@ describe('durable conversations', () => {
     if (parent.delegation?.role !== 'root') throw Error('fixture');
     // Hold lifecycle cancellation at its boundary to exercise a still-active worker reply.
     const cancel = vi.spyOn(f.manager, 'cancel').mockReturnValue(true);
-    f.store.updateRun(parent.id, { status: RUN_STATUS.done, delegation: { ...parent.delegation, finishRequestedAt: new Date().toISOString() } });
+    setRunStatus(f.store, parent.id, RUN_STATUS.done, { delegation: { ...parent.delegation, finishRequestedAt: new Date().toISOString() } });
     const reply = await f.service.reply(w.caller, { id: randomUUID(), recipientRunId: parent.id, kind: 'reply', requestId: sent.message.id, text: 'answer', timeoutSeconds: 600 });
     expect(reply).toMatchObject({ message: { state: 'late' }, delivery: 'not-delivered', outcome: { status: 'sender-closed' } });
     expect(f.store.getRun(parent.id)?.agentInputs ?? []).toEqual([]);

@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -72,7 +73,7 @@ describe('provider action gating', () => {
       // A persisted active backend belongs to a live run. Keeping the record queued would
       // model the prompt-authoring window, where provider availability deliberately does not
       // gate mutations of the existing task.
-      store.updateRun(run.id, { status: RUN_STATUS.running, currentStepId: 'task' });
+      setRunStatus(store, run.id, RUN_STATUS.running, { currentStepId: 'task' });
       store.updateStep(run.id, 'task', { backend, status: STEP_STATUS.running });
     }
     return run;
@@ -215,7 +216,7 @@ describe('provider action gating', () => {
       workflowDef: { name: 'original', source: 'built-in', steps },
       steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
     });
-    store.updateRun(run.id, { status: RUN_STATUS.cancelled });
+    setRunStatus(store, run.id, RUN_STATUS.cancelled);
     const response = await apiRequest(app, `/api/v1/runs/${run.id}/continue`, { method: 'POST' });
     await expectDisabled(response);
     expect(continueRun).not.toHaveBeenCalled();
@@ -230,7 +231,7 @@ describe('provider action gating', () => {
       workflowDef: { name: 'original', source: 'built-in', steps: [{ id: 'task', prompt: '{{task}}', ...(source === 'step' ? { runner: 'codex' as const } : {}) }] },
       steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
     });
-    store.updateRun(run.id, { status: RUN_STATUS.cancelled });
+    setRunStatus(store, run.id, RUN_STATUS.cancelled);
     const response = await apiRequest(app, `/api/v1/runs/${run.id}/continue`, { method: 'POST' });
     expect(response.status).toBe(200);
     expect(continueRun).toHaveBeenCalledOnce();
@@ -248,7 +249,7 @@ describe('provider action gating', () => {
         workflowDef: { name: 'original', source: 'built-in', steps: [{ id: 'task', prompt: '{{task}}' }] },
         steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
       });
-      store.updateRun(run.id, { status: RUN_STATUS.cancelled });
+      setRunStatus(store, run.id, RUN_STATUS.cancelled);
       const response = await apiRequest(app, `/api/v1/runs/${run.id}/continue`, { method: 'POST',
         headers: { 'content-type': 'application/json' }, body: JSON.stringify(switchProvider ? { runner: 'claude' } : {}),
       });

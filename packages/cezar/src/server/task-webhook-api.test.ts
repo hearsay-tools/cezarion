@@ -15,7 +15,7 @@ import { TaskWebhooks } from '../runs/webhook.ts';
 import { taskWebhooks } from '../workspace/webhooks.ts';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
-import { seedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, seedRuns } from '../runs/run-store.testkit.ts';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
 const HANG_GUARD_MS = 15_000;
@@ -220,7 +220,7 @@ describe('task webhook API', () => {
     it('turns notify off in any state and records it', async () => {
       await setWebhook({ url: 'https://bot.example/hook', token: 't' });
       const { id } = run();
-      store.updateRun(id, { status: RUN_STATUS.done, notify: true });
+      setRunStatus(store, id, RUN_STATUS.done, { notify: true });
       const res = await send(`/api/v1/runs/${id}/notify`, 'POST', { notify: false });
       expect(res.status).toBe(200);
       expect(store.getRun(id)?.notify).toBeUndefined();

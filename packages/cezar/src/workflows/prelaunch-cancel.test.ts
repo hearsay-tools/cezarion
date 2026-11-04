@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { mkdtempSync } from 'node:fs';
@@ -67,7 +68,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
       steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
     });
     p.store.updateStep(prior.id, 'task', { status: STEP_STATUS.done, sessionId: 'prior-session', backend: 'claude' });
-    p.store.updateRun(prior.id, { status: RUN_STATUS.done, workflowDef: workflow });
+    setRunStatus(p.store, prior.id, RUN_STATUS.done, { workflowDef: workflow });
     expect(p.manager.continueRun(prior.id)).toEqual({ ok: true });
     return prior.id;
   }
@@ -197,7 +198,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     // Old setup must neither drop this state nor overwrite its durable status.
     const replacement = { ...previous, cancelled: false, revokeCiTools, revokeDelegation };
     active.set(id, replacement);
-    p.store.updateRun(id, { status: RUN_STATUS.waiting, stopping: undefined });
+    setRunStatus(p.store, id, RUN_STATUS.waiting, { stopping: undefined });
     releaseSetup();
     const completion = execution.mock.results[0]!.value;
     try {

@@ -26,7 +26,7 @@ import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
 import { expectNoWaitNudgeKinds } from './turn-end.testkit.ts';
 import { watchTurnOutcomes, type TurnOutcomes } from './turn-outcomes.testkit.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
-import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
+import { setRunStatus, blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { recordCommits } from '../runs/outcome-crash.testkit.ts';
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 import { withHeldAck, withRejectedInput } from '../core/owned-input-delivery.testkit.ts';
@@ -995,16 +995,16 @@ function inputCells(runners: RunnerId[], it: typeof registerTest = registerTest)
         // window (hearsay-tools/cezarion#1236).
         const { agentProfile } = store.getRun(parked.id)!;
         const holder = store.createRun({ title: 'held', workflow: 'quick-task', task: 'held', steps: [] });
-        store.updateRun(holder.id, hold === 'deadline'
-          ? { status: RUN_STATUS.waiting, runner, agentProfile, autoResumeAt: new Date(Date.now() + 600_000).toISOString() }
-          : { status: RUN_STATUS.running, runner, agentProfile, autoResumeAttempts: 1 });
+        setRunStatus(store, holder.id, hold === 'deadline' ? RUN_STATUS.waiting : RUN_STATUS.running, hold === 'deadline'
+          ? { runner, agentProfile, autoResumeAt: new Date(Date.now() + 600_000).toISOString() }
+          : { runner, agentProfile, autoResumeAttempts: 1 });
         expect([...manager.accountHolds()[hold === 'deadline' ? 'deadline' : 'inFlight']]).toContain(`${runner}:${agentProfile ?? 'default'}`);
         external.settle();
         // The result waits in the line, undelivered, while the account is held.
         await until(() => store.getRun(parked.id)?.waits?.find(entry => entry.id === wait.id)?.phase === 'resolved' && runInternals(manager).line.queue.includes(parked.id));
         expect(settled(parked.id, wait.id)).toBeUndefined();
         if (hold === 'deadline') manager.cancelAutoResume(holder.id);
-        else { store.updateRun(holder.id, { status: RUN_STATUS.failed, autoResumeAttempts: undefined }); manager.cancelAutoResume(holder.id); }
+        else { setRunStatus(store, holder.id, RUN_STATUS.failed, { autoResumeAttempts: undefined }); manager.cancelAutoResume(holder.id); }
         await until(() => settled(parked.id, wait.id)?.phase === 'delivered');
         await until(() => store.getRun(parked.id)?.status === 'waiting' && !agentWaits(parked.id).length);
       });
@@ -2193,7 +2193,7 @@ function conversationsCells(runners: RunnerId[], it: typeof registerTest = regis
      *  whose authenticated caller sends to `to` through the conversing parent's service. */
     function peerOf(f: Awaited<ReturnType<typeof conversingParent>>, to: string) {
       const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
-      store.updateRun(peer.id, { status: RUN_STATUS.running, delegation: { role: 'root', permissions: ['spawn', 'wait', 'steer', 'inspect'], receipts: [] } });
+      setRunStatus(store, peer.id, RUN_STATUS.running, { delegation: { role: 'root', permissions: ['spawn', 'wait', 'steer', 'inspect'], receipts: [] } });
       const progress = async (text: string) => {
         const id = randomUUID();
         await f.service.send(f.callerFor(peer.id), { id, recipientRunId: to, kind: 'progress', text, timeoutSeconds: 600 });

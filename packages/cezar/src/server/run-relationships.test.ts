@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -13,7 +14,7 @@ it('reads all owned workers including archived records through each human projec
   for (let i = 0; i < 32; i++) workers.push(await f.service.spawn(f.caller, { task: `worker ${i}`, baseline: 'HEAD', requestId: randomUUID() }));
   const owned = f.store.getRun(workers[0]!.workerId)!.delegation;
   if (owned?.role !== 'worker') throw new Error('missing worker fixture');
-  f.store.updateRun(workers[0]!.workerId, { archived: true, status: RUN_STATUS.cancelled, delegation: { ...owned, destroy: { requestedAt: '2026-09-06T00:00:00.000Z', phase: 'incomplete', remaining: ['branch'], error: 'Branch checked out' } } });
+  setRunStatus(f.store, workers[0]!.workerId, RUN_STATUS.cancelled, { archived: true, delegation: { ...owned, destroy: { requestedAt: '2026-09-06T00:00:00.000Z', phase: 'incomplete', remaining: ['branch'], error: 'Branch checked out' } } });
   vi.stubEnv('CEZ_DELEGATION', '0');
   const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
   let expected: unknown;
@@ -50,7 +51,7 @@ it('retains parent identity without a parent record and distinguishes unknown ru
 it('serves a parent\'s workers off its receipts without walking the run index', async () => {
   const spawned = await f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
   const unrelated = f.store.createRun({ title: 'unrelated', task: 'unrelated', workflow: 'quick-task', steps: [] });
-  f.store.updateRun(unrelated.id, { archived: true, status: RUN_STATUS.done });
+  setRunStatus(f.store, unrelated.id, RUN_STATUS.done, { archived: true });
   const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
   const scan = vi.spyOn(f.store, 'listRuns');
   const read = (id: string) => app.request(`http://127.0.0.1/api/v1/runs/${id}/relationships`, { headers: { host: '127.0.0.1' } });
@@ -86,7 +87,7 @@ it('lists all 33 owned workers and the parent capacity after a verified destroy 
 // names its own runs — the parent's title for a worker, each worker's for a parent.
 it('carries the titles of the parent and of every worker, archived ones included', async () => {
   const { workerId } = await f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
-  f.store.updateRun(workerId, { title: 'Child task', titleSummary: 'Fix the child', archived: true, status: RUN_STATUS.done });
+  setRunStatus(f.store, workerId, RUN_STATUS.done, { title: 'Child task', titleSummary: 'Fix the child', archived: true });
   f.store.updateRun(f.parent.id, { title: 'Parent task' });
   const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
   const read = async (id: string) => runRelationshipsSchema.parse(await (await app.request(`http://127.0.0.1/api/v1/runs/${id}/relationships`, { headers: { host: '127.0.0.1' } })).json());

@@ -5,7 +5,7 @@ import {
   WAIT_SOURCE,
   WAIT_VIA,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { openTestRunStore } from '../runs/run-store.testkit.ts';
+import { setRunStatus, openTestRunStore } from '../runs/run-store.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { defaultWorkspaceConfig } from '../workspace/config.ts';
 import { createFixtureManager, drainFixtureManagers, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
@@ -114,7 +114,7 @@ export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha
   const manager = createFixtureManager(store, root, { semaphore });
   const admissionReads = vi.spyOn(semaphore, 'maxParallel');
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', runner: 'claude', model: 'opus', effort: 'high', steps: [] });
-  store.updateRun(parent.id, { status: RUN_STATUS.running, worktreePath: root, delegation: { role: 'root', permissions: ['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'wait'], receipts: [] } });
+  setRunStatus(store, parent.id, RUN_STATUS.running, { worktreePath: root, delegation: { role: 'root', permissions: ['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'wait'], receipts: [] } });
   const credentials = new CredentialRegistry();
   const token = credentials.issue('project', parent.id, randomUUID());
   const caller = credentials.authenticate(token)!;

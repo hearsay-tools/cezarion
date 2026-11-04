@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -244,7 +245,7 @@ describe('request validation bounds (#429)', () => {
     async (path) => {
       const mk = (pinned: boolean) => {
         const run = store.createRun({ title: 't', workflow: 'w', task: 't', steps: [] });
-        store.updateRun(run.id, { status: RUN_STATUS.done });
+        setRunStatus(store, run.id, RUN_STATUS.done);
         if (pinned) store.setPinned(run.id, true);
         return run.id;
       };

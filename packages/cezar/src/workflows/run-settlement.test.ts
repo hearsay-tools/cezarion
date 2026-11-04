@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { runnerHook, setupMonitoringFixture, waitForProduct } from './run-fixture.testkit.ts';
 import { RunSettlement } from './run/run-settlement.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
@@ -67,9 +68,12 @@ describe('successful run settlement (#473)', () => {
         store.updateStep(record.id, id, { status, startedAt: oldFinish, ...(stamped ? { finishedAt: oldFinish } : {}) });
       }
     }
-    store.updateRun(record.id, { status: RUN_STATUS.waiting, currentStepId: 'waiting-false', worktreePath: root,
+    {
+      const { status: fixtureStatus, ...fixtureExtras }: NonNullable<Parameters<typeof setRunStatus>[3]> & { status: Parameters<typeof setRunStatus>[2] } = { status: RUN_STATUS.waiting, currentStepId: 'waiting-false', worktreePath: root,
       ...(durable ? { delegation: { role: 'root' as const, permissions: [], receipts: [] } } : {}),
-    });
+    };
+      setRunStatus(store, record.id, fixtureStatus, fixtureExtras);
+    }
     store.updateStep(record.id, 'waiting-false', { sessionId: 'seed-session', backend: 'claude' });
     if (durable) store.commitRootFinishIntent(record.id);
     return record.id;
@@ -109,7 +113,7 @@ describe('successful run settlement (#473)', () => {
       vi.mocked(worktreeDiff).mockImplementationOnce(() => new Promise(resolve => { release = resolve; enter(); }));
       const pending = settle(id, durable);
       await entered;
-      store.updateRun(id, { status, finishedAt: oldFinish });
+      setRunStatus(store, id, status, { finishedAt: oldFinish });
       const snapshot = structuredClone(store.getRun(id));
       release('changed');
       await pending;

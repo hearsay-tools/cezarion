@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -123,7 +124,7 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     const wait = register(p.id, [w.id]);
     const id = parkNoticeId(w.id, wait.id);
     const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
-    store.updateRun(peer.id, { status: RUN_STATUS.running, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    setRunStatus(store, peer.id, RUN_STATUS.running, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     await service.send(callerOf(peer.id), { id, recipientRunId: p.id, kind: 'progress', text: 'Peer progress first', timeoutSeconds: 600 });
     expect(notify).toHaveBeenCalledWith(w.id);
     notify.mockRestore();
@@ -140,7 +141,7 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     const now = new Date().toISOString();
     fixtureUpdateRun(p.id, { agentInputs: Array.from({ length: 31 }, () => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: p.id, text: 'queued', createdAt: now })) });
     const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
-    store.updateRun(peer.id, { status: RUN_STATUS.running, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    setRunStatus(store, peer.id, RUN_STATUS.running, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const request = await service.send(callerOf(p.id), { id: randomUUID(), recipientRunId: peer.id, kind: 'request', text: 'Which versions?', timeoutSeconds: 600 });
     const w = await parkedWorker(p.id, 'Parked beside a held slot.');
     register(p.id, [w.id]);

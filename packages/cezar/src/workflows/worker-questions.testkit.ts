@@ -8,7 +8,7 @@ import { afterEach, expect, vi } from 'vitest';
 import { CredentialRegistry, type Caller } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { bookkeeping, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
-import { hasPendingAsk } from '../runs/run-store.testkit.ts';
+import { setRunStatus, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
@@ -41,7 +41,7 @@ export async function parentAtLastSlot(service: DelegationService, callerFor: (i
     const now = new Date().toISOString();
     fixtureUpdateRun(parentId, { agentInputs: Array.from({ length: 31 }, () => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: parentId, text: 'queued', createdAt: now })) });
     const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
-    store.updateRun(peer.id, { status: RUN_STATUS.running, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    setRunStatus(store, peer.id, RUN_STATUS.running, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const request = await service.send(callerFor(parentId), { id: randomUUID(), recipientRunId: peer.id, kind: 'request', text: 'Which versions?', timeoutSeconds: 600 });
     const reply = () => service.send(callerFor(peer.id), { id: randomUUID(), recipientRunId: parentId, kind: 'reply', requestId: request.message.id, text: 'zod 4', timeoutSeconds: 600 });
     return { reply, undelivered: () => store.getRun(parentId)?.agentInputs?.filter(input => !input.deliveredAt).length ?? 0 };

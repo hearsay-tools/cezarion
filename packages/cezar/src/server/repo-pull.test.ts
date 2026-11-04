@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -101,7 +102,7 @@ describe('project checkout pull', () => {
   });
   it.each(['queued', 'running', 'waiting', 'review'] as const)('asks before mutation for an active %s session', async (status) => {
     const run = store.createRun({ title: 'active', task: 'active', workflow: 'quick-task', steps: [] });
-    store.updateRun(run.id, { status });
+    setRunStatus(store, run.id, status);
     active.add(run.id);
     git(root, 'checkout', '-b', 'feature');
     const res = await post({ branch: 'main' });
@@ -114,7 +115,7 @@ describe('project checkout pull', () => {
   });
   it('does not gate a settled review session', async () => {
     const run = store.createRun({ title: 'review', task: 'review', workflow: 'quick-task', steps: [] });
-    store.updateRun(run.id, { status: RUN_STATUS.review });
+    setRunStatus(store, run.id, RUN_STATUS.review);
     expect((await post()).status).toBe(200);
   });
   it.each(['modified', 'untracked', 'staged'])('asks before pulling with %s files, and keeps unrelated edits on confirmation', async (kind) => {
