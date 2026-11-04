@@ -204,7 +204,7 @@ S7 commits one row (or row group) at a time, each with a regression test that fa
 | B4 | A settling exit keeps an existing `finishedAt` (`??=`); `continue-*` and `hold` clear it | The first settlement time is the fact; a later writer on a settled run only repairs | done |
 | B5 | Both success paths clear `activity` and settle running or waiting steps in the same write | One exit, one result | done |
 | B6 | accept-review and draft-pr set `finishedAt ??= now` and retire the Finish intent | As B3 and B4 | done: the Finish intent with B1-B3 |
-| B7 | The usage-limit Continue writes `continue-line` once | The second write repeats the first | |
+| B7 | The usage-limit Continue writes `continue-line` once | The second write repeats the first | done |
 | B8 | `park` settles the current step to waiting in the same write | As B5 | |
 | B9 | Kept; recorded only. The follow-up `flush()` stays until S6 gives each exit its durability | S6 decides it | |
 | B10 | Every exit to cancelled settles running and waiting steps to cancelled, with `finishedAt ??= now` | A cancelled run has no live step. The load-time repair (hearsay-tools/cezarion#2590) reuses this rule | |

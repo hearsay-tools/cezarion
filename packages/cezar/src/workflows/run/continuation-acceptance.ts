@@ -176,7 +176,7 @@ export class ContinuationAcceptance {
       this.line.enqueueContinuation(runId, {
         stepId, sessionId: resumeSessionId, backend: targetRunner, prompt, images, lineJoinedAt: Date.now(),
       });
-      this.host.move(runId, 'continue-line');
+      // `checkpointContinuation` already wrote continue-line (Table B7).
       // Enqueueing wakes the scheduler even after the previous execution released its slot.
       void this.host.pump();
       return { ok: true };

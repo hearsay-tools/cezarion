@@ -75,8 +75,7 @@ const SITES: Site[] = [
     before: () => ({ ...accepted, error: u, finishedAt: u, currentStepId: u }), after: () => accepted },
   { site: 'checkpointContinuation, now', exit: 'continue-now', from: 'review', manager: false,
     before: () => ({ ...accepted, error: u, finishedAt: u, currentStepId: 'step-2' }), after: () => ({ ...accepted, currentStepId: 'step-2' }) },
-  { site: 'dispatchAcceptedContinuation', exit: 'continue-line', from: 'queued', manager: true,
-    before: () => ({ error: u, finishedAt: u, currentStepId: u }), after: () => ({}) },
+  // B7: dispatchAcceptedContinuation no longer repeats checkpointContinuation's continue-line write.
   // hold
   { site: 'auto-resume hold', exit: 'hold', from: 'waiting', manager: true,
     before: () => ({ finishedAt: u, autoResumeAt: NOW }), after: () => ({ autoResumeAt: NOW }) },
