@@ -20,6 +20,14 @@ import type {
   UiItem,
   UiToolItem,
 } from './ui-events.ts';
+import { z } from 'zod';
+import { STATUS_MAP as CODEX_TOOL_STATUS_MAP } from './codex-ui-mapper.ts';
+import { STATUS_MAP as OPENCODE_TOOL_STATUS_MAP } from './opencode-ui-mapper.ts';
+
+const TOOL_STATUS = z.enum([
+  ...Object.values(CODEX_TOOL_STATUS_MAP),
+  ...Object.values(OPENCODE_TOOL_STATUS_MAP),
+]).enum;
 
 /** Exact structural equality of two types (the classic conditional trick). */
 type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends (<T>() => T extends Y ? 1 : 2)
@@ -162,7 +170,7 @@ describe('UiEvent vocabulary (compile-time contract)', () => {
       name: 'Bash',
       toolKind: 'execute',
       title: 'Ran npm test',
-      status: 'running',
+      status: TOOL_STATUS.running,
     };
     expect(label(tool)).toBe('Ran npm test');
     expect(label({ kind: 'message', id: 'i2', role: 'assistant', text: 'hi' })).toBe('hi');
@@ -195,7 +203,7 @@ describe('UiEvent vocabulary (compile-time contract)', () => {
           name: 'Edit',
           toolKind: 'edit',
           title: 'Edit src/a.ts',
-          status: 'running',
+          status: TOOL_STATUS.running,
           input: { file_path: 'src/a.ts' },
           diffs: [{ path: 'src/a.ts', oldText: 'a', newText: 'b' }],
           locations: [{ path: 'src/a.ts', line: 3 }],

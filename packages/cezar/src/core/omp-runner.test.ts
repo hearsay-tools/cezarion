@@ -30,6 +30,15 @@ import { ompProviderErrorMessage } from './omp-ui-mapper.js';
 import { createRunner } from './runner-factory.js';
 import { allowedToolsForStep, DEFAULT_ALLOWED_TOOLS } from '../workflows/types.js';
 import { readPids } from '../pid-file.testkit.js';
+import { z } from 'zod';
+import { STATUS_MAP as CODEX_TOOL_STATUS_MAP } from './codex-ui-mapper.ts';
+import { STATUS_MAP as OPENCODE_TOOL_STATUS_MAP } from './opencode-ui-mapper.ts';
+
+const TOOL_STATUS = z.enum([
+  ...Object.values(CODEX_TOOL_STATUS_MAP),
+  ...Object.values(OPENCODE_TOOL_STATUS_MAP),
+]).enum;
+
 
 /** The OMP (Oh My Pi) runner (#595): argv, tool mapping, and the persistent RPC session. */
 
@@ -658,7 +667,7 @@ ${settleTurn()}
     expect(result).toMatchObject({ type: 'tool-result', toolCallId: 'tool-denied', isError: true });
     expect(result?.type === 'tool-result' && result.result).toContain(denial);
     const failed = ui.find(event => event.type === 'item.completed' && event.item.kind === 'tool' && event.item.id === 'tool-denied');
-    expect(failed).toMatchObject({ item: { status: 'failed', error: expect.stringContaining(denial) } });
+    expect(failed).toMatchObject({ item: { status: TOOL_STATUS.failed, error: expect.stringContaining(denial) } });
     expect(events.filter(event => event.type === 'error')).toEqual([]);
     expect(turnEnds(events)).toBe(1);
     expect(events.findIndex(event => event.type === 'turn-end')).toBeGreaterThan(events.indexOf(result!));
