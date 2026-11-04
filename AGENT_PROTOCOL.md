@@ -1648,7 +1648,8 @@ named `scenario-unconstructible` exemptions for this OMP-specific startup respon
 S1/S3/S14 retain their native start/resume coverage. OMP's focused tests also pin
 explicit resume, empty/absent/malformed counts, unrelated queries and duplicate replies.
 
-**S22–S24** (hearsay-tools/cezarion#843), in `core/runner-shutdown-parity.test.ts`,
+**S22–S24** (hearsay-tools/cezarion#843), in `core/runner-shutdown-outside-signal-parity.test.ts` and
+`core/runner-shutdown-end-escalation-parity.test.ts`,
 start every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native mock.
 After prompt admission, an outside SIGKILL must fail the session; `end()` must
 escalate to SIGKILL when the child cannot handle EOF or SIGTERM; and a failed
@@ -1656,7 +1657,7 @@ output transport must terminate the live child. OpenCode uses its real HTTP/SSE
 stream for the transport failure, while the other backends use stdout.
 Requested teardown remains successful. The matrix has no wire exemptions.
 
-**S33/S34** (hearsay-tools/cezarion#1899), in the same file, delay delivery of
+**S33/S34** (hearsay-tools/cezarion#1899), in the outside-signal file, delay delivery of
 an actual native exit callback after an outside SIGKILL on every `RUNNER_IDS`
 wire. The exact OS status still fails the session when EOF cleanup runs first.
 Pi also pins self-exit 143 with the same scheduling fault. Claude, Codex and Pi
@@ -2327,7 +2328,7 @@ boundary, and a closed session refuses. Input rows I1/I2 (hearsay-tools/cezarion
 input is reported read before its turn ends, and that accepted input a finished turn
 never read is reported; Cursor is scenario-unconstructible for both, and Claude,
 Pi and OMP are capability-absent for I2 because they never leave acknowledged input unread.
-Rows I3–I5 (hearsay-tools/cezarion#935), in `core/conversation-answer-delivery.test.ts`, Continue a
+Rows I3–I5 (hearsay-tools/cezarion#935), in `core/conversation-answer-delivery-{steering,declared-delivery,pending-question}.test.ts`, Continue a
 worker's human answer after a restart closed its session and send a parent message through
 `DelegationService.send`. I3: a steer runner reads it before the answer turn ends. I4: delivery
 follows the declared mode while the answer is held: steer runners accept it in the turn, and Cursor

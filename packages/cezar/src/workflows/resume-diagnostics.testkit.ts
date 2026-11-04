@@ -2,7 +2,7 @@ import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract
 import { runInternals } from './run-internals.testkit.ts';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it as registerTest, vi } from 'vitest';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
@@ -30,21 +30,17 @@ async function start(runner: RunnerId, scenario: 'provider-error' | 'cezar-done'
   const run = manager.startRun(QUICK_TASK_WORKFLOW, {
     task: HARNESS_ADAPTERS[runner].scenarios[scenario]!, runner, worktree: false,
   });
-  await until(() => ['failed', 'done', 'review'].includes(store.getRun(run.id)?.status ?? '') && !manager.isActive(run.id));
+  await until(() => [RUN_STATUS.failed, RUN_STATUS.done, RUN_STATUS.review].some(status => status === store.getRun(run.id)?.status) && !manager.isActive(run.id));
   return run.id;
 }
+function failureContext(runner: RunnerId, it: typeof registerTest = registerTest): void {
 
-describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1380)', () => {
-  useWorkerWaitFixture();
-  afterEach(() => vi.unstubAllEnvs());
-
-  for (const runner of RUNNER_IDS) {
     it(`${runner} R85 checkpoints and delivers the failed step and continuation causes before Continue text`, async () => {
       const messages = native(runner);
       const id = await start(runner, 'provider-error');
       for (const text of [`${HARNESS_ADAPTERS[runner].scenarios['provider-error']}\nKeep this second line.`, '']) {
         const failed = store.getRun(id)!.steps.at(-1)!;
-        expect(failed.status).toBe('failed');
+        expect(failed.status).toBe(STEP_STATUS.failed);
         expect(failed.error).toBeTruthy();
         const before = messages().length;
         expect(manager.continueRun(id, { text })).toEqual({ ok: true });
@@ -63,9 +59,29 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
         expect(line).toContain(failed.error);
         expect(line).toContain('verify their state before restarting');
         expect(body.join('\n')).toBe(text || 'Continue.');
-        if (text) await until(() => store.getRun(id)?.status === 'failed' && !manager.isActive(id));
+        if (text) await until(() => store.getRun(id)?.status === RUN_STATUS.failed && !manager.isActive(id));
       }
     }, 60_000);
+
+    it(`${runner} R89 keeps multiline errors on one line without hiding a slash skill or changing human history`, async () => {
+      const messages = native(runner);
+      const skills = join(root, '.ai/cezar/skills');
+      mkdirSync(skills, { recursive: true });
+      writeFileSync(join(skills, 'resume-check.md'), '---\nname: resume-check\ndescription: Resume check\n---\nRESUME-SKILL-1380\n');
+      const id = await start(runner, 'provider-error');
+      const error = 'Provider unavailable\nTry later\r\nNo retry was made.';
+      store.updateStep(id, 'task', { error });
+      const before = messages().length;
+      expect(manager.continueRun(id, { text: '/resume-check' })).toEqual({ ok: true });
+      await until(() => messages().length > before);
+      const prompt = messages()[before]!;
+      expect(prompt.split('\n')[0]).toContain('Provider unavailable Try later No retry was made.');
+      expect(prompt).toContain('RESUME-SKILL-1380');
+      expect(store.readEvents(id).filter(event => event.type === 'user-message').at(-1)?.text).toBe('/resume-check');
+    }, 30_000);
+}
+
+function humanText(runner: RunnerId, it: typeof registerTest = registerTest): void {
 
     it(`${runner} R87 leaves a non-error Continue unchanged`, async () => {
       const messages = native(runner);
@@ -76,6 +92,19 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
       await until(() => messages().length > before);
       expect(messages()[before]).toBe(text);
     }, 30_000);
+
+    it(`${runner} R91 preserves human text that equals the legacy restart fallback`, async () => {
+      const messages = native(runner);
+      const id = await start(runner, 'cezar-done');
+      const text = 'The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
+      const before = messages().length;
+      expect(manager.continueRun(id, { text })).toEqual({ ok: true });
+      await until(() => messages().length > before);
+      expect(messages()[before]).toBe(text);
+    }, 30_000);
+}
+
+function restartContext(runner: RunnerId, it: typeof registerTest = registerTest): void {
 
     it(`${runner} R88 keeps the accepted failure cause and attachment through a restart`, async () => {
       const messages = native(runner);
@@ -107,23 +136,6 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
       expect(readFileSync(path, 'utf8')).toBe('brief-1380');
     }, 60_000);
 
-    it(`${runner} R89 keeps multiline errors on one line without hiding a slash skill or changing human history`, async () => {
-      const messages = native(runner);
-      const skills = join(root, '.ai/cezar/skills');
-      mkdirSync(skills, { recursive: true });
-      writeFileSync(join(skills, 'resume-check.md'), '---\nname: resume-check\ndescription: Resume check\n---\nRESUME-SKILL-1380\n');
-      const id = await start(runner, 'provider-error');
-      const error = 'Provider unavailable\nTry later\r\nNo retry was made.';
-      store.updateStep(id, 'task', { error });
-      const before = messages().length;
-      expect(manager.continueRun(id, { text: '/resume-check' })).toEqual({ ok: true });
-      await until(() => messages().length > before);
-      const prompt = messages()[before]!;
-      expect(prompt.split('\n')[0]).toContain('Provider unavailable Try later No retry was made.');
-      expect(prompt).toContain('RESUME-SKILL-1380');
-      expect(store.readEvents(id).filter(event => event.type === 'user-message').at(-1)?.text).toBe('/resume-check');
-    }, 30_000);
-
     it(`${runner} R90 explains repeated recovery once when the interrupted task had no saved message`, async () => {
       const messages = native(runner);
       const id = await start(runner, 'cezar-done');
@@ -142,27 +154,20 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
       expect(prompt.match(/cezar process restarted/g)).toHaveLength(1);
       expect(prompt.split('\n')[0]).toContain('verify their state before restarting');
     }, 60_000);
+}
 
-    it(`${runner} R91 preserves human text that equals the legacy restart fallback`, async () => {
-      const messages = native(runner);
-      const id = await start(runner, 'cezar-done');
-      const text = 'The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
-      const before = messages().length;
-      expect(manager.continueRun(id, { text })).toEqual({ ok: true });
-      await until(() => messages().length > before);
-      expect(messages()[before]).toBe(text);
-    }, 30_000);
+function savedContinuation(runner: RunnerId, it: typeof registerTest = registerTest): void {
 
-    for (const status of ['running', 'queued'] as const) {
+    for (const status of [RUN_STATUS.running, RUN_STATUS.queued] as const) {
       it(`${runner} R86 explains restart ahead of a saved ${status} continuation, without a live session`, async () => {
         const messages = native(runner);
         const id = await start(runner, 'cezar-done');
         const original = store.getRun(id)!.steps[0]!;
         const text = 'Saved human text.\nDo not change it.';
         store.addStep(id, { id: 'continue-1', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation' });
-        store.updateStep(id, 'continue-1', { status: status === 'queued' ? 'pending' : 'running' });
+        store.updateStep(id, 'continue-1', { status: status === RUN_STATUS.queued ? STEP_STATUS.pending : STEP_STATUS.running });
         store.updateRun(id, {
-          status, currentStepId: status === 'running' ? 'continue-1' : undefined,
+          status, currentStepId: status === RUN_STATUS.running ? 'continue-1' : undefined,
           finishedAt: undefined, error: undefined,
           continuationMessage: { id: 'continue-1', text, createdAt: new Date().toISOString(), origin: 'human' },
         });
@@ -183,5 +188,15 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
         expect(prompt).toContain(`\n${text}`);
       }, 60_000);
     }
-  }
-});
+}
+
+export const resumeDiagnosticsCells = { 'failure-context': failureContext, 'human-text': humanText, 'restart-context': restartContext, 'saved-continuation': savedContinuation };
+export const RESUME_DIAGNOSTICS_GROUPS = Object.fromEntries(Object.keys(resumeDiagnosticsCells).map(family => [family, RUNNER_IDS.map(runner => ({ runner, family: family as keyof typeof resumeDiagnosticsCells }))]));
+
+export function registerResumeDiagnosticsGroup(group: keyof typeof resumeDiagnosticsCells): void {
+  describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1380)', () => {
+    useWorkerWaitFixture();
+    afterEach(() => vi.unstubAllEnvs());
+    for (const row of RESUME_DIAGNOSTICS_GROUPS[group]!) resumeDiagnosticsCells[row.family](row.runner);
+  });
+}

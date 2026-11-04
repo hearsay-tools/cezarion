@@ -300,7 +300,7 @@ export const WORKTREE_SETUP_CRITERIA = [
   { id: 'R58', scenario: 'baseline', name: 'delivers the worktree setup note in the opening message' },
 ] as const;
 
-/** hearsay-tools/cezarion#935: conversation-answer-delivery.test.ts, a Continue executing a human answer. */
+/** hearsay-tools/cezarion#935: conversation-answer-delivery.testkit.ts, a Continue executing a human answer. */
 export const ANSWER_DELIVERY_CRITERIA = [
   { id: 'I3', scenario: 'steer-tool', name: 'steers a conversation message into a running human answer and reports it read before that turn ends' },
   { id: 'I4', scenario: 'hold-gated', name: 'delivers a conversation message to a running human answer as its input delivery declares' },
