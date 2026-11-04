@@ -9,7 +9,7 @@ import { merge, partial } from '../../e2e/spec-map/build-map'
 import { Bundle, assertSameJavaScript } from '../../e2e/spec-map/bundle'
 import { WORKSPACE_PACKAGES, moduleFacts, resolveImport, type ModuleFacts } from '../../e2e/spec-map/module-graph'
 import {
-  buildMap, joinPartials, mapProblems, partialMap, reach, specStatuses,
+  SPEC_STATUSES, buildMap, joinPartials, mapProblems, partialMap, reach, specStatuses,
   type SpecEvidence, type SpecMap,
 } from '../../e2e/spec-map/spec-map'
 import { captureBrowserArgs, compiledFunctions } from '../../e2e/spec-map/v8-log'
@@ -18,6 +18,7 @@ import e2eConfig from '../../e2e/vitest.config'
 
 // hearsay-tools/cezarion#1816: the map from cockpit sources to the browser specs that run them.
 
+const SPEC_STATUS = Object.fromEntries(SPEC_STATUSES.map(status => [status, status])) as { [Status in (typeof SPEC_STATUSES)[number]]: Status }
 const roots: string[] = []
 function tempRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'cez-spec-map-'))
@@ -282,7 +283,7 @@ describe('shard capture', () => {
   it('reads statuses from the Vitest JSON report as repository paths', () => {
     const statuses = specStatuses({ testResults: [
       { name: '/repo/packages/web/e2e/a.e2e.ts', status: 'passed' },
-      { name: '/repo/packages/web/e2e/b.e2e.ts', status: 'failed' },
+      { name: '/repo/packages/web/e2e/b.e2e.ts', status: SPEC_STATUS.failed },
       { name: '/elsewhere/c.e2e.ts', status: 'passed' },
     ] }, '/repo')
     expect([...statuses]).toEqual([['packages/web/e2e/a.e2e.ts', 'passed'], ['packages/web/e2e/b.e2e.ts', 'failed']])
@@ -307,7 +308,7 @@ describe('shard capture', () => {
         'packages/web/e2e/a.e2e.ts': {
           status: 'passed', executed: ['packages/web/src/b.ts'], loaded: ['packages/web/src/a.tsx', 'packages/web/src/b.ts'],
         },
-        'packages/web/e2e/b.e2e.ts': { status: 'failed', executed: [], loaded: [] },
+        'packages/web/e2e/b.e2e.ts': { status: SPEC_STATUS.failed, executed: [], loaded: [] },
       },
     })
     expect(() => partialMap(join(root, 'logs'), new Map(), bundle)).toThrow(/names no spec/)

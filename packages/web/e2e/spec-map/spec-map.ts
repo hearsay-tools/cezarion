@@ -16,7 +16,8 @@ import { nodeCaptureComplete, nodeEvidence, type FunctionEvidence } from './node
 
 export const SPEC_DIR = 'packages/web/e2e'
 
-export type SpecStatus = 'passed' | 'failed'
+export const SPEC_STATUSES = ['passed', 'failed'] as const
+export type SpecStatus = (typeof SPEC_STATUSES)[number]
 
 export interface SpecEvidence {
   status: SpecStatus

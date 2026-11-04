@@ -90,12 +90,6 @@
       "rule": "test-enum-literal",
       "site": "status: 'failed'",
       "count": 1
-    },
-    {
-      "file": "packages/web/src/test/e2e-spec-map.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'failed'",
-      "count": 2
     }
   ]
 }
