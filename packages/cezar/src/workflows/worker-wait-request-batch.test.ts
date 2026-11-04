@@ -1,14 +1,31 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { manager, semaphore, work, store, useWorkerWaitFixture, waitOf, lastWaitOf } from './worker-wait.testkit.ts';
+import { manager, semaphore, store, useWorkerWaitFixture, waitOf, lastWaitOf } from './worker-wait.testkit.ts';
 import { conversationPair } from './worker-wait-conversations.testkit.ts';
+
+const runnerSessions = vi.hoisted(() => new Map<string, import('../core/agent-runner.ts').AgentSession>());
+vi.mock('../core/runner-factory.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('../core/runner-factory.ts')>();
+  return { ...actual, createRunner: (...args: Parameters<typeof actual.createRunner>) => {
+    const runner = actual.createRunner(...args);
+    const start = runner.startSession.bind(runner);
+    runner.startSession = (spec, ...rest) => {
+      const session = start(spec, ...rest);
+      runnerSessions.set(spec.cwd, session);
+      return session;
+    };
+    return runner;
+  } };
+});
 
 describe('parent and worker conversation waits through RunManager', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   it('conversation: a full queue of 32 replies can admit an all-request wake without losing a message', async () => {
     const f = await conversationPair();
     const capacity = vi.spyOn(semaphore, 'maxParallel').mockReturnValue(0);
-    const submissions = [...work.liveSessions].map(session => vi.spyOn(session, 'sendAgentMessage'));
+    const session = runnerSessions.get(store.getRun(f.p.id)!.worktreePath!);
+    if (!session) throw Error('parent runner session missing');
+    const submissions = vi.spyOn(session, 'sendAgentMessage');
     try {
       const requestIds = Array.from({ length: 32 }, () => randomUUID());
       for (const id of requestIds) await f.service.send(f.parentCaller, { id, recipientRunId: f.w.id, kind: 'request', text: 'Batch question mock:hold', timeoutSeconds: 600 });
@@ -33,12 +50,15 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       }, { timeout: 60_000, interval: 20 }); // bound: 33 real deliveries on a loaded host, as before
       expect(lastWaitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, reason: 'outcome', requestOutcomes: expect.arrayContaining(requestIds.map(requestId => expect.objectContaining({ requestId, status: 'replied' }))) });
       // One submission: the result, then every reply, each once.
-      const delivered = submissions.flatMap(submission => submission.mock.calls.filter((call, index) => call[1]?.includes(wait.id) && submission.mock.results[index]?.value !== false));
+      const delivered = submissions.mock.calls.filter((_call, index) => {
+        const result = submissions.mock.results[index];
+        return result?.type === 'return' && result.value !== false;
+      });
       expect(delivered).toHaveLength(1);
       expect(delivered.flatMap(call => call[1])).toEqual([wait.id, ...replyIds]);
       expect((delivered.at(-1)?.[0][0] as { text: string })?.text).toContain(`Request wait ${wait.id} (outcome). Request outcomes:`);
       expect((delivered.at(-1)?.[0][0] as { text: string })?.text.match(/Batch answer mock:hold/g)).toHaveLength(32);
-    } finally { capacity.mockRestore(); for (const submission of submissions) submission.mockRestore(); f.close(); }
+    } finally { capacity.mockRestore(); submissions.mockRestore(); f.close(); }
   }, 90_000);
 
 });

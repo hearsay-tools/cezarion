@@ -1,3 +1,4 @@
+import type { AgentEvent } from '../core/agent-runner.ts';
 import type { UiEvent } from '../core/ui-events.ts';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -10,12 +11,14 @@ import { setRunStatus, blockRunWrites } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 const runnerEvents = vi.hoisted(() => new Map<string, (event: UiEvent) => void>());
+const runnerTurnEvents = vi.hoisted(() => new Map<string, (event: AgentEvent) => void>());
 vi.mock('../core/runner-factory.ts', async importOriginal => {
   const actual = await importOriginal<typeof import('../core/runner-factory.ts')>();
   return { ...actual, createRunner: (...args: Parameters<typeof actual.createRunner>) => {
     const runner = actual.createRunner(...args);
     const start = runner.startSession.bind(runner);
     runner.startSession = (spec, ...rest) => {
+      if (rest[0]) runnerTurnEvents.set(spec.cwd, rest[0]);
       const onUiEvent = rest[1]?.onUiEvent;
       if (onUiEvent) runnerEvents.set(spec.cwd, onUiEvent);
       return start(spec, ...rest);
@@ -96,24 +99,17 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent(); const w = await worker(p.id);
     await until(wire.initialReceived);
     register(p.id, [w.id]); store.flush();
-    const move = store.move.bind(store);
-    let refusedPark = false;
-    const checkpoint = vi.spyOn(store, 'move').mockImplementation((...args) => {
-      if (args[0] !== p.id || args[1] !== 'park-release') return move(...args);
-      const release = blockRunWrites(join(root, '.ai/cezar'));
-      try {
-        expect(() => move(...args)).toThrow();
-        expect(waitOf(store.getRun(p.id))?.phase).toBe('registered');
-        expect(semaphore.busy()).toBe(1);
-        refusedPark = true;
-        throw Error('park checkpoint refused');
-      } finally { release(); }
-    });
+    const emit = runnerTurnEvents.get(store.getRun(p.id)!.worktreePath!);
+    if (!emit) throw Error('parent runner turn channel missing');
+    const release = blockRunWrites(join(root, '.ai/cezar'));
     try {
-      writeFileSync(gate, 'end');
-      await until(() => refusedPark);
-      expect(store.readEvents(p.id).some(event => event.type === 'turn-end')).toBe(true);
-    } finally { checkpoint.mockRestore(); }
+      expect(() => emit({ type: 'turn-end' })).toThrow();
+      // Check after the entire turn handler unwinds: a caller must not catch the
+      // refused checkpoint and release the parent's slot anyway.
+      expect(waitOf(store.getRun(p.id))?.phase).toBe('registered');
+      expect(semaphore.busy()).toBe(1);
+    } finally { release(); writeFileSync(gate, 'end'); }
+
   });
 
   it('recovery admits an older queued child before an expired parent wake', async () => {
