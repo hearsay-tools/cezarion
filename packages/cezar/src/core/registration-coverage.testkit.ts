@@ -94,7 +94,7 @@ function executesRegistration(call: Node, path: readonly Node[], callee: string)
 }
 
 /** Every reference must be an unchanged declaration/import/export or a supported plain call. */
-function registrationArguments(source: string, file: string, callee: string, argumentValue: (call: Node) => string | undefined, onImport?: () => void): string[] {
+function registrationArguments(source: string, file: string, callee: string, argumentValue: (call: Node, path: readonly Node[]) => string | undefined, onImport?: () => void): string[] {
   const groups: string[] = [];
   const tree = parse(source, { sourceType: 'module', plugins: ['typescript'], allowUndeclaredExports: true });
   traverse(tree, (node, ancestors) => {
@@ -105,9 +105,9 @@ function registrationArguments(source: string, file: string, callee: string, arg
     const plainMember = reference.type === 'MemberExpression' && !reference.computed && reference.object.type === 'Identifier'
       && reference.property.type === 'Identifier' && `${reference.object.name}.${reference.property.name}` === callee;
     const plainCallee = reference.type === 'Identifier' && reference.name === callee;
-    const group = call?.type === 'CallExpression' && call.callee === reference && (plainCallee || plainMember)
-      ? argumentValue(call) : undefined;
     const path = ancestors.map(ancestor => ancestor.node).concat(node);
+    const group = call?.type === 'CallExpression' && call.callee === reference && (plainCallee || plainMember)
+      ? argumentValue(call, path) : undefined;
     if (group === undefined || !call || !executesRegistration(call, path, callee)) {
       const form = call ?? reference;
       throw new Error(`${file}: unsupported ${callee} registration: ${source.slice(form.start!, form.end!)}`);
@@ -122,11 +122,19 @@ export function registrationGroups(source: string, file: string, callee: string,
   return registrationArguments(source, file, callee, call => supportedGroup(call, catalog, knownGroups));
 }
 
-/** Literal partitions only: other arguments and every unsupported reference are errors. */
+function importedLiteral(call: Node, path: readonly Node[], callee: string): string | undefined {
+  const statement = path.at(-3);
+  const program = path.at(-4);
+  if (program?.type !== 'Program' || statement?.type !== 'ExpressionStatement' || statement.expression !== call) return undefined;
+  const imported = program.body.some(entry => entry.type === 'ImportDeclaration' && entry.importKind !== 'type' && entry.specifiers.some(specifier =>
+    specifier.type === 'ImportSpecifier' && specifier.importKind !== 'type' && specifier.imported.type === 'Identifier'
+    && specifier.imported.name === callee && specifier.local.name === callee));
+  if (!imported || call.type !== 'CallExpression' || call.arguments.length !== 1) return undefined;
+  const argument = call.arguments[0];
+  return argument?.type === 'StringLiteral' ? argument.value : undefined;
+}
+
+/** Literal partitions require their unchanged module import and a top-level call. */
 export function registrationStrings(source: string, file: string, callee: string, onImport?: () => void): string[] {
-  return registrationArguments(source, file, callee, call => {
-    if (call.type !== 'CallExpression' || call.arguments.length !== 1) return undefined;
-    const argument = call.arguments[0];
-    return argument?.type === 'StringLiteral' ? argument.value : undefined;
-  }, onImport);
+  return registrationArguments(source, file, callee, (call, path) => importedLiteral(call, path, callee), onImport);
 }

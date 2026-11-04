@@ -8,7 +8,7 @@ import { registrationCalls } from './split-registration.testkit.ts';
 it('counts direct registration calls and preserves duplicate group names', () => {
   const directory = mkdtempSync(join(tmpdir(), 'cez-registration-'));
   try {
-    writeFileSync(join(directory, 'family-row.test.ts'), `registerGroup('first');\nregisterGroup("first");\nregisterGroup(\n 'second'\n);`);
+    writeFileSync(join(directory, 'family-row.test.ts'), `import { registerGroup } from "./family.testkit.ts";\nregisterGroup('first');\nregisterGroup("first");\nregisterGroup(\n 'second'\n);`);
     expect(registrationCalls(pathToFileURL(`${directory}/`), 'family-', 'registerGroup')).toEqual(['first', 'first', 'second']);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
@@ -28,6 +28,8 @@ const template = \`registerGroup('template')\`;
 
 for (const source of [
   "registerGroup(part);",
+  "registerGroup('first');",
+  "function registerGroup() {} registerGroup('first');",
   "import { registerGroup as hidden } from './family.testkit.ts'; hidden('first');",
   "registerGroup('first'); const duplicate = registerGroup('first');",
   "function unused() { registerGroup('first'); }",
