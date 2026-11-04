@@ -468,6 +468,7 @@ export const WAIT_PARITY_FILES = Object.fromEntries(
 export const WAIT_PARITY_FAMILIES = {
   cursorMixedWaits: { runner: 'cursor', part: 'mixed', family: 'waits' },
   cursorMixedNotices: { runner: 'cursor', part: 'mixed', family: 'notices' },
+  cursorMixedMessages: { runner: 'cursor', part: 'mixed', family: 'messages' },
   cursorEntriesRefusals: { runner: 'cursor', part: 'entries', family: 'refusals' },
   cursorEntriesNoWait: { runner: 'cursor', part: 'entries', family: 'no-wait' },
   cursorEntriesCompletion: { runner: 'cursor', part: 'entries', family: 'completion' },
@@ -487,7 +488,8 @@ export function describeWaitParityFamily(scope: WaitParityFamily): void {
 function rowFamily(part: WaitParityPart, title: string): WaitParityFamily['family'] {
   const words = title.split(' ');
   if (part === 'mixed') {
-    if (['U3w', 'U3n', 'U3r', 'U3d'].includes(words[1]!)) return 'notices';
+    if (words[1] === 'U3w') return 'messages';
+    if (['U3n', 'U3r', 'U3d'].includes(words[1]!)) return 'notices';
     if (['U2w', 'U2t', 'U2c', 'U7w'].includes(words[1]!)) return 'waits';
     throw Error(`Unclassified mixed wait parity row: ${title}`);
   }
