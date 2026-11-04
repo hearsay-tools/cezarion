@@ -1,4 +1,10 @@
-import { runInternals } from './run-internals.testkit.ts';
+import { RunSettlement } from './run/run-settlement.ts';
+import { AutoResumeScheduler } from './run/auto-resume.ts';
+import { TrackedWork } from './run/tracked-work.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
+import { createActiveRun, type ActiveRun } from './active-run.ts';
+import type { RunModuleContext } from './run/types.ts';
+import { hasPendingHumanAsk, pendingHumanAskSeq } from './run/pending-ask-facts.ts';
 import { makeTimerWait, RUN_STATUS, STEP_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -6,7 +12,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore, type StepState } from '../runs/store.ts';
-import { RunManager } from './run.ts';
 import { worktreeDiff } from '../git-worktree.ts';
 
 vi.mock('../git-worktree.ts', async importOriginal => ({
@@ -21,20 +26,49 @@ const preservedStatuses = ['done', 'failed', 'cancelled', 'skipped', 'pending'] 
 describe('successful run settlement (#473)', () => {
   let root: string;
   let store: RunStore;
-  let manager: RunManager;
+  let settlement: RunSettlement;
+  let scheduler: AutoResumeScheduler;
+  let context: RunModuleContext;
+  let disposed: boolean;
+  const active = new Map<string, ActiveRun>();
+  const releaseSlot = vi.fn();
+  function fakeState(patch: Partial<ActiveRun> = {}) {
+    const state = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false });
+    Object.assign(state, patch);
+    return state;
+  }
+  function dispose() { disposed = true; active.clear(); scheduler.dispose(); }
   let settle: (id: string, durable?: boolean) => Promise<void>;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'cez-settlement-'));
     store = RunStore.open(join(root, '.ai/cezar'));
-    manager = new RunManager(store, root);
-    settle = runInternals(manager).runSettlement.settleSuccess.bind(runInternals(manager).runSettlement);
+    disposed = false;
+    active.clear();
+    releaseSlot.mockReset();
+    context = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work: new TrackedWork(),
+      semaphore: new WorkspaceSemaphore(), disposed: () => disposed };
+    scheduler = new AutoResumeScheduler(context, { move: (id, exit, patch) => store.move(id, exit, patch),
+      continueRun: vi.fn(), pump: vi.fn(async () => {}) });
+    type Args = ConstructorParameters<typeof RunSettlement>;
+    settlement = new RunSettlement(context, {} as Args[1], {} as Args[2],
+      { autosaveCleanupBlocker: () => undefined } as unknown as Args[3],
+      { forget: vi.fn() } as unknown as Args[4],
+      { clearForced: vi.fn(), hasStarting: () => false, hasQueued: () => false } as unknown as Args[5], scheduler,
+      { has: () => false } as unknown as Args[7], {} as Args[8], {
+        active, isActive: id => active.has(id), generation: () => undefined,
+        deferParentCompletion: id => hasPendingHumanAsk(id, key => pendingHumanAskSeq(store, key)),
+        move: (id, exit, patch) => store.move(id, exit, patch),
+        forgetMemoryPause: vi.fn(), isDisposedDelegatedRun: () => false, reconcileWorkerWaits: vi.fn(),
+        queueWaitWake: vi.fn(), releaseSlot, hasClaim: () => false, autosaveCleanupBlocker: () => undefined,
+      } satisfies Partial<Args[9]> as unknown as Args[9], '', '');
+    settle = settlement.settleSuccess.bind(settlement);
     vi.mocked(worktreeDiff).mockResolvedValue('a changed file');
     vi.stubEnv('CEZ_REVIEW_GATE', '0');
   });
 
   afterEach(() => {
-    manager.dispose();
+    dispose();
     store.flush();
     vi.unstubAllEnvs();
     rmSync(root, { recursive: true, force: true });
@@ -123,16 +157,14 @@ describe('successful run settlement (#473)', () => {
       agentInputs: [{ id: randomUUID(), parentRunId: run.id, source: 'lifecycle', text: 'pending', createdAt: now }],
     });
     held.waits = [makeTimerWait({ id: randomUUID(), registeredAt: now, deadline: new Date(Date.now() + 60_000).toISOString() })];
-    const line = runInternals(manager).line;
-    const snapshots: Array<{ resume: string | undefined; wake: boolean }> = [];
-    const release = line.releaseSlot.bind(line);
-    vi.spyOn(line, 'releaseSlot').mockImplementation(() => {
-      snapshots.push({ resume: store.getRun(run.id)?.autoResumeAt, wake: line.hasWake(run.id) });
-      release();
+    const snapshots: Array<{ resume: string | undefined }> = [];
+    releaseSlot.mockImplementation(() => {
+      snapshots.push({ resume: store.getRun(run.id)?.autoResumeAt });
     });
-    manager['dropActive'](run.id);
+    store.unpin(run.id, 'active');
+    settlement.afterDropActive(run.id);
     expect(snapshots).toHaveLength(1);
-    expect(snapshots[0]).toEqual({ resume: expect.any(String), wake: false });
+    expect(snapshots[0]).toEqual({ resume: expect.any(String) });
     expect(store.getRun(run.id)?.status).toBe('waiting');
     store.unpin(run.id, 'continue');
   });
@@ -152,12 +184,11 @@ describe('successful run settlement (#473)', () => {
 
   it.each([false, true])('does not reconcile a replacement execution during diff I/O (disposed=%s)', async disposed => {
     const id = seed();
-    const active = (manager as unknown as { active: Map<string, unknown> }).active;
-    active.set(id, { finishRequested: true });
+    active.set(id, fakeState({ finishRequested: true }));
     vi.mocked(worktreeDiff).mockImplementationOnce(async () => {
-      if (disposed) manager.dispose();
+      if (disposed) dispose();
       // A new ActiveRun is the generation boundary used by Continue admission.
-      active.set(id, {});
+      active.set(id, fakeState());
       store.updateRun(id, { status: RUN_STATUS.running });
       return 'changed';
     });
@@ -172,10 +203,9 @@ describe('successful run settlement (#473)', () => {
 
   it.each(['none', 'finish', 'cancel'] as const)('disposal during diff I/O preserves explicit terminal intent: %s', async intent => {
     const id = seed();
-    const active = (manager as unknown as { active: Map<string, unknown> }).active;
-    active.set(id, { finishRequested: intent === 'finish', cancelled: intent === 'cancel' });
+    active.set(id, fakeState({ finishRequested: intent === 'finish', cancelled: intent === 'cancel' }));
     vi.mocked(worktreeDiff).mockImplementationOnce(async () => {
-      manager.dispose();
+      dispose();
       return 'changed';
     });
     await settle(id);

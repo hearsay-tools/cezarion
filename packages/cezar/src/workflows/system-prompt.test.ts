@@ -1,4 +1,7 @@
-import { runInternals } from './run-internals.testkit.ts';
+import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
+import { TrackedWork } from './run/tracked-work.ts';
+import type { RunModuleContext } from './run/types.ts';
+import { discoverSkills } from '../skills.ts';
 import { createFixtureManager, drainFixtureManagers, fixtureWorkSettled, removeFixtureRepo } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -269,6 +272,8 @@ describe('systemPrompt end-to-end (dry run)', () => {
     let seamRoot: string;
     let seamStore: RunStore;
     let seamManager: RunManager;
+    let bookkeeper: TurnBookkeeper;
+    const seamWork = new TrackedWork();
 
     beforeAll(async () => {
       seamRoot = await seedRepo('cez-sysprompt-seams-');
@@ -276,6 +281,11 @@ describe('systemPrompt end-to-end (dry run)', () => {
       seamManager = createFixtureManager(seamStore, seamRoot, {
         semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }),
       });
+      const context: RunModuleContext = { store: seamStore, repoRoot: seamRoot, dataDir: join(seamRoot, '.ai/cezar'),
+        semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }), work: seamWork, disposed: () => false };
+      bookkeeper = new TurnBookkeeper(context, { isDisposedDelegatedRun: () => false,
+        discoverSkills: () => discoverSkills(seamRoot), reviveWorkflow: async () => skillWorkflow,
+        trackTurn: (_id, task) => { seamWork.track('turn', task); } });
     });
 
     afterAll(async () => {
@@ -284,7 +294,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
 
     it('live refresh: the namer applies turn context through the mock (direct drive)', async () => {
       const record = seamManager.startRun(skillWorkflow, { task: '437' });
-      await runInternals(seamManager).turnBookkeeper.autoNameRun(record.id, 'om-auto-review-pr', '437', {
+      await bookkeeper.autoNameRun(record.id, 'om-auto-review-pr', '437', {
         turnText: 'fixed the watchdog race',
         diffStat: '2 files, +10 -3',
       });
@@ -295,7 +305,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
     }, 30_000);
 
     it('turn-end refresh skips under CEZ_DRY_RUN and when the toggle or ownership forbids it', async () => {
-      const seam = runInternals(seamManager).turnBookkeeper;
+      const seam = bookkeeper;
       const record = seamManager.startRun(skillWorkflow, { task: '437' });
 
       // Dry-run guard (without the CEZ_AUTONAME=1 force): no key is recorded,
@@ -342,14 +352,14 @@ describe('systemPrompt end-to-end (dry run)', () => {
 
     it('marker declarations outrank the namer (spec 2026-07-18-task-ref-markers)', async () => {
       const record = seamManager.startRun(skillWorkflow, { task: '437' });
-      await runInternals(seamManager).turnBookkeeper.recordTurnEnd(record.id, 'Working on it.\nCEZ:PR=500\nCEZ:TITLE=implementing marker refs');
+      await bookkeeper.recordTurnEnd(record.id, 'Working on it.\nCEZ:PR=500\nCEZ:TITLE=implementing marker refs');
       let after = seamStore.getRun(record.id);
       expect(after?.prNumber).toBe(500);
       expect(after?.titleSummary).toBe('500: implementing marker refs');
       expect(after?.titleOrigin).toBe('marker');
       // A namer answer landing later (mock: "implementing cr fixes" + pr 437)
       // must not displace the agent's own declaration.
-      await runInternals(seamManager).turnBookkeeper.autoNameRun(record.id, 'om-auto-review-pr', '437', {
+      await bookkeeper.autoNameRun(record.id, 'om-auto-review-pr', '437', {
         turnText: 'fixed the watchdog race',
         diffStat: '2 files, +10 -3',
       });
@@ -361,14 +371,14 @@ describe('systemPrompt end-to-end (dry run)', () => {
 
     it('keeps explicit PR precedence when the prompt also names an issue', async () => {
       const record = seamManager.startRun(skillWorkflow, { task: 'Review PR #900 for issue #1200' });
-      await runInternals(seamManager).turnBookkeeper.recordTurnEnd(record.id, 'CEZ:TITLE=reviewing the change');
+      await bookkeeper.recordTurnEnd(record.id, 'CEZ:TITLE=reviewing the change');
       expect(seamStore.getRun(record.id)?.titleSummary).toBe('900: reviewing the change');
     }, 30_000);
 
     it('keeps the originating issue in a follow-up title marker', async () => {
       const record = seamManager.startRun(skillWorkflow, { task: 'Fix issue #1200' });
-      await runInternals(seamManager).turnBookkeeper.recordTurnEnd(record.id, 'CEZ:ISSUE=1200\nCEZ:PR=1210');
-      await runInternals(seamManager).turnBookkeeper.recordTurnEnd(record.id, 'CEZ:ISSUE=1216\nCEZ:TITLE=fixing issue attribution');
+      await bookkeeper.recordTurnEnd(record.id, 'CEZ:ISSUE=1200\nCEZ:PR=1210');
+      await bookkeeper.recordTurnEnd(record.id, 'CEZ:ISSUE=1216\nCEZ:TITLE=fixing issue attribution');
       const after = seamStore.getRun(record.id);
       expect(after?.issueNumber).toBe(1200);
       expect(after?.titleSummary).toBe('1200: fixing issue attribution');
