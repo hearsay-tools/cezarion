@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  SWIPE_PHASES,
   ACTION_PX,
   AXIS_LOCK_PX,
   COMMIT_RATIO,
@@ -12,6 +13,7 @@ import {
   useSwipeToArchive,
 } from './use-swipe-to-archive'
 
+const SWIPE_PHASE = Object.fromEntries(SWIPE_PHASES.map(phase => [phase, phase])) as { [Phase in (typeof SWIPE_PHASES)[number]]: Phase }
 const WIDTH = 320
 
 function Row({ id, enabled = true, onArchive }: { id: string; enabled?: boolean; onArchive: () => void | Promise<unknown> }) {
@@ -110,7 +112,7 @@ describe('useSwipeToArchive', () => {
     const onArchive = vi.fn()
     render(<Row id="a" onArchive={onArchive} />)
     drag('a', [{ dx: -20 }, { dx: -50 }])
-    expect(state('a')).toEqual({ offset: -ACTION_PX, phase: 'open', past: false })
+    expect(state('a')).toEqual({ offset: -ACTION_PX, phase: SWIPE_PHASE.open, past: false })
     expect(onArchive).not.toHaveBeenCalled()
   })
 

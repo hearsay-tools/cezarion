@@ -1,3 +1,4 @@
+import { skillSchema } from '@open-mercato/cezar-api-client/contract/skills'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
@@ -34,7 +35,7 @@ const SKILLS: Skill[] = [
     description: 'A global skill',
   }),
   skill({ name: 'om-fix', source: 'ai', description: 'Fix an issue end to end' }),
-  skill({ name: 'om-review', source: 'cezar', path: '.ai/cezar/skills/om-review.md' }),
+  skill({ name: 'om-review', source: skillSchema.shape.source.enum.cezar, path: '.ai/cezar/skills/om-review.md' }),
 ]
 
 const WORKFLOWS: WorkflowsResponse = {
