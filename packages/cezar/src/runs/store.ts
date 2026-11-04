@@ -1,5 +1,5 @@
 import { reportsIndex, type ReportsIndex } from '../artifacts/reports-index.ts';
-import { stageCommit, stageLoaded, stageDurableUpdate, stageDebouncedUpdate, stageConversation, stageArchiveFields, stagePullRequests, stageStepUpdate, redactPatch, redactText, clearPin } from './record-write-rules.ts';
+import { stageCommit, stageLoaded, stageDurableUpdate, stageDebouncedUpdate, stageConversation, stageArchiveFields, stagePullRequests, stageStepUpdate, redactPatch, redactText, clearPin, type RecordPatch } from './record-write-rules.ts';
 import { workerDeletionProof } from './worker-deletion-proof.ts';
 import { listPeerTaskSummaries, parseStoredSummary, type PeerTaskPageOptions } from './run-summary-page.ts';
 export { parseStoredSummary } from './run-summary-page.ts';
@@ -63,7 +63,7 @@ import { workflowDefSchema } from '../workflows/types.ts';
 
 import { applyOutcomes, type OutcomeDependencies, type OutcomeReceipt, type RunOutcome } from './outcome-commit.ts';
 import { ISSUE_URL_RE, originatingIssue, PR_URL_RE, refUrlNumber, referencedPrDeclaration, rescopeRun, resolveIssueReference, resolveReferencedRef, restoreOriginatingIssue, trackReferencedIssues, trackReferencedPrs } from './run-references.ts';
-import { applyExit, doneCommits, exitDurability, RUN_EXITS, type ExitDurability, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
+import { applyExit, doneCommits, exitDurability, RUN_EXITS, type ExitCall, type ExitDurability, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
 import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
 export { ConversationIdInUseError } from './conversation-identity.ts';
 
@@ -2691,12 +2691,13 @@ export class RunStore extends EventEmitter {
    *  record that write changes. A run this store cannot write is neither checked nor written. The
    *  exit decides how the write persists (`exitDurability`), never the extras. A guarded exit (one
    *  with a `guard` or a `settle`) commits at once, and writes nothing when its guard fails: undefined, or its
-   *  `refused` error. `stepId` names the step its settle sets. */
-  move(id: string, exit: RunExitId, extras: RunPatch = {}, stepId?: string): RunRecord | undefined {
+   *  `refused` error. `call` names the step the exit settles apart from the others. */
+  move(id: string, exit: RunExitId, extras: RunPatch = {}, call: ExitCall = {}): RunRecord | undefined {
     const spec: RunExitSpec = RUN_EXITS[exit];
     if (!spec.guard && !spec.settle) {
       const run = this.record(id);
-      return run && this.writeRun(id, run, applyExit(run, exit, extras), exitDurability(exit, run));
+      // Redacted first: a step the exit settles takes the run's error.
+      return run && this.writeRun(id, run, applyExit(run, exit, this.redactPatch(extras) as RunPatch, call), exitDurability(exit, run));
     }
     const run = this.peek(id);
     if (!run || (spec.guard && !spec.guard(run))) {
@@ -2704,8 +2705,8 @@ export class RunStore extends EventEmitter {
       return undefined;
     }
     const input = { ...run, ...this.redactPatch(extras) };
-    const settled = spec.settle ? spec.settle(input, { now: new Date().toISOString(), stepId }) : input;
-    this.commitIndex(new Map([[id, { ...settled, ...applyExit(run, exit) }]]));
+    const settled = spec.settle ? spec.settle(input, { ...call, now: new Date().toISOString() }) : input;
+    this.commitIndex(new Map([[id, { ...settled, ...applyExit(run, exit, {}, call) }]]));
     return this.peek(id);
   }
 
@@ -2722,7 +2723,7 @@ export class RunStore extends EventEmitter {
 
   /** One update of the held record `run`: committed at once, or written to the record for the next
    *  save. A debounced write is best-effort, so a locked database cannot stop cleanup. */
-  private writeRun(id: string, run: RunRecord, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>, durability: ExitDurability): RunRecord | undefined {
+  private writeRun(id: string, run: RunRecord, patch: RecordPatch, durability: ExitDurability): RunRecord | undefined {
     const hooks = {
       redact: (text: string) => this.redactText(text),
       repoHandle: this.repoHandle,

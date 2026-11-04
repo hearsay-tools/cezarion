@@ -176,7 +176,7 @@ export class WakeAdmission {
     if (keepsSlot) {
       this.host.move(runId, 'park');
       if (state.currentStepId) this.context.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
-    } else this.context.store.move(runId, 'park-release', {}, state.currentStepId);
+    } else this.context.store.move(runId, 'park-release', {}, { stepId: state.currentStepId });
     this.host.line.park(runId);
     if (keepsSlot) this.host.line.joinPool(runId); else this.leaveMonitoringPool(runId);
     if (!holdsSubagents && (top === 'workers' || top === 'peers')) this.host.armIdleTimer(runId, state);

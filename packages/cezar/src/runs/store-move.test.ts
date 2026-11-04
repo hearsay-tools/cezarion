@@ -220,9 +220,9 @@ describe('RunStore.move with a guarded exit', () => {
     store.flush();
     const before = structuredClone(store.getRun(id));
     const release = blockRunWrites(dir);
-    try { expect(() => store.move(id, 'park-release', {}, 'b')).toThrow(); } finally { release(); }
+    try { expect(() => store.move(id, 'park-release', {}, { stepId: 'b' })).toThrow(); } finally { release(); }
     expect(store.getRun(id)).toEqual(before);
-    store.move(id, 'park-release', {}, 'b');
+    store.move(id, 'park-release', {}, { stepId: 'b' });
     expect(committed(id)).toMatchObject({ status: RUN_STATUS.waiting });
     expect(committed(id)).not.toHaveProperty('activity');
     expect(committed(id).steps.map((step: { status: string }) => step.status)).toEqual(['pending', 'waiting', 'pending']);

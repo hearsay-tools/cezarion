@@ -15,27 +15,34 @@
  * the test setup fails the test after it ran. Outside strict mode each violation is one
  * `console.warn` and nothing is recorded.
  */
-import type { RunRecord, RunStatus } from '@open-mercato/cezar-contract';
+import type { RunRecord, RunStatus, StepState } from '@open-mercato/cezar-contract';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 
 /** The fields a write that applies a run exit patches beside it: never the status, which the exit
  *  writes (`RunStore.move`). */
 export type RunPatch = Partial<Omit<RunRecord, 'id' | 'steps' | 'status'>> & { status?: never };
 
-/** What a guarded exit's `settle` reads beside the record: one time for every field it stamps, and
- *  the step the caller names. */
-export type ExitSettlement = { now: string; stepId?: string | undefined };
+/** What a caller names beside an exit's extras: the step the exit settles apart from the others. */
+export type ExitCall = { stepId?: string | undefined };
+
+/** What an exit reads beside the record: one time for every field it stamps, and the step the
+ *  caller names. */
+export type ExitSettlement = ExitCall & { now: string };
+
+/** What an exit's `steps` read beside the step: the time the run settles at. */
+export type StepSettlement = ExitSettlement & { finishedAt: string };
 
 /** How a write that applies an exit persists: `committed` at once, or `debounced` to the next save,
  *  which is best-effort, so a locked database cannot stop cleanup (Decision 4). */
 export type ExitDurability = 'debounced' | 'committed';
 
-/** What an exit's `fields` read off the record a write applies it to. */
-export type ExitRead = Pick<RunRecord, 'status' | 'delegation'> & Partial<Pick<RunRecord, 'finishedAt'>>;
+/** What an exit's `fields` and `steps` read off the record a write applies it to. */
+export type ExitRead = Pick<RunRecord, 'status' | 'delegation'> & Partial<Pick<RunRecord, 'finishedAt'>> & { steps?: readonly StepState[] };
 
 /**
  * One kind of status write: the statuses it may leave from and the one it writes. `fields` are
- * the fields every site of the exit writes alike; a caller's extras override them. A guarded exit
+ * the fields every site of the exit writes alike; a caller's extras override them. `steps` settles
+ * each step of the run in the same write (Table B targets B5, B8, B10, B11). A guarded exit
  * declares a `guard`, a `settle`, or both: the store commits it at once, with the record `settle`
  * returns (the store writes the exit's fields and `to` over it). Its `guard` decides whether the run may take it: a failed guard writes nothing, and the store
  * returns undefined, or throws `refused` when the exit names one. `durability` is how a write that
@@ -46,6 +53,7 @@ export type RunExitSpec = {
   to: RunStatus;
   durability: ExitDurability;
   fields?: (run: ExitRead, at: ExitSettlement) => RunPatch;
+  steps?: (step: StepState, run: ExitRead, at: StepSettlement) => StepState;
   guard?: (run: RunRecord) => boolean;
   refused?: string;
   settle?: (run: RunRecord, at: ExitSettlement) => RunRecord;
@@ -82,19 +90,22 @@ export function settlesRun(exit: RunExitId): boolean {
 const settledRun = (run: ExitRead, write: RunPatch, { now }: ExitSettlement): RunPatch =>
   ({ ...retiredFinishPatch(run), currentStepId: undefined, finishedAt: run.finishedAt ?? write.finishedAt ?? now });
 
-/** A run that succeeded: its resume counter retired. A run that got all the way to a settled turn
- *  is not in a usage-limit loop, so its resume counter starts over instead of creeping toward the
- *  cap. */
-const succeeded = (): RunPatch => ({ autoResumeAttempts: undefined });
+/** The legacy `activity` cleared: a key no patch type takes (`WithLegacyActivity`). */
+const CLEARED_ACTIVITY = { activity: undefined } as RunPatch;
 
-/** A root Finish that succeeds: the run and its running or waiting steps settled at one time. */
-function settleRootFinish(run: RunRecord, { now }: ExitSettlement): RunRecord {
-  const finishedAt = run.finishedAt ?? now;
-  const settled: WithLegacyActivity = { ...run, autoResumeAttempts: undefined, activity: undefined,
-    steps: run.steps.map(step => step.status === 'waiting' || step.status === 'running'
-      ? { ...step, status: 'done' as const, finishedAt: step.finishedAt ?? finishedAt } : step) };
-  return settled;
-}
+/** A run that succeeded: its resume counter and the legacy `activity` retired. A run that got all
+ *  the way to a settled turn is not in a usage-limit loop, so its resume counter starts over
+ *  instead of creeping toward the cap. */
+const succeeded = (): RunPatch => ({ autoResumeAttempts: undefined, ...CLEARED_ACTIVITY });
+
+/** A step that is running or waiting. */
+const openStep = (step: StepState) => step.status === 'running' || step.status === 'waiting';
+
+/** A run that succeeded settles its running and waiting steps done at its time (B5). A worker's
+ *  incomplete earlier step, the one the caller names, stays waiting: a parent resume re-enters it
+ *  (hearsay-tools/cezarion#1620). */
+const succeededStep = (step: StepState, _run: ExitRead, { finishedAt, stepId }: StepSettlement): StepState =>
+  openStep(step) && step.id !== stepId ? { ...step, status: 'done', finishedAt: step.finishedAt ?? finishedAt } : step;
 
 /** A released park: the legacy `activity` cleared and the named step waiting. */
 function settleParkRelease(run: RunRecord, { stepId }: ExitSettlement): RunRecord {
@@ -121,11 +132,11 @@ export const RUN_EXITS = {
   'park-for-wake': { durability: 'debounced', from: ['queued', 'waiting'], to: 'waiting' },
   hold: { durability: 'debounced', from: ['failed', 'waiting'], to: 'waiting', fields: () => ({ finishedAt: undefined }) },
   resume: { durability: 'debounced', from: ['waiting'], to: 'running' },
-  succeed: { durability: 'debounced', from: ['running', 'waiting'], to: 'done', fields: succeeded },
-  'succeed-review': { durability: 'debounced', from: ['running', 'waiting'], to: 'review', fields: succeeded },
+  succeed: { durability: 'debounced', from: ['running', 'waiting'], to: 'done', fields: succeeded, steps: succeededStep },
+  'succeed-review': { durability: 'debounced', from: ['running', 'waiting'], to: 'review', fields: succeeded, steps: succeededStep },
   // A root's durable Finish: a concurrent explicit cancellation is never overwritten.
-  'succeed-root': { durability: 'committed', from: ['waiting'], to: 'done', guard: rootFinishWaiting, settle: settleRootFinish },
-  'succeed-root-review': { durability: 'committed', from: ['waiting'], to: 'review', guard: rootFinishWaiting, settle: settleRootFinish },
+  'succeed-root': { durability: 'committed', from: ['waiting'], to: 'done', guard: rootFinishWaiting, fields: succeeded, steps: succeededStep },
+  'succeed-root-review': { durability: 'committed', from: ['waiting'], to: 'review', guard: rootFinishWaiting, fields: succeeded, steps: succeededStep },
   'accept-review': { durability: 'debounced', from: ['review'], to: 'done' },
   // Draft PR (`POST /runs/:id/pr`): the cockpit offers it on review and on settled runs, so a
   // settled run that is published reads done too. A usage-limit hold is not declared (spec B13).
@@ -206,22 +217,31 @@ function checkFrom(exit: RunExitId, from: RunStatus | undefined): void {
   violate(`undeclared run transition: exit ${exit} from ${from} (declare it in runs/run-exits.ts)`);
 }
 
-/** The fields a write that applies `exit` writes: `extras` and the exit's status. */
-export type ExitWrite<E extends RunExitId> = Omit<RunPatch, 'status'> & { status: (typeof RUN_EXITS)[E]['to'] };
+/** The fields a write that applies `exit` writes: `extras`, the steps it settles and the exit's
+ *  status. */
+export type ExitWrite<E extends RunExitId> = Omit<RunPatch, 'status'> & { steps?: StepState[]; status: (typeof RUN_EXITS)[E]['to'] };
 
 /**
  * Apply `exit` to `run`, a record in hand: check its status against the exit's `from` and return
  * the fields to write: the exit's `fields`, then `extras` over them, then what a settling exit
- * writes on every run (`settledRun`), then the exit's status. It
+ * writes on every run (`settledRun`), then the steps its `steps` changed, then the exit's status. It
  * neither runs a guard nor a guarded `settle`: a caller of a guarded exit checks its guard itself.
  * `RunStore.move` writes through it, and the store's load-time and archive writers assign its
  * result onto the record they change.
  */
-export function applyExit<E extends RunExitId>(run: ExitRead, exit: E, extras: RunPatch = {}): ExitWrite<E> {
+export function applyExit<E extends RunExitId>(run: ExitRead, exit: E, extras: RunPatch = {}, call: ExitCall = {}): ExitWrite<E> {
   const spec: RunExitSpec = RUN_EXITS[exit];
-  const at = { now: new Date().toISOString() };
-  const write = { ...spec.fields?.(run, at), ...extras };
-  return { ...write, ...(settlesRun(exit) ? settledRun(run, write, at) : {}), status: exitStatus(exit, run.status) };
+  const at: ExitSettlement = { ...call, now: new Date().toISOString() };
+  const patch = { ...spec.fields?.(run, at), ...extras };
+  const write = { ...patch, ...(settlesRun(exit) ? settledRun(run, patch, at) : {}) };
+  const steps = spec.steps && run.steps ? settleSteps(run.steps, step => spec.steps!(step, run, { ...at, finishedAt: write.finishedAt ?? at.now })) : undefined;
+  return { ...write, ...(steps ? { steps } : {}), status: exitStatus(exit, run.status) };
+}
+
+/** `steps` with each settled by `settle`, or undefined when none changed. */
+function settleSteps(steps: readonly StepState[], settle: (step: StepState) => StepState): StepState[] | undefined {
+  const settled = steps.map(settle);
+  return settled.some((step, index) => step !== steps[index]) ? settled : undefined;
 }
 
 /**

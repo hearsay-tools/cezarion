@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RunStatus } from '@open-mercato/cezar-contract';
-import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 import { RUN_EXITS, takeRunExitViolations, type RunExitId } from './run-exits.ts';
 import { readPersistedRuns } from './run-store.testkit.ts';
@@ -142,5 +142,32 @@ describe('B4: a settling exit keeps an existing finishedAt; continue-* and hold 
     store.move(id, exit);
     store.flush();
     expect(committed(id)).not.toHaveProperty('finishedAt');
+  });
+});
+
+// B5: one exit, one result. Both success paths settle the run and its live steps in one write.
+describe('B5: both success paths clear activity and settle running or waiting steps in the same write', () => {
+  const statuses = (run: { steps: Array<{ status: string }> }) => run.steps.map(step => step.status);
+
+  it.each(['succeed', 'succeed-review', 'succeed-root', 'succeed-root-review'] as const)('%s', (exit) => {
+    const { store, root } = setup();
+    const id = root(exit);
+    Object.assign(store.getRun(id)!, { activity: 'monitoring' });
+    store.updateStep(id, 'a', { status: STEP_STATUS.running, finishedAt: EARLIER });
+    store.updateStep(id, 'b', { status: STEP_STATUS.waiting });
+    store.updateStep(id, 'c', { status: STEP_STATUS.failed });
+    const moved = store.move(id, exit)!;
+    expect(statuses(moved)).toEqual([STEP_STATUS.done, STEP_STATUS.done, STEP_STATUS.failed]);
+    expect(moved.steps.map(step => step.finishedAt)).toEqual([EARLIER, moved.finishedAt, undefined]);
+    expect(moved).not.toHaveProperty('activity', expect.anything());
+  });
+
+  it('keeps the step a worker re-enters waiting (hearsay-tools/cezarion#1620)', () => {
+    const { store, worker } = setup();
+    const id = worker('succeed');
+    store.updateStep(id, 'a', { status: STEP_STATUS.waiting });
+    store.updateStep(id, 'b', { status: STEP_STATUS.running });
+    const moved = store.move(id, 'succeed', {}, { stepId: 'a' })!;
+    expect(statuses(moved)).toEqual([STEP_STATUS.waiting, STEP_STATUS.done, STEP_STATUS.pending]);
   });
 });

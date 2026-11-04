@@ -35,7 +35,8 @@ import {
 } from './run-references.ts';
 import type { RepoHandle, RunRecord, StepState } from './store.ts';
 
-type RecordPatch = Partial<Omit<RunRecord, 'id' | 'steps'>>;
+/** The fields an update writes: a run exit's write may carry the steps it settled (`applyExit`). */
+export type RecordPatch = Partial<Omit<RunRecord, 'id' | 'steps'>> & { steps?: StepState[] };
 type StepPatch = Partial<Omit<StepState, 'id'>>;
 
 export const WRITE_PATHS = ['commit', 'durableUpdate', 'debouncedUpdate', 'loaded', 'conversation', 'pullRequests', 'archiveFields', 'stepUpdate'] as const;

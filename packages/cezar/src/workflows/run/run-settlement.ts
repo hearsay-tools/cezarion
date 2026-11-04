@@ -431,21 +431,11 @@ export class RunSettlement {
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
   }
 
-  /** The ordinary success path (not a root finish): the steps that settle as done, then the run
-   *  as `review` or `done`. */
+  /** The ordinary success path (not a root finish): the run as `review` or `done`. The exit
+   *  settles an idle-closed Continue's intermediate steps with it (B5); a worker's incomplete
+   *  earlier step stays `waiting`, since a parent resume re-enters it (hearsay-tools/cezarion#1620). */
   commitOrdinarySuccess(runId: string, review: boolean, keepStepId: string | undefined): void {
-    const finishedAt = new Date().toISOString();
-    // An idle-closed Continue remains waiting until the whole task succeeds.
-    // Complete those intermediate steps before publishing terminal run status.
-    // A worker's incomplete earlier step stays `waiting`: a parent resume re-enters it (hearsay-tools/cezarion#1620).
-    for (const step of this.context.store.getRun(runId)?.steps ?? []) {
-      if (settlesAsDone(step, keepStepId)) {
-        this.context.store.updateStep(runId, step.id, { status: 'done', finishedAt: step.finishedAt ?? finishedAt });
-      }
-    }
-    // The exit clears `currentStepId` and the resume counter and retires the Finish intent; the
-    // run settles at the time its steps did.
-    this.context.store.move(runId, review ? 'succeed-review' : 'succeed', { finishedAt });
+    this.context.store.move(runId, review ? 'succeed-review' : 'succeed', {}, { stepId: keepStepId });
   }
 
   /** Called only after session/process settlement. A refused nudge retained its
