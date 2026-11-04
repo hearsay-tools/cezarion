@@ -36,7 +36,7 @@ export function managerDisposed(manager: RunManager): boolean {
 /** The work registry owned by fixtures under this root, including recovered managers. */
 export function fixtureWork(root: string | RunManager): TrackedWork {
   const work = typeof root === 'string' ? fixtures.get(root)?.work : managerWork.get(root);
-  if (!work) throw new Error(`No fixture owns work under ${root}`);
+  if (!work) throw new Error(typeof root === 'string' ? `No fixture owns work under ${root}` : 'No fixture owns work for unregistered manager');
   return work;
 }
 
