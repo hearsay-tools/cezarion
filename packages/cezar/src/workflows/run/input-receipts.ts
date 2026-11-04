@@ -24,7 +24,7 @@ export interface InputReceiptsHost {
 /** Only the current session's observation writes consumedAt (hearsay-tools/cezarion#505). An ID reported
  * before its acceptance checkpoint lands is applied when that checkpoint commits. */
 export function handleAgentInputConsumed(context: RunModuleContext, host: InputReceiptsHost, runId: string, state: ActiveRun, session: AgentSession | undefined, ids: readonly string[]): void {
-  if (!session || !host.isCurrentState(runId, state) || state.session !== session) return;
+  if (!session || !host.isCurrentState(runId, state) || state.liveSession.session !== session) return;
   const inFlight = state.agentInputFlight?.inputIds ?? [];
   for (const id of ids) if (inFlight.includes(id)) state.consumedBeforeAck?.add(id);
   const read = ids.filter(id => !inFlight.includes(id));
@@ -42,14 +42,14 @@ export function handleAgentInputConsumed(context: RunModuleContext, host: InputR
  * DONE, auto-end and park see queued work. Out of a turn (an OpenCode lost wake)
  * it is submitted right away; at a turn-end the handler's own flush submits it. */
 export function retireUnreadInputs(context: RunModuleContext, host: InputReceiptsHost, runId: string, state: ActiveRun, ids: readonly string[], outOfTurn: boolean): void {
-  if (!ids.length || state.cancelled || !host.isCurrentState(runId, state)) return;
+  if (!ids.length || state.liveSession.cancelled || !host.isCurrentState(runId, state)) return;
   // Durable first: a failed checkpoint must never let this boundary finish (DONE, park)
   // over input that is still marked delivered but was never read.
   try { context.store.commitOutcome(runId, { kind: 'requeued', inputIds: ids }); }
   catch (error) {
     if (state.agentInputError) return;
     state.agentInputError = `agent input requeue checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
-    try { state.session?.interrupt(); } finally {
+    try { state.liveSession.session?.interrupt(); } finally {
       try { context.store.appendEvent(runId, { type: 'error', message: state.agentInputError }); }
       catch { console.error(`[cez] ${state.agentInputError}`); }
     }
@@ -67,7 +67,7 @@ export function retireUnreadInputs(context: RunModuleContext, host: InputReceipt
  * Its replay-prompt retirement still waits for that turn's successful end. */
 export function recordOpeningAccepted(context: RunModuleContext, host: InputReceiptsHost, runId: string, state: ActiveRun): void {
   const id = state.openingAgentInputId;
-  if (!id || state.cancelled || !host.isCurrentState(runId, state)) return;
+  if (!id || state.liveSession.cancelled || !host.isCurrentState(runId, state)) return;
   const inputs = context.store.getRun(runId)?.agentInputs ?? [];
   if (!inputs.some(input => input.id === id && !input.deliveredAt)) return;
   const deliveredAt = new Date().toISOString();
@@ -112,14 +112,14 @@ export function commitAnswer(context: RunModuleContext, runId: string, state: Ac
   const refused = commitBundledDelivery(context, runId, state, bundle?.inputs.map(input => input.id) ?? [], answerOutcomes(messageId, context.store.getRun(runId)?.automaticWakes));
   if (!refused || !messageId) return;
   state.agentInputError = `human input delivery checkpoint failed: ${refused}`;
-  state.session?.interrupt();
+  state.liveSession.session?.interrupt();
 }
 
 /** The turn that carried bundled messages has ended: the model read them. */
 export function readBundledInputs(context: RunModuleContext, host: InputReceiptsHost, runId: string, state: ActiveRun): void {
   const ids = state.bundledInputIds ?? [];
   state.bundledInputIds = undefined;
-  if (!ids.length || state.cancelled) return;
+  if (!ids.length || state.liveSession.cancelled) return;
   try { context.store.commitOutcome(runId, { kind: 'consumed', inputIds: ids, at: new Date().toISOString() }); host.reconcileWorkerWaits(); }
   catch (error) { console.warn(`[cez] bundled read checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
 }
@@ -134,7 +134,7 @@ export function requeueUnreadAtClose(context: RunModuleContext, host: InputRecei
   const opening = state.openingAgentInputId && context.store.getRun(runId)?.agentInputs?.some(input =>
     input.id === state.openingAgentInputId && input.deliveredAt && !input.consumedAt) ? [state.openingAgentInputId] : [];
   const ids = [...new Set([...(state.unreadInputIds ?? []), ...(state.bundledInputIds ?? []), ...opening])];
-  if (!session || !ids.length || !host.isCurrentState(runId, state) || state.session !== session) return;
+  if (!session || !ids.length || !host.isCurrentState(runId, state) || state.liveSession.session !== session) return;
   state.unreadInputIds?.clear();
   state.bundledInputIds = undefined;
   try { context.store.commitOutcome(runId, { kind: 'requeued', inputIds: ids }); }

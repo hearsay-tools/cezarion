@@ -123,7 +123,7 @@ export function sessionContextFor({ store, repoRoot, dataDir }: LaunchContext, r
     ? { prefix: '', handoffInjected: false, reports: [{ id: 'session-context', status: 'skipped', sources: [], reason: 'the opening message is a slash command, which must stay at its start' }] }
     : buildSessionContext({
       projectRoot: repoRoot,
-      cwd: state.cwd,
+      cwd: state.liveSession.cwd,
       role,
       handoffPath: handoff,
       variables: {
@@ -132,7 +132,7 @@ export function sessionContextFor({ store, repoRoot, dataDir }: LaunchContext, r
         role,
         'step.id': stepId,
         'project.root': repoRoot,
-        'worktree.root': state.cwd,
+        'worktree.root': state.liveSession.cwd,
         'handoff.path': handoff,
       },
     });
@@ -161,14 +161,14 @@ export function setDelegationProvisioner(host: LaunchSettingsHost, provisioner: 
   host.setProvisioner(provisioner);
   return () => {
     if (host.delegationProvisioner() === provisioner) host.setProvisioner(undefined);
-    for (const state of host.active.values()) { state.revokeDelegation?.(); state.revokeDelegation = undefined; }
+    for (const state of host.active.values()) { state.liveSession.revokeDelegation?.(); state.liveSession.clearDelegationRevoker(); }
   };
 }
 
 export function provisionSession(host: LaunchSettingsHost, runId: string, state: ActiveRun) {
-  state.revokeDelegation?.(); state.revokeDelegation = undefined;
+  state.liveSession.revokeDelegation?.(); state.liveSession.clearDelegationRevoker();
   if (host.historyDeletionPending(runId)) return;
   const session = host.delegationProvisioner()?.(runId);
-  state.revokeDelegation = session?.revoke;
+  state.liveSession.installDelegationRevoker(session?.revoke);
   return session;
 }

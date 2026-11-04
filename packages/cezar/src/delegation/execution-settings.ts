@@ -13,9 +13,9 @@ import { DelegationPolicyError } from './policy.ts';
 
 type ExecutionSelection = { backend?: RunnerId | undefined; model?: string | undefined; effort?: string | undefined; agentProfile?: string };
 
-export function delegationExecutionSettings(state: Pick<ActiveRun, 'session' | 'delegationSettings'> | undefined): DelegationExecutionSettings {
-  if (!state?.session?.open || !state.delegationSettings) throw new DelegationPolicyError('incompatible_state', 'Parent session settings unavailable');
-  return structuredClone(state.delegationSettings);
+export function delegationExecutionSettings(state: Pick<ActiveRun, 'liveSession'> | undefined): DelegationExecutionSettings {
+  if (!state?.liveSession.session?.open || !state.liveSession.delegationSettings) throw new DelegationPolicyError('incompatible_state', 'Parent session settings unavailable');
+  return structuredClone(state.liveSession.delegationSettings);
 }
 
 export async function selectDelegationExecutionSettings(repoRoot: string, parent: DelegationExecutionSettings, selection: { backend?: RunnerId | undefined; model?: string | undefined; effort?: string | undefined; agentProfile?: string }, validateModel?: (settings: DelegationExecutionSettings) => Promise<void>): Promise<DelegationExecutionSettings> {

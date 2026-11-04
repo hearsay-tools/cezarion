@@ -52,13 +52,13 @@ export class RunCancel {
   }
 
   private cancelActiveRun(runId: string, state: ActiveRun): void {
-    state.cancelled = true;
+    state.liveSession.cancel();
     this.context.store.updateRun(runId, { stopping: true });
     this.context.store.flush();
-    state.revokeCiTools?.(); state.revokeCiTools = undefined;
-    state.revokeDelegation?.(); state.revokeDelegation = undefined;
+    state.liveSession.revokeCiTools?.(); state.liveSession.clearCiRevoker();
+    state.liveSession.revokeDelegation?.(); state.liveSession.clearDelegationRevoker();
     clearIdleTimer(state);
-    state.interrupt();
+    state.liveSession.interrupt();
   }
 
   private cancelWorkerExecution(runId: string): void {

@@ -79,7 +79,7 @@ export function backgroundChildEvent(event: UiEvent): ChildEvent | undefined {
 /** The live children of the session the run holds now. */
 export function liveSubagents(state: ActiveRun): number {
   let live = 0;
-  for (const child of state.children.backgroundChildren.values()) if (child.session === state.session && child.status === 'running') live += 1;
+  for (const child of state.children.backgroundChildren.values()) if (child.session === state.liveSession.session && child.status === 'running') live += 1;
   return live;
 }
 
@@ -109,7 +109,7 @@ export class SubagentWaits {
     const known = state.children.backgroundChildren.get(child.id);
     if (!known && !child.background) return;
     if (known && (known.status !== 'running' || known.status === child.status)) return;
-    observeBackgroundChild(state.children, child.id, { session: known ? known.session : state.session, status: child.status });
+    observeBackgroundChild(state.children, child.id, { session: known ? known.session : state.liveSession.session, status: child.status });
     // A child that runs again voids the grace: the next time none runs, a full grace starts.
     const live = liveSubagents(state);
     if (live) this.clearGrace(runId);
@@ -133,7 +133,7 @@ export class SubagentWaits {
     // A question opens the wait too: the children keep running beside it, and the wait carries
     // their deadline and their restart. The question still ranks first for the user.
     if (wait) this.refreshWait(runId, state, wait);
-    else if (!state.pendingPermissions?.size) this.openSubagentWait(runId, state);
+    else if (!state.liveSession.pendingPermissions?.size) this.openSubagentWait(runId, state);
   }
 
   /** Whether native subagents still run in the run's session: then a park for the user keeps the
@@ -154,7 +154,7 @@ export class SubagentWaits {
   /** The children the wait saves: the session's own, the running ones first, then the latest ends,
    *  within the bound. */
   private children(state: ActiveRun): SubagentChild[] {
-    const own = [...state.children.backgroundChildren].filter(([, child]) => child.session === state.session).map(([id, child]) => ({ id, status: child.status }));
+    const own = [...state.children.backgroundChildren].filter(([, child]) => child.session === state.liveSession.session).map(([id, child]) => ({ id, status: child.status }));
     const running = own.filter(child => child.status === 'running').slice(0, SUBAGENT_WAIT_CHILD_LIMIT);
     const room = SUBAGENT_WAIT_CHILD_LIMIT - running.length;
     return [...running, ...(room > 0 ? own.filter(child => child.status !== 'running').slice(-room) : [])];
@@ -305,7 +305,7 @@ export class SubagentWaits {
 
   /** Whether the session that holds the wait's children is still live. */
   sessionLive(runId: string): boolean {
-    return !!this.host.active.get(runId)?.session?.open;
+    return !!this.host.active.get(runId)?.liveSession.session?.open;
   }
 
   dispose(): void {

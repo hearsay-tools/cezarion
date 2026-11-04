@@ -109,9 +109,9 @@ export class RunSettlement {
    * question on a worker is not one: the clean exit supersedes it, so the workflow goes on as the
    * plain park it replaced did (hearsay-tools/cezarion#1301). */
   supersedeFallbackThenWorkflowAsk(runId: string, state: ActiveRun): boolean {
-    if (!state.finishRequested) this.workerQuestions.supersedeWorkerFallback(runId);
+    if (!state.liveSession.finishRequested) this.workerQuestions.supersedeWorkerFallback(runId);
     const run = this.context.store.getRun(runId);
-    return !state.finishRequested && !!run && hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id)) &&
+    return !state.liveSession.finishRequested && !!run && hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id)) &&
       waitingBeforeFinalWorkflowStep(run, this.host.isSyntheticContinuation, record => this.waitingWorkflowStepIndex(record));
   }
 
@@ -121,12 +121,12 @@ export class RunSettlement {
    */
   stepLeftOpen(state: ActiveRun, stepId: string, next: WorkflowStepDef | undefined): boolean {
     const completed = state.completedStepId === stepId;
-    return !!next && !completed && !state.finishRequested;
+    return !!next && !completed && !state.liveSession.finishRequested;
   }
 
   /** Consume the completion mark only when Continue reaches its completion check. */
   private continuationLeftOpen(state: ActiveRun, stepId: string, next: WorkflowStepDef | undefined): boolean {
-    if (state.cancelled) return false;
+    if (state.liveSession.cancelled) return false;
     const open = this.stepLeftOpen(state, stepId, next);
     state.completedStepId = undefined;
     return open;
@@ -150,18 +150,18 @@ export class RunSettlement {
     resumedNext: WorkflowStepDef | undefined,
     close: ContinuationClose,
   ): Promise<void> | undefined {
-    if (completionGateReads.holdsClosingWakes(this.context, this.completionGateHost, runId) && !state.cancelled) {
+    if (completionGateReads.holdsClosingWakes(this.context, this.completionGateHost, runId) && !state.liveSession.cancelled) {
       this.settleClosingWakes(runId, state, stepId, sink);
       return undefined;
     }
-    if (!state.cancelled) {
+    if (!state.liveSession.cancelled) {
       this.context.store.updateRun(runId, { continuationMessage: undefined });
       this.context.store.flush();
     }
-    sink.sessionEnded(state.cancelled ? 'cancelled' : 'end_turn');
+    sink.sessionEnded(state.liveSession.cancelled ? 'cancelled' : 'end_turn');
     const incomplete = this.continuationLeftOpen(state, stepId, resumedNext);
-    const kind = stepDecisions.continuationCloseKind(state.cancelled, incomplete,
-      !state.cancelled && !incomplete && (state.idleClosed || this.supersedeFallbackThenWorkflowAsk(runId, state)));
+    const kind = stepDecisions.continuationCloseKind(state.liveSession.cancelled, incomplete,
+      !state.liveSession.cancelled && !incomplete && (state.idleClosed || this.supersedeFallbackThenWorkflowAsk(runId, state)));
     if (kind === 'cancelled') {
       this.settleCancelledContinuation(runId, stepId);
       return undefined;
@@ -229,7 +229,7 @@ export class RunSettlement {
     // Finish accepts this resumed step before the async settlement gate,
     // but must not launch the remaining workflow. A later cancellation
     // may cancel still-live steps, never this completed one (R30).
-    if (!state.finishRequested && waitingIndex < workflow.steps.length - 1) {
+    if (!state.liveSession.finishRequested && waitingIndex < workflow.steps.length - 1) {
       close.resumeWorkflow = {
         workflow,
         startAt: waitingIndex + 1,
@@ -265,7 +265,7 @@ export class RunSettlement {
     sink.sessionEnded('error', message);
     this.context.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: new Date().toISOString() });
     this.humanWaits.withdrawCezarHumanWaits(runId);
-    const delivery = this.host.closingWakeDecision(runId, completionGateReads.holdsClosingWakes(this.context, this.completionGateHost, runId), state.cancelled, message);
+    const delivery = this.host.closingWakeDecision(runId, completionGateReads.holdsClosingWakes(this.context, this.completionGateHost, runId), state.liveSession.cancelled, message);
     if (delivery === 'park') {
       // Retain the wait and scheduler wake source while closing this attempt.
       // settleSuccess only completes running/waiting steps, so its failure is durable.
@@ -295,8 +295,8 @@ export class RunSettlement {
       this.host.dropActive(runId);
       return;
     }
-    const settlement = stepDecisions.executionSettlementKind(state.cancelled, loop.runError, loop.incompleteStepId,
-      !state.cancelled && !loop.runError && !loop.incompleteStepId && (state.idleClosed || this.supersedeFallbackThenWorkflowAsk(runId, state)));
+    const settlement = stepDecisions.executionSettlementKind(state.liveSession.cancelled, loop.runError, loop.incompleteStepId,
+      !state.liveSession.cancelled && !loop.runError && !loop.incompleteStepId && (state.idleClosed || this.supersedeFallbackThenWorkflowAsk(runId, state)));
     if (settlement.kind === 'cancelled') {
       this.settleCancelledRun(runId);
     } else if (settlement.kind === 'failed') {
@@ -355,7 +355,7 @@ export class RunSettlement {
     // the record before touching steps, and never settle another session's work.
     const current = this.context.store.getRun(runId);
     if (!current || this.successSuperseded(runId, current.status, state, continuationGeneration)) return;
-    if (state?.cancelled) {
+    if (state?.liveSession.cancelled) {
       this.settleCancelledSuccess(runId);
       return;
     }
@@ -404,7 +404,7 @@ export class RunSettlement {
     const active = this.host.active.get(runId);
     // Disposal clears active, but cannot revoke an already accepted Finish/Stop.
     // A different active state is still a replacement, even after disposal.
-    const disposedWithTerminalIntent = this.context.disposed() && active === undefined && (state?.finishRequested || state?.cancelled);
+    const disposedWithTerminalIntent = this.context.disposed() && active === undefined && (state?.liveSession.finishRequested || state?.liveSession.cancelled);
     return !['queued', 'running', 'waiting'].includes(status) ||
       this.host.generation(runId) !== continuationGeneration ||
       (active !== state && !disposedWithTerminalIntent);

@@ -309,7 +309,7 @@ export class QueuedInput {
     // the state — seconds before the session opens — so checking `starting`
     // alone would reopen exactly the drop this rung exists to close.
     const state = this.host.activeGet(runId);
-    const startingUp = this.host.startingHas(runId) || (state !== undefined && !state.sessionEverOpened && !state.cancelled);
+    const startingUp = this.host.startingHas(runId) || (state !== undefined && !state.liveSession.sessionEverOpened && !state.liveSession.cancelled);
     if (!startingUp) return false;
     // The pending maps were removed only AFTER hydration. This entry therefore
     // needs live delivery, never a second fold into the already-created opening.

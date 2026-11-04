@@ -50,7 +50,7 @@ export async function continuationModel(
     const normalized = await resolveLaunchModel(
       backend,
       agentModelsLocked(repoRoot) ? undefined : stepIdentity ? stepIdentity.model : toolsStep?.model ?? record?.model,
-      state.cwd,
+      state.liveSession.cwd,
     );
     store.updateRun(runId, {
       modelIdentity: normalized ? formatModelIdentity(normalized.identity) : undefined,
@@ -145,7 +145,7 @@ export async function stepModel(
     const normalized = await resolveLaunchModel(
       stepBackend,
       modelsLocked ? undefined : stepIdentity ? stepIdentity.model : step.model ?? input.model,
-      state.cwd,
+      state.liveSession.cwd,
     );
     // Persist the identity of what ACTUALLY runs (#405, review M1). The run-start echo
     // (line ~993) is best-effort from `taskBackend`/`input.model`; a per-step `runner`/`model`

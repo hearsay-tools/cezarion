@@ -62,7 +62,7 @@ export class StepLoop {
     // Resolve the agent backend for this run: the task choice (GUI) wins over
     // the config default. Per-step `runner` can still override it at the step.
     const config = await loadConfig(this.context.repoRoot);
-    if (state.cancelled || this.context.store.getRun(runId)?.stopping) {
+    if (state.liveSession.cancelled || this.context.store.getRun(runId)?.stopping) {
       this.host.move(runId, 'cancel');
       this.host.dropActive(runId);
       return undefined;
@@ -79,7 +79,7 @@ export class StepLoop {
       ? input.systemPrompt
       : resolveExtraSystemPrompt(input.systemPrompt, config.systemPrompt);
     const modelIdentity = await taskModelIdentity(this.context.repoRoot, taskBackend, input);
-    if (state.cancelled) {
+    if (state.liveSession.cancelled) {
       this.host.move(runId, 'cancel');
       this.host.dropActive(runId);
       return undefined;
@@ -140,7 +140,7 @@ export class StepLoop {
     try {
       if (this.host.workerExecutionStopped(runId)) { this.host.dropActive(runId); return false; }
       const wt = await openExecutionWorktree(this.context.store, this.context.repoRoot, this.context.dataDir, execution, launch, base);
-      state.cwd = wt.path;
+      state.liveSession.changeWorkingDirectory(wt.path);
       this.context.store.updateRun(runId, {
         worktreePath: wt.path,
         branch: wt.branch,
@@ -152,7 +152,7 @@ export class StepLoop {
       // its own manager/repoRoot and must never copy another project's layer.
       // A worker's explicit `--attach` files win over the main checkout's copy (hearsay-tools/cezarion#1149).
       const attached = executionSeedFiles(ownedRun);
-      const seededConfig = await seedAgentConfigLocalLayer(this.context.repoRoot, state.cwd, process.env, attached).catch(() => []);
+      const seededConfig = await seedAgentConfigLocalLayer(this.context.repoRoot, state.liveSession.cwd, process.env, attached).catch(() => []);
       if (seededConfig.length > 0) {
         emit({ type: 'note', message: `seeded personal agent config: ${seededConfig.join(', ')}` });
       }
@@ -185,7 +185,7 @@ export class StepLoop {
     trigger: 'start' | 'rematerialized' | 'resume',
   ): Promise<string | undefined> {
     const record = this.context.store.getRun(runId);
-    if (!record || state.cwd === this.context.repoRoot) return undefined;
+    if (!record || state.liveSession.cwd === this.context.repoRoot) return undefined;
     const plan = resolveWorktreeSetup(raw);
     const interrupted = record.worktreeSetup?.status === 'running';
     if (plan.kind === 'none') {
@@ -215,10 +215,10 @@ export class StepLoop {
       }
       outcome = await runWorktreeSetup({
         plan,
-        cwd: state.cwd,
+        cwd: state.liveSession.cwd,
         env: worktreeSetupEnv({ projectRoot: this.context.repoRoot, runId, tmpEnv }),
-        setInterrupt: (stop) => { state.interrupt = stop; },
-        isCancelled: () => state.cancelled,
+        setInterrupt: (stop) => { state.liveSession.installInterrupt(stop); },
+        isCancelled: () => state.liveSession.cancelled,
         onCommandResult: (result) => emit({
           type: 'check-output',
           command: result.command,
@@ -265,7 +265,7 @@ export class StepLoop {
     startAt?: number,
   ): boolean {
     const run = this.context.store.getRun(runId);
-    if (!run || run.status === 'cancelled' || state?.cancelled) return false;
+    if (!run || run.status === 'cancelled' || state?.liveSession.cancelled) return false;
     // The watchdog sent this one through. Checked, never consumed: the spawn path asks this
     // question TWICE — here at the top of `execute`, and again after the exclusive repo-root
     // lease is granted — so a one-shot flag would clear at the first gate and let the second one
@@ -274,8 +274,8 @@ export class StepLoop {
     const finishHeld = this.host.executionBlockedByRootFinish(run);
     if (!finishHeld && (this.line.isForced(runId) ||
       !accountHeldFor({ ...run, runner }, this.context.semaphore.accountHolds(), runner))) return false;
-    state?.releaseRepoRoot?.();
-    if (state) { state.releaseRepoRoot = undefined; clearAutosaveTimer(state); }
+    state?.liveSession.releaseRepoRoot?.();
+    if (state) { state.liveSession.clearRepoRootRelease(); clearAutosaveTimer(state); }
     this.line.enqueueJob(runId, { workflow, input, startAt });
     this.host.move(runId, 'requeue', startAt !== undefined && startAt > 0 ? {} : { startedAt: undefined });
     this.context.store.appendEvent(runId, {
@@ -303,7 +303,7 @@ export class StepLoop {
 
     let i = startAt;
     while (i < workflow.steps.length) {
-      if (state.cancelled || this.host.workerExecutionStopped(runId)) { state.cancelled = true; break; }
+      if (state.liveSession.cancelled || this.host.workerExecutionStopped(runId)) { state.liveSession.cancel(); break; }
       const step = workflow.steps[i] as WorkflowStepDef;
       const kind = stepKind(step);
       const record = this.context.store.getRun(runId)?.steps.find((s) => s.id === step.id);
@@ -350,7 +350,7 @@ export class StepLoop {
       }
 
       const { ok, output } = await this.runCheckStep(state, step, emit);
-      if (state.cancelled || preserveRunAfterDisposal(this.context.store, this.context.disposed, runId, state)) break;
+      if (state.liveSession.cancelled || preserveRunAfterDisposal(this.context.store, this.context.disposed, runId, state)) break;
       const nextIndex = this.settleCheckStep(execution, i, record, { ok, output }, loop);
       if (nextIndex === undefined) break;
       i = nextIndex;
@@ -374,12 +374,12 @@ export class StepLoop {
     // Stale setup cannot finalize a replacement owner. Disposal also clears
     // active, but must still honor a previously accepted Stop/Finish intent.
     if (this.host.active.get(runId) !== state &&
-      !(this.context.disposed() && (state.cancelled || state.finishRequested))) return 'handed-off';
-    if (state.cancelled || preserveRunAfterDisposal(this.context.store, this.context.disposed, runId, state)) return 'settle';
+      !(this.context.disposed() && (state.liveSession.cancelled || state.liveSession.finishRequested))) return 'handed-off';
+    if (state.liveSession.cancelled || preserveRunAfterDisposal(this.context.store, this.context.disposed, runId, state)) return 'settle';
     this.humanWaits.withdrawCezarHumanWaits(runId);
     this.expireStepDeadlineWaits(runId, step, failure, attempt.startedAt);
     const current = this.context.store.getRun(runId);
-    if (current && this.host.executionBlockedByRootFinish(current) && !state.sessionEverOpened) {
+    if (current && this.host.executionBlockedByRootFinish(current) && !state.liveSession.sessionEverOpened) {
       this.context.store.updateStep(runId, step.id, { status: 'pending' });
       this.requeueWhileHeld(runId, workflow, input, launch.taskBackend, state, attempt.index);
       return 'handed-off';
@@ -393,7 +393,7 @@ export class StepLoop {
     if (state.idleClosed || this.runSettlement.supersedeFallbackThenWorkflowAsk(runId, state)) return 'settle';
     this.finishStep(runId, step.id, 'done', undefined, emit);
     // Finish is an explicit stop, not an answer or permission to run checks.
-    return state.finishRequested ? 'settle' : 'next';
+    return state.liveSession.finishRequested ? 'settle' : 'next';
   }
 
   /**
@@ -425,7 +425,7 @@ export class StepLoop {
     }
     // A clean close that leaves results undelivered is a failed delivery too.
     const undelivered = failure ?? (this.host.owesDelivery(runId) ? this.wakeSessionClosedError : undefined);
-    const delivery = this.host.closingWakeDecision(runId, holdsClosingWakes(this.context, this.completionGateHost, runId), state.cancelled, undelivered || undefined);
+    const delivery = this.host.closingWakeDecision(runId, holdsClosingWakes(this.context, this.completionGateHost, runId), state.liveSession.cancelled, undelivered || undefined);
     if (delivery === 'capped') {
       loop.deliveryCapped = true;
       if (!failure) {
@@ -499,9 +499,9 @@ export class StepLoop {
     // group, shared with worktree setup (#917).
     const result = await runGroupedCommand({
       command,
-      cwd: state.cwd,
+      cwd: state.liveSession.cwd,
       env: process.env,
-      setInterrupt: (stop) => { state.interrupt = stop; },
+      setInterrupt: (stop) => { state.liveSession.installInterrupt(stop); },
       keep: 'head',
       cap: CHECK_OUTPUT_CAP,
     });

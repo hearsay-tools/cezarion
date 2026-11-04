@@ -48,7 +48,7 @@ export class RunFinish {
     };
     const session = toolSessionRefusal(this.context.store.getRun(runId), state, this.completionGateHost.active.get(runId), generation, signal, this.context.disposed());
     const run = this.context.store.getRun(runId);
-    if (session || !run || !state?.session) return refuse(session ?? 'run_missing', doneErrorMessage(session ?? 'run_missing'));
+    if (session || !run || !state?.liveSession.session) return refuse(session ?? 'run_missing', doneErrorMessage(session ?? 'run_missing'));
     if (this.host.executionBlockedByRootFinish(run)) return refuse('root_finish_pending', doneErrorMessage('root_finish_pending'));
     // The answer a continuation opened with is not a pending question while its turn runs.
     // A cezar_ask this turn registered is pending too, before its turn end shows it
@@ -59,8 +59,8 @@ export class RunFinish {
       recordRequestRefusal(state, refusal, true);
       return refuse(refusal.code, refusal.message, refusal.workers);
     }
-    state.doneRequested = { session: state.session, ...(parsed.summary === undefined ? {} : { summary: parsed.summary }) };
-    const next = state.nextStep?.session === state.session ? state.nextStep.label : undefined;
+    state.doneRequested = { session: state.liveSession.session, ...(parsed.summary === undefined ? {} : { summary: parsed.summary }) };
+    const next = state.nextStep?.session === state.liveSession.session ? state.nextStep.label : undefined;
     return { ok: true, finishes: 'at_turn_end', ...(next === undefined ? { completes: 'task' as const } : { completes: 'step' as const, next_step: next }), open_waits };
   }
 
@@ -76,8 +76,8 @@ export class RunFinish {
     if (gate === 'accept') return false;
     const state = this.completionGateHost.active.get(runId);
     // Mid-turn, the live turn end takes its done to the gate itself, behind owed input and waits.
-    if (typeof gate === 'object' && state?.session && state.atTurnBoundary === state.session) {
-      this.turnSettler.settleTurn(runId, state, 'gate', this.turnSettler.boundaryTurn(runId, state, state.session, true), gate);
+    if (typeof gate === 'object' && state?.liveSession.session && state.atTurnBoundary === state.liveSession.session) {
+      this.turnSettler.settleTurn(runId, state, 'gate', this.turnSettler.boundaryTurn(runId, state, state.liveSession.session, true), gate);
     }
     return true;
   }
@@ -101,12 +101,12 @@ export class RunFinish {
     }
     if (parent.delegation?.role !== 'root') return 'accept';
     const refusal = pendingAsk ? undefined : this.completionRefusal(runId);
-    if (refusal && state?.session?.open) return refusal;
+    if (refusal && state?.liveSession.session?.open) return refusal;
     // A legacy accepted Finish takes the same path as a done: its refusal reopens the session.
     if (refusal) { this.turnNudges.queueCompletionRefusal(runId, refusal); return 'held'; }
     // Every blocker but the pending human question is a refusal: the question parks for the user.
     this.context.store.appendEvent(runId, { type: 'note', tone: 'warning', message: 'Completion blocked: answer the pending human question.' });
-    this.host.move(runId, 'park', { finishedAt: undefined }, { stepId: state?.currentStepId });
+    this.host.move(runId, 'park', { finishedAt: undefined }, { stepId: state?.liveSession.currentStepId });
     this.context.store.flush();
     if (state) {
       clearIdleTimer(state);
@@ -159,16 +159,16 @@ export class RunFinish {
       return false;
     }
     const state = this.completionGateHost.active.get(runId);
-    if (decision.action === 'session' && state?.session) {
+    if (decision.action === 'session' && state?.liveSession.session) {
       try {
         this.host.cancelOpenWaits(runId);
         this.acceptRootRequestFinish(runId);
       } catch { return false; }
       this.closeQuestionOnFinish(runId);
-      state.finishRequested = true;
+      state.liveSession.requestFinish();
       clearIdleTimer(state);
       this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'session closed by user' });
-      state.session.end();
+      state.liveSession.session.end();
       return true;
     }
     const run = this.context.store.getRun(runId);

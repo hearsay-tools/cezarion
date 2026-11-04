@@ -51,7 +51,7 @@ export function rootCompletionRefusal({ questions, blockers, requests, incomingR
 export function recordRequestRefusal(state: ActiveRun, refusal: CompletionRefusal, tool = false): void {
   if (refusal.code === 'requests_unanswered') state.incomingRequestRefused = true;
   if (refusal.code !== 'requests_outstanding') return;
-  if (tool && state.sentRequestRefused && state.session) state.doneRequested = { session: state.session };
+  if (tool && state.sentRequestRefused && state.liveSession.session) state.doneRequested = { session: state.liveSession.session };
   state.sentRequestRefused = true;
 }
 

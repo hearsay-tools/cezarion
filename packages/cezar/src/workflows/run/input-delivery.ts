@@ -91,9 +91,9 @@ export class InputDelivery {
   respondPermission(runId: string, requestId: string, optionId: string): boolean {
     const state = this.host.active.get(runId);
     const run = this.context.store.getRun(runId);
-    if (this.context.disposed() || !state?.session?.open || state.cancelled || state.finishRequested || !this.host.canProceedWithRun(runId, run) ||
-        !state.pendingPermissions?.has(requestId)) return false;
-    return state.session.respondPermission?.(requestId, optionId) ?? false;
+    if (this.context.disposed() || !state?.liveSession.session?.open || state.liveSession.cancelled || state.liveSession.finishRequested || !this.host.canProceedWithRun(runId, run) ||
+        !state.liveSession.pendingPermissions?.has(requestId)) return false;
+    return state.liveSession.session.respondPermission?.(requestId, optionId) ?? false;
   }
 
   /** Latch an agent input error, then interrupt: a transport failure the interrupt causes is secondary. */
@@ -121,7 +121,7 @@ export class InputDelivery {
     const current = this.context.store.getRun(runId);
     if (!current || !this.host.pendingConversationWakes(current).length) { this.host.holdPeerWakesAtCap(runId); return; }
     const state = this.host.active.get(runId);
-    if (current.status === 'waiting' && (!state || state.atTurnBoundary === state.session)) this.host.queueWaitWake(runId);
+    if (current.status === 'waiting' && (!state || state.atTurnBoundary === state.liveSession.session)) this.host.queueWaitWake(runId);
     else if (!this.host.recoveringRun(runId)) this.flushAgentInputs(runId);
   }
 
@@ -160,7 +160,7 @@ export class InputDelivery {
 
   private deliverRoutedAnswer(runId: string, state: ActiveRun, answer: RoutedAnswer, admitted: boolean): void {
     const { askSeq, source, reply, text, fallback } = answer;
-    if (!state.session?.open || state.cancelled || state.openingAgentInputId === reply.id) return;
+    if (!state.liveSession.session?.open || state.liveSession.cancelled || state.openingAgentInputId === reply.id) return;
     // Already waiting for admission: only the admission itself may deliver it.
     if (!admitted && (this.host.line.hasWake(runId) || this.host.line.isAdmitted(runId))) return;
     if (!admitted && this.host.line.isParked(runId)) {
@@ -170,13 +170,13 @@ export class InputDelivery {
       this.host.queueWaitWake(runId);
       return;
     }
-    const bundle = state.atTurnBoundary === state.session ? pendingConversationBatch(this.context.store.getRun(runId), state, input => formatAgentInput(input, id => this.context.store.getRun(id)), reply.id) : undefined;
-    const session = state.session;
+    const bundle = state.atTurnBoundary === state.liveSession.session ? pendingConversationBatch(this.context.store.getRun(runId), state, input => formatAgentInput(input, id => this.context.store.getRun(id)), reply.id) : undefined;
+    const session = state.liveSession.session;
     if (!writeInput(state, () => session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])]))) return;
     this.context.store.appendEvent(runId, { type: 'human-input-delivered', askSeq, source });
     inputReceipts.commitRoutedAnswer(this.context, runId, state, [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])], fallback, this.maxAutoContinues);
     // Spend the answer's admission now so later messages can steer before its turn ends.
-    if (this.host.line.retireAdmission(runId)) state.waitWakeTurn = state.session;
+    if (this.host.line.retireAdmission(runId)) state.waitWakeTurn = state.liveSession.session;
     state.pendingHumanAsk = hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id));
     if (!state.pendingHumanAsk) this.flushAgentInputs(runId);
     this.resumeParkedRun(runId, state);
@@ -217,8 +217,8 @@ export class InputDelivery {
     // checkpoint takes the run out of the question's park: park for the question again
     // (hearsay-tools/cezarion#1233).
     if (state.pendingHumanAsk && !proseGate && state.atTurnBoundary === session && session.open &&
-      !this.host.line.isParked(runId) && state.currentStepId) {
-      this.host.parkForUser(runId, state, state.currentStepId);
+      !this.host.line.isParked(runId) && state.liveSession.currentStepId) {
+      this.host.parkForUser(runId, state, state.liveSession.currentStepId);
       return true;
     }
     return false;
@@ -229,11 +229,11 @@ export class InputDelivery {
    * input is resubmitted once; after a second it is left delivered but unconfirmed. */
   armUnreadInputTimer(runId: string, state: ActiveRun): void {
     clearUnreadInputTimer(state);
-    const session = state.session;
+    const session = state.liveSession.session;
     if (!session?.open || state.pendingHumanAsk || !harnessOwesInput(state) || state.agentInputFlight) return;
     const timer = setTimeout(() => {
       state.unreadInputTimer = undefined;
-      if (this.context.disposed() || this.host.active.get(runId) !== state || state.session !== session || !session.open || state.cancelled ||
+      if (this.context.disposed() || this.host.active.get(runId) !== state || state.liveSession.session !== session || !session.open || state.liveSession.cancelled ||
         state.pendingHumanAsk || state.agentInputFlight || !harnessOwesInput(state)) return;
       const ids = [...state.unreadInputIds!];
       const retried = ids.filter(id => state.unreadRetried?.has(id));
@@ -262,7 +262,7 @@ export class InputDelivery {
   /** #486: a turn-end deferred close/park only because the harness still held a human follow-up. */
   armHeldHumanInputTimer(runId: string, state: ActiveRun): void {
     clearHeldHumanInputTimer(state, false);
-    const session = state.session;
+    const session = state.liveSession.session;
     if (!session?.open || !harnessHoldsHumanInput(state)) {
       state.heldHumanInputSince = undefined;
       return;
@@ -270,8 +270,8 @@ export class InputDelivery {
     state.heldHumanInputSince ??= Date.now();
     const timer = setTimeout(() => {
       state.heldHumanInputTimer = undefined;
-      if (this.context.disposed() || this.host.active.get(runId) !== state || state.session !== session || !session.open ||
-        state.cancelled || state.idleClosed || state.atTurnBoundary !== session) return;
+      if (this.context.disposed() || this.host.active.get(runId) !== state || state.liveSession.session !== session || !session.open ||
+        state.liveSession.cancelled || state.idleClosed || state.atTurnBoundary !== session) return;
       if (harnessHoldsHumanInput(state)) {
         // An in-flight ACK still owns this boundary; its .then re-settles.
         if (state.agentInputFlight) {
@@ -300,8 +300,8 @@ export class InputDelivery {
   }
 
   private inputReadyAuthorized(runId: string, state: ActiveRun, session: AgentSession | undefined): session is AgentSession {
-    return !(!session || this.context.disposed() || this.host.active.get(runId) !== state || state.session !== session ||
-      !session.open || state.idleClosed || state.cancelled || state.finishRequested || state.agentInputError || state.agentSessionError);
+    return !(!session || this.context.disposed() || this.host.active.get(runId) !== state || state.liveSession.session !== session ||
+      !session.open || state.idleClosed || state.liveSession.cancelled || state.liveSession.finishRequested || state.agentInputError || state.liveSession.agentSessionError);
   }
 
   /** A callback from an old/replaced/disposed session carries no authority. */
@@ -319,7 +319,7 @@ export class InputDelivery {
     // again (hearsay-tools/cezarion#1525).
     // It keeps tryAutonomousNudge's own guards: a run that may not continue on its own keeps the
     // retry pending, bounded by the idle timer.
-    if (idle && state.autonomousNudgePending === session && state.doneAtBoundary !== session && state.currentStepId &&
+    if (idle && state.autonomousNudgePending === session && state.doneAtBoundary !== session && state.liveSession.currentStepId &&
       state.autonomous && this.host.canAutoContinue(runId, state)) {
       this.host.settleTurn(runId, state, 'ready', { ...this.host.boundaryTurn(runId, state, session, false), monitoring: false });
       return;
@@ -329,8 +329,8 @@ export class InputDelivery {
 
   /** Reservation is synchronous; only an acknowledged transport may checkpoint delivery. */
   submitAgentInput(runId: string, state: ActiveRun, content: ContentBlock[], inputIds: readonly string[] = [], beforeHumanReset?: HumanAnswerBudget): boolean {
-    const session = state.session;
-    if (!session?.open || state.agentInputFlight || state.cancelled || state.finishRequested || state.agentInputError) return false;
+    const session = state.liveSession.session;
+    if (!session?.open || state.agentInputFlight || state.liveSession.cancelled || state.liveSession.finishRequested || state.agentInputError) return false;
     if (!this.admitsAgentInput(runId, state, session, inputIds, beforeHumanReset)) return false;
     // Every delivered turn ends with the waits still open.
     const footer = openWaitsFooter(this.context.store.getRun(runId)?.waits ?? []);
@@ -358,7 +358,7 @@ export class InputDelivery {
     else if (inputIds.length) startCompletionCycle(state);
   }
 
-  private admitsAgentInput(runId: string, state: ActiveRun, session: NonNullable<ActiveRun['session']>, inputIds: readonly string[], beforeHumanReset?: HumanAnswerBudget): boolean {
+  private admitsAgentInput(runId: string, state: ActiveRun, session: NonNullable<ActiveRun['liveSession']['session']>, inputIds: readonly string[], beforeHumanReset?: HumanAnswerBudget): boolean {
     // A pending question admits only a wake made of resolved-wait results and messages, at a turn boundary: it stays answerable, and nothing else is delivered until it is answered (hearsay-tools/cezarion#1233, #1235).
     if (state.pendingHumanAsk) {
       const run = this.context.store.getRun(runId);
@@ -371,11 +371,11 @@ export class InputDelivery {
   private sendAgentInput(runId: string, state: ActiveRun, flight: NonNullable<ActiveRun['agentInputFlight']>, content: ContentBlock[], refusal: boolean): Promise<void> | false {
     const { session, inputIds } = flight;
     const refund = (): void => { flight.wakeReserved = false; };
-    const current = (): boolean => !this.context.disposed() && this.host.active.get(runId) === state && state.session === session &&
-      state.agentInputFlight === flight && !state.cancelled && !state.finishRequested && !this.host.workerExecutionStopped(runId) &&
+    const current = (): boolean => !this.context.disposed() && this.host.active.get(runId) === state && state.liveSession.session === session &&
+      state.agentInputFlight === flight && !state.liveSession.cancelled && !state.liveSession.finishRequested && !this.host.workerExecutionStopped(runId) &&
       !!this.context.store.getRun(runId) && !this.host.executionBlockedByRootFinish(this.context.store.getRun(runId)!);
     const fail = (error: unknown, checkpoint: boolean): void => {
-      if (!current() || state.agentSessionError || state.agentInputError) return;
+      if (!current() || state.liveSession.agentSessionError || state.agentInputError) return;
       this.latchAgentInputError(runId, state, session, `${checkpoint ? 'agent input delivery checkpoint failed' : 'agent input delivery failed'}: ${error instanceof Error ? error.message : String(error)}`);
     };
     let acknowledgement: false | Promise<void>;
@@ -394,7 +394,7 @@ export class InputDelivery {
           const { accepted, resolvedIds, early, spent, observable, at, resumes } = batch;
           // One commit (hearsay-tools/cezarion#1805): the messages, then each wait's delivery (a message a wait carries keeps its read receipt), the charge, the early reads, the cleared failure count and the resume (hearsay-tools/cezarion#1235).
           this.context.store.commitOutcome(runId, withFailuresCleared(this.context.store, runId, acknowledgedBatch({ accepted, resolvedIds, early, spent, observable, at }), accepted, resolvedIds.length > 0),
-            resumes ? { exit: 'resume', resumeStepId: resolvedIds.length ? state.currentStepId : undefined } : {});
+            resumes ? { exit: 'resume', resumeStepId: resolvedIds.length ? state.liveSession.currentStepId : undefined } : {});
           this.applyAcknowledgedInput(runId, state, flight, batch, refusal);
         }
       } catch (error) { fail(error, true); }
@@ -402,7 +402,7 @@ export class InputDelivery {
       if (state.agentInputFlight !== flight) return;
       const authorized = current();
       state.agentInputFlight = undefined;
-      if (!authorized || !session.open || state.agentSessionError || state.agentInputError) return;
+      if (!authorized || !session.open || state.liveSession.agentSessionError || state.agentInputError) return;
       // A liveness resubmission gets its own quiet window, and so does input acknowledged after its turn already ended: no later turn-end would arm one (#505 review).
       if (inputIds.some(id => state.unreadRetried?.has(id)) || state.atTurnBoundary === session) this.armUnreadInputTimer(runId, state);
       if (this.flushAgentInputs(runId)) return;
@@ -441,14 +441,14 @@ export class InputDelivery {
   flushAgentInputs(runId: string, beforeHumanReset?: HumanAnswerBudget): boolean {
     const state = this.host.active.get(runId);
     let run = this.context.store.getRun(runId);
-    if (!state?.session?.open || state.cancelled || state.agentInputError || state.agentInputFlight || !run ||
+    if (!state?.liveSession.session?.open || state.liveSession.cancelled || state.agentInputError || state.agentInputFlight || !run ||
       !['queued', 'running', 'waiting'].includes(run.status) || this.host.executionBlockedByRootFinish(run) ||
       (run.delegation?.role === 'worker' && run.delegation.destroy)) return false;
     run = this.supersedeFallbackBeforeFlush(runId, state, run, beforeHumanReset);
     // A question pending at a turn boundary still takes an admitted wake of resolved-wait results
     // and messages; one pending mid-turn (a native ask) takes nothing until its turn ends.
     const askPending = state.pendingHumanAsk || this.host.hasUnansweredHumanAsk(runId);
-    if (askPending && state.atTurnBoundary !== state.session) return false;
+    if (askPending && state.atTurnBoundary !== state.liveSession.session) return false;
     run = this.cancelCappedTimersBeforeFlush(runId, state, run, beforeHumanReset);
     return this.flushAgentInputBatch(runId, state, run, askPending, beforeHumanReset);
   }
@@ -470,7 +470,7 @@ export class InputDelivery {
   private cancelCappedTimersBeforeFlush(runId: string, state: ActiveRun, run: RunRecord, beforeHumanReset?: HumanAnswerBudget): RunRecord {
     // A timer result still owed when the budget is spent is cancelled before its batch is sent; the
     // CI results beside it are delivered.
-    if (this.host.countAutomaticWakes(runId, beforeHumanReset) >= this.maxAutoContinues && this.host.line.isAdmitted(runId) && state.atTurnBoundary === state.session) {
+    if (this.host.countAutomaticWakes(runId, beforeHumanReset) >= this.maxAutoContinues && this.host.line.isAdmitted(runId) && state.atTurnBoundary === state.liveSession.session) {
       const owedTimers = resolvedWaits(run).filter(chargesBudget);
       if (owedTimers.length) {
         this.host.cancelAutomaticAtCap(runId, owedTimers);
@@ -492,10 +492,10 @@ export class InputDelivery {
     const beside = new Set(this.host.pendingConversationWakes(run, beforeHumanReset).map(input => input.id));
     // A refusal queued for a closed session waits for the reopened session's turn boundary: the
     // turn that answers it is the nudge's (hearsay-tools/cezarion#1301), not the opening turn.
-    const boundary = state.atTurnBoundary === state.session;
+    const boundary = state.atTurnBoundary === state.liveSession.session;
     const queue = (run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId && !owed.has(input.id) &&
       (!askPending || beside.has(input.id)) && (boundary || input.purpose !== 'completion-refusal'));
-    const admitted = this.host.line.isAdmitted(runId) && state.atTurnBoundary === state.session;
+    const admitted = this.host.line.isAdmitted(runId) && state.atTurnBoundary === state.liveSession.session;
     if (resolved.length && admitted) {
       const batch = resolvedWaitInputBatch(run, resolved, queue, input => formatAgentInput(input, id => this.context.store.getRun(id)), { workerStatus: this.host.waitRegistry.workerStatus });
       if (!batch) return false;
@@ -529,8 +529,8 @@ export class InputDelivery {
     // changes either (hearsay-tools/cezarion#1233).
     this.host.line.unpark(runId);
     this.host.move(runId, 'resume');
-    if (state.currentStepId) {
-      this.context.store.updateStep(runId, state.currentStepId, { status: 'running' });
+    if (state.liveSession.currentStepId) {
+      this.context.store.updateStep(runId, state.liveSession.currentStepId, { status: 'running' });
     }
   }
 
@@ -538,7 +538,7 @@ export class InputDelivery {
    * bookkeeping without masquerading as user-authored transcript messages. */
   deliverMessage(runId: string, content: PastedContent[], userAuthored: boolean, messageId?: string): boolean {
     const state = this.host.active.get(runId);
-    if (!state?.session?.open || state.cancelled || state.pendingPermissions?.size) return false;
+    if (!state?.liveSession.session?.open || state.liveSession.cancelled || state.liveSession.pendingPermissions?.size) return false;
     const run = this.context.store.getRun(runId);
     if (!canProceedWithRun(run, () => this.host.workerExecutionStopped(runId), run => this.host.executionBlockedByRootFinish(run))) return false;
 
@@ -553,7 +553,7 @@ export class InputDelivery {
     }
     const prepared = this.prepareMessageContent(runId, state, content, userAuthored);
     const { blocks, expanded, deliverable } = prepared;
-    const session = state.session;
+    const session = state.liveSession.session;
     const delivered = userAuthored ? writeInput(state, () => session.sendMessage(deliverable)) : this.host.submitAgentInput(runId, state, deliverable);
     if (delivered && expanded !== blocks) this.host.runSkills.provisionLiveSlashSkill(runId, state, blocks);
     if (delivered) {
@@ -574,7 +574,7 @@ export class InputDelivery {
     if (userAuthored) {
       this.context.store.appendEvent(runId, {
         type: 'user-message',
-        stepId: state.currentStepId,
+        stepId: state.liveSession.currentStepId,
         text,
         imageCount: content.filter((b) => b.type === 'image').length,
         images,
@@ -589,7 +589,7 @@ export class InputDelivery {
       : expanded.length ? expanded : [{ type: 'text', text: 'The user attached a document, but it could not be saved. Ask them to attach it again before discussing its contents.' }];
     const answeringAskSeq = userAuthored ? pendingHumanAskSeq(this.context.store, runId) : undefined;
     // An answer opening a turn carries held conversation messages after the answer.
-    const bundle = userAuthored && answeringAskSeq !== undefined && state.atTurnBoundary === state.session
+    const bundle = userAuthored && answeringAskSeq !== undefined && state.atTurnBoundary === state.liveSession.session
       ? pendingConversationBatch(this.context.store.getRun(runId), state, input => formatAgentInput(input, id => this.context.store.getRun(id))) : undefined;
     // Human input answers all human waits. Agent input gets its footer in submitAgentInput.
     const footer = userAuthored ? openWaitsFooter((this.context.store.getRun(runId)?.waits ?? []).filter(wait => wait.kind !== 'human')) : undefined;

@@ -66,7 +66,7 @@ export function finishDecision(context: RunModuleContext, host: CompletionGateHo
   { action: 'session' | 'root' | 'waiting' | 'review' } | { reason: string; warn?: boolean } {
   const blocked = delegationFinishBlockedReason(context, host, runId);
   if (blocked) return { reason: blocked, warn: true };
-  if (host.active.get(runId)?.session?.open) return { action: 'session' };
+  if (host.active.get(runId)?.liveSession.session?.open) return { action: 'session' };
   const run = context.store.getRun(runId);
   if (run?.status === 'waiting' && !hasRegisteredRunProcess(runId) && !host.isActive(runId) &&
     (run.delegation?.role === 'root' || run.delegation === undefined)) {
@@ -87,7 +87,7 @@ export function finishBlockedReason(context: RunModuleContext, host: CompletionG
 /** Human Finish keeps the worker guarantees and bypasses request obligations only. */
 export function completionMayPass(context: RunModuleContext, host: CompletionGateHost, runId: string): boolean {
   const run = context.store.getRun(runId);
-  const humanFinish = host.active.get(runId)?.finishRequested || (run?.delegation?.role === 'root' && run.delegation.finishRequestedAt);
+  const humanFinish = host.active.get(runId)?.liveSession.finishRequested || (run?.delegation?.role === 'root' && run.delegation.finishRequestedAt);
   return humanFinish ? host.parentCompletionBlockers(runId).every(blocker => blocker.reason === 'request') : !completionRefusal(context, host, runId);
 }
 

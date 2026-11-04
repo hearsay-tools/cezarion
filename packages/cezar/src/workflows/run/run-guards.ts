@@ -37,7 +37,7 @@ export function isDisposedDelegatedRun(store: Pick<RunStore, 'getRun'>, disposed
 
 /** Shutdown is not completion. Explicit terminal controls retain their precedence. */
 export function preserveRunAfterDisposal(store: Pick<RunStore, 'getRun'>, disposed: () => boolean, runId: string, state: ActiveRun): boolean {
-  return isDisposedDelegatedRun(store, disposed, runId) && !state.cancelled && !state.finishRequested;
+  return isDisposedDelegatedRun(store, disposed, runId) && !state.liveSession.cancelled && !state.liveSession.finishRequested;
 }
 
 /** Only an original workflow that has never executed may return to its queue. */

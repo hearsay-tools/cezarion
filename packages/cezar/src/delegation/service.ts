@@ -109,7 +109,7 @@ type WorkerGrants = { allowedTools?: string[]; bashAllowlist?: string[] };
  * tools use the runner default and unset Bash rules mean unrestricted Bash. Native enforcement
  * remains runner-specific.
  */
-function narrowGrants(parent: WorkerGrants, step: WorkflowStepDef, runner: RunnerId): WorkerGrants {
+function narrowGrants(parent: { allowedTools?: readonly string[]; bashAllowlist?: readonly string[] }, step: WorkflowStepDef, runner: RunnerId): WorkerGrants {
   const parentTools = step.allowedTools === undefined ? parent.allowedTools : parent.allowedTools ?? allowedToolsForStep(undefined, runner);
   const allowedTools = step.allowedTools === undefined ? parent.allowedTools : step.allowedTools.filter(tool => parentTools!.includes(tool));
   const bashAllowlist = step.bashAllowlist === undefined ? parent.bashAllowlist

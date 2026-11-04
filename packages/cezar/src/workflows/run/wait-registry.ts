@@ -100,7 +100,7 @@ export class WaitRegistry {
     // A worker that parked before this wait opened tells the parent now (hearsay-tools/cezarion#1327).
     this.host.noticeParkedWorkers(familyOf(run));
     const current = this.context.store.getRun(runId);
-    if (current?.waits?.some(wait => wait.id === entry.id) && (state.atTurnBoundary === state.session || this.host.isParked(runId))) this.host.parkOnWaits(runId, state);
+    if (current?.waits?.some(wait => wait.id === entry.id) && (state.atTurnBoundary === state.liveSession.session || this.host.isParked(runId))) this.host.parkOnWaits(runId, state);
     return this.recordedWorkerWait(runId, entry.id) ?? entry;
   }
 
@@ -132,7 +132,7 @@ export class WaitRegistry {
     if (!run?.delegation || run.delegation.role === 'invalid') refuse('Worker waits require an owned worker or parent run');
     if (historyDeletionPending(this.context.store, runId)) refuse('History deletion is pending; finish deletion before registering a wait');
     if (executionBlockedByRootFinish(this.context.store, run!)) refuse('Parent finish is pending; a finishing parent cannot register a wait');
-    if (!['running', 'waiting'].includes(run!.status) || !state?.session?.open || state.cancelled) {
+    if (!['running', 'waiting'].includes(run!.status) || !state?.liveSession.session?.open || state.liveSession.cancelled) {
       refuse(`Run is ${run!.status} with no available active session; register a wait from an executing parent or worker`);
     }
   }
@@ -215,7 +215,7 @@ export class WaitRegistry {
     // The question this turn's opening answers stays open only until the turn end settles it, so
     // a question asked in that turn is a new one, never the answered one returned
     // (hearsay-tools/cezarion#2397).
-    const answering = active.session?.open ? active.openingAnswerAskSeq : undefined;
+    const answering = active.liveSession.session?.open ? active.openingAnswerAskSeq : undefined;
     const open = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human' && wait.source !== 'cezar' &&
       (answering === undefined || wait.askSeq !== answering));
     if (open?.askSeq !== undefined) return open;
@@ -328,7 +328,7 @@ export class WaitRegistry {
     try { this.context.store.commitWait(runId, wait); }
     catch { throw Object.assign(new Error(waitErrorMessage('persistence')), { code: 'persistence' }); }
     this.host.armWait(runId, wait);
-    if (state.atTurnBoundary === state.session || this.host.isParked(runId)) this.host.parkOnWaits(runId, state);
+    if (state.atTurnBoundary === state.liveSession.session || this.host.isParked(runId)) this.host.parkOnWaits(runId, state);
     // The store keeps the entry it was given; only its phase can have moved since.
     return (this.context.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id) as W | undefined) ?? wait;
   }
@@ -341,7 +341,7 @@ export class WaitRegistry {
    */
   cancelWait(runId: string, waitId: string, generation: string): { cancelled: true } | { cancelled: false; code: 'not_found' | 'already_resolved' | 'human_question' } {
     const state = this.host.active(runId);
-    if (this.context.disposed() || !state || state.ciGeneration !== generation) {
+    if (this.context.disposed() || !state || state.liveSession.ciGeneration !== generation) {
       throw Object.assign(new Error(waitErrorMessage('generation_mismatch')), { code: 'generation_mismatch' });
     }
     const wait = this.context.store.getRun(runId)?.waits?.find(entry => entry.id === waitId);

@@ -58,7 +58,7 @@ export class WorktreeAutosave {
   }
 
   private async saveWorktreeWork(runId: string, state: ActiveRun, reason: AutosaveReason): Promise<void> {
-    if (state.cwd === this.context.repoRoot) return;
+    if (state.liveSession.cwd === this.context.repoRoot) return;
     for (;;) {
       const previous = this.autosaveTasks.get(runId);
       if (!previous) break;
@@ -79,18 +79,18 @@ export class WorktreeAutosave {
     let taskBranch: string | undefined;
     try { taskBranch = this.context.store.getRun(runId)?.branch; } catch { /* A closed store keeps the old rule. */ }
     let outcome: AutosaveOutcome | undefined;
-    const task = autosaveCommit(state.cwd, reason, {
+    const task = autosaveCommit(state.liveSession.cwd, reason, {
       ...(taskBranch ? { taskBranch } : {}),
       onOutcome: reported => { outcome = reported; },
       onWarning: note,
       onBlocked: (message, proof) => {
-        retainAutosaveCleanup(this.context.dataDir, runId, state.cwd, message, proof);
+        retainAutosaveCleanup(this.context.dataDir, runId, state.liveSession.cwd, message, proof);
         retained = true;
         if (!release) {
           const hold = this.host.holdForMaintenance([runId]);
           if (!hold) return; // Never release execution without a replacement writer guard.
           release = hold;
-          note(`${reason} autosave unsuccessful; run can settle, working files remain in ${state.cwd}`);
+          note(`${reason} autosave unsuccessful; run can settle, working files remain in ${state.liveSession.cwd}`);
         }
         entry.blocker = message;
         settle();
@@ -98,8 +98,8 @@ export class WorktreeAutosave {
     });
     void task.then(result => {
       cleanupConfirmed = true;
-      if (result === 'failed') note(`${reason} autosave failed; working files remain in ${state.cwd}`);
-      else if (result === 'refused') note(`${reason} autosave refused: unresolved conflicts or an unfinished merge, cherry-pick or revert; working files remain in ${state.cwd}`);
+      if (result === 'failed') note(`${reason} autosave failed; working files remain in ${state.liveSession.cwd}`);
+      else if (result === 'refused') note(`${reason} autosave refused: unresolved conflicts or an unfinished merge, cherry-pick or revert; working files remain in ${state.liveSession.cwd}`);
       else if (outcome && reason === 'periodic') {
         // The timer reports its commits too, since a clean closing flush reports nothing
         // (review on hearsay-tools/cezarion#1111): one coalesced handoff line per run of
@@ -113,7 +113,7 @@ export class WorktreeAutosave {
         note(message);
         recordHandoffAutosave(this.context.store, this.context.dataDir, runId, message);
       }
-    }, error => note(`${reason} autosave failed: ${String(error)}; working files remain in ${state.cwd}`)).finally(() => {
+    }, error => note(`${reason} autosave failed: ${String(error)}; working files remain in ${state.liveSession.cwd}`)).finally(() => {
       if (this.autosaveTasks.get(runId) === entry) this.autosaveTasks.delete(runId);
       if (retained && cleanupConfirmed) {
         try { clearAutosaveCleanup(this.context.dataDir, runId); }
@@ -134,7 +134,7 @@ export class WorktreeAutosave {
    *  Opt-in via CEZ_AUTOSAVE=1 (open-mercato/cezar#471) — see periodicAutosaveEnabled. */
   armAutosave(runId: string, state: ActiveRun): void {
     if (!periodicAutosaveEnabled()) return;
-    if (state.cwd === this.context.repoRoot || state.autosaveTimer) return;
+    if (state.liveSession.cwd === this.context.repoRoot || state.autosaveTimer) return;
     state.autosaveTimer = setInterval(() => {
       const task = this.host.saveWorktree(runId, state, 'periodic');
       this.host.trackTurn(runId, task);

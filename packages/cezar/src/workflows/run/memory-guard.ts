@@ -40,7 +40,7 @@ export class MemoryGuard {
       if (!usage || usage.rssBytes <= limitBytes) continue;
       if (this.memoryPausing.has(runId)) continue;
       const state = this.host.active.get(runId);
-      if (!state?.session?.open || state.cancelled) continue;
+      if (!state?.liveSession.session?.open || state.liveSession.cancelled) continue;
       this.memoryPausing.add(runId);
       const usedMb = Math.round(usage.rssBytes / (1024 * 1024));
       this.context.store.appendEvent(runId, {
@@ -55,7 +55,7 @@ export class MemoryGuard {
       // pump the queue. Suppress autonomous auto-continue so the pause actually holds.
       state.autonomous = false;
       clearIdleTimer(state);
-      state.session.end();
+      state.liveSession.session.end();
     }
   }
 
