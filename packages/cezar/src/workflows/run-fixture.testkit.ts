@@ -41,7 +41,7 @@ vi.mock('../core/runner-factory.ts', async (importOriginal) => {
 export const runnerHook = {
   uiEvent(event: UiEvent) { if (!hoistedRunnerHook.ui) throw new Error("No runner UI channel observed"); hoistedRunnerHook.ui(event); },
   get runner(): AgentRunner | undefined { return hoistedRunnerHook.runner; },
-  set runner(value: AgentRunner | undefined) { hoistedRunnerHook.runner = value; },
+  set runner(value: AgentRunner | undefined) { hoistedRunnerHook.runner = value; hoistedRunnerHook.ui = undefined; },
 };
 
 // Naming has its own suite; no background LLM call may outlive these fixtures. The mocks answer

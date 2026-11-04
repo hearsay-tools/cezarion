@@ -29,4 +29,8 @@ it('calls the original session start when two factory calls reuse one runner', (
   expect(start).toHaveBeenCalledTimes(2);
   expect(firstUi).toHaveBeenCalledExactlyOnceWith({ type: 'session.started', sessionId: 'first', backend: 'claude' });
   expect(secondUi).toHaveBeenCalledExactlyOnceWith({ type: 'session.started', sessionId: 'second', backend: 'claude' });
+  runnerHook.runner = undefined;
+  expect(() => runnerHook.uiEvent({ type: 'session.started', sessionId: 'stale', backend: 'claude' }))
+    .toThrow('No runner UI channel observed');
+  expect(secondUi).toHaveBeenCalledTimes(1);
 });
