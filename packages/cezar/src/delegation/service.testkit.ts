@@ -120,12 +120,13 @@ export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha
   const caller = credentials.authenticate(token)!;
   vi.spyOn(manager, 'delegationExecutionSettings').mockReturnValue({ cwd: root, runner: 'claude', model: 'opus', effort: 'high', agentProfile: 'default', accountBinding: { provider: 'claude', profileId: 'default', homePath: root, claudeLayout: { kind: 'relocated' } } });
   const service = new DelegationService(options);
+  let admissionHeld = true;
   const spawn = service.spawn.bind(service);
   vi.spyOn(service, 'spawn').mockImplementation(async (...args) => {
     const existingWorkers = new Set(store.listWorkerIds());
     const readsBefore = admissionReads.mock.calls.length;
     const result = await spawn(...args);
-    if (store.getRun(result.workerId)?.status === 'queued') {
+    if (admissionHeld && store.getRun(result.workerId)?.status === 'queued') {
       // bound: the requested pump awaits repository discovery before reading capacity.
       await vi.waitFor(() => expect(admissionReads.mock.calls.length).toBeGreaterThan(existingWorkers.has(result.workerId) ? 0 : readsBefore), { timeout: 10_000 });
       expect(semaphore.busy()).toBe(0);
@@ -134,7 +135,7 @@ export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha
   });
   const unregister = service.registerProject({ id: 'project', root, store, manager });
   return { root, sha, store, manager, parent, credentials, caller, token, service,
-    async releaseAdmission() { await semaphore.refresh(); await semaphore.release(); },
+    async releaseAdmission() { admissionHeld = false; await semaphore.refresh(); await semaphore.release(); },
     async close() {
       unregister();
       credentials.close();
