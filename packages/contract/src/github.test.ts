@@ -7,6 +7,7 @@ import {
   githubCommentsDataSchema,
   githubDataSchema,
   githubListQuerySchema,
+  githubItemSchema,
 } from './github.ts';
 
 /** The paged list (hearsay-tools/cezarion#1183): cursors per side, exact totals, and the list
@@ -54,7 +55,7 @@ describe('githubCommentCountsQuerySchema', () => {
     for (const bad of ['', '0', '1,,2', '01', '1,abc', '-1', '1, 2', '99999999999999999']) expect(ok(bad)).toBe(false);
     expect(ok(Array.from({ length: GITHUB_COMMENT_COUNTS_MAX + 1 }, (_, i) => i + 1).join(','))).toBe(false);
     expect(githubCommentCountsQuerySchema.safeParse({ numbers: '1' }).success).toBe(false);
-    expect(githubCommentCountsQuerySchema.safeParse({ kind: 'pr', numbers: '1', refresh: '0' }).success).toBe(false);
+    expect(githubCommentCountsQuerySchema.safeParse({ kind: githubItemSchema.shape.kind.enum.pr, numbers: '1', refresh: '0' }).success).toBe(false);
   });
 
   it('parses both answers of the counts route', () => {

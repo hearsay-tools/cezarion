@@ -1,3 +1,4 @@
+import { githubItemSchema } from '@open-mercato/cezar-api-client/contract/github'
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
@@ -41,7 +42,7 @@ describe('githubTaskPrompt', () => {
   })
 
   it('a PR reads "Address GitHub pull request"', () => {
-    expect(githubTaskPrompt(item({ kind: 'pr', number: 7 }))).toContain(
+    expect(githubTaskPrompt(item({ kind: githubItemSchema.shape.kind.enum.pr, number: 7 }))).toContain(
       'Address GitHub pull request #7:',
     )
   })
@@ -137,7 +138,7 @@ describe('githubTaskRef', () => {
   })
 
   it('a PR reads "Address GitHub pull request"', () => {
-    expect(githubTaskRef(item({ kind: 'pr', number: 7 }))).toContain(
+    expect(githubTaskRef(item({ kind: githubItemSchema.shape.kind.enum.pr, number: 7 }))).toContain(
       'Address GitHub pull request #7:',
     )
   })
@@ -148,7 +149,7 @@ describe('mentionsItem', () => {
     expect(mentionsItem('see https://github.com/acme/demo/issues/142 first', item())).toBe(true)
     expect(mentionsItem('port issue #142 to develop', item())).toBe(true)
     expect(mentionsItem('port ISSUE 142 to develop', item())).toBe(true)
-    const pr = item({ kind: 'pr', number: 77, url: 'https://github.com/acme/demo/pull/77' })
+    const pr = item({ kind: githubItemSchema.shape.kind.enum.pr, number: 77, url: 'https://github.com/acme/demo/pull/77' })
     expect(mentionsItem('rebase PR #77', pr)).toBe(true)
     expect(mentionsItem('rebase pull request 77', pr)).toBe(true)
   })
@@ -242,7 +243,7 @@ describe('extractTaskRefs over composed hand-off text', () => {
   })
 
   it('a custom prompt still yields the PR number', () => {
-    const pr = item({ kind: 'pr', number: 77, url: 'https://github.com/acme/demo/pull/77' })
+    const pr = item({ kind: githubItemSchema.shape.kind.enum.pr, number: 77, url: 'https://github.com/acme/demo/pull/77' })
     const task = composeGithubTask(pr, [], 'Port this one to develop and close original PR')
     expect(extractTaskRefs(task).prNumber).toBe(77)
   })
