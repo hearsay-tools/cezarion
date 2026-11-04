@@ -1,5 +1,4 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
-import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -10,7 +9,7 @@ import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { parkNoticeId } from '../delegation/park-notice.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
 import { thenSay, toolCall } from './waits-parity.testkit.ts';
-import { delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, register, restart, root, spendWorkerBudget, store, timeline, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, register, restart, root, semaphore, spendWorkerBudget, store, timeline, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
 /** hearsay-tools/cezarion#1327: the single-runner paths of the park notice. The RUNNER_IDS cells
  *  U3n, U3r and U3d (`waits-parity-cells.testkit.ts`) pin it on every native wire. */
@@ -45,13 +44,17 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     const w = await worker(p.id, `${toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 600, note: 'Re-check the load run.' })} ${thenSay('Waiting on the load run.')}`);
     const wait = register(p.id, [w.id]);
     // The crash: the worker parks, and its notice is never committed.
-    const lostNotice = vi.spyOn(runInternals(manager).workerQuestions, 'noticeParkedWorker').mockImplementation(() => {});
+    const commit = store.commitConversation.bind(store);
+    const lostNotice = vi.spyOn(store, 'commitConversation').mockImplementation((...args) => {
+      if (args[2]?.input.text.startsWith('Cezar notice: ')) return;
+      return commit(...args);
+    });
     manager.enqueueOwnedRun(w.id);
     await until(() => parked(w.id) && (store.getRun(w.id)?.waits ?? []).some(entry => entry.kind === 'timer' && entry.phase === 'open'), () => timeline(w.id));
     expect(notices(p.id, w.id)).toEqual([]);
     // As a crash leaves them: the fixture's own shutdown cancels runs, which completes the worker's
     // execution record, so it goes back with the event logs.
-    expect(lostNotice).toHaveBeenCalledWith(w.id);
+    expect(lostNotice.mock.calls.some(args => args[2]?.input.conversation?.senderRunId === w.id)).toBe(true);
     const files = eventCheckpoint();
     const execution = join(root, '.ai/cezar/runs', `${w.id}.execution.json`);
     files.set(execution, readFileSync(execution, 'utf8'));
@@ -100,14 +103,15 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     const { p, service, callerOf } = await family();
     const w = await parkedWorker(p.id, 'Parked before the request.');
     // The scheduler holds the request, so it stays queued on the parked worker.
-    const engine = runInternals(manager).line;
-    const pump = vi.spyOn(engine, 'pump').mockResolvedValue();
+    const cap = vi.spyOn(semaphore, 'maxParallel').mockReturnValue(0);
+    const projectCap = vi.spyOn(semaphore, 'projectMaxParallel').mockReturnValue(0);
     const request = randomUUID();
     await service.send(callerOf(p.id), { id: request, recipientRunId: w.id, kind: 'request', text: messagesPrompt('claude', ['Took the request; still blocked.']), timeoutSeconds: 600 });
     const wait = manager.registerWorkerListWait(p.id, { requestIds: [request], timeoutSeconds: 600 }, 'cez-worker-wait');
     expect(notices(p.id, w.id)).toEqual([]);
-    expect(pump).toHaveBeenCalled(); pump.mockRestore();
-    await engine.pump();
+    expect(store.getRun(w.id)?.agentInputs?.some(input => input.id === request && !input.deliveredAt)).toBe(true);
+    cap.mockRestore(); projectCap.mockRestore();
+    await semaphore.release();
     await until(() => notices(p.id, w.id).length > 0 && parked(w.id), () => timeline(w.id));
     const [notice, ...more] = notices(p.id, w.id);
     expect(more).toEqual([]);
@@ -118,18 +122,21 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
   // hearsay-tools/cezarion#1990 review: a peer that sends first under the notice's deterministic ID.
   it('a peer message that took the notice ID first sends no notice and notes it on the worker once', async () => {
     const { p, service, callerOf } = await family();
-    const noticing = runInternals(manager).workerQuestions;
-    const notify = vi.spyOn(noticing, 'noticeParkedWorker').mockImplementation(() => {});
+    const commit = store.commitConversation.bind(store);
+    const notify = vi.spyOn(store, 'commitConversation').mockImplementation((...args) => {
+      if (args[2]?.input.text.startsWith('Cezar notice: ')) return;
+      return commit(...args);
+    });
     const w = await parkedWorker(p.id, 'Parked behind a peer.');
     const wait = register(p.id, [w.id]);
     const id = parkNoticeId(w.id, wait.id);
     const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
     setRunStatus(store, peer.id, RUN_STATUS.running, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     await service.send(callerOf(peer.id), { id, recipientRunId: p.id, kind: 'progress', text: 'Peer progress first', timeoutSeconds: 600 });
-    expect(notify).toHaveBeenCalledWith(w.id);
+    expect(notify.mock.calls.some(args => args[2]?.input.conversation?.senderRunId === w.id)).toBe(true);
     notify.mockRestore();
-    noticing.noticeParkedWorker(w.id);
-    noticing.noticeParkedWorker(w.id);
+    register(p.id, [(await worker(p.id)).id]);
+    register(p.id, [(await worker(p.id)).id]);
     expect(notices(p.id, w.id)).toEqual([]);
     expect(store.readEvents(w.id).filter(event => event.type === 'note' && String(event.message).includes('park notice ID is already in use'))).toHaveLength(1);
     expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === id)).toEqual([
@@ -160,9 +167,7 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     const w = await parkedWorker(p.id, 'Parked with a full inbox.');
     const wait = register(p.id, [w.id]);
     // Another registration sweeps the family again, and the same wait finds the inbox still full.
-    const notify = vi.spyOn(runInternals(manager).workerQuestions, 'noticeParkedWorker');
     register(p.id, [(await worker(p.id)).id]);
-    expect(notify).toHaveBeenCalledWith(w.id);
     expect(store.getRun(p.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe('open');
     expect(notices(p.id, w.id)).toEqual([]);
     expect(store.readEvents(w.id).filter(event => event.type === 'note' && String(event.message).includes('no park notice was sent'))).toHaveLength(1);
