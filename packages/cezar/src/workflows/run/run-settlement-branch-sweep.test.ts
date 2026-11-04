@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
 import { RunStore } from '../../runs/store.ts';
 import { createFixtureManager, removeFixtureRepo } from '../fixture-cleanup.testkit.ts';
-import { runInternals } from '../run-internals.testkit.ts';
+import { RunSettlement } from './run-settlement.ts';
+import { TrackedWork } from './tracked-work.ts';
+import { WorkspaceSemaphore } from '../../workspace/semaphore.ts';
 
 /** The post-terminal trigger of the branch sweep (hearsay-tools/cezarion#2268): every retention
  *  pass hands the sweep its keep-count, which turns it off at 0. */
@@ -27,16 +29,24 @@ function fixture(retention?: number) {
   return { root, store: RunStore.open(join(root, '.ai/cezar')) };
 }
 
+/** Unit-test retention where it lives; public completion also runs other settlement work. */
+function settlement(root: string, store: RunStore, sweepBranches?: (keep: number) => void) {
+  const work = new TrackedWork();
+  const semaphore = new WorkspaceSemaphore();
+  createFixtureManager(store, root, { work, semaphore });
+  const context = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work, semaphore, disposed: () => false, sweepBranches };
+  const host = { claimWorktreeReclaim: () => null } as unknown as ConstructorParameters<typeof RunSettlement>[9];
+  return new RunSettlement(context, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, host, '', '');
+}
+
 it.each([3, 0])('hands the sweep the keep-count %i after each retention pass', async (keep) => {
   const { root, store } = fixture(keep);
   const sweepBranches = vi.fn();
-  const manager = createFixtureManager(store, root, { sweepBranches });
-  await runInternals(manager).runSettlement.enforceRetention();
+  await settlement(root, store, sweepBranches).enforceRetention();
   expect(sweepBranches).toHaveBeenCalledExactlyOnceWith(keep);
 });
 
 it('runs no sweep for a manager without one (`cez run`, tests)', async () => {
   const { root, store } = fixture(3);
-  const manager = createFixtureManager(store, root);
-  await expect(runInternals(manager).runSettlement.enforceRetention()).resolves.toBeUndefined();
+  await expect(settlement(root, store).enforceRetention()).resolves.toBeUndefined();
 });
