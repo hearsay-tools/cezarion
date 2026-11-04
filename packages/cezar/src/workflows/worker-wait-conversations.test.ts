@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
@@ -396,7 +397,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       await until(wire.initialReceived);
     }
     try {
-      const first = { id: randomUUID(), parentRunId: p.id, source: 'agent' as const, text: 'claimed message', createdAt: new Date().toISOString(),
+      const first = { id: randomUUID(), parentRunId: p.id, source: agentInputSchema.shape.source.enum.agent, text: 'claimed message', createdAt: new Date().toISOString(),
         conversation: { senderRunId: randomUUID(), recipientRunId: p.id, kind: 'progress' as const } };
       store.commitAgentInputs(p.id, [first]);
       // Seed through the Task 1 store so removing only Task 2 source proves an actual duplicate-delivery race.
@@ -459,7 +460,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       const request = randomUUID();
       await f.service.send(f.parentCaller, { id: request, recipientRunId: f.w.id, kind: 'request', text: 'Waiting for reply mock:hold', timeoutSeconds: 600 });
       const wait = manager.registerRequestWait(f.p.id, { requestIds: [request], timeoutSeconds: 600 });
-      const incoming = { id: randomUUID(), source: 'agent' as const, parentRunId: f.p.id, text: 'claimed progress', createdAt: new Date().toISOString(),
+      const incoming = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: f.p.id, text: 'claimed progress', createdAt: new Date().toISOString(),
         conversation: { senderRunId: f.w.id, recipientRunId: f.p.id, kind: 'progress' as const } };
       store.commitAgentInputs(f.p.id, [incoming]);
       const generation = randomUUID(); const receipt = manager.reserveInboxInputs(f.p.id, generation, [incoming.id])!;

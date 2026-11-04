@@ -24,6 +24,8 @@ import {
 import { inboxClaimSchema } from '@open-mercato/cezar-contract/delegation';
 import { readPersistedText } from '../runs/run-store.testkit.ts';
 
+const INVALID_PENDING_RECEIPT_STATUS = 'pending';
+
 describe('message inbox contract', () => {
   const at = '2026-09-06T12:00:00.000Z';
   const message = { id: randomUUID(), senderRunId: randomUUID(), recipientRunId: randomUUID(), kind: 'request',
@@ -60,7 +62,7 @@ describe('message inbox contract', () => {
     for (const status of ['acknowledged', 'already-acknowledged', 'released']) {
       expect(inboxReceiptResultSchema.parse({ receiptId, status })).toEqual({ receiptId, status });
     }
-    expect(inboxReceiptResultSchema.safeParse({ receiptId, status: 'pending' }).success).toBe(false);
+    expect(inboxReceiptResultSchema.safeParse({ receiptId, status: INVALID_PENDING_RECEIPT_STATUS }).success).toBe(false);
     const inspection = { messages: [message], outcomes: [outcome], hint: 'Run message inbox' };
     expect(conversationInspectResultSchema.parse(inspection)).toEqual(inspection);
     expect(conversationStateSchema.safeParse(inspection).success).toBe(false);

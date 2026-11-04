@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { expect, it } from 'vitest';
 import type { AgentInput, ConversationMessage } from '@open-mercato/cezar-contract';
@@ -31,7 +32,7 @@ for (const backend of RUNNER_IDS) {
         const id = kind === 'request' ? requestId : randomUUID();
         const attribution = { senderRunId: parentRunId, recipientRunId: runId, kind,
           ...(kind === 'follow-up' ? { requestId } : {}) };
-        const input: AgentInput = { id, source: 'agent', parentRunId,
+        const input: AgentInput = { id, source: agentInputSchema.shape.source.enum.agent, parentRunId,
           text: `mock:agent-echo conversation payload ${id}`, createdAt: new Date().toISOString(), conversation: attribution };
         inputs.push(input);
         messages.push({ id, ...attribution, text: input.text, createdAt: input.createdAt,

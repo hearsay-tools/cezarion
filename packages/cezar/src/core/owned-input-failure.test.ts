@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
@@ -58,7 +59,7 @@ it.each(['fresh', 'continuation'] as const)('%s acknowledged input checkpoint re
       const observe = ({ event }: { event: { type: string; reason?: unknown } }) => {
         if (event.type === 'human-ask-closed' && event.reason === 'superseded') unblock ??= blockRunWrites(join(repoRoot, '.ai/cezar'));
       };
-      const input = { id: randomUUID(), source: 'agent' as const, parentRunId, text: 'mock:hold', createdAt: new Date().toISOString() };
+      const input = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId, text: 'mock:hold', createdAt: new Date().toISOString() };
       store.on('event', observe);
       const unmute = muteLockedDatabaseLogs();
       try {

@@ -1,3 +1,4 @@
+import { githubItemSchema } from '@open-mercato/cezar-contract/github';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
@@ -3705,7 +3706,7 @@ describe('fetchGithubItem (#692)', () => {
     const res = await fetchGithubItem('/repo/item-pr', 'pr', 42);
     expect(res).toMatchObject({
       available: true,
-      item: { kind: 'pr', number: 42, checks: null, isDraft: false, comments: 5 },
+      item: { kind: githubItemSchema.shape.kind.enum.pr, number: 42, checks: null, isDraft: false, comments: 5 },
     });
   });
 
@@ -3829,7 +3830,7 @@ describe('fetchGithubItem (#692)', () => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
     expect(await fetchGithubItem('/repo/item-dry', 'pr', 128)).toMatchObject({
       available: true,
-      item: { kind: 'pr', number: 128 },
+      item: { kind: githubItemSchema.shape.kind.enum.pr, number: 128 },
       labelColors: { tests: 'c5def5' },
     });
     expect(await fetchGithubItem('/repo/item-dry', 'issue', 142)).toMatchObject({

@@ -155,7 +155,7 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     const { p } = await family();
     const now = new Date().toISOString();
     // 32 undelivered plain inputs fill the parent's inbox; nothing wakes it.
-    fixtureUpdateRun(p.id, { agentInputs: Array.from({ length: 32 }, () => ({ id: randomUUID(), source: 'agent' as const, parentRunId: p.id, text: 'queued', createdAt: now })) });
+    fixtureUpdateRun(p.id, { agentInputs: Array.from({ length: 32 }, () => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: p.id, text: 'queued', createdAt: now })) });
     const w = await parkedWorker(p.id, 'Parked with a full inbox.');
     const wait = register(p.id, [w.id]);
     // Another registration sweeps the family again, and the same wait finds the inbox still full.

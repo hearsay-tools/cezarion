@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { importableSkillSchema } from '@open-mercato/cezar-contract/skills';
+import { importableSkillSchema , skillSchema } from '@open-mercato/cezar-contract/skills';
 import { workspaceUiStatePath } from './paths.ts';
 import * as remote from './skills-remote.ts';
 import {
@@ -37,7 +37,7 @@ function teamSkill(name: string, repo: string): Skill {
 }
 
 function localSkill(name: string): Skill {
-  return { name, body: `${name} body`, path: `/repo/.ai/cezar/skills/${name}.md`, source: 'cezar' };
+  return { name, body: `${name} body`, path: `/repo/.ai/cezar/skills/${name}.md`, source: skillSchema.shape.source.enum.cezar };
 }
 
 describe('readDisabledTeamSkills', () => {

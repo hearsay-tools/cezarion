@@ -6,7 +6,7 @@ import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import fs, { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { delegationStateSchema, workerSpawnRequestSchema } from '@open-mercato/cezar-contract/delegation';
+import { delegationStateSchema, workerSpawnRequestSchema , agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { DelegationPolicyError } from './policy.ts';
 import { workerWorkflowHash } from './execution-identity.ts';
 import { QUICK_TASK_WORKFLOW, skillTaskSteps } from '../workflows/types.ts';
@@ -559,7 +559,7 @@ describe('delegation service durable authority', () => {
     const { workerId } = await f.service.spawn(f.caller, input());
     for (let n = 0; n < 32; n++) expect(await f.service.steer(f.caller, { workerId }, { text: `/skill note ${n}` })).toEqual({ workerId, state: 'queued' });
     await expect(f.service.steer(f.caller, { workerId }, { text: 'excess' })).rejects.toMatchObject({ code: 'capacity_limit' });
-    expect(f.store.getRun(workerId)?.agentInputs?.[0]).toMatchObject({ source: 'agent', parentRunId: f.parent.id, text: '/skill note 0' });
+    expect(f.store.getRun(workerId)?.agentInputs?.[0]).toMatchObject({ source: agentInputSchema.shape.source.enum.agent, parentRunId: f.parent.id, text: '/skill note 0' });
   });
   it('rejects generated credentials in agent task/steering text before persistence or delivery', async () => {
     f.store.registerSessionSecret(f.token);

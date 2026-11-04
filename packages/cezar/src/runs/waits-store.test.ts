@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { openTestRunStore, runPersistence } from './run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -550,17 +551,17 @@ describe('upgrade-on-read of agent worker waits', () => {
 
   it('upgrades the message stand-in by dropping it and leaving its input queued', () => {
     const run = parseOne(rootRow({ wait: legacyWait({ phase: 'wake-pending', reason: 'message', wakeId: WAKE_ID }) },
-      { agentInputs: [wakeInput(WAKE_ID, { source: 'agent' })] }));
+      { agentInputs: [wakeInput(WAKE_ID, { source: agentInputSchema.shape.source.enum.agent })] }));
     expect(run.waits).toBeUndefined();
     expect(run.lastWaits).toBeUndefined();
     expect(run.delegation).not.toHaveProperty('wait');
-    expect(run.agentInputs).toEqual([wakeInput(WAKE_ID, { source: 'agent' })]);
+    expect(run.agentInputs).toEqual([wakeInput(WAKE_ID, { source: agentInputSchema.shape.source.enum.agent })]);
   });
 
   it('reads a waiting run whose message stand-in a provider took as interrupted, and one an inbox read or a question holds as parked', () => {
     const deliveredAt = iso(-500);
     const standIn = { wait: legacyWait({ workerIds: [], revisions: undefined, phase: 'wake-pending', reason: 'message', wakeId: WAKE_ID }) };
-    const message = (overrides: Partial<AgentInput> = {}) => wakeInput(WAKE_ID, { source: 'agent', deliveredAt, ...overrides });
+    const message = (overrides: Partial<AgentInput> = {}) => wakeInput(WAKE_ID, { source: agentInputSchema.shape.source.enum.agent, deliveredAt, ...overrides });
     const parked = [{ id: 'main', name: 'main', kind: STEP_KIND.agent, status: STEP_STATUS.waiting, iterations: 1, tokensUsed: 0 }];
     const resumed = parseOne(rootRow(standIn, { agentInputs: [message()], steps: parked }));
     expect(resumed.status).toBe('running');

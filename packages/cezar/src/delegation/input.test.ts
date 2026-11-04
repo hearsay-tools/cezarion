@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { createActiveRun, type ActiveRun } from '../workflows/active-run.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
@@ -14,7 +15,7 @@ import { enqueueAgentInput, nextAgentInput, agentInputBatch } from './input.ts';
 import { blockRunWrites } from '../runs/run-store.testkit.ts';
 
 it('bounds batches without splitting messages or crossing lifecycle inputs', () => {
-  const make = (text: string): AgentInput => ({ id: randomUUID(), source: 'agent', parentRunId: randomUUID(), text, createdAt: new Date().toISOString(),
+  const make = (text: string): AgentInput => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: randomUUID(), text, createdAt: new Date().toISOString(),
     conversation: { senderRunId: randomUUID(), recipientRunId: randomUUID(), kind: 'progress' } });
   const a = make('a'.repeat(60_000)); const b = make('b'.repeat(60_000)); const c = make('small');
   const lifecycle: AgentInput = { ...make('lifecycle'), source: 'lifecycle', conversation: undefined };
@@ -25,7 +26,7 @@ it('bounds batches without splitting messages or crossing lifecycle inputs', () 
   expect(agentInputBatch([{ ...a, deliveredAt: a.createdAt }, c], entry => entry.text)?.inputs).toEqual([c]);
 });
 
-const input: AgentInput = { id: randomUUID(), source: 'agent', parentRunId: randomUUID(), text: '/skill mock:agent-echo steering', createdAt: '2026-09-06T12:00:00.000Z' };
+const input: AgentInput = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: randomUUID(), text: '/skill mock:agent-echo steering', createdAt: '2026-09-06T12:00:00.000Z' };
 const run = (patch: Partial<RunRecord> = {}): RunRecord => ({ id: randomUUID(), title: 'task', task: 'task', workflow: 'quick-task', status: RUN_STATUS.running, createdAt: input.createdAt, tokensUsed: 0, archived: false, steps: [], ...patch });
 
 describe('attributed input queue', () => {

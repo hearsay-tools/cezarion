@@ -1,4 +1,5 @@
 import { observationClock } from './observation-clock.testkit.ts';
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -90,7 +91,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             const startSeq = store.readEvents(runId).length;
             const turns = watchTurnOutcomes();
             expect(manager.steerWorker(runId, {
-              id: randomUUID(), source: 'agent', parentRunId,
+              id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId,
               text: promptFor(backend, 'silent-tail-ack-delay'), createdAt: new Date().toISOString(),
             })).toBe('queued');
             await waitFor(() => store.readEvents(runId).slice(startSeq).some(e => e.type === 'turn-end'));

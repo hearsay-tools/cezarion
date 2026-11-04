@@ -1,3 +1,4 @@
+import { automationCheckSchema } from '@open-mercato/cezar-contract/automations';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { SCHEDULED_TASK_NOTE } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { execFileSync } from 'node:child_process';
@@ -284,7 +285,7 @@ describe('GitHub automation API', () => {
     const queued = await apiRequest(server, `/api/v1/automations/${created.id}/check`, json({ mode: 'preview' }));
     expect(queued.status).toBe(202);
     const { checkId } = (await queued.json()) as { checkId: string };
-    let check: { status: string } = { status: 'queued' };
+    let check: { status: string } = { status: automationCheckSchema.shape.status.enum.queued };
     // Exits the moment the check fails; the bound only ends a hang. The background pass shells
     // out to `git` to read the repo's remote before it can decide there is none, and 200ms of
     // budget was under that spawn's cost whenever the rest of the server suites ran beside this one.

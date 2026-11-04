@@ -1,5 +1,6 @@
 import { autoEndObservationClock } from '../core/observation-clock.testkit.ts';
 import { AUTO_END_DELAY_MS } from '../core/runner-runtime.ts';
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUN_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
@@ -503,7 +504,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       expect(store.getRun(p.id)?.delegation).toHaveProperty('finishRequestedAt');
       expect(store.getRun(w.id)?.status).toBe('cancelled');
       expect(manager.continueRun(p.id, { text: 'cannot supersede finish' }).ok).toBe(false);
-      expect(() => manager.steerWorker(w.id, { id: randomUUID(), parentRunId: p.id, source: 'agent',
+      expect(() => manager.steerWorker(w.id, { id: randomUUID(), parentRunId: p.id, source: agentInputSchema.shape.source.enum.agent,
         text: 'cannot steer', createdAt: new Date().toISOString() })).toThrow('finish');
       store.move = move; store.updateRun(p.id, { baseBranch: 'main' });
       let durableStatus: string | undefined;
