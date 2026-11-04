@@ -11,7 +11,8 @@ export type { PermissionOption, PermissionOptionKind } from '@open-mercato/cezar
 export type UiBackend = 'claude' | 'codex' | 'opencode' | 'pi' | 'cursor' | 'omp'
 
 /** Tool lifecycle status (ACP-aligned; `running` ≡ ACP `in_progress`). */
-export type ToolStatus = 'pending' | 'running' | 'completed' | 'failed' | 'declined'
+export const TOOL_STATUSES = ['pending', 'running', 'completed', 'failed', 'declined'] as const
+export type ToolStatus = (typeof TOOL_STATUSES)[number]
 
 /** Icon/verb hint for a tool item — a superset of ACP's ToolKind. */
 export type { ToolKind } from '@open-mercato/cezar-contract/tool-display'
@@ -22,7 +23,8 @@ export type StopReason = 'end_turn' | 'max_tokens' | 'refusal' | 'cancelled' | '
 /** Status of one plan/todo entry. `cancelled` ("no longer needed") is
  *  opencode-only today — it renders struck through and drops out of the
  *  odometer's denominator rather than reading as unfinished work. */
-export type PlanStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
+export const PLAN_STATUSES = ['pending', 'in_progress', 'completed', 'cancelled'] as const
+export type PlanStatus = (typeof PLAN_STATUSES)[number]
 
 /** One entry of the session plan — full-replacement semantics (ACP style). */
 export interface PlanEntry {

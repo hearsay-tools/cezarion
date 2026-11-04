@@ -37,6 +37,9 @@ export interface ThreadNote {
 
 export type ThreadConversationDelivery = 'queued' | 'delivered' | 'consumed' | 'not-delivered'
 
+export const THREAD_CONVERSATION_PENDING_STATUSES = ['pending'] as const
+type ThreadConversationPendingStatus = (typeof THREAD_CONVERSATION_PENDING_STATUSES)[number]
+
 /** A parent/worker or peer conversation envelope, with its request outcome folded onto the request. */
 export interface ThreadConversationMessage {
   kind: 'conversation'
@@ -60,7 +63,7 @@ export interface ThreadConversationMessage {
   createdAt?: string
   requestHash?: string
   deadline?: string | undefined
-  outcome?: { status: RequestOutcome['status'] | 'pending'; replyId?: string; observedAt?: string }
+  outcome?: { status: RequestOutcome['status'] | ThreadConversationPendingStatus; replyId?: string; observedAt?: string }
 }
 
 /** An image the run persisted (v1 `image` line: served from `/api/runs/:id/images/…`). */
@@ -104,11 +107,14 @@ export interface ThreadAsk {
 /** Why an ask closed unanswered. */
 export type AskClosedReason = 'finish' | 'superseded' | 'parent-stopped' | 'worker-stopped' | 'undeliverable'
 
+export const THREAD_PERMISSION_STATUSES = ['pending', 'resolved', 'expired'] as const
+type ThreadPermissionStatus = (typeof THREAD_PERMISSION_STATUSES)[number]
+
 /** Native approvals belong to the live request that offered the choices, never a later turn. */
 export type ThreadPermission = Omit<UiPermissionRequestedEvent, 'type'> & {
   kind: 'permission'
   id: string
-  status: 'pending' | 'resolved' | 'expired'
+  status: ThreadPermissionStatus
   optionId?: string
   reason?: string | undefined
 }

@@ -92,48 +92,6 @@
       "count": 1
     },
     {
-      "file": "packages/web/src/routes/task-thread/conversation-presentation.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'pending'",
-      "count": 1
-    },
-    {
-      "file": "packages/web/src/routes/task-thread/subagent-dock.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'running'",
-      "count": 4
-    },
-    {
-      "file": "packages/web/src/routes/task-thread/thread-groups.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'pending'",
-      "count": 1
-    },
-    {
-      "file": "packages/web/src/routes/task-thread/thread-permissions.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'pending'",
-      "count": 3
-    },
-    {
-      "file": "packages/web/src/routes/task-thread/thread-state.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'failed'",
-      "count": 3
-    },
-    {
-      "file": "packages/web/src/routes/task-thread/thread-state.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'pending'",
-      "count": 2
-    },
-    {
-      "file": "packages/web/src/routes/task-thread/thread-state.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'running'",
-      "count": 3
-    },
-    {
       "file": "packages/web/src/test/e2e-spec-map.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'failed'",

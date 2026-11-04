@@ -1,3 +1,8 @@
+import { THREAD_CONVERSATION_PENDING_STATUSES } from './thread-state'
+const CONVERSATION_PENDING_STATUS = Object.fromEntries(THREAD_CONVERSATION_PENDING_STATUSES.map(status => [status, status])) as { [Status in (typeof THREAD_CONVERSATION_PENDING_STATUSES)[number]]: Status }
+import { TOOL_STATUSES, PLAN_STATUSES } from '@open-mercato/cezar-api-client/protocol/ui-events'
+const TOOL_STATUS = Object.fromEntries(TOOL_STATUSES.map(status => [status, status])) as { [Status in (typeof TOOL_STATUSES)[number]]: Status }
+const PLAN_STATUS = Object.fromEntries(PLAN_STATUSES.map(status => [status, status])) as { [Status in (typeof PLAN_STATUSES)[number]]: Status }
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 // @vitest-environment node
 
@@ -338,7 +343,7 @@ describe('reduceThread — mixed v1+v2 files (the dedup rule)', () => {
     const withTools: RunEvent[] = [
       line(1, 'turn.started', { turnId: 'turn_1' }),
       line(2, 'item.started', {
-        item: { kind: 'tool', id: 'toolu_A', name: 'Bash', toolKind: 'execute', title: 'Ran npm test', status: 'running' },
+        item: { kind: 'tool', id: 'toolu_A', name: 'Bash', toolKind: 'execute', title: 'Ran npm test', status: TOOL_STATUS.running },
       }),
       line(3, 'tool-call', { id: 'toolu_A', tool: 'Bash', input: { command: 'npm test' } }), // v1 twin
       line(4, 'item.completed', {
@@ -361,7 +366,7 @@ describe('reduceThread — mixed v1+v2 files (the dedup rule)', () => {
       line(1, 'turn.started', { turnId: 'turn_1' }),
       line(2, 'text', { text: 'Prose that only v1 ever described.' }),
       line(3, 'item.started', {
-        item: { kind: 'tool', id: 'toolu_A', name: 'Bash', toolKind: 'execute', title: 'Ran npm test', status: 'running' },
+        item: { kind: 'tool', id: 'toolu_A', name: 'Bash', toolKind: 'execute', title: 'Ran npm test', status: TOOL_STATUS.running },
       }),
       line(4, 'item.completed', {
         item: { kind: 'tool', id: 'toolu_A', name: 'Bash', toolKind: 'execute', title: 'Ran npm test', status: 'completed' },
@@ -455,7 +460,7 @@ describe('reduceThread — live-stream mechanics', () => {
       line(2, 'item.started', { item: { kind: 'message', id: 'm1', role: 'assistant', text: '' } }),
       line(3, 'item.delta', { itemId: 'm1', field: 'text', delta: 'Hel' }),
       line(4, 'item.delta', { itemId: 'm1', field: 'text', delta: 'lo' }),
-      line(5, 'item.started', { item: { kind: 'tool', id: 't1', name: 'Bash', toolKind: 'execute', title: 'Ran x', status: 'running' } }),
+      line(5, 'item.started', { item: { kind: 'tool', id: 't1', name: 'Bash', toolKind: 'execute', title: 'Ran x', status: TOOL_STATUS.running } }),
       line(6, 'item.delta', { itemId: 't1', field: 'output', delta: 'line 1\n' }),
       line(7, 'item.delta', { itemId: 't1', field: 'output', delta: 'line 2' }),
       line(8, 'item.completed', { item: { kind: 'message', id: 'm1', role: 'assistant', text: 'Hello!' } }),
@@ -594,7 +599,7 @@ describe('latestPlanEntries — the dock takes the newest snapshot across turns'
 
   it('v1 fallback is all-or-nothing: a malformed todos array yields no plan', () => {
     const state = reduceThread([
-      line(1, 'tool-call', { id: 't1', tool: 'TodoWrite', input: { todos: [{ status: 'pending' }] } }), // no content
+      line(1, 'tool-call', { id: 't1', tool: 'TodoWrite', input: { todos: [{ status: PLAN_STATUS.pending }] } }), // no content
       line(2, 'tool-call', { id: 't2', tool: 'TodoWrite', input: { notTodos: true } }),
     ])
     expect(latestPlanEntries(state)).toBeUndefined()
@@ -627,8 +632,8 @@ describe('reduceThread — check-output (check steps, v1-only by nature)', () =>
       line(2, 'check-output', { stepId: 'verify', command: 'nope', text: 'failed to spawn: ENOENT', exitCode: -1 }),
     ])
     const [failed, spawn] = turns[0]!.items as [UiToolItem, UiToolItem]
-    expect(failed).toMatchObject({ status: 'failed', exitCode: 2, output: '1 failing' })
-    expect(spawn).toMatchObject({ status: 'failed', exitCode: -1 })
+    expect(failed).toMatchObject({ status: TOOL_STATUS.failed, exitCode: 2, output: '1 failing' })
+    expect(spawn).toMatchObject({ status: TOOL_STATUS.failed, exitCode: -1 })
   })
 
   it('survives inside a v2-covered turn (it is meta, not an agent item twin)', () => {
@@ -857,7 +862,7 @@ describe('the v1 vocabulary sweep (cezar-code-map §3.2) — every persisted typ
     const items = allItems([
       line(1, 'check-output', { stepId: 'verify', command: 'npm test', exitCode: 1, text: '1 failed' }),
     ])
-    expect(items[0]).toMatchObject({ kind: 'tool', toolKind: 'execute', status: 'failed', exitCode: 1 })
+    expect(items[0]).toMatchObject({ kind: 'tool', toolKind: 'execute', status: TOOL_STATUS.failed, exitCode: 1 })
   })
 
   it('step-end failed → the one step fact the transcript must not hide', () => {
@@ -1232,7 +1237,7 @@ describe('reduceThread — parent/worker conversation', () => {
 
   it('marks an unanswered request pending', () => {
     const { turns } = reduceThread([line(1, 'conversation-message', { message, delivery: 'queued' })])
-    expect(turns[0]!.items[0]).toMatchObject({ kind: 'conversation', outcome: { status: 'pending' } })
+    expect(turns[0]!.items[0]).toMatchObject({ kind: 'conversation', outcome: { status: CONVERSATION_PENDING_STATUS.pending } })
   })
 
   // A request the engine refused to enqueue (`enqueue = !destroyed && !resumable` in

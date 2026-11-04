@@ -1,3 +1,5 @@
+import { TOOL_STATUSES } from '@open-mercato/cezar-api-client/protocol/ui-events'
+const TOOL_STATUS = Object.fromEntries(TOOL_STATUSES.map(status => [status, status])) as { [Status in (typeof TOOL_STATUSES)[number]]: Status }
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
@@ -265,7 +267,7 @@ describe('collectSubagents — children', () => {
       name: 'Task',
       toolKind: 'task',
       title: 'Task: review a',
-      status: 'running',
+      status: TOOL_STATUS.running,
     }
     const turns = [turn('turn-1', [selfRef, { ...selfRef, id: 'a', parentItemId: 'a' } as UiToolItem])]
     expect(subagentChildren(turns, 'a')).toEqual([])
@@ -395,10 +397,10 @@ describe('subagentActivityText', () => {
   })
 
   it('prefers a real activity line over either placeholder', () => {
-    expect(subagentActivityText({ id: 'a', title: 't', status: 'running', toolCalls: 1, activity: 'Ran npm test' })).toBe(
+    expect(subagentActivityText({ id: 'a', title: 't', status: TOOL_STATUS.running, toolCalls: 1, activity: 'Ran npm test' })).toBe(
       'Ran npm test',
     )
-    expect(subagentActivityText({ id: 'a', title: 't', status: 'running', toolCalls: 0 })).toBe('starting…')
+    expect(subagentActivityText({ id: 'a', title: 't', status: TOOL_STATUS.running, toolCalls: 0 })).toBe('starting…')
   })
 })
 
@@ -475,7 +477,7 @@ describe('collectSubagents — OMP turns (shapes from omp-ui-mapper)', () => {
     name: 'task',
     toolKind: 'other',
     title: 'Task batch · 3 agents',
-    status: 'running',
+    status: TOOL_STATUS.running,
   }
   /** One synthetic row per batch agent: `${toolCallId}#${lifecycleId}`. */
   const ompBatchRow = (lifecycleId: string, status: ToolStatus, agent: string): UiToolItem => ({

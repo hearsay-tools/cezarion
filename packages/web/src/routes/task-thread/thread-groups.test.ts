@@ -1,3 +1,5 @@
+import { THREAD_CONVERSATION_PENDING_STATUSES } from './thread-state'
+const CONVERSATION_PENDING_STATUS = Object.fromEntries(THREAD_CONVERSATION_PENDING_STATUSES.map(status => [status, status])) as { [Status in (typeof THREAD_CONVERSATION_PENDING_STATUSES)[number]]: Status }
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
@@ -337,7 +339,7 @@ describe('groupThreadItems — worker conversation', () => {
 
   it('keeps delayed replies and separated sends after intervening work', () => {
     const reqA = conversation('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', { recipientRunId: alpha, outcome: { status: 'replied' } })
-    const reqB = conversation('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', { recipientRunId: bravo, outcome: { status: 'pending' } })
+    const reqB = conversation('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', { recipientRunId: bravo, outcome: { status: CONVERSATION_PENDING_STATUS.pending } })
     const reply = conversation('cccccccc-cccc-4ccc-8ccc-cccccccccccc', {
       senderRunId: alpha,
       recipientRunId: parent,
