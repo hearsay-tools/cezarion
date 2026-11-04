@@ -1,5 +1,4 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
-import { runInternals } from './run-internals.testkit.ts';
 import { describe, expect, it, vi } from 'vitest';
 import { uuidFrom } from '../delegation/questions.ts';
 import { delegatingParent, manager, store, until, worker } from './worker-wait.testkit.ts';
@@ -48,18 +47,23 @@ it("sends a worker's cezar_ask question to its active parent as a request", asyn
   it('answers the worker for the parent when a peer message took its ID first', async () => {
     const { p, service, callerFor } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    const routing = runInternals(manager).workerQuestions;
-    const route = vi.spyOn(routing, 'routeWorkerQuestion').mockImplementation(() => {});
-    const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
+    const w = await worker(p.id, 'mock:cezar-ask');
+    const facts = store.transcriptFacts.bind(store);
+    const route = vi.spyOn(store, 'transcriptFacts').mockImplementation(id => {
+      const value = facts(id);
+      const { pendingAsk: _pendingAsk, ...withoutAsk } = value;
+      return id === w.id ? withoutAsk : value;
+    });
+    manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'ask.requested').length === 1);
     const askSeq = eventsOf(w.id, 'ask.requested')[0]!.seq;
     const id = uuidFrom(`worker-question:${w.id}:${askSeq}`);
     const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
     setRunStatus(store, peer.id, RUN_STATUS.running, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     await service.send(callerFor(peer.id), { id, recipientRunId: p.id, kind: 'progress', text: 'Peer progress first', timeoutSeconds: 600 });
-    expect(route).toHaveBeenCalledWith(w.id);
+    expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
     route.mockRestore();
-    routing.routeWorkerQuestion(w.id);
+    await manager.recover(p.id);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
     expect(eventsOf(w.id, 'worker-question-undelivered')).toEqual([expect.objectContaining({ askSeq, reason: expect.stringContaining('already in use') })]);
     await until(() => cezarAnswered(w.id).length === 1);

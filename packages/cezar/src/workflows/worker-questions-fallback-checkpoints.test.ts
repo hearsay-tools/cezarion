@@ -1,4 +1,3 @@
-import { runInternals } from './run-internals.testkit.ts';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { eventCheckpoint, manager, restart, root, store, until } from './worker-wait.testkit.ts';
@@ -49,13 +48,17 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
   for (const failing of ['outcome', 'retire'] as const) {
     it(`a failed ${failing} write leaves the fallback question pending, and recovery supersedes it`, async () => {
       const f = await idleWorker();
+      const commitInputs = store.commitAgentInputs.bind(store);
+      let retirementFailed = false;
       const fail = failing === 'outcome'
         ? vi.spyOn(store, 'commitConversation').mockImplementationOnce(() => { throw Error('disk full'); })
-        : vi.spyOn(runInternals(manager).workerQuestions, 'retireUnreadParentQuestion')
-          .mockImplementationOnce(() => { throw Error('disk full'); });
+        : vi.spyOn(store, 'commitAgentInputs').mockImplementation((id, inputs) => {
+          if (id === f.p.id && !retirementFailed) { retirementFailed = true; throw Error('disk full'); }
+          return commitInputs(id, inputs);
+        });
       vi.spyOn(console, 'warn').mockImplementation(() => {});
       expect(steer(f.w.id, f.p.id, 'mock:agent-echo Also lint').result).toBe('queued');
-      await until(() => fail.mock.calls.length > 0);
+      await until(() => failing === 'outcome' ? fail.mock.calls.length > 0 : retirementFailed);
       fail.mockRestore();
       expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([]);
       expect(store.transcriptFacts(f.w.id).pendingAsk?.seq).toBe(f.askSeq);
