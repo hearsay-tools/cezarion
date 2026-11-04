@@ -1,11 +1,10 @@
 import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 
 import { expect, vi } from 'vitest';
 
 import type { CiWait, CiWaitResult } from '@open-mercato/cezar-contract';
-import { manager, parent, store, until } from './worker-wait.testkit.ts';
-import { timed, type TimedWait } from './waits.testkit.ts';
+import { manager, parent, store, until, toolGenerationOf } from './worker-wait.testkit.ts';
+import { timed, fireCapturedTimer, type TimedWait } from './waits.testkit.ts';
 
 // Tool transport is exercised by adapter parity; lifecycle tests control only the CI supervisor.
 const hoistedResource = vi.hoisted(() => ({ supervisor: {} }));
@@ -37,13 +36,12 @@ export function github() {
 }
 
 export async function register(id: string) {
-  const state = (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(id)!;
-  return timed(await manager.registerWait(id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration));
+  return timed(await manager.registerWait(id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 30 }, 'cezar_wait', generationOf(id)));
 }
 
 // hearsay-tools/cezarion#1233: the wait list holds several CI and timer waits at once; each
 // resolves, is cancelled or is recovered on its own.
-export const generationOf = (id: string) => (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(id)!.ciGeneration;
+export const generationOf = toolGenerationOf;
 export const prUrl = (n: number) => `https://github.com/acme/repo/pull/${n}`;
 export const registerPr = async (id: string, n: number, timeout = 30) =>
   timed(await manager.registerWait(id, { kind: WAIT_KIND.pr, pr: prUrl(n), timeout_seconds: timeout }, 'cezar_wait', generationOf(id)));
@@ -52,7 +50,7 @@ export const registerTimer = async (id: string, seconds = 60, note?: string) =>
 export const waitById = (id: string, waitId: string) => store.getRun(id)?.waits?.find((entry): entry is TimedWait => entry.id === waitId && entry.kind !== 'human');
 export const settledById = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(entry => entry.id === waitId);
 export const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
-export const fireTimer = (waitId: string) => runInternals(manager).waitWatches.waitTimers.get(waitId)!.timer._onTimeout();
+export const fireTimer = fireCapturedTimer;
 export const timerFired = (waitId: string, note: string) =>
   `Timer ${waitId} fired: ${note}. Continue toward the task goal; register another wait if you are still waiting.`;
 export const flushMicrotasks = async () => { for (let n = 0; n < 5; n++) await Promise.resolve(); };
