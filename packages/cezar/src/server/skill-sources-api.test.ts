@@ -253,8 +253,9 @@ describe('the team skill sources API', () => {
     const removed = sourceRepo('gone');
     await add({ repo: kept });
     await add({ repo: removed });
-    const fetch = Promise.withResolvers<void>();
-    __holdFetchForTests(removed, fetch.promise);
+    let releaseFetch!: () => void;
+    const fetch = new Promise<void>((resolve) => { releaseFetch = resolve; });
+    __holdFetchForTests(removed, fetch);
     const load = refreshTeamSources(repoRoot, [{ repo: kept, ref: 'main' }, { repo: removed, ref: 'main' }]);
     try {
       // The kept source settling proves the load read both entries. The removed fetch stays held.
@@ -262,7 +263,7 @@ describe('the team skill sources API', () => {
       await vi.waitFor(() => expect(getTeamSourceStatuses(repoRoot).get(sourceKey({ repo: kept, ref: 'main' }))?.state).toBe('ok'), { timeout: 10_000 });
       writeFileSync(configPath(), JSON.stringify({ skillsRepos: [{ repo: kept }] }));
     } finally {
-      fetch.resolve();
+      releaseFetch();
       await load;
     }
     expect(await teamNames('/skills/importable')).toEqual(['kept']);
