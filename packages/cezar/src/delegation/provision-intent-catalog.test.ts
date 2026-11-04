@@ -304,4 +304,24 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(provisionMatrixCounts(sources)).toEqual(Object.fromEntries(Object.keys(PROVISION_ROWS).map(name => [name, 1])));
   });
 
+  for (const argument of [
+    '[...PROVISION_ROWS.governedIntent]',
+    'rows',
+    'PROVISION_ROWS["governedIntent"]',
+    '',
+    '...PROVISION_ROWS.governedIntent',
+    'PROVISION_ROWS.unknown',
+    'PROVISION_ROWS.governedIntent, extra',
+  ]) it(`rejects unresolved provision registration argument ${argument}`, () => {
+    const call = `it.each(${argument})`;
+    expect(() => provisionMatrixCounts([`${call};`], ['third-provision.test.ts'])).toThrow(`third-provision.test.ts: unsupported it.each registration: ${call}`);
+  });
+  it('checks nested provision registrations and ignores non-code text', () => {
+    const call = 'it.each(PROVISION_ROWS.governedIntent)';
+    expect(provisionMatrixCounts([`function later() { ${call}; }`]).governedIntent).toBe(1);
+    expect(() => provisionMatrixCounts(['function later() { it.each(rows); }'], ['nested.test.ts'])).toThrow('nested.test.ts: unsupported');
+    expect(provisionMatrixCounts([`// ${call}\n/* ${call} */\nconst text = "${call}"; const template = \`${call}\`;`]).governedIntent).toBe(0);
+    expect(provisionMatrixCounts([`${call}; ${call};`]).governedIntent).toBe(2);
+  });
+
 });

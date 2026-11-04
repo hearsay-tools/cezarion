@@ -1,28 +1,17 @@
 import { globSync, readFileSync } from 'node:fs';
-import { parse } from '@babel/parser';
-import { traverseFast } from '@babel/types';
+import { registrationGroups } from './registration-coverage.testkit.ts';
 import { describe, expect, it } from 'vitest';
 import { CI_NATIVE_GROUPS, registerCiDefinitionsAndInjection, registerCiValidation } from './ci-tools.testkit.ts';
 
 registerCiDefinitionsAndInjection();
 registerCiValidation();
 
-function nativeGroups(source: string): string[] {
-  const groups: string[] = [];
-  const tree = parse(source, { sourceType: 'module', plugins: ['typescript'] });
-  traverseFast(tree, node => {
-    if (node.type !== 'CallExpression' || node.callee.type !== 'Identifier' || node.callee.name !== 'registerCiNativeTools') return;
-    const argument = node.arguments[0];
-    if (argument?.type === 'MemberExpression' && !argument.computed && argument.object.type === 'Identifier'
-      && argument.object.name === 'CI_NATIVE_GROUPS' && argument.property.type === 'Identifier') {
-      groups.push(argument.property.name);
-    }
-  });
-  return groups;
+function nativeGroups(source: string, file = 'inline-native.test.ts'): string[] {
+  return registrationGroups(source, file, 'registerCiNativeTools', 'CI_NATIVE_GROUPS', Object.keys(CI_NATIVE_GROUPS));
 }
 
 function assertNativeCoverage(sources: readonly string[]) {
-  const groups = sources.flatMap(nativeGroups);
+  const groups = sources.flatMap(source => { return nativeGroups(source); });
   const tools = groups.flatMap(group => CI_NATIVE_GROUPS[group as keyof typeof CI_NATIVE_GROUPS] ?? []);
   expect([...tools].sort()).toEqual(['cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_wait']);
 }
@@ -30,9 +19,11 @@ function assertNativeCoverage(sources: readonly string[]) {
 describe('native CI tool row coverage', () => {
   const sourceRoot = new URL('../', import.meta.url);
   const sources = globSync('**/*.test.ts', { cwd: sourceRoot })
-    .map(file => readFileSync(new URL(file, sourceRoot), 'utf8'))
-    .filter(source => source.includes('registerCiNativeTools'))
-    .filter(source => nativeGroups(source).length > 0);
+    .map(file => {
+      const source = readFileSync(new URL(file, sourceRoot), 'utf8');
+      return nativeGroups(source, file).length > 0 ? source : '';
+    })
+    .filter(source => { return source.length > 0; });
   it('registers each native tool group in exactly one source file', () => {
     assertNativeCoverage(sources);
   });
@@ -54,5 +45,21 @@ describe('native CI tool row coverage', () => {
   });
   it('rejects a real native group call in a third source file', () => {
     expect(() => assertNativeCoverage([...sources, 'registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel);'])).toThrow();
+  });
+  it.each([
+    '[...CI_NATIVE_GROUPS.waitCancel]',
+    'group',
+    'CI_NATIVE_GROUPS["waitCancel"]',
+    '',
+    '...CI_NATIVE_GROUPS.waitCancel',
+    'CI_NATIVE_GROUPS.unknown',
+    'CI_NATIVE_GROUPS.waitCancel, extra',
+  ])('rejects unresolved native registration argument %s', argument => {
+    const call = `registerCiNativeTools(${argument})`;
+    expect(() => nativeGroups(`${call};`, 'third-native.test.ts')).toThrow(`third-native.test.ts: unsupported registerCiNativeTools registration: ${call}`);
+  });
+  it('checks native registrations inside function bodies', () => {
+    expect(() => assertNativeCoverage([...sources, 'function later() { registerCiNativeTools(CI_NATIVE_GROUPS.waitCancel); }'])).toThrow();
+    expect(() => nativeGroups('function later() { registerCiNativeTools(group); }', 'nested.test.ts')).toThrow('nested.test.ts: unsupported');
   });
 });

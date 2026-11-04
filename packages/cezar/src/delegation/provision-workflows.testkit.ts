@@ -1,3 +1,4 @@
+import { registrationGroups } from '../core/registration-coverage.testkit.ts';
 import type { Caller } from './credentials.ts';
 import { openTestRunStore } from '../runs/run-store.testkit.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
@@ -142,11 +143,12 @@ export const PROVISION_TEST_FILES = [
   'provision-accounts-lifecycle.test.ts',
 ] as const;
 
-export function provisionMatrixCounts(sources: readonly string[]): Record<string, number> {
-  const counts = Object.fromEntries(Object.keys(PROVISION_ROWS).map(name => [name, 0]));
-  for (const source of sources) for (const match of source.matchAll(/it\.each\(PROVISION_ROWS\.(\w+)\)/g)) {
-    const name = match[1]!;
-    counts[name] = (counts[name] ?? 0) + 1;
+export function provisionMatrixCounts(sources: readonly string[], files: readonly string[] = PROVISION_TEST_FILES): Record<string, number> {
+  const counts = Object.fromEntries(Object.keys(PROVISION_ROWS).map(name => { return [name, 0]; }));
+  for (const [index, source] of sources.entries()) {
+    for (const name of registrationGroups(source, files[index] ?? `provision-source-${index}.test.ts`, 'it.each', 'PROVISION_ROWS', Object.keys(PROVISION_ROWS))) {
+      counts[name] = (counts[name] ?? 0) + 1;
+    }
   }
   return counts;
 }
