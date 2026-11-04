@@ -15,6 +15,13 @@ import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { toolCall } from './waits-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
+function unused<T extends object>(name: string, values: Partial<T> = {}): T {
+  return new Proxy(values, { get(target, key) {
+    if (key in target) return Reflect.get(target, key);
+    throw new Error(`unused collaborator ${name}.${String(key)}`);
+  } }) as T;
+}
+
 function rootTask() {
   const run = store.createRun({ title: 'root', task: 'root', workflow: 'quick-task', workflowDef: QUICK_TASK_WORKFLOW,
     steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
@@ -29,9 +36,8 @@ function obligation(senderRunId: string, recipientRunId: string, kind: 'request'
 function completionRefusalFor(id: string) {
   const context: RunModuleContext = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
     work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => false };
-  const host: CompletionGateHost = { active: new Map(), pendingHumanAskSeq: () => undefined,
-    unansweredQuestions: () => [], parentCompletionBlockers: () => [], isActive: key => manager.isActive(key),
-    holdsAgentWaits: () => false, waitingBeforeFinalWorkflowStep: () => false };
+  const host = unused<CompletionGateHost>('completionHost', { active: new Map(),
+    unansweredQuestions: () => [], parentCompletionBlockers: () => [] });
   return completionRefusal(context, host, id);
 }
 

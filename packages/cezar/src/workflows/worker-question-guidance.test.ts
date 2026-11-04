@@ -7,6 +7,13 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixture } from '../delegation/service.testkit.ts';
 
+function unused<T extends object>(name: string, values: Partial<T> = {}): T {
+  return new Proxy(values, { get(target, key) {
+    if (key in target) return Reflect.get(target, key);
+    throw new Error(`unused collaborator ${name}.${String(key)}`);
+  } }) as T;
+}
+
 describe('unanswered worker question completion guidance', () => {
   let f: ReturnType<typeof fixture>;
   beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
@@ -17,8 +24,8 @@ describe('unanswered worker question completion guidance', () => {
     const asked = vi.fn(() => questions);
     const context: RunModuleContext = { store: f.store, repoRoot: f.root, dataDir: join(f.root, '.ai/cezar'),
       work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => false };
-    const host: CompletionGateHost = { active: new Map(), unansweredQuestions: asked, parentCompletionBlockers: () => [],
-      pendingHumanAskSeq: () => undefined, isActive: () => false, holdsAgentWaits: () => false, waitingBeforeFinalWorkflowStep: () => false };
+    const host = unused<CompletionGateHost>('completionHost', { active: new Map(),
+      unansweredQuestions: asked, parentCompletionBlockers: () => [] });
     const gate = completionRefusal(context, host, f.parent.id)!;
     expect(asked).toHaveBeenCalledWith(f.parent.id);
     expect(gate.code).toBe('worker_questions');

@@ -3,7 +3,7 @@ import { RunSettlement } from './run/run-settlement.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 import { TrackedWork } from './run/tracked-work.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { fixtureWorkSettled } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, fixtureWorkSettled } from './fixture-cleanup.testkit.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import type { AgentSession, AgentRunResult } from '../core/agent-runner.ts';
 import type { RunManager } from './run.ts';
@@ -134,6 +134,10 @@ describe('successful run settlement (#473)', () => {
   });
 
   async function usageLimitFailure(late: boolean) {
+    manager.dispose();
+    const semaphore = new WorkspaceSemaphore();
+    manager = createFixtureManager(store, root, { semaphore });
+    f.manager = manager;
     let fail!: (error: Error) => void;
     let finish!: (result: AgentRunResult) => void;
     const tools = vi.spyOn(manager, 'cezarToolHandlers');
@@ -167,6 +171,11 @@ describe('successful run settlement (#473)', () => {
       failedSnapshot = structuredClone(store.getRun(record.id));
     };
     store.on('event', commitLateWait);
+    const releaseSlot = semaphore.release.bind(semaphore);
+    const release = vi.spyOn(semaphore, 'release').mockImplementation(() => {
+      expect(store.getRun(record.id)?.autoResumeAt).toEqual(expect.any(String));
+      return releaseSlot();
+    });
     try {
       fail(new Error(`Claude AI usage limit reached|${reset}`));
       await waitForProduct(manager, store, () => !!store.getRun(record.id)?.autoResumeAt && !manager.isActive(record.id));
@@ -175,6 +184,7 @@ describe('successful run settlement (#473)', () => {
       if (late) expect(failedSnapshot).toMatchObject({ status: RUN_STATUS.failed, waits: undefined,
         lastWaits: expect.arrayContaining([expect.objectContaining({ id: lateWait.id, phase: WAIT_PHASE.cancelled })]) });
       expect(startSession).toHaveBeenCalledOnce();
+      expect(release).toHaveBeenCalled();
       expect(store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.waiting, autoResumeAt: expect.any(String) });
       expect(store.readEvents(record.id).filter(event => String(event.message).includes('continu'))).toEqual([]);
     } finally {
@@ -206,20 +216,50 @@ describe('successful run settlement (#473)', () => {
     return state;
   }
 
-  function policy(active: Map<string, ActiveRun>, disposed: boolean) {
+  function policy(active: Map<string, ActiveRun>, disposed: boolean | (() => boolean), asyncSuccess = false) {
     type Args = ConstructorParameters<typeof RunSettlement>;
     return new RunSettlement({ store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
-      work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => disposed },
-      unused<Args[1]>('humanWaits'), unused<Args[2]>('workerQuestions'), unused<Args[3]>('autosave'),
+      work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => typeof disposed === 'function' ? disposed() : disposed },
+      unused<Args[1]>('humanWaits'), unused<Args[2]>('workerQuestions'), unused<Args[3]>('autosave', asyncSuccess ? { autosaveCleanupBlocker: () => undefined } : {}),
       unused<Args[4]>('bookkeeper'), unused<Args[5]>('line'), unused<Args[6]>('resume'),
       unused<Args[7]>('workers'), unused<Args[8]>('completionGate'),
-      unused<Args[9]>('host', { active, generation: () => undefined }), '', '');
+      unused<Args[9]>('host', { active, generation: () => undefined,
+        ...(asyncSuccess ? { deferParentCompletion: () => false } : {}) }), '', '');
   }
 
-  it.each([false, true])('does not reconcile a replacement execution during diff I/O (disposed=%s)', disposed => {
+  it.each([false, true])('does not reconcile a replacement execution during diff I/O (disposed=%s)', async disposed => {
+    const id = seed();
     const original = fakeState(true);
-    const active = new Map([['run', fakeState()]]);
-    expect(policy(active, disposed).successSuperseded('run', RUN_STATUS.running, original, undefined)).toBe(true);
+    const active = new Map([[id, original]]);
+    let detached = false;
+    const settlement = policy(active, () => detached, true);
+    vi.mocked(worktreeDiff).mockImplementationOnce(async () => {
+      detached = disposed;
+      active.set(id, fakeState());
+      return 'changed';
+    });
+    const before = structuredClone(store.getRun(id)!);
+    await settlement.settleSuccess(id);
+    expect(store.getRun(id)?.status).toBe(before.status);
+    expect(store.getRun(id)?.finishedAt).toBe(before.finishedAt);
+    expect(store.getRun(id)?.steps).toEqual(before.steps);
+  });
+
+  it('disposal without terminal intent leaves the row unchanged after diff I/O', async () => {
+    const id = seed();
+    const active = new Map([[id, fakeState()]]);
+    let disposed = false;
+    const settlement = policy(active, () => disposed, true);
+    vi.mocked(worktreeDiff).mockImplementationOnce(async () => {
+      disposed = true;
+      active.clear();
+      return 'changed';
+    });
+    const before = structuredClone(store.getRun(id)!);
+    await settlement.settleSuccess(id);
+    expect(store.getRun(id)?.status).toBe(before.status);
+    expect(store.getRun(id)?.finishedAt).toBe(before.finishedAt);
+    expect(store.getRun(id)?.steps).toEqual(before.steps);
   });
 
   it.each(['none', 'finish', 'cancel'] as const)('disposal during diff I/O preserves explicit terminal intent: %s', intent => {
