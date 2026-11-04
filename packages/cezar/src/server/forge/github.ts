@@ -1,3 +1,5 @@
+import type { RepoHandleDiscovery } from './repo-handle-discovery.ts';
+export type { RepoHandleDiscovery } from './repo-handle-discovery.ts';
 import { createDraftPr } from './draft-pr.ts';
 export { createDraftPr, buildPrBody } from './draft-pr.ts';
 import { defined } from '../../core/defined.ts';
@@ -1397,14 +1399,7 @@ export function __clearRepoHandleCacheForTests(): void {
   for (const flight of repoDiscoveryFlights.values()) flight.controller.abort();
   repoDiscoveryFlights.clear();
 }
-export const REPO_HANDLE_DISCOVERY_STATUSES = ['resolved', 'unknown', 'retryable', 'cancelled'] as const;
-export type RepoHandleDiscoveryStatus = (typeof REPO_HANDLE_DISCOVERY_STATUSES)[number];
-/** Internal discovery outcome: callers that own a lifecycle can retry only transient failures. */
-export type RepoHandleDiscovery =
-  | { status: Extract<RepoHandleDiscoveryStatus, 'resolved'>; handle: { owner: string; name: string } }
-  | { status: Extract<RepoHandleDiscoveryStatus, 'unknown'> }
-  | { status: Extract<RepoHandleDiscoveryStatus, 'retryable'> }
-  | { status: Extract<RepoHandleDiscoveryStatus, 'cancelled'> };
+
 /** Local absence cannot improve through network retries. Authentication, timeouts and remote
  * errors deliberately stay retryable, including 404s for temporarily inaccessible repositories. */
 function isPermanentRepoFailure(error: unknown): boolean {

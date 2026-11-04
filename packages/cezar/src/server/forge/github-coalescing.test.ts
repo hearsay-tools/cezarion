@@ -1,3 +1,4 @@
+import { REPO_HANDLE_DISCOVERY_STATUSES } from './repo-handle-discovery.ts';
 import { z } from 'zod';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const execFileMock = vi.hoisted(() => vi.fn());
@@ -5,7 +6,7 @@ vi.mock('node:child_process', async (original) => ({
   ...await original<typeof import('node:child_process')>(),
   execFile: (...args: unknown[]) => execFileMock(...args),
 }));
-import { REPO_HANDLE_DISCOVERY_STATUSES, __clearRepoHandleCacheForTests, __clearRefStatusCacheForTests, discoverRepoHandle,
+import { __clearRepoHandleCacheForTests, __clearRefStatusCacheForTests, discoverRepoHandle,
   resolveRepoHandle, fetchGithub, fetchGithubRefStatus, forgetRefStatus } from './github.ts';
 
 const DISCOVERY_STATUS = z.enum(REPO_HANDLE_DISCOVERY_STATUSES).enum;
