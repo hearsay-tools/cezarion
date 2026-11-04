@@ -19,6 +19,15 @@ import type { UiEvent, UiItem, UiToolItem } from '../core/ui-events.ts';
 import { createCodexUiState, mapCodexNotification } from '../core/codex-ui-mapper.ts';
 import { RunStore } from './store.ts';
 import { DELTA_FLUSH_MS, UiEventSink, isV2WireEventType } from './ui-event-sink.ts';
+import { z } from 'zod';
+import { STATUS_MAP as CODEX_TOOL_STATUS_MAP } from '../core/codex-ui-mapper.ts';
+import { STATUS_MAP as OPENCODE_TOOL_STATUS_MAP } from '../core/opencode-ui-mapper.ts';
+
+const TOOL_STATUS = z.enum([
+  ...Object.values(CODEX_TOOL_STATUS_MAP),
+  ...Object.values(OPENCODE_TOOL_STATUS_MAP),
+]).enum;
+
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -62,7 +71,7 @@ function toolItem(overrides: Partial<UiToolItem> = {}): UiToolItem {
     name: 'commandExecution',
     toolKind: 'execute',
     title: 'Ran npm test',
-    status: 'running',
+    status: TOOL_STATUS.running,
     ...overrides,
   };
 }
@@ -151,12 +160,12 @@ describe('delta coalescing (fake timers)', () => {
 describe('snapshot persistence policy', () => {
   it('item.updated with streamed-content-only growth stays off disk (live-only); a status flip persists', () => {
     const { sink, persisted, live } = recorder();
-    sink.handle({ type: 'item.started', item: toolItem({ status: 'pending' }) });
-    const grown = toolItem({ status: 'pending', output: 'partial…' });
+    sink.handle({ type: 'item.started', item: toolItem({ status: TOOL_STATUS.pending }) });
+    const grown = toolItem({ status: TOOL_STATUS.pending, output: 'partial…' });
     sink.handle({ type: 'item.updated', item: grown });
     expect(persisted.map((e) => e.type)).toEqual(['item.started']);
     expect(live).toEqual([{ type: 'item.updated', item: grown }]); // live wire still sees it
-    sink.handle({ type: 'item.updated', item: toolItem({ status: 'running', output: 'partial…' }) });
+    sink.handle({ type: 'item.updated', item: toolItem({ status: TOOL_STATUS.running, output: 'partial…' }) });
     expect(persisted.map((e) => e.type)).toEqual(['item.started', 'item.updated']);
   });
 
