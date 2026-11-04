@@ -213,21 +213,39 @@ function moduleContext(root: string, store: RunStore, manager: RunManager, work:
   return { repoRoot: root, dataDir: join(root, '.ai/cezar'), store, semaphore: new WorkspaceSemaphore(), work, disposed: () => managerDisposed(manager) };
 }
 
+/** Unused collaborators fail at the first accidental access, including after constructor changes. */
+function unused<T extends object>(name: string, used: Partial<T> = {}): T {
+  return new Proxy(used as T, {
+    get(target, key, receiver) {
+      if (Reflect.has(target, key)) return Reflect.get(target, key, receiver);
+      throw new Error(`unused collaborator ${name}.${String(key)}`);
+    },
+  });
+}
+
 function settlementModule(context: RunModuleContext): RunSettlement {
-  const host = { active: new Map(), generation: () => undefined, deferParentCompletion: () => true, claimWorktreeReclaim: () => null };
-  return new RunSettlement(context, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, host as unknown as ConstructorParameters<typeof RunSettlement>[9], '', '');
+  const host = unused<ConstructorParameters<typeof RunSettlement>[9]>('RunSettlement.host', {
+    active: new Map(), generation: () => undefined, deferParentCompletion: () => true, claimWorktreeReclaim: () => null, preview: undefined,
+  });
+  return new RunSettlement(context, unused('HumanWaits'), unused('WorkerQuestions'), unused('WorktreeAutosave'),
+    unused('TurnBookkeeper'), unused('RunLine'), unused('AutoResumeScheduler'), unused('WorkerExecutions'),
+    unused('CompletionGateHost'), host, '', '');
 }
 
 const ownedOperations: Array<{ label: string; invoke(context: RunModuleContext, id: string): Promise<void> }> = [
   { label: 'pump', invoke: context => new RunLine({ ...context, disposed: () => true }).pump() },
   { label: 'rescueStalledQueue', invoke: context => new RunLine({ ...context, disposed: () => true }).rescueStalledQueue() },
-  { label: 'finishWorkerExecution', invoke: (context, id) => new WorkerExecutions(context, undefined!, undefined!).finishWorkerExecution(id) },
-  { label: 'recordTurnEnd', invoke: (context, id) => new TurnBookkeeper(context, { isDisposedDelegatedRun: () => true, discoverSkills: async () => [], reviveWorkflow: async () => null, trackTurn() {} } as ConstructorParameters<typeof TurnBookkeeper>[1]).recordTurnEnd(id, 'hello') },
-  { label: 'autoNameRun', invoke: (context, id) => new TurnBookkeeper(context, undefined!).autoNameRun(id, undefined, 'hello') },
-  { label: 'saveWorktree', invoke: (context, id) => new WorktreeAutosave(context, undefined!).saveWorktree(id, createActiveRun({ cwd: context.repoRoot, pendingHumanAsk: false, autonomous: false }), 'turn end') },
+  { label: 'finishWorkerExecution', invoke: (context, id) => new WorkerExecutions(context, unused('WorkerCleanup'), unused('WorkerExecutions.host')).finishWorkerExecution(id) },
+  { label: 'recordTurnEnd', invoke: (context, id) => new TurnBookkeeper(context, unused('TurnBookkeeper.host', {
+    isDisposedDelegatedRun: () => true, discoverSkills: async () => [], reviveWorkflow: async () => null, trackTurn() {},
+  })).recordTurnEnd(id, 'hello') },
+  { label: 'autoNameRun', invoke: (context, id) => new TurnBookkeeper(context, unused('TurnBookkeeper.host')).autoNameRun(id, undefined, 'hello') },
+  { label: 'saveWorktree', invoke: (context, id) => new WorktreeAutosave(context, unused('WorktreeAutosave.host')).saveWorktree(id, createActiveRun({ cwd: context.repoRoot, pendingHumanAsk: false, autonomous: false }), 'turn end') },
   { label: 'settleSuccess', invoke: (context, id) => settlementModule(context).settleSuccess(id) },
   { label: 'enforceRetention', invoke: context => settlementModule(context).enforceRetention() },
-  { label: 'settleRequestedRootFinish', invoke: (context, id) => new RunFinish(context, undefined!, { settleSuccess: async () => {} } as unknown as RunSettlement, undefined!, undefined!, undefined!, { reconcileWorkerWaits() {} } as ConstructorParameters<typeof RunFinish>[6]).settleRequestedRootFinish(id) },
+  { label: 'settleRequestedRootFinish', invoke: (context, id) => new RunFinish(context, unused('RunLine'),
+    unused<RunSettlement>('RunSettlement', { settleSuccess: async () => {} }), unused('HumanWaits'), unused('WorkerQuestions'), unused('AutoResumeScheduler'),
+    unused<ConstructorParameters<typeof RunFinish>[6]>('RunFinish.host', { reconcileWorkerWaits() {} })).settleRequestedRootFinish(id) },
 ];
 
 it.each(ownedOperations)('records module-owned $label before returning', async ({ label, invoke }) => {
@@ -286,8 +304,12 @@ it('keeps a session until close, interrupts it after dispose, and shares ownersh
   const { root, store, manager } = fixture();
   const work = fixtureWork(root);
   const closed = barrier();
-  const session = { result: closed.held, interrupt: vi.fn(closed.release) } as unknown as AgentSession;
-  const promise = new WorkerExecutions(moduleContext(root, store, manager, work), undefined!, undefined!).trackWorkerSessionResult('sessionless', session);
+  const session: AgentSession = {
+    result: closed.held.then(() => ({ text: '', toolCalls: [], tokensUsed: 0 })),
+    interrupt: vi.fn(closed.release), end: closed.release, open: true,
+    sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages() {}, holdsHumanInput: () => false,
+  };
+  const promise = new WorkerExecutions(moduleContext(root, store, manager, work), unused('WorkerCleanup'), unused('WorkerExecutions.host')).trackWorkerSessionResult('sessionless', session);
   expect(work.pending.get(promise)).toBe('session');
   expect(work.liveSessions.has(session)).toBe(true);
   manager.dispose();
