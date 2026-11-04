@@ -326,6 +326,30 @@ test('a queue run re-run after a decision is read as the attempt that ran when t
   assert.equal(proofReason(push), 'source-not-successful');
 });
 
+test('the command reads each attempt of a re-run queue run', async () => {
+  const runAt = attempt => ({ ...queueRun(1, attempt === 1 ? 'failure' : 'success', SHA('c1'), 10, 5), run_attempt: attempt,
+    run_started_at: attempt === 1 ? '2026-11-02T01:00:00Z' : '2026-11-02T04:00:00Z' });
+  const calls = [];
+  const gh = async args => {
+    calls.push(args[1]);
+    if (args[1].includes('/runs?event=merge_group')) return JSON.stringify({ total_count: 1, workflow_runs: [runAt(2)] });
+    if (args[1].includes('/runs?event=push')) return JSON.stringify({ total_count: 0, workflow_runs: [] });
+    if (args[1].includes('/jobs?')) return JSON.stringify({ total_count: 0, jobs: [] });
+    const attempt = /\/attempts\/(\d+)$/.exec(args[1]);
+    if (attempt) return JSON.stringify(runAt(Number(attempt[1])));
+    if (args.some(arg => arg.startsWith('q='))) {
+      return JSON.stringify({ data: { search: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] } } });
+    }
+    return JSON.stringify({ data: { repository: { pr5: { timelineItems: { pageInfo: { hasNextPage: false },
+      nodes: [{ createdAt: '2026-11-02T01:30:00Z', reason: 'failed_checks' }] } } } } });
+  };
+  const { code, out } = await run(['--from', '2026-11-02', '--to', '2026-11-02', '--repo', 'o/r', '--json'], gh);
+  assert.equal(code, 0);
+  assert.deepEqual(calls.filter(call => call.includes('/attempts/')).sort(),
+    ['repos/o/r/actions/runs/1/attempts/1', 'repos/o/r/actions/runs/1/attempts/2']);
+  assert.equal(JSON.parse(out).queue.failed, 1);
+});
+
 test('group refs name their PR and base', () => {
   assert.deepEqual(groupRef(`gh-readonly-queue/main/pr-12-${SHA(5)}`), { pr: 12, base: SHA(5) });
   assert.equal(groupRef('gh-readonly-queue/main/pr-12-short'), undefined);
