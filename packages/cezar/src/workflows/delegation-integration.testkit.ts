@@ -4,12 +4,13 @@ import { createFixtureManager, fixtureWorkSettled, drainFixtureManagers } from '
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { execFile as execFileCallback, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { build, transform } from 'esbuild';
 import { promisify } from 'node:util';
-import { onTestFinished, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { onTestFinished, afterAll, beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerCollectedResult, WorkerDestroyResult, WorkerInspection, WorkerSpawnResult, WorkerWaitResult } from '@open-mercato/cezar-contract';
 import { DelegationController } from '../delegation/provision.ts';
 import { RunStore } from '../runs/store.ts';
@@ -21,8 +22,36 @@ import { monitoringWakeOf } from './waits.testkit.ts';
 
 const execFile = promisify(execFileCallback);
 const entry = fileURLToPath(new URL('../index.ts', import.meta.url));
+
+/** Compile once for a fixture, preserving each module's source asset base. */
+export async function buildDelegationCli(sourceEntry: string = entry) {
+  const directory = mkdtempSync(join(tmpdir(), 'cez-delegation-cli-'));
+  const compiledEntry = join(directory, 'cli.mjs');
+  const close = () => rmSync(directory, { recursive: true, force: true });
+  try {
+    symlinkSync(fileURLToPath(new URL('../../node_modules', import.meta.url)), join(directory, 'node_modules'), 'junction');
+    await build({
+      entryPoints: [sourceEntry], outfile: compiledEntry, bundle: true,
+      platform: 'node', format: 'esm', packages: 'external',
+      plugins: [{ name: 'source-module-urls', setup(builder) {
+        builder.onLoad({ filter: /\.ts$/ }, async ({ path }) => {
+          const result = await transform(readFileSync(path, 'utf8'), {
+            loader: 'ts', format: 'esm',
+            define: { 'import.meta.url': JSON.stringify(pathToFileURL(path).href) },
+          });
+          return { contents: result.code, loader: 'js' };
+        });
+      } }],
+    });
+    return { entry: compiledEntry, close };
+  } catch (error) { close(); throw error; }
+}
+
 export function registerDelegationIntegrationGroup(group: 'reviewed-integration' | 'spawn-idempotency' | 'failure-authority' | 'parent-cancellation'): void {
   describe('public delegation completion integration', () => {
+  let cli: Awaited<ReturnType<typeof buildDelegationCli>>;
+  beforeAll(async () => { cli = await buildDelegationCli(); });
+  afterAll(() => cli?.close());
 
   let root: string, repo: string, control: string, store: RunStore, manager: RunManager, controller: DelegationController;
 
@@ -97,7 +126,7 @@ export function registerDelegationIntegrationGroup(group: 'reviewed-integration'
   }
 
   async function command<T = Record<string, unknown>>(id: string, args: string[], code = 0): Promise<T> {
-    const result = await execFile(process.execPath, ['--import', import.meta.resolve('tsx'), entry, 'worker', ...args], {
+    const result = await execFile(process.execPath, [cli.entry, 'worker', ...args], {
       cwd: root, env: { ...process.env, ...environments.get(id), PATH: '' }, timeout: 45_000,
     }).then(value => ({ ...value, code: 0 }), (error: { stdout: string; stderr: string; code: number }) => error);
     expect(result.stderr).toBe(''); expect(result.code, result.stdout).toBe(code);
@@ -253,7 +282,7 @@ if (group === 'spawn-idempotency') {
   // that switches spelling hashes identically and dedupes instead of reporting a payload conflict.
   // hearsay-tools/cezarion#974: Node 24.15 floor shard 1 on 81e88a0f exceeded the
   // default 5s at 5257ms. This cell waits for two native inputs (15s each) and
-  // two real tsx CLI processes (45s each); cover those serial bounds plus 5s.
+  // two real CLI processes (45s each); cover those serial bounds plus 5s.
   it('dedupes a --runner retry of a --backend spawn under the same request id', async () => {
     const p = await parent();
     const requestId = randomUUID();
