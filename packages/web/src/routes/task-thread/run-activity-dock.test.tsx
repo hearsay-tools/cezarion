@@ -1,3 +1,4 @@
+import { TOOL_STATUSES, PLAN_STATUSES } from '@open-mercato/cezar-api-client/protocol/ui-events'
 import { workerInspectionSchema } from '@open-mercato/cezar-api-client/contract/delegation'
 import {
   RUN_STATUS,
@@ -20,6 +21,9 @@ import type { ApiRun, RunEvent, StepState, WorkerInspection } from '@open-mercat
 import { RunActivityDock, resetActivityDisclosureForTests } from './run-activity-dock'
 import { reduceThread } from './thread-state'
 import type { ReaderScrollEvent, ReaderScrollListener } from './thread-scroller'
+
+const TOOL_STATUS = Object.fromEntries(TOOL_STATUSES.map(status => [status, status])) as { [Status in (typeof TOOL_STATUSES)[number]]: Status }
+const PLAN_STATUS = Object.fromEntries(PLAN_STATUSES.map(status => [status, status])) as { [Status in (typeof PLAN_STATUSES)[number]]: Status }
 
 /**
  * The unified Session activity accordion (#402, mockups `pasted-1..3.png`): ONE card above the
@@ -78,13 +82,13 @@ const EVENTS: RunEvent[] = [
     item: { kind: 'tool', id: 'task_1', name: 'Task', toolKind: 'task', title: 'Audit the auth flow', status: 'completed' },
   }),
   line(3, 'item.completed', {
-    item: { kind: 'tool', id: 'task_2', name: 'Task', toolKind: 'task', title: 'Review the store layer', status: 'running' },
+    item: { kind: 'tool', id: 'task_2', name: 'Task', toolKind: 'task', title: 'Review the store layer', status: TOOL_STATUS.running },
   }),
   line(4, 'plan.updated', {
     entries: [
       { content: 'Read the docs', status: 'completed' },
       { content: 'Summarize', status: 'in_progress', activeForm: 'Summarizing' },
-      { content: 'Reply', status: 'pending' },
+      { content: 'Reply', status: PLAN_STATUS.pending },
     ],
   }),
 ]

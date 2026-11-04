@@ -1,3 +1,4 @@
+import { TOOL_STATUSES } from '@open-mercato/cezar-api-client/protocol/ui-events'
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -5,6 +6,8 @@ import type { UiToolItem } from '@open-mercato/cezar-api-client'
 
 import { ToolCard } from './thread-items'
 import { ThreadCardCache, clearOpenCardCache } from './thread-open-cards'
+
+const TOOL_STATUS = Object.fromEntries(TOOL_STATUSES.map(status => [status, status])) as { [Status in (typeof TOOL_STATUSES)[number]]: Status }
 
 afterEach(() => {
   cleanup()
@@ -51,7 +54,7 @@ describe('the per-run open-card cache', () => {
   it('a user-closed card beats a would-be default-open on revisit', () => {
     // A running execute WITH output opens itself by default (the live tail) — the one default-open
     // case left now that failures start closed.
-    const streaming = item({ status: 'running', output: 'installing…' })
+    const streaming = item({ status: TOOL_STATUS.running, output: 'installing…' })
     const first = render(card('r1', streaming))
     expect(state()).toBe('open')
     fireEvent.click(trigger())

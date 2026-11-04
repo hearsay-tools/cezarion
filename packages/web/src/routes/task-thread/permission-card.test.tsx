@@ -1,14 +1,17 @@
+import { THREAD_PERMISSION_STATUSES } from './thread-state'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/client'
 import { PermissionCard } from './permission-card'
 import type { ThreadPermission } from './thread-state'
 
+const PERMISSION_STATUS = Object.fromEntries(THREAD_PERMISSION_STATUSES.map(status => [status, status])) as { [Status in (typeof THREAD_PERMISSION_STATUSES)[number]]: Status }
+
 const decide = vi.fn().mockResolvedValue({ delivered: true })
 vi.mock('@/api/permissions', () => ({ usePermissionDecision: () => ({ mutateAsync: decide }) }))
 afterEach(() => { cleanup(); decide.mockReset().mockResolvedValue({ delivered: true }); vi.restoreAllMocks() })
 const permission: ThreadPermission = {
-  kind: 'permission', id: 'permission:a', requestId: 'a', status: 'pending', title: 'Run this command?', details: `curl https://example.test/${'long/'.repeat(100)}\nFull command details`,
+  kind: 'permission', id: 'permission:a', requestId: 'a', status: PERMISSION_STATUS.pending, title: 'Run this command?', details: `curl https://example.test/${'long/'.repeat(100)}\nFull command details`,
   options: [
     { id: 'once', label: 'Allow once', kind: 'allow_once' }, { id: 'always', label: 'Allow for session', kind: 'allow_always' },
     { id: 'reject', label: 'Reject once', kind: 'reject_once' }, { id: 'never', label: 'Reject always', kind: 'reject_always' },

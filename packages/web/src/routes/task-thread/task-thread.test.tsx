@@ -1,3 +1,4 @@
+import { TOOL_STATUSES, PLAN_STATUSES } from '@open-mercato/cezar-api-client/protocol/ui-events'
 import {
   RUN_STATUS,
   STEP_KIND,
@@ -39,6 +40,9 @@ import { TaskThreadRoute, ThreadView } from './task-thread'
 import { buildTranscriptRows, mainTranscriptSections } from './session-transcript'
 import { reduceThread } from './thread-state'
 import { resetVoiceStoreForTests, voiceStore } from '@/lib/voice/proposal-store'
+
+const TOOL_STATUS = Object.fromEntries(TOOL_STATUSES.map(status => [status, status])) as { [Status in (typeof TOOL_STATUSES)[number]]: Status }
+const PLAN_STATUS = Object.fromEntries(PLAN_STATUSES.map(status => [status, status])) as { [Status in (typeof PLAN_STATUSES)[number]]: Status }
 
 afterEach(() => {
   cleanup()
@@ -1162,7 +1166,7 @@ describe('ThreadView', () => {
         entries: [
           { content: 'Read the docs', status: 'completed' },
           { content: 'Summarize', status: 'in_progress', activeForm: 'Summarizing' },
-          { content: 'Reply', status: 'pending' },
+          { content: 'Reply', status: PLAN_STATUS.pending },
         ],
       }),
     ]
@@ -1189,7 +1193,7 @@ describe('ThreadView', () => {
     const events: RunEvent[] = [
       line(1, 'turn.started', { turnId: 'turn_1' }),
       line(2, 'item.started', {
-        item: { kind: 'tool', id: 'toolu_todo', name: 'TodoWrite', toolKind: 'plan', title: 'Update plan', status: 'running', input: todoInput },
+        item: { kind: 'tool', id: 'toolu_todo', name: 'TodoWrite', toolKind: 'plan', title: 'Update plan', status: TOOL_STATUS.running, input: todoInput },
       }),
       line(3, 'plan.updated', { entries: todoInput.todos }),
       line(4, 'item.completed', {

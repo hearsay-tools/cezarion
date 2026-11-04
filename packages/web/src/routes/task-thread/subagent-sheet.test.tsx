@@ -1,3 +1,4 @@
+import { TOOL_STATUSES } from '@open-mercato/cezar-api-client/protocol/ui-events'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -7,6 +8,8 @@ import { MemoryRouter } from 'react-router'
 import { SubagentSheet } from './subagent-sheet'
 import type { SubagentSummary } from './subagent-dock'
 import type { ThreadEntry } from './thread-state'
+
+const TOOL_STATUS = Object.fromEntries(TOOL_STATUSES.map(status => [status, status])) as { [Status in (typeof TOOL_STATUSES)[number]]: Status }
 
 vi.mock('@/api/queries', async importOriginal => ({
   ...await importOriginal<typeof import('@/api/queries')>(),
@@ -18,7 +21,7 @@ afterEach(cleanup)
 const agent = (over: Partial<SubagentSummary> = {}): SubagentSummary => ({
   id: 'agent-1',
   title: 'Audit the auth flow',
-  status: 'running',
+  status: TOOL_STATUS.running,
   toolCalls: 2,
   ...over,
 })
@@ -88,7 +91,7 @@ describe('SubagentSheet — header', () => {
     render(
       <SubagentSheet
         runId="r1"
-        agent={agent({ agentType: 'general-purpose', status: 'running', toolCalls: 3 })}
+        agent={agent({ agentType: 'general-purpose', status: TOOL_STATUS.running, toolCalls: 3 })}
         entries={[]}
         onClose={() => {}}
       />,
@@ -165,7 +168,7 @@ describe('SubagentSheet — the child stream', () => {
   it('an agent completing while inspected flips the status pill and keeps the sheet open', () => {
     const entries = [toolChild('c1', 'Ran npm test')]
     const { rerender } = render(
-      <SubagentSheet runId="r1" agent={agent({ status: 'running' })} entries={entries} onClose={() => {}} />,
+      <SubagentSheet runId="r1" agent={agent({ status: TOOL_STATUS.running })} entries={entries} onClose={() => {}} />,
     )
     expect(document.querySelector('[data-slot="subagent-status"]')!.textContent).toBe('Running')
     rerender(<SubagentSheet runId="r1" agent={agent({ status: 'completed' })} entries={entries} onClose={() => {}} />)

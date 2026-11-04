@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-api-client/contract/delegation'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1281,7 +1282,7 @@ describe('conversation delivery replay', () => {
     const attribution = { senderRunId, recipientRunId, kind: 'progress' };
     const message = { id, ...attribution, text: 'Updated', createdAt: '2026-09-08T12:00:00.000Z', requestHash: 'a'.repeat(64), state: 'accepted' };
     const projection = { type: 'conversation-message', message, delivery: 'queued' };
-    const ack = { type: 'agent-input', input: { id, source: 'agent', parentRunId: senderRunId, text: message.text, createdAt: message.createdAt, deliveredAt: message.createdAt, conversation: attribution } };
+    const ack = { type: 'agent-input', input: { id, source: agentInputSchema.shape.source.enum.agent, parentRunId: senderRunId, text: message.text, createdAt: message.createdAt, deliveredAt: message.createdAt, conversation: attribution } };
     const entries = reduceThread(asRunEvents(ackFirst ? [ack, projection, ack] : [projection, ack, projection])).turns.flatMap(turn => turn.items);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({ kind: 'conversation', delivery: 'delivered', senderRunId, recipientRunId });
