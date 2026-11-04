@@ -36,6 +36,8 @@ const TOOL_STATUS = z.enum([
 ]).enum;
 const HOOK_STATUS = z.enum(Object.values(CODEX_HOOK_STATUS_MAP)).enum;
 
+const OBSOLETE_TASK_RUNNING_STATUS = 'running';
+
 const PLAN_STATUS = z.enum(PLAN_STATUSES).enum;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -663,7 +665,7 @@ describe('mapClaudeMessage edge cases', () => {
 
   it('tolerates `running` as an alias for in_progress, though the schema has no such status', () => {
     const state = create(createClaudeUiState(), 'toolu_c1', 'A', '1').state;
-    const mapped = mapClaudeMessage(taskUse('toolu_u1', 'TaskUpdate', { taskId: '1', status: 'running' }), state);
+    const mapped = mapClaudeMessage(taskUse('toolu_u1', 'TaskUpdate', { taskId: '1', status: OBSOLETE_TASK_RUNNING_STATUS }), state);
     expect(mapped.events.at(-1)).toEqual({
       type: 'plan.updated',
       entries: [{ content: 'A', status: 'in_progress' }],

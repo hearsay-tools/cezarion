@@ -826,10 +826,13 @@ const agentInput = (parentRunId: string, text = '/owned-skill mock:agent-echo pa
  * could put it. `deadline` is cezar-side, proven by a held turn ending in the
  * runner's own timeout error.
  */
+const SPEC_FIELD_PROBE_KINDS = ['boundary', 'process', 'deadline'] as const;
+type SpecFieldProbeKind = (typeof SPEC_FIELD_PROBE_KINDS)[number];
+
 type SpecFieldProbe =
-  | { readonly kind: 'boundary'; readonly without: Partial<AgentRunSpec>; readonly with: Partial<AgentRunSpec> }
-  | { readonly kind: 'process' }
-  | { readonly kind: 'deadline' };
+  | { readonly kind: Extract<SpecFieldProbeKind, 'boundary'>; readonly without: Partial<AgentRunSpec>; readonly with: Partial<AgentRunSpec> }
+  | { readonly kind: Extract<SpecFieldProbeKind, 'process'> }
+  | { readonly kind: Extract<SpecFieldProbeKind, 'deadline'> };
 
 const PROBE_IMAGE: ContentBlock = {
   type: 'image',
@@ -843,12 +846,12 @@ const SPEC_FIELD_PROBES: Readonly<Record<AgentRunSpecField, SpecFieldProbe>> = {
   // Markerless on purpose, so every mock still answers with its default turn.
   userPrompt: { kind: 'boundary', without: {}, with: { userPrompt: 'inspect the working tree, then report' } },
   images: { kind: 'boundary', without: {}, with: { images: [PROBE_IMAGE] } },
-  cwd: { kind: 'process' },
+  cwd: { kind: SPEC_FIELD_PROBE_KINDS[1] },
   // `without` is the drive's unset grant; the tool-grant cells pin every kind, bashAllowlist included.
   toolGrant: { kind: 'boundary', without: {}, with: { toolGrant: explicitToolGrant(['Read', 'Grep']) } },
   restrictCrossSessionMessaging: { kind: 'boundary', without: {}, with: { restrictCrossSessionMessaging: true } },
   additionalDirectories: { kind: 'boundary', without: {}, with: { additionalDirectories: ['/tmp/parity-probe-extra'] } },
-  env: { kind: 'process' },
+  env: { kind: SPEC_FIELD_PROBE_KINDS[1] },
   model: { kind: 'boundary', without: {}, with: { model: 'parity-probe/model-sentinel' } },
   effort: { kind: 'boundary', without: {}, with: { effort: 'xhigh' } },
   timeoutMs: { kind: 'deadline' },

@@ -51,7 +51,8 @@ export type StopReason = 'end_turn' | 'max_tokens' | 'refusal' | 'cancelled' | '
  * dropped row: an abandoned todo must stay visible (struck through) instead of
  * silently vanishing from the dock mid-run.
  */
-export type PlanStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+export const PLAN_STATUSES = ['pending', 'in_progress', 'completed', 'cancelled'] as const;
+export type PlanStatus = (typeof PLAN_STATUSES)[number];
 
 /** One entry of the session plan — full-replacement semantics (ACP style). */
 export interface PlanEntry {

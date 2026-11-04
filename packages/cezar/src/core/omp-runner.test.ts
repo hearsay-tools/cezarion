@@ -658,7 +658,7 @@ ${settleTurn()}
     expect(result).toMatchObject({ type: 'tool-result', toolCallId: 'tool-denied', isError: true });
     expect(result?.type === 'tool-result' && result.result).toContain(denial);
     const failed = ui.find(event => event.type === 'item.completed' && event.item.kind === 'tool' && event.item.id === 'tool-denied');
-    expect(failed).toMatchObject({ item: { status: 'failed', error: expect.stringContaining(denial) } });
+    expect(failed).toMatchObject({ item: { status: TOOL_STATUS.failed, error: expect.stringContaining(denial) } });
     expect(events.filter(event => event.type === 'error')).toEqual([]);
     expect(turnEnds(events)).toBe(1);
     expect(events.findIndex(event => event.type === 'turn-end')).toBeGreaterThan(events.indexOf(result!));
@@ -1147,6 +1147,14 @@ await import(${JSON.stringify(MOCK)});
       const bin = join(dir, 'pid-omp.mjs');
       writeFileSync(bin, `#!/usr/bin/env node
 import { appendFileSync } from 'node:fs';
+import { z } from 'zod';
+import { STATUS_MAP as CODEX_TOOL_STATUS_MAP } from './codex-ui-mapper.ts';
+import { STATUS_MAP as OPENCODE_TOOL_STATUS_MAP } from './opencode-ui-mapper.ts';
+
+const TOOL_STATUS = z.enum([
+  ...Object.values(CODEX_TOOL_STATUS_MAP),
+  ...Object.values(OPENCODE_TOOL_STATUS_MAP),
+]).enum;
 appendFileSync(${JSON.stringify(join(dir, 'pids.txt'))}, process.pid + '\\n');
 await import(${JSON.stringify(MOCK)});
 `, { mode: 0o755 });

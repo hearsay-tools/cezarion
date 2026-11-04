@@ -11,6 +11,14 @@ import { createRunner } from './runner-factory.ts';
 import { CursorRunner } from './cursor-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
+import { z } from 'zod';
+import { STATUS_MAP as CODEX_TOOL_STATUS_MAP } from './codex-ui-mapper.ts';
+import { STATUS_MAP as OPENCODE_TOOL_STATUS_MAP } from './opencode-ui-mapper.ts';
+
+const TOOL_STATUS = z.enum([
+  ...Object.values(CODEX_TOOL_STATUS_MAP),
+  ...Object.values(OPENCODE_TOOL_STATUS_MAP),
+]).enum;
 
 afterEach(() => vi.unstubAllEnvs());
 it('uses bundled Cursor print for a fresh dry run', async () => {
@@ -39,7 +47,7 @@ it('shows Cursor native questions as failed tools without a Cezar answer card', 
     await session.result;
     expect(ui.filter(event => event.type === 'ask.requested')).toEqual([]);
     expect(ui).toContainEqual(expect.objectContaining({ type: 'item.completed', item: expect.objectContaining({
-      status: 'failed', error: 'Cursor skipped this native question in headless print mode',
+      status: TOOL_STATUS.failed, error: 'Cursor skipped this native question in headless print mode',
     }) }));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

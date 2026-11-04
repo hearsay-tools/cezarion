@@ -6,6 +6,10 @@ import type { AgentEvent, AgentSession } from './agent-runner.ts';
 import { CodexAppServerRunner } from './codex-app-server-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
+import { z } from 'zod';
+import { CODEX_TURN_STATUSES } from './codex-turn-outcome.ts';
+
+const CODEX_TURN_STATUS = z.enum(CODEX_TURN_STATUSES).enum;
 
 const spawnHook = vi.hoisted(() => ({ child: undefined as unknown }));
 vi.mock('node:child_process', async (original) => ({
@@ -256,7 +260,7 @@ describe('Codex startup and Stop (#493)', () => {
     // These are control frames, not passive output. Neither channel may reopen.
     fake.respond('turn/start', { turn: { id: 'late', status: 'inProgress', items: [] } });
     started();
-    fake.frame({ method: 'turn/completed', params: { threadId: 'thread_1', turn: { id: 'turn_1', status: 'failed', error: { message: 'late cancellation noise' }, items: [] } } });
+    fake.frame({ method: 'turn/completed', params: { threadId: 'thread_1', turn: { id: 'turn_1', status: CODEX_TURN_STATUS.failed, error: { message: 'late cancellation noise' }, items: [] } } });
     fake.frame({ id: 'late_ask', method: 'item/tool/requestUserInput', params: { questions: [{ id: 'late', header: 'Late', question: 'Choose?', options: [{ label: 'A' }, { label: 'B' }] }] } });
     fake.exit(close === 'end' ? 0 : 143); await flush();
     const result = await session.result;

@@ -13,6 +13,16 @@ import {
   type OmpUiMapperState,
   type OmpUiMapping,
 } from './omp-ui-mapper.js';
+import { z } from 'zod';
+import { STATUS_MAP as CODEX_TOOL_STATUS_MAP } from './codex-ui-mapper.ts';
+import { STATUS_MAP as OPENCODE_TOOL_STATUS_MAP } from './opencode-ui-mapper.ts';
+import { PLAN_STATUSES } from './ui-events.ts';
+
+const TOOL_STATUS = z.enum([
+  ...Object.values(CODEX_TOOL_STATUS_MAP),
+  ...Object.values(OPENCODE_TOOL_STATUS_MAP),
+]).enum;
+const PLAN_STATUS = z.enum(PLAN_STATUSES).enum;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(HERE, '__fixtures__', 'omp');
@@ -150,7 +160,7 @@ describe('omp ui mapper (golden fixtures)', () => {
       input: { agent: 'explore', task: 'Summarise docs/rpc.md' },
     });
     expect(rows['toolu_task_2#Types']).toMatchObject({ title: 'Task: List every frame in rpc-types.ts', status: 'completed' });
-    expect(rows['toolu_task_2#Tests']).toMatchObject({ status: 'failed', input: { agent: 'task', task: 'Draft mapper tests' } });
+    expect(rows['toolu_task_2#Tests']).toMatchObject({ status: TOOL_STATUS.failed, input: { agent: 'task', task: 'Draft mapper tests' } });
   });
 
   it('nests child work under its sub-agent row and keeps it out of the parent text', () => {
@@ -367,7 +377,7 @@ describe('omp ui mapper (golden fixtures)', () => {
     const { events } = fold([batch('A'), lifecycle('A', 'started'), lifecycle('A', 'completed'), batch('B'), lifecycle('B', 'started'), text]);
     expect(events).toContainEqual({
       type: 'item.started',
-      item: expect.objectContaining({ id: 'B#Anna', title: 'Task: work for B', status: 'running' }),
+      item: expect.objectContaining({ id: 'B#Anna', title: 'Task: work for B', status: TOOL_STATUS.running }),
     });
     expect(events).toContainEqual({
       type: 'item.started',
@@ -403,13 +413,13 @@ describe('omp ui mapper (golden fixtures)', () => {
 
     it('an agent aborted after the tool result fails the row', () => {
       const { events } = fold([start, lifecycle('started'), end(), lifecycle('aborted')]);
-      expect(rowEvents(events).at(-1)).toMatchObject({ type: 'item.completed', item: { status: 'failed' } });
+      expect(rowEvents(events).at(-1)).toMatchObject({ type: 'item.completed', item: { status: TOOL_STATUS.failed } });
     });
 
     it('an agent aborted before a successful tool result still fails the row', () => {
       const { events } = fold([start, lifecycle('started'), lifecycle('aborted'), end()]);
       expect(rowEvents(events).map((event) => event.type)).toEqual(['item.started', 'item.completed']);
-      expect(rowEvents(events).at(-1)).toMatchObject({ item: { status: 'failed' } });
+      expect(rowEvents(events).at(-1)).toMatchObject({ item: { status: TOOL_STATUS.failed } });
     });
 
     it('a failed tool result completes the row at once, and a later lifecycle frame leaves it alone', () => {
@@ -473,8 +483,8 @@ describe('omp ui mapper (golden fixtures)', () => {
       entries: [
         { content: 'Write mapper', status: 'completed' },
         { content: 'Add fixtures', status: 'in_progress' },
-        { content: 'Run tests', status: 'pending' },
-        { content: 'Publish', status: 'cancelled' },
+        { content: 'Run tests', status: PLAN_STATUS.pending },
+        { content: 'Publish', status: PLAN_STATUS.cancelled },
       ],
     });
     const failed = fold([

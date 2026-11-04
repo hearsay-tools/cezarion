@@ -20,6 +20,12 @@ import type { UiEvent, UiItem } from './ui-events.ts';
 import { STATUS_MAP as CODEX_TOOL_STATUS_MAP, HOOK_STATUS as CODEX_HOOK_STATUS_MAP, codexSessionStarted, createCodexUiState, mapCodexNotification } from './codex-ui-mapper.ts';
 import { CodexAppServerRunner } from './codex-app-server-runner.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
+import { PLAN_STATUSES } from './ui-events.ts';
+import { CODEX_TURN_STATUSES } from './codex-turn-outcome.ts';
+
+const PLAN_STATUS = z.enum(PLAN_STATUSES).enum;
+const CODEX_TURN_STATUS = z.enum(CODEX_TURN_STATUSES).enum;
+const UNSUPPORTED_HOOK_RUNNING_STATUS = 'running';
 
 const TOOL_STATUS = z.enum(Object.values(CODEX_TOOL_STATUS_MAP)).enum;
 const WIRE_HOOK_STATUS = z.enum(Object.keys(CODEX_HOOK_STATUS_MAP)).enum;
@@ -106,7 +112,7 @@ describe('codex hook/completed (#961)', () => {
   });
 
   it('hook/started emits nothing', () => {
-    expect(mapCodexNotification(frame('hook/started', { status: 'running', entries: [{ kind: 'context', text: 'x' }] }), createCodexUiState()).events).toEqual([]);
+    expect(mapCodexNotification(frame('hook/started', { status: UNSUPPORTED_HOOK_RUNNING_STATUS, entries: [{ kind: 'context', text: 'x' }] }), createCodexUiState()).events).toEqual([]);
   });
 
   it('does not duplicate statusMessage already present as an entry', () => {
@@ -119,7 +125,7 @@ describe('codex hook/completed (#961)', () => {
   });
 
   it('ignores a hook/completed whose status is still running', () => {
-    expect(mapCodexNotification(frame('hook/completed', { status: 'running', entries: [{ kind: 'context', text: 'x' }] }), createCodexUiState()).events).toEqual([]);
+    expect(mapCodexNotification(frame('hook/completed', { status: UNSUPPORTED_HOOK_RUNNING_STATUS, entries: [{ kind: 'context', text: 'x' }] }), createCodexUiState()).events).toEqual([]);
   });
 
   it('turns a completed statusMessage into a warning entry', () => {
@@ -143,10 +149,10 @@ describe('mapCodexNotification edge cases', () => {
   const state = createCodexUiState();
 
   it.each([
-    [{ turn: { status: 'failed', error: null } }, 'error'],
+    [{ turn: { status: CODEX_TURN_STATUS.failed, error: null } }, 'error'],
     [{ turn: { error: { message: 'provider unavailable' } } }, 'error'],
     [{ error: { message: 'provider unavailable' } }, 'error'],
-    [{ turn: { status: 'failed', error: { message: 'provider stream interrupted unexpectedly' } } }, 'error'],
+    [{ turn: { status: CODEX_TURN_STATUS.failed, error: { message: 'provider stream interrupted unexpectedly' } } }, 'error'],
     [{ turn: { status: 'interrupted', error: null } }, 'cancelled'],
     [{ turn: { status: 'completed', error: null } }, 'end_turn'],
     [{ turn: { status: 'completed', error: {} } }, 'end_turn'],
@@ -326,8 +332,8 @@ describe('mapCodexNotification edge cases', () => {
     const cases: Array<[Record<string, unknown>, string]> = [
       [{ method: 'turn/completed', params: { turn: { id: 't1', status: 'completed' } } }, 'end_turn'],
       [{ method: 'turn/completed', params: { turn: { id: 't1', status: 'interrupted' } } }, 'cancelled'],
-      [{ method: 'turn/failed', params: { turn: { id: 't1', status: 'failed' }, error: { message: 'boom' } } }, 'error'],
-      [{ method: 'turn/failed', params: { turn: { id: 't1', status: 'failed' }, error: { message: 'Turn interrupted' } } }, 'cancelled'],
+      [{ method: 'turn/failed', params: { turn: { id: 't1', status: CODEX_TURN_STATUS.failed }, error: { message: 'boom' } } }, 'error'],
+      [{ method: 'turn/failed', params: { turn: { id: 't1', status: CODEX_TURN_STATUS.failed }, error: { message: 'Turn interrupted' } } }, 'cancelled'],
       [{ method: 'turn/failed', params: { turn: { id: 't1', status: 'interrupted' } } }, 'cancelled'],
       [{ method: 'turn/failed', params: { turn: { id: 't1' } } }, 'error'],
     ];
@@ -470,7 +476,7 @@ describe('mapCodexNotification edge cases', () => {
       type: 'plan.updated',
       entries: [
         { content: 'ok', status: 'completed' },
-        { content: 'later', status: 'pending' },
+        { content: 'later', status: PLAN_STATUS.pending },
       ],
     });
 
@@ -707,7 +713,7 @@ describe('mapCodexNotification edge cases', () => {
       // codex's core protocol type spells it `in_progress` — accept both.
       const events = mapCodexNotification(
         planFrame([
-          { step: 'a', status: 'pending' },
+          { step: 'a', status: PLAN_STATUS.pending },
           { step: 'b', status: 'inProgress' },
           { step: 'c', status: 'in_progress' },
           { step: 'd', status: 'completed' },
@@ -718,7 +724,7 @@ describe('mapCodexNotification edge cases', () => {
         {
           type: 'plan.updated',
           entries: [
-            { content: 'a', status: 'pending' },
+            { content: 'a', status: PLAN_STATUS.pending },
             { content: 'b', status: 'in_progress' },
             { content: 'c', status: 'in_progress' },
             { content: 'd', status: 'completed' },
@@ -733,16 +739,16 @@ describe('mapCodexNotification edge cases', () => {
         state,
       ).events;
       expect(events).toEqual([
-        { type: 'plan.updated', entries: [{ content: 'a', status: 'pending' }, { content: 'b', status: 'pending' }] },
+        { type: 'plan.updated', entries: [{ content: 'a', status: PLAN_STATUS.pending }, { content: 'b', status: PLAN_STATUS.pending }] },
       ]);
     });
 
     it('filters malformed steps but keeps the good ones', () => {
       const events = mapCodexNotification(
-        planFrame(['oops', null, 42, { status: 'pending' }, { step: 5 }, { step: 'real', status: 'pending' }]),
+        planFrame(['oops', null, 42, { status: PLAN_STATUS.pending }, { step: 5 }, { step: 'real', status: PLAN_STATUS.pending }]),
         state,
       ).events;
-      expect(events).toEqual([{ type: 'plan.updated', entries: [{ content: 'real', status: 'pending' }] }]);
+      expect(events).toEqual([{ type: 'plan.updated', entries: [{ content: 'real', status: PLAN_STATUS.pending }] }]);
     });
 
     it('emits an empty plan for an empty list — a cleared plan is a real snapshot', () => {
@@ -762,12 +768,12 @@ describe('mapCodexNotification edge cases', () => {
       // Contrast claude's id-keyed task map: nothing from the first frame may
       // survive into the second. The only state kept is the precedence latch.
       const first = mapCodexNotification(planFrame([{ step: 'a', status: 'completed' }]), state);
-      const second = mapCodexNotification(planFrame([{ step: 'b', status: 'pending' }]), first.state);
-      expect(second.events).toEqual([{ type: 'plan.updated', entries: [{ content: 'b', status: 'pending' }] }]);
+      const second = mapCodexNotification(planFrame([{ step: 'b', status: PLAN_STATUS.pending }]), first.state);
+      expect(second.events).toEqual([{ type: 'plan.updated', entries: [{ content: 'b', status: PLAN_STATUS.pending }] }]);
       expect({ ...second.state, planFromNotification: false }).toEqual(state);
 
       // The latch settles after the first frame rather than churning state.
-      const third = mapCodexNotification(planFrame([{ step: 'c', status: 'pending' }]), second.state);
+      const third = mapCodexNotification(planFrame([{ step: 'c', status: PLAN_STATUS.pending }]), second.state);
       expect(third.state).toBe(second.state);
     });
 
@@ -827,10 +833,10 @@ describe('mapCodexNotification edge cases', () => {
 
     it('ignores the explanation prose (the dock renders entries only)', () => {
       const events = mapCodexNotification(
-        { method: 'turn/plan/updated', params: { threadId: 'th_1', turnId: 'turn_1', explanation: 'why', plan: [{ step: 'a', status: 'pending' }] } },
+        { method: 'turn/plan/updated', params: { threadId: 'th_1', turnId: 'turn_1', explanation: 'why', plan: [{ step: 'a', status: PLAN_STATUS.pending }] } },
         state,
       ).events;
-      expect(events).toEqual([{ type: 'plan.updated', entries: [{ content: 'a', status: 'pending' }] }]);
+      expect(events).toEqual([{ type: 'plan.updated', entries: [{ content: 'a', status: PLAN_STATUS.pending }] }]);
     });
   });
 });
