@@ -1,6 +1,6 @@
 import { setRunStatus, openTestRunStore } from '../runs/run-store.testkit.ts';
-import * as executionSettings from './execution-settings.ts';
-import { runInternals } from '../workflows/run-internals.testkit.ts';
+import * as launchContext from '../workflows/run/launch-context.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { workerDiffSchema, workerWaitResultSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
@@ -101,10 +101,10 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const parent = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner, agentProfile: profile, worktree: false });
     await until(() => sessions.length === 1);
     const caller = controller.credentials.authenticate(delegationToken(sessions[0]!.spec))!;
-    const pump = vi.spyOn(runInternals(f.manager).line, 'pump').mockResolvedValue();
+    const admission = vi.spyOn(WorkspaceSemaphore.prototype, 'maxParallel').mockReturnValue(0);
     const child = await controller.service.spawn(caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
     await mergeWriteAgentAccounts(store => { store.accounts = []; });
-    expect(pump).toHaveBeenCalled(); pump.mockRestore(); await (runInternals(f.manager).line).pump();
+    expect(admission).toHaveBeenCalled(); admission.mockRestore(); await f.releaseAdmission();
     await until(() => sessions.length === 2);
     expect(sessions[1]!.spec.env?.CODEX_HOME).toBe(runner === 'codex' ? home : undefined);
     expect(sessions[1]!.spec.env?.XDG_CONFIG_HOME).toBeUndefined();
@@ -138,8 +138,8 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(sessions[0]!.spec.systemPrompt).toContain('PARENT SKILL BODY 778');
     expect(sessions[0]!.spec.systemPrompt).toContain('parent extra');
     const caller = controller.credentials.authenticate(delegationToken(sessions[0]!.spec))!;
-    const pump = vi.spyOn(runInternals(f.manager).line, 'pump').mockResolvedValue();
-    return { parent, caller, pump };
+    const admission = vi.spyOn(WorkspaceSemaphore.prototype, 'maxParallel').mockReturnValue(0);
+    return { parent, caller, admission };
   }
   it("does not copy the parent's selected skill into worker records", async () => {
     const { caller } = await startSkillParent();
@@ -152,16 +152,16 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     for (const child of children) expect(f.store.getRun(child.workerId)?.systemPrompt).toBe('parent extra');
   });
   it('gives first-session and post-Continue spawns the same inherited prompt', async () => {
-    const { parent, caller, pump } = await startSkillParent();
+    const { parent, caller, admission } = await startSkillParent();
     const first = await controller.service.spawn(caller, { task: 'first', baseline: 'HEAD', requestId: randomUUID() });
     sessions[0]!.finish(); await until(() => owesRefusal(parent.id));
-    expect(pump).toHaveBeenCalled(); pump.mockRestore(); await (runInternals(f.manager).line).pump();
+    expect(admission).toHaveBeenCalled(); admission.mockRestore(); await f.releaseAdmission();
     await until(() => sessions.some(s => s !== sessions[0] && s.spec.env?.CEZ_TASK_ID === parent.id));
-    const resumedPump = vi.spyOn(runInternals(f.manager).line, 'pump').mockResolvedValue();
+    const resumedAdmission = vi.spyOn(WorkspaceSemaphore.prototype, 'maxParallel').mockReturnValue(0);
     const continued = sessions.find(s => s !== sessions[0] && s.spec.env?.CEZ_TASK_ID === parent.id)!;
     const nextCaller = controller.credentials.authenticate(delegationToken(continued.spec))!;
     const second = await controller.service.spawn(nextCaller, { task: 'second', baseline: 'HEAD', requestId: randomUUID() });
-    expect(resumedPump).toHaveBeenCalled();
+    expect(resumedAdmission).toHaveBeenCalled();
     expect(f.store.getRun(first.workerId)?.systemPrompt).toBe(f.store.getRun(second.workerId)?.systemPrompt);
     expect(f.store.getRun(second.workerId)?.systemPrompt).toBe('parent extra');
   });
@@ -201,10 +201,10 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const first = sessions[0]!; const token = delegationToken(first.spec);
     expect(token).toBeTypeOf('string'); expect(first.spec.systemPrompt).not.toContain(token);
     expect(f.store.getRun(run.id)?.delegation).toMatchObject({ role: 'root' });
-    const settings = executionSettings.delegationExecutionSettings(runInternals(f.manager).active.get(run.id));
+    const settings = f.manager.delegationExecutionSettings(run.id);
     expect(settings).toMatchObject({ model: 'haiku', systemPrompt: 'parent restriction', allowedTools: ['Read', 'Bash'], bashAllowlist: ['git status'] });
     // Hold admission after parent is live, so snapshot durability is independently observable.
-    const pump = vi.spyOn(runInternals(f.manager).line, 'pump').mockResolvedValue();
+    const admission = vi.spyOn(WorkspaceSemaphore.prototype, 'maxParallel').mockReturnValue(0);
     const child = await controller.service.spawn(controller.credentials.authenticate(token)!, { task: 'child', baseline: 'parent-head', requestId: randomUUID() });
     const worker = f.store.getRun(child.workerId)!;
     expect(worker).toMatchObject({ model: 'haiku', agentProfile: settings.agentProfile, systemPrompt: 'parent restriction', workflowDef: { steps: [{ allowedTools: ['Read', 'Bash'], bashAllowlist: ['git status'] }] } });
@@ -213,7 +213,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(reopened.getRun(child.workerId)).toMatchObject({ model: 'haiku', systemPrompt: 'parent restriction', workflowDef: { steps: [{ allowedTools: ['Read', 'Bash'], bashAllowlist: ['git status'] }] } }); reopened.flush();
     first.finish(); await until(() => owesRefusal(run.id));
     expect(controller.credentials.authenticate(token)).toBeUndefined();
-    expect(pump).toHaveBeenCalled(); pump.mockRestore(); await (runInternals(f.manager).line).pump();
+    expect(admission).toHaveBeenCalled(); admission.mockRestore(); await f.releaseAdmission();
     await until(() => sessions.some(s => s !== first && s.spec.cwd === f.root));
     const second = sessions.find(s => s !== first && s.spec.cwd === f.root)!;
     expect(second.spec.env?.CEZ_DELEGATION_TOKEN).not.toBe(token);
@@ -225,11 +225,11 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const parent = f.manager.startRun(workflow, { task: 'parent', runner: 'claude', worktree: false });
     await until(() => sessions.length === 1);
     const token = delegationToken(sessions[0]!.spec);
-    const pump = vi.spyOn(runInternals(f.manager).line, 'pump').mockResolvedValue();
+    const admission = vi.spyOn(WorkspaceSemaphore.prototype, 'maxParallel').mockReturnValue(0);
     const child = await controller.service.spawn(controller.credentials.authenticate(token)!, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
     writeFileSync(join(f.root, '.ai/cezar/config.json'), JSON.stringify({ systemPrompt: 'later config must not enter accepted worker' }));
-    expect(pump).toHaveBeenCalled(); pump.mockRestore();
-    await (runInternals(f.manager).line).pump();
+    expect(admission).toHaveBeenCalled(); admission.mockRestore();
+    await f.releaseAdmission();
     await until(() => sessions.length === 2);
     const worker = sessions[1]!;
     expect(worker.spec.toolGrant).toEqual({ kind: 'inherited', tools: [], bashAllowlist: [] });
@@ -248,9 +248,8 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   it('revokes a finished workflow step before preparation of the next session', async () => {
     let entered = false; let release!: () => void;
     const gate = new Promise<void>(done => { release = done; });
-    const engine = f.manager as unknown as { agentEnvForStep(...args: unknown[]): Promise<unknown> };
-    const prepare = engine.agentEnvForStep.bind(f.manager); let count = 0;
-    vi.spyOn(engine, 'agentEnvForStep').mockImplementation(async (...args) => { if (++count === 2) { entered = true; await gate; } return prepare(...args); });
+    const prepare = launchContext.agentEnvForStep; let count = 0;
+    vi.spyOn(launchContext, 'agentEnvForStep').mockImplementation(async (...args) => { if (++count === 2) { entered = true; await gate; } return prepare(...args); });
     const run = f.manager.startRun({ ...QUICK_TASK_WORKFLOW, steps: [{ id: 'one', prompt: '{{task}}' }, { id: 'two', prompt: '{{task}}' }] }, { task: 'parent', runner: 'claude', worktree: false });
     try {
       await until(() => sessions.length === 1);

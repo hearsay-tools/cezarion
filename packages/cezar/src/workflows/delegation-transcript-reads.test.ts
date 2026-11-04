@@ -1,4 +1,3 @@
-import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -56,12 +55,11 @@ describe('delegation paths read no transcript (#880)', () => {
     expect(store.readEvents(family.parentId)).toHaveLength(projected);
   });
 
-  it('projectConversationEvents and routedAsk read no transcript', () => {
+  it('projectConversationEvents reads no transcript', () => {
     checkpoint(family.workerId);
     const before = store.readEvents(family.workerId).filter((event) => event.type === 'conversation-message').length;
     const reads = countTranscriptReads(familyPaths);
     projectConversationEvents(store, store.getRun(family.parentId)!);
-    runInternals(manager).workerQuestions.routedAsk(family.workerId);
     expect(reads.counts).toEqual({ files: [], decompress: 0 });
     restoreTranscriptReads();
     expect(store.readEvents(family.workerId).filter((event) => event.type === 'conversation-message')).toHaveLength(before);

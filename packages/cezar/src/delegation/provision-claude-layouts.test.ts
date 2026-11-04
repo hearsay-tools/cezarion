@@ -1,3 +1,4 @@
+import * as launchContext from '../workflows/run/launch-context.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -76,9 +77,8 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   });
   it('checks native Claude layout against merged session env, not only the host env', async () => {
     const a = await acceptClaudeLayout('native');
-    const engine = f.manager as unknown as { agentEnv(...args: unknown[]): Record<string, string> };
-    const prepare = engine.agentEnv.bind(f.manager);
-    vi.spyOn(engine, 'agentEnv').mockImplementation((...args) => ({ ...prepare(...args), CLAUDE_CONFIG_DIR: a.home }));
+    const prepare = launchContext.agentEnv;
+    vi.spyOn(launchContext, 'agentEnv').mockImplementation((...args) => ({ ...prepare(...args), CLAUDE_CONFIG_DIR: a.home }));
     const { store } = await launchAccepted(a, 'queued');
     await until(() => store.getRun(a.child.workerId)?.status === 'failed' || sessions.length > 1);
     expect(store.getRun(a.child.workerId)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('layout') }); expect(sessions).toHaveLength(1);
