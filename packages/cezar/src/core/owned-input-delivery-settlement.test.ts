@@ -1,0 +1,71 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
+import { runInternals } from '../workflows/run-internals.testkit.ts';
+import { randomUUID } from 'node:crypto';
+
+import { expect, it } from 'vitest';
+import { withHeldAck } from './owned-input-delivery.testkit.ts';
+
+import { driveSeam, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+
+
+for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
+  it(`${backend} a completed turn with a delayed ACK holds auto-end and resumes it after acceptance`, async () => {
+    await withHeldAck(backend, async release => {
+      await driveSeam(backend, 'hold', {
+        sessionOptions: { autoEndAfterFirstTurn: true },
+        whileOpen: async (session, { v1 }) => {
+          await waitFor(() => v1.some(event => event.type === 'turn-end'));
+          const ack = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo delay-owned-ack' }]);
+          expect(ack).toBeInstanceOf(Promise);
+          let accepted = false;
+          if (!ack) throw new Error('expected reserved submission');
+          void ack.then(() => { accepted = true; }, () => {});
+          await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 2);
+          // bound: observe past the real runner's 250 ms auto-end timer while its native ACK is held by the fixture.
+          await new Promise(resolve => setTimeout(resolve, 400));
+          expect(accepted).toBe(false); expect(session.open).toBe(true);
+          expect(session.sendAgentMessage([{ type: 'text', text: 'duplicate' }])).toBe(false);
+          release(); await ack; await session.result;
+          expect(session.open).toBe(false);
+        },
+      });
+    });
+  }, 60_000);
+
+  it.each(['finish', 'cancel', 'dispose'] as const)(`${backend} pending ACK settles without a delivery receipt or reopened lifecycle after %s`, async stop => {
+    await withHeldAck(backend, async release => {
+      await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
+        manager.enqueueOwnedRun(runId);
+        await waitFor(() => store.getRun(runId)?.status === 'waiting');
+        const input = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId,
+          text: 'mock:agent-echo delay-owned-ack stopped', createdAt: new Date().toISOString() };
+        expect(manager.steerWorker(runId, input)).toBe('queued');
+        await waitFor(() => store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes('stopped')));
+        const internals = runInternals(manager);
+        const state = internals.active.get(runId)!;
+        const session = state.session!;
+        const settled = state.agentInputFlight?.settled;
+        expect(settled).toBeInstanceOf(Promise);
+        try {
+          if (stop === 'dispose') manager.dispose();
+          else manager[stop](runId);
+          release(); await settled;
+          expect(store.getRun(runId)?.agentInputs).toEqual([input]);
+          if (stop === 'dispose') {
+            expect(internals.active.has(runId)).toBe(false);
+            expect(session.open).toBe(true); // Disposal alone is no termination proof.
+            expect(manager.isActive(runId)).toBe(true);
+          }
+          else {
+            await waitFor(() => !manager.isActive(runId));
+            expect(stop === 'cancel' ? ['cancelled'] : ['done', 'review']).toContain(store.getRun(runId)?.status);
+          }
+        } finally {
+          session.interrupt();
+          await session.result.catch(() => undefined);
+          await waitFor(() => !internals.workerExecutions.executions.has(runId));
+        }
+      });
+    });
+  }, 60_000);
+}
