@@ -38,7 +38,7 @@ function holdStepDeadline() {
 }
 
 
-export const WORKFLOW_ASK_GROUPS = {'answer': ['Q1', 'Q3'], 'continue': ['Q4', 'Q10'], 'restart': ['Q5'], 'cancel': ['Q6'], 'finish': ['Q7'], 'timeout': ['Q8'], 'autonomous': ['Q9']} as const;
+export const WORKFLOW_ASK_GROUPS = {'answer': ['Q1', 'Q3'], 'continue': ['Q4'], 'clean-close': ['Q10'], 'restart': ['Q5'], 'cancel': ['Q6'], 'finish': ['Q7'], 'timeout': ['Q8'], 'autonomous': ['Q9']} as const;
 
 export function describeWorkflowAsk(group: keyof typeof WORKFLOW_ASK_GROUPS, registration = { describe, it, afterEach }) {
   const { describe, it, afterEach } = registration;
