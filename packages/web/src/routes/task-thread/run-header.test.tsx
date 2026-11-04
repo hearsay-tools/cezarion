@@ -1,3 +1,4 @@
+import { githubItemSchema } from '@open-mercato/cezar-api-client/contract/github'
 import {
   RUN_STATUS,
   STEP_KIND,
@@ -165,7 +166,7 @@ describe('fixed mobile parent navigation', () => {
 
   afterEach(() => document.querySelector('[data-slot="test-mobile-bar"]')?.remove())
 
-  it.each<RunTab>(['session', 'changes', 'commits', 'files', { kind: 'issue', number: 751 }, { kind: 'pr', number: 752 }])('portals a compact scoped parent link on %j before lookup and after failure', async tab => {
+  it.each<RunTab>(['session', 'changes', 'commits', 'files', { kind: 'issue', number: 751 }, { kind: githubItemSchema.shape.kind.enum.pr, number: 752 }])('portals a compact scoped parent link on %j before lookup and after failure', async tab => {
     stubFetch({ [`/api/v1/p/sample/runs/${parentId}`]: () => jsonResponse({ error: 'not found' }, 404) })
     const slot = phoneSlot()
     slot.dataset.slot = 'test-mobile-bar'
@@ -253,7 +254,7 @@ describe('simplified header (hearsay-tools/cezarion#1333)', () => {
 })
 
 describe('Session-only activity controls (#751)', () => {
-  const tabs: RunTab[] = ['changes', 'commits', 'files', { kind: 'issue', number: 751 }, { kind: 'pr', number: 752 }]
+  const tabs: RunTab[] = ['changes', 'commits', 'files', { kind: 'issue', number: 751 }, { kind: githubItemSchema.shape.kind.enum.pr, number: 752 }]
 
   it.each(tabs)('omits workers and workflow controls on %j', async (tab) => {
     stubFetch({ '/api/v1/runs/r1/relationships': () => jsonResponse({ workers: [] }) })
@@ -1059,7 +1060,7 @@ describe('linked issue and PR tabs (#692)', () => {
 
   it('marks the item tab active and Session inactive', () => {
     stubFetch()
-    renderHeader(run('done', { prNumber: 801, issueNumber: 692 }), undefined, { kind: 'pr', number: 801 })
+    renderHeader(run('done', { prNumber: 801, issueNumber: 692 }), undefined, { kind: githubItemSchema.shape.kind.enum.pr, number: 801 })
     const tabs = within(tabRow())
     expect(tabs.getByRole('link', { name: 'Pull request #801' }).getAttribute('aria-current')).toBe('page')
     expect(tabs.getByRole('link', { name: 'Issue #692' }).getAttribute('aria-current')).toBeNull()
