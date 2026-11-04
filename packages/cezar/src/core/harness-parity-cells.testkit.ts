@@ -644,7 +644,7 @@ const CONTROL_CRITERIA = [
   { id: 'R35', scenario: 'baseline' },
   // hearsay-tools/cezarion#784: the session's preview CDP address reaches each native process.
   { id: 'R125', scenario: 'baseline' },
-  // core/ci-tools.test.ts (hearsay-tools/cezarion#1233): `cezar_wait` and `cezar_cancel_wait`
+  // core/ci-tools-wait-cancel.test.ts (hearsay-tools/cezarion#1233): `cezar_wait` and `cezar_cancel_wait`
   // reach the session's handlers through each native wire, fresh and resumed.
   { id: 'U0', scenario: 'baseline' },
   // #399: shared monitoring instructions on each native prompt channel.

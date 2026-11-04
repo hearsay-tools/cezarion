@@ -108,7 +108,7 @@ environment:
 ```sh
 node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
   --project web --project e2e \
-  --test packages/web/src/routes/new-task.test.tsx \
+  --test packages/web/src/routes/new-task-composer.test.tsx \
   --test packages/web/e2e/completion-controls.e2e.ts \
   --output .ai/qa/<issue>/code-quality.md
 ```
@@ -175,7 +175,7 @@ NODE
   trap 'exit 143' TERM
   node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
     --project web --project e2e \
-    --test packages/web/src/routes/new-task.test.tsx \
+    --test packages/web/src/routes/new-task-composer.test.tsx \
     --test packages/web/e2e/completion-controls.e2e.ts \
     --output .ai/qa/<issue>/code-quality.md
 )

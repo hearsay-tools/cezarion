@@ -6,7 +6,7 @@ import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { readMockRecords } from '../mock-records.testkit.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's RUNNER_IDS cells. U0 (tool admission) lives in
-// `core/ci-tools.test.ts`.
+// `core/ci-tools-wait-cancel.test.ts` and `core/ci-tools-ask-done.test.ts`.
 export const WAIT_CRITERIA = [
   { id: 'U1', scenario: 'baseline', name: 'ci and timer register through cezar_wait on the native wire, park, and wake with their result' },
   { id: 'U4', scenario: 'baseline', name: 'cezar_cancel_wait cancels and no observation is delivered' },
