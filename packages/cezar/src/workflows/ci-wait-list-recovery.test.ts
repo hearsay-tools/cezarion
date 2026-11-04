@@ -76,7 +76,9 @@ describe('Wait list recovery and cancellation', { timeout: 30_000 }, () => {
     const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<Record<string, unknown> & { id: string }>;
     Object.assign(disk.find(entry => entry.id === run.id)!, { status: RUN_STATUS.review });
     await restart(false, disk);
-    await until(() => (store.getRun(run.id)?.waits ?? []).length === 0);
+    await until(() => {
+      return (store.getRun(run.id)?.waits ?? []).length === 0;
+    });
     expect([settledById(run.id, ci.id)?.phase, settledById(run.id, timer.id)?.phase]).toEqual(['cancelled', 'cancelled']);
     expect([runInternals(manager).waitWatches.waitTimers.size, runInternals(manager).waitWatches.ciWatches.size]).toEqual([0, 0]);
     expect(store.getRun(run.id)?.agentInputs ?? []).toEqual([]);
