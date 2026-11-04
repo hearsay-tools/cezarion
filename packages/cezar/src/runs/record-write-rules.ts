@@ -1,3 +1,24 @@
+/**
+ * The record write rules (ADR 0056, Decision 4 of .ai/specs/2026-11-03-run-store-owns-exits.md):
+ * one ordered list, `RECORD_WRITE_RULES`, that every write path runs with its path as input.
+ * Each rule names the paths it runs on (`on`). A rule that runs on only one of the two update
+ * saves, or that the two saves apply differently, names that difference (`difference`), so a rule
+ * one path skips is visible in the list: four fixes found such a skip after the rules left the
+ * store (hearsay-tools/cezarion#2377 to hearsay-tools/cezarion#2382).
+ *
+ * The paths:
+ * - `commit`: every store commit (`commitIndex`), on the staged records before they persist;
+ * - `durableUpdate`: an update that commits at once, on a staged copy; its commit then runs `commit`;
+ * - `debouncedUpdate`: an update the next save writes, on the held record;
+ * - `loaded`: a record the store loads;
+ * - `conversation`: a conversation ledger and the input it delivers;
+ * - `pullRequests`: the PRs a run accumulates (updates, marker declarations, PR discovery, events);
+ * - `archiveFields`: the fields an archive or restore sets (`stageArchive`, updates, bulk archive);
+ * - `stepUpdate`: a step patch.
+ *
+ * Redaction: the store's `redact` owns the `CEZ_REDACT_SECRETS=0` opt-out, which skips host
+ * secrets only, so every redaction rule scrubs session secrets (hearsay-tools/cezarion#2325).
+ */
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { agentInputSchema, delegationStateSchema } from '@open-mercato/cezar-contract/delegation';
@@ -7,63 +28,217 @@ import type { AgentInput, ConversationState, DelegationState, RunPullRequest } f
 import { redactSecrets } from '../core/secret-redaction.ts';
 import { ConversationIdInUseError } from './conversation-identity.ts';
 import { mergePullRequests } from './pull-requests.ts';
+import { applyExit } from './run-exits.ts';
+import {
+  ISSUE_URL_RE, PR_URL_RE, refUrlNumber, referencedPrDeclaration, rescopeRun, resolveIssueReference, resolveReferencedRef,
+  trackReferencedIssues, trackReferencedPrs,
+} from './run-references.ts';
 import type { RepoHandle, RunRecord, StepState } from './store.ts';
 
 type RecordPatch = Partial<Omit<RunRecord, 'id' | 'steps'>>;
-type Staged = ReadonlyMap<string, RunRecord | null>;
+type StepPatch = Partial<Omit<StepState, 'id'>>;
 
-/** Rule order is path-specific. These differences preserve existing behavior: durable task edits
- * skip reference resolution. Patch redaction's opt-out also skips session secrets, while text
- * redaction always scrubs those secrets.
- * Completion actions (hearsay-tools/cezarion#2324): every path clears a retired action, so one
- * run state stores one action state. Only a commit creates one, because the action and its
- * archive must be durable; updateRun routes opted-in Done and setting changes to a commit.
- */
-export const WRITE_PATH_RULES = {
-  commit: ['stale-resume', 'completion-actions'],
-  durableUpdate: ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'archive-fields'],
-  debouncedUpdate: ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'assign', 'retire-completion-action', 'stale-resume', 'task-references', 'archive-or-touch'],
-  loaded: ['stale-resume'],
-  conversation: ['redact-messages', 'parse-delegation', 'redact-input', 'parse-input', 'append-input'],
-  // updateRun, marker declarations, PR discovery and event observations.
-  pullRequests: ['merge-pull-requests'],
-  // stageArchive, updateRun and applyArchived, including bulk archive.
-  archiveFields: ['archive-time', 'store-owned:withdraw-hold', 'store-owned:clear-pin'],
-  stepUpdate: ['redact-step-error'],
-} as const;
+export const WRITE_PATHS = ['commit', 'durableUpdate', 'debouncedUpdate', 'loaded', 'conversation', 'pullRequests', 'archiveFields', 'stepUpdate'] as const;
+export type WritePath = (typeof WRITE_PATHS)[number];
 
+/** What a commit reads from the store: the records it holds and the family archive it stages. */
 interface CommitHooks {
   peek(id: string): RunRecord | undefined;
   completionArchiveBlocker(run: RunRecord): string | undefined;
   stageArchive(staged: Map<string, RunRecord | null>, run: RunRecord, archived: boolean): void;
 }
 
-// Pure reference helpers remain in store.ts; callbacks avoid a store/module value cycle.
+/** What an update reads from the store: its secrets, its repository, the run's transcript and the
+ *  debounced save. */
 interface UpdateHooks {
   redact(text: string): string;
-  refUrlNumber(url: string | undefined): number | undefined;
   repoHandle?: RepoHandle | null | undefined;
+  /** Restore the run's plain transcript. */
   restore(): void;
-  withdrawHold(run: RunRecord): void;
-  clearPin(run: RunRecord): void;
-  hasPrUrl(text: string): boolean;
-  hasIssueUrl(text: string): boolean;
-  trackReferencedPrs(run: RunRecord, text: string): unknown;
-  trackReferencedIssues(run: RunRecord, text: string): unknown;
-  resolveReferencedPr(run: RunRecord): string | undefined;
-  resolveIssueReference(run: RunRecord): string | undefined;
-  rescopeRun(run: RunRecord): unknown;
+  /** The debounced archive: the transcript form, the archive fields, then the save. */
   archive(run: RunRecord, archived: boolean): unknown;
+  /** The debounced save. */
   touch(run: RunRecord): void;
 }
 
-export function stageCommit(input: Staged, hooks: CommitHooks): Map<string, RunRecord | null> {
-  return prepareCompletionActions(withoutStaleResumes(input), hooks);
+type ConversationDelivery = { recipientRunId: string; input: AgentInput; recipientDelegation?: DelegationState };
+
+/** One write in progress, per path. A rule changes the fields its path stages. */
+interface Writes {
+  commit: { path: 'commit'; staged: Map<string, RunRecord | null>; hooks: CommitHooks };
+  durableUpdate: UpdateWrite;
+  debouncedUpdate: UpdateWrite;
+  loaded: { path: 'loaded'; run: RunRecord };
+  conversation: {
+    path: 'conversation'; staged: Map<string, RunRecord>; root: RunRecord; state: ConversationState;
+    delivery: ConversationDelivery | undefined; recipient?: RunRecord; input?: AgentInput;
+    peek(id: string): RunRecord | undefined; redact(text: string): string;
+  };
+  pullRequests: { path: 'pullRequests'; run: RunRecord; entries: readonly RunPullRequest[]; handle: RepoHandle | null | undefined; changed: boolean };
+  archiveFields: { path: 'archiveFields'; run: RunRecord; archived: boolean; now: string };
+  stepUpdate: { path: 'stepUpdate'; patch: StepPatch; redact(text: string): string };
+}
+/** An update: `run` is the held record, and on a durable save the staged copy from `assign` on.
+ *  `archived` is the archive flag `restore` takes off the patch. */
+type UpdateWrite = { path: 'durableUpdate' | 'debouncedUpdate'; run: RunRecord; patch: RecordPatch; archived: boolean | undefined; hooks: UpdateHooks };
+
+type RecordWriteRule = {
+  id: string;
+  on: readonly WritePath[];
+  /** Why the rule runs on one update save only, or differs between them. */
+  difference?: string;
+  apply(write: Writes[WritePath]): void;
+};
+
+function rule<P extends WritePath>(id: string, on: readonly P[], apply: (write: Writes[P]) => void, difference?: string): RecordWriteRule {
+  return { id, on, ...(difference ? { difference } : {}), apply: write => apply(write as Writes[P]) };
+}
+
+const UPDATES = ['durableUpdate', 'debouncedUpdate'] as const;
+const hasOwn = (patch: object, key: string) => Object.prototype.hasOwnProperty.call(patch, key);
+
+/** The rules, in the order every path runs them. */
+export const RECORD_WRITE_RULES: readonly RecordWriteRule[] = [
+  // A patched issue number is its writer's, no longer the number reference resolution seeded.
+  rule('issue-seed', UPDATES, ({ run, patch }) => { if (hasOwn(patch, 'issueNumber')) delete run.referencedIssueNumberSeeded; }),
+  rule('pull-requests', UPDATES, ({ run, patch, hooks }) => {
+    if (patch.pullRequestUrl === undefined) return;
+    stagePullRequests(run, [run.pullRequestUrl, patch.pullRequestUrl].flatMap((url) => {
+      const number = refUrlNumber(url);
+      if (number === undefined) return [];
+      const parsed = runPullRequestSchema.safeParse({ number, url, source: 'created' });
+      return parsed.success ? [parsed.data] : [];
+    }), hooks.repoHandle);
+  }),
+  // Takes the archive flag off the patch. Restores before the patch is written, so a throw leaves
+  // status and archived unchanged (hearsay-tools/cezarion#818 S3). Waits are not cleared on an
+  // update: RunManager cancels them when a run ends (spec 2026-10-17-unified-waits).
+  rule('restore', UPDATES, (write) => {
+    if (!hasOwn(write.patch, 'archived')) return;
+    const { archived, archivedAt: _archivedAt, ...patch } = write.patch;
+    write.patch = patch;
+    write.archived = Boolean(archived);
+    if (!write.archived) write.hooks.restore();
+  }),
+  rule('redact-patch', UPDATES, (write) => { write.patch = redactPatch(write.patch, write.hooks.redact); }),
+  rule('assign', UPDATES, (write) => {
+    if (write.path === 'durableUpdate') write.run = { ...write.run, ...write.patch };
+    else Object.assign(write.run, write.patch);
+  }, 'The durable save writes a staged copy, which its commit persists before it replaces the held record; the debounced save writes the held record. The rules before it change the held record on both.'),
+  rule('retire-completion-action', ['debouncedUpdate'], ({ run }) => {
+    if (run.completionAction && completionActionRetired(run)) run.completionAction = undefined;
+  }, 'The durable save retires an action in its commit (completion-actions), so every path stores one action state per run state (hearsay-tools/cezarion#2324).'),
+  // A resume time is the appointment of a `waiting` run (hearsay-tools/cezarion#1236,
+  // hearsay-tools/cezarion#1496), so a run coming back to life or settling retires it. Open waits
+  // survive at every status: recovery owns their cancellation. `autoResumeAttempts` stays, since
+  // `MAX_AUTO_RESUMES` counts attempts across resumes.
+  rule('stale-resume', ['commit', 'debouncedUpdate', 'loaded'], (write) => {
+    if (write.path !== 'commit') {
+      if (isStaleResume(write.run)) write.run.autoResumeAt = undefined;
+      return;
+    }
+    // A copy, set to `undefined` and never deleted: a caller may stage the held record itself.
+    for (const [id, run] of [...write.staged]) if (run && isStaleResume(run)) write.staged.set(id, { ...run, autoResumeAt: undefined });
+  }, 'The durable save takes it in its commit. A commit stages a copy; the debounced save and a load change the held record.'),
+  rule('completion-actions', ['commit'], prepareCompletionActions,
+    'Only a commit creates an action, because the action and its archive must be durable: updateRun routes an opted-in Done and option changes to a commit (hearsay-tools/cezarion#2324). The debounced save only retires one (retire-completion-action).'),
+  // Both update saves resolve an edited task alike (hearsay-tools/cezarion#2323).
+  rule('task-references', UPDATES, ({ run, patch, hooks }) => { if (patch.task !== undefined) resolveEditedTaskRefs(run, hooks.repoHandle); }),
+  rule('archive-fields', ['durableUpdate'], ({ run, archived }) => {
+    if (archived !== undefined) stageArchiveFields(run, archived, new Date().toISOString());
+  }, 'The durable save sets the archive fields on its copy, and its commit queues the transcript compression. The debounced save archives through archive-or-touch.'),
+  rule('archive-or-touch', ['debouncedUpdate'], ({ run, archived, hooks }) => {
+    if (archived !== undefined) hooks.archive(run, archived);
+    else hooks.touch(run);
+  }, 'The debounced save archives the held record with its transcript form, then saves it; without an archive flag it only saves. The durable save archives through archive-fields and saves in its commit.'),
+  rule('merge-pull-requests', ['pullRequests'], (write) => {
+    const next = mergePullRequests(write.run.pullRequests, write.entries, write.handle
+      ? `https://github.com/${write.handle.owner}/${write.handle.name}` : undefined);
+    if (isDeepStrictEqual(next, write.run.pullRequests)) return;
+    write.run.pullRequests = next;
+    write.changed = true;
+  }),
+  rule('archive-time', ['archiveFields'], ({ run, archived, now }) => {
+    run.archived = archived;
+    run.archivedAt = archived ? now : undefined;
+    if (!archived) run.manualUnarchivedAt = now;
+  }),
+  rule('withdraw-hold', ['archiveFields'], ({ run, archived }) => { if (archived) withdrawHold(run); }),
+  rule('clear-pin', ['archiveFields'], ({ run, archived }) => { if (archived) clearPin(run); }),
+  // The ledger is staged before its recipient input, also when both are the same run.
+  rule('redact-messages', ['conversation'], (write) => {
+    write.state = { ...write.state, messages: write.state.messages.map(message => ({ ...message, text: write.redact(message.text) })) };
+  }),
+  rule('parse-delegation', ['conversation'], ({ staged, root, state }) => {
+    staged.set(root.id, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: state }) });
+  }),
+  // The staged queue can differ from the stored one: a continuation patch may set it.
+  rule('find-recipient', ['conversation'], (write) => {
+    if (!write.delivery) return;
+    const recipient = write.staged.get(write.delivery.recipientRunId) ?? write.peek(write.delivery.recipientRunId);
+    if (!recipient) throw new Error('missing conversation recipient');
+    const id = write.delivery.input.id;
+    if (recipient.agentInputs?.some(queued => queued.id === id)) throw new ConversationIdInUseError();
+    write.recipient = recipient;
+  }),
+  rule('redact-input', ['conversation'], (write) => {
+    if (write.delivery) write.input = { ...write.delivery.input, text: write.redact(write.delivery.input.text) };
+  }),
+  rule('parse-input', ['conversation'], (write) => { if (write.input) write.input = agentInputSchema.parse(write.input); }),
+  // The input appends to the recipient's staged queue, so a worker continuation keeps a patched agentInputs.
+  rule('append-input', ['conversation'], ({ staged, delivery, recipient, input }) => {
+    if (!delivery || !recipient || !input) return;
+    const delegation = !recipient.delegation && delivery.recipientDelegation ? { delegation: delegationStateSchema.parse(delivery.recipientDelegation) } : {};
+    staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(recipient.agentInputs ?? []), input] });
+  }),
+  // `StepState.error` is the step-level counterpart of the run's `error`: `run.ts` feeds the same
+  // message to both (open-mercato/cezar#456 review).
+  rule('redact-step-error', ['stepUpdate'], (write) => {
+    if (typeof write.patch.error === 'string') write.patch = { ...write.patch, error: write.redact(write.patch.error) };
+  }),
+];
+
+function runRules<P extends WritePath>(write: Writes[P]): Writes[P] {
+  for (const each of RECORD_WRITE_RULES) if (each.on.includes(write.path)) each.apply(write);
+  return write;
+}
+
+/** The rules `path` runs, in order. */
+export function writePathRules(path: WritePath): string[] {
+  return RECORD_WRITE_RULES.filter(each => each.on.includes(path)).map(each => each.id);
+}
+
+export function stageCommit(input: ReadonlyMap<string, RunRecord | null>, hooks: CommitHooks): Map<string, RunRecord | null> {
+  return runRules<'commit'>({ path: 'commit', staged: new Map(input), hooks }).staged;
 }
 
 export function stageLoaded(run: RunRecord): void {
-  // Open waits survive at every status; recovery owns their cancellation.
-  if (isStaleResume(run)) run.autoResumeAt = undefined;
+  runRules<'loaded'>({ path: 'loaded', run });
+}
+
+export function stageDurableUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks): RunRecord {
+  return runRules<'durableUpdate'>({ path: 'durableUpdate', run, patch, archived: undefined, hooks }).run;
+}
+
+export function stageDebouncedUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks): void {
+  runRules<'debouncedUpdate'>({ path: 'debouncedUpdate', run, patch, archived: undefined, hooks });
+}
+
+export function stageStepUpdate(patch: StepPatch, redact: (text: string) => string): StepPatch {
+  return runRules<'stepUpdate'>({ path: 'stepUpdate', patch, redact }).patch;
+}
+
+export function stageConversation(staged: Map<string, RunRecord>, root: RunRecord, state: ConversationState,
+  delivery: ConversationDelivery | undefined, peek: (id: string) => RunRecord | undefined, redact: (text: string) => string): void {
+  runRules<'conversation'>({ path: 'conversation', staged, root, state, delivery, peek, redact });
+}
+
+export function stagePullRequests(run: RunRecord, entries: readonly RunPullRequest[], handle?: RepoHandle | null): boolean {
+  return runRules<'pullRequests'>({ path: 'pullRequests', run, entries, handle, changed: false }).changed;
+}
+
+export function stageArchiveFields(run: RunRecord, archived: boolean, now: string): void {
+  runRules<'archiveFields'>({ path: 'archiveFields', run, archived, now });
 }
 
 /** The one stale-resume rule, on every write path (hearsay-tools/cezarion#2322): a resume time is
@@ -78,89 +253,10 @@ export function redactText(text: string, sessionSecrets: readonly string[], host
   return redactSecrets(safe, hostSecrets());
 }
 
-function prepareUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks) {
-  if (Object.prototype.hasOwnProperty.call(patch, 'issueNumber')) delete run.referencedIssueNumberSeeded;
-  const normalized = { ...patch };
-  if (normalized.pullRequestUrl !== undefined) {
-    stagePullRequests(run, [run.pullRequestUrl, normalized.pullRequestUrl].flatMap((url) => {
-      const number = hooks.refUrlNumber(url);
-      if (number === undefined) return [];
-      const parsed = runPullRequestSchema.safeParse({ number, url, source: 'created' });
-      return parsed.success ? [parsed.data] : [];
-    }), hooks.repoHandle);
-  }
-  // Waits are not cleared here: RunManager cancels them explicitly when a run ends (spec
-  // 2026-10-17-unified-waits), so a terminal patch never retires one as a side effect.
-  const archived = Object.prototype.hasOwnProperty.call(normalized, 'archived') ? Boolean(normalized.archived) : undefined;
-  if (archived !== undefined) { delete normalized.archived; delete normalized.archivedAt; }
-  // Restore before mutating so a throw leaves status and archived unchanged (hearsay-tools/cezarion#818 S3).
-  if (archived === false) hooks.restore();
-  return { normalized, archived };
-}
-
-export function stageDurableUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks): RunRecord {
-  const { normalized, archived } = prepareUpdate(run, patch, hooks);
-  const next = { ...run, ...redactPatch(normalized, hooks.redact) };
-  // Both write paths resolve an edited task the same way (hearsay-tools/cezarion#2323).
-  if (normalized.task !== undefined) resolveEditedTaskRefs(next, hooks);
-  if (archived !== undefined) stageArchiveFields(next, archived, new Date().toISOString(), hooks.withdrawHold, hooks.clearPin);
-  return next;
-}
-
-export function stageDebouncedUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks): void {
-  const { normalized, archived } = prepareUpdate(run, patch, hooks);
-  Object.assign(run, redactPatch(normalized, hooks.redact));
-  if (run.completionAction && completionActionRetired(run)) run.completionAction = undefined;
-  // The usage-limit resume is the appointment of a `waiting` run (hearsay-tools/cezarion#1236),
-  // so a run coming back to life or settling retires it. Unlike stageCommit, this mutates the held record.
-  stageLoaded(run);
-  if (normalized.task !== undefined) resolveEditedTaskRefs(run, hooks);
-  if (archived !== undefined) hooks.archive(run, archived);
-  else hooks.touch(run);
-}
-
-export function stageStepUpdate(patch: Partial<Omit<StepState, 'id'>>, redact: (text: string) => string): Partial<Omit<StepState, 'id'>> {
-  if (typeof patch.error !== 'string') return patch;
-  return { ...patch, error: redact(patch.error) };
-}
-
-/** Stage the ledger before its recipient input, also when both are the same run. The input
- * appends to the recipient's staged queue, so a worker continuation keeps a patched agentInputs. */
-export function stageConversation(staged: Map<string, RunRecord>, root: RunRecord, state: ConversationState,
-  delivery: { recipientRunId: string; input: AgentInput; recipientDelegation?: DelegationState } | undefined,
-  peek: (id: string) => RunRecord | undefined, redact: (text: string) => string): void {
-  staged.set(root.id, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...state,
-    messages: state.messages.map(message => ({ ...message, text: redact(message.text) })),
-  } }) });
-  if (delivery) {
-    const recipient = staged.get(delivery.recipientRunId) ?? peek(delivery.recipientRunId);
-    if (!recipient) throw new Error('missing conversation recipient');
-    // The staged queue can differ from the stored one: a continuation patch may set it.
-    if (recipient.agentInputs?.some(queued => queued.id === delivery.input.id)) throw new ConversationIdInUseError();
-    const input = agentInputSchema.parse({ ...delivery.input, text: redact(delivery.input.text) });
-    const delegation = !recipient.delegation && delivery.recipientDelegation ? { delegation: delegationStateSchema.parse(delivery.recipientDelegation) } : {};
-    staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(recipient.agentInputs ?? []), input] });
-  }
-}
-
-/**
- * The write rule (hearsay-tools/cezarion#1496): a resume time is the appointment of a `waiting`
- * run, so every commit takes it off a record that is not `waiting`. A copy, set to `undefined`
- * and never deleted: a caller may stage the held record itself. `autoResumeAttempts` stays, since
- * `MAX_AUTO_RESUMES` counts attempts across resumes.
- */
-function withoutStaleResumes(input: ReadonlyMap<string, RunRecord | null>): ReadonlyMap<string, RunRecord | null> {
-  let staged: Map<string, RunRecord | null> | undefined;
-  for (const [id, run] of input) {
-    if (!run || !isStaleResume(run)) continue;
-    (staged ??= new Map(input)).set(id, { ...run, autoResumeAt: undefined });
-  }
-  return staged ?? input;
-}
-
-function prepareCompletionActions(input: ReadonlyMap<string, RunRecord | null>, hooks: CommitHooks): Map<string, RunRecord | null> {
-  const staged = new Map(input);
-  for (const [id, candidate] of input) {
+/** Iterates the records the commit staged before it: an archive this rule stages adds the family. */
+function prepareCompletionActions(write: Writes['commit']): void {
+  const { staged, hooks } = write;
+  for (const [id, candidate] of [...staged]) {
     if (!candidate) continue;
     const previous = hooks.peek(id);
     let next = candidate;
@@ -180,7 +276,6 @@ function prepareCompletionActions(input: ReadonlyMap<string, RunRecord | null>, 
       staged.set(id, { ...candidate, completionAction: undefined });
     }
   }
-  return staged;
 }
 
 /** An action has meaning only on a Done run with a completion option on. */
@@ -190,23 +285,23 @@ function completionActionRetired(run: RunRecord): boolean {
 
 /** Prompt edits can both revoke and restore a reference. Resolve the retained working sets
  *  before notifying readers, using the same ambiguity, marker and repository rules as events. */
-function resolveEditedTaskRefs(run: RunRecord, hooks: UpdateHooks): void {
+function resolveEditedTaskRefs(run: RunRecord, handle: RepoHandle | null | undefined): void {
   // An edited prompt is trusted evidence, just like the initial prompt. Collect its new
   // URLs without discarding earlier evidence before applying the usual resolution rules.
-  if (hooks.hasPrUrl(run.task)) hooks.trackReferencedPrs(run, run.task);
-  if (hooks.hasIssueUrl(run.task)) hooks.trackReferencedIssues(run, run.task);
+  if (PR_URL_RE.test(run.task)) trackReferencedPrs(run, run.task, handle);
+  if (ISSUE_URL_RE.test(run.task)) trackReferencedIssues(run, run.task, handle);
   if (run.referencedPrCandidates !== undefined) {
-    run.referencedPullRequestUrl = hooks.resolveReferencedPr(run);
+    run.referencedPullRequestUrl = resolveReferencedRef(run.referencedPrCandidates, run.task, referencedPrDeclaration(run), handle);
   }
   if (run.referencedIssueCandidates !== undefined) {
-    run.referencedIssueUrl = hooks.resolveIssueReference(run);
-    const number = hooks.refUrlNumber(run.referencedIssueUrl);
+    run.referencedIssueUrl = resolveIssueReference(run, handle);
+    const number = refUrlNumber(run.referencedIssueUrl);
     if (run.referencedIssueNumberSeeded) {
       // We may change only the number this janitor owns, including clearing an ambiguous one.
       run.issueNumber = number;
       if (number === undefined) delete run.referencedIssueNumberSeeded;
     } else if (number !== undefined && run.issueNumber === undefined &&
-      run.markerRefs?.issue === undefined && hooks.hasIssueUrl(run.task)) {
+      run.markerRefs?.issue === undefined && ISSUE_URL_RE.test(run.task)) {
       // A new seed still needs trusted prompt evidence; retained tool output alone is insufficient.
       run.issueNumber = number;
       run.referencedIssueNumberSeeded = true;
@@ -214,15 +309,7 @@ function resolveEditedTaskRefs(run: RunRecord, hooks: UpdateHooks): void {
   }
   // Legacy records may carry a URL without a candidate array. Preserve that evidence when
   // allowed, while still revoking a foreign URL the edited prompt no longer corroborates.
-  hooks.rescopeRun(run);
-}
-
-export function stagePullRequests(run: RunRecord, entries: readonly RunPullRequest[], handle?: RepoHandle | null): boolean {
-  const next = mergePullRequests(run.pullRequests, entries, handle
-    ? `https://github.com/${handle.owner}/${handle.name}` : undefined);
-  if (isDeepStrictEqual(next, run.pullRequests)) return false;
-  run.pullRequests = next;
-  return true;
+  rescopeRun(run, handle);
 }
 
 /**
@@ -234,13 +321,7 @@ export function stagePullRequests(run: RunRecord, entries: readonly RunPullReque
  * patch fields carrying agent/process text; the rest are ids, enums, counters
  * and URLs, and running the scrubber over them would only risk mangling them.
  *
- * `StepState.error` is the step-level counterpart and is scrubbed the same
- * way in `updateStep` — `run.ts` feeds the SAME `err.message` string to both
- * calls, so redacting only the run-level copy left the token verbatim one
- * field away (open-mercato/cezar#456 review).
- *
- * `redact` owns the `CEZ_REDACT_SECRETS=0` opt-out: it skips host secrets only, so
- * session secrets are scrubbed here too (hearsay-tools/cezarion#2325).
+ * `StepState.error` is the step-level counterpart, scrubbed by `redact-step-error`.
  */
 export function redactPatch(
   patch: RecordPatch, redact: (text: string) => string,
@@ -256,12 +337,29 @@ export function redactPatch(
 }
 
 /**
+ * Archiving IS resigning from a task, so an archived run can never carry a pending usage-limit
+ * resume (spec 2026-08-03-auto-resume-after-usage-limit). The rule lives in the archive fields
+ * rather than in the archive route because the bulk "Archive finished" sweep never goes through
+ * that route, and a user who archives fifty finished tasks has resigned from all fifty.
+ *
+ * The engine needs no telling: its timer re-reads the record before it fires and no sweep re-arms
+ * an archived run, so a cleared field is the whole cancellation.
+ */
+function withdrawHold(run: RunRecord): void {
+  // A withdrawn appointment settles the run failed with its kept error (hearsay-tools/cezarion#1236),
+  // the state a usage-limited run was in before it waited.
+  if (isUsageLimitHold(run)) Object.assign(run, applyExit(run, 'withdraw-hold', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
+  run.autoResumeAt = undefined;
+  run.autoResumeAttempts = undefined;
+}
+
+/**
  * Archiving is resigning from a task, so it retires the pin too (#935) — a pin on a task the
  * user has filed away is stale by definition, and the archived view collapses into one bucket
  * anyway, so a surviving pin would be invisible state waiting to surprise whoever unarchives.
  *
- * Here rather than in the pin route for the same reason `clearPendingAutoResume` is in the store:
- * the bulk "Archive finished" sweep never goes through a route, and it has to obey the rule too.
+ * Here rather than in the pin route for the same reason `withdrawHold` is: the bulk "Archive
+ * finished" sweep never goes through a route, and it has to obey the rule too.
  *
  * Deleted, not set to `false`: absent is what every reader treats as unpinned, and it is the
  * shape a cezar that has never heard of pins already writes.
@@ -269,11 +367,4 @@ export function redactPatch(
 export function clearPin(run: RunRecord): void {
   delete run.pinned;
   delete run.pinnedAt;
-}
-
-export function stageArchiveFields(run: RunRecord, archived: boolean, now: string, withdrawHold: (run: RunRecord) => void, clearPin: (run: RunRecord) => void): void {
-  run.archived = archived;
-  run.archivedAt = archived ? now : undefined;
-  if (archived) { withdrawHold(run); clearPin(run); }
-  else run.manualUnarchivedAt = now;
 }

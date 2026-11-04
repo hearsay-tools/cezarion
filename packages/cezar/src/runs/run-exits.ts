@@ -26,6 +26,10 @@ export type RunPatch = Partial<Omit<RunRecord, 'id' | 'steps' | 'status'>> & { s
  *  the step the caller names. */
 export type ExitSettlement = { now: string; stepId?: string | undefined };
 
+/** How a write that applies an exit persists: `committed` at once, or `debounced` to the next save,
+ *  which is best-effort, so a locked database cannot stop cleanup (Decision 4). */
+export type ExitDurability = 'debounced' | 'committed';
+
 /** What an exit's `fields` read off the record a write applies it to. */
 export type ExitRead = Pick<RunRecord, 'status' | 'delegation'>;
 
@@ -34,11 +38,13 @@ export type ExitRead = Pick<RunRecord, 'status' | 'delegation'>;
  * the fields every site of the exit writes alike; a caller's extras override them. A guarded exit
  * declares `settle` instead, the record it commits at once (the store writes `to` over its status).
  * Its `guard` decides whether the run may take it: a failed guard writes nothing, and the store
- * returns undefined, or throws `refused` when the exit names one.
+ * returns undefined, or throws `refused` when the exit names one. `durability` is how a write that
+ * applies the exit persists, unless a rule raises it (`exitDurability`); a guarded exit commits.
  */
 export type RunExitSpec = {
   from: readonly RunStatus[];
   to: RunStatus;
+  durability: ExitDurability;
   fields?: (run: ExitRead, at: ExitSettlement) => RunPatch;
   guard?: (run: RunRecord) => boolean;
   refused?: string;
@@ -92,60 +98,78 @@ function settleParkRelease(run: RunRecord, { stepId }: ExitSettlement): RunRecor
 const rootFinishWaiting = (run: RunRecord) => run.status === 'waiting' && rootFinishPending(run);
 
 export const RUN_EXITS = {
-  start: { from: ['queued', 'running', 'waiting'], to: 'running' },
-  'start-held': { from: ['queued'], to: 'queued' },
-  requeue: { from: ['queued', 'running', 'failed'], to: 'queued', fields: () => ({ currentStepId: undefined }) },
-  'continue-line': { from: ['waiting', 'review', 'done', 'failed', 'cancelled'], to: 'queued',
+  start: { durability: 'debounced', from: ['queued', 'running', 'waiting'], to: 'running' },
+  'start-held': { durability: 'debounced', from: ['queued'], to: 'queued' },
+  requeue: { durability: 'debounced', from: ['queued', 'running', 'failed'], to: 'queued', fields: () => ({ currentStepId: undefined }) },
+  'continue-line': { durability: 'debounced', from: ['waiting', 'review', 'done', 'failed', 'cancelled'], to: 'queued',
     fields: () => ({ error: undefined, finishedAt: undefined, currentStepId: undefined }) },
   // The step it runs is the caller's: `currentStepId` is an extra.
-  'continue-now': { from: ['waiting', 'review', 'done', 'failed', 'cancelled'], to: 'running',
+  'continue-now': { durability: 'debounced', from: ['waiting', 'review', 'done', 'failed', 'cancelled'], to: 'running',
     fields: () => ({ error: undefined, finishedAt: undefined }) },
-  park: { from: ['running', 'queued', 'waiting'], to: 'waiting' },
+  park: { durability: 'debounced', from: ['running', 'queued', 'waiting'], to: 'waiting' },
   // A park that gives up its slot (hearsay-tools/cezarion#1235): committed at once, so a refused
   // write throws with nothing changed and the caller keeps the slot.
-  'park-release': { from: ['running', 'queued', 'waiting'], to: 'waiting', settle: settleParkRelease },
-  'park-for-wake': { from: ['queued', 'waiting'], to: 'waiting' },
-  hold: { from: ['failed', 'waiting'], to: 'waiting', fields: () => ({ finishedAt: undefined }) },
-  resume: { from: ['waiting'], to: 'running' },
-  succeed: { from: ['running', 'waiting'], to: 'done', fields: succeededNow },
-  'succeed-review': { from: ['running', 'waiting'], to: 'review', fields: succeededNow },
+  'park-release': { durability: 'committed', from: ['running', 'queued', 'waiting'], to: 'waiting', settle: settleParkRelease },
+  'park-for-wake': { durability: 'debounced', from: ['queued', 'waiting'], to: 'waiting' },
+  hold: { durability: 'debounced', from: ['failed', 'waiting'], to: 'waiting', fields: () => ({ finishedAt: undefined }) },
+  resume: { durability: 'debounced', from: ['waiting'], to: 'running' },
+  succeed: { durability: 'debounced', from: ['running', 'waiting'], to: 'done', fields: succeededNow },
+  'succeed-review': { durability: 'debounced', from: ['running', 'waiting'], to: 'review', fields: succeededNow },
   // A root's durable Finish: a concurrent explicit cancellation is never overwritten.
-  'succeed-root': { from: ['waiting'], to: 'done', guard: rootFinishWaiting, settle: settleRootFinish },
-  'succeed-root-review': { from: ['waiting'], to: 'review', guard: rootFinishWaiting, settle: settleRootFinish },
+  'succeed-root': { durability: 'committed', from: ['waiting'], to: 'done', guard: rootFinishWaiting, settle: settleRootFinish },
+  'succeed-root-review': { durability: 'committed', from: ['waiting'], to: 'review', guard: rootFinishWaiting, settle: settleRootFinish },
   // Sets no `finishedAt` (Table B6).
-  'accept-review': { from: ['review'], to: 'done', fields: retiredFinishPatch },
+  'accept-review': { durability: 'debounced', from: ['review'], to: 'done', fields: retiredFinishPatch },
   // Draft PR (`POST /runs/:id/pr`): the cockpit offers it on review and on settled runs, so a
   // settled run that is published reads done too. A usage-limit hold is not declared (spec B13).
-  'draft-pr': { from: ['review', 'done', 'failed', 'cancelled'], to: 'done' },
+  'draft-pr': { durability: 'debounced', from: ['review', 'done', 'failed', 'cancelled'], to: 'done' },
   // Three sites keep `currentStepId` (Table B1); the others clear it in their extras.
-  'fail-start': { from: ['queued', 'running'], to: 'failed', fields: settledNow },
-  fail: { from: ['running', 'waiting'], to: 'failed', fields: settledOffStep },
+  'fail-start': { durability: 'debounced', from: ['queued', 'running'], to: 'failed', fields: settledNow },
+  fail: { durability: 'debounced', from: ['running', 'waiting'], to: 'failed', fields: settledOffStep },
   // settleFailedContinuation alone: a worker Stop can record cancelled before it settles.
-  'fail-continue': { from: ['running', 'waiting', 'cancelled'], to: 'failed', fields: settledOffStep },
+  'fail-continue': { durability: 'debounced', from: ['running', 'waiting', 'cancelled'], to: 'failed', fields: settledOffStep },
   // Restart recovery sets `finishedAt` now and retires the Finish intent; the store's load-time
   // writer keeps an existing `finishedAt` and the intent (Table B4). Each passes its own.
-  'fail-interrupted': { from: ['queued', 'running', 'waiting'], to: 'failed',
+  'fail-interrupted': { durability: 'debounced', from: ['queued', 'running', 'waiting'], to: 'failed',
     fields: () => ({ error: 'interrupted — cezar process exited during the run' }) },
   // Neither site clears `currentStepId` (Table B2).
-  'fail-crash': { from: ['queued', 'running', 'waiting'], to: 'failed', fields: settledNow },
+  'fail-crash': { durability: 'debounced', from: ['queued', 'running', 'waiting'], to: 'failed', fields: settledNow },
   // A crash right after the withdrawal must not find it on disk (hearsay-tools/cezarion#1236).
-  'withdraw-hold': { from: ['waiting'], to: 'failed', guard: isUsageLimitHold,
+  'withdraw-hold': { durability: 'committed', from: ['waiting'], to: 'failed', guard: isUsageLimitHold,
     settle: (run, { now }) => ({ ...run, autoResumeAt: undefined, autoResumeAttempts: undefined, finishedAt: now }) },
   // `finishedAt` and `currentStepId` stay with each site (Table B3, B4).
-  cancel: { from: ['queued', 'running', 'waiting'], to: 'cancelled' },
+  cancel: { durability: 'debounced', from: ['queued', 'running', 'waiting'], to: 'cancelled' },
   // Cancellation supersedes a root's pending Finish; from cancelled it repairs a snapshot an older
   // controller left with the intent.
-  'cancel-root': { from: ['waiting', 'cancelled'], to: 'cancelled',
+  'cancel-root': { durability: 'committed', from: ['waiting', 'cancelled'], to: 'cancelled',
     guard: run => (run.status === 'waiting' || run.status === 'cancelled') && rootFinishPending(run),
     settle: (run, { now }) => ({ ...retiredFinish(run), finishedAt: run.finishedAt ?? now }) },
   // Must hit disk before queued no-start evidence authorizes cleanup.
-  'stop-worker': { from: ['queued', 'running', 'waiting', 'review', 'done', 'failed'], to: 'cancelled',
+  'stop-worker': { durability: 'committed', from: ['queued', 'running', 'waiting', 'review', 'done', 'failed'], to: 'cancelled',
     guard: run => run.delegation?.role === 'worker', refused: 'Worker not found', settle: (run, { now }) => ({ ...run, finishedAt: now }) },
   // A Stop that lands after the run settled. A Stop accepted before an exit (`stopping` on load)
   // can meet any status, as the engine's late Stop can.
-  'cancel-late': { from: ['queued', 'running', 'waiting', 'done', 'review', 'failed'], to: 'cancelled' },
+  'cancel-late': { durability: 'debounced', from: ['queued', 'running', 'waiting', 'done', 'review', 'failed'], to: 'cancelled' },
 } as const satisfies Record<string, RunExitSpec>;
 export type RunExitId = keyof typeof RUN_EXITS;
+
+/** The record rule: a Done commits at once on a run with a completion option, because its
+ *  completion action and archive must be durable (hearsay-tools/cezarion#2324). */
+export function doneCommits(run: Pick<RunRecord, 'archiveWhenDone' | 'autoMergePr'>): boolean {
+  return Boolean(run.archiveWhenDone || run.autoMergePr);
+}
+
+/**
+ * How `RunStore.move` persists `exit` on `run`, the record before the write (Decision 4). First
+ * match wins: the record rule (an exit to `done` on a run with a completion option commits), then
+ * the exit's own `durability`. A rule only raises a debounced exit to committed. An exit applied
+ * inside another commit (`resume` in `commitOutcome`, `continue-*` in `commitWorkerContinuation`)
+ * commits with that commit, before either rule; the caller's extras never decide.
+ */
+export function exitDurability(exit: RunExitId, run: Pick<RunRecord, 'archiveWhenDone' | 'autoMergePr'>): ExitDurability {
+  const spec: RunExitSpec = RUN_EXITS[exit];
+  return spec.to === 'done' && doneCommits(run) ? 'committed' : spec.durability;
+}
 
 let strict = false;
 /** Strict mode only: outside it nothing is recorded, so production keeps no growing list. */

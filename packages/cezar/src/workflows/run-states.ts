@@ -86,8 +86,9 @@ export type TriggerRow = {
   exit: RunExitId | null;
   /** The states it reaches, or `same`: it does not leave the state. */
   to: readonly RunState[] | 'same';
-  /** The `run.ts` functions on its path; `store:` and `server:` name a writer outside `run.ts`,
-   *  and `exits:` the `runs/run-exits.ts` entry point it applies its exit through. */
+  /** The `run.ts` functions on its path; `store:`, `server:` and `rules:` (`runs/record-write-rules.ts`)
+   *  name a writer outside `run.ts`, and `exits:` the `runs/run-exits.ts` entry point it applies its
+   *  exit through. */
   via: readonly string[];
   /** The existing test that drives the row. */
   pinnedBy?: { file: string; test: string };
@@ -204,7 +205,7 @@ export const RUN_TRIGGERS: readonly TriggerRow[] = [
   { id: 'hold.withdrawn', states: ['waiting:usage-limit'], trigger: 'Auto-resume is off, the window was missed by a day, the cap (12) is reached, or the run is unreadable or refused at fire time', firedBy: 'engine', when: 'the resume cannot run', behavior: 'failed with the kept error and a note', exit: 'withdraw-hold', to: ['failed'], via: ['reconcileAutoResumes', 'fireAutoResume', 'withdrawAutoResume'], pinnedBy: { file: 'workflows/auto-resume.test.ts', test: 'stops scheduling once the consecutive-resume cap is spent, and says why' } },
   { id: 'hold.cancel', states: ['waiting:usage-limit'], trigger: 'Per-task cancel (DELETE /runs/:id/auto-resume)', firedBy: 'human', behavior: 'failed', exit: 'withdraw-hold', to: ['failed'], via: ['cancelAutoResume', 'withdrawAutoResume'], pinnedBy: { file: 'workflows/auto-resume.test.ts', test: 'cancels one task without touching another that is waiting out the same window' } },
   { id: 'hold.stop', states: ['waiting:usage-limit'], trigger: 'Stop with open waits', firedBy: 'human', behavior: 'Waits discarded, the resume withdrawn: failed. With no open wait the Stop is refused and the hold stays', exit: 'withdraw-hold', to: ['failed'], via: ['cancel', 'cancelAutoResume'], pinnedBy: { file: 'workflows/waits-wake.test.ts', test: 'claude Stop on a usage-limited failed run holding a wait result discards it and cancels the automatic resume' } },
-  { id: 'hold.archive', states: ['waiting:usage-limit'], trigger: 'Archive', firedBy: 'human', behavior: 'failed', exit: 'withdraw-hold', to: ['failed'], via: ['store:clearPendingAutoResume', 'exits:applyExit'], pinnedBy: { file: 'workflows/auto-resume.test.ts', test: 'never resumes a task the user resigned from' } },
+  { id: 'hold.archive', states: ['waiting:usage-limit'], trigger: 'Archive', firedBy: 'human', behavior: 'failed', exit: 'withdraw-hold', to: ['failed'], via: ['rules:withdrawHold', 'exits:applyExit'], pinnedBy: { file: 'workflows/auto-resume.test.ts', test: 'never resumes a task the user resigned from' } },
   { id: 'hold.continue', states: ['waiting:usage-limit'], trigger: 'A human message or Continue', firedBy: 'human', behavior: 'queued, as a wake in the line', exit: 'continue-line', to: ['queued'], via: ['admitContinuation'], pinnedBy: { file: 'workflows/auto-resume.test.ts', test: 'treats a human message during the hold as the user' } },
   { id: 'hold.wait-resolves', states: ['waiting:usage-limit'], trigger: 'One of its waits resolves', firedBy: 'watcher', behavior: 'Stays resolved and owed; the resume delivers it', exit: null, to: 'same', via: ['queueWaitWake'], pinnedBy: { file: 'workflows/auto-resume.test.ts', test: 'keeps a wait that resolves during the hold for the resume to deliver' } },
   { id: 'hold.restart', states: ['waiting:usage-limit'], trigger: 'Restart', firedBy: 'recovery', behavior: 'Re-armed: stays waiting', exit: 'hold', to: 'same', via: ['reconcileAutoResumes', 'armAutoResume'], pinnedBy: { file: 'workflows/auto-resume.test.ts', test: 're-arms a waiting usage-limit run across a restart without reopening it' } },

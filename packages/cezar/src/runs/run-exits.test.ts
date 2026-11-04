@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RunStatus } from '@open-mercato/cezar-contract';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { exitStatus, strictRunExits, takeRunExitViolations, throwRunExitViolations } from './run-exits.ts';
+import { exitDurability, exitStatus, RUN_EXITS, strictRunExits, takeRunExitViolations, throwRunExitViolations, type RunExitId } from './run-exits.ts';
 import { runThenCleanUp } from './run-exits.testkit.ts';
 
 describe('run exits: an undeclared transition is written, then reported (ADR 0056)', () => {
@@ -88,5 +88,34 @@ describe('run exits: an undeclared transition is written, then reported (ADR 005
       throw new Error('still active');
     })).rejects.toThrow('the model failed');
     expect(takeRunExitViolations()).toEqual([]);
+  });
+});
+
+// Decision 4: durability belongs to the exit. Today's call-site choices are their own exits, and
+// a plain Finish stays debounced so a locked database cannot stop cleanup.
+describe('run exits: each exit declares how its write persists', () => {
+  const COMMITTED = ['park-release', 'succeed-root', 'succeed-root-review', 'withdraw-hold', 'cancel-root', 'stop-worker'];
+
+  it('commits only the exits the call sites committed; every other exit is debounced', () => {
+    const declared = Object.fromEntries(Object.entries(RUN_EXITS).map(([id, spec]) => [id, spec.durability]));
+    expect(declared).toEqual(Object.fromEntries(Object.keys(RUN_EXITS).map(id => [id, COMMITTED.includes(id) ? 'committed' : 'debounced'])));
+  });
+
+  it('commits every guarded exit, which writes in its own commit', () => {
+    const guarded = Object.entries(RUN_EXITS).filter(([, spec]) => 'settle' in spec).map(([id]) => id);
+    expect(guarded.sort()).toEqual([...COMMITTED].sort());
+  });
+
+  it('raises an exit to done to committed on a run with a completion option, and lowers nothing', () => {
+    const exits = Object.keys(RUN_EXITS) as RunExitId[];
+    for (const option of [{}, { archiveWhenDone: true }, { autoMergePr: true }, { archiveWhenDone: false, autoMergePr: false }]) {
+      const optedIn = Boolean(Object.values(option).some(Boolean));
+      for (const exit of exits) {
+        const expected = RUN_EXITS[exit].durability === 'committed' || (optedIn && RUN_EXITS[exit].to === RUN_STATUS.done) ? 'committed' : 'debounced';
+        expect(exitDurability(exit, option), `${exit} with ${JSON.stringify(option)}`).toBe(expected);
+      }
+    }
+    expect(exitDurability('succeed-review', { archiveWhenDone: true })).toBe('debounced');
+    expect(exitDurability('accept-review', { autoMergePr: true })).toBe('committed');
   });
 });

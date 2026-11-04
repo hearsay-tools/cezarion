@@ -69,9 +69,9 @@ describe('run states and their exits (hearsay-tools/cezarion#1804)', () => {
   });
 
   it('names only functions that exist', () => {
-    const files = { run: runSources().map(blanked).join('\n'), store: blanked('runs/store.ts'), server: blanked('server/server.ts'), exits: blanked('runs/run-exits.ts') };
+    const files = { run: runSources().map(blanked).join('\n'), store: blanked('runs/store.ts'), server: blanked('server/server.ts'), exits: blanked('runs/run-exits.ts'), rules: blanked('runs/record-write-rules.ts') };
     const missing = [...new Set(RUN_TRIGGERS.flatMap((row) => row.via))].filter((name) => {
-      const [file, fn] = name.includes(':') ? name.split(':') as ['store' | 'server' | 'exits', string] : ['run' as const, name];
+      const [file, fn] = name.includes(':') ? name.split(':') as ['store' | 'server' | 'exits' | 'rules', string] : ['run' as const, name];
       const defined = file === 'server'
         ? new RegExp(`\\b${fn}\\(`)
         : new RegExp(`^\\s*(?:export\\s+)?(?:function\\s+|(?:private|public|protected|static|async|readonly)\\s+)*${fn}\\s*[(<]`, 'm');

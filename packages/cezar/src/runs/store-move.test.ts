@@ -12,7 +12,8 @@ import { RunStore } from './store.ts';
 /**
  * `RunStore.move` applies a run exit (ADR 0056, slice S2 of
  * .ai/specs/2026-11-03-run-store-owns-exits.md): it checks the exit against the status of the
- * record its write changes, then writes the exit's status and the extras in one `updateRun` write.
+ * record its write changes, then writes the exit's status and the extras in one write, which the exit
+ * and the record make durable or debounced (Decision 4, slice S6).
  */
 
 const cleanups: Array<() => void> = [];
@@ -28,7 +29,7 @@ function setup() {
 }
 
 describe('RunStore.move', () => {
-  it('writes the exit status and the extras, and returns the record updateRun returns', () => {
+  it('writes the exit status and the extras, and returns the held record', () => {
     const { store, created } = setup();
     const id = created();
     const moved = store.move(id, 'start', { runner: 'claude', startedAt: '2026-11-03T10:00:00.000Z' });
@@ -52,7 +53,7 @@ describe('RunStore.move', () => {
     expect(takeRunExitViolations()).toEqual([]);
   });
 
-  it('keeps updateRun\'s durable choice: an opted-in Done commits at once, a plain Finish waits for the save', () => {
+  it('commits an opted-in Done at once by the record rule; a plain Finish waits for the save', () => {
     const { store, created, committed } = setup();
     const optedIn = created();
     store.updateRun(optedIn, { archiveWhenDone: true });
@@ -67,6 +68,18 @@ describe('RunStore.move', () => {
     expect(committed(plain)?.status).toBe(RUN_STATUS.running);
     store.flush();
     expect(committed(plain)?.status).toBe(RUN_STATUS.done);
+  });
+
+  // Decision 4: the exit and the record decide, never the extras. Today no move passes the fields
+  // updateRun commits for; a move that did would still wait for the save.
+  it('decides durability by the exit and the record, never by the extras', () => {
+    const { store, created, committed } = setup();
+    const id = created();
+    store.flush();
+    store.move(id, 'start', { autoMergePr: false, handoffRecords: { autosave: [] } });
+    expect(committed(id)?.status).toBe(RUN_STATUS.queued);
+    store.flush();
+    expect(committed(id)?.status).toBe(RUN_STATUS.running);
   });
 
   it('applies the exit inside commitOutcome\'s one commit, checked against the stored status', () => {
