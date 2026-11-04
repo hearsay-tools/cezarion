@@ -1,3 +1,4 @@
+import { PLAN_STATUSES } from '@open-mercato/cezar-api-client/protocol/ui-events'
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -5,6 +6,8 @@ import type { PlanEntry } from '@open-mercato/cezar-api-client'
 
 import thinkingEditWriteTodo from '../../../../cezar/src/core/__fixtures__/claude/thinking-edit-write-todo.expected.json'
 import { PlanList, planCounts } from './plan-dock'
+
+const PLAN_STATUS = Object.fromEntries(PLAN_STATUSES.map(status => [status, status])) as { [Status in (typeof PLAN_STATUSES)[number]]: Status }
 
 afterEach(cleanup)
 
@@ -27,13 +30,13 @@ describe('planCounts — the odometer math', () => {
       planCounts([
         { content: 'a', status: 'completed' },
         { content: 'b', status: 'completed' },
-        { content: 'c', status: 'cancelled' },
+        { content: 'c', status: PLAN_STATUS.cancelled },
       ]),
     ).toEqual({ done: 2, total: 2 })
   })
 
   it('an all-cancelled plan is 0/0, not a division by the dropped work', () => {
-    expect(planCounts([{ content: 'a', status: 'cancelled' }])).toEqual({ done: 0, total: 0 })
+    expect(planCounts([{ content: 'a', status: PLAN_STATUS.cancelled }])).toEqual({ done: 0, total: 0 })
   })
 })
 
@@ -65,7 +68,7 @@ describe('PlanList', () => {
       <PlanList
         entries={[
           { content: 'Ship the fix', status: 'completed' },
-          { content: 'Rework the parser', status: 'cancelled' },
+          { content: 'Rework the parser', status: PLAN_STATUS.cancelled },
         ]}
       />,
     )

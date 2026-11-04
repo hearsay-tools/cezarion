@@ -1,15 +1,18 @@
+import { TOOL_STATUSES } from '@open-mercato/cezar-api-client/protocol/ui-events'
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { AgentList } from './agents-dock'
 import type { SubagentSummary } from './subagent-dock'
 
+const TOOL_STATUS = Object.fromEntries(TOOL_STATUSES.map(status => [status, status])) as { [Status in (typeof TOOL_STATUSES)[number]]: Status }
+
 afterEach(cleanup)
 
 const agent = (over: Partial<SubagentSummary> = {}): SubagentSummary => ({
   id: 'a',
   title: 'Audit the auth flow',
-  status: 'running',
+  status: TOOL_STATUS.running,
   toolCalls: 0,
   ...over,
 })
@@ -66,9 +69,9 @@ describe('AgentList — rows', () => {
     render(
       <AgentList
         agents={[
-          agent({ id: 'a', status: 'running' }),
+          agent({ id: 'a', status: TOOL_STATUS.running }),
           agent({ id: 'b', status: 'completed' }),
-          agent({ id: 'c', status: 'failed' }),
+          agent({ id: 'c', status: TOOL_STATUS.failed }),
         ]}
       />,
     )
@@ -86,7 +89,7 @@ describe('AgentList — rows', () => {
   })
 
   it('renders a stalled agent as interrupted — not pulsing, not a checkmark', () => {
-    render(<AgentList agents={[agent({ status: 'running', stalled: true })]} />)
+    render(<AgentList agents={[agent({ status: TOOL_STATUS.running, stalled: true })]} />)
     const svg = glyph(rows()[0]!)
     expect(svg.getAttribute('data-stalled')).toBe('true')
     // Not the live glyph: no pulse, no amber fill — the run ended, nothing is working.
@@ -99,7 +102,7 @@ describe('AgentList — rows', () => {
 
   it('keeps a stalled agent’s real activity line when it produced one', () => {
     render(
-      <AgentList agents={[agent({ status: 'running', stalled: true, activity: 'Ran npm test' })]} />,
+      <AgentList agents={[agent({ status: TOOL_STATUS.running, stalled: true, activity: 'Ran npm test' })]} />,
     )
     expect(document.querySelector('[data-slot="agent-activity"]')!.textContent).toBe('Ran npm test')
   })
