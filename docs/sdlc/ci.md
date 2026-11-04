@@ -546,6 +546,45 @@ positive/negative examples and manual recovery.
 Node-side browser-test API requests send `Connection: close`. The synchronous agent-browser commands can block the test process long enough for a fixture server to expire an idle connection before Node handles its close event. CI diagnostics captured reused sockets after 6–23 seconds without an event-loop tick, followed by `UND_ERR_SOCKET`. Fresh connections avoid that stale pool; the real browser and application server keep their normal connection policies. No request retries are added.
 Wed Sep 16 13:50:51 CEST 2026
 
+### Merge-queue pilot metrics
+
+The owner reads the parallel queue-build pilot by hand, once a week
+(spec `.ai/specs/2026-11-03-speculative-merge-queue.md`, from
+hearsay-tools/cezarion#2622, § Rollout step 4).
+This command prints its metrics and both rollback verdicts (§ Owner decisions Q3):
+
+```bash
+node .github/scripts/queue-metrics.cjs                    # the 7 days before now
+node .github/scripts/queue-metrics.cjs --from 2026-11-01 --to 2026-11-03 --json
+```
+
+It only reads, through authenticated `gh api` GET and GraphQL query calls, and needs
+no configuration. Without `--repo`, it reads the repository name with `gh repo view`.
+A date covers its whole UTC day. A `YYYY-MM-DDTHH:MM:SSZ` time is an exact bound.
+Run-list and GraphQL search queries cover at most one UTC day each, because
+GitHub returns at most 1,000 results per query.
+
+- **Runner-minutes**: the jobs of completed `merge_group` runs of `ci.yml`, each
+  rounded up to a whole minute. An `ubicloud-*` label is Ubicloud. A GitHub image
+  label (`ubuntu-*`, `windows-*`, `macos-*`) is hosted.
+- **Per merge**: divided by the PRs merged in the window that entered the queue.
+- **Queue failure rate**: the spec's counting rule. Over completed `merge_group`
+  runs, `failure`, `cancelled` and `timed_out` runs divided by all runs. Excluded
+  runs count in neither term:
+  - **invalidated**: GitHub started a later run for the same PR on another base,
+    from the `gh-readonly-queue/main/pr-<N>-<base>` ref, with no queue removal of
+    that PR between the two runs;
+  - **removed for another cause**: the first queue removal of the run's PR after GitHub
+    created the run has a reason other than `failed_checks`, a timeout or `merged`, for
+    example `manual` or `merge_conflict`.
+- **Invalidated runs**: the runner-minutes of the invalidated runs above are waste.
+- **Re-run attempts**: runner-minutes count every attempt. A re-run run's outcome is the
+  attempt that ran when its entry ended. A fallback reason uses the attempt the proof read.
+- **Main-push proof fallback**: a `main` push run whose Typecheck job ran. The API
+  does not return the proof's job summary, so the command rebuilds the reason from
+  the evidence `queue-ci-proof.cjs` reads. It prints the URL of each run it cannot
+  explain.
+
 ### Investigating a CI or load failure
 
 A full local Vitest run (or one shard) that fails only under host load can still

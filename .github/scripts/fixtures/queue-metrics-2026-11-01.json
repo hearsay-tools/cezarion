@@ -1,0 +1,400 @@
+{
+ "recorded": "gh api responses for --from 2026-11-01T16:00:00Z --to 2026-11-01T21:00:00Z --repo hearsay-tools/cezarion, recorded 2026-11-03 and trimmed to the fields queue-metrics.cjs reads. Queue runs after the window keep only the window PRs, which the invalidation check reads. One record per line.",
+ "responses": {
+  "[\"api\",\"repos/hearsay-tools/cezarion/actions/workflows/ci.yml/runs?event=push&branch=main&created=2026-11-01T16:00:00Z..2026-11-01T21:00:00Z&exclude_pull_requests=true&per_page=100&page=1\"]": {
+   "json": {
+    "total_count": 4,
+    "workflow_runs": [
+      {"id": 41348468186, "run_attempt": 1, "event": "push", "head_sha": "a0440272593f00d28bb0edd61f08eb1aa09637a8", "head_branch": "main", "status": "completed", "conclusion": "success", "created_at": "2026-11-01T20:45:22Z", "run_started_at": "2026-11-01T20:45:22Z", "updated_at": "2026-11-01T20:46:33Z", "html_url": "https://github.com/hearsay-tools/cezarion/actions/runs/41348468186"},
+      {"id": 41334112445, "run_attempt": 1, "event": "push", "head_sha": "05a1ee28989378319a0f982b7696b276858c89b4", "head_branch": "main", "status": "completed", "conclusion": "success", "created_at": "2026-11-01T17:57:45Z", "run_started_at": "2026-11-01T17:57:45Z", "updated_at": "2026-11-01T18:10:18Z", "html_url": "https://github.com/hearsay-tools/cezarion/actions/runs/41334112445"},
+      {"id": 41326268652, "run_attempt": 1, "event": "push", "head_sha": "7fac3b06b7a07d76f2897ecf530e09e17cf0e759", "head_branch": "main", "status": "completed", "conclusion": "success", "created_at": "2026-11-01T16:25:39Z", "run_started_at": "2026-11-01T16:25:39Z", "updated_at": "2026-11-01T16:38:26Z", "html_url": "https://github.com/hearsay-tools/cezarion/actions/runs/41326268652"},
+      {"id": 41325135449, "run_attempt": 1, "event": "push", "head_sha": "284db7fd65ca98d499476065dcc66d2b242c8fc5", "head_branch": "main", "status": "completed", "conclusion": "success", "created_at": "2026-11-01T16:12:38Z", "run_started_at": "2026-11-01T16:12:38Z", "updated_at": "2026-11-01T16:13:58Z", "html_url": "https://github.com/hearsay-tools/cezarion/actions/runs/41325135449"}
+     ]
+   }
+  },
+  "[\"api\",\"graphql\",\"-f\",\"query=query($q: String!, $endCursor: String) {\\n  search(query: $q, type: ISSUE, first: 50, after: $endCursor) {\\n    issueCount\\n    pageInfo { hasNextPage endCursor }\\n    nodes { ... on PullRequest { number mergedAt\\n      timelineItems(last: 100, itemTypes: [ADDED_TO_MERGE_QUEUE_EVENT]) { nodes { ... on AddedToMergeQueueEvent { createdAt } } } } }\\n  }\\n}\",\"-f\",\"q=repo:hearsay-tools/cezarion is:pr is:merged base:main merged:2026-11-01T16:00:00Z..2026-11-01T21:00:00Z\"]": {
+   "json": {
+    "data": {
+     "search": {
+      "issueCount": 4,
+      "pageInfo": {
+       "hasNextPage": false,
+       "endCursor": "Y3Vyc29yOjQ="
+      },
+      "nodes": [
+        {"number": 2414, "mergedAt": "2026-11-01T20:45:20Z", "timelineItems": {"nodes": [{"createdAt": "2026-11-01T20:38:37Z"}]}},
+        {"number": 2411, "mergedAt": "2026-11-01T17:57:44Z", "timelineItems": {"nodes": [{"createdAt": "2026-11-01T16:10:40Z"}, {"createdAt": "2026-11-01T17:44:44Z"}]}},
+        {"number": 2409, "mergedAt": "2026-11-01T16:12:37Z", "timelineItems": {"nodes": [{"createdAt": "2026-11-01T15:59:43Z"}]}},
+        {"number": 2407, "mergedAt": "2026-11-01T16:25:37Z", "timelineItems": {"nodes": [{"createdAt": "2026-11-01T16:10:13Z"}]}}
+       ]
+     }
+    }
+   }
+  },
+  "[\"api\",\"repos/hearsay-tools/cezarion/actions/runs/41324022773/jobs?filter=all&per_page=100&page=1\"]": {
+   "json": {
+    "total_count": 24,
+    "jobs": [
+      {"id": 124900070490, "name": "Classify pull request change surface", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:00:06Z", "completed_at": "2026-11-01T16:00:08Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124900070544, "name": "Check new code clones", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:00:06Z", "completed_at": "2026-11-01T16:00:43Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124900070593, "name": "Check function complexity", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:00:06Z", "completed_at": "2026-11-01T16:00:39Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124900070628, "name": "Verify exact queue CI evidence", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:00:06Z", "completed_at": "2026-11-01T16:00:09Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124900070635, "name": "Classify PR shape", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:00:06Z", "completed_at": "2026-11-01T16:00:18Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124900099576, "name": "Typecheck", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:00:12Z", "completed_at": "2026-11-01T16:01:02Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124900342507, "name": "Review preflight", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:01:05Z", "completed_at": "2026-11-01T16:01:07Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124900365785, "name": "Unit, build, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:01:10Z", "completed_at": "2026-11-01T16:06:47Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124900365853, "name": "Cockpit browser E2E shard 4/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:01:27Z", "completed_at": "2026-11-01T16:10:01Z", "labels": ["ubicloud-standard-2"], "steps": []},
+      {"id": 124900365889, "name": "Cockpit browser E2E shard 1/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:01:27Z", "completed_at": "2026-11-01T16:10:21Z", "labels": ["ubicloud-standard-2"], "steps": []},
+      {"id": 124900365890, "name": "Cockpit browser E2E shard 3/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:01:26Z", "completed_at": "2026-11-01T16:10:21Z", "labels": ["ubicloud-standard-2"], "steps": []},
+      {"id": 124900365924, "name": "Vitest shard 1/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:01:10Z", "completed_at": "2026-11-01T16:10:02Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124900365930, "name": "Cockpit browser E2E shard 2/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:01:29Z", "completed_at": "2026-11-01T16:11:01Z", "labels": ["ubicloud-standard-2"], "steps": []},
+      {"id": 124900365951, "name": "Vitest shard 4/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:01:10Z", "completed_at": "2026-11-01T16:11:16Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124900365982, "name": "Vitest shard 2/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:01:11Z", "completed_at": "2026-11-01T16:10:29Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124900366019, "name": "Vitest shard 3/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:01:10Z", "completed_at": "2026-11-01T16:12:03Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124900366720, "name": "(github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main') && 'Automated Code Review' || 'PR review (not applicable)'", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:01:07Z", "completed_at": "2026-11-01T16:01:07Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124900366881, "name": "Review", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:01:07Z", "completed_at": "2026-11-01T16:01:07Z", "labels": [], "steps": []},
+      {"id": 124903223047, "name": "Unit, build, E2E, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:12:06Z", "completed_at": "2026-11-01T16:12:08Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124903224651, "name": "Merge Vitest coverage", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:12:04Z", "completed_at": "2026-11-01T16:12:03Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903246241, "name": "Validate reviewed queue entry", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:12:11Z", "completed_at": "2026-11-01T16:12:27Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903247963, "name": "Prepare PR snapshot archives", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:12:09Z", "completed_at": "2026-11-01T16:12:08Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124903247990, "name": "Publish npm snapshot", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:12:09Z", "completed_at": "2026-11-01T16:12:08Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124903328582, "name": "Automated Code Review", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:12:29Z", "completed_at": "2026-11-01T16:12:32Z", "labels": ["ubuntu-latest"], "steps": []}
+     ]
+   }
+  },
+  "[\"api\",\"repos/hearsay-tools/cezarion/actions/runs/41326270473/jobs?filter=all&per_page=100&page=1\"]": {
+   "json": {
+    "total_count": 27,
+    "jobs": [
+      {"id": 124906746758, "name": "Classify pull request change surface", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:25:44Z", "completed_at": "2026-11-01T16:25:48Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906746820, "name": "Classify PR shape", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:25:44Z", "completed_at": "2026-11-01T16:25:57Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124906746827, "name": "Verify native PR test evidence", "run_attempt": 1, "status": "completed", "conclusion": "failure", "started_at": "2026-11-01T16:25:44Z", "completed_at": "2026-11-01T16:25:49Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906746887, "name": "Verify exact queue CI evidence", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:25:44Z", "completed_at": "2026-11-01T16:25:48Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906746907, "name": "Check function complexity", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:25:44Z", "completed_at": "2026-11-01T16:26:15Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906746950, "name": "Check new code clones", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:25:44Z", "completed_at": "2026-11-01T16:26:12Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906747656, "name": "Resolve immutable PR test inputs", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:25:41Z", "completed_at": "2026-11-01T16:25:41Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906779347, "name": "Typecheck", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:25:51Z", "completed_at": "2026-11-01T16:26:48Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124907038756, "name": "Review preflight", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:51Z", "completed_at": "2026-11-01T16:26:53Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124907062425, "name": "Unit, build, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:57Z", "completed_at": "2026-11-01T16:32:57Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124907062470, "name": "Vitest shard 2/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:57Z", "completed_at": "2026-11-01T16:37:34Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124907062528, "name": "Vitest shard 3/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:57Z", "completed_at": "2026-11-01T16:37:53Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124907062539, "name": "Cockpit browser E2E shard 2/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:56Z", "completed_at": "2026-11-01T16:36:07Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124907062578, "name": "Vitest shard 4/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:57Z", "completed_at": "2026-11-01T16:36:30Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124907062627, "name": "Cockpit browser E2E shard 1/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:27:15Z", "completed_at": "2026-11-01T16:36:11Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124907062719, "name": "Cockpit browser E2E shard 4/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:27:15Z", "completed_at": "2026-11-01T16:36:06Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124907062721, "name": "Cockpit browser E2E shard 3/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:27:18Z", "completed_at": "2026-11-01T16:36:48Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124907062742, "name": "Vitest shard 1/4", "run_attempt": 1, "status": "completed", "conclusion": "failure", "started_at": "2026-11-01T16:26:57Z", "completed_at": "2026-11-01T16:35:17Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124907063008, "name": "Review", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:26:54Z", "completed_at": "2026-11-01T16:26:54Z", "labels": [], "steps": []},
+      {"id": 124907063607, "name": "(github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main') && 'Automated Code Review' || 'PR review (not applicable)'", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:26:54Z", "completed_at": "2026-11-01T16:26:54Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124909870408, "name": "Unit, build, E2E, and package", "run_attempt": 1, "status": "completed", "conclusion": "failure", "started_at": "2026-11-01T16:37:57Z", "completed_at": "2026-11-01T16:38:01Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124909871545, "name": "Attest PR test inputs / ${{ github.workflow_sha }} / ${{ github.event.pull_request.head.sha }}", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:37:54Z", "completed_at": "2026-11-01T16:37:54Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124909871731, "name": "Merge Vitest coverage", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:37:54Z", "completed_at": "2026-11-01T16:37:54Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124909899663, "name": "Automated Code Review", "run_attempt": 1, "status": "completed", "conclusion": "failure", "started_at": "2026-11-01T16:38:03Z", "completed_at": "2026-11-01T16:38:06Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124909900127, "name": "Publish npm snapshot", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:38:01Z", "completed_at": "2026-11-01T16:38:01Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124909900218, "name": "Prepare PR snapshot archives", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:38:01Z", "completed_at": "2026-11-01T16:38:01Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124909900299, "name": "Validate reviewed queue entry", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:38:01Z", "completed_at": "2026-11-01T16:38:01Z", "labels": ["ubuntu-24.04"], "steps": []}
+     ]
+   }
+  },
+  "[\"api\",\"repos/hearsay-tools/cezarion/actions/runs/41325137187/jobs?filter=all&per_page=100&page=1\"]": {
+   "json": {
+    "total_count": 24,
+    "jobs": [
+      {"id": 124903386227, "name": "Classify PR shape", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:12:43Z", "completed_at": "2026-11-01T16:12:58Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124903386488, "name": "Classify pull request change surface", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:12:43Z", "completed_at": "2026-11-01T16:12:46Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903386530, "name": "Check function complexity", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:12:43Z", "completed_at": "2026-11-01T16:13:12Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903386531, "name": "Check new code clones", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:12:43Z", "completed_at": "2026-11-01T16:13:11Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903386552, "name": "Verify exact queue CI evidence", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:12:43Z", "completed_at": "2026-11-01T16:12:46Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903412850, "name": "Typecheck", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:12:49Z", "completed_at": "2026-11-01T16:13:41Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903649082, "name": "Review preflight", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:13:44Z", "completed_at": "2026-11-01T16:13:48Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124903678735, "name": "Unit, build, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:13:51Z", "completed_at": "2026-11-01T16:19:51Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903678763, "name": "Cockpit browser E2E shard 2/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:14:10Z", "completed_at": "2026-11-01T16:23:24Z", "labels": ["ubicloud-standard-2"], "steps": []},
+      {"id": 124903678780, "name": "Cockpit browser E2E shard 3/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:14:11Z", "completed_at": "2026-11-01T16:25:05Z", "labels": ["ubicloud-standard-2"], "steps": []},
+      {"id": 124903678789, "name": "Vitest shard 2/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:13:51Z", "completed_at": "2026-11-01T16:24:21Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903678808, "name": "Vitest shard 3/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:13:51Z", "completed_at": "2026-11-01T16:23:04Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903678835, "name": "Cockpit browser E2E shard 4/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:14:14Z", "completed_at": "2026-11-01T16:24:34Z", "labels": ["ubicloud-standard-2"], "steps": []},
+      {"id": 124903678858, "name": "Cockpit browser E2E shard 1/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:14:14Z", "completed_at": "2026-11-01T16:24:01Z", "labels": ["ubicloud-standard-2"], "steps": []},
+      {"id": 124903678861, "name": "Vitest shard 1/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:13:51Z", "completed_at": "2026-11-01T16:22:08Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903678912, "name": "Vitest shard 4/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:13:51Z", "completed_at": "2026-11-01T16:24:26Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903679212, "name": "Review", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:13:48Z", "completed_at": "2026-11-01T16:13:48Z", "labels": [], "steps": []},
+      {"id": 124903679793, "name": "(github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main') && 'Automated Code Review' || 'PR review (not applicable)'", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:13:48Z", "completed_at": "2026-11-01T16:13:48Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124906440734, "name": "Merge Vitest coverage", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:24:27Z", "completed_at": "2026-11-01T16:24:27Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906596682, "name": "Unit, build, E2E, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:25:08Z", "completed_at": "2026-11-01T16:25:10Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124906618596, "name": "Validate reviewed queue entry", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:25:15Z", "completed_at": "2026-11-01T16:25:28Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906619845, "name": "Prepare PR snapshot archives", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:25:10Z", "completed_at": "2026-11-01T16:25:10Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124906620105, "name": "Publish npm snapshot", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:25:10Z", "completed_at": "2026-11-01T16:25:10Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124906694443, "name": "Automated Code Review", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:25:31Z", "completed_at": "2026-11-01T16:25:34Z", "labels": ["ubuntu-latest"], "steps": []}
+     ]
+   }
+  },
+  "[\"api\",\"repos/hearsay-tools/cezarion/actions/runs/41333049888/jobs?filter=all&per_page=100&page=1\"]": {
+   "json": {
+    "total_count": 27,
+    "jobs": [
+      {"id": 124927005341, "name": "Verify exact queue CI evidence", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:45:05Z", "completed_at": "2026-11-01T17:45:09Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124927005483, "name": "Check new code clones", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:45:05Z", "completed_at": "2026-11-01T17:45:32Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124927005487, "name": "Classify pull request change surface", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:45:05Z", "completed_at": "2026-11-01T17:45:08Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124927005507, "name": "Classify PR shape", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:45:05Z", "completed_at": "2026-11-01T17:45:21Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124927005620, "name": "Check function complexity", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:45:05Z", "completed_at": "2026-11-01T17:45:39Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124927005652, "name": "Verify native PR test evidence", "run_attempt": 1, "status": "completed", "conclusion": "failure", "started_at": "2026-11-01T17:45:05Z", "completed_at": "2026-11-01T17:45:13Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124927006630, "name": "Resolve immutable PR test inputs", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T17:45:02Z", "completed_at": "2026-11-01T17:45:02Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124927037281, "name": "Typecheck", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:45:12Z", "completed_at": "2026-11-01T17:46:05Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124927279780, "name": "Review preflight", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:46:08Z", "completed_at": "2026-11-01T17:46:10Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124927304716, "name": "Vitest shard 2/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:46:14Z", "completed_at": "2026-11-01T17:56:52Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124927304720, "name": "Cockpit browser E2E shard 4/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:46:19Z", "completed_at": "2026-11-01T17:54:46Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124927304737, "name": "Unit, build, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:46:13Z", "completed_at": "2026-11-01T17:51:50Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124927304809, "name": "Vitest shard 3/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:46:13Z", "completed_at": "2026-11-01T17:57:11Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124927304838, "name": "Cockpit browser E2E shard 2/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:46:19Z", "completed_at": "2026-11-01T17:55:27Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124927304845, "name": "Cockpit browser E2E shard 3/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:46:20Z", "completed_at": "2026-11-01T17:56:45Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124927304849, "name": "Cockpit browser E2E shard 1/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:46:20Z", "completed_at": "2026-11-01T17:55:58Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124927304936, "name": "Vitest shard 4/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:46:13Z", "completed_at": "2026-11-01T17:54:15Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124927304955, "name": "Vitest shard 1/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:46:13Z", "completed_at": "2026-11-01T17:56:03Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124927305292, "name": "Review", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T17:46:11Z", "completed_at": "2026-11-01T17:46:10Z", "labels": [], "steps": []},
+      {"id": 124927306257, "name": "(github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main') && 'Automated Code Review' || 'PR review (not applicable)'", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T17:46:11Z", "completed_at": "2026-11-01T17:46:10Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124930034466, "name": "Unit, build, E2E, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:57:14Z", "completed_at": "2026-11-01T17:57:17Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124930035620, "name": "Attest PR test inputs / ${{ github.workflow_sha }} / ${{ github.event.pull_request.head.sha }}", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T17:57:12Z", "completed_at": "2026-11-01T17:57:11Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124930035628, "name": "Merge Vitest coverage", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T17:57:12Z", "completed_at": "2026-11-01T17:57:11Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124930057561, "name": "Validate reviewed queue entry", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:57:20Z", "completed_at": "2026-11-01T17:57:34Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124930058638, "name": "Publish npm snapshot", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T17:57:17Z", "completed_at": "2026-11-01T17:57:17Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124930058754, "name": "Prepare PR snapshot archives", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T17:57:17Z", "completed_at": "2026-11-01T17:57:17Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124930128159, "name": "Automated Code Review", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:57:37Z", "completed_at": "2026-11-01T17:57:41Z", "labels": ["ubuntu-latest"], "steps": []}
+     ]
+   }
+  },
+  "[\"api\",\"repos/hearsay-tools/cezarion/actions/runs/41347932272/jobs?filter=all&per_page=100&page=1\"]": {
+   "json": {
+    "total_count": 27,
+    "jobs": [
+      {"id": 124971661155, "name": "Verify exact queue CI evidence", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:38:59Z", "completed_at": "2026-11-01T20:39:02Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124971661310, "name": "Verify native PR test evidence", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:39:00Z", "completed_at": "2026-11-01T20:39:21Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124971661317, "name": "Check new code clones", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:38:59Z", "completed_at": "2026-11-01T20:39:27Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124971661360, "name": "Classify pull request change surface", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:39:00Z", "completed_at": "2026-11-01T20:39:04Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124971661416, "name": "Classify PR shape", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:39:00Z", "completed_at": "2026-11-01T20:39:15Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124971661450, "name": "Check function complexity", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:38:59Z", "completed_at": "2026-11-01T20:39:26Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124971662251, "name": "Resolve immutable PR test inputs", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:38:57Z", "completed_at": "2026-11-01T20:38:56Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124971685758, "name": "Typecheck", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:39:05Z", "completed_at": "2026-11-01T20:39:58Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124971918187, "name": "Review preflight", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:40:01Z", "completed_at": "2026-11-01T20:40:03Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124971942507, "name": "Vitest shard 1/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:40:07Z", "completed_at": "2026-11-01T20:40:11Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "success"}]},
+      {"id": 124971942530, "name": "Vitest shard 2/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:40:06Z", "completed_at": "2026-11-01T20:40:09Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "success"}]},
+      {"id": 124971942567, "name": "Unit, build, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:40:07Z", "completed_at": "2026-11-01T20:44:49Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124971942596, "name": "Vitest shard 4/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:40:07Z", "completed_at": "2026-11-01T20:40:11Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "success"}]},
+      {"id": 124971942635, "name": "Cockpit browser E2E shard 3/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:40:12Z", "completed_at": "2026-11-01T20:40:19Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "success"}]},
+      {"id": 124971942643, "name": "Vitest shard 3/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:40:07Z", "completed_at": "2026-11-01T20:40:11Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "success"}]},
+      {"id": 124971942644, "name": "Cockpit browser E2E shard 4/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:40:12Z", "completed_at": "2026-11-01T20:40:18Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "success"}]},
+      {"id": 124971942726, "name": "Cockpit browser E2E shard 1/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:40:12Z", "completed_at": "2026-11-01T20:40:19Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "success"}]},
+      {"id": 124971942765, "name": "Cockpit browser E2E shard 2/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:40:13Z", "completed_at": "2026-11-01T20:40:19Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "success"}]},
+      {"id": 124971943762, "name": "Review", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:40:04Z", "completed_at": "2026-11-01T20:40:04Z", "labels": [], "steps": []},
+      {"id": 124971944096, "name": "(github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main') && 'Automated Code Review' || 'PR review (not applicable)'", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:40:04Z", "completed_at": "2026-11-01T20:40:04Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124971979539, "name": "Merge Vitest coverage", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:40:12Z", "completed_at": "2026-11-01T20:40:12Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124972013807, "name": "Attest PR test inputs / ${{ github.workflow_sha }} / ${{ github.event.pull_request.head.sha }}", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:40:20Z", "completed_at": "2026-11-01T20:40:19Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124973139722, "name": "Unit, build, E2E, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:44:52Z", "completed_at": "2026-11-01T20:44:55Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124973164747, "name": "Validate reviewed queue entry", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:44:58Z", "completed_at": "2026-11-01T20:45:11Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124973166332, "name": "Publish npm snapshot", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:44:55Z", "completed_at": "2026-11-01T20:44:55Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124973166339, "name": "Prepare PR snapshot archives", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:44:55Z", "completed_at": "2026-11-01T20:44:55Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124973235290, "name": "Automated Code Review", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:45:14Z", "completed_at": "2026-11-01T20:45:18Z", "labels": ["ubuntu-latest"], "steps": []}
+     ]
+   }
+  },
+  "[\"api\",\"repos/hearsay-tools/cezarion/actions/runs/41348468186/jobs?filter=all&per_page=100&page=1\"]": {
+   "json": {
+    "total_count": 21,
+    "jobs": [
+      {"id": 124973284938, "name": "Classify pull request change surface", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:45:25Z", "completed_at": "2026-11-01T20:45:28Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124973285181, "name": "Verify exact queue CI evidence", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:45:26Z", "completed_at": "2026-11-01T20:45:36Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124973285191, "name": "Classify PR shape", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:45:26Z", "completed_at": "2026-11-01T20:45:41Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124973286040, "name": "Check new code clones", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:23Z", "completed_at": "2026-11-01T20:45:22Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124973286197, "name": "Verify native PR test evidence", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:23Z", "completed_at": "2026-11-01T20:45:22Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124973286297, "name": "Check function complexity", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:23Z", "completed_at": "2026-11-01T20:45:22Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124973286488, "name": "Resolve immutable PR test inputs", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:23Z", "completed_at": "2026-11-01T20:45:22Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124973344009, "name": "Typecheck", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:36Z", "completed_at": "2026-11-01T20:45:36Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124973367630, "name": "Review preflight", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:45:44Z", "completed_at": "2026-11-01T20:45:48Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124973396732, "name": "Unit, build, E2E, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:45:50Z", "completed_at": "2026-11-01T20:45:53Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124973397011, "name": "Review", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:48Z", "completed_at": "2026-11-01T20:45:48Z", "labels": [], "steps": []},
+      {"id": 124973397036, "name": "(github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main') && 'Automated Code Review' || 'PR review (not applicable)'", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:48Z", "completed_at": "2026-11-01T20:45:48Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124973397346, "name": "Unit, build, and package", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:48Z", "completed_at": "2026-11-01T20:45:48Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124973398005, "name": "Vitest shard ${{ matrix.shard }}/4", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:48Z", "completed_at": "2026-11-01T20:45:48Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124973398237, "name": "Attest PR test inputs / ${{ github.workflow_sha }} / ${{ github.event.pull_request.head.sha }}", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:48Z", "completed_at": "2026-11-01T20:45:48Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124973398274, "name": "Cockpit browser E2E shard ${{ matrix.shard }}/4", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:48Z", "completed_at": "2026-11-01T20:45:48Z", "labels": ["ubicloud-standard-2"], "steps": []},
+      {"id": 124973398521, "name": "Merge Vitest coverage", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:48Z", "completed_at": "2026-11-01T20:45:48Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124973423202, "name": "Publish npm snapshot", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T20:45:57Z", "completed_at": "2026-11-01T20:46:33Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124973424146, "name": "Validate reviewed queue entry", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:54Z", "completed_at": "2026-11-01T20:45:54Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124973424174, "name": "Prepare PR snapshot archives", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:54Z", "completed_at": "2026-11-01T20:45:54Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124973425081, "name": "github.event_name == 'merge_group' && 'Automated Code Review' || 'Queue review (not applicable)'", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T20:45:54Z", "completed_at": "2026-11-01T20:45:54Z", "labels": ["ubuntu-latest"], "steps": []}
+     ]
+   }
+  },
+  "[\"api\",\"repos/hearsay-tools/cezarion/actions/runs/41325135449/jobs?filter=all&per_page=100&page=1\"]": {
+   "json": {
+    "total_count": 18,
+    "jobs": [
+      {"id": 124903380445, "name": "Classify pull request change surface", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:12:41Z", "completed_at": "2026-11-01T16:12:44Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903380769, "name": "Classify PR shape", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:12:42Z", "completed_at": "2026-11-01T16:12:56Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124903380790, "name": "Verify exact queue CI evidence", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:12:42Z", "completed_at": "2026-11-01T16:12:50Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903381487, "name": "Check function complexity", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:12:39Z", "completed_at": "2026-11-01T16:12:39Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903381527, "name": "Check new code clones", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:12:39Z", "completed_at": "2026-11-01T16:12:39Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903431314, "name": "Typecheck", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:12:51Z", "completed_at": "2026-11-01T16:12:50Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903452186, "name": "Review preflight", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:12:59Z", "completed_at": "2026-11-01T16:13:02Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124903481201, "name": "Unit, build, E2E, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:13:06Z", "completed_at": "2026-11-01T16:13:10Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124903481321, "name": "Review", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:13:03Z", "completed_at": "2026-11-01T16:13:02Z", "labels": [], "steps": []},
+      {"id": 124903481903, "name": "Vitest shard ${{ matrix.shard }}/4", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:13:03Z", "completed_at": "2026-11-01T16:13:03Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903481916, "name": "(github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main') && 'Automated Code Review' || 'PR review (not applicable)'", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:13:03Z", "completed_at": "2026-11-01T16:13:03Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124903482078, "name": "Merge Vitest coverage", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:13:03Z", "completed_at": "2026-11-01T16:13:03Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903482332, "name": "Unit, build, and package", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:13:03Z", "completed_at": "2026-11-01T16:13:03Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903482531, "name": "Cockpit browser E2E shard ${{ matrix.shard }}/4", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:13:03Z", "completed_at": "2026-11-01T16:13:03Z", "labels": ["ubicloud-standard-2"], "steps": []},
+      {"id": 124903513561, "name": "Publish npm snapshot", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:13:13Z", "completed_at": "2026-11-01T16:13:57Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124903514517, "name": "Validate reviewed queue entry", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:13:10Z", "completed_at": "2026-11-01T16:13:10Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124903514610, "name": "Prepare PR snapshot archives", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:13:10Z", "completed_at": "2026-11-01T16:13:10Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124903514996, "name": "github.event_name == 'merge_group' && 'Automated Code Review' || 'Queue review (not applicable)'", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:13:10Z", "completed_at": "2026-11-01T16:13:10Z", "labels": ["ubuntu-latest"], "steps": []}
+     ]
+   }
+  },
+  "[\"api\",\"repos/hearsay-tools/cezarion/actions/runs/41326268652/jobs?filter=all&per_page=100&page=1\"]": {
+   "json": {
+    "total_count": 24,
+    "jobs": [
+      {"id": 124906740992, "name": "Classify pull request change surface", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:25:43Z", "completed_at": "2026-11-01T16:25:47Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906741030, "name": "Verify exact queue CI evidence", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:25:42Z", "completed_at": "2026-11-01T16:25:50Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906741057, "name": "Classify PR shape", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:25:42Z", "completed_at": "2026-11-01T16:25:56Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124906742148, "name": "Check function complexity", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:25:40Z", "completed_at": "2026-11-01T16:25:39Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906742371, "name": "Check new code clones", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:25:40Z", "completed_at": "2026-11-01T16:25:39Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906786336, "name": "Typecheck", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:25:53Z", "completed_at": "2026-11-01T16:26:31Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906963295, "name": "Review preflight", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:34Z", "completed_at": "2026-11-01T16:26:36Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124906986791, "name": "Vitest shard 3/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:39Z", "completed_at": "2026-11-01T16:36:43Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906986815, "name": "Vitest shard 1/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:39Z", "completed_at": "2026-11-01T16:33:50Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906986832, "name": "Vitest shard 4/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:40Z", "completed_at": "2026-11-01T16:36:43Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906986835, "name": "Cockpit browser E2E shard 3/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:58Z", "completed_at": "2026-11-01T16:36:15Z", "labels": ["ubicloud-standard-2"], "steps": []},
+      {"id": 124906986869, "name": "Vitest shard 2/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:40Z", "completed_at": "2026-11-01T16:37:23Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906986881, "name": "Unit, build, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:40Z", "completed_at": "2026-11-01T16:32:30Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124906986889, "name": "Cockpit browser E2E shard 1/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:27:14Z", "completed_at": "2026-11-01T16:36:12Z", "labels": ["ubicloud-standard-2"], "steps": []},
+      {"id": 124906986916, "name": "Cockpit browser E2E shard 2/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:59Z", "completed_at": "2026-11-01T16:36:40Z", "labels": ["ubicloud-standard-2"], "steps": []},
+      {"id": 124906986943, "name": "Cockpit browser E2E shard 4/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:26:59Z", "completed_at": "2026-11-01T16:35:32Z", "labels": ["ubicloud-standard-2"], "steps": []},
+      {"id": 124906987215, "name": "Review", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:26:37Z", "completed_at": "2026-11-01T16:26:37Z", "labels": [], "steps": []},
+      {"id": 124906987632, "name": "(github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main') && 'Automated Code Review' || 'PR review (not applicable)'", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:26:37Z", "completed_at": "2026-11-01T16:26:37Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124909748363, "name": "Unit, build, E2E, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:37:27Z", "completed_at": "2026-11-01T16:37:30Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124909750108, "name": "Merge Vitest coverage", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:37:24Z", "completed_at": "2026-11-01T16:37:24Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124909777635, "name": "Publish npm snapshot", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T16:37:33Z", "completed_at": "2026-11-01T16:38:25Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124909778898, "name": "Prepare PR snapshot archives", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:37:31Z", "completed_at": "2026-11-01T16:37:31Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124909778908, "name": "Validate reviewed queue entry", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:37:31Z", "completed_at": "2026-11-01T16:37:31Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124909779566, "name": "github.event_name == 'merge_group' && 'Automated Code Review' || 'Queue review (not applicable)'", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T16:37:31Z", "completed_at": "2026-11-01T16:37:31Z", "labels": ["ubuntu-latest"], "steps": []}
+     ]
+   }
+  },
+  "[\"api\",\"repos/hearsay-tools/cezarion/actions/runs/41334112445/jobs?filter=all&per_page=100&page=1\"]": {
+   "json": {
+    "total_count": 27,
+    "jobs": [
+      {"id": 124930175673, "name": "Verify exact queue CI evidence", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:57:49Z", "completed_at": "2026-11-01T17:57:58Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124930175853, "name": "Classify pull request change surface", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:57:48Z", "completed_at": "2026-11-01T17:57:51Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124930175897, "name": "Classify PR shape", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:57:49Z", "completed_at": "2026-11-01T17:58:06Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124930176648, "name": "Check function complexity", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T17:57:46Z", "completed_at": "2026-11-01T17:57:46Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124930176739, "name": "Check new code clones", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T17:57:46Z", "completed_at": "2026-11-01T17:57:46Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124930176868, "name": "Verify native PR test evidence", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T17:57:46Z", "completed_at": "2026-11-01T17:57:46Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124930202798, "name": "Resolve immutable PR test inputs", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T17:57:52Z", "completed_at": "2026-11-01T17:57:46Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124930223821, "name": "Typecheck", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:58:00Z", "completed_at": "2026-11-01T17:58:50Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124930440324, "name": "Review preflight", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:58:53Z", "completed_at": "2026-11-01T17:58:56Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124930466114, "name": "Unit, build, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:59:00Z", "completed_at": "2026-11-01T18:04:48Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124930466140, "name": "Vitest shard 4/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:58:59Z", "completed_at": "2026-11-01T18:09:16Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124930466141, "name": "Vitest shard 2/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:59:01Z", "completed_at": "2026-11-01T18:09:33Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124930466145, "name": "Cockpit browser E2E shard 2/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:59:17Z", "completed_at": "2026-11-01T18:08:33Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124930466162, "name": "Vitest shard 1/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:59:00Z", "completed_at": "2026-11-01T18:06:39Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124930466165, "name": "Cockpit browser E2E shard 4/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:59:15Z", "completed_at": "2026-11-01T18:07:51Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124930466173, "name": "Cockpit browser E2E shard 1/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:59:19Z", "completed_at": "2026-11-01T18:09:00Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124930466196, "name": "Cockpit browser E2E shard 3/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:59:25Z", "completed_at": "2026-11-01T18:08:28Z", "labels": ["ubicloud-standard-2"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124930466242, "name": "Vitest shard 3/4", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T17:59:00Z", "completed_at": "2026-11-01T18:08:49Z", "labels": ["ubuntu-24.04"], "steps": [{"name": "Reuse verified native PR suite", "conclusion": "skipped"}]},
+      {"id": 124930466871, "name": "Review", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T17:58:57Z", "completed_at": "2026-11-01T17:58:56Z", "labels": [], "steps": []},
+      {"id": 124930466970, "name": "(github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main') && 'Automated Code Review' || 'PR review (not applicable)'", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T17:58:57Z", "completed_at": "2026-11-01T17:58:57Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124933267122, "name": "Unit, build, E2E, and package", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T18:09:36Z", "completed_at": "2026-11-01T18:09:39Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124933268535, "name": "Attest PR test inputs / ${{ github.workflow_sha }} / ${{ github.event.pull_request.head.sha }}", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T18:09:34Z", "completed_at": "2026-11-01T18:09:33Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124933269064, "name": "Merge Vitest coverage", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T18:09:34Z", "completed_at": "2026-11-01T18:09:33Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124933293462, "name": "Publish npm snapshot", "run_attempt": 1, "status": "completed", "conclusion": "success", "started_at": "2026-11-01T18:09:42Z", "completed_at": "2026-11-01T18:10:17Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124933294181, "name": "Validate reviewed queue entry", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T18:09:39Z", "completed_at": "2026-11-01T18:09:39Z", "labels": ["ubuntu-24.04"], "steps": []},
+      {"id": 124933294814, "name": "Prepare PR snapshot archives", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T18:09:39Z", "completed_at": "2026-11-01T18:09:39Z", "labels": ["ubuntu-latest"], "steps": []},
+      {"id": 124933295047, "name": "github.event_name == 'merge_group' && 'Automated Code Review' || 'Queue review (not applicable)'", "run_attempt": 1, "status": "completed", "conclusion": "skipped", "started_at": "2026-11-01T18:09:39Z", "completed_at": "2026-11-01T18:09:39Z", "labels": ["ubuntu-latest"], "steps": []}
+     ]
+   }
+  },
+  "[\"api\",\"repos/hearsay-tools/cezarion/actions/workflows/ci.yml/runs?event=merge_group&head_sha=05a1ee28989378319a0f982b7696b276858c89b4&per_page=100&page=1\"]": {
+   "json": {
+    "total_count": 1,
+    "workflow_runs": [
+      {"id": 41333049888, "run_attempt": 1, "event": "merge_group", "head_sha": "05a1ee28989378319a0f982b7696b276858c89b4", "head_branch": "gh-readonly-queue/main/pr-2411-7fac3b06b7a07d76f2897ecf530e09e17cf0e759", "status": "completed", "conclusion": "failure", "created_at": "2026-11-01T17:45:01Z", "run_started_at": "2026-11-01T17:45:01Z", "updated_at": "2026-11-01T17:57:41Z", "html_url": "https://github.com/hearsay-tools/cezarion/actions/runs/41333049888"}
+     ]
+   }
+  },
+  "[\"api\",\"repos/hearsay-tools/cezarion/actions/workflows/ci.yml/runs?event=merge_group&head_sha=7fac3b06b7a07d76f2897ecf530e09e17cf0e759&per_page=100&page=1\"]": {
+   "json": {
+    "total_count": 1,
+    "workflow_runs": [
+      {"id": 41325137187, "run_attempt": 1, "event": "merge_group", "head_sha": "7fac3b06b7a07d76f2897ecf530e09e17cf0e759", "head_branch": "gh-readonly-queue/main/pr-2407-284db7fd65ca98d499476065dcc66d2b242c8fc5", "status": "completed", "conclusion": "success", "created_at": "2026-11-01T16:12:39Z", "run_started_at": "2026-11-01T16:12:39Z", "updated_at": "2026-11-01T16:25:34Z", "html_url": "https://github.com/hearsay-tools/cezarion/actions/runs/41325137187"}
+     ]
+   }
+  },
+  "[\"api\",\"graphql\",\"-f\",\"query=query($owner: String!, $name: String!, $since: DateTime!) {\\n  repository(owner: $owner, name: $name) {\\n    pr2407: pullRequest(number: 2407) {\\n      timelineItems(first: 100, since: $since, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {\\n        pageInfo { hasNextPage } nodes { ... on RemovedFromMergeQueueEvent { createdAt reason } } } }\\n    pr2409: pullRequest(number: 2409) {\\n      timelineItems(first: 100, since: $since, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {\\n        pageInfo { hasNextPage } nodes { ... on RemovedFromMergeQueueEvent { createdAt reason } } } }\\n    pr2411: pullRequest(number: 2411) {\\n      timelineItems(first: 100, since: $since, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {\\n        pageInfo { hasNextPage } nodes { ... on RemovedFromMergeQueueEvent { createdAt reason } } } }\\n    pr2414: pullRequest(number: 2414) {\\n      timelineItems(first: 100, since: $since, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {\\n        pageInfo { hasNextPage } nodes { ... on RemovedFromMergeQueueEvent { createdAt reason } } } }\\n  }\\n}\",\"-f\",\"owner=hearsay-tools\",\"-f\",\"name=cezarion\",\"-f\",\"since=2026-11-01T16:00:00Z\"]": {
+   "json": {
+    "data": {
+     "repository": {
+      "pr2407": {
+       "timelineItems": {
+        "pageInfo": {
+         "hasNextPage": false
+        },
+        "nodes": [
+          {"createdAt": "2026-11-01T16:25:37Z", "reason": "merged"}
+         ]
+       }
+      },
+      "pr2409": {
+       "timelineItems": {
+        "pageInfo": {
+         "hasNextPage": false
+        },
+        "nodes": [
+          {"createdAt": "2026-11-01T16:12:36Z", "reason": "merged"}
+         ]
+       }
+      },
+      "pr2411": {
+       "timelineItems": {
+        "pageInfo": {
+         "hasNextPage": false
+        },
+        "nodes": [
+          {"createdAt": "2026-11-01T16:38:05Z", "reason": "failed_checks"},
+          {"createdAt": "2026-11-01T17:57:43Z", "reason": "merged"}
+         ]
+       }
+      },
+      "pr2414": {
+       "timelineItems": {
+        "pageInfo": {
+         "hasNextPage": false
+        },
+        "nodes": [
+          {"createdAt": "2026-11-01T20:45:20Z", "reason": "merged"}
+         ]
+       }
+      }
+     }
+    }
+   }
+  },
+  "[\"api\",\"repos/hearsay-tools/cezarion/actions/workflows/ci.yml/runs?event=merge_group&created=2026-11-01T16:00:00Z..2026-11-02T00:00:00Z&exclude_pull_requests=true&per_page=100&page=1\"]": {
+   "json": {
+    "total_count": 5,
+    "workflow_runs": [
+      {"id": 41347932272, "run_attempt": 1, "event": "merge_group", "head_sha": "a0440272593f00d28bb0edd61f08eb1aa09637a8", "head_branch": "gh-readonly-queue/main/pr-2414-05a1ee28989378319a0f982b7696b276858c89b4", "status": "completed", "conclusion": "success", "created_at": "2026-11-01T20:38:56Z", "run_started_at": "2026-11-01T20:38:56Z", "updated_at": "2026-11-01T20:45:19Z", "html_url": "https://github.com/hearsay-tools/cezarion/actions/runs/41347932272"},
+      {"id": 41333049888, "run_attempt": 1, "event": "merge_group", "head_sha": "05a1ee28989378319a0f982b7696b276858c89b4", "head_branch": "gh-readonly-queue/main/pr-2411-7fac3b06b7a07d76f2897ecf530e09e17cf0e759", "status": "completed", "conclusion": "failure", "created_at": "2026-11-01T17:45:01Z", "run_started_at": "2026-11-01T17:45:01Z", "updated_at": "2026-11-01T17:57:41Z", "html_url": "https://github.com/hearsay-tools/cezarion/actions/runs/41333049888"},
+      {"id": 41326270473, "run_attempt": 1, "event": "merge_group", "head_sha": "07d26df145e5433ba26ad927d4b40e71bff41ec4", "head_branch": "gh-readonly-queue/main/pr-2411-7fac3b06b7a07d76f2897ecf530e09e17cf0e759", "status": "completed", "conclusion": "failure", "created_at": "2026-11-01T16:25:40Z", "run_started_at": "2026-11-01T16:25:40Z", "updated_at": "2026-11-01T16:38:07Z", "html_url": "https://github.com/hearsay-tools/cezarion/actions/runs/41326270473"},
+      {"id": 41325137187, "run_attempt": 1, "event": "merge_group", "head_sha": "7fac3b06b7a07d76f2897ecf530e09e17cf0e759", "head_branch": "gh-readonly-queue/main/pr-2407-284db7fd65ca98d499476065dcc66d2b242c8fc5", "status": "completed", "conclusion": "success", "created_at": "2026-11-01T16:12:39Z", "run_started_at": "2026-11-01T16:12:39Z", "updated_at": "2026-11-01T16:25:34Z", "html_url": "https://github.com/hearsay-tools/cezarion/actions/runs/41325137187"},
+      {"id": 41324022773, "run_attempt": 1, "event": "merge_group", "head_sha": "284db7fd65ca98d499476065dcc66d2b242c8fc5", "head_branch": "gh-readonly-queue/main/pr-2409-c27213073e7115cc1d1d53681ca6dbdd51926e25", "status": "completed", "conclusion": "success", "created_at": "2026-11-01T16:00:02Z", "run_started_at": "2026-11-01T16:00:02Z", "updated_at": "2026-11-01T16:12:32Z", "html_url": "https://github.com/hearsay-tools/cezarion/actions/runs/41324022773"}
+     ]
+   }
+  },
+  "[\"api\",\"repos/hearsay-tools/cezarion/actions/workflows/ci.yml/runs?event=merge_group&created=2026-11-02T00:00:00Z..2026-11-02T21:00:00Z&exclude_pull_requests=true&per_page=100&page=1\"]": {
+   "json": {
+    "total_count": 0,
+    "workflow_runs": []
+   }
+  }
+ }
+}
