@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SKILLS_REPO_FORMATS, type TeamSkillSourcesResponse } from '@open-mercato/cezar-contract/skill-sources';
 import { RunStore } from '../runs/store.ts';
-import { bareDirFor, refreshTeamSources, waitForTeamSkills } from '../skills-remote.ts';
+import { __holdFetchForTests, bareDirFor, getTeamSourceStatuses, refreshTeamSources, sourceKey, waitForTeamSkills } from '../skills-remote.ts';
 import type { Skill } from '../skills.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -251,13 +251,21 @@ describe('the team skill sources API', () => {
   it('a fetch that ends after its source was removed does not bring the source back', async () => {
     const kept = sourceRepo('kept');
     const removed = sourceRepo('gone');
-    writeFileSync(configPath(), JSON.stringify({ skillsRepos: [{ repo: kept }, { repo: removed }] }));
+    await add({ repo: kept });
+    await add({ repo: removed });
+    let releaseFetch!: () => void;
+    const fetch = new Promise<void>((resolve) => { releaseFetch = resolve; });
+    __holdFetchForTests(removed, fetch);
     const load = refreshTeamSources(repoRoot, [{ repo: kept, ref: 'main' }, { repo: removed, ref: 'main' }]);
-    // The load has read the config once the first clone starts; the source is removed after that.
-    // bound: a hang guard for a local clone, not a timing assumption
-    await vi.waitFor(() => expect(existsSync(bareDirFor(kept))).toBe(true), { timeout: 10_000 });
-    writeFileSync(configPath(), JSON.stringify({ skillsRepos: [{ repo: kept }] }));
-    await load;
+    try {
+      // The kept source settling proves the load read both entries. The removed fetch stays held.
+      // bound: a hang guard for the kept source's local fetch and listing
+      await vi.waitFor(() => expect(getTeamSourceStatuses(repoRoot).get(sourceKey({ repo: kept, ref: 'main' }))?.state).toBe('ok'), { timeout: 10_000 });
+      writeFileSync(configPath(), JSON.stringify({ skillsRepos: [{ repo: kept }] }));
+    } finally {
+      releaseFetch();
+      await load;
+    }
     expect(await teamNames('/skills/importable')).toEqual(['kept']);
     expect((await sources()).sources.map((source) => source.repo)).toEqual([kept]);
   });
