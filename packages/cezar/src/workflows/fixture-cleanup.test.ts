@@ -3,7 +3,14 @@ import type { AgentSession } from '../core/agent-runner.ts';
 import type { RunManager } from './run.ts';
 import { createActiveRun } from './active-run.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { RUN_MODULE_CLASSES, runInternals } from './run-internals.testkit.ts';
+import { QUEUE_WATCHDOG_MS } from './run.ts';
+import { RunLine } from './run/run-line.ts';
+import { RunSettlement } from './run/run-settlement.ts';
+import { RunFinish } from './run/run-finish.ts';
+import { WorkerExecutions } from './run/worker-executions.ts';
+import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
+import { WorktreeAutosave } from './run/worktree-autosave.ts';
+import type { RunModuleContext } from './run/types.ts';
 import { TrackedWork } from './run/tracked-work.ts';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -14,11 +21,12 @@ import { RunStore } from '../runs/store.ts';
 import * as git from '../git-worktree.ts';
 import * as retention from '../runs/retention.ts';
 import * as workflows from './load.ts';
-import { createFixtureManager, removeFixtureRepo, fixtureWorkSettled } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, removeFixtureRepo, fixtureWorkSettled, fixtureWork, managerDisposed } from './fixture-cleanup.testkit.ts';
 
 const roots: string[] = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await removeFixtureRepo(root);
+  vi.useRealTimers();
   vi.unstubAllEnvs();
 });
 
@@ -30,7 +38,8 @@ function fixture() {
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
   vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
   const store = RunStore.open(join(root, '.ai/cezar'));
-  return { root, store, manager: createFixtureManager(store, root) };
+  const manager = createFixtureManager(store, root);
+  return { root, store, manager };
 }
 
 function barrier() {
@@ -54,14 +63,13 @@ it.each(['ordinary', 'delegated root'] as const)('drains detached Finish settlem
     boundary.enter(); await boundary.held;
     return result;
   });
-  const settlement = mode === 'ordinary'
-    ? vi.spyOn(runInternals(manager).runSettlement, 'settleSuccess')
-    : vi.spyOn(runInternals(manager).runFinish, 'settleRequestedRootFinish');
+  const track = vi.spyOn(fixtureWork(root), 'track');
   expect(manager.isActive(run.id)).toBe(false);
   expect(manager.finish(run.id)).toBe(true);
-  expect(settlement).toHaveBeenCalledWith(run.id);
-  // Observe the real detached operation, including rejection on the broken helper.
-  const finished = Promise.allSettled([settlement.mock.results[0]!.value]);
+  const label = mode === 'ordinary' ? 'settleSuccess' : 'settleRequestedRootFinish';
+  const operation = track.mock.calls.find(([name]) => name === label);
+  expect(operation).toBeDefined();
+  const finished = Promise.allSettled([operation![1]]);
   await boundary.entered;
   const removing = removeFixtureRepo(root);
   try {
@@ -74,11 +82,12 @@ it.each(['ordinary', 'delegated root'] as const)('drains detached Finish settlem
     expect(existsSync(root)).toBe(false);
   } finally {
     boundary.release(); await finished; await removing;
-    settlement.mockRestore(); diffSpy.mockRestore();
+    track.mockRestore(); diffSpy.mockRestore();
   }
 });
 
 it('drains queue rescue held while loading a lost queued run workflow', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
   const { root, store, manager } = fixture();
   const run = store.createRun({ title: 'lost queued run', task: 'hello', workflow: 'quick-task', steps: [] });
   const boundary = barrier();
@@ -89,7 +98,9 @@ it('drains queue rescue held while loading a lost queued run workflow', async ()
     return result;
   });
   expect(store.getRun(run.id)?.status).toBe('queued');
-  const rescued = Promise.allSettled([runInternals(manager).line.rescueStalledQueue()]);
+  const tracking = vi.spyOn(fixtureWork(root), 'track');
+  vi.advanceTimersByTime(QUEUE_WATCHDOG_MS);
+  const rescued = Promise.allSettled([tracking.mock.calls.find(([label]) => label === 'rescueStalledQueue')![1]]);
   await boundary.entered;
   const removing = removeFixtureRepo(root);
   try {
@@ -107,13 +118,17 @@ it('drains queue rescue held while loading a lost queued run workflow', async ()
 
 it.each(['root', 'continuation'] as const)('keeps the repo until a real %s session and its final write finish', async mode => {
   const { root, store, manager } = fixture();
-  const track = vi.spyOn(runInternals(manager).context.work, 'track');
+  const track = vi.spyOn(fixtureWork(root), 'track');
   const workflow = { name: 'cleanup', source: 'built-in' as const, steps: [{ id: 'work', prompt: '{{task}}' }] };
   let id: string;
-  if (mode === 'root') id = manager.startRun(workflow, { task: 'hello', worktree: false }).id;
+  if (mode === 'root') id = manager.startRun(workflow, { task: 'hello', worktree: true }).id;
   else {
     const record = store.createRun({ title: 'resume', task: 'hello', workflow: 'cleanup', runner: 'claude', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });
-    id = record.id; store.updateStep(id, 'work', { sessionId: 'prior-session', backend: 'claude' }); store.updateRun(id, { status: RUN_STATUS.done, worktree: false });
+    id = record.id;
+    const tree = join(root, 'task-tree');
+    execFileSync('git', ['worktree', 'add', '-qb', 'task-branch', tree], { cwd: root });
+    store.updateStep(id, 'work', { sessionId: 'prior-session', backend: 'claude' });
+    store.updateRun(id, { status: RUN_STATUS.done, worktreePath: tree, branch: 'task-branch', baseBranch: 'main' });
     expect(manager.continueRun(id, { text: 'hello' })).toEqual({ ok: true });
   }
   await vi.waitFor(() => expect(store.getRun(id)?.status).toBe('waiting'), { timeout: 10_000 });
@@ -121,13 +136,12 @@ it.each(['root', 'continuation'] as const)('keeps the repo until a real %s sessi
   expect(track.mock.calls.some(([label]) => label === 'session')).toBe(true);
   // Delay the real final autosave at its filesystem boundary, after the real
   // session has been interrupted. Removal must not race this closing write.
-  const engine = runInternals(manager).worktreeAutosave;
-  const save = engine.saveWorktree.bind(engine);
+  const save = git.autosaveCommit;
   let release!: () => void;
   let entered!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const saving = new Promise<void>(resolve => { entered = resolve; });
-  const saveSpy = vi.spyOn(engine, 'saveWorktree').mockImplementation(async (...args) => { entered(); await gate; writeFileSync(join(root, 'late'), 'final write'); await save(...args); });
+  const saveSpy = vi.spyOn(git, 'autosaveCommit').mockImplementation(async (...args) => { entered(); await gate; writeFileSync(join(args[0], 'late'), 'final write'); return save(...args); });
   manager.cancel(id);
   await saving;
   expect(saveSpy).toHaveBeenCalled();
@@ -139,7 +153,7 @@ it.each(['root', 'continuation'] as const)('keeps the repo until a real %s sessi
     await removing;
     expect(manager.isActive(id)).toBe(false);
     expect(existsSync(root)).toBe(false);
-  } finally { release(); await removing; }
+  } finally { release(); await removing; saveSpy.mockRestore(); }
 }, 20_000);
 
 it('retains the repository and reports an ownership timeout', async () => {
@@ -153,7 +167,7 @@ it('retains the repository and reports an ownership timeout', async () => {
 });
 
 it('keeps draining while owned work settles one operation at a time past one bound', async () => {
-  const { root, manager } = fixture();
+  const { root, store, manager } = fixture();
   // Three retention passes that each settle inside the bound but together outlast it: the
   // teardown of hearsay-tools/cezarion#1323, which still owned `enforceRetention` three times.
   const passes = [barrier(), barrier(), barrier()];
@@ -163,7 +177,7 @@ it('keeps draining while owned work settles one operation at a time past one bou
     pass.enter(); await pass.held;
     return [];
   });
-  const engine = runInternals(manager).runSettlement;
+  const engine = settlementModule(moduleContext(root, store, manager, fixtureWork(root)));
   const retained = Promise.allSettled([engine.enforceRetention(), engine.enforceRetention(), engine.enforceRetention()]);
   await Promise.all(passes.map(pass => pass.entered));
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
@@ -189,42 +203,47 @@ it('propagates removal errors', async () => {
   await expect(removeFixtureRepo(join(file, 'child'))).rejects.toThrow();
 });
 
-it('reads every facade module through the typed internals seam', () => {
-  const { manager } = fixture();
-  const internals = runInternals(manager);
-  for (const [name, Module] of Object.entries(RUN_MODULE_CLASSES)) {
-    expect(internals[name as keyof typeof RUN_MODULE_CLASSES], name).toBeInstanceOf(Module);
-  }
-  expect(internals.context.work).toBeInstanceOf(TrackedWork);
-  expect(internals.active).toBeInstanceOf(Map);
-  expect(internals.disposed).toBe(false);
+it('records disposal and shares owned work across restart', () => {
+  const { root, store, manager } = fixture();
+  const work = fixtureWork(root);
+  expect(managerDisposed(manager)).toBe(false);
   manager.dispose();
-  expect(internals.disposed).toBe(true);
+  expect(managerDisposed(manager)).toBe(true);
+  const recovered = createFixtureManager(store, root);
+  expect(fixtureWork(recovered)).toBe(work);
+  expect(managerDisposed(recovered)).toBe(false);
 });
 
-const ownedOperations: Array<{ label: string; invoke(manager: RunManager, id: string): Promise<void> }> = [
-  { label: 'pump', invoke: manager => runInternals(manager).line.pump() },
-  { label: 'rescueStalledQueue', invoke: manager => runInternals(manager).line.rescueStalledQueue() },
-  { label: 'finishWorkerExecution', invoke: (manager, id) => runInternals(manager).workerExecutions.finishWorkerExecution(id) },
-  { label: 'recordTurnEnd', invoke: (manager, id) => runInternals(manager).turnBookkeeper.recordTurnEnd(id, 'hello') },
-  { label: 'autoNameRun', invoke: (manager, id) => runInternals(manager).turnBookkeeper.autoNameRun(id, undefined, 'hello') },
-  { label: 'saveWorktree', invoke: (manager, id) => {
-    const { context, worktreeAutosave } = runInternals(manager);
-    return worktreeAutosave.saveWorktree(id, createActiveRun({ cwd: context.repoRoot, pendingHumanAsk: false, autonomous: false }), 'turn end');
-  } },
-  { label: 'settleSuccess', invoke: (manager, id) => runInternals(manager).runSettlement.settleSuccess(id) },
-  { label: 'enforceRetention', invoke: manager => runInternals(manager).runSettlement.enforceRetention() },
-  { label: 'settleRequestedRootFinish', invoke: (manager, id) => runInternals(manager).runFinish.settleRequestedRootFinish(id) },
+/** These are module contracts: no public manager call invokes just one owned wrapper. */
+function moduleContext(root: string, store: RunStore, manager: RunManager, work: TrackedWork): RunModuleContext {
+  return { repoRoot: root, dataDir: join(root, '.ai/cezar'), store, semaphore: new WorkspaceSemaphore(), work, disposed: () => managerDisposed(manager) };
+}
+
+function settlementModule(context: RunModuleContext): RunSettlement {
+  const host = { active: new Map(), generation: () => undefined, deferParentCompletion: () => true, claimWorktreeReclaim: () => null };
+  return new RunSettlement(context, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, host as unknown as ConstructorParameters<typeof RunSettlement>[9], '', '');
+}
+
+const ownedOperations: Array<{ label: string; invoke(context: RunModuleContext, id: string): Promise<void> }> = [
+  { label: 'pump', invoke: context => new RunLine({ ...context, disposed: () => true }).pump() },
+  { label: 'rescueStalledQueue', invoke: context => new RunLine({ ...context, disposed: () => true }).rescueStalledQueue() },
+  { label: 'finishWorkerExecution', invoke: (context, id) => new WorkerExecutions(context, undefined!, undefined!).finishWorkerExecution(id) },
+  { label: 'recordTurnEnd', invoke: (context, id) => new TurnBookkeeper(context, { isDisposedDelegatedRun: () => true, discoverSkills: async () => [], reviveWorkflow: async () => null, trackTurn() {} } as ConstructorParameters<typeof TurnBookkeeper>[1]).recordTurnEnd(id, 'hello') },
+  { label: 'autoNameRun', invoke: (context, id) => new TurnBookkeeper(context, undefined!).autoNameRun(id, undefined, 'hello') },
+  { label: 'saveWorktree', invoke: (context, id) => new WorktreeAutosave(context, undefined!).saveWorktree(id, createActiveRun({ cwd: context.repoRoot, pendingHumanAsk: false, autonomous: false }), 'turn end') },
+  { label: 'settleSuccess', invoke: (context, id) => settlementModule(context).settleSuccess(id) },
+  { label: 'enforceRetention', invoke: context => settlementModule(context).enforceRetention() },
+  { label: 'settleRequestedRootFinish', invoke: (context, id) => new RunFinish(context, undefined!, { settleSuccess: async () => {} } as unknown as RunSettlement, undefined!, undefined!, undefined!, { reconcileWorkerWaits() {} } as ConstructorParameters<typeof RunFinish>[6]).settleRequestedRootFinish(id) },
 ];
 
 it.each(ownedOperations)('records module-owned $label before returning', async ({ label, invoke }) => {
   const { root, store, manager } = fixture();
   const run = store.createRun({ title: 'ownership', task: 'hello', workflow: 'cleanup', steps: [] });
   store.updateRun(run.id, { status: RUN_STATUS.waiting });
-  const work = runInternals(manager).context.work;
-  const promise = invoke(manager, run.id);
+  const work = fixtureWork(root);
+  const promise = invoke(moduleContext(root, store, manager, work), run.id);
   try { expect([...work.pending.values()]).toContain(label); }
-  finally { await Promise.allSettled([promise]); await fixtureWorkSettled(root); }
+  finally { await promise; await fixtureWorkSettled(root); }
 });
 
 it('records a queued continuation at launch', async () => {
@@ -232,7 +251,7 @@ it('records a queued continuation at launch', async () => {
   old.dispose();
   const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 1, memoryLimitMb: 0 }) });
   const manager = createFixtureManager(store, root, { semaphore });
-  const work = runInternals(manager).context.work;
+  const work = fixtureWork(root);
   const track = vi.spyOn(work, 'track');
   const run = store.createRun({ title: 'resume', task: 'hello', workflow: 'cleanup', runner: 'claude', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });
   store.updateStep(run.id, 'work', { sessionId: 'prior-session', backend: 'claude' });
@@ -271,17 +290,17 @@ it.each(['fulfilled', 'rejected'] as const)('returns the same %s promise and sig
 
 it('keeps a session until close, interrupts it after dispose, and shares ownership across restart', async () => {
   const { root, store, manager } = fixture();
-  const work = runInternals(manager).context.work;
+  const work = fixtureWork(root);
   const closed = barrier();
   const session = { result: closed.held, interrupt: vi.fn(closed.release) } as unknown as AgentSession;
-  const promise = runInternals(manager).workerExecutions.trackWorkerSessionResult('sessionless', session);
+  const promise = new WorkerExecutions(moduleContext(root, store, manager, work), undefined!, undefined!).trackWorkerSessionResult('sessionless', session);
   expect(work.pending.get(promise)).toBe('session');
   expect(work.liveSessions.has(session)).toBe(true);
   manager.dispose();
   expect(work.pending.get(promise)).toBe('session');
   expect(work.liveSessions.has(session)).toBe(true);
   const recovered = createFixtureManager(store, root);
-  expect(runInternals(recovered).context.work).toBe(work);
+  expect(fixtureWork(root)).toBe(work);
   await removeFixtureRepo(root);
   expect(session.interrupt).toHaveBeenCalledTimes(1);
   expect(work.liveSessions.size).toBe(0);
@@ -290,10 +309,10 @@ it('keeps a session until close, interrupts it after dispose, and shares ownersh
 
 it('waits for detached work and new work it creates across managers', async () => {
   const { root, store, manager } = fixture();
-  const work = runInternals(manager).context.work;
+  const work = fixtureWork(root);
   const first = barrier(), second = barrier();
   const recovered = createFixtureManager(store, root);
-  const same = runInternals(recovered).context.work;
+  const same = fixtureWork(root);
   const child = first.held.then(() => same.track('namer', second.held));
   work.track('bookkeeping', child);
   let settled = false;
@@ -308,7 +327,7 @@ it('waits for detached work and new work it creates across managers', async () =
 it('reports the label of held work on a drain timeout', async () => {
   const { root, manager } = fixture();
   const held = barrier();
-  runInternals(manager).context.work.track('held-namer', held.held);
+  fixtureWork(root).track('held-namer', held.held);
   try {
     await expect(removeFixtureRepo(root, 0)).rejects.toThrow('held-namer');
     expect(existsSync(root)).toBe(true);
