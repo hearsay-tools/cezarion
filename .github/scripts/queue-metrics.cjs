@@ -12,7 +12,9 @@ const FALLBACK_JOB = 'Typecheck';
 const REUSE_STEP = 'Reuse verified native PR suite';
 // Q3: failure rate above 30%, or runner-minutes per merge above 128 × 1.4.
 const LIMITS = { failureRate: 0.3, runnerMinutesPerMerge: 179 };
-const FAILED = new Set(['failure', 'timed_out', 'startup_failure']);
+// Spec § Rollout, "How the failure rate is counted".
+const FAILED = new Set(['failure', 'cancelled', 'timed_out']);
+const REMOVAL_BATCH = 25;
 const DAY = 86400000;
 const LIST_CAP = 1000;
 const CONCURRENCY = 8;
@@ -69,7 +71,6 @@ function client(gh, { retries = 3, wait = attempt => delay(1000 * attempt) } = {
     }
   }
   const json = async args => JSON.parse(await call(args));
-  const text = async args => (await call(args)).trim();
   async function list(endpoint, key) {
     const rows = [];
     for (let page = 1; ; page++) {
@@ -83,7 +84,7 @@ function client(gh, { retries = 3, wait = attempt => delay(1000 * attempt) } = {
   }
   // After the first failure, no read starts: the report is lost anyway.
   const stop = error => { stopped ??= error; };
-  return { json, text, list, stop };
+  return { json, list, stop };
 }
 
 async function mapLimit(items, fn) {
@@ -152,20 +153,35 @@ async function readQueueMerges(api, repo, window) {
   return prs.filter(pr => inWindow(pr.mergedAt, window));
 }
 
-const groupBase = branch => /^gh-readonly-queue\/main\/pr-\d+-([0-9a-f]{40})$/.exec(branch ?? '')?.[1];
+function groupRef(branch) {
+  const match = /^gh-readonly-queue\/main\/pr-(\d+)-([0-9a-f]{40})$/.exec(branch ?? '');
+  return match ? { pr: Number(match[1]), base: match[2] } : undefined;
+}
 
-// A group base is on main when main is identical to it or ahead of it. A base GitHub no longer knows is not.
-async function readOnMain(api, repo, bases) {
-  const onMain = {};
-  await mapLimit([...new Set(bases)], async base => {
-    try {
-      onMain[base] = ['identical', 'ahead'].includes(await api.text([`repos/${repo}/compare/${base}...main`, '--jq', '.status']));
-    } catch (error) {
-      if (!/HTTP (404|422)/.test(error.message)) throw error;
-      onMain[base] = false;
+// The queue removals of each PR from the window start on. A run's removal comes after the run starts.
+const removalsQuery = numbers => `query($owner: String!, $name: String!, $since: DateTime!) {
+  repository(owner: $owner, name: $name) {${numbers.map(number => `
+    pr${number}: pullRequest(number: ${number}) {
+      timelineItems(first: 100, since: $since, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {
+        pageInfo { hasNextPage } nodes { ... on RemovedFromMergeQueueEvent { createdAt reason } } } }`).join('')}
+  }
+}`;
+
+async function readRemovals(api, repo, window, numbers) {
+  const [owner, name] = repo.split('/');
+  const batches = [];
+  for (let i = 0; i < numbers.length; i += REMOVAL_BATCH) batches.push(numbers.slice(i, i + REMOVAL_BATCH));
+  const removals = {};
+  await mapLimit(batches, async batch => {
+    const { repository } = (await api.json(['graphql', '-f', `query=${removalsQuery(batch)}`,
+      '-f', `owner=${owner}`, '-f', `name=${name}`, '-f', `since=${iso(window.from)}`])).data;
+    for (const number of batch) {
+      const items = repository[`pr${number}`].timelineItems;
+      if (items.pageInfo.hasNextPage) throw new Error(`PR ${number} has more than 100 queue removals in the window. Narrow the window.`);
+      removals[number] = items.nodes.map(node => ({ createdAt: node.createdAt, reason: node.reason }));
     }
   });
-  return onMain;
+  return removals;
 }
 
 const proofJob = jobs => jobs.find(job => job.name === PROOF_JOB);
@@ -204,8 +220,9 @@ async function readEvidence(api, repo, window) {
   await mapLimit(pushes.filter(push => isFallback(push.jobs)), async push => {
     push.evidence = await readProofEvidence(api, repo, push, queueJobs);
   });
-  const onMain = await readOnMain(api, repo, completedQueue.map(run => groupBase(run.head_branch)).filter(Boolean));
-  return { repo, from: iso(from), to: iso(to), queueRuns, queueJobs, pushes, merges, onMain };
+  const queuePrs = [...new Set(queueRuns.map(run => groupRef(run.head_branch)?.pr).filter(Boolean))].sort((a, b) => a - b);
+  const removals = await readRemovals(api, repo, window, queuePrs);
+  return { repo, from: iso(from), to: iso(to), queueRuns, queueJobs, pushes, merges, removals };
 }
 
 // ---- Computing (pure) ----
@@ -238,24 +255,47 @@ const sumMinutes = list => list.reduce((sum, item) => {
   return sum;
 }, { hosted: 0, ubicloud: 0, other: 0, all: 0 });
 
+// A removal for the run's own checks, or the merge that ends its entry, keeps the run in the failure rate.
+const keepsRun = reason => reason === 'merged' || reason === 'failed_checks' || /time[d_ ]?out/i.test(reason ?? '');
+
+// Spec § Rollout, "How the failure rate is counted": the runs that count in neither term.
+// Invalidated: a later run for the same PR on another base, with no removal of that PR between the two.
+// Removed: the first removal of the run's entry after the run started is for another cause.
+function exclusion(run, raw) {
+  const ref = groupRef(run.head_branch);
+  if (!ref) return null;
+  const started = Date.parse(run.created_at);
+  const removals = (raw.removals[ref.pr] ?? []).map(removal => ({ at: Date.parse(removal.createdAt), reason: removal.reason }))
+    .filter(removal => removal.at >= started).sort((a, b) => a.at - b.at);
+  const rebuilt = raw.queueRuns.some(other => {
+    const otherRef = groupRef(other.head_branch);
+    const at = Date.parse(other.created_at);
+    return otherRef?.pr === ref.pr && otherRef.base !== ref.base && at > started && !removals.some(removal => removal.at < at);
+  });
+  if (rebuilt) return 'invalidated';
+  return removals.length && !keepsRun(removals[0].reason) ? 'removed' : null;
+}
+
 function queueRunMetrics(raw) {
   const completed = raw.queueRuns.filter(run => run.status === 'completed');
   const runs = completed.map(run => {
     const jobs = raw.queueJobs[run.id] ?? [];
-    const base = groupBase(run.head_branch);
-    return { run, minutes: runnerMinutes(jobs), reused: reused(jobs), invalidated: base !== undefined && raw.onMain[base] === false };
+    return { run, minutes: runnerMinutes(jobs), reused: reused(jobs), excluded: exclusion(run, raw) };
   });
   const conclusions = {};
   for (const { run } of runs) conclusions[run.conclusion] = (conclusions[run.conclusion] ?? 0) + 1;
-  const failed = runs.filter(({ run }) => FAILED.has(run.conclusion)).length;
+  const counted = runs.filter(item => !item.excluded);
+  const failed = counted.filter(({ run }) => FAILED.has(run.conclusion)).length;
   const success = runs.filter(({ run }) => run.conclusion === 'success');
+  const invalidated = runs.filter(item => item.excluded === 'invalidated');
   return {
-    completed: runs.length, inFlight: raw.queueRuns.length - completed.length, conclusions, failed,
-    failureRate: runs.length ? failed / runs.length : null,
+    completed: runs.length, inFlight: raw.queueRuns.length - completed.length, conclusions,
+    counted: counted.length, removed: runs.filter(item => item.excluded === 'removed').length, failed,
+    failureRate: counted.length ? failed / counted.length : null,
     minutes: sumMinutes(runs),
     fullRunMinutesP50: percentile(success.filter(item => !item.reused).map(item => item.minutes.all), 0.5),
     reuseHits: runs.filter(item => item.reused).length,
-    invalidated: { runs: runs.filter(item => item.invalidated).length, minutes: sumMinutes(runs.filter(item => item.invalidated)).all },
+    invalidated: { runs: invalidated.length, minutes: sumMinutes(invalidated).all },
     wallP50: percentile(success.map(({ run }) => minutes(run.run_started_at, run.updated_at)), 0.5),
     wallP90: percentile(success.map(({ run }) => minutes(run.run_started_at, run.updated_at)), 0.9),
   };
@@ -334,7 +374,7 @@ function formatReport(m) {
     `Merges per day: ${Object.entries(merges.perDay).map(([day, n]) => `${day} ${n}`).join(', ')} (total ${merges.total})`,
     `Enqueue to merge (last enqueue): p50 ${fixed(merges.enqueueP50)} min, p90 ${fixed(merges.enqueueP90)} min, max ${fixed(merges.enqueueMax)} min`,
     `Queue runs: ${queue.completed} completed (${counts(queue.conclusions)}), ${queue.inFlight} in flight not counted`,
-    `Queue failure rate: ${percent(queue.failureRate)} (${queue.failed} of ${queue.completed})`,
+    `Queue failure rate: ${percent(queue.failureRate)} (${queue.failed} of ${queue.counted}; excluded: ${queue.invalidated.runs} invalidated, ${queue.removed} removed for another cause)`,
     `Runner-minutes: ${queue.minutes.all} (${split(queue.minutes, String)})`,
     `Runner-minutes per merge: ${fixed(m.runnerMinutesPerMerge.all)} (${split(m.runnerMinutesPerMerge)})`,
     `Runner-minutes per full run: p50 ${fixed(queue.fullRunMinutesP50)} (successful runs without native-suite reuse)`,
@@ -381,4 +421,4 @@ async function main(argv, { gh = defaultGh, stdout = text => process.stdout.writ
 if (require.main === module) main(process.argv.slice(2)).then(code => { process.exitCode = code; });
 
 module.exports = { main, parseOptions, readAll, computeMetrics, formatReport, percentile, runnerMinutes, proofReason,
-  groupBase, LIMITS, PROOF_JOB, FALLBACK_JOB, REUSE_STEP };
+  groupRef, LIMITS, PROOF_JOB, FALLBACK_JOB, REUSE_STEP };

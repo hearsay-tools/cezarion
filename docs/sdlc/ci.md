@@ -560,10 +560,16 @@ Each runs and search query covers one UTC day, because GitHub returns at most
   rounded up to a whole minute. An `ubicloud-*` label is Ubicloud. A GitHub image
   label (`ubuntu-*`, `windows-*`, `macos-*`) is hosted.
 - **Per merge**: divided by the PRs merged in the window that entered the queue.
-- **Queue failure rate**: `failure`, `timed_out` and `startup_failure` runs over
-  completed runs.
-- **Invalidated runs**: runs whose group base, from the
-  `gh-readonly-queue/main/pr-<N>-<base>` ref, never reached `main`.
+- **Queue failure rate**: the spec's counting rule. Over completed `merge_group`
+  runs, `failure`, `cancelled` and `timed_out` runs divided by all runs. Excluded
+  runs count in neither term:
+  - **invalidated**: GitHub started a later run for the same PR on another base,
+    from the `gh-readonly-queue/main/pr-<N>-<base>` ref, with no queue removal of
+    that PR between the two runs;
+  - **removed for another cause**: the first queue removal of the run's PR after the
+    run started has a reason other than `failed_checks`, a timeout or `merged`, for
+    example `manual` or `merge_conflict`.
+- **Invalidated runs**: the runner-minutes of the invalidated runs above are waste.
 - **Main-push proof fallback**: a `main` push run whose Typecheck job ran. The API
   does not return the proof's job summary, so the command rebuilds the reason from
   the evidence `queue-ci-proof.cjs` reads. It prints the URL of each run it cannot

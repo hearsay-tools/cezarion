@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { main, parseOptions, computeMetrics, percentile, runnerMinutes, proofReason, groupBase,
+const { main, parseOptions, computeMetrics, percentile, runnerMinutes, proofReason, groupRef,
   PROOF_JOB, FALLBACK_JOB, REUSE_STEP } = require('./queue-metrics.cjs');
 const { REQUIRED_QUEUE_JOBS } = require('./queue-ci-proof.cjs');
 
@@ -41,7 +41,7 @@ test('recorded window prints every pilot metric and both rollback verdicts', asy
     'Merges per day: 2026-11-01 4 (total 4)',
     'Enqueue to merge (last enqueue): p50 12.9 min, p90 14.7 min, max 15.4 min',
     'Queue runs: 5 completed (failure 2, success 3), 0 in flight not counted',
-    'Queue failure rate: 40.0% (2 of 5)',
+    'Queue failure rate: 40.0% (2 of 5; excluded: 0 invalidated, 0 removed for another cause)',
     'Runner-minutes: 410 (hosted 249, Ubicloud 161)',
     'Runner-minutes per merge: 102.5 (hosted 62.3, Ubicloud 40.3)',
     'Runner-minutes per full run: p50 96.5 (successful runs without native-suite reuse)',
@@ -83,17 +83,16 @@ test('--json carries the same numbers as the report', async () => {
   assert.equal(metrics.verdicts.runnerMinutesPerMerge.verdict, 'within limit');
 });
 
-test('a server error is retried and a missing group base counts as not on main', async () => {
+test('a server error is retried', async () => {
   let failedOnce = false;
   const { gh, calls } = replay(RECORDED, { fail: args => {
     if (!failedOnce && args[1].includes('/jobs?')) { failedOnce = true; return 'gh: Server Error (HTTP 502)'; }
-    if (args[1].includes('/compare/') && args[1].includes('7fac3b06')) return 'gh: Not Found (HTTP 404)';
     return undefined;
   } });
   const { code, out } = await run([...WINDOW, '--json'], gh);
   assert.equal(code, 0);
   assert.equal(calls.filter(args => args[1].includes('/jobs?')).length, 10);
-  assert.equal(JSON.parse(out).queue.invalidated.runs, 2);
+  assert.equal(JSON.parse(out).queue.completed, 5);
 });
 
 test('a client error stops the script with exit code 1 and no report', async () => {
@@ -120,8 +119,8 @@ test('a multi-day window reads one UTC day per query and counts a boundary resul
     }
     if (args[1].includes('/runs?event=push')) return JSON.stringify({ total_count: 0, workflow_runs: [] });
     if (args[1].includes('/jobs?')) return JSON.stringify({ total_count: 0, jobs: [] });
-    if (args[1].includes('/compare/')) return 'identical\n';
     const q = args.find(arg => arg.startsWith('q='));
+    if (!q) return JSON.stringify({ data: { repository: { pr7: { timelineItems: { pageInfo: { hasNextPage: false }, nodes: [] } } } } });
     queried.search.push(/merged:(\S+)/.exec(q)[1]);
     const nodes = q.includes('2026-11-02T00:00:00Z') ? [merged] : [];
     return JSON.stringify({ data: { search: { issueCount: nodes.length, pageInfo: { hasNextPage: false }, nodes } } });
@@ -184,9 +183,9 @@ test('runner-minutes round each job up and split by runner label', () => {
   ]), { hosted: 3, ubicloud: 2, other: 1, all: 6 });
 });
 
-function queueRun(id, conclusion, base, minutesLong = 10) {
+function queueRun(id, conclusion, base, minutesLong = 10, pr = id) {
   const start = Date.parse('2026-11-02T00:00:00Z') + id * 3600000;
-  return { id, run_attempt: 1, event: 'merge_group', head_sha: SHA(id), head_branch: `gh-readonly-queue/main/pr-${id}-${base}`,
+  return { id, run_attempt: 1, event: 'merge_group', head_sha: SHA(id), head_branch: `gh-readonly-queue/main/pr-${pr}-${base}`,
     status: 'completed', conclusion, created_at: new Date(start).toISOString(), run_started_at: new Date(start).toISOString(),
     updated_at: new Date(start + minutesLong * 60000).toISOString(), html_url: `https://example.test/runs/${id}` };
 }
@@ -194,13 +193,37 @@ const jobFor = (minutes, labels = ['ubuntu-24.04'], steps = []) => ({ id: minute
   conclusion: 'success', labels, steps, started_at: '2026-11-02T00:00:00Z',
   completed_at: new Date(Date.parse('2026-11-02T00:00:00Z') + minutes * 60000).toISOString() });
 
-test('a run whose group base never reached main counts as invalidated waste', () => {
+// Removal i hours and 30 minutes after 2026-11-02T00:00Z, the start of run i.
+const removedAfter = (run, reason) => ({ createdAt: new Date(Date.parse('2026-11-02T00:30:00Z') + run * 3600000).toISOString(), reason });
+
+test('the failure rate counts neither invalidated runs nor runs removed for another cause', () => {
+  const raw = { repo: 'o/r', from: '2026-11-02T00:00:00Z', to: '2026-11-03T00:00:00Z', pushes: [], merges: [], queueJobs: {},
+    queueRuns: [
+      queueRun(1, 'failure', SHA('c1'), 10, 10), queueRun(2, 'success', SHA('c2'), 10, 10),
+      queueRun(3, 'failure', SHA('c1'), 10, 11), queueRun(4, 'failure', SHA('c1'), 10, 12), queueRun(5, 'cancelled', SHA('c1'), 10, 13),
+      queueRun(6, 'failure', SHA('c1'), 10, 14), queueRun(7, 'success', SHA('c3'), 10, 14), queueRun(8, 'success', SHA('c1'), 10, 15),
+    ],
+    removals: {
+      10: [removedAfter(2, 'merged')], 11: [removedAfter(3, 'failed_checks')], 12: [removedAfter(4, 'manual')],
+      13: [removedAfter(5, 'failed_checks')], 14: [removedAfter(6, 'failed_checks'), removedAfter(7, 'merged')],
+      15: [removedAfter(8, 'merge_conflict')],
+    } };
+  const { queue, verdicts } = computeMetrics(raw);
+  assert.equal(verdicts.failureRate.value, 3 / 5);
+  assert.equal(queue.completed, 8);
+  assert.equal(queue.counted, 5);
+  assert.equal(queue.failed, 3);
+  assert.equal(queue.invalidated.runs, 1);
+  assert.equal(queue.removed, 2);
+});
+
+test('a run rebuilt on another base counts as invalidated waste', () => {
   const ahead = SHA('b1');
   const raw = { repo: 'o/r', from: '2026-11-02T00:00:00Z', to: '2026-11-09T00:00:00Z', pushes: [],
-    queueRuns: [queueRun(1, 'failure', SHA('c1')), queueRun(2, 'success', ahead), queueRun(3, 'success', SHA('c1')),
+    queueRuns: [queueRun(1, 'failure', SHA('c1')), queueRun(2, 'success', ahead), queueRun(3, 'success', SHA('c1'), 10, 2),
       { ...queueRun(4, null, SHA('c1')), status: 'in_progress' }],
     queueJobs: { 1: [jobFor(100)], 2: [jobFor(90, ['ubicloud-standard-2'])], 3: [jobFor(80, ['ubuntu-24.04'], [{ name: REUSE_STEP, conclusion: 'success' }])] },
-    onMain: { [SHA('c1')]: true, [ahead]: false },
+    removals: {},
     merges: [{ number: 3, mergedAt: '2026-11-02T04:00:00Z', enqueuedAt: ['2026-11-02T01:00:00Z', '2026-11-02T03:30:00Z', '2026-11-02T05:00:00Z'] },
       { number: 9, mergedAt: '2026-11-03T00:00:00Z', enqueuedAt: [] }] };
   const metrics = computeMetrics(raw);
@@ -212,13 +235,13 @@ test('a run whose group base never reached main counts as invalidated waste', ()
   assert.equal(metrics.merges.total, 1);
   assert.equal(metrics.merges.enqueueP50, 30);
   assert.equal(metrics.merges.perDay['2026-11-08'], 0);
-  assert.deepEqual(metrics.verdicts.failureRate, { value: 1 / 3, limit: 0.3, verdict: 'above limit: roll back' });
+  assert.deepEqual(metrics.verdicts.failureRate, { value: 1 / 2, limit: 0.3, verdict: 'above limit: roll back' });
   assert.deepEqual(metrics.verdicts.runnerMinutesPerMerge, { value: 270, limit: 179, verdict: 'above limit: roll back' });
 });
 
 test('no merges and no runs print n/a and no verdict', () => {
   const metrics = computeMetrics({ repo: 'o/r', from: '2026-11-02T00:00:00Z', to: '2026-11-09T00:00:00Z',
-    queueRuns: [], queueJobs: {}, pushes: [], onMain: {}, merges: [] });
+    queueRuns: [], queueJobs: {}, pushes: [], removals: {}, merges: [] });
   assert.equal(metrics.verdicts.failureRate.verdict, 'no data');
   assert.equal(metrics.verdicts.runnerMinutesPerMerge.verdict, 'no data');
 });
@@ -242,15 +265,15 @@ test('a main push counts as a fallback only when Typecheck ran', () => {
     jobs: [{ name: PROOF_JOB, conclusion: proof, completed_at: '2026-11-02T01:00:00Z' }, { name: FALLBACK_JOB, conclusion: typecheck }],
     evidence: { queueRun: null, queueJobs: [] } });
   const metrics = computeMetrics({ repo: 'o/r', from: '2026-11-02T00:00:00Z', to: '2026-11-03T00:00:00Z', queueRuns: [], queueJobs: {},
-    onMain: {}, merges: [], pushes: [push(1, 'cancelled', 'skipped'), push(2, 'success', 'skipped'), push(3, 'failure', 'success'),
+    removals: {}, merges: [], pushes: [push(1, 'cancelled', 'skipped'), push(2, 'success', 'skipped'), push(3, 'failure', 'success'),
       push(4, 'success', 'failure')] });
   assert.deepEqual(metrics.mainPush, { pushes: 4, fallbacks: 2, reasons: { 'proof-job-failure': 1, 'no-exact-queue-run': 1 }, unexplained: [] });
 });
 
-test('group refs name their base', () => {
-  assert.equal(groupBase(`gh-readonly-queue/main/pr-12-${SHA(5)}`), SHA(5));
-  assert.equal(groupBase('gh-readonly-queue/main/pr-12-short'), undefined);
-  assert.equal(groupBase(undefined), undefined);
+test('group refs name their PR and base', () => {
+  assert.deepEqual(groupRef(`gh-readonly-queue/main/pr-12-${SHA(5)}`), { pr: 12, base: SHA(5) });
+  assert.equal(groupRef('gh-readonly-queue/main/pr-12-short'), undefined);
+  assert.equal(groupRef(undefined), undefined);
 });
 
 test('ci.yml still has the jobs and step the metrics read', () => {

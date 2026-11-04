@@ -3286,17 +3286,69 @@
     ]
    }
   },
-  "[\"api\",\"repos/hearsay-tools/cezarion/compare/c27213073e7115cc1d1d53681ca6dbdd51926e25...main\",\"--jq\",\".status\"]": {
-   "text": "ahead\n"
-  },
-  "[\"api\",\"repos/hearsay-tools/cezarion/compare/05a1ee28989378319a0f982b7696b276858c89b4...main\",\"--jq\",\".status\"]": {
-   "text": "ahead\n"
-  },
-  "[\"api\",\"repos/hearsay-tools/cezarion/compare/284db7fd65ca98d499476065dcc66d2b242c8fc5...main\",\"--jq\",\".status\"]": {
-   "text": "ahead\n"
-  },
-  "[\"api\",\"repos/hearsay-tools/cezarion/compare/7fac3b06b7a07d76f2897ecf530e09e17cf0e759...main\",\"--jq\",\".status\"]": {
-   "text": "ahead\n"
+  "[\"api\",\"graphql\",\"-f\",\"query=query($owner: String!, $name: String!, $since: DateTime!) {\\n  repository(owner: $owner, name: $name) {\\n    pr2407: pullRequest(number: 2407) {\\n      timelineItems(first: 100, since: $since, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {\\n        pageInfo { hasNextPage } nodes { ... on RemovedFromMergeQueueEvent { createdAt reason } } } }\\n    pr2409: pullRequest(number: 2409) {\\n      timelineItems(first: 100, since: $since, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {\\n        pageInfo { hasNextPage } nodes { ... on RemovedFromMergeQueueEvent { createdAt reason } } } }\\n    pr2411: pullRequest(number: 2411) {\\n      timelineItems(first: 100, since: $since, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {\\n        pageInfo { hasNextPage } nodes { ... on RemovedFromMergeQueueEvent { createdAt reason } } } }\\n    pr2414: pullRequest(number: 2414) {\\n      timelineItems(first: 100, since: $since, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {\\n        pageInfo { hasNextPage } nodes { ... on RemovedFromMergeQueueEvent { createdAt reason } } } }\\n  }\\n}\",\"-f\",\"owner=hearsay-tools\",\"-f\",\"name=cezarion\",\"-f\",\"since=2026-11-01T16:00:00Z\"]": {
+   "json": {
+    "data": {
+     "repository": {
+      "pr2407": {
+       "timelineItems": {
+        "pageInfo": {
+         "hasNextPage": false
+        },
+        "nodes": [
+         {
+          "createdAt": "2026-11-01T16:25:37Z",
+          "reason": "merged"
+         }
+        ]
+       }
+      },
+      "pr2409": {
+       "timelineItems": {
+        "pageInfo": {
+         "hasNextPage": false
+        },
+        "nodes": [
+         {
+          "createdAt": "2026-11-01T16:12:36Z",
+          "reason": "merged"
+         }
+        ]
+       }
+      },
+      "pr2411": {
+       "timelineItems": {
+        "pageInfo": {
+         "hasNextPage": false
+        },
+        "nodes": [
+         {
+          "createdAt": "2026-11-01T16:38:05Z",
+          "reason": "failed_checks"
+         },
+         {
+          "createdAt": "2026-11-01T17:57:43Z",
+          "reason": "merged"
+         }
+        ]
+       }
+      },
+      "pr2414": {
+       "timelineItems": {
+        "pageInfo": {
+         "hasNextPage": false
+        },
+        "nodes": [
+         {
+          "createdAt": "2026-11-01T20:45:20Z",
+          "reason": "merged"
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
   }
  }
 }
