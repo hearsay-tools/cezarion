@@ -103,7 +103,6 @@ export class ContinuationAcceptance {
     try {
       job = current.delegation?.role === 'worker'
         // A projection of the job the line will start, not a status write.
-        // ast-grep-ignore: run-status-write-outside-transition
         ? this.host.ownedJob({ ...current, status: 'queued' })
         : { workflow: current.workflowDef!, input: queuedRecoveryInput(current) };
       this.workerExecutions.beginWorkerExecution(runId, false);

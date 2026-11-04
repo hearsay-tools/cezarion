@@ -2694,7 +2694,7 @@ export class RunStore extends EventEmitter {
   /** A write that is not a run exit. It commits at once when it changes handoff records or a
    *  completion option, else the next save writes it. A status in the patch, which only test
    *  fixtures still write, takes the exit's record rule (`doneCommits`). */
-  updateRun(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>): RunRecord | undefined {
+  updateRun(id: string, patch: RunPatch): RunRecord | undefined {
     const run = this.record(id);
     if (!run) return undefined;
     const committed = (patch.status === 'done' && doneCommits(run)) || patch.handoffRecords !== undefined ||
