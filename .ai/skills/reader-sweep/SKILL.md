@@ -14,18 +14,6 @@ names, intentional refusal tests, legacy-row conversion tests and historical ref
 stay. The general construction-site rule in the [load-bearing-change skill](../load-bearing-change/SKILL.md) covers shared in-memory objects, and
 the Task routing rows for run search, pending asks and skills list their readers.
 
-Where readers hide, searched from the repo root (replace the example values):
-
-<!-- until: hearsay-tools/cezarion#2513 -->
-- **An enum or discriminant value renamed** (a wait kind, outcome, status or attention
-  label): the quoted old value in tests, searched before each push that renames one; the
-  `test-enum-literal` baseline lists tests still on literals. A rejection test that
-  passes only because the old value is now unknown must test its constraint.
-
-  ```bash
-  rg -n -F -e 'delegation.wait' -e "'ci'" packages --glob '*.test.*' --glob '*.e2e.ts'
-  ```
-
 Run `npm run test:e2e:affected` for the browser specs a change reaches
 ([the e2e README](../../../packages/web/e2e/README.md#choosing-specs-for-a-change)).
 A change to the dry-run mocks, the turn-end rule, attention or the human-ask summary also
