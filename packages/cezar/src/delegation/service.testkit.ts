@@ -7,6 +7,7 @@ import {
 } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { openTestRunStore } from '../runs/run-store.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
+import { defaultWorkspaceConfig } from '../workspace/config.ts';
 import { createFixtureManager, drainFixtureManagers, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -109,7 +110,7 @@ export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha
   const sha = copyServiceRepository(root);
   const store = openTestRunStore(join(root, '.ai/cezar'), { keepLive: true });
   // Scheduler admission is held so acceptance is durable before execution starts.
-  const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 1, memoryLimitMb: 0 }) });
+  const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => defaultWorkspaceConfig().resources });
   const manager = createFixtureManager(store, root, { semaphore });
   const admissionReads = vi.spyOn(semaphore, 'maxParallel');
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', runner: 'claude', model: 'opus', effort: 'high', steps: [] });
