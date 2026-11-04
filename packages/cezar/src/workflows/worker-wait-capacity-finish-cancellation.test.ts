@@ -1,9 +1,9 @@
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
+import * as gitWorktree from '../git-worktree.ts';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { type RunRecord } from '../runs/store.ts';
-import { manager, parent, restart, root, store, until } from './worker-wait.testkit.ts';
+import { manager, parent, restart, root, store, until, work } from './worker-wait.testkit.ts';
 import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { useWorkerCapacityFixture } from './worker-wait-capacity.testkit.ts';
 
@@ -12,15 +12,19 @@ describe("worker waits through RunManager", { timeout: 30_000 }, () => {
 
 it.each(['delayed diff', 'failed diff'])('cancellation retires pending Finish after %s and preserves human Continue across restart', async mode => {
     const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
-    const settle = runInternals(manager).runSettlement.settleSuccess.bind(runInternals(manager).runSettlement);
+    const diff = gitWorktree.worktreeDiff;
     let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
-    let completion: Promise<void> | undefined;
-    runInternals(manager).runSettlement.settleSuccess = (id, durable) => completion = (mode === 'delayed diff' ? gate : Promise.resolve()).then(() => settle(id, durable));
+    const delayedDiff = vi.spyOn(gitWorktree, 'worktreeDiff').mockImplementation(async (...args) => {
+      if (mode === 'delayed diff') await gate;
+      return diff(...args);
+    });
+    let completion: Promise<unknown> | undefined;
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       if (mode === 'failed diff') store.updateRun(p.id, { baseBranch: 'nonexistent-ref' });
       expect(manager.finish(p.id)).toBe(true);
-      expect(completion).toBeInstanceOf(Promise);
+      expect(delayedDiff).toHaveBeenCalled();
+      completion = Promise.allSettled([...work.pending.keys()]);
       if (mode === 'failed diff') await until(() => warn.mock.calls.length > 0);
       expect(manager.cancel(p.id)).toBe(true);
       // Read disk without flush: cancellation and retirement are one durable checkpoint.
@@ -34,7 +38,7 @@ it.each(['delayed diff', 'failed diff'])('cancellation retires pending Finish af
       await restart();
       expect(manager.continueRun(p.id, { text: 'actual human answer mock:hold' }).ok).toBe(true);
       await until(() => store.getRun(p.id)?.status === 'waiting');
-    } finally { release(); await completion?.catch(() => {}); warn.mockRestore(); }
+    } finally { release(); await completion?.catch(() => {}); warn.mockRestore(); delayedDiff.mockRestore(); }
   });
 
 it('restart durably reconciles cancelled roots with superseded Finish intent', async () => {
