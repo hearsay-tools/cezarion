@@ -126,7 +126,7 @@ exit settles takes `finishedAt ??=` the run's settled time.
 | succeed-root, succeed-root-review | waiting → done, review | 1 (`settleSuccessWork`) | as succeed, in one commit | root with a pending Finish intent; else no write, returns false | C by exit |
 | accept-review | review → done | 1 | Settled (B6) | none | D by exit; C by record |
 | draft-pr | review, done, failed, cancelled → done | 1 | Settled (B6); `pullRequestUrl` is the route's extra. The route refuses a usage-limit hold (B13) | none | D by exit; C by record |
-| fail-start | queued, running → failed | 7 | Settled; `error` is the caller's; live steps failed, each keeping its own error, else the run's; an owned worker keeps a waiting step (B11) | none | D |
+| fail-start | queued, running → failed | 7 | Settled; `error` is the caller's; running steps failed, each keeping its own error, else the run's; a waiting step stays waiting, as the cursor a Continue resumes (B11) | none | D |
 | fail | running, waiting → failed | 4 | as fail-start | none | D |
 | fail-continue | running, waiting, cancelled → failed | 1 | as fail | none | D |
 | fail-interrupted | queued, running, waiting → failed | 1 + `live.read-only` | as fail-start, with a fixed `error` | none | D |
@@ -213,8 +213,8 @@ S7 commits one row (or row group) at a time, each with a regression test that fa
 | B7 | The usage-limit Continue writes `continue-line` once | The second write repeats the first | done |
 | B8 | `park` settles the current step to waiting in the same write | As B5 | done, `park-release` too |
 | B9 | Kept; recorded only. The follow-up `flush()` stays until S6 gives each exit its durability | S6 decides it | no change |
-| B10 | Every exit to cancelled settles running and waiting steps to cancelled, with `finishedAt ??= now` | A cancelled run has no live step. The load-time repair (hearsay-tools/cezarion#2590) reuses this rule | done |
-| B11 | Every exit to failed settles open steps to failed for a root run; an owned worker keeps its re-entry step `waiting` (hearsay-tools/cezarion#1620) | A failed root has no live step; a parent resume re-enters the worker's step | done |
+| B10 | Every exit to cancelled settles running and waiting steps to cancelled, with `finishedAt ??= now` | A cancelled run has no live step. The load-time repair (hearsay-tools/cezarion#2590) reuses this rule | done. Kept as written in S7 review: a Stop also cancels a waiting step, so a Continue after a Stop runs no remaining workflow step, as the live-session Stop already did before S7 |
+| B11 | Every exit to failed settles running steps to failed. A waiting step stays `waiting`, for a root and an owned worker alike (decided in S7: the first text failed a root's waiting step too) | A failed run has no live step. A waiting step is the cursor a Continue resumes: a root's earlier workflow step (`settleIncompleteStep`), so a failed Continue does not lose the workflow's remaining steps, and an owned worker's re-entry step (hearsay-tools/cezarion#1620) | done |
 | B12 | The cancel exits write the `run cancelled` event once, at every site | The web header (hearsay-tools/cezarion#2589) and the timeline read one event for one cancellation | done: the exit writes it when it moves a run into cancelled; a queued run's Stop keeps its text `cancelled while queued` |
 | B13 | S7 decides whether the Draft PR route refuses a usage-limit hold, or `draft-pr` declares it | Until then the raw route records a violation; the cockpit offers no Draft PR on a hold | done: the route refuses a hold with 409 before any write; `draft-pr` keeps its `from` (owner review) |
 

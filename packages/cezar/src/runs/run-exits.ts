@@ -116,12 +116,12 @@ const succeededStep = (step: StepState, _run: ExitRead, { finishedAt, stepId }: 
 const cancelledStep = (step: StepState, _run: ExitRead, { finishedAt }: StepSettlement): StepState =>
   openStep(step) ? { ...step, status: 'cancelled', finishedAt: step.finishedAt ?? finishedAt } : step;
 
-/** A failed root has no live step (B11): its running and waiting steps fail at the run's time,
- *  each keeping an error of its own, else taking the run's. An owned worker keeps a waiting step:
- *  a parent resume re-enters it (hearsay-tools/cezarion#1620). */
-const failedStep = (step: StepState, run: ExitRead, { finishedAt, error }: StepSettlement): StepState =>
-  step.status === 'running' || (step.status === 'waiting' && run.delegation?.role !== 'worker')
-    ? { ...step, status: 'failed', finishedAt: step.finishedAt ?? finishedAt, error: step.error ?? error } : step;
+/** A failed run has no live step (B11): its running steps fail at the run's time, each keeping an
+ *  error of its own, else taking the run's. A waiting step stays waiting: it is the cursor a
+ *  Continue resumes, a root's (`settleIncompleteStep`) and an owned worker's alike
+ *  (hearsay-tools/cezarion#1620). */
+const failedStep = (step: StepState, _run: ExitRead, { finishedAt, error }: StepSettlement): StepState =>
+  step.status === 'running' ? { ...step, status: 'failed', finishedAt: step.finishedAt ?? finishedAt, error: step.error ?? error } : step;
 
 /** A park settles its step waiting in the same write (B8): the step the caller names, else the
  *  run's current step. A step that already ended (a failed attempt a park keeps for its wakes)

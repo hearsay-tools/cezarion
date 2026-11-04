@@ -95,14 +95,7 @@ function engine() {
 // The delivery bound, not the backoff, is what these cells pin: retries start at once.
 const retryAtOnce = () => { runInternals(manager).retries.wakeRetryBackoff = { fastMs: 0, fastCount: MAX_WAKE_DELIVERY_ATTEMPTS, capMs: 0 }; };
 const stepStatus = (id: string, stepId: string) => store.getRun(id)?.steps.find(step => step.id === stepId)?.status;
-/** The delivery attempts that failed: each fails its own step with its own error. The run's exit to
- *  failed then fails every step still open with the run's error (Table B11,
- *  .ai/specs/2026-11-03-run-store-owns-exits.md), which is not an attempt. */
-const failedSteps = (id: string) => {
-  const run = store.getRun(id);
-  return run?.steps.filter(step => step.status === 'failed' && step.error !== run.error).length;
-};
-const openSteps = (id: string) => store.getRun(id)?.steps.filter(step => step.status === 'running' || step.status === 'waiting').length;
+const failedSteps = (id: string) => store.getRun(id)?.steps.filter(step => step.status === 'failed').length;
 
 /** The run settled `failed` at the delivery bound and still holds the result: resolved, its input
  *  undelivered, with the cap note, the last error, and no automatic wake left. */
@@ -115,7 +108,6 @@ function expectHeldAtTheBound(id: string, waitId: string, { error = /^continue f
   expect(inputsFor(id, waitId).map(input => input.deliveredAt)).toEqual([undefined]);
   expect(store.readEvents(id).filter(event => event.type === 'note' && event.message === WAKE_DELIVERY_CAP_NOTE)).toHaveLength(1);
   expect(failedSteps(id)).toBe(failed);
-  expect(openSteps(id)).toBe(0);
   expect(manager.isActive(id)).toBe(false);
   expect(runInternals(manager).retries.wakeBackoffs.has(id)).toBe(false);
 }

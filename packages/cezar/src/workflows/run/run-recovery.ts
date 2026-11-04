@@ -386,7 +386,7 @@ export class RunRecovery {
     // continueRun expects), then pick the work back up from the last session.
     const run = this.host.checkpointRestartContext(found);
     const interruptedStepId = run.currentStepId;
-    // The exit fails its open steps with the interrupted error (B11).
+    // The exit fails its running steps with the interrupted error and keeps a waiting one (B11).
     this.host.move(run.id, 'fail-interrupted');
     if (this.host.requeueInterruptedRun(run, interruptedStepId)) return;
     const resumed = this.host.continueRun(
