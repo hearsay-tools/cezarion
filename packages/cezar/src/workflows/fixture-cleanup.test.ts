@@ -21,7 +21,7 @@ import { RunStore } from '../runs/store.ts';
 import * as git from '../git-worktree.ts';
 import * as retention from '../runs/retention.ts';
 import * as workflows from './load.ts';
-import { createFixtureManager, removeFixtureRepo, fixtureWorkSettled, fixtureWork, managerDisposed } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, removeFixtureRepo, fixtureWorkSettled, unused, fixtureWork, managerDisposed } from './fixture-cleanup.testkit.ts';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -211,16 +211,6 @@ it('records disposal and shares owned work across restart', () => {
 /** These are module contracts: no public manager call invokes just one owned wrapper. */
 function moduleContext(root: string, store: RunStore, manager: RunManager, work: TrackedWork): RunModuleContext {
   return { repoRoot: root, dataDir: join(root, '.ai/cezar'), store, semaphore: new WorkspaceSemaphore(), work, disposed: () => managerDisposed(manager) };
-}
-
-/** Unused collaborators fail at the first accidental access, including after constructor changes. */
-function unused<T extends object>(name: string, used: Partial<T> = {}): T {
-  return new Proxy(used as T, {
-    get(target, key, receiver) {
-      if (Reflect.has(target, key)) return Reflect.get(target, key, receiver);
-      throw new Error(`unused collaborator ${name}.${String(key)}`);
-    },
-  });
 }
 
 function settlementModule(context: RunModuleContext): RunSettlement {

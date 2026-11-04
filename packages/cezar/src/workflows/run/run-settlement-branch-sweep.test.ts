@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
 import { RunStore } from '../../runs/store.ts';
-import { createFixtureManager, removeFixtureRepo } from '../fixture-cleanup.testkit.ts';
+import { createFixtureManager, removeFixtureRepo, unused } from '../fixture-cleanup.testkit.ts';
 import { RunSettlement } from './run-settlement.ts';
 import { TrackedWork } from './tracked-work.ts';
 import { WorkspaceSemaphore } from '../../workspace/semaphore.ts';
@@ -35,8 +35,10 @@ function settlement(root: string, store: RunStore, sweepBranches?: (keep: number
   const semaphore = new WorkspaceSemaphore();
   createFixtureManager(store, root, { work, semaphore });
   const context = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work, semaphore, disposed: () => false, sweepBranches };
-  const host = { claimWorktreeReclaim: () => null } as unknown as ConstructorParameters<typeof RunSettlement>[9];
-  return new RunSettlement(context, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, undefined!, host, '', '');
+  const host = unused<ConstructorParameters<typeof RunSettlement>[9]>('RunSettlement.host', { claimWorktreeReclaim: () => null, preview: undefined });
+  return new RunSettlement(context, unused('HumanWaits'), unused('WorkerQuestions'), unused('WorktreeAutosave'),
+    unused('TurnBookkeeper'), unused('RunLine'), unused('AutoResumeScheduler'), unused('WorkerExecutions'),
+    unused('CompletionGateHost'), host, '', '');
 }
 
 it.each([3, 0])('hands the sweep the keep-count %i after each retention pass', async (keep) => {
