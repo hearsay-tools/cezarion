@@ -1,66 +1,86 @@
-import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { handleRunnerUiEvent, makeUiSink } from './run/session-events.ts';
-import { runInternals } from './run-internals.testkit.ts';
-import type { ActiveRun } from './active-run.ts';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentSession } from '../core/agent-runner.ts';
+import { runnerHook, setupMonitoringFixture, waitForProduct } from './run-fixture.testkit.ts';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AgentEvent, AgentRunResult, AgentSession } from '../core/agent-runner.ts';
+import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import type { UiEvent } from '../core/ui-events.ts';
-import { RunStore } from '../runs/store.ts';
-import { RunManager } from './run.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
+import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 
-type State = ActiveRun;
 describe('human permission lifecycle', () => {
-  let root: string, store: RunStore, manager: RunManager, id: string, state: State, session: AgentSession;
-  const emit = (event: UiEvent) => handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, id, state, makeUiSink(runInternals(manager).context, runInternals(manager).sessionHelperHost, id, 'task'), event);
+  const f = setupMonitoringFixture();
+  let id: string;
+  let session: AgentSession;
+  let open: boolean;
+  let emit: (event: UiEvent) => void;
+  let agentEvent: (event: AgentEvent) => void;
+  let semaphore: WorkspaceSemaphore;
   const request = (requestId: string) => emit({ type: 'permission.requested', requestId, title: 'Run command', options: [{ id: 'deny', label: 'Decline', kind: 'reject_once' }] });
+
   beforeEach(async () => {
-    root = mkdtempSync(join(tmpdir(), 'cez-permission-'));
-    store = RunStore.open(join(root, '.ai/cezar'));
-    id = store.createRun({ title: 'Permission', task: 'work', workflow: 'quick-task', steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] }).id;
-    await store.factsWarmIdle();
-    store.updateRun(id, { status: RUN_STATUS.running });
-    manager = new RunManager(store, root);
-    session = { open: true, result: new Promise(() => {}), sendMessage: vi.fn(() => true), sendAgentMessage: vi.fn(() => Promise.resolve()),
-      respondPermission: vi.fn((requestId, optionId) => {
-        if (optionId !== 'deny') return false;
-        emit({ type: 'permission.resolved', requestId, optionId }); return true;
-      }), end: vi.fn(), interrupt: vi.fn(), discardQueuedMessages: vi.fn(), holdsHumanInput: () => false };
-    state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, backgroundChildren: new Map(), autonomous: true, session, currentStepId: 'task' };
-    manager['activate'](id, state);
+    session = undefined!;
+    open = true;
+    f.manager.dispose();
+    semaphore = new WorkspaceSemaphore();
+    f.manager = createFixtureManager(f.store, f.repoRoot, { semaphore });
+    runnerHook.runner = {
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
+      run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => {},
+      startSession(_spec, onEvent, options) {
+        let finish!: (result: AgentRunResult) => void;
+        const result = new Promise<AgentRunResult>(resolve => { finish = resolve; });
+        emit = event => options?.onUiEvent?.(event);
+        agentEvent = event => onEvent?.(event);
+        const close = () => { open = false; finish({ text: '', toolCalls: [], tokensUsed: 0 }); };
+        session = { get open() { return open; }, result, sendMessage: vi.fn(() => true), sendAgentMessage: vi.fn(async () => {}),
+          respondPermission: vi.fn((requestId, optionId) => {
+            if (optionId !== 'deny') return false;
+            emit({ type: 'permission.resolved', requestId, optionId }); return true;
+          }), end: close, interrupt: close, discardQueuedMessages: vi.fn(), holdsHumanInput: () => false };
+        queueMicrotask(() => agentEvent({ type: 'session', sessionId: 'permission-session' }));
+        return session;
+      },
+    };
+    const record = f.manager.startRun(f.SINGLE_STEP, { task: 'work', autonomous: true, runner: 'claude', worktree: false });
+    id = record.id;
+    f.currentId = id;
+    await waitForProduct(f.manager, f.store, () => {
+      const current = f.store.getRun(id);
+      if (current?.status === 'failed') throw new Error(current.error);
+      if (!session && current?.status !== 'queued' && current?.status !== 'running') throw new Error(`Unexpected startup status: ${current?.status}`);
+      return !!session;
+    });
   });
-  afterEach(() => { manager.dispose(); store.close(); rmSync(root, { recursive: true, force: true }); });
 
   it('parks concurrent requests until their exact IDs resolve and blocks all ordinary input', () => {
     request('a'); request('b');
-    expect(store.getRun(id)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
-    expect(runInternals(manager).line.busySlots()).toBe(0);
-    expect(manager.sendMessage(id, [{ type: 'text', text: 'accept' }])).toBe(false);
-    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task')).toBe(false);
+    expect(f.store.getRun(id)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
+    expect(semaphore.busy()).toBe(0);
+    expect(f.manager.sendMessage(id, [{ type: 'text', text: 'accept' }])).toBe(false);
+    agentEvent({ type: 'turn-end' });
     expect(session.sendMessage).not.toHaveBeenCalled();
     expect(session.sendAgentMessage).not.toHaveBeenCalled();
-    expect(store.readEvents(id).some(event => event.type === 'user-message')).toBe(false);
-    expect(manager.respondPermission(id, 'a', 'invalid')).toBe(false);
-    expect(manager.respondPermission(id, 'unknown', 'deny')).toBe(false);
-    expect(manager.respondPermission(id, 'a', 'deny')).toBe(true);
-    expect(store.getRun(id)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
-    expect(manager.respondPermission(id, 'a', 'deny')).toBe(false);
-    expect(manager.respondPermission(id, 'b', 'deny')).toBe(true);
-    expect(store.getRun(id)).toMatchObject({ status: RUN_STATUS.running, hasPendingPermission: false });
-    expect(runInternals(manager).line.busySlots()).toBe(1);
+    expect(f.store.readEvents(id).some(event => event.type === 'user-message')).toBe(false);
+    expect(f.manager.respondPermission(id, 'a', 'invalid')).toBe(false);
+    expect(f.manager.respondPermission(id, 'unknown', 'deny')).toBe(false);
+    expect(f.manager.respondPermission(id, 'a', 'deny')).toBe(true);
+    expect(f.store.getRun(id)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
+    expect(f.manager.respondPermission(id, 'a', 'deny')).toBe(false);
+    expect(f.manager.respondPermission(id, 'b', 'deny')).toBe(true);
+    expect(f.store.getRun(id)).toMatchObject({ status: RUN_STATUS.running, hasPendingPermission: false });
+    expect(semaphore.busy()).toBe(1);
   });
 
-  it.each(['cancelled', 'stopping', 'closed'] as const)('%s refuses decisions and teardown clears attention', reason => {
+  it.each(['cancelled', 'stopping', 'closed'] as const)('%s refuses decisions and teardown clears attention', async reason => {
     request('a');
-    if (reason === 'cancelled') state.cancelled = true;
-    if (reason === 'stopping') store.updateRun(id, { stopping: true });
-    if (reason === 'closed') state.session = { ...session, open: false };
-    expect(manager.respondPermission(id, 'a', 'deny')).toBe(false);
+    if (reason === 'cancelled') f.manager.cancel(id);
+    if (reason === 'stopping') f.store.updateRun(id, { stopping: true });
+    if (reason === 'closed') open = false;
+    expect(f.manager.respondPermission(id, 'a', 'deny')).toBe(false);
     expect(session.respondPermission).not.toHaveBeenCalled();
-    manager['dropActive'](id);
-    expect(store.getRun(id)?.hasPendingPermission).toBe(false);
-    expect(manager.respondPermission(id, 'a', 'deny')).toBe(false);
+    f.manager.cancel(id);
+    await waitForProduct(f.manager, f.store, () => !f.manager.isActive(id));
+    expect(f.store.getRun(id)?.hasPendingPermission).toBe(false);
+    expect(f.manager.respondPermission(id, 'a', 'deny')).toBe(false);
   });
 });

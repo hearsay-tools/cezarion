@@ -1,9 +1,16 @@
-import { runInternals } from './run-internals.testkit.ts';
+import { runnerHook } from './run-fixture.testkit.ts';
+import { completionRefusal, type CompletionGateHost } from './run/completion-gate.ts';
+import { TrackedWork } from './run/tracked-work.ts';
+import type { RunModuleContext } from './run/types.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
+import { join } from 'node:path';
+import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
+import type { AgentSession, AgentRunResult } from '../core/agent-runner.ts';
 import { RUN_STATUS, STEP_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cezarDoneAnswerSchema } from '@open-mercato/cezar-contract/waits';
-import { manager, parent, restart, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, parent, restart, root, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { toolCall } from './waits-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
@@ -19,24 +26,52 @@ function obligation(senderRunId: string, recipientRunId: string, kind: 'request'
   return { id: randomUUID(), senderRunId, recipientRunId, kind, relationship: 'peer' as const, text: 'Check',
     createdAt: new Date().toISOString(), deadline: new Date(Date.now() + 600_000).toISOString(), state: 'accepted' as const, requestHash: 'a'.repeat(64) };
 }
-function gate() {
-  return runInternals(manager).runFinish;
+function completionRefusalFor(id: string) {
+  const context: RunModuleContext = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
+    work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => false };
+  const host: CompletionGateHost = { active: new Map(), pendingHumanAskSeq: () => undefined,
+    unansweredQuestions: () => [], parentCompletionBlockers: () => [], isActive: key => manager.isActive(key),
+    holdsAgentWaits: () => false, waitingBeforeFinalWorkflowStep: () => false };
+  return completionRefusal(context, host, id);
+}
+
+async function closingRoot() {
+  let close!: () => void;
+  runnerHook.runner = { backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
+    run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => {},
+    startSession(_spec, onEvent) {
+      let open = true;
+      let finish!: (result: AgentRunResult) => void;
+      const result = new Promise<AgentRunResult>(resolve => { finish = resolve; });
+      const end = () => { open = false; finish({ text: '', toolCalls: [], tokensUsed: 0 }); };
+      close = end;
+      const session: AgentSession = { get open() { return open; }, result, end, interrupt: end,
+        sendMessage: () => true, sendAgentMessage: async () => {}, discardQueuedMessages: () => {}, holdsHumanInput: () => false };
+      queueMicrotask(() => onEvent?.({ type: 'session', sessionId: 'closed-root' }));
+      return session;
+    },
+  };
+  const run = await parent('work');
+  return { run, close };
 }
 
 describe('root request completion without a live session', () => {
   useWorkerWaitFixture();
+  afterEach(() => { runnerHook.runner = undefined; });
   it.each(['cancelled', 'progress'] as const)('%s creates no completion obligation', kind => {
     const sender = rootTask(); const recipient = rootTask();
     const message = obligation(sender.id, recipient.id, kind === 'progress' ? 'progress' : 'request');
     store.commitConversation(sender.id, { messages: [message], outcomes: kind === 'cancelled'
       ? [{ requestId: message.id, status: RUN_STATUS.cancelled, observedAt: new Date().toISOString() }] : [] });
-    expect(gate().completionRefusal(sender.id)).toBeUndefined();
+    expect(completionRefusalFor(sender.id)).toBeUndefined();
   });
-  it('queues a refusal naming the request when done reaches the gate without a session', () => {
-    const sender = rootTask(); const recipient = rootTask();
+  it('queues a refusal naming the request when done reaches the gate without a session', async () => {
+    const closing = await closingRoot();
+    const sender = closing.run; const recipient = rootTask();
     const request = obligation(sender.id, recipient.id);
     store.commitConversation(sender.id, { messages: [request], outcomes: [] });
-    expect(gate().completionGate(sender.id)).toBe('held');
+    closing.close();
+    await until(() => store.getRun(sender.id)?.agentInputs?.some(input => input.purpose === 'completion-refusal') === true);
     expect(store.getRun(sender.id)?.agentInputs).toEqual(expect.arrayContaining([expect.objectContaining({
       purpose: 'completion-refusal', text: expect.stringContaining(request.id),
     })]));
@@ -97,7 +132,9 @@ describe('root request completion without a live session', () => {
     const delegation = store.getRun(sender.id)!.delegation;
     if (delegation?.role !== 'root') throw Error('missing root');
     store.commitDelegation([{ id: sender.id, delegation: { ...delegation, finishRequestedAt: new Date().toISOString() } }]);
-    await gate().settleRequestedRootFinish(sender.id);
+    if (status === 'review') expect(manager.finish(sender.id)).toBe(true);
+    else await restart();
+    await until(() => store.getRun(sender.id)?.status === 'done');
     expect(store.getRun(sender.id)?.status).toBe('done');
     const finished = store.getRun(sender.id)?.delegation;
     expect(finished).not.toHaveProperty('finishRequestedAt');
@@ -110,8 +147,7 @@ describe('root request completion without a live session', () => {
     const delegation = store.getRun(run.id)!.delegation;
     if (delegation?.role !== 'root') throw Error('missing root');
     store.commitDelegation([{ id: run.id, delegation: { ...delegation, finishRequestedAt: new Date().toISOString() } }]);
-    (manager as unknown as { settleFailedRun(id: string, error: string, capped: boolean): void })
-      .settleFailedRun(run.id, 'provider failed', false);
+    store.move(run.id, 'fail', { error: 'provider failed' });
     expect(store.getRun(run.id)).toMatchObject({ status: RUN_STATUS.failed, error: 'provider failed' });
     expect(store.getRun(run.id)?.delegation).not.toHaveProperty('finishRequestedAt');
     expect(store.getRun(run.id)?.delegation).not.toHaveProperty('conversation');
@@ -133,7 +169,7 @@ describe('root request completion without a live session', () => {
     for (const [index, sender] of senders.entries()) store.commitConversation(sender.id, {
       messages: Array.from({ length: index === 0 ? 32 : 13 }, () => obligation(sender.id, recipient.id)), outcomes: [],
     });
-    const refusal = gate().completionRefusal(recipient.id)!;
+    const refusal = completionRefusalFor(recipient.id)!;
     expect(refusal.code).toBe('requests_unanswered');
     expect(refusal.message).toContain('5 more incoming requests omitted');
     expect(refusal.message).toContain('cez message conversation <sender>');
@@ -155,7 +191,7 @@ describe('root request completion without a live session', () => {
     const sender = rootTask(); const recipient = rootTask();
     const messages = Array.from({ length: 32 }, () => obligation(sender.id, recipient.id));
     store.commitConversation(sender.id, { messages, outcomes: [] });
-    const refusal = gate().completionRefusal(sender.id)!;
+    const refusal = completionRefusalFor(sender.id)!;
     for (const request of messages) {
       expect(refusal.message).toContain(request.id);
       expect(refusal.message).toContain(request.recipientRunId);
