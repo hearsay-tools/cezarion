@@ -113,4 +113,20 @@ describe('delivering a message to a worker reads no transcript (#880)', { timeou
     expect(liveManager.sendMessage(w.id, [{ type: 'text', text: 'a human answer' }])).toBe(false);
     expect(reads.counts).toEqual({ files: [], decompress: 0 });
   });
+
+  it('answers a question without a routing marker from the index without reading its transcript', async () => {
+    const { p } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
+    await until(() => liveStore.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id, 'mock:cezar-ask'); liveManager.enqueueOwnedRun(w.id);
+    await until(() => liveStore.readEvents(w.id).some((event) => event.type === 'worker-question-routed') && liveStore.getRun(w.id)?.status === 'waiting');
+    // A fresh ask checkpoint has no routing marker. answeredElsewhere must consult pendingAnswer,
+    // which calls routedAsk, before the public delivery can answer this question.
+    const ask = liveStore.appendEvent(w.id, { type: 'ask.requested', requestId: randomUUID(), questions });
+    expect(liveStore.transcriptFacts(w.id).pendingAsk?.routedMessageId).toBeUndefined();
+    const reads = countTranscriptReads((path) => path.includes(w.id));
+    expect(liveManager.sendMessage(w.id, [{ type: 'text', text: 'Pick: A' }])).toBe(true);
+    expect(reads.counts).toEqual({ files: [], decompress: 0 });
+    restoreTranscriptReads();
+    expect(liveStore.readEvents(w.id)).toContainEqual(expect.objectContaining({ type: 'human-input-delivered', askSeq: ask.seq }));
+  });
 });

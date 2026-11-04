@@ -1,5 +1,5 @@
 import { setRunStatus, openTestRunStore } from '../runs/run-store.testkit.ts';
-import * as launchContext from '../workflows/run/launch-context.ts';
+import * as agentAccounts from '../workspace/agent-accounts.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { workerDiffSchema, workerWaitResultSchema } from '@open-mercato/cezar-contract/delegation';
@@ -248,12 +248,12 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   it('revokes a finished workflow step before preparation of the next session', async () => {
     let entered = false; let release!: () => void;
     const gate = new Promise<void>(done => { release = done; });
-    const prepare = launchContext.agentEnvForStep; let count = 0;
-    vi.spyOn(launchContext, 'agentEnvForStep').mockImplementation(async (...args) => { if (++count === 2) { entered = true; await gate; } return prepare(...args); });
     const run = f.manager.startRun({ ...QUICK_TASK_WORKFLOW, steps: [{ id: 'one', prompt: '{{task}}' }, { id: 'two', prompt: '{{task}}' }] }, { task: 'parent', runner: 'claude', worktree: false });
     try {
       await until(() => sessions.length === 1);
       const token = delegationToken(sessions[0]!.spec);
+      const load = agentAccounts.loadAgentAccounts;
+      vi.spyOn(agentAccounts, 'loadAgentAccounts').mockImplementation(async () => { entered = true; await gate; return load(); });
       doneTurn(sessions[0]!, 'one'); await until(() => entered);
       expect(f.store.getRun(run.id)?.status).toBe('running');
       expect(controller.credentials.authenticate(token)).toBeUndefined();
