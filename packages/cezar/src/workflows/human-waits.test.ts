@@ -1,3 +1,4 @@
+import { fireCapturedTimer } from './waits.testkit.ts';
 import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
@@ -197,7 +198,7 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     await until(() => store.getRun(run.id)?.status === 'waiting' && store.getRun(run.id)?.waits?.some(wait => wait.kind === 'timer') === true);
     const timer = store.getRun(run.id)!.waits!.find(wait => wait.kind === 'timer')!;
     store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES });
-    runInternals(manager).waitWatches.waitTimers.get(timer.id)!.timer._onTimeout();
+    fireCapturedTimer(timer.id);
     await until(() => needsYou(run.id));
     expect(settled(run.id, timer.id)?.phase).toBe('cancelled');
     const [budget, ...more] = humanOpen(run.id);
@@ -237,7 +238,7 @@ describe('the lifecycle prompt teaches the cezar tools', { timeout: 45_000 }, ()
     expect(manager.sendMessage(run.id, [{ type: 'text', text: toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 120, note: 'recheck' }) }])).toBe(true);
     await until(() => store.getRun(run.id)?.status === 'waiting' && store.getRun(run.id)?.waits?.some(wait => wait.kind === 'timer') === true);
     const timer = store.getRun(run.id)!.waits!.find(wait => wait.kind === 'timer')!;
-    runInternals(manager).waitWatches.waitTimers.get(timer.id)!.timer._onTimeout();
+    fireCapturedTimer(timer.id);
     await until(() => store.getRun(run.id)?.agentInputs?.some(input => input.id === timer.id) === true);
     expect(store.getRun(run.id)!.agentInputs!.find(input => input.id === timer.id)!.text)
       .toBe(`Timer ${timer.id} fired: recheck. Continue toward the task goal; register another wait if you are still waiting.`);
