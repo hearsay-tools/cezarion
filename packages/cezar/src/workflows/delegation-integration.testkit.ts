@@ -1,14 +1,16 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { workerCollectedResultSchema, workerInspectionSchema } from '@open-mercato/cezar-contract/delegation';
 import { createFixtureManager, fixtureWorkSettled, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { execFile as execFileCallback, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { build, transform } from 'esbuild';
 import { promisify } from 'node:util';
-import { onTestFinished, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { onTestFinished, afterAll, beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerCollectedResult, WorkerDestroyResult, WorkerInspection, WorkerSpawnResult, WorkerWaitResult } from '@open-mercato/cezar-contract';
 import { DelegationController } from '../delegation/provision.ts';
 import { RunStore } from '../runs/store.ts';
@@ -21,15 +23,49 @@ import { monitoringWakeOf } from './waits.testkit.ts';
 const execFile = promisify(execFileCallback);
 const entry = fileURLToPath(new URL('../index.ts', import.meta.url));
 
-describe('public delegation completion integration', () => {
+/** Compile once for a fixture, preserving each module's source asset base. */
+export async function buildDelegationCli(sourceEntry: string = entry) {
+  const directory = mkdtempSync(join(tmpdir(), 'cez-delegation-cli-'));
+  const compiledEntry = join(directory, 'cli.mjs');
+  const close = () => rmSync(directory, { recursive: true, force: true });
+  try {
+    symlinkSync(fileURLToPath(new URL('../../node_modules', import.meta.url)), join(directory, 'node_modules'), 'junction');
+    await build({
+      entryPoints: [sourceEntry], outfile: compiledEntry, bundle: true,
+      platform: 'node', format: 'esm', packages: 'external',
+      plugins: [{ name: 'source-module-urls', setup(builder) {
+        builder.onLoad({ filter: /\.ts$/ }, async ({ path }) => {
+          const result = await transform(readFileSync(path, 'utf8'), {
+            loader: 'ts', format: 'esm',
+            define: { 'import.meta.url': JSON.stringify(pathToFileURL(path).href) },
+          });
+          return { contents: result.code, loader: 'js' };
+        });
+      } }],
+    });
+    return { entry: compiledEntry, close };
+  } catch (error) { close(); throw error; }
+}
+
+export function registerDelegationIntegrationGroup(group: 'reviewed-integration' | 'spawn-idempotency' | 'failure-authority' | 'parent-cancellation'): void {
+  describe('public delegation completion integration', () => {
+  let cli: Awaited<ReturnType<typeof buildDelegationCli>>;
+  beforeAll(async () => { cli = await buildDelegationCli(); });
+  afterAll(() => cli?.close());
+
   let root: string, repo: string, control: string, store: RunStore, manager: RunManager, controller: DelegationController;
+
   const environments = new Map<string, Record<string, string>>();
+
   const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' }).trim();
+
   // hearsay-tools/cezarion#1233: a monitoring park is a waiting run with an open monitoring timer.
-  const monitoringPark = (id: string) => store.getRun(id)?.status === 'waiting' && !!monitoringWakeOf(store.getRun(id));
+  const monitoringPark = (id: string) => store.getRun(id)?.status === RUN_STATUS.waiting && !!monitoringWakeOf(store.getRun(id));
+
   async function until(predicate: () => boolean, label: string) {
     await vi.waitFor(() => expect(predicate(), `${label}: ${JSON.stringify(store.listRuns().map(r => ({ id: r.id, status: r.status, error: r.error })))}`).toBe(true), { timeout: 15_000, interval: 20 });
   }
+
   function track() {
     // Observe actual session provisioning and await existing asynchronous lifecycle
     // tasks at teardown; no scheduling, result, or runner method is replaced.
@@ -41,6 +77,7 @@ describe('public delegation completion integration', () => {
     });
 
   }
+
   beforeEach(async () => {
     onTestFinished(scopeFixtureProcesses());
     root = mkdtempSync(join(tmpdir(), 'cez-delegation-integration-'));
@@ -58,6 +95,7 @@ describe('public delegation completion integration', () => {
     manager = createFixtureManager(store, repo, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 3 } }) }); track();
     controller = await DelegationController.start(); controller.attachProject({ id: 'integration', root: repo, store, manager });
   });
+
   afterEach(async () => {
     for (const run of store.listRuns()) manager.cancel(run.id);
     await until(() => store.listRuns().every(run => !manager.isActive(run.id)), 'all sessions stopped');
@@ -66,44 +104,52 @@ describe('public delegation completion integration', () => {
     manager.dispose(); store.flush(); await controller.close();
     environments.clear(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true });
   }, 30_000);
+
   async function input(id: string, turn = 1) {
     const path = join(control, `${id}.${turn}.input.json`);
     await until(() => existsSync(path), `wire receives ${id} turn ${turn}`);
     return JSON.parse(readFileSync(path, 'utf8')) as { text: string; cwd: string; backend: string };
   }
+
   /** The answer the wire's cezar_done got in that turn. */
   async function done(id: string, turn: number) {
     const path = join(control, `${id}.${turn}.done.json`);
     await until(() => existsSync(path), `wire calls cezar_done in ${id} turn ${turn}`);
     return JSON.parse(readFileSync(path, 'utf8')) as { ok: boolean; code?: string; message: string };
   }
+
   function reply(id: string, turn: number, value: { text?: string; commit?: string; error?: string; done?: true } = {}) {
     const path = join(control, `${id}.${turn}.reply.json`);
     const tmp = `${path}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(value));
     renameSync(tmp, path);
   }
+
   async function command<T = Record<string, unknown>>(id: string, args: string[], code = 0): Promise<T> {
-    const result = await execFile(process.execPath, ['--import', import.meta.resolve('tsx'), entry, 'worker', ...args], {
+    const result = await execFile(process.execPath, [cli.entry, 'worker', ...args], {
       cwd: root, env: { ...process.env, ...environments.get(id), PATH: '' }, timeout: 45_000,
     }).then(value => ({ ...value, code: 0 }), (error: { stdout: string; stderr: string; code: number }) => error);
     expect(result.stderr).toBe(''); expect(result.code, result.stdout).toBe(code);
     return JSON.parse(result.stdout) as T;
   }
+
   async function parent() {
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'Coordinate independent implementations', runner: 'claude' });
     await input(run.id); return run;
   }
+
   async function spawn(parentId: string, backend: 'claude' | 'codex', task: string, context = 'Only selected context') {
     const result = await command<WorkerSpawnResult>(parentId, ['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--backend', backend, '--context', context, task]);
     await input(result.workerId); return result.workerId;
   }
-  async function settled(id: string, status = 'review') {
+
+  async function settled(id: string, status: string = RUN_STATUS.review) {
     await until(() => store.getRun(id)?.status === status, `${id} reaches ${status}`);
     expect(await manager.awaitRunTermination(id, 15_000)).toBe(true);
   }
+
   async function finishWorker(parentId: string, id: string, change: string) {
-    reply(id, 1); await until(() => store.getRun(id)?.status === 'waiting', 'worker ready for steering');
+    reply(id, 1); await until(() => store.getRun(id)?.status === RUN_STATUS.waiting, 'worker ready for steering');
     expect(['queued', 'delivered']).toContain((await command(parentId, ['steer', id, `Commit ${change} and report the result`])).state);
     expect((await input(id, 2)).text).toContain(`Commit ${change}`);
     await until(() => store.getRun(id)?.agentInputs?.some(item => item.source === 'agent' && !!item.deliveredAt) === true, 'steering delivery persisted');
@@ -111,8 +157,12 @@ describe('public delegation completion integration', () => {
     reply(id, 2, { commit: change, text: `Implemented ${change}; Git commit ready for inspection.`, done: true });
     await settled(id);
   }
+
   const collect = (parentId: string, id: string) => command<WorkerCollectedResult>(parentId, ['collect', id]);
+
   const destroy = (parentId: string, id: string, code = 0) => command<WorkerDestroyResult>(parentId, ['destroy', id], code);
+
+if (group === 'reviewed-integration') {
 
   // Catches lost gate/wake wiring, backend/context mixing, mistaken auto-integration,
   // and removal of the only retained evidence during real branch cleanup failure.
@@ -157,10 +207,10 @@ describe('public delegation completion integration', () => {
     if (!question.text.includes(`Worker wait ${wait.wait.id}`)) { await input(p.id, 3); reply(p.id, 3); }
     await until(() => monitoringPark(p.id), 'parent observes wait-any wake');
     expect(store.getRun(p.id)?.agentInputs?.filter(item => item.id === wait.wait.id && item.deliveredAt)).toHaveLength(1);
-    expect(store.getRun(b)?.status).toBe('running');
+    expect(store.getRun(b)?.status).toBe(RUN_STATUS.running);
     expect(await collect(p.id, b)).toMatchObject({ backend: 'codex', settled: false, partial: true });
     const resultA = await collect(p.id, a);
-    expect(resultA).toMatchObject({ status: workerCollectedResultSchema.shape.status.enum.review, outcome: 'review-ready', settled: true, partial: false, summary: { text: expect.stringContaining('Implemented alpha') }, head: { state: 'available' }, diff: { state: 'available' } });
+    expect(resultA).toMatchObject({ status: workerCollectedResultSchema.shape.status.enum.review, outcome: workerCollectedResultSchema.shape.outcome.enum['review-ready'], settled: true, partial: false, summary: { text: expect.stringContaining('Implemented alpha') }, head: { state: 'available' }, diff: { state: 'available' } });
     expect(await command<WorkerInspection>(p.id, ['inspect', a])).toMatchObject({ status: workerInspectionSchema.shape.status.enum.review, backend: 'claude', parentRunId: p.id });
     expect(manager.finish(p.id)).toBe(false);
     await finishWorker(p.id, b, 'beta');
@@ -192,14 +242,14 @@ describe('public delegation completion integration', () => {
     expect(await destroy(p.id, b)).toMatchObject({ state: 'complete', remaining: [] });
     expect(manager.finish(p.id)).toBe(true);
     await until(() => !manager.isActive(p.id), 'parent session closes at review');
-    expect(store.getRun(p.id)?.status).toBe('review');
+    expect(store.getRun(p.id)?.status).toBe(RUN_STATUS.review);
     await fixtureWorkSettled(repo);
     manager.dispose(); store.close(); await controller.close();
     store = RunStore.open(join(repo, '.ai/cezar'), { keepLive: true });
     manager = createFixtureManager(store, repo); track();
     controller = await DelegationController.start(); controller.attachProject({ id: 'integration', root: repo, store, manager });
     await manager.recover();
-    expect(store.getRun(p.id)?.status).toBe('review');
+    expect(store.getRun(p.id)?.status).toBe(RUN_STATUS.review);
     expect(store.readWorkerResultDiff(p.id, a)).toContain('+alpha');
     expect(store.getRun(a)?.delegation).toMatchObject({ destroy: { phase: 'incomplete', remaining: ['branch'] } });
     for (const path of readdirSync(control).filter(path => path.startsWith(p.id))) rmSync(join(control, path));
@@ -213,7 +263,7 @@ describe('public delegation completion integration', () => {
       expect(response.status, await response.text()).toBe(200);
       expect(store.getRun(id)).toBeUndefined();
       expect(existsSync(join(repo, '.ai/cezar/runs', `${id}.ndjson`))).toBe(false);
-      expect(await collect(p.id, id)).toMatchObject({ outcome: 'destroyed', settled: true, cleanup: 'complete', workspace: { state: 'deleted' }, summary: { state: 'available' }, diff: { state: 'available' }, head: { state: 'deleted' } });
+      expect(await collect(p.id, id)).toMatchObject({ outcome: workerCollectedResultSchema.shape.outcome.enum.destroyed, settled: true, cleanup: 'complete', workspace: { state: 'deleted' }, summary: { state: 'available' }, diff: { state: 'available' }, head: { state: 'deleted' } });
     }
     expect(store.readWorkerResultDiff(p.id, a)).toContain('+alpha');
     expect(store.readWorkerResultDiff(p.id, b)).toContain('+beta');
@@ -222,14 +272,17 @@ describe('public delegation completion integration', () => {
     const publicState = JSON.stringify([store.listRuns(), ...store.listRuns().map(run => store.readEvents(run.id))]);
     for (const env of environments.values()) expect(publicState).not.toContain(env.CEZ_DELEGATION_TOKEN!);
     reply(p.id, 1, { text: 'Reviewed alpha integration; beta conflict deliberately aborted.', done: true });
-    await until(() => store.getRun(p.id)?.status === 'review', 'collected deleted workers permit honest parent review');
+    await until(() => store.getRun(p.id)?.status === RUN_STATUS.review, 'collected deleted workers permit honest parent review');
   }, 120_000);
+}
+
+if (group === 'spawn-idempotency') {
 
   // hearsay-tools/cezarion#632: `--runner` and `--backend` fill the same request field, so a retry
   // that switches spelling hashes identically and dedupes instead of reporting a payload conflict.
   // hearsay-tools/cezarion#974: Node 24.15 floor shard 1 on 81e88a0f exceeded the
   // default 5s at 5257ms. This cell waits for two native inputs (15s each) and
-  // two real tsx CLI processes (45s each); cover those serial bounds plus 5s.
+  // two real CLI processes (45s each); cover those serial bounds plus 5s.
   it('dedupes a --runner retry of a --backend spawn under the same request id', async () => {
     const p = await parent();
     const requestId = randomUUID();
@@ -240,6 +293,9 @@ describe('public delegation completion integration', () => {
     expect(retry.workerId).toBe(first.workerId);
     expect(store.listRuns().filter(run => run.delegation?.role === 'worker')).toHaveLength(1);
   }, 125_000);
+}
+
+if (group === 'failure-authority') {
 
   it('reports a real provider failure and a stopped worker without allowing peer authority or premature success', async () => {
     const p = await parent(); const failed = await spawn(p.id, 'codex', 'Exercise provider failure'); const stopped = await spawn(p.id, 'claude', 'Exercise explicit stop');
@@ -249,32 +305,38 @@ describe('public delegation completion integration', () => {
     expect(store.listRuns()).toHaveLength(3);
     reply(p.id, 1); await until(() => monitoringPark(p.id), 'parent idle');
     const wait = await command<WorkerWaitResult>(p.id, ['wait', failed, stopped, '--mode', 'all']);
-    reply(failed, 1, { error: 'integration provider unavailable' }); await settled(failed, 'failed');
+    reply(failed, 1, { error: 'integration provider unavailable' }); await settled(failed, RUN_STATUS.failed);
     expect(store.getRun(p.id)?.agentInputs?.some(item => item.id === wait.wait.id && item.deliveredAt)).not.toBe(true);
-    expect(['stopping', 'terminated']).toContain((await command(p.id, ['stop', stopped])).state); await settled(stopped, 'cancelled');
+    expect(['stopping', 'terminated']).toContain((await command(p.id, ['stop', stopped])).state); await settled(stopped, RUN_STATUS.cancelled);
     expect(await command(p.id, ['stop', stopped])).toMatchObject({ state: 'terminated' });
     await input(p.id, 2); reply(p.id, 2);
     expect(manager.finish(p.id)).toBe(false);
-    expect(await collect(p.id, failed)).toMatchObject({ outcome: 'failed', lastExecutionOutcome: 'failed', partial: true, settled: true, error: expect.stringContaining('integration provider unavailable') });
-    expect(await collect(p.id, stopped)).toMatchObject({ outcome: 'cancelled', partial: true, settled: true });
+    expect(await collect(p.id, failed)).toMatchObject({ outcome: workerCollectedResultSchema.shape.outcome.enum.failed, lastExecutionOutcome: workerCollectedResultSchema.shape.lastExecutionOutcome.enum.failed, partial: true, settled: true, error: expect.stringContaining('integration provider unavailable') });
+    expect(await collect(p.id, stopped)).toMatchObject({ outcome: workerCollectedResultSchema.shape.outcome.enum.cancelled, partial: true, settled: true });
     expect(await command(p.id, ['steer', stopped, 'Late input must not reopen'], 1)).toMatchObject({ code: 'incompatible_state' });
-    expect(store.getRun(stopped)?.status).toBe('cancelled');
+    expect(store.getRun(stopped)?.status).toBe(RUN_STATUS.cancelled);
     expect(manager.finish(p.id)).toBe(true);
-    await until(() => store.getRun(p.id)?.status === 'done', 'collected failures allow explicit human Finish');
+    await until(() => store.getRun(p.id)?.status === RUN_STATUS.done, 'collected failures allow explicit human Finish');
   }, 90_000);
+}
+
+if (group === 'parent-cancellation') {
 
   it('parent cancellation proves live child termination while preserving another child review worktree', async () => {
     const p = await parent(); const completed = await spawn(p.id, 'claude', 'Complete useful work'); const live = await spawn(p.id, 'codex', 'Long running work');
     await finishWorker(p.id, completed, 'retained');
     const result = await collect(p.id, completed);
     manager.cancel(p.id);
-    await settled(live, 'cancelled');
+    await settled(live, RUN_STATUS.cancelled);
     await until(() => !manager.isActive(p.id), 'cancelled parent closes');
-    expect(store.getRun(p.id)?.status).toBe('cancelled');
-    expect(store.getRun(completed)?.status).toBe('review');
+    expect(store.getRun(p.id)?.status).toBe(RUN_STATUS.cancelled);
+    expect(store.getRun(completed)?.status).toBe(RUN_STATUS.review);
     expect(readFileSync(join(result.workspace.path, 'shared.txt'), 'utf8')).toBe('retained\n');
     expect(store.readWorkerResultDiff(p.id, completed)).toContain('+retained');
     expect(store.readWorkerExecution(live)?.phase).toBe('complete');
     expect(store.getRun(live)?.worktreePath && existsSync(store.getRun(live)!.worktreePath!)).toBe(true);
   }, 90_000);
-});
+}
+
+  });
+}

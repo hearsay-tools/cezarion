@@ -1,8 +1,9 @@
+import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it as registerTest, describe, vi } from 'vitest';
 import type { ConversationMessage } from '@open-mercato/cezar-contract';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
@@ -36,7 +37,7 @@ async function withAnsweredWorker(backend: RunnerId, env: Record<string, string>
     const { repoRoot, runId, parentRunId } = fixture;
     fixture.manager.enqueueOwnedRun(runId);
     await waitFor(() => fixture.store.readEvents(runId).some(event => event.type === 'worker-question-routed'));
-    await waitFor(() => fixture.store.getRun(runId)?.status === 'waiting');
+    await waitFor(() => fixture.store.getRun(runId)?.status === RUN_STATUS.waiting);
     const askSeq = fixture.store.readEvents(runId).find(event => event.type === 'ask.requested')!.seq;
     // Native question turns stay open, so a restart is the session close every wire shares.
     let { store, manager } = await fixture.restart();
@@ -71,11 +72,12 @@ const checkpoints = (store: RunStore, runId: string, askSeq: number) => store.re
 const firstAfter = (store: RunStore, runId: string, type: string, seq: number) => store.readEvents(runId)
   .find(event => event.type === type && event.seq > seq)?.seq;
 const lastSeq = (store: RunStore, runId: string) => store.readEvents(runId).at(-1)?.seq ?? 0;
+function steering(backend: RunnerId, it: typeof registerTest = registerTest): void {
 
-for (const backend of RUNNER_IDS) {
-  const [steer, declared, held] = ANSWER_DELIVERY_CRITERIA;
+  const [steer] = ANSWER_DELIVERY_CRITERIA;
 
   const steerExemption = exemptionFor(steer.id, backend);
+
   if (steerExemption) {
     it(`${backend} is exempt from ${steer.id} — ${steerExemption.reason}`, () => {
       expect(steerExemption.kind).toBe('scenario-unconstructible');
@@ -97,11 +99,16 @@ for (const backend of RUNNER_IDS) {
         expect(projectionSeq(store, runId, id, 'delivered')).toBeLessThan(turnEnd);
         expect(projectionSeq(store, runId, id, 'consumed')).toBeLessThan(turnEnd);
         expect(checkpoints(store, runId, askSeq)[0]!.seq).toBeGreaterThan(turnEnd);
-        await waitFor(() => store.getRun(runId)?.status === 'waiting');
+        await waitFor(() => store.getRun(runId)?.status === RUN_STATUS.waiting);
         expect(checkpoints(store, runId, askSeq)).toEqual([expect.objectContaining({ source: 'parent' })]);
       });
     }, 60_000);
   }
+}
+
+function declaredDelivery(backend: RunnerId, it: typeof registerTest = registerTest): void {
+
+  const [, declared] = ANSWER_DELIVERY_CRITERIA;
 
   it(`${backend} ${declared.id} ${declared.name}`, async () => {
     const releaseFile = join(tmpdir(), `cez-935-release-${randomUUID()}`);
@@ -134,6 +141,11 @@ for (const backend of RUNNER_IDS) {
       });
     } finally { rmSync(releaseFile, { force: true }); }
   }, 60_000);
+}
+
+function pendingQuestion(backend: RunnerId, it: typeof registerTest = registerTest): void {
+
+  const [, , held] = ANSWER_DELIVERY_CRITERIA;
 
   it(`${backend} ${held.id} ${held.name}`, async () => {
     await withAnsweredWorker(backend, {}, async answerFixture => {
@@ -143,9 +155,9 @@ for (const backend of RUNNER_IDS) {
       // hearsay-tools/cezarion#1235 phase 3a (§ Messages beside a pending question): a native
       // question takes nothing but its answer, so the message waits for the answer's turn end; a
       // cezar_ask question takes it beside the card. Either way it is never the answer.
-      const question = (seq: number) => store.getRun(runId)?.waits?.find(wait => wait.kind === 'human' && wait.phase === 'open' && wait.askSeq === seq);
+      const question = (seq: number) => store.getRun(runId)?.waits?.find(wait => wait.kind === WAIT_KIND.human && wait.phase === WAIT_PHASE.open && wait.askSeq === seq);
       const expectBesideOrHeld = async (id: string, seq: number) => {
-        if (question(seq)?.via === 'native-ask') {
+        if (question(seq)?.via === WAIT_VIA['native-ask']) {
           await quiet();
           expect(input(store, runId, id)?.deliveredAt).toBeUndefined();
           expect(question(seq)).toBeDefined();
@@ -153,7 +165,7 @@ for (const backend of RUNNER_IDS) {
           await waitFor(() => !!input(store, runId, id)?.deliveredAt);
           // The beside turn ends and parks for a question again.
           await waitFor(() => store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes(input(store, runId, id)!.text)));
-          await waitFor(() => store.getRun(runId)?.status === 'waiting' && store.transcriptFacts(runId).pendingAsk !== undefined);
+          await waitFor(() => store.getRun(runId)?.status === RUN_STATUS.waiting && store.transcriptFacts(runId).pendingAsk !== undefined);
           // Delivered beside the card, not instead of it: the original question is still open.
           expect(question(seq)).toBeDefined();
         }
@@ -179,7 +191,7 @@ for (const backend of RUNNER_IDS) {
       await send(answer, pending.routedMessageId);
       await waitFor(() => firstAfter(store, runId, 'ask.requested', start) !== undefined);
       const newer = firstAfter(store, runId, 'ask.requested', start)!;
-      await waitFor(() => store.getRun(runId)?.status === 'waiting');
+      await waitFor(() => store.getRun(runId)?.status === RUN_STATUS.waiting);
       await waitFor(() => checkpoints(store, runId, answered).length === 1);
       expect(checkpoints(store, runId, answered)[0]?.source).toBe('parent');
       const later = await send('mock:agent-echo progress after the newer question');
@@ -196,7 +208,15 @@ for (const backend of RUNNER_IDS) {
       expect(checkpoints(store, runId, answered)).toHaveLength(1);
       await waitFor(() => checkpoints(store, runId, newer).length === 1);
       expect(checkpoints(store, runId, newer)[0]).toMatchObject({ source: 'parent' });
-      await waitFor(() => store.getRun(runId)?.status === 'waiting');
+      await waitFor(() => store.getRun(runId)?.status === RUN_STATUS.waiting);
     });
   }, 60_000);
+}
+
+export const answerDeliveryCells = { 'steering': steering, 'declared-delivery': declaredDelivery, 'pending-question': pendingQuestion };
+export const ANSWER_DELIVERY_GROUPS = Object.fromEntries(Object.keys(answerDeliveryCells).map(family => [family, RUNNER_IDS.map(runner => ({ runner, family: family as keyof typeof answerDeliveryCells }))]));
+export function registerAnswerDeliveryGroup(group: keyof typeof answerDeliveryCells): void {
+  describe('conversation answer delivery', () => {
+    for (const row of ANSWER_DELIVERY_GROUPS[group]!) answerDeliveryCells[row.family](row.runner);
+  });
 }

@@ -547,7 +547,7 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
 
 /** Criteria driven through `whileOpen` rather than one settled observation. */
 const CONTROL_CRITERIA = [
-  // hearsay-tools/cezarion#1380: workflows/resume-diagnostics-parity.test.ts.
+  // hearsay-tools/cezarion#1380: workflows/resume-diagnostics.testkit.ts.
   { id: 'R85', scenario: 'provider-error' },
   { id: 'R86', scenario: 'cezar-done' },
   { id: 'R87', scenario: 'cezar-done' },
