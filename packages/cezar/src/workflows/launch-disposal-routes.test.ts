@@ -1,4 +1,4 @@
-import { runInternals } from './run-internals.testkit.ts';
+import { WorktreeAutosave } from './run/worktree-autosave.ts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRunResult, AgentSession } from '../core/agent-runner.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
@@ -48,11 +48,10 @@ describe('launch disposal routes', { timeout: 30_000 }, () => {
     let entered!: () => void, release!: () => void;
     const saving = new Promise<void>(resolve => { entered = resolve; });
     const gate = new Promise<void>(resolve => { release = resolve; });
-    const manager = runInternals(f.manager).worktreeAutosave;
-    const save = manager.saveWorktree.bind(manager);
-    const saveSpy = vi.spyOn(manager, 'saveWorktree').mockImplementation(async (...args) => {
+    const save = WorktreeAutosave.prototype.saveWorktree;
+    const saveSpy = vi.spyOn(WorktreeAutosave.prototype, 'saveWorktree').mockImplementation(async function (this: WorktreeAutosave, ...args) {
       if (args[2] === 'run finalize') { entered(); await gate; }
-      await save(...args);
+      await save.apply(this, args);
     });
     sessions[0]!.close();
     try {

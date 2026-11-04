@@ -1,4 +1,3 @@
-import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { appendFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -377,8 +376,7 @@ describe('automation task templates', () => {
       const manager = createFixtureManager(store, root);
       vi.spyOn(store, 'updateRun').mockImplementationOnce(() => { throw new Error('crash after create'); });
       const { runId } = await launchScheduledRun({ root, manager, store, definition: scheduled, occurrence, receiptId: 'receipt', projectName: 'demo', timeZone: 'UTC' });
-      const engine = runInternals(manager);
-      expect(runInternals(manager).line.queue.includes(runId) || runInternals(manager).line.pendingJobs.has(runId) || runInternals(manager).line.starting.has(runId) || engine.active.has(runId)).toBe(true);
+      expect(manager.isActive(runId)).toBe(true);
       vi.restoreAllMocks();
       manager.cancel(runId);
       await drainFixtureManagers(root);

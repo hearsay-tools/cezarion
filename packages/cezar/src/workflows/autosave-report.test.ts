@@ -1,7 +1,7 @@
-import { runInternals } from './run-internals.testkit.ts';
 import { createActiveRun } from './active-run.ts';
-import type { WorktreeAutosave } from './run/worktree-autosave.ts';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { WorktreeAutosave } from './run/worktree-autosave.ts';
+import { TrackedWork } from './run/tracked-work.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { execFile, execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -69,7 +69,12 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     dataDir = join(repoRoot, '.ai/cezar');
     store = RunStore.open(dataDir);
-    manager = runInternals(createFixtureManager(store, repoRoot)).worktreeAutosave;
+    const unused = (): never => { throw new Error('unexpected autosave timer callback'); };
+    manager = new WorktreeAutosave({ store, repoRoot, dataDir, work: new TrackedWork(),
+      semaphore: new WorkspaceSemaphore(), disposed: () => false }, {
+      holdForMaintenance: () => () => {}, reapTerminalScratch: () => {}, releaseSlot: () => {},
+      saveWorktree: unused, trackTurn: unused,
+    });
     runId = store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] }).id;
     const wt = await createWorktree(repoRoot, runId, 'main');
     worktreePath = wt.path;
@@ -83,7 +88,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     vi.restoreAllMocks();
     if (bin) rmSync(bin, { recursive: true, force: true });
     bin = undefined;
-    await drainFixtureManagers(repoRoot);
+    manager.dispose();
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
   });
