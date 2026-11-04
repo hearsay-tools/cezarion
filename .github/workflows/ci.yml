@@ -758,6 +758,8 @@ jobs:
 
       - name: Run server and cockpit unit suites
         id: collect
+        env:
+          VITEST_FILE_DURATION_CAP: '1'
         run: npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4 ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && '--coverage.enabled' || '' }}
         if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
 
