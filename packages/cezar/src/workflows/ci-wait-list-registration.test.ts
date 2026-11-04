@@ -1,7 +1,6 @@
 // Register the external CI mock before loading RunManager.
-import { generationOf, prUrl, registerPr, registerTimer, waitById, settledById, inputsFor, fireTimer, timerFired, flushMicrotasks, githubByPr, waitingParent, expectNoWaitHumanWait } from './ci-wait-fixture.testkit.ts';
+import { externalResource, generationOf, prUrl, registerPr, registerTimer, waitById, settledById, inputsFor, fireTimer, timerFired, flushMicrotasks, githubByPr, waitingParent, expectNoWaitHumanWait } from './ci-wait-fixture.testkit.ts';
 import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -86,15 +85,19 @@ describe('Wait list registration and resolution', { timeout: 30_000 }, () => {
     // The tool answer lists what is still open.
     const answer = await manager.cezarToolHandlers(run.id, generationOf(run.id)).cancelWait({ wait_id: kept.id }, new AbortController().signal);
     expect(answer).toEqual({ cancelled: true, wait_id: kept.id, open_waits: [] });
-    expect(runInternals(manager).waitWatches.waitTimers.has(kept.id)).toBe(false);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(inputsFor(run.id, kept.id)).toEqual([]);
+    expect(settledById(run.id, kept.id)?.phase).toBe('cancelled');
+    vi.useRealTimers();
   });
 
   it('two concurrent cezar_wait ci calls for different PRs both register', async () => {
     let release!: () => void;
     githubByPr(new Promise<void>(resolve => { release = resolve; }));
+    const lookups = vi.spyOn(externalResource.supervisor as { resolve(url: string): Promise<unknown> }, 'resolve');
     const run = await waitingParent();
     const pending = Promise.all([registerPr(run.id, 12), registerPr(run.id, 13)]);
-    await until(() => runInternals(manager).waitRegistry.ciRegistrations.size === 2);
+    await until(() => lookups.mock.calls.length === 2);
     release();
     const [first, second] = await pending;
     expect(first.id).not.toBe(second.id);
@@ -130,12 +133,16 @@ describe('Wait list registration and resolution', { timeout: 30_000 }, () => {
     interval.mockReturnValue(5);
     const wait = await registerTimer(run.id, 600);
     interval.mockReturnValue(1);
-    await (runInternals(manager).line).pump();
+    await semaphore.release();
     expect(waitById(run.id, wait.id)?.deadline).toBe(wait.deadline);
     interval.mockReturnValue(null);
-    await (runInternals(manager).line).pump();
+    await semaphore.release();
     expect(waitById(run.id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open, deadline: wait.deadline });
-    expect(runInternals(manager).waitWatches.waitTimers.has(wait.id)).toBe(true);
+    await vi.advanceTimersByTimeAsync(599_000);
+    expect(waitById(run.id, wait.id)?.phase).toBe('open');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(inputsFor(run.id, wait.id)).toHaveLength(1);
+    vi.useRealTimers();
   });
 
   it('timer refuses wake_budget_spent once the run spent its automatic wakes', async () => {
