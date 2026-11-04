@@ -160,7 +160,6 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(store.readEvents(id).some(e => e.type === 'note' && String(e.message).startsWith('autonomous — safety cap reached (40)'))).toBe(true);
   });
 
-
   function pendingBoundary(): void {
     state.currentStepId = 'task';
     state.atTurnBoundary = session;
@@ -184,7 +183,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     '%s revokes readiness authority', guard => {
       pendingBoundary();
       canContinue.mockReturnValue(false);
-    switch (guard) {
+      switch (guard) {
         case 'replaced-state': active.set(id, fakeState()); break;
         case 'replaced-session': state.session = { ...session }; break;
         case 'new-boundary': state.atTurnBoundary = undefined; break;
@@ -199,12 +198,6 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     },
   );
-
-
-
-
-
-
 
   it('a pending autonomous retry is not replaced by the no-wait nudge', () => {
     pendingBoundary();
@@ -261,16 +254,10 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(state.noWaitNudgeReplyTimer).toBeUndefined();
   });
 
-
-
   // hearsay-tools/cezarion#1234: an unanswered nudge opens Cezar's no-wait human wait, so the run
   // waits on the user and a late reply stays on that question.
 
-
   // hearsay-tools/cezarion#1301: an unanswered completion refusal nudge says so, not "no-wait".
-
-
-
 
 });
 
