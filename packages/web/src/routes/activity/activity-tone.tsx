@@ -24,10 +24,12 @@ import { attentionOfRung, type AttentionShape, type AttentionTone } from '@/lib/
 import type { NowIcon } from './now-box'
 
 /** Readable ink for each attention tone on a card or on card-2 (packages/web/docs/card-2-contrast.md):
- *  danger reads as the red signal word and neutral as muted text. */
+ *  pending reads as the amber signal word, danger as the red one and neutral as muted text.
+ *  Small text on card-2 spells these classes out where the cez/card-2-contrast lint can read them
+ *  (`NowBoxView`); a class read from this map is invisible to it. */
 export const TONE_INK: Record<AttentionTone, string> = {
   success: 'text-success',
-  pending: 'text-pending-strong',
+  pending: 'text-signal-word-amber',
   danger: 'text-signal-word-red',
   accent: 'text-accent-text',
   info: 'text-info',

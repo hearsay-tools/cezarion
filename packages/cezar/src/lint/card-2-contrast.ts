@@ -134,7 +134,7 @@ export function scan(source: string, surfaceClasses: Set<string>): string[] {
         const backgrounds = classes.filter(c => surfaceClasses.has(c) || c === 'bg-transparent' || surfaceClasses.has(c.split('/')[0] ?? ''))
         const inheritsSurface = backgrounds.length === 0 || backgrounds.some(c => c === 'bg-transparent' || c.includes('/'))
         const onCard = backgrounds.includes('bg-card-2') || inheritsSurface && (card || bodySlot)
-        const ownColors = classes.map(c => c.replace(/^(text-(?:danger|destructive|soft-foreground))\/.+$/, '$1')).filter(c => /^text-(?:danger|destructive|soft-foreground|muted-foreground|supporting-foreground|link-foreground|foreground|signal-word-red)$/.test(c))
+        const ownColors = classes.map(c => c.replace(/^(text-(?:danger|destructive|soft-foreground|pending-strong))\/.+$/, '$1')).filter(c => /^text-(?:danger|destructive|soft-foreground|pending-strong|muted-foreground|supporting-foreground|link-foreground|foreground|signal-word-red|signal-word-amber)$/.test(c))
         const colors = ownColors.length ? ownColors : [color]
         const sizes = classes.filter(c => /^text-(?:xs|sm|base|lg|xl|\d+xl)(?:\/.*)?$|^text-(?:\[|\(length:)/.test(c))
         const size = sizes.length ? Math.min(...sizes.map(fontSize)) : inheritedSize
@@ -142,7 +142,7 @@ export function scan(source: string, surfaceClasses: Set<string>): string[] {
         const bold = weights.length ? weights.every(w => /^font-(?:bold|extrabold|black)$/.test(w)) : inheritedBold
         return { onCard, colors, size, bold, large: size >= 24 || bold && size >= 56 / 3 }
       })
-      const unsafe = (ink: string) => ink === 'text-danger' || ink === 'text-destructive' || ink === 'text-soft-foreground'
+      const unsafe = (ink: string) => ink === 'text-danger' || ink === 'text-destructive' || ink === 'text-soft-foreground' || ink === 'text-pending-strong'
       const children = node.children
       if (children.some(rendersText) && states.some(s => s.onCard && !s.large && s.colors.some(unsafe))) {
         sites.push(source.slice(opening.start ?? 0, opening.end ?? 0).replace(/\s+/g, ' '))
@@ -184,7 +184,7 @@ export const card2Contrast: SourceRule = {
     const actual = scan(source, paletteSurfaces()).map(site => `${local}: ${site}`)
     return compareContrast(actual, baseline ??= readContrastBaseline()).added.map(site => ({
       line: 1,
-      message: `Unsafe small text: ${site}. Use text-muted-foreground for soft ink or text-signal-word-red for danger ink. Fix new sites; remove fixed entries from the baseline. Never add allowances. (hearsay-tools/cezarion#1133, hearsay-tools/cezarion#2423).`,
+      message: `Unsafe small text: ${site}. Use text-muted-foreground for soft ink, text-signal-word-red for danger ink or text-signal-word-amber for amber ink. Fix new sites; remove fixed entries from the baseline. Never add allowances. (hearsay-tools/cezarion#1133, hearsay-tools/cezarion#2423).`,
     }))
   },
 }

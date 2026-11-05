@@ -15,8 +15,10 @@ Opacity, overlays, hover surfaces and custom colors require a separate measureme
 | `text-muted-foreground`, `text-supporting-foreground` | 5.70:1 | 6.60:1 | Yes — secondary text |
 | `text-link-foreground` | 7.60:1 | 4.80:1 | Yes — links |
 | `text-signal-word-red` | 5.11:1 | 5.67:1 | Yes — red words |
+| `text-signal-word-amber` | 8.38:1 | 6.07:1 | Yes — amber words |
 | `text-soft-foreground` | 4.56:1 | 4.37:1 | No — use muted-foreground |
 | `text-danger`, `text-destructive` (alias) | 4.34:1 | 4.24:1 | No — use signal-word-red |
+| `text-pending-strong` | 8.38:1 | 4.41:1 | No — use signal-word-amber |
 
 Icons and non-text graphics have a separate 3:1 requirement; these text rules
 do not prohibit their use of danger.

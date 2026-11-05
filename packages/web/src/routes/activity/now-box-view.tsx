@@ -46,7 +46,16 @@ export function NowBoxView({ box, now, dense }: { box: NowBox; now: number; dens
   return (
     <div data-slot="activity-now" data-verb={box.verb} className="grid grid-cols-[16px_minmax(0,1fr)] gap-x-2 gap-y-px rounded-lg bg-card-2 px-2.5 py-2">
       <Icon aria-hidden="true" className={cn('mt-px size-[15px]', ink)} />
-      <span className={cn('flex gap-2 text-[11px] font-semibold tracking-[0.04em] uppercase', ink)}>
+      {/* Each tone's ink as a literal branch, so the cez/card-2-contrast lint checks the small verb. */}
+      <span className={cn('flex gap-2 text-[11px] font-semibold tracking-[0.04em] uppercase', {
+        'text-success': box.tone === 'success',
+        'text-signal-word-amber': box.tone === 'pending',
+        'text-signal-word-red': box.tone === 'danger',
+        'text-accent-text': box.tone === 'accent',
+        'text-info': box.tone === 'info',
+        'text-status-running': box.tone === 'running',
+        'text-muted-foreground': box.tone === 'neutral',
+      })}>
         <span data-slot="activity-verb">{box.verb}</span>
         {box.since ? (
           <span data-slot="activity-age" className="ml-auto font-medium tracking-normal text-muted-foreground normal-case tabular-nums">
