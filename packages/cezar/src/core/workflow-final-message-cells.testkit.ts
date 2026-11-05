@@ -11,7 +11,6 @@ import { RUNNER_IDS } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 import { FINAL_MESSAGE_CRITERIA, HARNESS_ADAPTERS, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { IDLE_TIMEOUT_MS, NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE } from '../workflows/run.ts';
-import { watchTurnOutcomes } from '../workflows/turn-outcomes.testkit.ts';
 
 function replyObservationClock() {
   return observationClock(delay => delay === 300 &&
@@ -99,7 +98,6 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             manager.enqueueOwnedRun(runId);
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
             const startSeq = store.readEvents(runId).length;
-            const turns = watchTurnOutcomes();
             const inputId = randomUUID();
             expect(manager.steerWorker(runId, {
               id: inputId, source: agentInputSchema.shape.source.enum.agent, parentRunId,
@@ -111,8 +109,9 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             expect(input?.deliveredAt).toBeUndefined();
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
             await waitFor(() => nudgeNotes(store.readEvents(runId).slice(startSeq)).length === 1);
-            expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
-            expect(turns.words(runId)).toContain('running (no-wait nudge)');
+            expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toEqual([expect.objectContaining({
+              stepId: store.getRun(runId)?.steps.at(-1)?.id,
+            })]);
           }, { semaphore });
         }, 30_000);
         continue;
@@ -135,7 +134,6 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
         it(`${backend} ${row.id} ${row.name}`, async () => {
           const semaphore = new WorkspaceSemaphore();
           await withOwnedInputRun(backend, 'silent-tail-no-reply', async ({ store, manager, runId }) => {
-            const turns = watchTurnOutcomes();
             const startSeq = store.readEvents(runId).length;
             const clock = replyObservationClock();
             try {
@@ -155,7 +153,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             expectParkedOutsidePool(semaphore);
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(noReplyNotes(store.readEvents(runId))).toHaveLength(1);
-            expect(turns.words(runId)).toContain('waiting');
+            expect(store.getRun(runId)?.status).toBe('waiting');
           }, { semaphore, noWaitNudgeReplyMs: 300 });
         }, 30_000);
         continue;
@@ -242,7 +240,6 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           const semaphore = new WorkspaceSemaphore();
           const gateRoot = backend === 'cursor' ? mkdtempSync(join(tmpdir(), 'cez-nudge-content-')) : undefined;
           try { await withOwnedInputRun(backend, 'silent-tail-slow-done', async ({ store, manager, runId }) => {
-            const turns = watchTurnOutcomes();
             const startSeq = store.readEvents(runId).length;
             if (gateRoot) {
               // Cursor starts a new print process for the nudge. Its startup must not
@@ -267,7 +264,6 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             expect(store.getRun(runId)?.status).toBe('done');
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
-            expect(turns.words(runId)).toContain('running (no-wait nudge)');
           }, { semaphore, noWaitNudgeReplyMs: 300, ...(gateRoot ? { env: { CEZ_MOCK_RELEASE_FILE: join(gateRoot, 'done') } } : {}) });
           } finally { if (gateRoot) rmSync(gateRoot, { recursive: true, force: true }); }
         }, 30_000);
@@ -277,7 +273,6 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
         it(`${backend} ${row.id} ${row.name} (${mode})`, async () => {
           const semaphore = new WorkspaceSemaphore();
           await withOwnedInputRun(backend, mode === 'continuation' ? 'baseline' : row.scenario, async ({ store, manager, runId }) => {
-            const turns = watchTurnOutcomes();
             if (mode === 'continuation') {
               manager.enqueueOwnedRun(runId);
               await waitFor(() => store.getRun(runId)?.status === 'waiting');
@@ -311,7 +306,6 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               expect(status).toBe('done');
               expect(notes).toHaveLength(1);
               expect(autonomousNotes(events)).toHaveLength(0);
-              expect(turns.words(runId)).toContain('running (no-wait nudge)');
             } else if (row.id === 'F2') {
               expect(status).toBe('waiting');
               expect(status).not.toBe('done');

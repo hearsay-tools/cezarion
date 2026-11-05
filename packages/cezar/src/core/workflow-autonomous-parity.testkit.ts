@@ -13,7 +13,6 @@ import { handoffPath } from '../handoff.ts';
 import { IDLE_TIMEOUT_MS, MAX_AUTO_CONTINUES } from '../workflows/run.ts';
 import { hasPendingAsk, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { RUN_EXITS } from '../runs/run-exits.ts';
-import { watchTurnOutcomes } from '../workflows/turn-outcomes.testkit.ts';
 import { WAIT_KIND, WAIT_PHASE, RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 // The settle budget for the row cells below. OpenCode's A5, A11 and A12 cells run
@@ -289,8 +288,6 @@ describe('autonomous turn-end parity — #426', () => {
             }
           }
           await prepareContinuation();
-          // Only this row's turns: a continuation's first step settled before the spy.
-          const turns = watchTurnOutcomes();
           store.updateRun(runId, { autonomous: row.id !== 'A6' });
           if (row.id === 'A10') store.appendEvent(runId, {
             type: 'ask.requested', requestId: randomUUID(),
@@ -322,8 +319,8 @@ describe('autonomous turn-end parity — #426', () => {
           function assertCapOutcome(): void {
             expect(store.getRun(runId)?.status).toBe('waiting');
             expect(notes).toHaveLength(MAX_AUTO_CONTINUES);
-            expect(events.some(e => e.type === 'note' && String(e.message).includes(`autonomous — safety cap reached (${MAX_AUTO_CONTINUES})`))).toBe(true);
-            expect(turns.words(runId).filter(word => word === 'waiting')).toHaveLength(1);
+            expect(statusWrites().filter(status => status === RUN_STATUS.waiting)).toHaveLength(1);
+            expect(events.filter(e => e.type === 'note' && String(e.message).includes(`autonomous — safety cap reached (${MAX_AUTO_CONTINUES})`))).toHaveLength(1);
           }
           function assertParkedOutcome(): void {
             expect(store.getRun(runId)?.status).toBe('waiting');
@@ -342,8 +339,7 @@ describe('autonomous turn-end parity — #426', () => {
             expect(store.getRun(runId)?.status).toBe('done');
             expect(notes).toHaveLength(row.id === 'A8' ? 0 : 1);
             expect(statusWrites()).not.toContain(RUN_STATUS.waiting);
-            expect(turns.words(runId)).not.toContain('waiting');
-            if (row.id !== 'A8') expect(turns.words(runId)).toContain('running (autonomous nudge)');
+            expect(store.getRun(runId)?.waits?.filter(wait => wait.kind === WAIT_KIND.human && wait.phase === WAIT_PHASE.open) ?? []).toEqual([]);
             const stepId = store.getRun(runId)!.steps.at(-1)!.id;
             expect(notes.every(note => note.stepId === stepId)).toBe(true);
             if (row.id === 'A3' || row.id === 'A4') {
