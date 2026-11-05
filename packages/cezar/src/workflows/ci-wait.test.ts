@@ -1,8 +1,9 @@
+import { observationClock } from '../core/observation-clock.testkit.ts';
+import { WAKE_RETRY_BACKOFF } from '../delegation/retry-backoff.ts';
 // Register the external CI mock before loading RunManager.
 import { externalResource, pr, identity, success, ciWaitOf, lastCiWaitOf, parked, github, register } from './ci-wait-fixture.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { WAIT_KIND, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -10,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type Wait } from '@open-mercato/cezar-contract/waits';
 import type { CiWait, CiWaitResult } from '@open-mercato/cezar-contract';
-import { controlledWire, manager, parent, root, restart, store, until, worker, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { controlledWire, manager, parent, root, restart, store, until, worker, waitOf, useWorkerWaitFixture, work, toolGenerationOf, reopenRuntime } from './worker-wait.testkit.ts';
 
 import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 
@@ -39,21 +40,25 @@ describe('CI wait recovery and conversations', { timeout: 30_000 }, () => {
     const watched: CiWait[] = [];
     const supervisor = { resolve: async () => identity, watch: (wait: CiWait) => { watched.push(wait); return new Promise<CiWaitResult>(done => { settle = done; }); }, close() {} };
     externalResource.supervisor = supervisor;
-    Object.assign(manager, { ciSupervisor: supervisor });
+    manager.dispose();
+    reopenRuntime();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
-    const state = (manager as unknown as { active: Map<string, { liveSession: { ciGeneration: string; };  }> }).active.get(run.id)!;
-    const receipt = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, until: 'merge', wake_on_conflict: false, timeout_seconds: 30 }, 'cezar_wait', state.liveSession.ciGeneration);
+    const receipt = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, until: 'merge', wake_on_conflict: false, timeout_seconds: 30 }, 'cezar_wait', toolGenerationOf(run.id));
     await restart();
     expect(manager.isActive(run.id)).toBe(false);
     expect(watched.at(-1)).toMatchObject({ id: receipt.id, until: 'merge', wakeOnConflict: false });
     // The committed row at the wake boundary already holds the result and its input.
     let committed: { waits?: Wait[]; agentInputs?: Array<{ id: string; text: string }> } | undefined;
-    const engine = runInternals(manager).wakeAdmission;
-    const queue = engine.queueWaitWake.bind(engine);
-    const wake = vi.spyOn(engine, 'queueWaitWake').mockImplementation(id => { if (id === run.id) committed = readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === id); queue(id); });
+    const observe = (row: { id: string; waits?: Wait[] }) => {
+      if (row.id === run.id && row.waits?.some(wait => wait.id === receipt.id && wait.phase === 'resolved')) {
+        committed = readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === run.id);
+      }
+    };
+    store.on('run', observe);
     settle({ outcome: 'merged', headSha: identity.headSha, observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false, mergedAt: '2026-10-23T09:00:00Z' });
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
-    expect(wake).toHaveBeenCalled();
+    store.off('run', observe);
+    expect(committed).toBeDefined();
     expect(committed?.waits?.find(wait => wait.id === receipt.id)).toMatchObject({ phase: WAIT_PHASE.resolved, until: 'merge', result: { outcome: 'merged' } });
     expect(committed?.agentInputs?.find(input => input.id === receipt.id)?.text).toContain('(until merge)');
     expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === receipt.id)).toHaveLength(1);
@@ -116,8 +121,9 @@ describe('CI wait recovery and conversations', { timeout: 30_000 }, () => {
     const external = github();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     await register(run.id);
-    const state = (manager as unknown as { active: Map<string, { liveSession: { session: { end(): void }; };  }> }).active.get(run.id)!;
-    state.liveSession.session.end();
+    expect(work.liveSessions.size).toBe(1);
+    const [session] = work.liveSessions;
+    session!.end();
     await until(() => !manager.isActive(run.id));
     expect(store.getRun(run.id)?.status).toBe('waiting');
     external.settle(success());
@@ -127,11 +133,11 @@ describe('CI wait recovery and conversations', { timeout: 30_000 }, () => {
 
   it('a CI wait keeps an earlier step open, and the step advances only on a done after the resumed turn', async () => {
     const external = github();
-    const gate = join(root, 'nonfinal-boundary'); controlledWire({ firstResultGate: gate, replay: true });
+    const gate = join(root, 'nonfinal-boundary'); const wire = controlledWire({ firstResultGate: gate, replay: true });
     const run = manager.startRun({ name: 'ci-chain', source: 'built-in', steps: [
       { id: 'first', prompt: 'hold' }, { id: 'check', command: 'node -e "process.exit(0)"' },
     ] }, { task: 'CI chain', runner: 'claude' });
-    await until(() => !!(manager as unknown as { active: Map<string, { liveSession: { sessionEverOpened?: boolean; };  }> }).active.get(run.id)?.liveSession.sessionEverOpened);
+    await until(wire.initialReceived);
     await register(run.id); writeFileSync(gate, 'end');
     await until(() => parked(run.id));
     expect(store.getRun(run.id)?.steps.find(step => step.id === 'check')?.status).toBe('pending');
@@ -153,8 +159,9 @@ describe('CI wait recovery and conversations', { timeout: 30_000 }, () => {
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     const wait = await register(run.id);
     await until(() => parked(run.id));
-    const session = runInternals(manager).active.get(run.id)!.liveSession.session!;
-    const send = vi.spyOn(session, 'sendAgentMessage');
+    expect(work.liveSessions.size).toBe(1);
+    const [session] = work.liveSessions;
+    const send = vi.spyOn(session!, 'sendAgentMessage');
     const update = (n: number) => ({ id: randomUUID(), parentRunId: run.id, source: agentInputSchema.shape.source.enum.agent, text: `worker update ${n}`,
       createdAt: new Date().toISOString(), conversation: { senderRunId: randomUUID(), recipientRunId: run.id, kind: 'progress' as const } });
     const inputOf = (id: string) => store.getRun(run.id)?.agentInputs?.find(input => input.id === id);
@@ -190,16 +197,20 @@ describe('CI wait recovery and conversations', { timeout: 30_000 }, () => {
     const external = github();
     const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     const gate = join(root, 'worker-boundary'); controlledWire({ firstResultGate: gate });
+    const sessions = new Set(work.liveSessions);
     const child = await worker(p.id); manager.enqueueOwnedRun(child.id);
-    await until(() => !!(manager as unknown as { active: Map<string, { liveSession: { sessionEverOpened?: boolean; };  }> }).active.get(child.id)?.liveSession.sessionEverOpened);
+    await until(() => store.getRun(child.id)?.steps.some(step => !!step.sessionId) === true && [...work.liveSessions].some(session => !sessions.has(session)));
     await register(child.id);
     external.settle(success());
     await until(() => ciWaitOf(child.id)?.phase === 'resolved');
-    const state = (manager as unknown as { active: Map<string, { liveSession: { session: { end(): void }; };  }> }).active.get(child.id)!;
+    const session = [...work.liveSessions].find(session => !sessions.has(session))!;
     // The session closes with the result owed: one failed delivery, retried after the wake backoff
     // (hearsay-tools/cezarion#1233), which the test need not wait out.
-    runInternals(manager).retries.wakeRetryBackoff = { fastMs: 0, fastCount: 1, capMs: 0 };
-    state.liveSession.session.end(); writeFileSync(gate, 'end');
+    const clock = observationClock(delay => delay === WAKE_RETRY_BACKOFF.fastMs &&
+      /\bat WakeRetries\.backoff \(/.test(new Error().stack ?? ''));
+    session.end(); writeFileSync(gate, 'end');
+    await until(() => clock.pending > 0 || !!lastCiWaitOf(child.id)?.deliveredAt);
+    if (clock.pending) await clock.advance(WAKE_RETRY_BACKOFF.fastMs);
     await until(() => !!lastCiWaitOf(child.id)?.deliveredAt);
     expect(ciWaitOf(child.id)).toBeUndefined();
   });
