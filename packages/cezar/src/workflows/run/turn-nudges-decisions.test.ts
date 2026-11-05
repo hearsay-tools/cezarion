@@ -13,9 +13,7 @@ import type { RunManager } from '../run.ts';
 import { COMPLETION_NUDGE_NOTE } from '../turn-end.ts';
 import { COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES } from './constants.ts';
 import { QUICK_TASK_WORKFLOW } from '../types.ts';
-import { HumanWaits } from './human-waits.ts';
-import { WakeAdmission } from './wake-admission.ts';
-import { WakeRetries } from './wake-retries.ts';
+import { observationClock } from '../../core/observation-clock.testkit.ts';
 import { completionRefusalQueueDecision } from './turn-nudges.ts';
 
 describe('completionRefusalQueueDecision', () => {
@@ -75,86 +73,98 @@ describe('closed-session refusal effects through public recovery', () => {
       text: `Workers are still live: ${workerId}. ${COMPLETION_WILL_WAIT}`, createdAt: new Date().toISOString() };
   }
 
-  function observeGate(throwWake = false, expectedInput?: AgentInput) {
+  function observeGate(expected: string[], beforeEvent?: (event: Parameters<RunStore['appendEvent']>[1]) => void) {
     const trace: string[] = [];
     let inGate = false;
+    let checked = false;
     const append = store.appendEvent.bind(store), move = store.move.bind(store), flush = store.flush.bind(store);
     vi.spyOn(store, 'appendEvent').mockImplementation((runId, event) => {
       if (runId === id && event.type === 'note' && String(event.message).startsWith('Completion blocked:')) {
         inGate = true; trace.push('warning');
-      } else if (runId === id && inGate) trace.push(`event:${event.type}`);
+      } else if (runId === id && inGate) {
+        beforeEvent?.(event);
+        trace.push(`event:${event.type}`);
+      }
       return append(runId, event);
     });
     vi.spyOn(store, 'move').mockImplementation((...args) => {
-      if (args[0] === id && inGate && args[1] === 'park') trace.push('park');
+      if (args[0] === id && inGate) trace.push(args[1]);
       return move(...args);
     });
     vi.spyOn(store, 'flush').mockImplementation(() => { if (inGate) trace.push('flush'); return flush(); });
-    const queue = WakeAdmission.prototype.queueWaitWake;
-    const wake = vi.spyOn(WakeAdmission.prototype, 'queueWaitWake').mockImplementation(function (this: WakeAdmission, runId) {
-      if (runId !== id || !inGate) return queue.call(this, runId);
-      expect(trace.slice(0, 3)).toEqual(['warning', 'park', 'flush']);
-      expect(fixtureWork(manager).liveSessions.size).toBe(0);
-      if (expectedInput) {
-        expect(store.getRun(id)?.agentInputs).toEqual([expectedInput]);
-        expect(store.getRun(id)?.automaticWakes).toBe(7);
+    // The gate is synchronous. Recovery next enumerates runs after its live-run loop,
+    // before rearmRecoveredWakes. Check the complete trace at that owned store boundary.
+    const list = store.listRuns.bind(store);
+    vi.spyOn(store, 'listRuns').mockImplementation((...args) => {
+      if (inGate) {
+        expect(trace).toEqual(expected);
+        checked = true;
+        inGate = false;
       }
-      trace.push('wake');
-      if (throwWake) { throwWake = false; throw Error('owned wake queue failure'); }
-      queue.call(this, runId); inGate = false;
+      return list(...args);
     });
-    const retry = WakeRetries.prototype.retryWaitAdmission;
-    vi.spyOn(WakeRetries.prototype, 'retryWaitAdmission').mockImplementation(function (this: WakeRetries, runId) {
-      if (runId === id && inGate) { trace.push('retry'); inGate = false; }
-      return retry.call(this, runId);
+    const retry = observationClock(delay => {
+      if (delay !== 1000 || !/\bat WakeRetries\.retryWaitAdmission \(/.test(new Error().stack ?? '')) return false;
+      if (inGate) trace.push('retry');
+      return true;
     });
-    return { trace, wake, inGate: () => inGate, close: () => { inGate = false; } };
+    return { trace, retry, inGate: () => inGate, checked: () => checked };
   }
 
-  it.each([false, true])('keeps the exact owed input and charge; throwing wake=%s', throwWake => {
-    // Return the recovery promise so every assertion follows the real gate settlement.
+  it('keeps the exact owed input and charge through the gate, then rearms its wake', async () => {
     const input = refusalInput();
     store.commitAgentInputs(id, [input]);
-    const gate = observeGate(throwWake, input);
+    const expected = ['warning', 'park', 'flush'];
+    const gate = observeGate(expected);
     const outcome = vi.spyOn(store, 'commitOutcome');
     const wait = vi.spyOn(store, 'commitWait');
-    const alias = vi.spyOn(HumanWaits.prototype, 'openHumanAlias');
-    const surface = vi.spyOn(HumanWaits.prototype, 'surfaceHumanWait');
-    return manager.recover(id).then(() => {
-      expect(gate.trace).toEqual(throwWake ? ['warning', 'park', 'flush', 'wake', 'retry'] : ['warning', 'park', 'flush', 'wake']);
-      expect(store.getRun(id)?.agentInputs).toEqual([input]);
-      expect(store.getRun(id)?.automaticWakes).toBe(7);
-      expect(store.getRun(id)?.delegation).not.toHaveProperty('finishRequestedAt');
-      expect(fixtureWork(manager).liveSessions.size).toBe(0);
-      expect(outcome.mock.calls.filter(([runId]) => runId === id)).toEqual([]);
-      expect(wait.mock.calls.filter(([runId]) => runId === id)).toEqual([]);
-      expect(alias).not.toHaveBeenCalled(); expect(surface).not.toHaveBeenCalled();
-      expect(store.readEvents(id).filter(event => event.type === 'agent-input' || String(event.message).startsWith(COMPLETION_NUDGE_NOTE))).toEqual([]);
-    });
+    const inputs = vi.spyOn(store, 'commitAgentInputs');
+    await manager.recover(id);
+    expect(gate.checked()).toBe(true);
+    expect(gate.trace).toEqual(expected);
+    expect(gate.retry.captured).toBe(1);
+    expect(gate.retry.pending).toBe(1);
+    expect(store.getRun(id)?.agentInputs).toEqual([input]);
+    expect(store.getRun(id)?.automaticWakes).toBe(7);
+    expect(store.getRun(id)?.delegation).not.toHaveProperty('finishRequestedAt');
+    expect(fixtureWork(manager).liveSessions.size).toBe(0);
+    expect(outcome.mock.calls.filter(([runId]) => runId === id)).toEqual([]);
+    expect(wait.mock.calls.filter(([runId]) => runId === id)).toEqual([]);
+    expect(inputs.mock.calls.filter(([runId]) => runId === id)).toEqual([]);
+    expect(store.readEvents(id).filter(event => event.type === 'agent-input' || String(event.message).startsWith(COMPLETION_NUDGE_NOTE))).toEqual([]);
   });
 
   it('commits the budget alias before surfacing its note, with no refusal charge', async () => {
     store.updateRun(id, { automaticWakes: MAX_AUTO_CONTINUES });
-    const gate = observeGate();
-    const alias = HumanWaits.prototype.openHumanAlias, surface = HumanWaits.prototype.surfaceHumanWait;
+    const expected = ['warning', 'park', 'flush', 'alias', 'event:note', 'surfaced'];
     let aliasId: string | undefined;
-    vi.spyOn(HumanWaits.prototype, 'openHumanAlias').mockImplementation(function (this: HumanWaits, ...args) {
-      const wait = alias.apply(this, args);
-      if (args[0] === id && gate.inGate()) { gate.trace.push('alias'); aliasId = wait?.id; }
-      return wait;
+    const gate = observeGate(expected, event => {
+      if (event.type !== 'note' || !String(event.message).includes('automatic-wake budget spent')) return;
+      expect(aliasId).toBeDefined();
+      expect(store.getRun(id)?.waits).toEqual([expect.objectContaining({ id: aliasId, via: WAIT_VIA.budget })]);
+      expect(gate.trace).toEqual(['warning', 'park', 'flush', 'alias']);
     });
-    vi.spyOn(HumanWaits.prototype, 'surfaceHumanWait').mockImplementation(function (this: HumanWaits, ...args) {
+    const commit = store.commitWait.bind(store);
+    vi.spyOn(store, 'commitWait').mockImplementation((...args) => {
       if (args[0] === id && gate.inGate()) {
-        expect(aliasId).toBeDefined();
-        expect(store.getRun(id)?.waits).toEqual([expect.objectContaining({ id: aliasId, via: WAIT_VIA.budget })]);
-        expect(gate.trace).toEqual(['warning', 'park', 'flush', 'alias']);
-        gate.trace.push('surface');
+        if (args[1].kind !== 'human' || args[1].askSeq === undefined) {
+          expect(gate.trace).toEqual(['warning', 'park', 'flush']);
+          gate.trace.push('alias');
+          aliasId = args[1].id;
+        } else {
+          expect(gate.trace).toEqual(['warning', 'park', 'flush', 'alias', 'event:note']);
+          expect(args[1].id).toBe(aliasId);
+          expect(args[1].askSeq).toBe(store.readEvents(id).at(-1)?.seq);
+          gate.trace.push('surfaced');
+        }
       }
-      surface.apply(this, args); gate.close();
+      return commit(...args);
     });
     const outcome = vi.spyOn(store, 'commitOutcome');
     await manager.recover(id);
-    expect(gate.trace).toEqual(['warning', 'park', 'flush', 'alias', 'surface', 'event:note']);
+    expect(gate.checked()).toBe(true);
+    expect(gate.trace).toEqual(expected);
+    expect(gate.retry.captured).toBe(0);
     expect(store.getRun(id)?.agentInputs ?? []).toEqual([]);
     expect(store.getRun(id)?.automaticWakes).toBe(MAX_AUTO_CONTINUES);
     expect(store.getRun(id)?.waits).toEqual([expect.objectContaining({ id: aliasId, askSeq: expect.any(Number) })]);
@@ -163,7 +173,9 @@ describe('closed-session refusal effects through public recovery', () => {
   });
 
   it.each([false, true])('enqueues with an atomic charge, persistence failure=%s', async failure => {
-    const gate = observeGate();
+    const expected = failure ? ['warning', 'park', 'flush', 'charge']
+      : ['warning', 'park', 'flush', 'charge', 'event:agent-input', 'event:note'];
+    const gate = observeGate(expected);
     const commit = store.commitOutcome.bind(store);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(store, 'commitOutcome').mockImplementation((...args) => {
@@ -179,14 +191,15 @@ describe('closed-session refusal effects through public recovery', () => {
       return committed;
     });
     await manager.recover(id);
-    gate.close();
+    expect(gate.checked()).toBe(true);
+    expect(gate.trace).toEqual(expected);
+    expect(gate.retry.captured).toBe(failure ? 0 : 1);
     if (failure) {
       expect(gate.trace).toEqual(['warning', 'park', 'flush', 'charge']);
       expect(store.getRun(id)?.agentInputs ?? []).toEqual([]);
       expect(store.getRun(id)?.automaticWakes).toBe(7);
       expect(console.warn).toHaveBeenCalledWith('[cez] completion refusal not queued: owned outcome checkpoint failure');
     } else {
-      expect(gate.trace).toEqual(['warning', 'park', 'flush', 'charge', 'event:agent-input', 'event:note', 'wake']);
       expect(store.getRun(id)?.agentInputs).toEqual([expect.objectContaining({ text: expect.stringContaining(`Workers are still live: ${workerId}.`), purpose: 'completion-refusal' })]);
       expect(store.getRun(id)?.automaticWakes).toBe(8);
       expect(store.getRun(id)?.agentInputs?.[0]?.text.endsWith(COMPLETION_WILL_WAIT)).toBe(true);
@@ -197,10 +210,19 @@ describe('closed-session refusal effects through public recovery', () => {
     const input = refusalInput();
     store.commitAgentInputs(id, [input]);
     store.commitWait(id, makeTimerWait({ deadline: new Date(Date.now() + 60_000).toISOString() }));
-    const gate = observeGate();
+    const expected = ['warning', 'park', 'flush'];
+    const gate = observeGate(expected);
+    const outcome = vi.spyOn(store, 'commitOutcome');
+    const wait = vi.spyOn(store, 'commitWait');
+    const inputs = vi.spyOn(store, 'commitAgentInputs');
     await manager.recover(id);
-    gate.close();
-    expect(gate.trace.slice(0, 3)).toEqual(['warning', 'park', 'flush']);
+    expect(gate.checked()).toBe(true);
+    expect(gate.trace).toEqual(expected);
+    expect(gate.retry.captured).toBe(1);
+    expect(gate.retry.pending).toBe(1);
+    expect(outcome.mock.calls.filter(([runId]) => runId === id)).toEqual([]);
+    expect(wait.mock.calls.filter(([runId]) => runId === id)).toEqual([]);
+    expect(inputs.mock.calls.filter(([runId]) => runId === id)).toEqual([]);
     expect(store.getRun(id)?.agentInputs).toEqual([input]);
     expect(store.getRun(id)?.automaticWakes).toBe(7);
   });
