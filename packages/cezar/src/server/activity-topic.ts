@@ -25,21 +25,26 @@ export interface ActivityTopicDeps {
 /**
  * Register the activity topics (spec 2026-11-05-live-activity-view, Live transport). Both keep the
  * default `loopbackReadable: false`: they carry run titles, tool titles and request text. A
- * project id the workspace cannot resolve answers the hub's unknown-topic error; the project
- * routes answer its real failure. A project topic follows the registry: a removed project sends
+ * project id the registry does not know answers the hub's unknown-topic error. A known project
+ * whose context cannot build yet gets a topic that sends that failure and binds once the project
+ * resolves. A project topic follows the registry: a removed project sends
  * one unavailable frame and stops its work, and a re-added one binds to its new context, retrying
  * a failed resolution when the project's context gets built or a subscriber arrives. A project
  * id never holds a colon, so the names cannot collide.
  */
 export function registerActivityTopics(hub: SocketHub, deps: ActivityTopicDeps): void {
   hub.registerTopicFamily(ACTIVITY_PROJECT_TOPIC_PREFIX, async (projectId) => {
-    let project: LoadedProject;
+    let start: Parameters<typeof createProjectTopicPublisher>[0];
     try {
-      project = await deps.workspaceProjects.resolveLiveProject(projectId);
-    } catch {
-      return undefined;
+      start = { project: await deps.workspaceProjects.resolveLiveProject(projectId) };
+    } catch (error) {
+      // Only an id the registry does not know names no topic. A known project whose context
+      // cannot build now (folder missing, store unavailable) starts unbound with that failure.
+      const unavailable = deps.workspaceProjects.projectFailure(error, projectId);
+      if (unavailable.status === 404) return undefined;
+      start = { projectId, unavailable };
     }
-    return createProjectTopicPublisher(project, {
+    return createProjectTopicPublisher(start, {
       sources: deps.sources,
       demand: deps.demand,
       publisher: deps.publisher,

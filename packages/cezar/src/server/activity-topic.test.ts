@@ -246,4 +246,27 @@ describe('the activity topics', () => {
     expect(frames.at(-1)!.projects[0]).toMatchObject({ tasks: [{ title: 'New task' }] });
     stop();
   });
+
+  it('follows a known project whose store fails at the first subscribe until it gets ready', async () => {
+    const { families, demand, loaded, failing, emit } = wire();
+    loaded.set('docs', project('docs', 'Docs task'));
+    failing.add('docs');
+    const publisher = await families.get(ACTIVITY_PROJECT_TOPIC_PREFIX)!.resolve('docs');
+    expect(publisher).toBeDefined(); // a known project names a topic even while it cannot resolve
+    const frames: ActivitySnapshot[] = [];
+    let next: (() => void) | undefined;
+    const stop = publisher!.start((data) => { frames.push(data as ActivitySnapshot); next?.(); });
+    const first = await publisher!.snapshot() as ActivitySnapshot;
+    expect(first.projects[0]).toMatchObject({ projectId: 'docs', loaded: true, unavailable: { status: 503 }, tasks: [] });
+    expect(demand.has('docs')).toBe(false);
+
+    failing.delete('docs');
+    const ready = new Promise<void>((resolve) => { next = resolve; });
+    emit('ready', 'docs');
+    await ready;
+    expect(frames.at(-1)!.projects[0]).toMatchObject({ loaded: true, tasks: [{ title: 'Docs task' }] });
+    expect(frames.at(-1)!.projects[0]!.unavailable).toBeUndefined();
+    expect(demand.has('docs')).toBe(true);
+    stop();
+  });
 });

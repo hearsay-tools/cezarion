@@ -502,7 +502,9 @@ Case table for the probe (a detached process):
   the topic binds to the new context and sends its snapshot. A re-add whose context cannot
   build yet sends the project `unavailable` with the status the project routes answer (409
   or 503), and resolves again when its context gets built (`project-ready`) or a new
-  subscriber arrives.
+  subscriber arrives. The same holds at the first subscribe: only an id the registry does
+  not know answers the unknown-topic error; a known project whose context cannot build yet
+  gets a topic that sends that failure and binds once the project resolves.
 - The publisher starts on the first subscriber and stops on the last. It sends a full
   snapshot on subscribe, then a new snapshot at most every 500 ms and only when
   something changed: a run change in the store, a tracker change, or a progress

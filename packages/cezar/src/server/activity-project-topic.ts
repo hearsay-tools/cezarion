@@ -65,13 +65,15 @@ interface Session {
  * context and sends its snapshot; a failure sends the project unavailable with the status the
  * project routes answer (`projectFailure`), once for each change of that status or error.
  */
-export function createProjectTopicPublisher(initial: LoadedProject, deps: ProjectTopicDeps): TopicPublisher {
-  const projectId = initial.id;
-  let bound: TopicPublisher | undefined = bindTo(initial);
+export function createProjectTopicPublisher(start: { project: LoadedProject } | { projectId: string; unavailable: Unavailable },
+  deps: ProjectTopicDeps): TopicPublisher {
+  const projectId = 'project' in start ? start.project.id : start.projectId;
+  let bound: TopicPublisher | undefined = 'project' in start ? bindTo(start.project) : undefined;
   let name = projectId;
   let session: Session | undefined;
-  /** Why the project is unbound; undefined while bound. */
-  let unavailable: Unavailable | undefined;
+  /** Why the project is unbound; undefined while bound. A project whose context cannot build at
+   *  the first subscribe starts here and binds on the same events as a re-add. */
+  let unavailable: Unavailable | undefined = 'project' in start ? undefined : start.unavailable;
 
   function bindTo(project: LoadedProject): TopicPublisher {
     return createActivityPublisher({
