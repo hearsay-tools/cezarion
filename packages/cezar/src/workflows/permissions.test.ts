@@ -59,6 +59,8 @@ describe('human permission lifecycle', () => {
 
   it('parks concurrent requests until their exact IDs resolve and blocks all ordinary input', () => {
     const session = liveSession();
+    // Without an exemption, a wrongly pooled permission park would cost a slot.
+    const monitoringLimit = vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(0);
     request('a'); request('b');
     expect(f.store.getRun(id)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
     expect(semaphore.busy()).toBe(0);
@@ -72,6 +74,7 @@ describe('human permission lifecycle', () => {
     expect(f.manager.respondPermission(id, 'a', 'deny')).toBe(true);
     expect(f.store.getRun(id)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
     expect(f.manager.respondPermission(id, 'a', 'deny')).toBe(false);
+    monitoringLimit.mockRestore();
     expect(f.manager.respondPermission(id, 'b', 'deny')).toBe(true);
     expect(f.store.getRun(id)).toMatchObject({ status: RUN_STATUS.running, hasPendingPermission: false });
     expect(semaphore.busy()).toBe(1);
