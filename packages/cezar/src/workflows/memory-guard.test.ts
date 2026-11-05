@@ -63,6 +63,31 @@ describe('RunManager memory guard', () => {
       && typeof event.message === 'string' && event.message.startsWith('paused — memory limit exceeded'));
   }
 
+  it('ignores an active run before its session attaches and preserves autonomous startup', async () => {
+    let sampled = false;
+    let addedEvents: ReturnType<typeof f.store.readEvents> = [];
+    const append = f.store.appendEvent.bind(f.store);
+    vi.spyOn(f.store, 'appendEvent').mockImplementation((id, event) => {
+      const result = append(id, event);
+      if (event.type === 'step-start') {
+        expect(f.manager.isActive(id)).toBe(true);
+        const before = f.store.readEvents(id);
+        sample(id);
+        addedEvents = f.store.readEvents(id).slice(before.length);
+        sampled = true;
+      }
+      return result;
+    });
+    const id = await start();
+    expect(sampled).toBe(true);
+    expect(addedEvents).toEqual([]);
+    expect(session.open).toBe(true);
+    expect(session.end).not.toHaveBeenCalled();
+    expect(pauses(id)).toEqual([]);
+    emit({ type: 'turn-end' });
+    expect(session.sendAgentMessage).toHaveBeenCalledWith([{ type: 'text', text: AUTONOMOUS_NUDGE }], []);
+  });
+
   it('records the pause and suppresses autonomous turn input before the process exits', async () => {
     const id = await start();
     vi.mocked(session.end).mockImplementation(() => {});
