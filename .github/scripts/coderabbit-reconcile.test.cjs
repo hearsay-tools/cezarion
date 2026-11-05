@@ -434,3 +434,17 @@ for (const historical of [false, true]) test(`admission read error revocation pr
   assert.deepEqual(await run(h), [historical ? 'review-evidence-unavailable' : 'rerun-requested']);
   assert.deepEqual(h.s.writes, historical ? [] : [30]);
 });
+
+for (const policy of ['current', 'execution-only']) test(`manual dispatch preserves ${policy} native policy after provider recovery`, async () => {
+  const h = fixture(); h.s.checks = [];
+  if (policy === 'execution-only') h.s.jobs[0].steps = [{ name: 'Require fresh CodeRabbit execution and resolved threads' }];
+  assert.deepEqual(await run(h), [policy === 'current' ? 'unchanged' : 'legacy-workflow']);
+  h.s.checks = fixture().s.checks;
+  assert.deepEqual(await run(h), [policy === 'current' ? 'rerun-requested' : 'legacy-workflow']);
+  assert.deepEqual(h.s.writes, policy === 'current' ? [30] : []);
+  if (policy === 'current') {
+    h.s.run.status = 'completed'; h.s.jobs[0].conclusion = 'success';
+    assert.deepEqual(await run(h), ['unchanged']);
+    assert.deepEqual(h.s.writes, [30]);
+  }
+});
