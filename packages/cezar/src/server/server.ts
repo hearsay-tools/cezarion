@@ -42,6 +42,7 @@ import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { CheckoutProgressCache } from './checkout-progress.ts';
 import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract/projects';
 import { createLiveRoutes } from './live-routes.ts';
+import { createActivityRoutes } from './activity-routes.ts';
 import { createWorkspaceProjects, createWorkspaceProjectContexts, createTaskWebhooks, type WorkspaceProjects } from './workspace-projects.ts';
 import { subscribeRunFeed } from './run-event-feed.ts';
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
@@ -4997,9 +4998,6 @@ export function createApp(deps: ServerDeps) {
    */
   const RUNS_INDEX_PER_PROJECT = ARCHIVED_WINDOW;
 
-  /** `RunRecord` → the wire row. Optional keys are spread CONDITIONALLY: writing
-   *  `titleSummary: run.titleSummary` types a key as always-present that `JSON.stringify` then
-   *  drops when it is undefined, which is exactly the drift the parity guard fails on. */
   /**
    * Every number a run MENTIONS — a superset of what its chip will show.
    *
@@ -5170,6 +5168,7 @@ export function createApp(deps: ServerDeps) {
     .route('/', fsBrowseRoutes)
     .route('/', automationChecksRoutes)
     .route('/', runsIndexRoutes)
+    .route('/', createActivityRoutes({ bootContext, contexts, workspaceProjects }))
     .route('/', workspaceEventsRoutes);
 
   // ---- mount ---------------------------------------------------------------
