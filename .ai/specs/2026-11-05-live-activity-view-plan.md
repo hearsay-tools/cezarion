@@ -25,8 +25,8 @@ can drive the view from the HTTP snapshot. One PR for each slice.
   and asks two optional providers for tool activity and check progress
   (`ToolActivitySource`, `CiProgressSource`). In S1 both providers return nothing.
 - `packages/cezar/src/activity/requests.ts`: open and recently closed requests from
-  the ledgers of held and pinned roots plus foreign `live = 1` rows (no scan of
-  finished rows); test a pinned terminal root, a foreign live root, and a sender
+  the ledgers of held and pinned roots plus the roots of foreign claimed families
+  (no scan of finished rows, no new store read); test a pinned terminal root, a foreign live root, and a sender
   that settles right after a reply (the publisher's carry-over read), and a foreign
   terminal root that is still claimed (live = 0) (one ledger for each request: the root's for family, the sender's
   for peer). Only `accepted` requests open.

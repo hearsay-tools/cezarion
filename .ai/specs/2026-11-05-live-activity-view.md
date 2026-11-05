@@ -21,7 +21,7 @@ Open it in a browser. It runs a scripted 50-second loop with sample data.
 | D5 | No new setting, flag, file or interval that a user must choose. The activity data is derived from the run store and from in-memory trackers. Deleting `.ai/cezar/` loses nothing this view needs beyond the runs themselves. | AGENTS.md § Zero config |
 | D6 | The activity data is never written to `RunRecord`. Tool activity and check progress live in memory and start empty after a restart. | Planner: a tool call per second would rewrite the run row and fire a workspace `run` frame for every call. |
 | D7 | When the live coordinator has topics, live data comes from a new WebSocket topic. Without topics (remote mode, or no working SharedWorker), the view reads the HTTP snapshot every 5 s while it is visible. | docs/areas/realtime-events.md: a new live signal is a topic; remote mode opens no WebSocket. |
-| D8 | The view shows **active work**: root tasks that are `queued`, `running` or `waiting`, and any root that still has a live worker. Tasks in `review`, `failed`, `done` or `cancelled` are not cards. One summary chip counts tasks in review and links to Tasks. | Planner: review is finished work at the human gate; many review tasks would crowd out live work. |
+| D8 | The view shows **active work**: root tasks that are `queued`, `running` or `waiting`, and any root that still has a live worker (a worker whose status is `queued`, `running` or `waiting`: `isLiveStatus`). Tasks in `review`, `failed`, `done` or `cancelled` are not cards. One summary chip counts tasks in review and links to Tasks. | Planner: review is finished work at the human gate; many review tasks would crowd out live work. |
 | D9 | Card placement is stable. A card keeps its column and order while it stays on the view. State changes never move a card. | Planner: a living view that reorders on every change cannot be read. |
 
 ## What the user sees
@@ -53,8 +53,8 @@ changes.
 | running | Doing | The latest tool call title, for example `Edit workers/spawn.ts`. Before the first call, or 10 s after the last call ended: "Thinking". | "Last tool 6 s ago". The dot pulses, a light sweeps the box, and the main line slides in at each new call. |
 | needs-you, with a question (`asksQuestion()`) | Needs you | The ask card's first question. | The card glows in the pending tone. An Answer button opens the task. |
 | needs-you, no question: a plain turn end, or Cezar's `no-wait` wait | Needs you | "Your turn". | The glow. An Open task button. |
-| needs-you, no question: Cezar's `budget` wait | Needs you | "Automatic wakes used up", with the count of queued messages when known. | The glow. An Open task button. |
-| needs-permission | Needs you | "Permission: <tool>". | Same as above. |
+| needs-you, no question: Cezar's `budget` wait | Needs you | "Automatic wakes used up", and "N messages queued" when the run holds agent inputs not yet delivered. | The glow. An Open task button. |
+| needs-permission | Needs you | "Permission". The record holds only `hasPendingPermission`; the tool name lives in the run manager's memory, so the view does not show it. | Same as above. |
 | waiting-on-workers, worker outcomes only | Waiting for workers | "<mode> of N · M settled". With several open worker waits: "N owed", the count `computeWaitingOn` reports, without a mode. | A bar fills as workers settle. The earliest deadline. |
 | waiting-on-workers with `replies` (every open worker-kind wait names `requestIds`) | Waiting for reply | "From <task>", or "From N tasks". | Reply deadline. |
 | waiting-on-workers, mixed (some entries name workers, some name requests) | Waiting for workers | "N owed · M settled", the count `computeWaitingOn` reports. | The earliest deadline. The request lines show which replies are owed. |
@@ -126,6 +126,12 @@ label says "Replied", and both fade out. A request that closes without a reply
 
 ### Global view (`/activity`)
 
+The global read covers the boot project and every project whose context this
+process has already built (as `projectRunSources` does). It never builds a context to
+read it, because building one recovers that project's runs. A project without a
+context is an entry with `loaded: false`, and its panel says "Not loaded in this
+cockpit" with a link that opens the project.
+
 One panel for each project that has active work, in project-rail order. Projects with
 no active work collapse into one line at the bottom. A panel holds one compact pill for
 each card: shape, title, a small heartbeat and one line (the verb in the rung tone and
@@ -189,6 +195,8 @@ activitySnapshot = {
 }
 ActivityProject = {
   projectId, name,
+  loaded: boolean,             // false: this process has built no context for the
+                               // project, so its lists are empty, not idle
   inReview: number,            // D8 chip
   tasks: ActivityRun[],        // active roots (D8)
   requests: ActivityRequest[], // open requests only (D2)
@@ -207,19 +215,30 @@ ActivityRun = {
   collected?: boolean,        // workers: the parent holds a collected result for this
                               // revision (see Read model)
 }
-ActivityWait = { kind, since, deadline?, detail } // detail is per kind, e.g.
+ActivityWait = { kind, since?, deadline? } & detail, a union on `kind`, which is
+  // `computeWaitingOn`'s kind. `since` is the earliest `registeredAt` of the open
+  // entries of that kind (absent for usage-limit: the record stores no start).
+  // `deadline` is the earliest deadline among them.
+  // human: { question?: string (first question, clamped to 500),
+  //          reason: 'question'|'turn-end'|'budget'|'completion',
+  //          queuedMessages?: int (agent inputs not delivered, only when > 0) }
+  // usage-limit: { resumeAt }
+  // workers: { owed (= computeWaitingOn count), total, settled, replies?: true,
+  //            mode? (only when one entry is open),
+  //            recipientRunIds: string[] (reply-wait recipients, deduplicated) }
+  // peers: { peerRunIds: string[] }      subagents: { running }
+  // process: { pid, note? }              timer: { wakeAt, note? }
   // pr: { number, target: 'checks'|'merge',
   //       checks?: { name, bucket: 'pass'|'fail'|'pending'|'skipping'|'cancel' }[] }
   //       counts: { pass, fail, pending, skipping, cancel } — over every check,
   //       counted before the list is cut; truncated?: true when the list holds
   //       only the first 100 (names clamped to 100 characters)
   //       The main line's P and T come from `counts`, never from the list.
-  // worker: { mode, total, settled }   timer: { wakeAt, note? }   human: { question? }
-  // peer: { recipientRunId }           process: { pid, note? }      usage: { resumeAt }
 ActivityRequest = {
   requestId, relationship: 'family'|'peer',
   senderRunId, recipientRunId, text,        // text clamped to 500 characters
-  senderTitle, recipientTitle,              // so a line to a task with no card can
+  senderTitle?, recipientTitle?,            // absent when that record cannot be read;
+                                            // so a line to a task with no card can
                                             // still name it
   createdAt, deadline?,
 }
@@ -275,12 +294,13 @@ and the two trackers. It reads; it never writes a run.
     `packages/cezar/src/runs/store.ts`: the held live set plus local pins). Pins keep
     a terminal root whose lifecycle is not settled yet, which `isLiveRecord()` alone
     does not, so its open requests stay drawn until reconcile closes them;
-  - the roots of foreign families: rows with `live = 1` (the indexed column from
-    `isLiveRecord()` in `packages/cezar/src/runs/run-row.ts`), plus every root of a
-    family in `store.listForeignClaimedRunIds()`, read with `getRun()`. The claims
-    list covers a foreign root that is terminal but still pinned in its own process:
-    pins live only in that process's memory and never set `live`. `listRuns()` leaves
-    foreign families out of memory.
+  - the roots of every family in `store.listForeignClaimedRunIds()`, read with
+    `getRun()`. That list holds every family another process owns, alive, or dead
+    with a live run left to recover, so it covers the foreign rows with `live = 1`
+    (`isLiveRecord()` in `packages/cezar/src/runs/run-row.ts`) without a new store
+    read. It also covers a foreign root that is terminal but still pinned in its own
+    process: pins live only in that process's memory and never set `live`.
+    `listRuns()` leaves foreign families out of memory.
   - Settlement for reconcile is the delegation service's own test. The read model
     never treats a foreign root as settled because this process's run manager does
     not hold it.
