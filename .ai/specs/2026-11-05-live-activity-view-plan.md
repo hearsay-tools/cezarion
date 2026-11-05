@@ -68,7 +68,8 @@ can drive the view from the HTTP snapshot. One PR for each slice.
   subscribers and from S1's HTTP reads (15 s after each read). Until S4 lands, only
   HTTP reads create demand.
 - Tests: every row of the spec's probe case table; all five buckets; a check that
-  moves `pending` → `pass` between two snapshots. Prove the "result only updates
+  moves `pending` → `pass` between two snapshots; 101 checks with only the last one
+  pending (counts say 100 of 101). Prove the "result only updates
   progress" row red against a version that lets a failed read resolve the wait. Read
   `.ai/skills/load-bearing-change/SKILL.md` first: this slice touches a working
   watcher.
@@ -88,6 +89,9 @@ can drive the view from the HTTP snapshot. One PR for each slice.
 - Tests (also): the last running task parks with nonzero buckets and no later
   event; frames continue until every bucket is zero, then stop.
 - Report demand per project to `CiProgressRegistry`.
+- While the scope has a run another process owns, rebuild every 5 s and send on
+  change. Test: a foreign write with no local event reaches subscribers within one
+  rebuild; no rebuild timer runs without a foreign run.
 - Cockpit: `packages/web/src/api/activity.ts`: `useActivity(scope)` reads the HTTP
   snapshot, then subscribes when the live coordinator has topics, or re-reads every
   5 s while visible when it has none (remote mode, no SharedWorker, failed

@@ -207,9 +207,12 @@ ActivityRun = {
 ActivityWait = { kind, since, deadline?, detail } // detail is per kind, e.g.
   // pr: { number, target: 'checks'|'merge',
   //       checks?: { name, bucket: 'pass'|'fail'|'pending'|'skipping'|'cancel' }[] }
-  //       (at most 100 checks, names clamped to 100 characters; the client counts)
+  //       counts: { pass, fail, pending, skipping, cancel } — over every check,
+  //       counted before the list is cut; truncated?: true when the list holds
+  //       only the first 100 (names clamped to 100 characters)
+  //       The main line's P and T come from `counts`, never from the list.
   // worker: { mode, total, settled }   timer: { wakeAt, note? }   human: { question? }
-  // peer: { recipientRunId }           process: { command }      usage: { resumeAt }
+  // peer: { recipientRunId }           process: { pid, note? }      usage: { resumeAt }
 ActivityRequest = {
   requestId, relationship: 'family'|'peer',
   senderRunId, recipientRunId, text,        // text clamped to 500 characters
@@ -275,7 +278,7 @@ Case table for request state (a cross-run relationship):
 | Sender's history deletion in progress | `delegation.historyDeletion` set on the ledger's root | The read model skips that ledger: the sender's lines leave with no animation |
 | Recipient's history deletion in progress | the request sits in the sender's ledger, which is not being deleted | Open line until the deletion removes the recipient's record; then outcome `deleted` (peer) or `destroyed` (worker): fade |
 | Recipient's Finish is pending (done refused while its workers live) | the recipient stays `running` or `waiting`; no outcome | Open line |
-| Sender or recipient owned by another cockpit process on the same store | the read model reads the shared run store; the ledger is the same | Same as any other row: the view shows what the store holds |
+| Sender or recipient owned by another cockpit process on the same store | the read model reads the shared run store; the ledger is the same. The run store emits change events only in the process that writes (`RunStore` is an `EventEmitter`; `getRun()` reads emit nothing) | The view shows what the store holds, up to 5 s late: see "Writes by another process" in Live transport. That run's tool heartbeat and CI progress are empty, because both trackers are local to the process that runs it. |
 | Recipient in another project | cannot happen: peers send only inside one project | — |
 | Root A asks root B | peer `request` in A's ledger, no outcome | Open peer line A → B |
 | B replies | B's reply and the outcome `replied`, both in A's ledger | Closed: reply comet B → A |
@@ -368,6 +371,10 @@ Case table for the probe (a detached process):
   while it runs, and for up to 30 s after its last tool call, so a heartbeat drains
   to flat after a task parks. A project with running work sends about one frame a
   second. The client draws each frame's buckets as sent; it never ages them itself.
+- **Writes by another process**: no cross-process change signal exists. While a
+  publisher has subscribers and its scope contains a run that another process owns
+  (`store.listForeignClaimedRunIds()`), it rebuilds the snapshot every 5 s and sends
+  it when it changed. Without such a run, no rebuild timer runs.
 - **HTTP**: `GET /api/v1/workspace/activity?project=<id>` (or no `project` for all)
   returns the same snapshot. The view reads it once on mount for a fast first paint.
   The topic takes over when the live coordinator has topics. When it has none (remote
