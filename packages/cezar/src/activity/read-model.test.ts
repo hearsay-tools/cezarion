@@ -94,6 +94,47 @@ describe('D8: which roots are cards', () => {
   });
 });
 
+describe('unreadable records', () => {
+  /** Two snapshots that share one once-only logger, as the route does. */
+  const twoSnapshots = (runs: readonly RunRecord[], options: FakeStoreOptions & { carryOver?: string[] }) => {
+    const log = vi.fn();
+    const deps: ActivityDeps = { onUnreadable: unreadableLogger(log) };
+    const source = { projectId: 'shop', name: 'Shop', loaded: { store: fakeStore(runs, options), isActive: () => true } };
+    const snapshots = [0, 1].map(() => buildActivityProject(source, deps, { now: NOW, ...(options.carryOver ? { carryOver: options.carryOver } : {}) }).project);
+    return { snapshots, logged: log.mock.calls.map(([message]) => message as string) };
+  };
+
+  it('leaves out a worker it cannot read, and logs it once', () => {
+    const root = makeRoot();
+    const readable = makeWorker(root);
+    const broken = makeWorker(root);
+    const { snapshots, logged } = twoSnapshots([root, readable, broken], { unreadable: [broken.id] });
+    for (const project of snapshots) expect(project.tasks[0]!.workers.map((worker) => worker.runId)).toEqual([readable.id]);
+    expect(logged).toEqual([expect.stringContaining(broken.id)]);
+  });
+
+  it('logs a request recipient it cannot read once, and draws the request without its title', () => {
+    const sender = makeRoot({ status: RUN_STATUS.waiting });
+    // Not a card: only the request read meets it.
+    const recipient = makeRoot({ status: RUN_STATUS.review });
+    const request = addRequest(sender, sender, recipient, { relationship: 'peer' });
+    const { snapshots, logged } = twoSnapshots([sender, recipient], { unreadable: [recipient.id] });
+    for (const project of snapshots) {
+      expect(project.tasks.map((task) => task.runId)).toEqual([sender.id]);
+      expect(project.requests.map((entry) => [entry.requestId, 'recipientTitle' in entry])).toEqual([[request.id, false]]);
+    }
+    expect(logged).toEqual([expect.stringContaining(recipient.id)]);
+  });
+
+  it('logs a carry-over root it cannot read once', () => {
+    const live = makeRoot();
+    const gone = makeRoot({ status: RUN_STATUS.done });
+    const { snapshots, logged } = twoSnapshots([live, gone], { unreadable: [gone.id], carryOver: [gone.id] });
+    for (const project of snapshots) expect(project.requests).toEqual([]);
+    expect(logged).toEqual([expect.stringContaining(gone.id)]);
+  });
+});
+
 describe('workers', () => {
   it('lists every owned worker, settled ones included, oldest first', () => {
     const root = makeRoot();

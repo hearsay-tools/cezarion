@@ -68,10 +68,40 @@ export function buildActivityProject(source: ActivityProjectSource, deps: Activi
   const loaded = source.loaded;
   // One snapshot decodes each cold record once: claims, cards, workers, reconcile lookups and
   // request titles all read the same runs (hearsay-tools/cezarion#2378).
-  return loaded.store.withReadCache(() => loadedProject(source.projectId, loaded, deps, options, empty));
+  const store = loggingUnreadable(loaded.store, (runId) => deps.onUnreadable?.(source.projectId, runId));
+  return loaded.store.withReadCache(() => loadedProject(store, loaded.isActive, deps, options, empty));
 }
 
-function loadedProject(projectId: string, { store, isActive }: NonNullable<ActivityProjectSource['loaded']>, deps: ActivityDeps,
+/**
+ * The store as the snapshot reads it: every record that cannot be read is reported to `log` and
+ * left out (spec, Unreadable records), whichever read met it — a card, a worker, a reconcile
+ * lookup, a request title or a carry-over root.
+ */
+function loggingUnreadable(store: ActivityStore, log: (runId: string) => void): ActivityStore {
+  const getRun = (id: string) => {
+    const run = store.getRun(id);
+    if (!run && store.isUnreadable(id)) log(id);
+    return run;
+  };
+  return {
+    getRun,
+    isUnreadable: (id) => store.isUnreadable(id),
+    listRuns: () => store.listRuns(),
+    listForeignClaimedRunIds: () => store.listForeignClaimedRunIds(),
+    readWorkerExecution: (id) => store.readWorkerExecution(id),
+    listRunSummaries: (options) => store.listRunSummaries(options),
+    withReadCache: (fn) => store.withReadCache(fn),
+    // The store skips a worker it cannot read: the receipts name it.
+    listOwnedWorkers: (parentId) => {
+      const workers = store.listOwnedWorkers(parentId);
+      const parent = getRun(parentId);
+      if (parent?.delegation?.role === 'root') for (const receipt of parent.delegation.receipts) if (store.isUnreadable(receipt.workerId)) log(receipt.workerId);
+      return workers;
+    },
+  };
+}
+
+function loadedProject(store: ActivityStore, isActive: (runId: string) => boolean, deps: ActivityDeps,
   options: { now: number; carryOver?: Iterable<string> }, empty: Omit<ActivityProject, 'loaded'>): { project: ActivityProject; openLedgers: Set<string> } {
   const { active, inReview } = activeRoots(store);
   const context: RunContext = { now: options.now, tools: deps.tools ?? noTools, ci: deps.ci ?? noProgress };
@@ -79,7 +109,6 @@ function loadedProject(projectId: string, { store, isActive }: NonNullable<Activ
   for (const id of active) {
     const root = store.getRun(id);
     if (root && root.delegation?.role !== 'worker') roots.push(root);
-    else if (!root && store.isUnreadable(id)) deps.onUnreadable?.(projectId, id);
   }
   const tasks = roots.sort(byCreation).map((root) => activityRoot(store, root, context));
   const read = readActivityRequests(store, { now: options.now, isActive, roots: active, ...(options.carryOver ? { carryOver: options.carryOver } : {}) });
