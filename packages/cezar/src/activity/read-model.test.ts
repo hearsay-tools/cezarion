@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import type { AttentionRung } from '@open-mercato/cezar-contract';
 import { activitySnapshotSchema, activityToolSchema } from '@open-mercato/cezar-contract/activity';
@@ -12,6 +13,7 @@ import { computeWaitingOn } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord } from '../runs/store.ts';
 import { addRequest, fakeStore, iso, makeRoot, makeWorker, NOW, rootOf, type FakeStoreOptions } from './activity.testkit.ts';
 import { buildActivityProject, buildActivitySnapshot, unreadableLogger, type ActivityDeps } from './read-model.ts';
+import { ToolActivityTracker } from './tool-activity.ts';
 
 const read = (runs: readonly RunRecord[], options: FakeStoreOptions & { deps?: ActivityDeps; active?: (id: string) => boolean } = {}) =>
   buildActivityProject({ projectId: 'shop', name: 'Shop', loaded: { store: fakeStore(runs, options), isActive: options.active ?? (() => false) } },
@@ -184,6 +186,24 @@ describe('tool activity and check progress providers', () => {
     const reads = vi.fn(() => ({ tool, rate }));
     expect(card([root], root.id, { deps: { tools: { read: reads } } })).toMatchObject({ tool, rate });
     expect(reads).toHaveBeenCalledWith(root.id, NOW);
+  });
+
+  it('shows no tool for a cancelled worker whose session reports a tool after the cancel', () => {
+    const root = makeRoot();
+    const worker = makeWorker(root, { status: RUN_STATUS.cancelled });
+    const tracker = new ToolActivityTracker({ now: () => NOW });
+    const store = Object.assign(new EventEmitter(), { redactText: (text: string) => text });
+    const feed = tracker.attach(store);
+    // Cancelled before its first tool; the session's late tool start still reaches the tracker.
+    store.emit('run', worker);
+    const late = { kind: 'tool' as const, id: 'late', name: 'Bash', toolKind: 'execute' as const, title: 'Ran npm test', status: activityToolSchema.shape.status.enum.running };
+    feed.observe(worker.id, { type: 'item.started', item: late });
+    feed.observe(root.id, { type: 'item.started', item: { ...late, id: 'root-tool', title: 'Ran ls' } });
+
+    const shown = card([root, worker], root.id, { deps: { tools: tracker } });
+    expect(shown.tool?.title).toBe('Ran ls');
+    expect(shown.workers[0]).toMatchObject({ runId: worker.id, status: RUN_STATUS.cancelled, rate: Array.from({ length: 30 }, () => 0) });
+    expect(shown.workers[0]!.tool).toBeUndefined();
   });
 
   it('adds a PR wait’s check progress when the registry holds some', () => {

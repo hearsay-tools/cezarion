@@ -7,6 +7,8 @@ import type { ToolActivitySource } from './read-model.ts';
 import { clampText } from './text.ts';
 
 const TERMINAL: ReadonlySet<ToolStatus> = new Set(['completed', 'failed', 'declined']);
+/** An entry with no event for this long, and no tool in flight, is pruned. */
+export const TOOL_ACTIVITY_IDLE_MS = 60_000;
 
 /** What a feed needs from a run store: the run changes it drops runs on, and the store's redactor. */
 export interface ToolActivityStore extends Pick<RunStore, 'redactText'> {
@@ -20,7 +22,7 @@ export interface ToolActivityStore extends Pick<RunStore, 'redactText'> {
 export interface ToolActivityFeed {
   /** One UI event of a run of this store, redacted with the store's own redactor. */
   observe(runId: string, event: UiEvent): void;
-  /** The manager is disposed: stop listening, drop this feed's runs, and ignore later events. */
+  /** The manager is disposed: stop listening, drop the runs this feed fed, and ignore later events. */
   detach(): void;
 }
 
@@ -33,6 +35,8 @@ interface RunActivity {
   buckets: number[];
   /** The epoch second of the newest bucket. */
   second: number;
+  /** When the run's last tool event arrived. */
+  lastEventAt: number;
 }
 
 /**
@@ -43,6 +47,8 @@ interface RunActivity {
 export class ToolActivityTracker implements ToolActivitySource {
   private readonly runs = new Map<string, RunActivity>();
   private readonly now: () => number;
+  /** The second of the last prune sweep: observe() sweeps at most once a second. */
+  private sweptSecond = Number.NEGATIVE_INFINITY;
 
   constructor(options: { now?: () => number } = {}) {
     this.now = options.now ?? Date.now;
@@ -59,14 +65,16 @@ export class ToolActivityTracker implements ToolActivitySource {
     if (event.item.kind !== 'tool') return;
     const item = event.item;
     const at = this.now();
+    this.sweep(at);
     // Only the completion closes an item: an update to a terminal status may still be followed by it.
     const closes = event.type === 'item.completed';
     const terminal = closes || TERMINAL.has(item.status);
+    const run = this.runs.get(runId);
+    if (run) run.lastEventAt = at;
     if (item.background) {
       this.backgrounded(runId, item, at);
       return;
     }
-    const run = this.runs.get(runId);
     if (!run?.open.has(item.id)) {
       this.started(runId, item, at, { terminal, closes, title: toolTitle(item, redact) });
       return;
@@ -85,6 +93,10 @@ export class ToolActivityTracker implements ToolActivitySource {
   read(runId: string, now: number): { tool?: ActivityTool; rate: readonly number[] } | undefined {
     const run = this.runs.get(runId);
     if (!run) return undefined;
+    if (idle(run, now)) {
+      this.runs.delete(runId);
+      return undefined;
+    }
     shift(run, secondOf(now));
     return { ...(run.latest ? { tool: { ...run.latest.tool } } : {}), rate: [...run.buckets] };
   }
@@ -97,30 +109,25 @@ export class ToolActivityTracker implements ToolActivitySource {
   /**
    * The feed of one run manager over its `store`. A run that leaves the live set or is deleted is
    * dropped on that run change. A session can still emit events after the drop (a worker is
-   * cancelled before its session shuts down), so the feed ignores the run's events until the
-   * store reports it live again: a resume starts tracking afresh.
+   * cancelled before its session shuts down); such an entry is harmless, because the read model
+   * shows tool activity only for a live run, and the idle prune removes it.
    */
   attach(store: ToolActivityStore): ToolActivityFeed {
-    /** Runs this feed holds an entry for. */
+    /** Runs this feed has fed and not dropped yet: detach drops them. */
     const fed = new Set<string>();
-    /** Runs this feed fed that left the live set: their late events are ignored. */
-    const dropped = new Set<string>();
     let attached = true;
     const forget = (runId: string) => {
-      if (!fed.delete(runId)) return;
-      this.drop(runId);
-      dropped.add(runId);
+      if (fed.delete(runId)) this.drop(runId);
     };
     const onRun = (run: RunRecord) => {
-      if (isLiveStatus(run.status)) dropped.delete(run.id);
-      else forget(run.id);
+      if (!isLiveStatus(run.status)) forget(run.id);
     };
     store.on('run', onRun);
     store.on('deleted', forget);
     const redact = (text: string) => store.redactText(text);
     return {
       observe: (runId, event) => {
-        if (!attached || dropped.has(runId)) return;
+        if (!attached) return;
         this.observe(runId, event, redact);
         if (this.runs.has(runId)) fed.add(runId);
       },
@@ -131,16 +138,23 @@ export class ToolActivityTracker implements ToolActivitySource {
         store.off('deleted', forget);
         for (const runId of fed) this.drop(runId);
         fed.clear();
-        dropped.clear();
       },
     };
+  }
+
+  /** Prune every idle entry, at most once a second. Reads prune the run they read. */
+  private sweep(at: number): void {
+    const second = secondOf(at);
+    if (second === this.sweptSecond) return;
+    this.sweptSecond = second;
+    for (const [runId, run] of this.runs) if (idle(run, at)) this.runs.delete(runId);
   }
 
   /** The first event of a tool item: one call, and the latest tool. A tool first seen at its end counts once. */
   private started(runId: string, item: UiToolItem, at: number, { terminal, closes, title }: { terminal: boolean; closes: boolean; title: string }): void {
     let run = this.runs.get(runId);
     if (!run) {
-      run = { open: new Set(), buckets: Array.from({ length: ACTIVITY_RATE_SECONDS }, () => 0), second: secondOf(at) };
+      run = { open: new Set(), buckets: Array.from({ length: ACTIVITY_RATE_SECONDS }, () => 0), second: secondOf(at), lastEventAt: at };
       this.runs.set(runId, run);
     }
     shift(run, secondOf(at));
@@ -181,6 +195,13 @@ function shift(run: RunActivity, second: number): void {
   }
   run.second = second;
 }
+
+/**
+ * No tool event for `TOOL_ACTIVITY_IDLE_MS` and no tool in flight: a tool that has not ended
+ * (pending or running) keeps its entry however long it runs.
+ */
+const idle = (run: RunActivity, now: number): boolean =>
+  now - run.lastEventAt >= TOOL_ACTIVITY_IDLE_MS && (run.latest === undefined || run.latest.tool.endedAt !== undefined);
 
 const secondOf = (ms: number): number => Math.floor(ms / 1000);
 const iso = (ms: number): string => new Date(ms).toISOString();

@@ -148,7 +148,9 @@ function activityRoot(store: ActivityStore, root: RunRecord, context: RunContext
 }
 
 function activityRunBase(run: RunRecord, ledger: ConversationState | undefined, context: RunContext): Omit<ActivityRun, 'workers'> {
-  const activity = context.tools.read(run.id, context.now);
+  // Only a live run shows tool activity: a session can still report a tool after its run stopped,
+  // and a stopped run never looks busy, whatever the tracker holds.
+  const activity = isLiveStatus(run.status) ? context.tools.read(run.id, context.now) : undefined;
   const wait = activityWait(run, ledger, context.ci);
   const error = firstLine(run.error, ACTIVITY_ERROR_MAX);
   return {

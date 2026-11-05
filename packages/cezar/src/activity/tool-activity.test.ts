@@ -197,16 +197,34 @@ describe('ToolActivityTracker', () => {
     expect(read()?.tool?.title).toBe('Ran login [REDACTED]');
   });
 
-  it('keeps a cancelled run dropped when a late event of its session arrives', () => {
+  it('prunes an entry after 60 s with no event once its latest tool has ended', () => {
     const { clock, tracked, read } = tracker();
-    const store = fakeStore();
-    const feed = tracked.attach(store);
-    feed.observe(RUN, started(tool('a')));
-    store.emit('run', runChange(RUN, RUN_STATUS.cancelled));
-    clock.now += 500;
-    feed.observe(RUN, completed(tool('a', { status: TOOL_STATUS.failed })));
-    feed.observe(RUN, started(tool('b')));
-    expect(read()).toBeUndefined();
+    see(tracked, RUN, started(tool('a')));
+    clock.now += 1_000;
+    see(tracked, RUN, completed(tool('a', { status: TOOL_STATUS.completed })));
+    expect(read(T0 + 1_000 + 59_999)?.tool).toMatchObject({ title: 'Ran a', status: TOOL_STATUS.completed });
+    expect(read(T0 + 1_000 + 60_000)).toBeUndefined();
+    // The prune is final: a later read finds nothing either.
+    expect(read(T0 + 1_000)).toBeUndefined();
+  });
+
+  it('keeps a running tool older than 60 s', () => {
+    const { tracked, read } = tracker();
+    see(tracked, RUN, started(tool('a', { title: 'Ran the full test suite' })));
+    expect(read(T0 + 10 * 60_000)).toEqual({
+      tool: { title: 'Ran the full test suite', toolKind: 'execute', status: TOOL_STATUS.running, startedAt: iso(T0) }, rate: zeros(),
+    });
+  });
+
+  it('prunes other runs’ idle entries when an event arrives, with no read of them', () => {
+    const { clock, tracked } = tracker();
+    see(tracked, 'idle', completed(tool('a', { status: TOOL_STATUS.completed })));
+    see(tracked, 'busy', started(tool('a')));
+    clock.now += 60_000;
+    see(tracked, RUN, started(tool('b')));
+    // A read at T0 would not prune on its own: only the sweep can have removed the idle entry.
+    expect(tracked.read('idle', T0)).toBeUndefined();
+    expect(tracked.read('busy', T0)).toBeDefined();
   });
 
   it('tracks a run afresh once the store reports it live again (a resume)', () => {

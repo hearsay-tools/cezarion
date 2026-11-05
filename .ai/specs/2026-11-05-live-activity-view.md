@@ -391,11 +391,18 @@ An in-memory `ToolActivityTracker` keyed by run id, fed by the UI event sink
   mapper sets the final title of some edits only at completion:
   `toolEnded()` in `packages/cezar/src/core/omp-ui-mapper.ts`).
 - Buckets: a ring of 30 one-second counters. A read shifts the ring to the read time.
-- A run that leaves the active set is dropped from the tracker. A restart starts the
-  tracker empty (D6). A session can still emit events after the drop (a worker is
-  cancelled before its session shuts down), so the run's events are ignored until the
-  store reports it live again; a resume starts it afresh. A disposed run manager drops
-  the runs it fed and feeds nothing more.
+- A run that leaves the active set (a run change to a status that is not live) or is
+  deleted is dropped from the tracker. A restart starts the tracker empty (D6). A
+  disposed run manager drops the runs it fed and feeds nothing more.
+- The read model shows `tool` and `rate` only for a run whose status is live
+  (`queued`, `running` or `waiting`: `isLiveStatus`). A `review`, `done`, `failed` or
+  `cancelled` run never shows tool activity, whatever the tracker holds. A session can
+  still emit a tool event after its run stopped (a worker cancelled before its session
+  shuts down), and that event never makes the run look busy.
+- The tracker prunes an entry that has had no tool event for 60 s and whose latest tool
+  has ended (or that has no latest tool). A tool that is still pending or running keeps
+  its entry however long it runs. The check runs on a read of that run and on every
+  event (a sweep of all entries, at most once a second); there is no timer.
 - The sink sees each event before the run store redacts it. The tracker redacts a
   title with that run store's own redactor (the transcript's policy) and clamps it
   after, so no part of a secret survives at the clamp boundary.
