@@ -27,7 +27,8 @@ can drive the view from the HTTP snapshot. One PR for each slice.
 - `packages/cezar/src/activity/requests.ts`: open and recently closed requests from
   the ledgers of held and pinned roots plus foreign `live = 1` rows (no scan of
   finished rows); test a pinned terminal root, a foreign live root, and a sender
-  that settles right after a reply (the publisher's carry-over read) (one ledger for each request: the root's for family, the sender's
+  that settles right after a reply (the publisher's carry-over read), and a foreign
+  terminal root that is still claimed (live = 0) (one ledger for each request: the root's for family, the sender's
   for peer). Only `accepted` requests open.
 - `packages/cezar/src/activity/demand.ts`: per-project demand. An HTTP read marks
   the project for 15 s; S4 adds topic subscribers. S3 reads it.
@@ -57,7 +58,7 @@ can drive the view from the HTTP snapshot. One PR for each slice.
   (on the run change, not on a timer).
 - Wire it as the read model's `ToolActivitySource`.
 - Tests: start, complete, failed and declined tools; a tool first seen at
-  completion; a non-terminal title update; a second tool before the first ends; ring shift across idle seconds and across more than 30 s; a run dropped on
+  completion; a non-terminal title update; a title that arrives only with completion; a second tool before the first ends; ring shift across idle seconds and across more than 30 s; a run dropped on
   settle; title clamp. One test for each runner's mapper fixture to prove its tool
   items reach the tracker.
 

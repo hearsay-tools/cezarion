@@ -277,13 +277,21 @@ and the two trackers. It reads; it never writes a run.
     `packages/cezar/src/runs/store.ts`: the held live set plus local pins). Pins keep
     a terminal root whose lifecycle is not settled yet, which `isLiveRecord()` alone
     does not, so its open requests stay drawn until reconcile closes them;
-  - the rows of foreign families with `live = 1` (the indexed column from
-    `isLiveRecord()` in `packages/cezar/src/runs/run-row.ts`), read with `getRun()`.
-    `listRuns()` leaves foreign families out of memory.
+  - the roots of foreign families: rows with `live = 1` (the indexed column from
+    `isLiveRecord()` in `packages/cezar/src/runs/run-row.ts`), plus every root of a
+    family in `store.listForeignClaimedRunIds()`, read with `getRun()`. The claims
+    list covers a foreign root that is terminal but still pinned in its own process:
+    pins live only in that process's memory and never set `live`. `listRuns()` leaves
+    foreign families out of memory.
+  - Settlement for reconcile is the delegation service's own test. The read model
+    never treats a foreign root as settled because this process's run manager does
+    not hold it.
   A root in both sets is read once. A publisher also re-reads, once, every root
   whose ledger held an open request in its previous snapshot, even when that root
   left both sets. So a reply whose sender settles before the next snapshot still
-  shows its stored `replied` outcome and its comet. Known gap: a request whose sender rests at
+  shows its stored `replied` outcome and its comet. The HTTP fallback has no
+  publisher and no carry-over: in that mode a reply whose sender settles between two
+  5 s reads fades with no comet. That is the fallback's accepted limit. Known gap: a request whose sender rests at
   `review` with no open wait is not in the live set and is not drawn, although no
   outcome closes it. Drawing it needs an indexed column for open requests; that is a
   follow-up, not part of this work.
@@ -344,7 +352,9 @@ An in-memory `ToolActivityTracker` keyed by run id, fed by the UI event sink
 - A later `item.updated` of the latest tool that is not terminal replaces its `title`
   (mappers replace placeholder titles) and does not count again.
 - `item.completed`, or `item.updated` to a terminal status, of the latest tool: set
-  `status` and `endedAt`.
+  `status` and `endedAt`, and take its `title` when the event carries one (the omp
+  mapper sets the final title of some edits only at completion:
+  `toolEnded()` in `packages/cezar/src/core/omp-ui-mapper.ts`).
 - Buckets: a ring of 30 one-second counters. A read shifts the ring to the read time.
 - A run that leaves the active set is dropped from the tracker. A restart starts the
   tracker empty (D6).
