@@ -55,6 +55,10 @@ class ScriptedGithub extends GithubCiClient {
     }
     return read;
   }
+  // The test drives every read itself; the permit rule has its own tests (supervisor-permits).
+  override tryChecks(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubCheck[]> {
+    return this.checks(pr, signal);
+  }
   /** The held checks read answers. */
   releaseHeld(rows: GithubCheck[]): void { this.held!(rows); }
   override watch(_pr: CiPrIdentity, signal: AbortSignal): Promise<void> {

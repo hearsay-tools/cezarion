@@ -8,6 +8,9 @@ export const CI_QUERY_TIMEOUT_MS = 10_000;
 /** `gh pr checks --watch --interval`, in seconds. Not the query timeout. */
 export const CI_WATCH_INTERVAL_SECONDS = 30;
 export const CI_QUERY_LIMIT = 4;
+/** The free query permits an activity progress read needs before it starts, so it never takes the
+ *  last one an outcome query could need. */
+export const CI_PROGRESS_FREE_PERMITS = 2;
 export const CI_OUTPUT_LIMIT = 64 * 1024;
 export const CI_TERMINATE_MS = 2_000;
 
@@ -30,6 +33,13 @@ export class CiSemaphore {
     else this.active++;
     // A slot is transferred to the oldest waiter, not released and raced for.
     if (signal.aborted) { this.release(); signal.throwIfAborted(); }
+    let released = false;
+    return () => { if (!released) { released = true; this.release(); } };
+  }
+  /** A permit now, only while at least `free` permits are free and nobody queues; never waits. */
+  tryAcquire(free: number): (() => void) | undefined {
+    if (this.queue.length || this.limit - this.active < free) return undefined;
+    this.active++;
     let released = false;
     return () => { if (!released) { released = true; this.release(); } };
   }
@@ -165,14 +175,19 @@ export class GithubCiClient {
     this.command = options.command ?? (this.env.CEZ_DRY_RUN === '1' ? { file: process.execPath, args: ['-e', dryRunCommand] } : { file: 'gh', args: [] });
     this.cwd = options.cwd;
   }
-  private async query(args: string[], signal: AbortSignal): Promise<CiCommandResult> {
+  /** One bounded gh query. It waits for a query permit unless the caller already holds `permit`. */
+  private async query(args: string[], signal: AbortSignal, permit?: () => void): Promise<CiCommandResult> {
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(CI_QUERY_TIMEOUT_MS)]);
-    let release: (() => void) | undefined;
+    let release = permit;
     try {
-      release = await this.queries.acquire(bounded);
-      return await runCiCommand({ file: this.command.file, args: [...this.command.args, ...args] }, bounded, false, this.env, this.cwd); }
+      release ??= await this.queries.acquire(bounded);
+      return await this.runCommand(args, bounded); }
     catch (error) { if (!signal.aborted && bounded.aborted) throw new CiGithubError('query_timeout', 'GitHub query exceeded ten seconds; check connectivity and retry.', true); throw error; }
     finally { release?.(); }
+  }
+  /** Run one gh command under a held query permit. */
+  protected runCommand(args: string[], signal: AbortSignal): Promise<CiCommandResult> {
+    return runCiCommand({ file: this.command.file, args: [...this.command.args, ...args] }, signal, false, this.env, this.cwd);
   }
   private async readMetadata(pr: string, signal: AbortSignal, merge = false): Promise<CiPrIdentity & GithubPrMetadata & { raw: unknown }> {
     if (!ciWaitRequestSchema.safeParse({pr}).success) throw new CiGithubError('invalid_request', 'Provide an HTTPS GitHub pull request URL.');
@@ -236,7 +251,20 @@ export class GithubCiClient {
     return parseActiveWorkflowRuns(result.stdout);
   }
   async checks(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubCheck[]> {
-    const result = await this.query(['pr', 'checks', String(pr.prNumber), '--repo', `github.com/${pr.repository}`, '--json', 'name,state,link,bucket'], signal);
+    return this.readChecks(pr, signal);
+  }
+  /**
+   * A checks read for the activity view's progress (spec 2026-11-05-live-activity-view). It never
+   * waits for a query permit and starts only while `CI_PROGRESS_FREE_PERMITS` are free, so it never
+   * delays an outcome query. `undefined`: no permit now; the caller skips this read.
+   */
+  tryChecks(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubCheck[]> | undefined {
+    if (signal.aborted) return undefined;
+    const permit = this.queries.tryAcquire(CI_PROGRESS_FREE_PERMITS);
+    return permit && this.readChecks(pr, signal, permit);
+  }
+  private async readChecks(pr: CiPrIdentity, signal: AbortSignal, permit?: () => void): Promise<GithubCheck[]> {
+    const result = await this.query(['pr', 'checks', String(pr.prNumber), '--repo', `github.com/${pr.repository}`, '--json', 'name,state,link,bucket'], signal, permit);
     // gh documents 1 for failed checks and 8 for pending. Only validated JSON decides CI outcome.
     if (![0, 1, 8].includes(result.code) || !result.stdout.trim()) {
       // gh's empty-check path emits no JSON; pin the exact CLI diagnostic, never a generic exit 1.
