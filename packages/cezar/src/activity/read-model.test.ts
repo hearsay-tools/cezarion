@@ -192,7 +192,7 @@ describe('tool activity and check progress providers', () => {
     const root = makeRoot();
     const worker = makeWorker(root, { status: RUN_STATUS.cancelled });
     const tracker = new ToolActivityTracker({ now: () => NOW });
-    const store = Object.assign(new EventEmitter(), { redactText: (text: string) => text });
+    const store = Object.assign(new EventEmitter(), { redactText: (text: string) => text, getRun: (id: string) => [root, worker].find((run) => run.id === id) });
     const feed = tracker.attach(store);
     // Cancelled before its first tool; the session's late tool start still reaches the tracker.
     store.emit('run', worker);

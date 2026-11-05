@@ -403,6 +403,10 @@ An in-memory `ToolActivityTracker` keyed by run id, fed by the UI event sink
 - A run change into a live status clears an entry marked stopped, so a resumed run
   never shows a tool from before it stopped; it shows a tool again from its next tool
   event. A live run change of a run that never stopped keeps its entry.
+- An event that would create a new entry reads the run's current record from its
+  store once (the held record for a live run). When the run is not live, the entry is
+  created marked stopped. So a late event that arrives after the stop marker idled out
+  is still cleared by the next live transition, and a resumed run never shows it.
 - The read model shows `tool` and `rate` only for a run whose status is live
   (`queued`, `running` or `waiting`: `isLiveStatus`). A `review`, `done`, `failed` or
   `cancelled` run never shows tool activity, whatever the tracker holds. A session can

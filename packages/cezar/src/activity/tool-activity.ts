@@ -12,8 +12,11 @@ export const TOOL_ACTIVITY_COMPLETED_IDS = 64;
 /** An entry with no event for this long, and no tool in flight, is pruned. */
 export const TOOL_ACTIVITY_IDLE_MS = 60_000;
 
-/** What a feed needs from a run store: the run changes it drops runs on, and the store's redactor. */
-export interface ToolActivityStore extends Pick<RunStore, 'redactText'> {
+/**
+ * What a feed needs from a run store: the run changes it drops runs on, the store's redactor, and
+ * a run's current record, read once when an event would create the run's entry.
+ */
+export interface ToolActivityStore extends Pick<RunStore, 'redactText' | 'getRun'> {
   on(event: 'run', listener: (run: RunRecord) => void): unknown;
   on(event: 'deleted', listener: (runId: string) => void): unknown;
   off(event: 'run', listener: (run: RunRecord) => void): unknown;
@@ -26,6 +29,12 @@ export interface ToolActivityFeed {
   observe(runId: string, event: UiEvent): void;
   /** The manager is disposed: stop listening, drop this feed's entries, and ignore later events. */
   detach(): void;
+}
+
+/** A feed, as the entries it made name it. */
+interface FeedOwner {
+  /** Whether the run is not live right now: an entry it creates starts marked stopped. */
+  stopped(runId: string): boolean;
 }
 
 interface RunActivity {
@@ -48,7 +57,7 @@ interface RunActivity {
   /** The run left the live set: the entry holds no tool from before, only late events after. */
   stopped?: true;
   /** The feed that made the entry; its detach drops it. */
-  owner?: object;
+  owner?: FeedOwner;
 }
 
 /**
@@ -76,7 +85,7 @@ export class ToolActivityTracker implements ToolActivitySource {
     this.record(undefined, runId, event, redact);
   }
 
-  private record(owner: object | undefined, runId: string, event: UiEvent, redact: (text: string) => string): void {
+  private record(owner: FeedOwner | undefined, runId: string, event: UiEvent, redact: (text: string) => string): void {
     if (event.type !== 'item.started' && event.type !== 'item.updated' && event.type !== 'item.completed') return;
     if (event.item.kind !== 'tool') return;
     const item = event.item;
@@ -137,10 +146,17 @@ export class ToolActivityTracker implements ToolActivitySource {
    * land in the marked entry, which read() never shows, and the read model shows tool activity
    * only for a live run anyway. A run change back into the live set (a resume) clears a marked
    * entry, so a resumed run starts empty. A marker with no tool in flight is pruned like any idle
-   * entry, after 60 s.
+   * entry, after 60 s; an event that would then create a new entry for a run that is still not
+   * live creates it marked stopped again, so a resume clears it however late it came.
    */
   attach(store: ToolActivityStore): ToolActivityFeed {
-    const owner = {};
+    const owner: FeedOwner = {
+      // The held record for a live run: one read, only when an event would create an entry.
+      stopped: (runId) => {
+        const run = store.getRun(runId);
+        return run === undefined || !isLiveStatus(run.status);
+      },
+    };
     let attached = true;
     const onRun = (run: RunRecord) => {
       if (isLiveStatus(run.status)) {
@@ -168,7 +184,7 @@ export class ToolActivityTracker implements ToolActivitySource {
   }
 
   /** Replace the run's entry with an empty, marked one: the run left the live set. */
-  private stop(runId: string, owner: object): void {
+  private stop(runId: string, owner: FeedOwner): void {
     const at = this.now();
     this.sweep(at);
     this.runs.set(runId, { open: new Set(), completed: [], buckets: zeros(), second: secondOf(at), lastEventAt: at, stopped: true, owner });
@@ -183,10 +199,12 @@ export class ToolActivityTracker implements ToolActivitySource {
   }
 
   /** The first event of a tool item: one call, and the latest tool. A tool first seen at its end counts once. */
-  private started(runId: string, item: UiToolItem, at: number, { terminal, closes, owner, title }: { terminal: boolean; closes: boolean; owner: object | undefined; title: string }): void {
+  private started(runId: string, item: UiToolItem, at: number, { terminal, closes, owner, title }: { terminal: boolean; closes: boolean; owner: FeedOwner | undefined; title: string }): void {
     let run = this.runs.get(runId);
     if (!run) {
-      run = { open: new Set(), completed: [], buckets: zeros(), second: secondOf(at), lastEventAt: at, ...(owner ? { owner } : {}) };
+      // A late event of a run that is no longer live (its stop marker already idled out) creates an
+      // entry marked stopped, so the run's next live transition clears it.
+      run = { open: new Set(), completed: [], buckets: zeros(), second: secondOf(at), lastEventAt: at, ...(owner ? { owner } : {}), ...(owner?.stopped(runId) ? { stopped: true as const } : {}) };
       this.runs.set(runId, run);
     }
     shift(run, secondOf(at));

@@ -203,8 +203,21 @@ describe('ToolActivityTracker', () => {
   });
 
   /** A run store as a feed sees it: run changes and a redactor that hides `secret`. */
+  /**
+   * A run store as a feed sees it: run changes, a redactor that hides `hunter2-secret`, and each
+   * run's current record (running until a run change says otherwise).
+   */
   function fakeStore() {
-    return Object.assign(new EventEmitter(), { redactText: (text: string) => text.split('hunter2-secret').join('[REDACTED]') });
+    const statuses = new Map<string, RunRecord['status']>();
+    class FakeRunStore extends EventEmitter {
+      redactText = (text: string) => text.split('hunter2-secret').join('[REDACTED]');
+      getRun = (id: string) => makeRunRecord({ id, status: statuses.get(id) ?? RUN_STATUS.running });
+      override emit(event: string | symbol, ...args: unknown[]): boolean {
+        if (event === 'run') statuses.set((args[0] as RunRecord).id, (args[0] as RunRecord).status);
+        return super.emit(event, ...args);
+      }
+    }
+    return new FakeRunStore();
   }
   const runChange = (id: string, status: RunRecord['status']) => makeRunRecord({ id, status });
 
@@ -286,7 +299,27 @@ describe('ToolActivityTracker', () => {
     expect(read()).toEqual({ tool: { title: 'Ran after resume', toolKind: 'execute', status: TOOL_STATUS.running, startedAt: iso(T0 + 120_000) }, rate: rateWith({ 29: 1 }) });
   });
 
-  it('keeps a live run’s entry on a live run change, and holds a stop marker for 60 s only', () => {
+  it('marks a late tool start long after the stop, so a resume still shows no tool until a new event', () => {
+    const { clock, tracked, read } = tracker();
+    const store = fakeStore();
+    const feed = tracked.attach(store);
+    feed.observe(RUN, started(tool('a')));
+    feed.observe(RUN, completed(tool('a', { status: TOOL_STATUS.completed })));
+    store.emit('run', runChange(RUN, RUN_STATUS.cancelled));
+    // 61 s later the stop marker has idled out; another run's event sweeps it away.
+    clock.now += 61_000;
+    feed.observe('other', started(tool('x')));
+    feed.observe(RUN, started(tool('late', { title: 'Ran late' })));
+    expect(read()).toBeUndefined();
+
+    store.emit('run', runChange(RUN, RUN_STATUS.running));
+    expect(read()).toBeUndefined();
+    clock.now += 1_000;
+    feed.observe(RUN, started(tool('new', { title: 'Ran after resume' })));
+    expect(read()).toEqual({ tool: { title: 'Ran after resume', toolKind: 'execute', status: TOOL_STATUS.running, startedAt: iso(T0 + 62_000) }, rate: rateWith({ 29: 1 }) });
+  });
+
+  it('keeps a live run’s entry on a live run change, and hides a stopped run’s event after its marker idled out', () => {
     const { clock, tracked, read } = tracker();
     const store = fakeStore();
     const feed = tracked.attach(store);
@@ -297,10 +330,10 @@ describe('ToolActivityTracker', () => {
     store.emit('run', runChange('stopped', RUN_STATUS.done));
     clock.now += 60_000;
     feed.observe(RUN, completed(tool('a', { status: TOOL_STATUS.completed })));
-    // The sweep pruned the idle marker: a much later event is a plain entry again (still hidden by the
-    // read model, which shows tool activity only for a live run).
+    // The sweep pruned the idle marker; the run is still stopped, so a much later event creates an
+    // entry marked stopped again, which read() never shows.
     feed.observe('stopped', completed(tool('b', { status: TOOL_STATUS.completed, title: 'Ran b' })));
-    expect(tracked.read('stopped', clock.now)?.tool?.title).toBe('Ran b');
+    expect(tracked.read('stopped', clock.now)).toBeUndefined();
   });
 
   it('drops the runs a feed fed when it detaches, stops listening, and ignores later events', () => {
