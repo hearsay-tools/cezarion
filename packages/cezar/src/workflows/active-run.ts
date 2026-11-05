@@ -1,3 +1,5 @@
+import { createWaitGroup, type WaitGroup } from './run/wait-registry.ts';
+import { createAutosaveGroup, type AutosaveGroup } from './run/worktree-autosave.ts';
 import { createInputGroup, type InputGroup } from './run/input-delivery.ts';
 import { createSessionGroup, type SessionGroup } from './run/live-session-state.ts';
 import { createChildrenGroup, type ChildrenGroup } from './run/subagent-waits.ts';
@@ -10,6 +12,8 @@ import { createUsageGroup, type UsageGroup } from './run/usage-accounting.ts';
  * (hearsay-tools/cezarion#1806). `RunManager` registers every instance through `activate`.
  */
 export interface ActiveRun {
+  readonly waitIdentity: WaitGroup;
+  readonly autosave: AutosaveGroup;
   readonly inputState: InputGroup;
   readonly usage: UsageGroup;
   readonly liveSession: SessionGroup;
@@ -98,6 +102,8 @@ export interface ActiveRunInit {
  */
 export function createActiveRun(init: ActiveRunInit): ActiveRun {
   const state = {
+    waitIdentity: createWaitGroup(),
+    autosave: createAutosaveGroup(),
     inputState: createInputGroup(),
     usage: createUsageGroup(),
     liveSession: createSessionGroup(init.cwd),
@@ -106,6 +112,8 @@ export function createActiveRun(init: ActiveRunInit): ActiveRun {
     skills: createSkillsGroup(),
     autonomous: init.autonomous,
   };
+  Object.defineProperty(state, 'waitIdentity', { writable: false, configurable: false });
+  Object.defineProperty(state, 'autosave', { writable: false, configurable: false });
   Object.defineProperty(state, 'inputState', { writable: false, configurable: false });
   Object.defineProperty(state, 'liveSession', { writable: false, configurable: false });
   Object.defineProperty(state, 'usage', { writable: false, configurable: false });

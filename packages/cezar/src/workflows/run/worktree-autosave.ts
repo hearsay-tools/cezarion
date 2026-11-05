@@ -15,6 +15,27 @@ interface WorktreeAutosaveHost {
 /** Periodic "cezar autosave" commit in the task worktree (spec 006). */
 export const AUTOSAVE_INTERVAL_MS = 90_000;
 
+/** The periodic timer is independent of idle and reply bounds. */
+export class AutosaveGroup {
+  #autosaveTimer: NodeJS.Timeout | undefined;
+  constructor() { Object.freeze(this); }
+  get autosaveTimer(): NodeJS.Timeout | undefined { return this.#autosaveTimer; }
+  armAutosave(save: () => void): void {
+    this.#autosaveTimer = setInterval(save, AUTOSAVE_INTERVAL_MS);
+    this.#autosaveTimer.unref?.();
+  }
+  clearAutosave(): void {
+    if (this.#autosaveTimer) {
+      clearInterval(this.#autosaveTimer);
+      this.#autosaveTimer = undefined;
+    }
+  }
+}
+
+Object.freeze(AutosaveGroup.prototype);
+Object.freeze(AutosaveGroup);
+export function createAutosaveGroup(): AutosaveGroup { return new AutosaveGroup(); }
+
 /**
  * Periodic saves are opt-in. Turn-end, finalization and pre-PR flushes remain enabled; only
  * pre-PR follows a repointed HEAD. Coalesce timer-save evidence in the handoff.

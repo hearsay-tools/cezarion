@@ -4,6 +4,16 @@ import { resolve } from 'node:path';
 import { isMap, isSeq, parseDocument, visit } from 'yaml';
 
 export const ownerGroups = {
+  wait: {
+    slot: 'waitIdentity', owner: 'wait-registry.ts', factory: 'createWaitGroup',
+    types: ['WaitGroup'], getters: ['waitIdentity'],
+    bindings: ['waitIdentity', 'ciTurnId'], fields: ['waitIdentity', 'ciTurnId'],
+  },
+  autosave: {
+    owner: 'worktree-autosave.ts', factory: 'createAutosaveGroup',
+    types: ['AutosaveGroup'], getters: ['autosave', 'autosaveTimer'],
+    fields: ['autosave', 'autosaveTimer'],
+  },
   input: {
     slot: 'inputState', owner: 'input-delivery.ts', factory: 'createInputGroup',
     types: ['InputGroup', 'InputFlight', 'ReadonlySetView'],

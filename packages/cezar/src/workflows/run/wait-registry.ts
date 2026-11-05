@@ -23,6 +23,19 @@ import { probeProcessWait } from '../../process-wait/supervisor.ts';
 import { confineExitFile, type ExitFileRoots } from '../../process-wait/exit-file.ts';
 import { processStartToken, recordedProcessLive } from '../../delegation/process-liveness.ts';
 
+/** CI identity stays live across registration and rotates at the existing turn boundaries. */
+export class WaitGroup {
+  #ciTurnId: string | undefined;
+  constructor() { Object.freeze(this); }
+  get ciTurnId(): string | undefined { return this.#ciTurnId; }
+  ensureCiTurn(): string { return this.#ciTurnId ??= randomUUID(); }
+  rotateCiTurn(turnId: string): void { this.#ciTurnId = turnId; }
+}
+
+Object.freeze(WaitGroup.prototype);
+Object.freeze(WaitGroup);
+export function createWaitGroup(): WaitGroup { return new WaitGroup(); }
+
 interface WaitRegistryHost {
   active(id: string): ActiveRun | undefined;
   workerExecutionStopped(id: string): boolean;
