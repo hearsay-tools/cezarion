@@ -1,13 +1,12 @@
 import { registrationGroups } from '../core/registration-coverage.testkit.ts';
 import type { Caller } from './credentials.ts';
 import { setRunStatus, openTestRunStore } from '../runs/run-store.testkit.ts';
-import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
-import { createFixtureManager, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager, fixtureWork, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
 import { type WorkerSpawnRequest } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
-import { onTestFinished, afterEach, beforeEach, expect, vi, type MockInstance } from 'vitest';
+import { onTestFinished, afterEach, beforeEach, expect, vi } from 'vitest';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import type { AgentRunResult, AgentRunSpec, AgentSession, AgentEvent } from '../core/agent-runner.ts';
 import * as runners from '../core/runner-factory.ts';
@@ -34,17 +33,24 @@ type AcceptedIdentityWorker = {
   caller: Caller;
   request: WorkerSpawnRequest;
   child: Awaited<ReturnType<DelegationController['service']['spawn']>>;
-  pump: MockInstance<ReturnType<typeof runInternals>['line']['pump']>;
 };
 
 export function provisionWorkflowFixture() {
   let f: ReturnType<typeof fixture>, controller: DelegationController;
+  const toolSessions = new Map<string, { manager: RunManager; generation: string }>();
+  function observeTools(manager: RunManager) {
+    const handlers = manager.cezarToolHandlers.bind(manager);
+    vi.spyOn(manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
+      toolSessions.set(id, { manager, generation }); return handlers(id, generation);
+    });
+  }
   const recoveredManagers: RunManager[] = [];
   const recoveredStores: RunStore[] = [];
   const sessions: Array<{ spec: AgentRunSpec; session: AgentSession; emit(event: AgentEvent): void; finish(text?: string): void }> = [];
   beforeEach(async () => {
     vi.stubEnv('CEZ_DELEGATION', '1'); vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     f = fixture(); await f.releaseAdmission(); vi.restoreAllMocks();
+    toolSessions.clear(); observeTools(f.manager);
     onTestFinished(scopeFixtureProcesses());
     const home = join(f.root, 'default-claude'); mkdirSync(home); vi.stubEnv('CLAUDE_CONFIG_DIR', home);
     vi.spyOn(runners, 'createRunner').mockImplementation(backend => ({ backend: backend ?? 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', interrupt: async () => {}, run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), startSession: (spec, emit) => {
@@ -79,12 +85,18 @@ export function provisionWorkflowFixture() {
     const parent = f.manager.startRun(workflow, { task: 'parent', runner: 'claude', ...settings, agentProfile: 'account-a', worktree: false });
     await until(() => sessions.length === 1);
     const caller: Caller = controller.credentials.authenticate(delegationToken(sessions[0]!.spec))!;
-    const pump = vi.spyOn(runInternals(f.manager).line, 'pump').mockResolvedValue();
+    await f.holdAdmission();
     prepare?.(parent.id);
     const request = { task: 'child', baseline: 'HEAD', requestId: randomUUID(), ...spawnInputs };
     const child = await controller.service.spawn(caller, request);
-    expect(pump).toHaveBeenCalled();
-    return { home, parent, caller, request, child, pump };
+    await acceptedBeforeLaunch(child.workerId);
+    return { home, parent, caller, request, child };
+  }
+  async function acceptedBeforeLaunch(workerId: string) {
+    await Promise.all([...fixtureWork(f.manager).pending].filter(([, label]) => label === 'pump').map(([promise]) => promise));
+    expect(f.store.getRun(workerId)?.status).toBe('queued');
+    expect(f.store.readWorkerExecution(workerId)?.phase).toBe('queued');
+    expect(sessions.some(entry => entry.spec.env?.CEZ_TASK_ID === workerId)).toBe(false);
   }
   async function launchAccepted(accepted: Awaited<ReturnType<typeof acceptIdentityWorker>>, mode: 'queued' | 'restart' | 'continue') {
     if (mode === 'restart') {
@@ -93,26 +105,27 @@ export function provisionWorkflowFixture() {
       setRunStatus(f.store, accepted.parent.id, RUN_STATUS.waiting); f.store.close();
       const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true });
       const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
+      observeTools(manager);
       controller.attachProject({ id: 'restarted', root: f.root, store, manager });
       await manager.recover(); return { manager, store };
     }
-    expect(accepted.pump).toHaveBeenCalled(); accepted.pump.mockRestore(); await (runInternals(f.manager).line).pump();
+    await acceptedBeforeLaunch(accepted.child.workerId);
+    await f.releaseAdmission();
     return { manager: f.manager, store: f.store };
   }
   /** The fake session calls cezar_done, then its turn ends, which completes an earlier workflow step
    *  (hearsay-tools/cezarion#1620, hearsay-tools/cezarion#2397). */
   const doneTurn = (entry: { spec: AgentRunSpec; emit(event: AgentEvent): void }, text: string) => void (async () => {
     const runId = entry.spec.env!.CEZ_TASK_ID!;
-    const manager = [f.manager, ...recoveredManagers].find(candidate => runInternals(candidate).active.has(runId));
-    const state = manager && runInternals(manager).active.get(runId);
-    if (!manager || !state?.liveSession.ciGeneration) throw new Error(`no live session for ${runId}`);
-    const answer = await manager.cezarToolHandlers(runId, state.liveSession.ciGeneration).finishTurn({}, new AbortController().signal);
+    const tools = toolSessions.get(runId);
+    if (!tools) throw new Error(`no tool launch for ${runId}`);
+    const answer = await tools.manager.cezarToolHandlers(runId, tools.generation).finishTurn({}, new AbortController().signal);
     if (!answer.ok) throw new Error(`cezar_done refused: ${answer.code}`);
     entry.emit({ type: 'text', text });
     entry.emit({ type: 'turn-end' });
   })();
 
-  return { get f() { return f; }, get controller() { return controller; }, sessions, recoveredManagers, recoveredStores, acceptIdentityWorker, launchAccepted, doneTurn };
+  return { get f() { return f; }, get controller() { return controller; }, sessions, recoveredManagers, recoveredStores, acceptIdentityWorker, acceptedBeforeLaunch, launchAccepted, doneTurn };
 }
 
 export const PROVISION_ROWS = {

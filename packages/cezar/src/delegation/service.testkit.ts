@@ -105,12 +105,13 @@ afterAll(() => {
   if (repositoryTemplate) rmSync(repositoryTemplate.root, { recursive: true, force: true });
 });
 
-export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha: string; store: RunStore; manager: RunManager; parent: RunRecord; credentials: CredentialRegistry; caller: Caller; token: string; service: DelegationService; releaseAdmission(): Promise<void>; close(): Promise<void> } {
+export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha: string; store: RunStore; manager: RunManager; parent: RunRecord; credentials: CredentialRegistry; caller: Caller; token: string; service: DelegationService; holdAdmission(): Promise<void>; releaseAdmission(): Promise<void>; close(): Promise<void> } {
   const root = mkdtempSync(join(tmpdir(), 'cez-delegation-service-'));
   const sha = copyServiceRepository(root);
   const store = openTestRunStore(join(root, '.ai/cezar'), { keepLive: true });
   // Scheduler admission is held so acceptance is durable before execution starts.
-  const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => defaultWorkspaceConfig().resources });
+  let admissionHeld = true;
+  const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ ...defaultWorkspaceConfig().resources, ...(admissionHeld ? { maxParallel: 0 } : {}) }) });
   const manager = createFixtureManager(store, root, { semaphore });
   const admissionReads = vi.spyOn(semaphore, 'maxParallel');
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', runner: 'claude', model: 'opus', effort: 'high', steps: [] });
@@ -120,7 +121,6 @@ export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha
   const caller = credentials.authenticate(token)!;
   vi.spyOn(manager, 'delegationExecutionSettings').mockReturnValue({ cwd: root, runner: 'claude', model: 'opus', effort: 'high', agentProfile: 'default', accountBinding: { provider: 'claude', profileId: 'default', homePath: root, claudeLayout: { kind: 'relocated' } } });
   const service = new DelegationService(options);
-  let admissionHeld = true;
   const spawn = service.spawn.bind(service);
   vi.spyOn(service, 'spawn').mockImplementation(async (...args) => {
     const existingWorkers = new Set(store.listWorkerIds());
@@ -135,6 +135,7 @@ export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha
   });
   const unregister = service.registerProject({ id: 'project', root, store, manager });
   return { root, sha, store, manager, parent, credentials, caller, token, service,
+    async holdAdmission() { admissionHeld = true; await semaphore.refresh(); },
     async releaseAdmission() { admissionHeld = false; await semaphore.refresh(); await semaphore.release(); },
     async close() {
       unregister();
