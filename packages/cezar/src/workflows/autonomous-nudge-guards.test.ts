@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './run/turn-boundary.ts';
 import { InputFlight } from './run/input-delivery.ts';
 import { runnerHook, setupMonitoringFixture, waitForProduct } from './run-fixture.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
@@ -114,13 +115,13 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   function applyGuard(guard: typeof guards[number]): void {
     canContinue.mockReturnValue(false);
     switch (guard) {
-      case 'disabled': state.autonomous = false; break; // includes the memory-limit pause
+      case 'disabled': transitionTurnBoundary(state, { kind: 'mode-disabled', phase: 'disable', session: state.liveSession.session }); break; // includes the memory-limit pause
       case 'cancelled': state.liveSession.cancel(); break;
       case 'finish': state.liveSession.requestFinish(); break;
       case 'disposed': disposed = true; break;
       case 'stopping': store.updateRun(id, { stopping: true }); break;
       case 'input-error': state.inputState.recordInputError('transport failed'); break;
-      case 'native-ask': state.pendingHumanAsk = true; break;
+      case 'native-ask': transitionTurnBoundary(state, { kind: 'human-wait-opened', phase: 'refresh-question', session: state.liveSession.session, pending: true }); break;
       case 'persisted-ask': store.appendEvent(id, { type: 'ask.requested', requestId: randomUUID(), ...ask }); break;
       case 'closed': state.liveSession.attachSession({ ...session, open: false }); break;
       case 'queued-input': queued.mockReturnValue(true); store.commitAgentInputs(id, [{ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: randomUUID(), text: 'Read this first', createdAt: new Date().toISOString() }]); break;
@@ -163,8 +164,8 @@ describe('autonomous nudge priority and lifecycle guards', () => {
 
   function pendingBoundary(): void {
     state.liveSession.selectStep('task');
-    state.atTurnBoundary = session;
-    state.autonomousNudgePending = session;
+    transitionTurnBoundary(state, { kind: 'turn-end', phase: 'ui-completed', session: session });
+    transitionTurnBoundary(state, { kind: 'input-ready', phase: 'retain-nudge', session: session });
     active.set(id, state);
   }
 
@@ -186,10 +187,10 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       switch (guard) {
         case 'replaced-state': active.set(id, fakeState()); break;
         case 'replaced-session': state.liveSession.attachSession({ ...session }); break;
-        case 'new-boundary': state.atTurnBoundary = undefined; break;
-        case 'done': state.doneAtBoundary = session; break;
-        case 'no-pending': state.autonomousNudgePending = undefined; break;
-        case 'closed-by-idle': state.idleClosed = true; break;
+        case 'new-boundary': transitionTurnBoundary(state, { kind: 'turn-started', phase: 'clear-boundary', session: state.liveSession.session }); break;
+        case 'done': transitionTurnBoundary(state, { kind: 'turn-end', phase: 'retain-done', session: session }); break;
+        case 'no-pending': transitionTurnBoundary(state, { kind: 'input-ready', phase: 'clear-nudge', session: state.liveSession.session }); break;
+        case 'closed-by-idle': transitionTurnBoundary(state, { kind: 'idle-expired', phase: 'close', session: state.liveSession.session }); break;
         case 'session-error': state.liveSession.recordSessionError('provider failed'); break;
       }
       readiness().handleAgentInputReady(id, state, session);
@@ -211,47 +212,47 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     }), 60_000, 40, 'Wait for workers.', 3600);
     expect(settler.settleTurn(id, state, 'ack', { stepId: 'task', humanGate: false, ask: null, done: false, monitoring: false, nudgedLastTurn: false })).toBe(true);
     expect(outcomes).toHaveBeenCalledWith(id, 'ack', { kind: 'readiness' });
-    expect(state.autonomousNudgePending).toBe(session);
+    expect(state.boundary.autonomousNudgePending).toBe(session);
     expect(session.sendAgentMessage).not.toHaveBeenCalled();
     expect(session.sendMessage).not.toHaveBeenCalled();
     expect(store.readEvents(id).some(e => e.type === 'note' && String(e.message).startsWith(NO_WAIT_NUDGE_NOTE))).toBe(false);
   });
 
   it('nested subagent items do not clear the no-wait nudge reply bound', () => {
-    state.noWaitNudged = session;
+    transitionTurnBoundary(state, { kind: 'input-submitted', phase: 'nudge-delivered', session: session });
     active.set(id, state);
     nudges.armNoWaitNudgeReplyTimer(id, state);
-    expect(state.noWaitNudgeReplyTimer).toBeDefined();
+    expect(state.boundary.noWaitNudgeReplyTimer).toBeDefined();
     nudges.noteNoWaitNudgeContent(id, state, {
       type: 'item.started',
       item: { parentItemId: 'parent' },
     });
-    expect(state.noWaitNudgeReplyTimer).toBeDefined();
+    expect(state.boundary.noWaitNudgeReplyTimer).toBeDefined();
     nudges.noteNoWaitNudgeContent(id, state, { type: 'item.delta' });
-    expect(state.noWaitNudgeReplyTimer).toBeDefined();
+    expect(state.boundary.noWaitNudgeReplyTimer).toBeDefined();
     nudges.noteNoWaitNudgeContent(id, state, {
       type: 'item.started',
       item: {},
     });
-    expect(state.noWaitNudgeReplyTimer).toBeUndefined();
+    expect(state.boundary.noWaitNudgeReplyTimer).toBeUndefined();
   });
 
   it('text before the reply timer is armed means the nudge was answered', () => {
-    state.noWaitNudged = session;
+    transitionTurnBoundary(state, { kind: 'input-submitted', phase: 'nudge-delivered', session: session });
     active.set(id, state);
     nudges.noteNoWaitNudgeContent(id, state, { type: 'text' });
     nudges.armNoWaitNudgeReplyTimer(id, state);
-    expect(state.noWaitNudgeReplyTimer).toBeUndefined();
+    expect(state.boundary.noWaitNudgeReplyTimer).toBeUndefined();
   });
 
   it('turn.started before the reply timer is armed does not count as a nudge reply', () => {
-    state.noWaitNudged = session;
+    transitionTurnBoundary(state, { kind: 'input-submitted', phase: 'nudge-delivered', session: session });
     active.set(id, state);
     nudges.noteNoWaitNudgeContent(id, state, { type: 'turn.started' });
     nudges.armNoWaitNudgeReplyTimer(id, state);
-    expect(state.noWaitNudgeReplyTimer).toBeDefined();
+    expect(state.boundary.noWaitNudgeReplyTimer).toBeDefined();
     nudges.noteNoWaitNudgeContent(id, state, { type: 'turn.started' });
-    expect(state.noWaitNudgeReplyTimer).toBeUndefined();
+    expect(state.boundary.noWaitNudgeReplyTimer).toBeUndefined();
   });
 
   // hearsay-tools/cezarion#1234: an unanswered nudge opens Cezar's no-wait human wait, so the run

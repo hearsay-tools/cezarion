@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import { continuationNextStep, waitingWorkflowStepIndex, ciWorkflowResumeStepIndex } from './workflow-position.ts';
 import type { QueuedInput } from './queued-input.ts';
 import type { WorkerQuestions } from './worker-questions.ts';
@@ -466,7 +467,7 @@ export class ContinuationSession {
     }, runId, stepId, state, record, { prompt, images, persistedImages, persistedAttachments });
     prompt = opening.prompt;
     const answer = this.openingAnswer(runId, state, opening);
-    state.pendingHumanAsk = answer.askSeq === undefined && hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id));
+    transitionTurnBoundary(state, { kind: 'session-open', phase: 'restore-question', session: state.liveSession.session, pending: answer.askSeq === undefined && hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id)) });
 
     const turn: SessionTurn = { text: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
     const sink = this.host.makeUiSink(runId, stepId);
@@ -599,7 +600,7 @@ export class ContinuationSession {
     state.liveSession.attachSession(session);
     const resumedNext = continuationNextStep(this.context.store, runId, record => waitingWorkflowStepIndex(record,
       (run, step) => this.host.isSyntheticContinuation(run, step), ciWorkflowResumeStepIndex));
-    state.nextStep = stepScope(session, resumedNext);
+    transitionTurnBoundary(state, { kind: 'session-open', phase: 'scope-step', session, next: stepScope(session, resumedNext) });
     state.liveSession.markSessionOpened();
     state.liveSession.installInterrupt(() => session.interrupt());
     let setupComplete = false;

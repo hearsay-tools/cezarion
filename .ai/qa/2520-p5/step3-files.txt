@@ -1,0 +1,9 @@
+packages/cezar/src/core/harness-parity-cells.testkit.ts | flat reads: none | flat writes: idleClosed | mechanical private shape and owner-command migration
+packages/cezar/src/core/skill-resume-parity.testkit.ts | flat reads: idleTimer | flat writes: none | mechanical private shape and reader path migration
+packages/cezar/src/workflows/autonomous-nudge-guards.test.ts | flat reads: autonomousNudgePending,noWaitNudgeReplyTimer | flat writes: autonomous,pendingHumanAsk,atTurnBoundary,autonomousNudgePending,doneAtBoundary,idleClosed,noWaitNudged | mechanical readers and owner commands
+packages/cezar/src/workflows/completion-gate-entry.test.ts | flat reads: doneAtBoundary,doneClose | flat writes: atTurnBoundary,doneAtBoundary | mechanical readers and owner commands
+packages/cezar/src/workflows/run-active-run-factory.test.ts | flat reads: pendingHumanAsk,autonomous (shape/key assertions) | flat writes: none | remove flat keys; add boundary slot and container-freeze assertion
+packages/cezar/src/workflows/run/autosave-encapsulation.test.ts | flat reads: none | flat writes: idleTimer,noWaitNudgeReplyTimer | arm test timer handles through boundary commands
+packages/cezar/src/workflows/run/turn-settler.test.ts | flat reads: parkAfterAck,doneAtBoundary,completedStepId,noWaitNudgeSawContent,idleTimer; order log observes doneRequested,noWaitNudged,completionNudgeAnswered,completionNudged,autonomousNudgePending | flat writes: doneRequested,noWaitNudged,completionNudged,autonomousNudgePending,parkAfterAck,doneAtBoundary,doneClose | mechanical readers and owner commands; replace flat-write Proxy order log with transition-entry log
+packages/cezar/src/workflows/step-completion-mark.test.ts | flat reads: completedStepId | flat writes: completedStepId | mechanical readers and owner commands
+packages/cezar/src/workflows/worker-questions-pending-finish.test.ts | flat reads: doneRequested | flat writes: none | mechanical private shape and reader path migration

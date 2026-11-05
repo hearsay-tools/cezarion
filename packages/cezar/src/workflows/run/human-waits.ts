@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
 import { WAIT_LIMIT, type HumanWaitEntry, type WaitVia } from '@open-mercato/cezar-contract/waits';
 import type { AskRequest } from '../../core/ask.ts';
@@ -25,8 +26,7 @@ export class HumanWaits {
   /** Ask precedence: the question is pending, and no autonomous nudge goes beside it. Durable
    *  input and waits stay queued until an actual human answer. */
   prepareHumanAsk(state: ActiveRun): void {
-    state.autonomousNudgePending = undefined;
-    state.pendingHumanAsk = true;
+    transitionTurnBoundary(state, { kind: 'human-wait-opened', phase: 'prepare', session: state.liveSession.session });
   }
 
   /** The human gate a human wait without a card raises (live workers with re-checks off):
@@ -102,7 +102,7 @@ export class HumanWaits {
       else {
         this.context.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), code: PROSE_HUMAN_GATE, message: 'waiting for a human response to the assistant’s request' });
       }
-    } else if (state) state.pendingHumanAsk = true;
+    } else if (state) transitionTurnBoundary(state, { kind: 'human-wait-opened', phase: 'refresh-question', session: state.liveSession.session, pending: true });
     this.markHumanWaitSurfaced(runId, wait);
     this.host.routeWorkerQuestion(runId);
   }

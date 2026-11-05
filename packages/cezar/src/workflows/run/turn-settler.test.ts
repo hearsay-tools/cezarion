@@ -1,3 +1,5 @@
+import { traceBoundary } from './boundary-order.testkit.ts';
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import { InputDelivery } from './input-delivery.ts';
 import { unused } from '../fixture-cleanup.testkit.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -18,11 +20,8 @@ const ask = { questions: [{ header: 'Choice', question: 'Which path?' }] };
 function fixture() {
   const log: string[] = [];
   const call = <T>(name: string, result: T) => vi.fn(() => { log.push(name); return result; });
-  const raw = createActiveRun({ cwd: '.', pendingHumanAsk: false, autonomous: false });
-  const state = new Proxy(raw, { set(target, key, value) {
-    log.push(`state:${String(key)}`);
-    return Reflect.set(target, key, value);
-  } });
+  const state = createActiveRun({ cwd: '.', pendingHumanAsk: false, autonomous: false });
+  traceBoundary(log);
   const session = { open: true, holdsHumanInput: call('holds', false), discardQueuedMessages: call('discard', undefined), end: call('end', undefined) } as unknown as AgentSession;
   state.liveSession.attachSession(session);
   state.liveSession.selectStep('step');
@@ -79,16 +78,22 @@ afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 describe('turn settler entry orders', () => {
   it('turn-end consumes done before resetting nudges, saves boundary before settlement, then clears resume attempts', () => {
     const f = fixture();
-    f.state.doneRequested = { session: f.session };
-    f.state.noWaitNudged = f.session;
-    f.state.completionNudged = f.session;
+    transitionTurnBoundary(f.state, { kind: 'done-request', session: f.state.liveSession.session });
+    transitionTurnBoundary(f.state, { kind: 'input-submitted', phase: 'nudge-delivered', session: f.session });
+    transitionTurnBoundary(f.state, { kind: 'completion-refusal', phase: 'nudge-delivered', session: f.session });
     decide({ kind: 'park' });
+    f.host.subagentWaits.atTurnEnd.mockImplementation(() => {
+      expect(f.state.boundary.noWaitNudged).toBeUndefined();
+      expect(f.state.boundary.completionNudgeAnswered).toBe(f.session);
+      expect(f.state.boundary.completionNudged).toBeUndefined();
+      f.log.push('subagentsAtTurnEnd');
+    });
     f.host.parkOnWaits.mockImplementation(() => {
-      f.log.push('parkWaits'); expect(f.state.parkAfterAck?.session).toBe(f.session); return true;
+      f.log.push('parkWaits'); expect(f.state.boundary.parkAfterAck?.session).toBe(f.session); return true;
     });
     f.log.length = 0;
     f.settler.endTurn('run', f.state, { handle: () => undefined } as unknown as UiEventSink, { stepId: 'step', scheduleWakeup: undefined });
-    order(f, ['state:doneRequested', 'state:noWaitNudged', 'state:completionNudgeAnswered', 'state:completionNudged', 'state:parkAfterAck', 'parkWaits', 'outcome', 'update:autoResumeAttempts']);
+    order(f, ['boundary:turn-end/consume-done', 'boundary:turn-end/reset-nudges', 'subagentsAtTurnEnd', 'boundary:turn-end/save-ack', 'parkWaits', 'outcome', 'update:autoResumeAttempts']);
   });
 
   it('turn-end discards queued input for a human wait card before preparing it and storing its boundary', () => {
@@ -96,7 +101,7 @@ describe('turn settler entry orders', () => {
     decide({ kind: 'park' });
     f.host.humanWaits.turnEndHumanWait.mockImplementation(() => { f.log.push('humanWait'); return { kind: WAIT_KIND.human, ...ask }; });
     f.settler.endTurn('run', f.state, { handle: () => undefined } as unknown as UiEventSink, { stepId: 'step', scheduleWakeup: undefined });
-    order(f, ['humanWait', 'discard', 'state:noWaitNudged', 'prepareAsk', 'state:parkAfterAck']);
+    order(f, ['humanWait', 'discard', 'boundary:turn-end/reset-nudges', 'prepareAsk', 'boundary:turn-end/save-ack']);
   });
 
   // hearsay-tools/cezarion#2431: native subagents still running replace the monitoring timer.
@@ -107,25 +112,25 @@ describe('turn settler entry orders', () => {
       decide({ kind: 'take-input' }, { kind: 'park' });
       f.settler.endTurn('run', f.state, { handle: () => undefined } as unknown as UiEventSink, { stepId: 'step', scheduleWakeup: 300 });
       expect(f.host.subagentWaits.atTurnEnd).toHaveBeenCalledWith('run', f.state, { sessionOpen: true, done: false, asks: false });
-      order(f, ['subagentsAtTurnEnd', 'state:parkAfterAck', ...(subagents ? [] : ['commitWait', 'armWait']), 'parkWaits']);
+      order(f, ['subagentsAtTurnEnd', 'boundary:turn-end/save-ack', ...(subagents ? [] : ['commitWait', 'armWait']), 'parkWaits']);
     });
   }
 
   it('ready calls the gate before clearing the pending nudge and dispatching the carrier', () => {
     const f = fixture();
-    f.state.autonomousNudgePending = f.session;
+    transitionTurnBoundary(f.state, { kind: 'input-ready', phase: 'retain-nudge', session: f.session });
     f.log.length = 0;
-    f.state.parkAfterAck = { session: f.session, monitoring: false, humanGate: true, nudgedLastTurn: true };
+    transitionTurnBoundary(f.state, { kind: 'turn-end', phase: 'save-ack', session: f.state.liveSession.session, boundary: { session: f.session, monitoring: false, humanGate: true, nudgedLastTurn: true } });
     f.log.length = 0;
     const decision = decide({ kind: 'park' });
     f.settler.settleTurn('run', f.state, 'ready', f.settler.boundaryTurn('run', f.state, f.session, true));
     expect(decision).toHaveBeenCalledWith(expect.objectContaining({ done: true, question: true, noWaitNudgedLastTurn: true }));
-    order(f, ['gate', 'state:autonomousNudgePending', 'parkWaits', 'outcome']);
+    order(f, ['gate', 'boundary:input-ready/clear-nudge', 'parkWaits', 'outcome']);
   });
 
   it('gate uses the supplied refusal without calling the gate again, and records only through the outcome seam', () => {
     const f = fixture();
-    f.state.parkAfterAck = { session: f.session, monitoring: false, humanGate: true, nudgedLastTurn: true };
+    transitionTurnBoundary(f.state, { kind: 'turn-end', phase: 'save-ack', session: f.state.liveSession.session, boundary: { session: f.session, monitoring: false, humanGate: true, nudgedLastTurn: true } });
     const decision = decide({ kind: 'park', refused: true });
     f.settler.settleTurn('run', f.state, 'gate', f.settler.boundaryTurn('run', f.state, f.session, true), refusal);
     expect(decision).toHaveBeenCalledWith(expect.objectContaining({ done: true, question: true, noWaitNudgedLastTurn: true }));
@@ -136,17 +141,29 @@ describe('turn settler entry orders', () => {
 
   it.each(['ack', 'ready', 'gate'] as const)('held %s preserves boundary and input timer before reporting park', entry => {
     const f = fixture();
-    f.state.doneAtBoundary = f.session;
+    transitionTurnBoundary(f.state, { kind: 'turn-end', phase: 'retain-done', session: f.session });
     vi.spyOn(Date, 'now').mockReturnValue(42);
     f.state.inputState.beginHeldClock();
     f.host.completionGate.mockImplementation(() => { f.log.push('gate'); return 'held'; });
     f.host.line.inPool.mockImplementation(() => {
-      expect(f.state.doneAtBoundary).toBe(f.session); expect(f.state.inputState.heldHumanInputSince).toBe(42);
+      expect(f.state.boundary.doneAtBoundary).toBe(f.session); expect(f.state.inputState.heldHumanInputSince).toBe(42);
       f.log.push('inPool'); return false;
     });
     f.log.length = 0;
     f.settler.settleTurn('run', f.state, entry, { ...turn, done: true });
     expect(f.log).toEqual(['gate', 'inPool', 'outcome']);
+  });
+
+  it('held turn-end records the done and close metadata before the pool read', () => {
+    const f = fixture();
+    f.host.completionGate.mockImplementation(() => { f.log.push('gate'); return 'held'; });
+    f.host.line.inPool.mockImplementation(() => {
+      expect(f.state.boundary.doneAtBoundary).toBe(f.session);
+      expect(f.state.boundary.doneClose).toEqual({ summary: 'finished', via: 'cezar_done' });
+      f.log.push('inPool'); return false;
+    });
+    f.settler.settleTurn('run', f.state, 'turn-end', { ...turn, done: true, doneRequest: { session: f.session, summary: 'finished' } });
+    order(f, ['gate', 'boundary:turn-end/record-done', 'inPool', 'outcome']);
   });
 
   it('take-input notes refusal before flushing, opens monitoring after a refused flush, then reads new facts', () => {
@@ -215,7 +232,7 @@ describe('turn settler carrier orders', () => {
     decide({ kind }, { kind });
     f.settler.settleTurn('run', f.state, 'ack', turn);
     expect(f.host.settledTurnOutcome).toHaveBeenCalledWith('run', 'ack', { kind: 'running' });
-    expect(f.log.slice(f.log.lastIndexOf('wakes') + 1)).toEqual(['outcome']);
+    expect(f.log.slice(f.log.lastIndexOf('wakes') + 1)).toEqual(['boundary:turn-end/carry', 'outcome']);
   });
 
   it.each(['closed', 'input', 'defer', 'park', 'human-wait', 'nudge', 'completion-wait'] as const)('withdraws settled refusal before the %s carrier, then records its outcome', kind => {
@@ -249,11 +266,11 @@ describe('turn settler carrier orders', () => {
 
   it('done marks the step before summary, lifecycle, wait cancellation, and session close, without an outcome', () => {
     const f = fixture();
-    f.state.doneClose = { via: 'cezar_done', summary: 'finished' };
+    transitionTurnBoundary(f.state, { kind: 'turn-end', phase: 'record-done', session: f.state.liveSession.session, done: false, keepClose: true, request: { session: f.state.liveSession.session!, summary: 'finished' } });
     decide({ kind: 'done' });
     f.settler.settleTurn('run', f.state, 'ack', { ...turn, done: true });
-    order(f, ['state:completedStepId', 'event:note', 'event:lifecycle', 'cancelWaits', 'end']);
-    expect(f.state.completedStepId).toBe('step');
+    order(f, ['boundary:done-step-consumed/completed', 'event:note', 'event:lifecycle', 'cancelWaits', 'end']);
+    expect(f.state.boundary.completedStepId).toBe('step');
     expect(f.host.settledTurnOutcome).not.toHaveBeenCalled();
   });
 
@@ -278,20 +295,20 @@ describe('turn settler carrier orders', () => {
     vi.useFakeTimers();
     const f = fixture();
     f.host.submitAgentInput.mockImplementation(() => {
-      expect(f.state.noWaitNudgeSawContent).toBe(false); f.log.push('submit'); return sent;
+      expect(f.state.boundary.noWaitNudgeSawContent).toBe(false); f.log.push('submit'); return sent;
     });
     decide({ kind: 'nudge', cause: 'completion', ifRefused: 'park-for-user' });
     f.settler.settleTurn('run', f.state, 'ack', turn, refusal);
     const tail = sent ? ['replyBound', 'charge', 'event:note', 'outcome']
-      : ['state:doneAtBoundary', 'event:note', 'move', 'release', 'wake', 'notice', 'outcome'];
-    order(f, ['withdraw', 'state:noWaitNudgeSawContent', 'submit', ...tail]);
+      : ['boundary:turn-end/retain-done', 'event:note', 'move', 'release', 'wake', 'notice', 'outcome'];
+    order(f, ['withdraw', 'boundary:turn-end/reset-content', 'submit', ...tail]);
   });
 
   it('settled refusal withdraws human waits before the done carrier closes the session', () => {
     const f = fixture();
     decide({ kind: 'done' });
     f.settler.settleTurn('run', f.state, 'ack', turn, refusal);
-    order(f, ['withdraw', 'state:completedStepId', 'event:lifecycle', 'cancelWaits', 'end']);
+    order(f, ['withdraw', 'boundary:done-step-consumed/completed', 'event:lifecycle', 'cancelWaits', 'end']);
     expect(f.host.settledTurnOutcome).not.toHaveBeenCalled();
   });
 
@@ -338,7 +355,7 @@ describe('turn settler carrier orders', () => {
     f.settler.parkForUser('run', f.state, 'step');
     order(f, ['move', 'flush', 'parkLine', 'leavePool', 'idle', 'release', 'wake']);
     expect(f.host.move).toHaveBeenCalledWith('run', 'park', {}, { stepId: 'step' });
-    expect(f.state.idleTimer).toBeDefined();
+    expect(f.state.boundary.idleTimer).toBeDefined();
   });
 });
 
@@ -354,10 +371,16 @@ describe('turn settler monitoring alias orders', () => {
   it.each(['off', 'budget'] as const)('%s fallback notes the cause before opening its human alias', reason => {
     const f = fixture();
     if (reason === 'off') f.semaphore.monitoringWakeIntervalMinutes.mockReturnValue(null);
-    else f.host.countAutomaticWakes.mockReturnValue(10);
+    else {
+      f.host.countAutomaticWakes.mockReturnValue(10);
+      f.host.humanWaits.openHumanAlias.mockImplementation(() => {
+        expect(f.state.boundary.monitoringCapNoted).toBe(true);
+        f.log.push('humanAlias'); return { source: WAIT_SOURCE.cezar };
+      });
+    }
     decide({ kind: 'park' });
     f.settler.settleTurn('run', f.state, 'ack', { ...turn, monitoring: true });
-    order(f, ['event:note', 'humanAlias', 'parkWaits', 'outcome']);
+    order(f, [...(reason === 'budget' ? ['boundary:turn-end/monitoring-cap'] : []), 'event:note', 'humanAlias', 'parkWaits', 'outcome']);
     expect(f.store.commitWait).not.toHaveBeenCalled();
     expect(f.host.waitWatches.armWait).not.toHaveBeenCalled();
   });
@@ -372,4 +395,16 @@ describe('turn settler monitoring alias orders', () => {
     expect(f.host.waitWatches.armWait).not.toHaveBeenCalled();
   });
 
+});
+
+
+it('ACK refusal drops retained done after the gate and classification before carrying the decision', () => {
+  const f = fixture();
+  transitionTurnBoundary(f.state, { kind: 'turn-end', phase: 'retain-done', session: f.session });
+  f.log.length = 0;
+  f.host.completionGate.mockImplementation(() => { f.log.push('gate'); return refusal; });
+  decide({ kind: 'park', refused: true });
+  f.settler.settleTurn('run', f.state, 'ack', { ...turn, done: true });
+  order(f, ['gate', 'boundary:turn-end/drop-done', 'event:note', 'boundary:turn-end/carry', 'parkWaits', 'outcome']);
+  expect(f.state.boundary.doneAtBoundary).toBeUndefined();
 });

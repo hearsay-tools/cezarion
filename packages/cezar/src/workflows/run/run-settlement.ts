@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import { workerEvidenceRunIds } from '../../runs/worker-execution.ts';
 import { removeAgentTmpDir } from '../../runs/agent-tmpdir.ts';
 import { resolveWorktreeRetention } from '../../config.ts';
@@ -120,7 +121,7 @@ export class RunSettlement {
    * It reads the done `closeAsDone` recorded; callers clear the consumed mark. Finish is an explicit stop, settled as before.
    */
   stepLeftOpen(state: ActiveRun, stepId: string, next: WorkflowStepDef | undefined): boolean {
-    const completed = state.completedStepId === stepId;
+    const completed = state.boundary.completedStepId === stepId;
     return !!next && !completed && !state.liveSession.finishRequested;
   }
 
@@ -128,7 +129,7 @@ export class RunSettlement {
   private continuationLeftOpen(state: ActiveRun, stepId: string, next: WorkflowStepDef | undefined): boolean {
     if (state.liveSession.cancelled) return false;
     const open = this.stepLeftOpen(state, stepId, next);
-    state.completedStepId = undefined;
+    transitionTurnBoundary(state, { kind: 'done-step-consumed', phase: 'consumed', session: state.liveSession.session });
     return open;
   }
 
@@ -161,7 +162,7 @@ export class RunSettlement {
     sink.sessionEnded(state.liveSession.cancelled ? 'cancelled' : 'end_turn');
     const incomplete = this.continuationLeftOpen(state, stepId, resumedNext);
     const kind = stepDecisions.continuationCloseKind(state.liveSession.cancelled, incomplete,
-      !state.liveSession.cancelled && !incomplete && (state.idleClosed || this.supersedeFallbackThenWorkflowAsk(runId, state)));
+      !state.liveSession.cancelled && !incomplete && (state.boundary.idleClosed || this.supersedeFallbackThenWorkflowAsk(runId, state)));
     if (kind === 'cancelled') {
       this.settleCancelledContinuation(runId, stepId);
       return undefined;
@@ -296,7 +297,7 @@ export class RunSettlement {
       return;
     }
     const settlement = stepDecisions.executionSettlementKind(state.liveSession.cancelled, loop.runError, loop.incompleteStepId,
-      !state.liveSession.cancelled && !loop.runError && !loop.incompleteStepId && (state.idleClosed || this.supersedeFallbackThenWorkflowAsk(runId, state)));
+      !state.liveSession.cancelled && !loop.runError && !loop.incompleteStepId && (state.boundary.idleClosed || this.supersedeFallbackThenWorkflowAsk(runId, state)));
     if (settlement.kind === 'cancelled') {
       this.settleCancelledRun(runId);
     } else if (settlement.kind === 'failed') {
@@ -432,7 +433,7 @@ export class RunSettlement {
       await this.settleIdleClosedWorker(runId);
       return;
     }
-    if (!run || !state.autonomousNudgePending || run.waits?.length || hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id))) return;
+    if (!run || !state.boundary.autonomousNudgePending || run.waits?.length || hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id))) return;
     for (const step of run.steps) {
       if (step.status === 'running') this.context.store.updateStep(runId, step.id, { status: 'waiting' });
     }

@@ -234,7 +234,7 @@ export type SettledTurn = {
   humanWait?: HumanWaitEntry | undefined;
   sink?: UiEventSink;
   done: boolean;
-  doneRequest?: ActiveRun['doneRequested'];
+  doneRequest?: ActiveRun['boundary']['doneRequested'];
   /** The turn answered the no-wait nudge. The completion cause's flag is `completionNudgeAnswered`. */
   nudgedLastTurn: boolean;
   scheduleWakeup?: number | null | undefined;

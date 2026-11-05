@@ -220,7 +220,7 @@ export class WorkerQuestions {
     // A question goes to the parent through `routeWorkerQuestion`; a prose gate does not, so it gets a notice.
     // Queued input wakes the worker, so the turn that takes it decides at its own park.
     return worker.status === 'waiting' && !worker.stopping && !this.context.store.transcriptFacts(worker.id).pendingAsk &&
-      !this.host.active(worker.id)?.pendingHumanAsk && this.context.store.readWorkerExecution(worker.id)?.phase !== 'complete' &&
+      !this.host.active(worker.id)?.boundary.pendingHumanAsk && this.context.store.readWorkerExecution(worker.id)?.phase !== 'complete' &&
       !this.host.hasQueuedAgentInputs(worker.id);
   }
 

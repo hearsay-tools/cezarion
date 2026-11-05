@@ -66,7 +66,7 @@ export class FamilyReconciler {
   /** A turn of this run is executing now: a recovered run's is not, whatever it last recorded. */
   private isExecutingWorkerWaitTurn(runId: string): boolean {
     const state = this.host.active(runId);
-    return !!state?.liveSession.session?.open && !state.liveSession.cancelled && !this.host.recoveringRun(runId) && state.atTurnBoundary !== state.liveSession.session;
+    return !!state?.liveSession.session?.open && !state.liveSession.cancelled && !this.host.recoveringRun(runId) && state.boundary.atTurnBoundary !== state.liveSession.session;
   }
 
   /** Request deadlines share the existing reconciliation timer registry, never a polling loop. */

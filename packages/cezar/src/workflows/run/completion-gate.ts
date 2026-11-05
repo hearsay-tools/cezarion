@@ -20,7 +20,7 @@ export interface CompletionGateHost {
 export function completionRefusal(context: RunModuleContext, host: CompletionGateHost, runId: string): CompletionRefusal | undefined {
   if (context.store.getRun(runId)?.delegation?.role !== 'root') return undefined;
   return rootCompletionRefusal({ questions: host.unansweredQuestions(runId), blockers: host.parentCompletionBlockers(runId),
-    requests: openCompletionRequests(context.store, runId), incomingRefused: !!host.active.get(runId)?.incomingRequestRefused });
+    requests: openCompletionRequests(context.store, runId), incomingRefused: !!host.active.get(runId)?.boundary.incomingRequestRefused });
 }
 
 export function parentCompletionBlockers(context: RunModuleContext, host: CompletionGateHost, runId: string) {
@@ -53,7 +53,7 @@ export function monitorsLiveWorkers(context: RunModuleContext, host: CompletionG
 export function delegationFinishBlockedReason(context: RunModuleContext, host: CompletionGateHost, runId: string): string | undefined {
   const parent = context.store.getRun(runId);
   if (parent?.delegation?.role !== 'root') return undefined;
-  if (hasPendingHumanAsk(runId, id => host.pendingHumanAskSeq(id)) || host.active.get(runId)?.pendingHumanAsk) return 'Answer the pending human question before finishing.';
+  if (hasPendingHumanAsk(runId, id => host.pendingHumanAskSeq(id)) || host.active.get(runId)?.boundary.pendingHumanAsk) return 'Answer the pending human question before finishing.';
   const questions = host.unansweredQuestions(runId);
   if (questions.length) return `Answer your workers' questions before finishing: ${questions.map(q => q.workerId).join(', ')}`;
   const blockers = host.parentCompletionBlockers(runId).filter(blocker => blocker.reason !== 'request');

@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import { MemoryGuard } from './memory-guard.ts';
 import { RunCancel } from './run-cancel.ts';
 import { IDLE_TIMEOUT_MS, ROUTED_QUESTION_REFUSAL, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, SCHEDULE_WAKEUP_MAX_SECONDS, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, RESTART_CONTINUATION_PROMPT } from './constants.ts';
@@ -263,7 +264,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     routeWorkerQuestion: id => modules.workerQuestions.routeWorkerQuestion(id), noticeParkedWorker: id => modules.workerQuestions.noticeParkedWorker(id),
     retireUnreadParentQuestion: (id, request) => modules.workerQuestions.retireUnreadParentQuestion(id, request),
     deleteUnreadInput: (id, input) => { host.active.get(id)?.inputState.forgetUnreadInput(input); },
-    updatePendingHumanAsk: (id, value) => { const state = host.active.get(id); if (state) state.pendingHumanAsk = value; },
+    updatePendingHumanAsk: (id, value) => { const state = host.active.get(id); if (state) transitionTurnBoundary(state, { kind: 'human-wait-opened', phase: 'refresh-question', session: state.liveSession.session, pending: value }); },
   }, MAX_AUTO_CONTINUES);
   modules.familyReconciler = new FamilyReconciler(context, {
     reapTerminalScratch: id => modules.runSettlement.reapTerminalScratch(id), cancelOpenWaits: id => modules.wakeAdmission.cancelOpenWaits(id),

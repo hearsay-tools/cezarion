@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { RunnerId } from '../../core/agent-runner.ts';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import type { ActiveRun } from '../active-run.ts';
@@ -388,9 +389,9 @@ export class StepLoop {
     if (failure || loop.deliveryCapped) return 'settle';
     // A session that closed without a done leaves its step resumable; the tail never starts.
     const incomplete = this.runSettlement.stepLeftOpen(state, step.id, attempt.nextStep);
-    state.completedStepId = undefined;
+    transitionTurnBoundary(state, { kind: 'done-step-consumed', phase: 'consumed', session: state.liveSession.session });
     if (incomplete) { loop.incompleteStepId = step.id; return 'settle'; }
-    if (state.idleClosed || this.runSettlement.supersedeFallbackThenWorkflowAsk(runId, state)) return 'settle';
+    if (state.boundary.idleClosed || this.runSettlement.supersedeFallbackThenWorkflowAsk(runId, state)) return 'settle';
     this.finishStep(runId, step.id, 'done', undefined, emit);
     // Finish is an explicit stop, not an answer or permission to run checks.
     return state.liveSession.finishRequested ? 'settle' : 'next';

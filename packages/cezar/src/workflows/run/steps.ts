@@ -3,7 +3,7 @@ import type { ActiveRun } from '../active-run.ts';
 import type { WorkflowStepDef } from '../types.ts';
 
 /** The session whose done completes a step that is not the last, and the step it starts next. */
-export function stepScope(session: AgentSession, next: WorkflowStepDef | undefined): ActiveRun['nextStep'] {
+export function stepScope(session: AgentSession, next: WorkflowStepDef | undefined): ActiveRun['boundary']['nextStep'] {
   return next ? { session, label: stepLabel(next) } : undefined;
 }
 

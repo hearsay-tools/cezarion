@@ -213,11 +213,11 @@ function skillInPrompt(prompt: string, repoRoot: string): boolean {
 
 async function idleClose(manager: RunManager, runId: string): Promise<void> {
   await waitFor(() => {
-    const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(runId);
-    return typeof (state?.idleTimer as { _onTimeout?: () => void } | undefined)?._onTimeout === 'function';
+    const state = (manager as unknown as { active: Map<string, { boundary: { readonly idleTimer?: NodeJS.Timeout & { _onTimeout(): void } } }> }).active.get(runId);
+    return typeof state?.boundary.idleTimer?._onTimeout === 'function';
   });
-  const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(runId);
-  const timer = state?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
+  const state = (manager as unknown as { active: Map<string, { boundary: { readonly idleTimer?: NodeJS.Timeout & { _onTimeout(): void } } }> }).active.get(runId);
+  const timer = state!.boundary.idleTimer!;
   timer._onTimeout();
   await waitFor(() => !manager.isActive(runId));
 }

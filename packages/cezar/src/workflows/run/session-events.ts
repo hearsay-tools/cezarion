@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
 import { askPayloadOf, askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
@@ -150,8 +151,7 @@ export function recordSessionFault(context: RunModuleContext, host: SessionHelpe
 export function markTurnBoundary(context: RunModuleContext, host: SessionHelperHost, runId: string, state: ActiveRun, event: Extract<AgentEvent, { type: 'turn-end' }>): void {
   inputReceipts.retireUnreadInputs(context, host.inputReceiptHost, runId, state, event.unconsumedInputIds ?? [], false);
   inputReceipts.readBundledInputs(context, host.inputReceiptHost, runId, state);
-  state.waitWakeTurn = undefined;
-  state.atTurnBoundary = state.liveSession.session;
+  transitionTurnBoundary(state, { kind: 'turn-end', phase: 'ui-completed', session: state.liveSession.session });
   state.waitIdentity.rotateCiTurn(randomUUID());
 }
 
@@ -269,9 +269,9 @@ export function handleRunnerUiEvent(context: RunModuleContext, host: SessionHelp
   host.trackSubagentEvent(runId, state, event);
   host.noteNoWaitNudgeContent(runId, state, event);
   if (isRunnerActivity(event)) {
-    if (state.autonomousNudgePending) { state.autonomousNudgePending = undefined; clearIdleTimer(state); }
+    if (state.boundary.autonomousNudgePending) { transitionTurnBoundary(state, { kind: 'turn-started', phase: 'clear-nudge', session: state.liveSession.session }); clearIdleTimer(state); }
     clearHeldHumanInputTimer(state);
-    state.atTurnBoundary = undefined; state.doneAtBoundary = undefined; state.parkAfterAck = undefined;
+    transitionTurnBoundary(state, { kind: 'turn-started', phase: 'clear-boundary', session: state.liveSession.session });
   }
   if (event.type === 'permission.requested') {
     handlePermissionRequested(context, host, runId, state, event.requestId);
@@ -315,8 +315,8 @@ export function handlePermissionRequested(context: RunModuleContext, host: Sessi
 export function handlePermissionResolved(context: RunModuleContext, host: SessionHelperHost, runId: string, state: ActiveRun, pendingPermissions: ReadonlySet<string>): void {
   if (!pendingPermissions.size) {
     context.store.updateRun(runId, { hasPendingPermission: false });
-    state.pendingHumanAsk = hasPendingHumanAsk(runId, id => pendingHumanAskSeq(context.store, id));
-    if (!state.pendingHumanAsk && state.liveSession.session?.open && !context.store.getRun(runId)?.stopping) {
+    transitionTurnBoundary(state, { kind: 'human-wait-opened', phase: 'refresh-question', session: state.liveSession.session, pending: hasPendingHumanAsk(runId, id => pendingHumanAskSeq(context.store, id)) });
+    if (!state.boundary.pendingHumanAsk && state.liveSession.session?.open && !context.store.getRun(runId)?.stopping) {
       host.resumeParkedRun(runId, state);
       host.flushAgentInputs(runId);
     }

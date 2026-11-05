@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { RunModuleContext } from './types.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { ProcessUsage } from '../../core/process-usage.ts';
@@ -53,7 +54,7 @@ export class MemoryGuard {
       });
       // Closing the session frees the tree and lets the normal exit path settle the run and
       // pump the queue. Suppress autonomous auto-continue so the pause actually holds.
-      state.autonomous = false;
+      transitionTurnBoundary(state, { kind: 'mode-disabled', phase: 'disable', session: state.liveSession.session });
       clearIdleTimer(state);
       state.liveSession.session.end();
     }
