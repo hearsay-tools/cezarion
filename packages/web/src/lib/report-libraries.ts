@@ -42,9 +42,15 @@ export function findLibraries(html: string): ReportLibraryId[] {
 }
 
 const LOADERS: Record<ReportLibraryId, () => Promise<string>> = {
-  tailwind: () => import('@tailwindcss/browser?raw').then(module => module.default),
+  tailwind: async () => {
+    const module = await import('@tailwindcss/browser?raw')
+    return module.default
+  },
   'tailwind-v3': () => Promise.resolve(TAILWIND_V3_COMPAT),
-  mermaid: () => import('mermaid/dist/mermaid.min.js?raw').then(module => module.default),
+  mermaid: async () => {
+    const module = await import('mermaid/dist/mermaid.min.js?raw')
+    return module.default
+  },
 }
 
 /** Loads the code of each library; a library that fails to load stays out and stays blocked. */
