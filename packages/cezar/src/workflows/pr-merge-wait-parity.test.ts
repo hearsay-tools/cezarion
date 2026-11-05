@@ -1,16 +1,16 @@
+import { WaitRegistry } from './run/wait-registry.ts';
+import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentSession } from '../core/agent-runner.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { GithubCiClient } from '../ci-wait/github.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { manager, store, restart, root, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, store, restart, root, semaphore, toolGenerationOf, until, useWorkerWaitFixture, work } from './worker-wait.testkit.ts';
 import { ciNativeMessages } from './waits-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
@@ -31,22 +31,50 @@ vi.mock('node:timers/promises', async importOriginal => {
     });
   } };
 });
-const resources = vi.hoisted(() => ({ github: undefined as GithubCiClient | undefined }));
+const resources = vi.hoisted(() => ({ github: undefined as GithubCiClient | undefined,
+  supervisor: undefined as CiWatcherSupervisor | undefined, replay: async (_result?: CiWaitResult) => {} }));
 vi.mock('../ci-wait/resources.ts', async importOriginal => {
   const original = await importOriginal<typeof import('../ci-wait/resources.ts')>();
   return { acquireCiResources(workspace: object) {
     const shared = original.acquireCiResources(workspace);
-    if (!resources.github) return shared;
-    const supervisor = new CiWatcherSupervisor({ github: resources.github });
-    return { ...shared, supervisor, release() { supervisor.close(); shared.release(); } };
+    // Each restart owns a fresh supervisor. The initial fixture chooses its wire later.
+    let selected = resources.github ? new CiWatcherSupervisor({ github: resources.github }) : undefined;
+    const current = () => selected ??= resources.supervisor!;
+    // The manager holds this forwarding boundary before the test chooses its GitHub wire.
+    const supervisor = {
+      resolve: (...args: Parameters<CiWatcherSupervisor['resolve']>) => current().resolve(...args),
+      watch: (...args: Parameters<CiWatcherSupervisor['watch']>) => {
+        const result = current().watch(...args).then(value => value);
+        const then = result.then.bind(result);
+        vi.spyOn(result, 'then').mockImplementation((fulfilled, rejected) => {
+          resources.replay = async override => { if (override) await fulfilled?.(override); else await then(fulfilled, rejected); };
+          return then(fulfilled, rejected);
+        });
+        return result;
+      },
+      close() {},
+    };
+    return { ...shared, supervisor, release() { selected?.close(); shared.release(); } };
   } };
 });
 const pr = 'https://github.com/acme/repo/pull/12';
 const open = (id: string) => store.getRun(id)?.waits?.find(wait => wait.kind === 'pr');
 const last = (id: string) => store.getRun(id)?.lastWaits?.find(wait => wait.kind === 'pr');
-const active = (id: string) => (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; ciGeneration: string; };  }> }).active.get(id);
 const disk = (id: string) => readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === id);
 const mergeReads = (log: string) => existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(line => line.includes('state,mergedAt')).length : 0;
+
+// This module case reaches the registry guard itself. A settled wait must return
+// before it reads a live session or queues another input; every host read is a fault.
+function assertIgnoredResolution(runId: string, waitId: string, result: CiWaitResult): void {
+  type Host = ConstructorParameters<typeof WaitRegistry>[1];
+  const host: Host = new Proxy(Object.create(null), {
+    get(_target, property) { throw new Error(`Settled wait consulted ${String(property)}`); },
+  });
+  const registry = new WaitRegistry({ store, repoRoot: root, dataDir: join(root, '.ai/cezar'), semaphore, work, disposed: () => false }, host, 10);
+  const before = structuredClone(store.getRun(runId));
+  registry.resolveWait(runId, waitId, result);
+  expect(store.getRun(runId)).toEqual(before);
+}
 
 // R97–R99 (hearsay-tools/cezarion#1425): a merge wait polls the real metadata parser over a native
 // gh wire. Green checks do not end it; GitHub's merge does, with one committed, delivered input.
@@ -64,16 +92,16 @@ describe('native PR merge wait parity', { timeout: 35_000 }, () => {
       resources.github = new GithubCiClient({ command: { file: process.execPath,
         args: [fileURLToPath(new URL('./ci-merge-gh.testkit.mjs', import.meta.url)), gate, log] } });
       const supervisor = new CiWatcherSupervisor({ github: resources.github });
-      Object.assign(manager, { ciSupervisor: supervisor });
+      resources.supervisor = supervisor;
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
       if (mode === 'continued') {
-        active(run.id)!.liveSession.session.end();
+        [...work.liveSessions].find(session => session.open)!.end();
         await until(() => !manager.isActive(run.id));
         expect(manager.continueRun(run.id, { text: HARNESS_ADAPTERS[runner].scenarios.baseline! }).ok).toBe(true);
-        await until(() => store.getRun(run.id)?.status === 'waiting' && !!active(run.id)?.liveSession.session.open);
+        await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id) && [...work.liveSessions].some(session => session.open));
       }
-      const wait = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, until: 'merge', timeout_seconds: 120 }, 'cezar_wait', active(run.id)!.liveSession.ciGeneration);
+      const wait = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, until: 'merge', timeout_seconds: 120 }, 'cezar_wait', toolGenerationOf(run.id));
       if (mode === 'recovered') {
         await restart();
         expect(manager.isActive(run.id)).toBe(false);
@@ -87,18 +115,27 @@ describe('native PR merge wait parity', { timeout: 35_000 }, () => {
       await until(() => mergeReads(log) > before && probes.size > 0);
       expect(open(run.id)).toMatchObject({ id: wait.id, phase: WAIT_PHASE.open });
       // The committed row at the wake boundary already holds the result and its input.
-      const engine = runInternals(manager).wakeAdmission;
-      const queue = engine.queueWaitWake.bind(engine);
+      const commit = store.commitWait.bind(store);
       let committed: ReturnType<typeof disk>;
-      const wake = vi.spyOn(engine, 'queueWaitWake').mockImplementation(id => { if (id === run.id && !committed) committed = disk(id); queue(id); });
+      const checkpoint = vi.spyOn(store, 'commitWait').mockImplementation((id, entry, input) => {
+        const result = commit(id, entry, input);
+        if (id === run.id && entry.id === wait.id && entry.phase === 'resolved') {
+          committed = disk(id);
+          if (entry.kind === 'pr' && entry.result) assertIgnoredResolution(id, wait.id, entry.result);
+        }
+        return result;
+      });
       writeFileSync(gate + '.merged', '');
       for (const probe of [...probes]) probe.resume();
+      await until(() => committed !== undefined);
+      assertIgnoredResolution(run.id, wait.id, committed.waits.find((entry: { id: string }) => entry.id === wait.id).result);
       await until(() => !!last(run.id)?.deliveredAt);
-      expect(wake).toHaveBeenCalled();
+      expect(checkpoint).toHaveBeenCalled();
       expect(committed.waits.find((entry: { id: string }) => entry.id === wait.id)).toMatchObject({ phase: WAIT_PHASE.resolved, result: { outcome: 'merged' } });
       expect(committed.agentInputs.filter((input: { id: string }) => input.id === wait.id)).toHaveLength(1);
       expect(last(run.id)).toMatchObject({ id: wait.id, until: 'merge', result: { outcome: 'merged', mergedAt: '2026-10-23T09:00:00Z', mergeCommitSha: 'b'.repeat(40) } });
-      runInternals(manager).waitRegistry.resolveWait(run.id, wait.id, last(run.id)!.result); // A duplicate callback cannot enqueue another input.
+      await resources.replay(); // A duplicate supervisor callback cannot enqueue another input.
+      assertIgnoredResolution(run.id, wait.id, committed.waits.find((entry: { id: string }) => entry.id === wait.id).result);
       await until(() => ciNativeMessages(runner, root).some(text => text.includes(`PR wait observation ${wait.id}`)));
       const prompts = ciNativeMessages(runner, root).filter(text => text.includes(`PR wait observation ${wait.id}`));
       expect(prompts).toHaveLength(1);

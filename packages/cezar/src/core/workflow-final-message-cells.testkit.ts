@@ -1,28 +1,21 @@
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { observationClock } from './observation-clock.testkit.ts';
-import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as realDelay } from 'node:timers/promises';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 import { FINAL_MESSAGE_CRITERIA, HARNESS_ADAPTERS, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
-import { NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE } from '../workflows/run.ts';
+import { IDLE_TIMEOUT_MS, NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE } from '../workflows/run.ts';
 import { watchTurnOutcomes } from '../workflows/turn-outcomes.testkit.ts';
 
-function replyObservationClock(manager: Parameters<typeof runInternals>[0]) {
-  let armingReply = false;
-  const clock = observationClock(() => armingReply);
-  const owner = runInternals(manager).turnNudges;
-  const arm = owner.armNoWaitNudgeReplyTimer.bind(owner);
-  const arming = vi.spyOn(owner, 'armNoWaitNudgeReplyTimer').mockImplementation((...args) => {
-    armingReply = true;
-    try { arm(...args); } finally { armingReply = false; }
-  });
-  return { clock, arming };
+function replyObservationClock() {
+  return observationClock(delay => delay === 300 &&
+    /\bat (?:[^ (\n]+\.)?armNoWaitNudgeReplyTimer \(/.test(new Error().stack ?? ''));
 }
 
 // Poll native process/store signals while the product's reply clock is frozen.
@@ -94,22 +87,26 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           continue;
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
+          const semaphore = new WorkspaceSemaphore();
           await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
             manager.enqueueOwnedRun(runId);
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
             const startSeq = store.readEvents(runId).length;
             const turns = watchTurnOutcomes();
+            const inputId = randomUUID();
             expect(manager.steerWorker(runId, {
-              id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId,
+              id: inputId, source: agentInputSchema.shape.source.enum.agent, parentRunId,
               text: promptFor(backend, 'silent-tail-ack-delay'), createdAt: new Date().toISOString(),
             })).toBe('queued');
             await waitFor(() => store.readEvents(runId).slice(startSeq).some(e => e.type === 'turn-end'));
-            expect(manager['active'].get(runId)?.agentInputFlight).toBeDefined();
+            const input = store.getRun(runId)?.agentInputs?.find(input => input.id === inputId);
+            expect(input).toBeDefined();
+            expect(input?.deliveredAt).toBeUndefined();
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
             await waitFor(() => nudgeNotes(store.readEvents(runId).slice(startSeq)).length === 1);
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(turns.words(runId)).toContain('running (no-wait nudge)');
-          });
+          }, { semaphore });
         }, 30_000);
         continue;
       }
@@ -129,30 +126,30 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           continue;
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
+          const semaphore = new WorkspaceSemaphore();
           await withOwnedInputRun(backend, 'silent-tail-no-reply', async ({ store, manager, runId }) => {
             const turns = watchTurnOutcomes();
             const startSeq = store.readEvents(runId).length;
-            const { clock, arming } = replyObservationClock(manager);
+            const clock = replyObservationClock();
             try {
               manager.enqueueOwnedRun(runId);
-              await waitForNativeContent(() => clock.captured === 1 &&
-                manager['active'].get(runId)?.noWaitNudgeReplyTimer !== undefined);
+              await waitForNativeContent(() => clock.captured === 1 && clock.pending === 1);
               expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
               expect(store.getRun(runId)?.status).toBe('running');
-              expect(runInternals(manager).line.busySlots()).toBe(1);
+              expect(semaphore.busy()).toBe(1);
               await clock.advance(150);
               expect(store.getRun(runId)?.status).toBe('running');
-              expect(runInternals(manager).line.busySlots()).toBe(1);
+              expect(semaphore.busy()).toBe(1);
               expect(noReplyNotes(store.readEvents(runId))).toHaveLength(0);
               await clock.advance(150);
               await waitForNativeContent(() => store.getRun(runId)?.status === 'waiting');
               expect(clock.captured).toBe(1);
-            } finally { arming.mockRestore(); clock.restore(); }
-            expect(runInternals(manager).line.busySlots()).toBe(0);
+            } finally { clock.restore(); }
+            expect(semaphore.busy()).toBe(0);
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(noReplyNotes(store.readEvents(runId))).toHaveLength(1);
             expect(turns.words(runId)).toContain('waiting');
-          }, { noWaitNudgeReplyMs: 300 });
+          }, { semaphore, noWaitNudgeReplyMs: 300 });
         }, 30_000);
         continue;
       }
@@ -168,6 +165,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           continue;
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
+          const semaphore = new WorkspaceSemaphore();
           const gateRoot = mkdtempSync(join(tmpdir(), 'cez-late-reply-'));
           const release = join(gateRoot, 'release');
           try {
@@ -176,12 +174,12 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               manager.enqueueOwnedRun(runId);
               await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
               expect(store.getRun(runId)?.status).toBe('waiting');
-              expect(runInternals(manager).line.busySlots()).toBe(0);
+              expect(semaphore.busy()).toBe(0);
               // The native reply stays blocked until parking and slot release are observed.
               // Capture the resumed slot in the store callback: DONE can follow in the same tick.
               let resumedSlots: number | undefined;
               const onRun = (run: { id: string; status: string }) => {
-                if (run.id === runId && run.status === 'running') resumedSlots ??= runInternals(manager).line.busySlots();
+                if (run.id === runId && run.status === 'running') resumedSlots ??= semaphore.busy();
               };
               store.on('run', onRun);
               try {
@@ -192,7 +190,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               } finally { store.off('run', onRun); }
               expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
               expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
-            }, { noWaitNudgeReplyMs: 300, env: { CEZ_MOCK_RELEASE_FILE: release } });
+            }, { semaphore, noWaitNudgeReplyMs: 300, env: { CEZ_MOCK_RELEASE_FILE: release } });
           } finally { rmSync(gateRoot, { recursive: true, force: true }); }
         }, 30_000);
         continue;
@@ -206,6 +204,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           continue;
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
+          const semaphore = new WorkspaceSemaphore();
           const gateRoot = mkdtempSync(join(tmpdir(), 'cez-late-turn-'));
           const release = join(gateRoot, 'release');
           try {
@@ -214,25 +213,26 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               manager.enqueueOwnedRun(runId);
               await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
               expect(store.getRun(runId)?.status).toBe('waiting');
-              expect(runInternals(manager).line.busySlots()).toBe(0);
+              expect(semaphore.busy()).toBe(0);
               const parkedSeq = store.readEvents(runId).length;
               // The mock waits for observed parking instead of racing a 200 ms window.
               writeFileSync(release, 'go');
               // Content has its own gate, so only native turn-start can resume the run here.
               await waitFor(() => store.getRun(runId)?.status === 'running');
-              expect(runInternals(manager).line.busySlots()).toBe(1);
+              expect(semaphore.busy()).toBe(1);
               expect(lateDoneContent(store.readEvents(runId).slice(parkedSeq))).toBe(false);
               writeFileSync(`${release}.content`, 'go');
               await waitFor(() => store.getRun(runId)?.status === 'done');
               expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
               expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
-            }, { noWaitNudgeReplyMs: 300, env: { CEZ_MOCK_RELEASE_FILE: release } });
+            }, { semaphore, noWaitNudgeReplyMs: 300, env: { CEZ_MOCK_RELEASE_FILE: release } });
           } finally { rmSync(gateRoot, { recursive: true, force: true }); }
         }, 30_000);
         continue;
       }
       if (row.id === 'F10') {
         it(`${backend} ${row.id} ${row.name}`, async () => {
+          const semaphore = new WorkspaceSemaphore();
           const gateRoot = backend === 'cursor' ? mkdtempSync(join(tmpdir(), 'cez-nudge-content-')) : undefined;
           try { await withOwnedInputRun(backend, 'silent-tail-slow-done', async ({ store, manager, runId }) => {
             const turns = watchTurnOutcomes();
@@ -241,20 +241,19 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               // Cursor starts a new print process for the nudge. Its startup must not
               // consume F10's 300 ms content budget (hearsay-tools/cezarion#1511).
               // Freeze only that budget: process-drain and other timers keep real time.
-              const { clock, arming: armClock } = replyObservationClock(manager);
+              const clock = replyObservationClock();
               try {
                 manager.enqueueOwnedRun(runId);
                 await waitForNativeContent(() => store.readEvents(runId).slice(startSeq).some(e =>
                   e.type === 'text' && String(e.text).includes('Working on the wrap-up.')));
-                expect(armClock).toHaveBeenCalledOnce();
                 expect(clock.captured).toBe(1);
-                expect(manager['active'].get(runId)?.noWaitNudgeReplyTimer).toBeUndefined();
+                expect(clock.pending).toBe(0);
                 // The native mock holds DONE until this test crosses the reply bound.
                 await clock.advance(300);
                 expect(store.getRun(runId)?.status).toBe('running');
-                expect(runInternals(manager).line.busySlots()).toBe(1);
+                expect(semaphore.busy()).toBe(1);
                 expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
-              } finally { armClock.mockRestore(); clock.restore(); }
+              } finally { clock.restore(); }
               writeFileSync(join(gateRoot, 'done'), 'go');
             } else manager.enqueueOwnedRun(runId);
             await waitFor(() => store.getRun(runId)?.status === 'done' || store.getRun(runId)?.status === 'waiting');
@@ -262,13 +261,14 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
             expect(turns.words(runId)).toContain('running (no-wait nudge)');
-          }, { noWaitNudgeReplyMs: 300, ...(gateRoot ? { env: { CEZ_MOCK_RELEASE_FILE: join(gateRoot, 'done') } } : {}) });
+          }, { semaphore, noWaitNudgeReplyMs: 300, ...(gateRoot ? { env: { CEZ_MOCK_RELEASE_FILE: join(gateRoot, 'done') } } : {}) });
           } finally { if (gateRoot) rmSync(gateRoot, { recursive: true, force: true }); }
         }, 30_000);
         continue;
       }
       for (const mode of ['fresh', 'continuation'] as const) {
         it(`${backend} ${row.id} ${row.name} (${mode})`, async () => {
+          const semaphore = new WorkspaceSemaphore();
           await withOwnedInputRun(backend, mode === 'continuation' ? 'baseline' : row.scenario, async ({ store, manager, runId }) => {
             const turns = watchTurnOutcomes();
             if (mode === 'continuation') {
@@ -279,13 +279,20 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             }
             if (row.id === 'F6') store.updateRun(runId, { autonomous: true });
             const startSeq = store.readEvents(runId).length;
+            const idleClock = row.id === 'F6' ? observationClock(delay => delay === IDLE_TIMEOUT_MS) : undefined;
             if (mode === 'continuation') expect(manager.continueRun(runId, { text: promptFor(backend, row.scenario) }).ok).toBe(true);
             else manager.enqueueOwnedRun(runId);
             if (row.id === 'F6') {
               await waitFor(() => autonomousNotes(store.readEvents(runId).slice(startSeq)).length >= 1);
               expect(store.getRun(runId)?.status).toBe('running');
-              expect(runInternals(manager).line.busySlots()).toBe(1);
-              expect(manager['active'].get(runId)?.idleTimer).toBeUndefined();
+              expect(semaphore.busy()).toBe(1);
+              try {
+                await idleClock!.advance(IDLE_TIMEOUT_MS);
+                expect(store.getRun(runId)?.status).toBe('running');
+                expect(semaphore.busy()).toBe(1);
+                expect(store.readEvents(runId).slice(startSeq).some(event => event.type === 'lifecycle' &&
+                  String(event.message).includes('of inactivity'))).toBe(false);
+              } finally { idleClock!.restore(); }
               expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
               return;
             }
@@ -327,7 +334,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               expect(status).toBe('done');
               expect(notes).toHaveLength(0);
             }
-          });
+          }, { semaphore });
         }, 30_000);
       }
     }

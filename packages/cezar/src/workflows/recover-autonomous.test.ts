@@ -1,6 +1,8 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
+import * as runners from '../core/runner-factory.ts';
+import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
+import { fixtureWorkSettled } from './fixture-cleanup.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -48,6 +50,7 @@ describe('recover() and the autonomous flag (#489)', () => {
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
   });
@@ -104,17 +107,30 @@ describe('recover() and the autonomous flag (#489)', () => {
       store.close();
     }
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-    const recovered = createFixtureManager(store, repoRoot, { semaphore: frozen() });
+    const semaphore = frozen();
+    const recovered = createFixtureManager(store, repoRoot, { semaphore });
     try {
       await recovered.recover();
       expect(store.getRun(id)?.autonomous).toBe(autonomous);
       expect(store.getRun(id)?.status).toBe('queued');
       expect(store.readEvents(id).some(event => event.type === 'lifecycle' &&
         typeof event.message === 'string' && event.message.includes('cezar restarted'))).toBe(true);
-      const continuation = runInternals(recovered).line.pendingContinuations.get(id);
-      expect(continuation).toMatchObject({
-        stepId: 'continue-1', sessionId: 'previous-session', prompt: 'Continue setup',
+      const startSession = vi.fn(() => ({
+        result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }), open: false,
+        sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => {},
+        holdsHumanInput: () => false, interrupt: () => {}, end: () => {},
+      }));
+      vi.spyOn(runners, 'createRunner').mockReturnValue({
+        backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
+        startSession, run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => {},
       });
+      vi.spyOn(semaphore, 'maxParallel').mockReturnValue(1);
+      await semaphore.release();
+      await fixtureWorkSettled(repoRoot);
+      expect(startSession).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 'previous-session', userPrompt: expect.stringContaining('Continue setup'), resume: true,
+      }), expect.any(Function), expect.any(Object));
+      expect(store.getRun(id)?.steps.at(-1)?.id).toBe('continue-1');
       store.flush();
       expect(RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true }).getRun(id)?.autonomous)
         .toBe(autonomous);

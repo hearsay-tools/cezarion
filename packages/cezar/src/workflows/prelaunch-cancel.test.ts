@@ -1,6 +1,8 @@
+import { createActiveRun } from './active-run.ts';
+import { launchPreamble, launchStale, type SessionHelperHost, type LaunchPreambleHost } from './run/session-events.ts';
+import type { RunModuleContext } from './run/types.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,7 +12,7 @@ import { ClaudeCliRunner } from '../core/claude-cli-runner.ts';
 import { RunStore, type RunRecord, type RunStatus } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { RunManager } from './run.ts';
-import { createFixtureManager, removeFixtureRepo } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, removeFixtureRepo, fixtureWork, fixtureWorkSettled, unused } from './fixture-cleanup.testkit.ts';
 import type { WorkflowDef } from './types.ts';
 
 const workflow: WorkflowDef = {
@@ -56,7 +58,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     const root = mkdtempSync(join(tmpdir(), 'cez-prelaunch-cancel-'));
     const store = RunStore.open(join(root, '.ai/cezar'));
     const manager = createFixtureManager(store, root, { semaphore });
-    const result = { root, store, manager };
+    const result = { root, store, manager, semaphore };
     projects.push(result);
     return result;
   }
@@ -73,9 +75,11 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     return prior.id;
   }
 
-  function watchExecution(p: ReturnType<typeof project>, mode: typeof modes[number]) {
-    const method = mode === 'fresh' ? 'execute' : 'runContinuation';
-    return vi.spyOn(p.manager as unknown as Record<typeof method, (...args: unknown[]) => Promise<void>>, method);
+  function executionWork(p: ReturnType<typeof project>, mode: typeof modes[number]): Promise<unknown> {
+    const label = mode === 'fresh' ? 'execute' : 'runContinuation';
+    const promise = [...fixtureWork(p.manager).pending].find(([, name]) => name === label)?.[0];
+    if (!promise) throw new Error(`No owned ${label} operation`);
+    return promise;
   }
 
   beforeEach(async () => {
@@ -119,18 +123,14 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     const revoke = vi.fn();
     a.manager.setDelegationProvisioner(() => ({ env: {}, instructions: '', restrictCrossSessionMessaging: true, revoke }));
     const provision = vi.spyOn(controller, 'provision');
-    const execution = watchExecution(a, mode);
     const id = start(a, mode);
     await setupEntered;
     expect(setup).toHaveBeenCalledTimes(1);
     const stepId = a.store.getRun(id)!.currentStepId!;
     expect(launches.mock.calls.length).toBe(0);
 
-    const admission = vi.spyOn(runInternals(b.manager).line, 'pump');
-    const queuedExecution = watchExecution(b, 'fresh');
     const queued = b.manager.startRun({ name: 'next', source: 'built-in', steps: [{ id: 'check', command: 'true' }] }, { task: 'next project', worktree: false });
-    expect(admission).toHaveBeenCalled();
-    await Promise.all(admission.mock.results.map(result => result.value));
+    await Promise.all([...fixtureWork(b.manager).pending].filter(([, label]) => label === 'pump').map(([promise]) => promise));
     expect(b.store.getRun(queued.id)?.status).toBe('queued');
     expect(semaphore.busy()).toBe(1);
 
@@ -139,8 +139,9 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     expect(a.store.getRun(id)?.stopping).toBe(true);
     expect(a.manager.continueRun(id).ok).toBe(false);
     expect(revoke).toHaveBeenCalled();
+    const completion = executionWork(a, mode);
     releaseSetup();
-    await Promise.race([execution.mock.results[0]!.value, launchEntered]);
+    await Promise.race([completion, launchEntered]);
     expect(launches.mock.calls.length).toBe(0);
     expect(a.manager.isActive(id)).toBe(false);
     expect(provision).not.toHaveBeenCalled();
@@ -151,15 +152,13 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     await queuedDone;
     expect(b.store.getRun(queued.id)?.status).toBe('done');
     // The durable status precedes execute's finally block, which releases capacity.
-    expect(queuedExecution).toHaveBeenCalledTimes(1);
-    await queuedExecution.mock.results[0]!.value;
+    await fixtureWorkSettled(b.root);
     expect(semaphore.busy()).toBe(0);
   });
 
   it.each(modes)('%s revokes capability prepared as Stop arrives before launch', async mode => {
     const p = project(new WorkspaceSemaphore({ initial: { maxParallel: 1 } }));
     const provision = controller.provision.bind(controller);
-    const execution = watchExecution(p, mode);
     const id = start(p, mode);
     let revoke: Mock<() => void> | undefined;
     vi.spyOn(controller, 'provision').mockImplementation(register => {
@@ -172,8 +171,9 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     });
     await setupEntered;
     expect(setup).toHaveBeenCalledTimes(1);
+    const completion = executionWork(p, mode);
     releaseSetup();
-    await Promise.race([execution.mock.results[0]!.value, launchEntered]);
+    await Promise.race([completion, launchEntered]);
     expect(launches.mock.calls.length).toBe(0);
     expect(revoke).toHaveBeenCalled();
     // Cleared fields are absent once the settled run is read back from runs.db (#779).
@@ -182,35 +182,80 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     expect(p.manager.isActive(id)).toBe(false);
   });
 
-  it.each(modes)('%s stale setup cannot tear down replacement launch authority', async mode => {
+  it('fresh setup cannot tear down replacement launch authority', async () => {
     const p = project(new WorkspaceSemaphore({ initial: { maxParallel: 1 } }));
-    // A call-through completion barrier avoids sleeps after releasing setup.
-    const execution = watchExecution(p, mode);
-    const id = start(p, mode);
+    const record = p.store.createRun({ title: 'replacement', task: 'replacement', workflow: workflow.name,
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
+    setRunStatus(p.store, record.id, RUN_STATUS.waiting);
+    const revokeCiTools = vi.fn();
+    const revokeDelegation = vi.fn();
+    const previous = createActiveRun({ cwd: p.root, pendingHumanAsk: false, autonomous: false });
+    previous.liveSession.installCiRevoker(vi.fn());
+    previous.liveSession.installDelegationRevoker(vi.fn());
+    const replacement = createActiveRun({ cwd: p.root, pendingHumanAsk: false, autonomous: false });
+    replacement.liveSession.installCiRevoker(revokeCiTools);
+    replacement.liveSession.installDelegationRevoker(revokeDelegation);
+    const active = new Map([[record.id, previous]]);
+    const context = unused<RunModuleContext>('launch context', { store: p.store });
+    const helper = unused<SessionHelperHost>('launch helper', { active,
+      workerExecutionStopped: () => false, executionBlockedByRootFinish: () => false });
+    let releaseTools!: () => void;
+    const toolsGate = new Promise<void>(resolve => { releaseTools = resolve; });
+    let toolsEntered!: () => void;
+    const entered = new Promise<void>(resolve => { toolsEntered = resolve; });
+    const delegation = unused<NonNullable<Awaited<ReturnType<LaunchPreambleHost['provisionSession']>>>>('delegation', { revoke: previous.liveSession.revokeDelegation! });
+    const ciTools = { descriptor: unused<NonNullable<Awaited<ReturnType<LaunchPreambleHost['provisionCiSession']>>>['descriptor']>('CI descriptor'), env: {}, revoke: previous.liveSession.revokeCiTools! };
+    const host: LaunchPreambleHost = {
+      provisionSession: () => delegation,
+      agentWebhooksPart: async () => undefined,
+      provisionCiSession: async () => { toolsEntered(); await toolsGate; return ciTools; },
+      launchStale: (...args) => launchStale(context, helper, ...args),
+    };
+    const completion = launchPreamble(host, record.id, previous);
+    await entered;
+    active.set(record.id, replacement);
+    const before = structuredClone(p.store.getRun(record.id));
+    releaseTools();
+    expect((await completion).stale).toBe(true);
+    expect(previous.liveSession.revokeCiTools).toBeUndefined();
+    expect(previous.liveSession.revokeDelegation).toBeUndefined();
+    expect(ciTools.revoke).toHaveBeenCalledTimes(1);
+    expect(delegation.revoke).toHaveBeenCalledTimes(1);
+    expect(active.get(record.id)).toBe(replacement);
+    expect(replacement.liveSession.revokeCiTools).toBe(revokeCiTools);
+    expect(replacement.liveSession.revokeDelegation).toBe(revokeDelegation);
+    expect(revokeCiTools).not.toHaveBeenCalled();
+    expect(revokeDelegation).not.toHaveBeenCalled();
+    expect(p.store.getRun(record.id)).toEqual(before);
+    expect(launches).not.toHaveBeenCalled();
+  });
+
+  it('Continue stale setup cannot tear down replacement launch authority', async () => {
+    const p = project(new WorkspaceSemaphore({ initial: { maxParallel: 1 } }));
+    const id = start(p, 'Continue');
     await setupEntered;
     expect(setup).toHaveBeenCalledTimes(1);
-    const active = (p.manager as unknown as { active: Map<string, { cancelled: boolean; revokeCiTools?: () => void; revokeDelegation?: () => void }> }).active;
-    const previous = active.get(id)!;
+    const active = (p.manager as unknown as { active: Map<string, ReturnType<typeof createActiveRun>> }).active;
     expect(p.manager.cancel(id)).toBe(true);
     const revokeCiTools = vi.fn();
     const revokeDelegation = vi.fn();
-    // Inject only the authority replacement, not a fake async runner/session.
-    // Old setup must neither drop this state nor overwrite its durable status.
-    const replacement = { ...previous, cancelled: false, revokeCiTools, revokeDelegation };
+    // Inject only the replacement authority; the stale launch must leave it untouched.
+    const replacement = createActiveRun({ cwd: p.root, pendingHumanAsk: false, autonomous: false });
+    replacement.liveSession.installCiRevoker(revokeCiTools);
+    replacement.liveSession.installDelegationRevoker(revokeDelegation);
     active.set(id, replacement);
     setRunStatus(p.store, id, RUN_STATUS.waiting, { stopping: undefined });
+    const completion = executionWork(p, 'Continue');
     releaseSetup();
-    const completion = execution.mock.results[0]!.value;
     try {
       await Promise.race([completion, launchEntered]);
       expect(launches.mock.calls.length).toBe(0);
       await completion;
-      expect(active.get(id) === replacement).toBe(true);
+      expect(active.get(id)).toBe(replacement);
       expect(p.store.getRun(id)?.status).toBe('waiting');
       expect(revokeCiTools).not.toHaveBeenCalled();
       expect(revokeDelegation).not.toHaveBeenCalled();
     } finally {
-      // Clean up even on the red baseline, where the stale owner launched.
       for (const result of launches.mock.results) if (result.type === 'return') result.value.interrupt();
       await completion;
       p.manager.dispose();
@@ -248,35 +293,40 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
       revokeCiTools = vi.fn(capability.revoke);
       return { ...capability, revoke: revokeCiTools };
     });
-    const execution = watchExecution(p, mode);
     const id = start(p, mode);
     await setupEntered;
     const stepId = p.store.getRun(id)!.currentStepId!;
     p.store.commitDelegation([{ id, delegation: { role: 'root', permissions: [], receipts: [], finishRequestedAt: new Date().toISOString() } }]);
+    const completion = executionWork(p, mode);
     releaseSetup();
-    await Promise.race([execution.mock.results[0]!.value, launchEntered]);
+    await Promise.race([completion, launchEntered]);
     expect(launches.mock.calls.length).toBe(0);
     expect(revokeCiTools).toHaveBeenCalled();
     expect(revokeDelegation).toHaveBeenCalledTimes(1);
     expect(p.store.getRun(id)?.status).toBe('queued');
     expect(p.store.getRun(id)?.steps.find(step => step.id === stepId)?.status).toBe('pending');
-    // Held in the queue for the Finish, with no session state left behind.
-    const engine = runInternals(p.manager);
-    expect(engine.active.has(id)).toBe(false);
-    expect(runInternals(p.manager).line.queue).toContain(id);
+    // Held in the queue for the Finish, with no live session or active slot left behind.
+    expect(fixtureWork(p.manager).liveSessions.size).toBe(0);
+    expect(p.semaphore.busy()).toBe(0);
+    // Removing the hold must launch this same queued job without a new start/Continue.
+    const parked = runStatus(p.store, id, 'waiting');
+    p.store.commitDelegation([{ id, delegation: { role: 'root', permissions: [], receipts: [] } }]);
+    await p.semaphore.release();
+    await parked;
+    expect(launches).toHaveBeenCalledTimes(1);
   });
 
   // hearsay-tools/cezarion#1632: a run whose execution stops during setup (here an invalid
   // delegation, one of the stops `workerExecutionStopped` reads) settles cancelled and never launches.
   it.each(modes)('%s never launches when its execution stops during setup', async mode => {
     const p = project(new WorkspaceSemaphore({ initial: { maxParallel: 1 } }));
-    const execution = watchExecution(p, mode);
     const id = start(p, mode);
     await setupEntered;
     const stepId = p.store.getRun(id)!.currentStepId!;
     p.store.updateRun(id, { delegation: { role: 'invalid' } });
+    const completion = executionWork(p, mode);
     releaseSetup();
-    await Promise.race([execution.mock.results[0]!.value, launchEntered]);
+    await Promise.race([completion, launchEntered]);
     expect(launches.mock.calls.length).toBe(0);
     expect(p.store.getRun(id)?.status).toBe('cancelled');
     expect(p.store.getRun(id)?.steps.find(step => step.id === stepId)?.status).toBe('cancelled');

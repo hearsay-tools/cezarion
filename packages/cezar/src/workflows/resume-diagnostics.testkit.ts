@@ -1,5 +1,4 @@
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it as registerTest, vi } from 'vitest';
@@ -39,7 +38,7 @@ function failureContext(runner: RunnerId, it: typeof registerTest = registerTest
       const messages = native(runner);
       const id = await start(runner, 'provider-error');
       for (const text of [`${HARNESS_ADAPTERS[runner].scenarios['provider-error']}\nKeep this second line.`, '']) {
-        const failed = store.getRun(id)!.steps.at(-1)!;
+        const failed = structuredClone(store.getRun(id)!.steps.at(-1)!);
         expect(failed.status).toBe(STEP_STATUS.failed);
         expect(failed.error).toBeTruthy();
         const before = messages().length;
@@ -126,7 +125,7 @@ function restartContext(runner: RunnerId, it: typeof registerTest = registerTest
         failure: { stepId: failed.id, error: failed.error }, restarted: true,
       } });
       held.mockRestore();
-      await (runInternals(manager).line).pump();
+      await semaphore.release();
       await until(() => messages().length > before);
       const prompt = messages()[before]!;
       expect(prompt.split('\n')[0]).toContain(failed.error);
@@ -148,7 +147,7 @@ function restartContext(runner: RunnerId, it: typeof registerTest = registerTest
       expect(checkpoint.continuationMessage).toMatchObject({ text: 'Continue.', origin: 'lifecycle', resumeContext: { restarted: true } });
       await restart();
       held.mockRestore();
-      await (runInternals(manager).line).pump();
+      await semaphore.release();
       await until(() => messages().length > before);
       const prompt = messages()[before]!;
       expect(prompt.match(/cezar process restarted/g)).toHaveLength(1);
@@ -162,7 +161,7 @@ function savedContinuation(runner: RunnerId, it: typeof registerTest = registerT
       it(`${runner} R86 explains restart ahead of a saved ${status} continuation, without a live session`, async () => {
         const messages = native(runner);
         const id = await start(runner, 'cezar-done');
-        const original = store.getRun(id)!.steps[0]!;
+        const original = structuredClone(store.getRun(id)!.steps[0]!);
         const text = 'Saved human text.\nDo not change it.';
         store.addStep(id, { id: 'continue-1', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation' });
         store.updateStep(id, 'continue-1', { status: status === RUN_STATUS.queued ? STEP_STATUS.pending : STEP_STATUS.running });
@@ -176,7 +175,7 @@ function savedContinuation(runner: RunnerId, it: typeof registerTest = registerT
         const disk = readPersistedRuns(join(root, '.ai/cezar')).find(run => run.id === id)!;
         expect(disk.continuationMessage).toMatchObject({ text, resumeContext: { restarted: true } });
         held.mockRestore();
-        await (runInternals(manager).line).pump();
+        await semaphore.release();
         await until(() => messages().length > before);
         const prompt = messages()[before]!;
         expect(prompt.split('\n')[0]).toContain('cezar process restarted');

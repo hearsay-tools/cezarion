@@ -1,3 +1,4 @@
+import type { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 /**
  * Shared fixtures for the harness parity matrix (`harness-parity.test.ts`,
  * spec `.ai/specs/2026-09-04-harness-parity-matrix.md`, #68).
@@ -1465,6 +1466,8 @@ export async function withOwnedInputRun(
     /** Preserve a legacy native-wire fixture while the backend default changes. */
     mockBin?: string;
     noWaitNudgeReplyMs?: number;
+    /** Admission capacity owned by the caller; omission keeps the manager default. */
+    semaphore?: WorkspaceSemaphore;
   } = {},
 ): Promise<void> {
   const restoreEnvironment = prepareOwnedInputEnvironment(backend, options);

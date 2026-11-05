@@ -1,6 +1,5 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +10,7 @@ import { readPid, requirePid } from '../pid-file.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from './run.ts';
+import { TrackedWork } from './run/tracked-work.ts';
 import type { WorkflowDef } from './types.ts';
 
 const workflow: WorkflowDef = {
@@ -38,8 +38,9 @@ describe('Stop before the first Codex turn (#493)', { timeout: 15_000 }, () => {
   function project(semaphore: WorkspaceSemaphore) {
     const root = mkdtempSync(join(tmpdir(), 'cez-codex-startup-'));
     const store = RunStore.open(join(root, '.ai/cezar'));
-    const manager = new RunManager(store, root, { semaphore });
-    const result = { root, store, manager };
+    const work = new TrackedWork();
+    const manager = new RunManager(store, root, { semaphore, work });
+    const result = { root, store, manager, work };
     projects.push(result);
     return result;
   }
@@ -90,13 +91,11 @@ describe('Stop before the first Codex turn (#493)', { timeout: 15_000 }, () => {
     expect(a.store.getRun(runId)).toMatchObject({ status: RUN_STATUS.running, tokensUsed: 0 });
     expect(a.store.readEvents(runId).some(event => ['session', 'turn.started', 'turn-end', 'text'].includes(event.type))).toBe(false);
 
-    const admission = vi.spyOn(runInternals(b.manager).line, 'pump');
     const queued = b.manager.startRun({ name: 'next', source: 'built-in', steps: [{ id: 'check', command: 'true' }] }, { task: 'next project', worktree: false });
     // Observe B's real initial sweep finishing while capacity is unavailable.
     // Otherwise that still-pending sweep could admit B without a release wake,
     // and a broken cross-project broadcast would pass this test accidentally.
-    await vi.waitFor(() => expect(admission).toHaveBeenCalled(), waitOptions);
-    await Promise.all(admission.mock.results.map(result => result.value));
+    await Promise.all([...b.work.pending].filter(([, label]) => label === 'pump').map(([promise]) => promise));
     expect(b.store.getRun(queued.id)?.status).toBe('queued');
     expect(semaphore.busy()).toBe(1);
 

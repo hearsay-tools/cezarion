@@ -1,13 +1,12 @@
+import { CiToolController } from '../ci-wait/controller.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { createActiveRun } from './active-run.ts';
-import { runInternals } from './run-internals.testkit.ts';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWorkSettled, fixtureWork } from './fixture-cleanup.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { shellQuote } from '../core/shell-env.ts';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -117,15 +116,19 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     process.env.CEZ_DRY_RUN = '1';
   });
 
-  it('exempts only the configured number of durable monitoring sessions', () => {
+  it('exempts only the configured number of durable monitoring sessions', async () => {
     const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 2, maxMonitoringSessions: 2 } });
     const projectA = project('cez-monitor-cap-', semaphore);
-    const internals = runInternals(projectA.manager);
-    for (const id of ['ordinary', 'm1', 'm2', 'm3']) internals.active.set(id, createActiveRun({ cwd: projectA.root, pendingHumanAsk: false, autonomous: false }));
-    for (const id of ['ordinary', 'm1', 'm2', 'm3']) runInternals(projectA.manager).line.waiting.add(id);
-    for (const id of ['m1', 'm2', 'm3']) runInternals(projectA.manager).line.monitoring.add(id);
-    // ordinary wait is exempt; two monitors are exempt; monitor #3 back-pressures the active pool.
-    expect(runInternals(projectA.manager).line.busySlots()).toBe(1);
+    const ordinary = projectA.manager.startRun(AGENT, { task: 'ordinary human wait' });
+    await waitFor(() => projectA.store.getRun(ordinary.id)?.status === 'waiting', 'ordinary session to park');
+    expect(semaphore.busy()).toBe(0);
+    for (const name of ['m1', 'm2', 'm3']) {
+      const monitor = projectA.manager.startRun(AGENT, { task: `mock:schedule-wakeup ${name}` });
+      await waitFor(() => projectA.store.getRun(monitor.id)?.status === 'waiting' &&
+        Boolean(projectA.store.getRun(monitor.id)?.waits?.some(wait => wait.kind === 'timer')),
+      'monitoring session to park with a durable timer');
+    }
+    // Ordinary wait is exempt; two monitors are exempt; the third holds an active slot.
     expect(semaphore.busy()).toBe(1);
   });
 
@@ -404,28 +407,26 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
         sessionId: `session-${suffix}`,
         backend: 'claude',
       });
-      setRunStatus(store, record.id, RUN_STATUS.running, { currentStepId: 'task' });
+      const worktreePath = fixtureRepo(`cez-wsem-resume-${suffix}-`, roots);
+      setRunStatus(store, record.id, RUN_STATUS.running, { currentStepId: 'task', worktreePath });
     }
 
     // Hold the first admitted continuation open. This isolates scheduler
     // admission from backend timing and makes the cap observable.
     let releaseContinuation!: () => void;
-    const held = new Promise<void>(resolve => { releaseContinuation = resolve; });
-    const holdContinuation = (manager: RunManager) => {
-      (
-        manager as unknown as {
-          runContinuation(runId: string, stepId: string): Promise<void>;
-        }
-      ).runContinuation = async (runId: string, stepId: string) => {
-        store.updateStep(runId, stepId, { status: STEP_STATUS.running });
-        setRunStatus(store, runId, RUN_STATUS.running, { currentStepId: stepId });
-        await held;
-      };
-    };
+    let held = new Promise<void>(resolve => { releaseContinuation = resolve; });
+    const controllers: CiToolController[] = [];
+    const startController = CiToolController.start.bind(CiToolController);
+    const setup = vi.spyOn(CiToolController, 'start').mockImplementation(async (...args) => {
+      const controller = await startController(...args);
+      controllers.push(controller);
+      await held;
+      return controller;
+    });
     try {
-      holdContinuation(firstManager);
 
       await firstManager.recover();
+      await waitFor(() => controllers.length === 1, 'first recovered continuation to reach prelaunch');
       await waitFor(
         () => store.listRuns().filter((run) => run.status === 'running').length === 1,
         'one recovered continuation to take the project slot',
@@ -440,15 +441,20 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
           .filter((run) => run.status === 'queued')
           .map((run) => [run.id, run.steps.filter((step) => step.id.startsWith('continue-')).length]),
       );
+      await Promise.all([...fixtureWork(firstManager).pending]
+        .filter(([, label]) => label === 'pump').map(([operation]) => operation));
       firstManager.dispose();
+      releaseContinuation();
+      await fixtureWorkSettled(root);
+      held = new Promise<void>(resolve => { releaseContinuation = resolve; });
 
       // Simulate another process start before the queued continuations receive a
       // slot. They must reconstruct those same Continue jobs, not revive the
       // original quick-task workflow or append duplicate continuation steps.
       const secondManager = createFixtureManager(store, root, { semaphore });
       managers.push(secondManager);
-      holdContinuation(secondManager);
       await secondManager.recover();
+      await waitFor(() => controllers.length === 2, 'second recovered continuation to reach prelaunch');
       await waitFor(
         () => store.listRuns().filter((run) => run.status === 'running').length === 1,
         'one continuation to take the project slot after the second restart',
@@ -475,7 +481,11 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
       for (const run of store.listRuns()) {
         setRunStatus(store, run.id, RUN_STATUS.cancelled, { finishedAt: new Date().toISOString() });
       }
-    } finally { releaseContinuation(); }
+    } finally {
+      releaseContinuation();
+      setup.mockRestore();
+      for (const controller of controllers) await controller.close();
+    }
   });
 
   it('restart continuation releases its starting slot after becoming active', async () => {
@@ -508,9 +518,8 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     );
 
     expect(semaphore.busy()).toBe(0);
-    expect(
-      runInternals(manager).line.starting.has(record.id),
-    ).toBe(false);
+    const next = manager.startRun(INSTANT, { task: 'use the recovered starting slot' });
+    await waitFor(() => store.getRun(next.id)?.status === 'done', 'next run to use the released starting slot');
   });
 
   it('#347 with a per-project cap: a waiting run on the capped project still resumes immediately', async () => {

@@ -1,4 +1,4 @@
-import { runInternals } from './run-internals.testkit.ts';
+import * as git from '../git-worktree.ts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRunResult, AgentSession } from '../core/agent-runner.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
@@ -42,17 +42,16 @@ describe('launch disposal routes', { timeout: 30_000 }, () => {
   });
 
   it('preserves a delegated run disposed during final save', async () => {
-    const run = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'test', runner: 'claude', worktree: false });
+    const run = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'test', runner: 'claude' });
     await until(() => sessions.length === 1);
     f.store.updateRun(run.id, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     let entered!: () => void, release!: () => void;
     const saving = new Promise<void>(resolve => { entered = resolve; });
     const gate = new Promise<void>(resolve => { release = resolve; });
-    const manager = runInternals(f.manager).worktreeAutosave;
-    const save = manager.saveWorktree.bind(manager);
-    const saveSpy = vi.spyOn(manager, 'saveWorktree').mockImplementation(async (...args) => {
-      if (args[2] === 'run finalize') { entered(); await gate; }
-      await save(...args);
+    const save = git.autosaveCommit;
+    const saveSpy = vi.spyOn(git, 'autosaveCommit').mockImplementation(async (...args) => {
+      if (args[1] === 'run finalize') { entered(); await gate; }
+      return save(...args);
     });
     sessions[0]!.close();
     try {

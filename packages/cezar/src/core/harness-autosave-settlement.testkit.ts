@@ -1,4 +1,4 @@
-import { runInternals } from '../workflows/run-internals.testkit.ts';
+import { observationClock } from './observation-clock.testkit.ts';
 import childProcess, { execFileSync, spawn, type ChildProcess, type ExecFileOptions, type SpawnOptions } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
@@ -8,7 +8,7 @@ import { setTimeout as realSetTimeout } from 'node:timers';
 import { describe, expect, it, vi } from 'vitest';
 import * as worktrees from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
-import { RunManager } from '../workflows/run.ts';
+import { IDLE_TIMEOUT_MS, RunManager } from '../workflows/run.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { HARNESS_ADAPTERS, withOwnedInputRun, withoutTaskScenario, waitFor } from './harness-parity.testkit.ts';
@@ -42,25 +42,29 @@ type SaveBudget = { timeoutMs: number; killGraceMs: number; confirmMs: number };
 async function parkForSettlement({ store, manager, runId }: SettlementFixture,
   continuation: boolean, outcome: SettlementOutcome, hasTail: boolean): Promise<void> {
   if (continuation || outcome !== 'failed') {
-    manager.enqueueOwnedRun(runId);
-    // bound: the native mock must park before Finish or Continue can act.
-    await waitFor(() => store.getRun(runId)?.status === 'waiting', FIXTURE_STEP_MS);
-    if (hasTail) {
-      // bound: wait for the cezar_ask question to reach the parent before expiring the
-      // continuation (hearsay-tools/cezarion#2410).
-      await waitFor(() => store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined, FIXTURE_STEP_MS);
-      expect(store.getRun(runId)?.steps.map(step => step.status)).toEqual(['waiting', 'pending']);
-    }
-    if (continuation) {
-      if (outcome === 'cancelled') {
-        const state = (manager as unknown as { active: Map<string, { idleTimer: NodeJS.Timeout & { _onTimeout(): void } }> }).active.get(runId)!;
-        const expire = state.idleTimer._onTimeout;
-        clearTimeout(state.idleTimer);
-        expire();
-      } else manager.finish(runId);
-      // bound: the first Finish saves through real Git under the product budget.
-      await waitFor(() => !manager.isActive(runId), FIXTURE_STEP_MS);
-    }
+    const idleClock = continuation && outcome === 'cancelled'
+      ? observationClock(delay => delay === IDLE_TIMEOUT_MS) : undefined;
+    try {
+      manager.enqueueOwnedRun(runId);
+      // bound: the native mock must park before Finish or Continue can act.
+      await waitFor(() => store.getRun(runId)?.status === 'waiting', FIXTURE_STEP_MS);
+      if (hasTail) {
+        // bound: wait for the cezar_ask question to reach the parent before expiring the
+        // continuation (hearsay-tools/cezarion#2410).
+        await waitFor(() => store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined, FIXTURE_STEP_MS);
+        expect(store.getRun(runId)?.steps.map(step => step.status)).toEqual(['waiting', 'pending']);
+      }
+      if (continuation) {
+        if (outcome === 'cancelled') {
+          expect(idleClock?.pending).toBe(1);
+          await idleClock!.advance(IDLE_TIMEOUT_MS);
+          expect(store.readEvents(runId).some(event => event.type === 'lifecycle' &&
+            event.message === 'session closed after 15m of inactivity')).toBe(true);
+        } else manager.finish(runId);
+        // bound: the first Finish saves through real Git under the product budget.
+        await waitFor(() => !manager.isActive(runId), FIXTURE_STEP_MS);
+      }
+    } finally { idleClock?.restore(); }
   }
 }
 
@@ -375,7 +379,6 @@ export function describeAutosaveChurn(registration = { describe, it }): void {
                 const notes = store.readEvents(runId).filter(event => event.type === 'note').map(event => String(event.message));
                 expect(notes.filter(note => /autosave (failed|unsuccessful)|termination not confirmed|cleanup/.test(note))).toEqual([]);
                 expect(execFileSync('git', ['show', 'HEAD:progress.txt'], { cwd: dir, encoding: 'utf8' })).toBe('save me\n');
-                expect(runInternals(manager).worktreeAutosave.autosaveCleanupBlocker(runId)).toBeUndefined();
                 const release = manager.claimForPublish(runId);
                 expect(release).not.toBeNull(); release?.();
                 expect(unrelated.exitCode).toBeNull();

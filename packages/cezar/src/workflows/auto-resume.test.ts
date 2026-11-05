@@ -5,8 +5,7 @@ import {
   WAIT_SOURCE,
   WAIT_VIA,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
-import { createFixtureManager, drainFixtureManagers, fixtureWorkSettled } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWorkSettled, fixtureWork } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,6 +19,7 @@ import {
   AUTO_RESUME_GRACE_MS,
   AUTO_RESUME_MISSED_WINDOW_MS,
   MAX_AUTO_RESUMES,
+  QUEUE_WATCHDOG_MS,
   RunManager,
 } from './run.ts';
 import type { WorkflowDef } from './types.ts';
@@ -89,6 +89,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
 
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
+    vi.useRealTimers();
     manager?.dispose();
     manager = undefined;
     for (const [key, value] of Object.entries(savedEnv)) {
@@ -363,6 +364,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
   }, 60_000);
 
   it('watchdog: an idle queue with no appointment behind the hold starts work anyway', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     manager = createFixtureManager(store, repoRoot, {
       semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }),
     });
@@ -373,7 +375,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
 
     // While a real appointment is ahead, sitting still is CORRECT and the watchdog must not
     // touch it — otherwise the failsafe becomes the stampede.
-    await runInternals(manager).line.rescueStalledQueue();
+    await vi.advanceTimersByTimeAsync(QUEUE_WATCHDOG_MS);
+    await Promise.all([...fixtureWork(manager).pending].filter(([, label]) => label === 'rescueStalledQueue').map(([work]) => work));
     // bound: negative window. `rescueStalledQueue` has returned, so a start it triggered would be recorded in the pump it kicked; 500 ms covers that.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(store.getRun(waiting.id)?.startedAt).toBeUndefined();
@@ -383,13 +386,15 @@ describe('a run stopped by a usage limit resumes itself', () => {
     setRunStatus(store, limited.id, RUN_STATUS.queued, { autoResumeAt: undefined, autoResumeAttempts: 1 });
     expect(manager.accountHolds().inFlight.size).toBe(1);
 
-    await runInternals(manager).line.rescueStalledQueue();
+    await vi.advanceTimersByTimeAsync(QUEUE_WATCHDOG_MS);
+    await Promise.all([...fixtureWork(manager).pending].filter(([, label]) => label === 'rescueStalledQueue').map(([work]) => work));
     await expect
       .poll(() => store.getRun(waiting.id)?.startedAt, { timeout: 20_000 })
       .toBeDefined();
   }, 60_000);
 
   it('watchdog: an in-place run it forces through is not handed back at the repo-root gate', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     // The same wedge as above, but the rescued run is `worktree: false` — and that is the case
     // the spawn path asks the hold question TWICE for: once at the top of `execute`, and again
     // after the exclusive repo-root lease is granted. A force override consumed by the first gate
@@ -408,7 +413,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
     setRunStatus(store, limited.id, RUN_STATUS.queued, { autoResumeAt: undefined, autoResumeAttempts: 1 });
     expect(manager.accountHolds().inFlight.size).toBe(1);
 
-    await runInternals(manager).line.rescueStalledQueue();
+    await vi.advanceTimersByTimeAsync(QUEUE_WATCHDOG_MS);
+    await Promise.all([...fixtureWork(manager).pending].filter(([, label]) => label === 'rescueStalledQueue').map(([work]) => work));
     await expect.poll(() => store.getRun(waiting.id)?.startedAt, { timeout: 20_000 }).toBeDefined();
     // …and it STAYS started. A bounce at the second gate shows up as a return to `queued` with
     // `startedAt` cleared, which is exactly what the first assertion alone would miss.
@@ -452,6 +458,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
   }, 40_000);
 
   it('watchdog: re-adopts a queued record the engine has no work item for', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     // The worst shape a queue can be in — and the one a live workspace ended up in: every record
     // says `queued`, several with a pending `continue-N` step, and the engine holds nothing for
     // any of them. `pump()` iterates its own queue, so such a run is invisible to it and would
@@ -465,7 +472,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
     setRunStatus(store, record.id, RUN_STATUS.queued, { finishedAt: undefined, startedAt: undefined });
 
     manager = createFixtureManager(store, repoRoot); // deliberately NO recover()
-    await runInternals(manager).line.rescueStalledQueue();
+    await vi.advanceTimersByTimeAsync(QUEUE_WATCHDOG_MS);
+    await Promise.all([...fixtureWork(manager).pending].filter(([, label]) => label === 'rescueStalledQueue').map(([work]) => work));
 
     await expect
       .poll(() => store.getRun(record.id)?.status, { timeout: 20_000 })
@@ -731,7 +739,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
   it('queues a human Continue while another run holds the same account, and starts it once that hold lifts', async () => {
     // The approved 4a design (hearsay-tools/cezarion#1236): a Continue retires its own appointment
     // and joins the line as a wake, still subject to another run's known deadline on the account.
-    manager = createFixtureManager(store, repoRoot);
+    const semaphore = new WorkspaceSemaphore();
+    manager = createFixtureManager(store, repoRoot, { semaphore });
     const a = manager.startRun(workflow, { task: 'mock:limit probe a', worktree: false });
     await settle(a.id);
     // B starts on the same account only once A's hold is out of the way, then hits the limit too.
@@ -747,7 +756,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     expect(store.getRun(b.id)?.status).toBe('queued');
     expect(store.getRun(b.id)?.continuationMessage?.origin).toBe('human');
     // A real pump that sees A's hold must leave it queued.
-    await (runInternals(manager).line).pump();
+    await semaphore.release();
     expect(store.getRun(b.id)?.status).toBe('queued');
 
     manager.cancelAutoResume(a.id);

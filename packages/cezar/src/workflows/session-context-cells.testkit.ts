@@ -1,6 +1,5 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -169,7 +168,7 @@ export function describeSessionContext(rows: readonly string[], suite = { descri
         const held = vi.spyOn(semaphore, 'maxParallel').mockReturnValue(0);
         await restart();
         held.mockRestore();
-        await (runInternals(manager).line).pump();
+        await semaphore.release();
         await until(() => messages().length > before);
         const recovered = messages()[before]!;
         expect(count(recovered, '<cezar-context id="handoff"')).toBe(1);
