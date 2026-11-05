@@ -144,14 +144,21 @@ can drive the view from the HTTP snapshot. One PR for each slice.
   flash; worker enter, settle and fold; card enter and leave with FLIP; chip bumps;
   the Just now feed. All from snapshot differences (spec, Live transport).
 - Reduced motion and hidden-tab behavior as in the spec.
+- The "Many lines" rule: edge stubs with the card's name for a request whose other
+  end is off screen, and no line when neither end is on screen (moved here from S5).
+- Switch the view from S5's HTTP read to S4's `useActivityLive` (one query key).
+  The header's "Updated" time becomes the Live indicator.
 - Tests: the snapshot-difference function (every animation trigger is a pure
   function of two snapshots); reduced motion turns every trigger into an immediate
   change; the comet loop stops when no comet is in flight.
 
 ### S7: global view
 
-- `/activity`: project panels, pills, arcs, the empty-project line, the scope switch.
-- Tests: grouping, rail order, arcs only inside a panel.
+- `/activity`: project panels, pills, arcs, the empty-project line (loaded idle
+  projects only), the notice panels for `loaded: false` and `unavailable`, the scope
+  switch.
+- Tests: grouping, rail order, arcs only inside a panel, an unloaded or unavailable
+  project never in the idle line.
 
 ### S8: e2e and docs
 

@@ -38,6 +38,8 @@ html, body { margin: 0; background: var(--surface-base); color: var(--text-prima
 .proto { font: 600 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text); border: 1px solid color-mix(in oklch, var(--accent-text) 40%, transparent); padding: 2px 8px; border-radius: 6px; }
 .seg { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden; margin-left: auto; }
 .seg button { all: unset; cursor: pointer; padding: 5px 12px; font-weight: 500; font-size: 12px; color: var(--text-secondary); }
+.seg button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 .seg button.on { background: var(--surface-muted); color: var(--text-primary); }
 .summary { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
 .chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px; background: var(--surface-raised); border: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-secondary); transition: border-color .4s; }
@@ -290,7 +292,7 @@ function init() {
     for (const w of t.workers) { w.since = -(w.age ?? 200); w.ti = 0; } }
   S.edges = [
     { id: 'e1', kind: 'peer', from: 't4', to: 't1', q: 'Does spawn.ts still own the lease file, or did it move to the worker store?', since: -250, due: 600, short: 'lease owner?' },
-    { id: 'f1', kind: 'fam', from: 'w22', to: 't2', task: 't2', q: 'Keep 5 cards or show 7? Two findings tie on score.', since: -130, due: 600 },
+    { id: 'f1', kind: 'fam', from: 'w22', to: 't2', task: 't2', q: 'Keep 5 cards or show 7? Two findings tie on score.', since: -130 },
   ];
   pushFeed('t-run', 'Refresh parser fixtures started', -40);
   pushFeed('t-fam', 'Draft top-5 report asked its parent', -130);
@@ -346,8 +348,8 @@ function patchLive() {
   document.querySelectorAll('[data-count]').forEach(e => { e.textContent = mmss(+e.dataset.count - now); });
   const d = new Date(Date.UTC(2026, 10, 5, 14, 32, 0) + now * 1000);
   $('#clock').textContent = d.toLocaleTimeString('en-GB', { timeZone: 'Europe/Warsaw' });
-  document.querySelectorAll('.elabel[data-edge]').forEach(l => { const e = S.edges.find(x => x.id === l.dataset.edge); if (!e) return; l.querySelector('.a').textContent = mmss(now - e.since); l.querySelector('.due i').style.width = Math.min(100, (now - e.since) / e.due * 100) + '%'; });
-  document.querySelectorAll('.req[data-edge]').forEach(r => { const e = S.edges.find(x => x.id === r.dataset.edge); if (!e) return; r.querySelector('.a').textContent = mmss(now - e.since); r.querySelector('.d').textContent = mmss(e.due - (now - e.since)); r.querySelector('.meter i').style.width = Math.min(100, (now - e.since) / e.due * 100) + '%'; });
+  document.querySelectorAll('.elabel[data-edge]').forEach(l => { const e = S.edges.find(x => x.id === l.dataset.edge); if (!e) return; l.querySelector('.a').textContent = mmss(now - e.since); if (e.due) l.querySelector('.due i').style.width = Math.min(100, (now - e.since) / e.due * 100) + '%'; });
+  document.querySelectorAll('.req[data-edge]').forEach(r => { const e = S.edges.find(x => x.id === r.dataset.edge); if (!e) return; r.querySelector('.a').textContent = mmss(now - e.since); if (e.due) { r.querySelector('.d').textContent = mmss(e.due - (now - e.since)); r.querySelector('.meter i').style.width = Math.min(100, (now - e.since) / e.due * 100) + '%'; } });
   document.querySelectorAll('#feed li').forEach(li => { const a = now - +li.dataset.at; li.querySelector('.ago').textContent = a < 5 ? 'now' : a < 60 ? `${Math.floor(a)} s` : `${Math.floor(a / 60)} min`; });
 }
 
@@ -404,6 +406,7 @@ function drawEdges() {
 /* comets: one helper for the project lines and the global arcs */
 function drawComets(svg) {
   svg.querySelectorAll('.comet').forEach(c => c.remove());
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   for (const c of S.comets) {
     const p = svg.querySelector(`[data-edge="${c.edge}"]`); if (!p || sim < c.at) continue;
     const L = p.getTotalLength(); let f = (sim - c.at) / c.dur; f = f < .5 ? 2 * f * f : 1 - (-2 * f + 2) ** 2 / 2;
@@ -432,7 +435,7 @@ function renderRail() {
     if (box.querySelector(`[data-edge="${e.id}"]`)) continue;
     const d = document.createElement('div'); d.className = `req ${e.kind === 'fam' ? 't-fam' : 't-peer'} ${e.born ? 'enter' : ''}`; d.dataset.edge = e.id;
     d.innerHTML = `<div class="who">${short(NAME(e.from))} <svg><use href="#i-arrow"/></svg> ${short(NAME(e.to))}<span class="kind" style="color:var(--c)">${e.kind === 'fam' ? 'Question' : 'Request'}</span></div>
-      <p>“${e.q}”</p><div class="st"><span>${e.kind === 'fam' ? 'Worker → parent' : 'Peer'} · open <span class="a"></span></span><span class="due">reply due in <span class="d"></span></span></div><div class="meter"><i></i></div>`;
+      <p>“${e.q}”</p><div class="st"><span>${e.kind === 'fam' ? 'Worker → parent' : 'Peer'} · open <span class="a"></span></span>${e.due ? '<span class="due">reply due in <span class="d"></span></span>' : ''}</div>${e.due ? '<div class="meter"><i></i></div>' : ''}`;
     box.appendChild(d);
   }
   if (!open.length && !box.querySelector('.empty')) box.insertAdjacentHTML('beforeend', '<div class="empty">No task waits for a reply.</div>');
@@ -468,7 +471,7 @@ function finishWorker(tid, wid, line) {
 }
 function at(time, fn) { later.push({ time, fn }); }
 function send(id, kind, from, to, q, shortQ, extra = {}) {
-  const e = { id, kind, from, to, q, short: shortQ, since: sim, due: 600, born: true, ...extra }; S.edges.push(e);
+  const e = { id, kind, from, to, q, short: shortQ, since: sim, ...(kind === 'fam' ? {} : { due: 600 }), born: true, ...extra }; S.edges.push(e);
   drawEdges(); S.comets.push({ edge: id, at: sim, dur: 1.1, color: kind === 'fam' ? 'oklch(0.783 0.129 299.3)' : 'oklch(0.80 0.13 150)' });
   renderRail(); renderSummary(); gRender();
 }

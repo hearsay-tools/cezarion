@@ -132,8 +132,10 @@ read it, because building one recovers that project's runs. A project without a
 context is an entry with `loaded: false`, and its panel says "Not loaded in this
 cockpit" with a link that opens the project.
 
-One panel for each project that has active work, in project-rail order. Projects with
-no active work collapse into one line at the bottom. A panel holds one compact pill for
+One panel for each project that has active work, in project-rail order. **Loaded**
+projects with no active work collapse into one line at the bottom. A project with
+`loaded: false` or with `unavailable` never joins that line: it keeps its own panel
+with its notice and its link, because the view does not know whether it is idle. A panel holds one compact pill for
 each card: shape, title, a small heartbeat and one line (the verb in the rung tone and
 a short main line), and one dot for each live worker. Open peer requests are arcs
 above the pills, with the same marching dashes, comets and age label. Peer messages
