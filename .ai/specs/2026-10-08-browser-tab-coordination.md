@@ -61,6 +61,11 @@ are not accelerated to the five-second workspace schedule. Mutations remain loca
 and invalidate shared reads. Automation state/log reads and the bounded
 `GET /api/v1/projects/checkout/:checkoutId/progress` recovery cover transient consumers.
 
+The live activity view's snapshot (`GET /api/v1/workspace/activity`) joins that allowlist.
+A view whose topic has an HTTP twin follows the coordinator's transport (`liveTransport()`,
+`onLiveTransport()`): it holds the topic, and adds the recurring read only while the
+transport is `finite`, because the finite fallback carries no topic data.
+
 Remote fallback trades connection safety for up to two seconds of task latency and
 five seconds of workspace latency, plus request/backoff time. Ephemeral intermediate
 deltas coalesce into full active-item snapshots in finite batches, so unfinished text
