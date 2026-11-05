@@ -2,10 +2,8 @@ import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
 import { TrackedWork } from './run/tracked-work.ts';
 import { setRunStatus, crashStore } from '../runs/run-store.testkit.ts';
 import { runnerHook, run, GIT_ID, waitForProduct, TURN_TEXT, setupMonitoringFixture, FINISHED_RUN_STATUSES } from './run-fixture.testkit.ts';
-import { handleRunnerUiEvent, makeUiSink } from './run/session-events.ts';
-import { beginUsageInvocation } from './run/usage-accounting.ts';
+import { beginUsageInvocation, recordUsageUiEvent } from './run/usage-accounting.ts';
 import { createActiveRun } from './active-run.ts';
-import { UiEventSink } from '../runs/ui-event-sink.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers, unused, fixtureWork } from './fixture-cleanup.testkit.ts';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
@@ -91,6 +89,7 @@ describe('RunManager directional usage accounting', () => {
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
     manager.dispose();
+    runnerHook.runner = undefined;
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
   });
@@ -104,26 +103,25 @@ describe('RunManager directional usage accounting', () => {
     });
     store.updateStep(run.id, 'work', { iterations: 1, status: STEP_STATUS.running });
     const state = createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false });
-    const sink = new UiEventSink({ persist: () => undefined, emitLive: () => undefined });
-    return { run, state, sink };
+    return { run, state };
   }
 
   it('deduplicates starts and completions while summing multiple turns in one invocation', () => {
-    const { run, state, sink } = fixture();
-    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
+    const { run, state } = fixture();
+    beginUsageInvocation(store, run.id, state, 'work');
     const started: UiEvent = { type: 'turn.started', turnId: 'turn_1' };
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, started);
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, started);
+    recordUsageUiEvent(store, run.id, state, started);
+    recordUsageUiEvent(store, run.id, state, started);
     const completed: UiEvent = {
       type: 'turn.completed',
       turnId: 'turn_1',
       stopReason: 'end_turn',
       usage: { input: 10, output: 2, total: 12 },
     };
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, completed);
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, completed);
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, { type: 'turn.started', turnId: 'turn_2' });
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
+    recordUsageUiEvent(store, run.id, state, completed);
+    recordUsageUiEvent(store, run.id, state, completed);
+    recordUsageUiEvent(store, run.id, state, { type: 'turn.started', turnId: 'turn_2' });
+    recordUsageUiEvent(store, run.id, state, {
       type: 'turn.completed',
       turnId: 'turn_2',
       stopReason: 'end_turn',
@@ -142,12 +140,12 @@ describe('RunManager directional usage accounting', () => {
   });
 
   it('keeps the run aggregate absent after a pre-turn failure even when a later invocation is metered', () => {
-    const { run, state, sink } = fixture();
-    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
+    const { run, state } = fixture();
+    beginUsageInvocation(store, run.id, state, 'work');
     // The first startSession attempt fails before emitting turn.started.
-    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, { type: 'turn.started', turnId: 'turn_1' });
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
+    beginUsageInvocation(store, run.id, state, 'work');
+    recordUsageUiEvent(store, run.id, state, { type: 'turn.started', turnId: 'turn_1' });
+    recordUsageUiEvent(store, run.id, state, {
       type: 'turn.completed',
       turnId: 'turn_1',
       stopReason: 'end_turn',
@@ -166,51 +164,51 @@ describe('RunManager directional usage accounting', () => {
     expect(store.getRun(run.id)?.outputTokens).toBeUndefined();
   });
 
-  it('writes each completeness checkpoint before launching or forwarding its boundary event', () => {
-    const { run, state } = fixture();
-    store.flush();
-
-    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
-    expect(RunStore.open(join(repoRoot, '.ai/cezar')).getRun(run.id)?.steps[0]).toMatchObject({
-      usageInvocationsStarted: 1,
-    });
-
+  it('writes each completeness checkpoint before launching or forwarding its boundary event', async () => {
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    writeFileSync(join(repoRoot, 'a.txt'), 'base');
+    await run('git', ['add', 'a.txt'], { cwd: repoRoot });
+    await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
+    manager.dispose();
+    manager = createFixtureManager(store, repoRoot);
     const persistedAtSink: StepState[] = [];
-    const sink = new UiEventSink({ persist: () => undefined, emitLive: () => undefined });
-    vi.spyOn(sink, 'handle').mockImplementation((_event: UiEvent) => {
-        const persisted = RunStore.open(join(repoRoot, '.ai/cezar')).getRun(run.id)?.steps[0];
-        if (persisted) persistedAtSink.push(persisted);
+    store.on('event', ({ runId, event }) => {
+      if (event.type !== 'turn.started' && event.type !== 'turn.completed') return;
+      const persisted = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true }).getRun(runId)?.steps[0];
+      expect(persisted).toMatchObject(event.type === 'turn.started'
+        ? { usageInvocationsObserved: 1, usageTurnsStarted: 1 }
+        : { usageTurnsRecorded: 1, inputTokens: 8, outputTokens: 2 });
+      persistedAtSink.push(persisted!);
     });
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, { type: 'turn.started', turnId: 'turn_1' });
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
-      type: 'turn.completed',
-      turnId: 'turn_1',
-      stopReason: 'end_turn',
-      usage: { input: 8, output: 2, total: 10 },
-    });
-
-    expect(persistedAtSink[0]).toMatchObject({
-      usageInvocationsObserved: 1,
-      usageTurnsStarted: 1,
-    });
-    expect(persistedAtSink[1]).toMatchObject({
-      usageTurnsRecorded: 1,
-      inputTokens: 8,
-      outputTokens: 2,
-    });
+    runnerHook.runner = {
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
+      run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => undefined,
+      startSession: (_spec, _onEvent, options) => {
+        const persisted = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true }).getRun(record.id)?.steps[0];
+        expect(persisted).toMatchObject({ usageInvocationsStarted: 1 });
+        options?.onUiEvent?.({ type: 'turn.started', turnId: 'turn_1' });
+        options?.onUiEvent?.({ type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn', usage: { input: 8, output: 2, total: 10 } });
+        return { result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
+          sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => undefined,
+          holdsHumanInput: () => false, end: () => undefined, interrupt: () => undefined, open: false };
+      },
+    };
+    const record = manager.startRun({ name: 'usage', source: 'built-in', steps: [{ id: 'work', prompt: '{{task}}' }] }, { task: 'usage', worktree: false });
+    await waitForProduct(manager, store, () => persistedAtSink.length === 2 && !manager.isActive(record.id));
+    expect(persistedAtSink).toHaveLength(2);
   });
 
   it('tracks an unmetered turn without recording it and ignores a completion that never started', () => {
-    const { run, state, sink } = fixture();
-    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
+    const { run, state } = fixture();
+    beginUsageInvocation(store, run.id, state, 'work');
+    recordUsageUiEvent(store, run.id, state, {
       type: 'turn.completed',
       turnId: 'ghost',
       stopReason: 'end_turn',
       usage: { input: 99, output: 9, total: 108 },
     });
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, { type: 'turn.started', turnId: 'turn_1' });
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
+    recordUsageUiEvent(store, run.id, state, { type: 'turn.started', turnId: 'turn_1' });
+    recordUsageUiEvent(store, run.id, state, {
       type: 'turn.completed',
       turnId: 'turn_1',
       stopReason: 'end_turn',
@@ -255,6 +253,11 @@ describe('RunManager reported cost accounting', () => {
 
   it.each(['fresh', 'legacy-inflated', 'missed-persist'] as const)('counts cumulative Claude USD across Continue steps (%s)', async (priorState) => {
     let launches = 0;
+    const tools = new Map<string, ReturnType<RunManager['cezarToolHandlers']>>();
+    const handlers = manager.cezarToolHandlers.bind(manager);
+    vi.spyOn(manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
+      const result = handlers(id, generation); tools.set(id, result); return result;
+    });
     runnerHook.runner = {
       backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
@@ -276,8 +279,7 @@ describe('RunManager reported cost accounting', () => {
           });
           onEvent?.({ type: 'text', text: 'Finished.' });
           // The turn finishes through cezar_done, as an agent's does (hearsay-tools/cezarion#2397).
-          const state = runInternals(manager).active.get(record.id)!;
-          await manager.cezarToolHandlers(record.id, state.liveSession.ciGeneration!).finishTurn({}, new AbortController().signal);
+          await tools.get(record.id)!.finishTurn({}, new AbortController().signal);
           onEvent?.({ type: 'turn-end' });
         })());
         const close = () => {
