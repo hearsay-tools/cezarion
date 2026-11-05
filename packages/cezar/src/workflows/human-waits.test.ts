@@ -1,5 +1,5 @@
 import { fireCapturedTimer } from './waits.testkit.ts';
-import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -304,7 +304,7 @@ describe('cezar_done refusals at worker capacity', { timeout: 45_000 }, () => {
     expect(cezarDoneAnswerSchema.safeParse(outstanding).success).toBe(true);
     expect(outstanding).toMatchObject({ ok: false, code: 'workers_outstanding' });
     expect(outstanding.ok === false && outstanding.workers).toHaveLength(32);
-    for (const w of workers) fixtureUpdateRun(w.id, { status: 'done' });
+    for (const w of workers) fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     const uncollected = await done(p.id);
     expect(cezarDoneAnswerSchema.safeParse(uncollected).success).toBe(true);
     expect(uncollected).toMatchObject({ ok: false, code: 'workers_uncollected' });
