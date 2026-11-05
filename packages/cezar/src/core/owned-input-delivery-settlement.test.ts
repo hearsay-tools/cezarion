@@ -1,8 +1,8 @@
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
-import { runInternals } from '../workflows/run-internals.testkit.ts';
+import { fixtureWork } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { withHeldAck } from './owned-input-delivery.testkit.ts';
 
 import { driveSeam, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
@@ -39,20 +39,24 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
         const input = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId,
           text: 'mock:agent-echo delay-owned-ack stopped', createdAt: new Date().toISOString() };
+        const work = fixtureWork(manager);
+        const session = [...work.liveSessions].find(session => session.open)!;
+        const send = session.sendAgentMessage.bind(session);
+        let accepted: Promise<void> | undefined;
+        vi.spyOn(session, 'sendAgentMessage').mockImplementation((...args) => {
+          const result = send(...args);
+          if (result) accepted = result.then(() => undefined, () => undefined);
+          return result;
+        });
         expect(manager.steerWorker(runId, input)).toBe('queued');
         await waitFor(() => store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes('stopped')));
-        const internals = runInternals(manager);
-        const state = internals.active.get(runId)!;
-        const session = state.liveSession.session!;
-        const settled = state.inputState.agentInputFlight?.settled;
-        expect(settled).toBeInstanceOf(Promise);
+        expect(accepted).toBeInstanceOf(Promise);
         try {
           if (stop === 'dispose') manager.dispose();
           else manager[stop](runId);
-          release(); await settled;
+          release(); await accepted;
           expect(store.getRun(runId)?.agentInputs).toEqual([input]);
           if (stop === 'dispose') {
-            expect(internals.active.has(runId)).toBe(false);
             expect(session.open).toBe(true); // Disposal alone is no termination proof.
             expect(manager.isActive(runId)).toBe(true);
           }
@@ -63,7 +67,9 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
         } finally {
           session.interrupt();
           await session.result.catch(() => undefined);
-          await waitFor(() => !internals.workerExecutions.executions.has(runId));
+          await waitFor(() => !work.liveSessions.has(session));
+          await Promise.all([...work.pending].filter(([, label]) => label === 'finishWorkerExecution').map(([task]) => task));
+          expect(store.getRun(runId)?.agentInputs).toEqual([input]);
         }
       });
     });

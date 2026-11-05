@@ -1,11 +1,10 @@
-import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { eventCheckpoint, manager, restart, root, semaphore, store, until, waitOf } from './worker-wait.testkit.ts';
+import { eventCheckpoint, manager, restart, root, semaphore, store, until, waitOf, work } from './worker-wait.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
 import { conversationOf, eventsOf, closedAs, noHumanCard, askedPair, answered, said, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
@@ -17,9 +16,10 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
   // the parent is stopping, not when its status settles.
   it('closes a routed question while its parent is stopping', async () => {
     const f = await askedPair();
-    const state = (manager as unknown as { active: Map<string, { liveSession: { interrupt(): void; installInterrupt(interrupt: () => void): void; };  }> }).active.get(f.p.id)!;
-    const interrupt = state.liveSession.interrupt;
-    state.liveSession.installInterrupt(() => {});
+    // The fixture launches the parent before its worker; both sessions are fixture-owned.
+    const session = [...work.liveSessions][0]!;
+    const interrupt = session.interrupt.bind(session);
+    const heldInterrupt = vi.spyOn(session, 'interrupt').mockImplementation(() => {});
     try {
       expect(manager.cancel(f.p.id)).toBe(true);
       expect(store.getRun(f.p.id)).toMatchObject({ stopping: true, status: expect.stringMatching(/^(running|waiting)$/) });
@@ -30,8 +30,8 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
       expect(store.getRun(f.p.id)?.stopping).toBe(true);
       noHumanCard(f.w.id);
     } finally {
-      state.liveSession.installInterrupt(interrupt);
-      state.liveSession.interrupt();
+      heldInterrupt.mockRestore();
+      interrupt();
       f.close();
     }
   });
@@ -48,13 +48,10 @@ it("waits for capacity before a parent's answer resumes the worker", async () =>
         // Another message while the answer waits for admission must not deliver it early.
         await f.service.send(f.parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'progress', text: 'mock:agent-echo Still here', timeoutSeconds: 600 });
         // The send queued an admission pump. Observe that pump's completion with the slot held.
-        const engine = runInternals(manager);
-        const sweep = engine.line.pump();
-        const pumps = [...engine.context.work.pending].filter(([, label]) => label === 'pump');
-        await Promise.all([sweep, ...pumps.map(([work]) => work)]);
-        expect(engine.line.hasWake(f.w.id)).toBe(true);
-        expect(engine.line.isAdmitted(f.w.id)).toBe(false);
-        expect(engine.active.get(f.w.id)?.inputState.agentInputFlight).toBeUndefined();
+        await semaphore.release();
+        await Promise.all([...work.pending].filter(([, label]) => label === 'pump').map(([task]) => task));
+        expect(store.getRun(f.w.id)?.agentInputs?.filter(input => !input.deliveredAt)).toEqual(
+          expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining('Use the parser') })]));
         expect(answered(f.w.id)).toEqual([]);
         // Freeing the slot admits the worker, and the held answer goes in.
         manager.cancel(blocker.id);
