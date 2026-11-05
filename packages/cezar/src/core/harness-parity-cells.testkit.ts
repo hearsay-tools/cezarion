@@ -2831,12 +2831,11 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
 
       it(`${backend} R23 retains pending-question worker scratch after its process completes`, async () => {
         await withOwnedInputRun(backend, 'ask', async ({ manager, store, runId, repoRoot }) => {
-          const idle = observationClock(delay => delay === IDLE_TIMEOUT_MS && /armIdleTimer/.test(new Error().stack ?? ''));
           manager.enqueueOwnedRun(runId);
           await waitFor(() => store.readEvents(runId).some(event => event.type === 'ask.requested'));
           const scratch = resolveAgentTmpDir(join(repoRoot, '.ai/cezar'), runId);
           writeFileSync(join(scratch, 'notes'), 'pending answer');
-          await idle.advance(IDLE_TIMEOUT_MS);
+          [...fixtureWork(manager).liveSessions][0]!.end();
           await waitFor(() => !manager.isActive(runId));
           expect(store.getRun(runId)?.status).toBe('waiting');
           expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
