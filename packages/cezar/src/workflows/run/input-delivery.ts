@@ -1,5 +1,7 @@
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import type { Wait } from '@open-mercato/cezar-contract/waits';
+import type { InputDelivery as InputDeliveryPolicy } from '../../core/agent-runner.ts';
+import { ReadonlySetView } from './readonly-collections.ts';
 import type { ContentBlock } from '../../core/agent-runner.ts';
 import type { AgentSession } from '../../core/claude-cli-runner.ts';
 import type { RunRecord } from '../../runs/store.ts';
@@ -30,6 +32,152 @@ import type { AttachmentWriter } from './attachment-writer.ts';
 import type { HumanWaits } from './human-waits.ts';
 import type { QuestionAnswerSource, WorkerQuestions } from './worker-questions.ts';
 import type { WaitRegistry } from './wait-registry.ts';
+
+// The flight keeps its identity across asynchronous acknowledgement. Only this module can
+// change the reservation or attach the settled promise; readers receive getters only.
+let flightWrites: {
+  reserve(flight: InputFlight, reserved: boolean): void;
+  settle(flight: InputFlight, settled: Promise<void>): void;
+};
+
+export class InputFlight {
+  #session: AgentSession;
+  #inputIds: readonly string[];
+  #settled: Promise<void> | undefined;
+  #wakeReserved: boolean | undefined;
+  #admittedWake: boolean | undefined;
+  constructor(session: AgentSession, inputIds: readonly string[], admittedWake?: boolean) {
+    this.#session = session;
+    this.#inputIds = Object.freeze([...inputIds]);
+    this.#admittedWake = admittedWake;
+    Object.freeze(this);
+  }
+  get session(): AgentSession { return this.#session; }
+  get inputIds(): readonly string[] { return this.#inputIds; }
+  get settled(): Promise<void> | undefined { return this.#settled; }
+  /** Counts one reserved automatic wake until its ACK spends or refunds it. */
+  get wakeReserved(): boolean | undefined { return this.#wakeReserved; }
+  /** An admitted message-only wake spends its admission too. */
+  get admittedWake(): boolean | undefined { return this.#admittedWake; }
+  static {
+    flightWrites = {
+      reserve(flight, reserved) { flight.#wakeReserved = reserved; },
+      settle(flight, settled) { flight.#settled = settled; },
+    };
+  }
+}
+
+/** Input transport, receipt and liveness state. All mutation commands live in this module. */
+export class InputGroup {
+  #agentInputError: string | undefined;
+  #agentInputFlight: InputFlight | undefined;
+  #inputDelivery: InputDeliveryPolicy | undefined;
+  #unreadInputIds: Set<string> | undefined;
+  #unreadView: ReadonlySetView<string> | undefined;
+  #consumedBeforeAck: Set<string> | undefined;
+  #consumedView: ReadonlySetView<string> | undefined;
+  #bundledInputIds: readonly string[] | undefined;
+  #retiredInFlight: Set<string> | undefined;
+  #retiredView: ReadonlySetView<string> | undefined;
+  #unreadInputTimer: NodeJS.Timeout | undefined;
+  #unreadRetried: Set<string> | undefined;
+  #retriedView: ReadonlySetView<string> | undefined;
+  #heldHumanInputTimer: NodeJS.Timeout | undefined;
+  #heldHumanInputSince: number | undefined;
+  #heldHumanInputExpired: boolean | undefined;
+  #openingAnswerAskSeq: number | undefined;
+  #openingAgentInputId: string | undefined;
+  #writingInput: boolean | undefined;
+  constructor() { Object.freeze(this); }
+  get agentInputError(): string | undefined { return this.#agentInputError; }
+  get agentInputFlight(): InputFlight | undefined { return this.#agentInputFlight; }
+  get inputDelivery(): InputDeliveryPolicy | undefined { return this.#inputDelivery; }
+  /** Accepted by an observable harness, awaiting its read report. */
+  get unreadInputIds(): ReadonlySet<string> | undefined { return this.#unreadView; }
+  /** Reads reported before their acceptance checkpoint. */
+  get consumedBeforeAck(): ReadonlySet<string> | undefined { return this.#consumedView; }
+  /** Messages carried behind a human answer, read at that turn's end. */
+  get bundledInputIds(): readonly string[] | undefined { return this.#bundledInputIds; }
+  /** Unread reports received while the same submission's ACK is pending. */
+  get retiredInFlight(): ReadonlySet<string> | undefined { return this.#retiredView; }
+  get unreadInputTimer(): NodeJS.Timeout | undefined { return this.#unreadInputTimer; }
+  get unreadRetried(): ReadonlySet<string> | undefined { return this.#retriedView; }
+  get heldHumanInputTimer(): NodeJS.Timeout | undefined { return this.#heldHumanInputTimer; }
+  get heldHumanInputSince(): number | undefined { return this.#heldHumanInputSince; }
+  get heldHumanInputExpired(): boolean | undefined { return this.#heldHumanInputExpired; }
+  /** Only the older ask answered by this continuation's opening turn. */
+  get openingAnswerAskSeq(): number | undefined { return this.#openingAnswerAskSeq; }
+  get openingAgentInputId(): string | undefined { return this.#openingAgentInputId; }
+  /** A turn started synchronously inside Cezar's write belongs to that write. */
+  get writingInput(): boolean | undefined { return this.#writingInput; }
+
+  recordInputError(message: string): void { this.#agentInputError = message; }
+  attachFlight(flight: InputFlight): void { this.#agentInputFlight = flight; }
+  clearFlight(): void { this.#agentInputFlight = undefined; }
+  declareDelivery(delivery: InputDeliveryPolicy): void { this.#inputDelivery = Object.freeze({ ...delivery }); }
+  resetUnreadInputs(): void {
+    this.#unreadInputIds = new Set(); this.#unreadView = new ReadonlySetView(this.#unreadInputIds);
+  }
+  resetEarlyConsumption(): void {
+    this.#consumedBeforeAck = new Set(); this.#consumedView = new ReadonlySetView(this.#consumedBeforeAck);
+  }
+  recordEarlyConsumption(id: string): void { this.#consumedBeforeAck?.add(id); }
+  forgetEarlyConsumption(id: string): void { this.#consumedBeforeAck?.delete(id); }
+  recordUnreadInput(id: string): void { this.#unreadInputIds?.add(id); }
+  forgetUnreadInput(id: string): void { this.#unreadInputIds?.delete(id); }
+  clearUnreadInputs(): void { this.#unreadInputIds?.clear(); }
+  bundleInputs(ids: readonly string[]): void {
+    this.#bundledInputIds = Object.freeze([...(this.#bundledInputIds ?? []), ...ids]);
+  }
+  clearBundledInputs(): void { this.#bundledInputIds = undefined; }
+  retireInFlight(id: string): void {
+    if (!this.#retiredInFlight) {
+      this.#retiredInFlight = new Set(); this.#retiredView = new ReadonlySetView(this.#retiredInFlight);
+    }
+    this.#retiredInFlight.add(id);
+  }
+  forgetRetiredInput(id: string): void { this.#retiredInFlight?.delete(id); }
+  prepareUnreadRetry(): void {
+    if (!this.#unreadRetried) {
+      this.#unreadRetried = new Set(); this.#retriedView = new ReadonlySetView(this.#unreadRetried);
+    }
+  }
+  recordUnreadRetry(id: string): void { this.#unreadRetried!.add(id); }
+  retainUnreadTimer(timer: NodeJS.Timeout): void { this.#unreadInputTimer = timer; }
+  unreadTimerFired(): void { this.#unreadInputTimer = undefined; }
+  clearUnreadTimer(): void {
+    if (this.#unreadInputTimer) clearTimeout(this.#unreadInputTimer);
+    this.#unreadInputTimer = undefined;
+  }
+  retainHeldTimer(timer: NodeJS.Timeout): void { this.#heldHumanInputTimer = timer; }
+  heldTimerFired(): void { this.#heldHumanInputTimer = undefined; }
+  clearHeldTimer(resetClock = true): void {
+    if (this.#heldHumanInputTimer) clearTimeout(this.#heldHumanInputTimer);
+    this.#heldHumanInputTimer = undefined;
+    if (resetClock) {
+      this.#heldHumanInputSince = undefined;
+      this.#heldHumanInputExpired = undefined;
+    }
+  }
+  clearHeldClock(): void { this.#heldHumanInputSince = undefined; }
+  beginHeldClock(): void { this.#heldHumanInputSince ??= Date.now(); }
+  expireHeldInput(): void { this.#heldHumanInputExpired = true; }
+  answerOpeningAsk(seq: number): void { this.#openingAnswerAskSeq = seq; }
+  clearOpeningAnswer(): void { this.#openingAnswerAskSeq = undefined; }
+  selectOpeningInput(id: string | undefined): void { this.#openingAgentInputId = id; }
+  writeInput<T>(write: () => T): T {
+    const previous = this.#writingInput;
+    this.#writingInput = true;
+    try { return write(); }
+    finally { this.#writingInput = previous; }
+  }
+}
+
+for (const type of [InputGroup, InputFlight]) {
+  Object.freeze(type.prototype);
+  Object.freeze(type);
+}
+export function createInputGroup(): InputGroup { return new InputGroup(); }
 
 type HumanAnswerBudget = { spent: number };
 type RoutedAnswer = { askSeq: number; source: QuestionAnswerSource; reply: AgentInput; text: string; state: ActiveRun | undefined; fallback: boolean };
