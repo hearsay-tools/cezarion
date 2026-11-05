@@ -4,6 +4,7 @@ import type { ActivitySnapshot } from '@open-mercato/cezar-contract';
 import { fakeStore, makeRoot } from '../activity/activity.testkit.ts';
 import { ActivityDemand } from '../activity/demand.ts';
 import { createActivitySources, type LoadedProject } from './activity-sources.ts';
+import { projectEventOf, type ProjectEvent } from './activity-project-topic.ts';
 import { ACTIVITY_PROJECT_TOPIC_PREFIX, ACTIVITY_WORKSPACE_TOPIC, registerActivityTopics } from './activity-topic.ts';
 import { ProjectContextError } from './project-context.ts';
 import type { SocketHub, TopicFamilyResolver, TopicOptions, TopicPublisher } from './ws.ts';
@@ -20,7 +21,9 @@ function wire() {
   const workspaceProjects = {
     listVisibleProjects: async () => registry as never,
     resolveBootProject: async () => 'boot',
-    projectFailure: () => ({ error: 'unavailable', status: 503 as const }),
+    projectFailure: (error: unknown) => error instanceof ProjectContextError && error.reason === 'unknown-project'
+      ? { error: error.message, status: 404 as const }
+      : { error: 'unavailable', status: 503 as const },
     resolveLiveProject: async (id: string): Promise<LoadedProject> => {
       if (id === 'default' || id === 'boot') return boot;
       const found = loaded.get(id);
@@ -37,6 +40,7 @@ function wire() {
     close: () => undefined,
   };
   const scopeListeners = new Set<() => void>();
+  const projectListeners = new Set<(event: ProjectEvent, projectId: string) => void>();
   const demand = new ActivityDemand();
   registerActivityTopics(hub, {
     sources: createActivitySources({ bootContext: boot, contexts: { peek: (id) => loaded.get(id) }, workspaceProjects }),
@@ -44,8 +48,10 @@ function wire() {
     demand,
     publisher: {},
     onProjectsChange: (listener) => { scopeListeners.add(listener); return () => scopeListeners.delete(listener); },
+    onProjectEvent: (listener) => { projectListeners.add(listener); return () => projectListeners.delete(listener); },
   });
-  return { topics, families, demand, loaded, scopeListeners };
+  const emit = (event: ProjectEvent, projectId: string) => { for (const listener of [...projectListeners]) listener(event, projectId); };
+  return { topics, families, demand, loaded, scopeListeners, projectListeners, emit };
 }
 
 describe('the activity topics', () => {
@@ -84,5 +90,50 @@ describe('the activity topics', () => {
     expect((await frame).projects[1]?.tasks.map((task) => task.title)).toEqual(['Docs task']);
     stop();
     expect(scopeListeners.size).toBe(0);
+  });
+
+  it('stop the work of a removed project, say so once, and follow its re-added context', async () => {
+    const { families, demand, loaded, emit, projectListeners } = wire();
+    const before = project('docs', 'Old task');
+    loaded.set('docs', before);
+    const publisher = (await families.get(ACTIVITY_PROJECT_TOPIC_PREFIX)!.resolve('docs'))!;
+    const frames: ActivitySnapshot[] = [];
+    let next!: () => void;
+    const stop = publisher.start((data) => { frames.push(data as ActivitySnapshot); next?.(); });
+    await publisher.snapshot();
+    const store = (context: LoadedProject) => context.store as unknown as EventEmitter;
+    expect(store(before).listenerCount('run')).toBe(1);
+    expect(demand.has('docs')).toBe(true);
+
+    loaded.delete('docs');
+    emit('removed', 'docs');
+    expect(frames.map((frame) => frame.projects[0]!.unavailable)).toEqual([{ status: 404, error: expect.stringContaining('docs') }]);
+    expect(frames[0]!.projects[0]!.name).toBe('Docs');
+    expect(store(before).listenerCount('run')).toBe(0);
+    expect(demand.has('docs')).toBe(false);
+    emit('removed', 'docs');
+    expect(frames).toHaveLength(1);
+    expect(await publisher.snapshot()).toMatchObject({ projects: [{ unavailable: { status: 404 } }] });
+
+    const after = project('docs', 'New task');
+    loaded.set('docs', after);
+    const rebound = new Promise<void>((resolve) => { next = resolve; });
+    emit('added', 'docs');
+    await rebound;
+    expect(frames.at(-1)!.projects[0]!.tasks.map((task) => task.title)).toEqual(['New task']);
+    expect(store(after).listenerCount('run')).toBe(1);
+    expect(demand.has('docs')).toBe(true);
+
+    stop();
+    expect(store(after).listenerCount('run')).toBe(0);
+    expect(demand.has('docs')).toBe(false);
+    expect(projectListeners.size).toBe(0);
+  });
+
+  it('reads the registry events off the workspace bus', () => {
+    expect(projectEventOf('project-removed', { id: 'docs' })).toEqual({ event: 'removed', projectId: 'docs' });
+    expect(projectEventOf('project-added', { project: { id: 'docs', name: 'Docs' } })).toEqual({ event: 'added', projectId: 'docs' });
+    expect(projectEventOf('project-ready', { project: 'docs' })).toBeUndefined();
+    expect(projectEventOf('project-removed', {})).toBeUndefined();
   });
 });

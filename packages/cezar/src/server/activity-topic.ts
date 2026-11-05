@@ -1,6 +1,9 @@
 import type { ActivityDemand } from '../activity/demand.ts';
 import { createActivityPublisher, type ActivityPublisherDeps } from '../activity/publisher.ts';
+import { createProjectTopicPublisher, type ProjectEvent } from './activity-project-topic.ts';
 import type { createActivitySources, LoadedProject } from './activity-sources.ts';
+import { ProjectContextError } from './project-context.ts';
+import type { WorkspaceProjects } from './workspace-projects.ts';
 import type { SocketHub } from './ws.ts';
 
 /** The topic family of one project's activity: `activity:project:<projectId>`. */
@@ -10,9 +13,11 @@ export const ACTIVITY_WORKSPACE_TOPIC = 'activity:workspace';
 
 export interface ActivityTopicDeps {
   sources: ReturnType<typeof createActivitySources>;
-  workspaceProjects: { resolveLiveProject(id: string): Promise<LoadedProject> };
+  workspaceProjects: { resolveLiveProject(id: string): Promise<LoadedProject> } & Pick<WorkspaceProjects, 'projectFailure'>;
   /** The scope changes of the workspace topic: a project built, added or removed. */
   onProjectsChange: (listener: () => void) => () => void;
+  /** The registry's project-added and project-removed events, for the project topics. */
+  onProjectEvent: (listener: (event: ProjectEvent, projectId: string) => void) => () => void;
   demand: ActivityDemand;
   publisher: ActivityPublisherDeps;
 }
@@ -21,7 +26,9 @@ export interface ActivityTopicDeps {
  * Register the activity topics (spec 2026-11-05-live-activity-view, Live transport). Both keep the
  * default `loopbackReadable: false`: they carry run titles, tool titles and request text. A
  * project id the workspace cannot resolve answers the hub's unknown-topic error; the project
- * routes answer its real failure. A project id never holds a colon, so the names cannot collide.
+ * routes answer its real failure. A project topic follows the registry: a removed project sends
+ * one unavailable frame and stops its work, and a re-added one binds to its new context. A project
+ * id never holds a colon, so the names cannot collide.
  */
 export function registerActivityTopics(hub: SocketHub, deps: ActivityTopicDeps): void {
   hub.registerTopicFamily(ACTIVITY_PROJECT_TOPIC_PREFIX, async (projectId) => {
@@ -31,10 +38,14 @@ export function registerActivityTopics(hub: SocketHub, deps: ActivityTopicDeps):
     } catch {
       return undefined;
     }
-    return createActivityPublisher({
-      sources: async () => [await deps.sources.project(project)],
-      watch: () => deps.demand.watch(project.id),
-    }, deps.publisher);
+    return createProjectTopicPublisher(project, {
+      sources: deps.sources,
+      demand: deps.demand,
+      publisher: deps.publisher,
+      resolve: (id) => deps.workspaceProjects.resolveLiveProject(id),
+      removed: (id) => deps.workspaceProjects.projectFailure(new ProjectContextError('unknown-project', id), id),
+      onProjectEvent: deps.onProjectEvent,
+    });
   });
   hub.registerTopic(ACTIVITY_WORKSPACE_TOPIC, createActivityPublisher({
     sources: () => deps.sources.workspace(),

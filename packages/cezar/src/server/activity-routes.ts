@@ -7,6 +7,7 @@ import { buildActivitySnapshot, unreadableLogger, type ActivityDeps, type Activi
 import type { ToolActivityTracker } from '../activity/tool-activity.ts';
 import type { CiProgressRegistry } from '../ci-wait/progress.ts';
 import { createActivitySources, type ActivitySourceDeps, type LoadedProject } from './activity-sources.ts';
+import { projectEventOf } from './activity-project-topic.ts';
 import { registerActivityTopics } from './activity-topic.ts';
 import { queryZodValidator } from './validators.ts';
 import type { WorkspaceProjects } from './workspace-projects.ts';
@@ -32,7 +33,7 @@ export interface ActivityRouteDeps extends Omit<ActivitySourceDeps, 'ciOf'>, Act
   /** The live server's socket hub: when present, the activity topics register on it too. */
   socketHub?: SocketHub | undefined;
   /** Project added or removed (the workspace event bus). */
-  workspaceEvents?: { on(listener: (event: string) => void): () => void };
+  workspaceEvents?: { on(listener: (event: string, data: unknown) => void): () => void };
 }
 
 /**
@@ -77,6 +78,10 @@ export function createActivityRoutes(routeDeps: ActivityRouteDeps) {
         const offEvents = workspaceEvents?.on((event) => { if (event === 'project-added' || event === 'project-removed') listener(); });
         return () => { offBuilt?.(); offEvents?.(); };
       },
+      onProjectEvent: (listener) => workspaceEvents?.on((event, data) => {
+        const change = projectEventOf(event, data);
+        if (change) listener(change.event, change.projectId);
+      }) ?? (() => undefined),
     });
   }
   const snapshot = (projects: ActivityProjectSource[]): ActivitySnapshot => {

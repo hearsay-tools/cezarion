@@ -496,6 +496,10 @@ Case table for the probe (a detached process):
   it on its last. Demand is counted per concrete name, as today. The global view uses
   the plain topic `activity:workspace`. The two names cannot collide: a project id is a
   slug and may be `all`, but it never contains a colon.
+- A project topic follows the registry. When the project is removed while subscribed, its
+  publisher stops its timers, store listeners and demand, and sends one frame with the
+  project `unavailable` (404, the project routes' answer). When the same id is added again,
+  the topic binds to the new context and sends its snapshot.
 - The publisher starts on the first subscriber and stops on the last. It sends a full
   snapshot on subscribe, then a new snapshot at most every 500 ms and only when
   something changed: a run change in the store, a tracker change, or a progress
