@@ -31,7 +31,7 @@ const STATE_TABLE: Row[] = [
   ['needs you: the wake budget is spent', waiting('needs-you', { kind: ACTIVITY_WAIT_KIND.human, since: iso(-60_000), detail: { reason: 'budget', queuedMessages: 2 } }),
     { verb: 'Needs you', main: 'Automatic wakes used up · 2 queued messages', action: 'open' }],
   ['needs permission', run({ rung: 'needs-permission', tool: { title: 'Bash rm -rf dist', toolKind: 'execute', status: TOOL_STATUS.pending, startedAt: iso(-2_000) } }),
-    { verb: 'Needs you', main: 'Permission: Bash rm -rf dist', action: 'open' }],
+    { verb: 'Needs you', main: 'Permission', action: 'open' }],
   ['waiting on workers, outcomes only, one entry', waiting('waiting-on-workers', { kind: ACTIVITY_WAIT_KIND.workers, since: iso(-640_000), deadline: iso(1_080_000), detail: { owed: 2, total: 3, settled: 1, mode: 'any', recipientRunIds: [] } }),
     { verb: 'Waiting for workers', main: 'Any of 3 · 1 settled', bar: 1 / 3, detail: `Deadline ${clockOf(iso(1_080_000))}` }],
   ['waiting on workers, several entries', waiting('waiting-on-workers', { kind: ACTIVITY_WAIT_KIND.workers, since: iso(-640_000), detail: { owed: 4, total: 5, settled: 1, recipientRunIds: [] } }),

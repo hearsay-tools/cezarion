@@ -79,9 +79,9 @@ function needsYou(run: ActivityRun, wait: Extract<ActivityWait, { kind: 'human' 
   return { ...base, main: 'Your turn', action: 'open' }
 }
 
+/** The record holds only `hasPendingPermission`, never the tool it asks about. */
 function permission(run: ActivityRun): NowBox {
-  const open = run.tool && run.tool.endedAt === undefined ? run.tool.title : undefined
-  return { verb: 'Needs you', tone: toneOf(run), icon: 'user', main: open ? `Permission: ${open}` : 'Permission requested', action: 'open' }
+  return { verb: 'Needs you', tone: toneOf(run), icon: 'user', main: 'Permission', action: 'open' }
 }
 
 function workers(run: ActivityRun, wait: Extract<ActivityWait, { kind: 'workers' }>, ctx: NowContext): NowBox {
