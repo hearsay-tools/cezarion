@@ -177,6 +177,9 @@ test('the daily digest recommends at most the configured top groups in one publi
     'issues that a day without findings closed with no digest comment',
     'newest finalized digest comment',
     'That section marks the digest finalized',
+    'the account gh api user names wrote',
+    'Ignore a comment from any other author',
+    'the newest issue first',
     'need no approval',
   ]) assert.ok(prompt.includes(text), text);
   assert.ok(!/Offer a comment/.test(prompt), 'comments with new evidence are posted, not offered');
