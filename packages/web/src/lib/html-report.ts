@@ -1,4 +1,4 @@
-import { MERMAID_IMPORT, scriptLibrary, type ReportLibraries, type ReportLibraryId } from './report-libraries'
+import { MERMAID_IMPORT, scriptLibrary, TAILWIND_V3_CONFIG_SHIM, type ReportLibraries, type ReportLibraryId } from './report-libraries'
 
 /**
  * Prepares a self-contained HTML report for the sandboxed reader frame (hearsay-tools/cezarion#2400,
@@ -57,6 +57,26 @@ function inlineScript(doc: Document, code: string): HTMLScriptElement {
   return script
 }
 
+function tailwindCompat(doc: Document, sheet: string): HTMLStyleElement {
+  const style = doc.createElement('style')
+  style.setAttribute('type', 'text/tailwindcss')
+  style.textContent = sheet
+  return style
+}
+
+/**
+ * Puts a library's code in place of its CDN tag; a deferred tag's code runs at the end of `<body>`.
+ * The v3 compat sheet and the `tailwind.config` API stay where the tag was, so a config script
+ * after the tag finds them, even when the library code itself runs later.
+ */
+function placeLibrary(doc: Document, script: HTMLScriptElement, code: string, v3Compat: string | undefined): void {
+  const atTag: Node[] = v3Compat === undefined ? [] : [tailwindCompat(doc, v3Compat), inlineScript(doc, TAILWIND_V3_CONFIG_SHIM)]
+  const inline = inlineScript(doc, code)
+  const deferred = script.hasAttribute('defer') || script.hasAttribute('async') || script.getAttribute('type') === 'module'
+  if (deferred) doc.body.append(inline)
+  script.replaceWith(...atTag, ...(deferred ? [] : [inline]))
+}
+
 /**
  * Keeps inline scripts. Removes every remote `<script src>` and counts it, except a library from
  * `report-libraries.ts`, whose pinned code takes the tag's place. A deferred tag's code moves to
@@ -78,16 +98,7 @@ function placeScripts(doc: Document, blocked: BlockedContent, libraries: ReportL
     if (!library || code === undefined || (id === 'tailwind-v3' && libraries['tailwind-v3'] === undefined)) { blocked.scripts++; script.remove(); continue }
     if (placed.has(library)) { script.remove(); continue }
     placed.add(library)
-    const inline = inlineScript(doc, code)
-    const nodes: Node[] = [inline]
-    if (id === 'tailwind-v3') {
-      const compat = doc.createElement('style')
-      compat.setAttribute('type', 'text/tailwindcss')
-      compat.textContent = libraries['tailwind-v3']!
-      nodes.unshift(compat)
-    }
-    const deferred = script.hasAttribute('defer') || script.hasAttribute('async') || script.getAttribute('type') === 'module'
-    if (deferred) { script.remove(); doc.body.append(...nodes) } else script.replaceWith(...nodes)
+    placeLibrary(doc, script, code, id === 'tailwind-v3' ? libraries['tailwind-v3'] : undefined)
   }
   if (!imports.size) return
   if (libraries.mermaid === undefined) { blocked.scripts += imports.size; return }

@@ -23,11 +23,14 @@ let server: ChildProcess
 let probe: ChildProcess
 let probeOrigin: string
 let hitsFile: string
+let udpFile: string
+let stunPort: string
 let browser: AgentBrowser
 let publication: { id: string; link: string; markdown: string }
 let interactive: { id: string; link: string; markdown: string }
 let libraries: { id: string; link: string; markdown: string }
 let escape: { id: string; link: string; markdown: string }
+let webrtc: { id: string; link: string; markdown: string }
 
 const FRAME = '[data-slot="html-report-frame"]'
 const LINK = '[data-slot="user-bubble"] a[data-streamdown="link"]'
@@ -79,9 +82,19 @@ document.getElementById('pick').addEventListener('change', event => { answer.tex
 copy.addEventListener('click', () => navigator.clipboard.writeText(answer.textContent).then(() => { copy.textContent = 'Copied' }, error => { copy.textContent = 'Failed: ' + error.name }))
 </script></body></html>`
 
+/** A report whose script starts WebRTC ICE gathering against a STUN server: the probe's UDP port. */
+function webrtcHtml(port: string): string {
+  return `<!doctype html><html><head><title>WebRTC</title></head><body><p id="rtc">RTC</p><script>
+const connection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:127.0.0.1:${port}' }] })
+connection.createDataChannel('probe')
+connection.createOffer().then(offer => connection.setLocalDescription(offer)).then(() => { document.documentElement.dataset.rtc = 'gathering' })
+</script></body></html>`
+}
+
 /** A report that loads Tailwind (the v3 Play CDN) and Mermaid 11 from CDNs, as agents write them. */
-const LIBRARY_HTML = `<!doctype html><html><head><title>Libraries</title><script src="https://cdn.tailwindcss.com"></script></head><body>
-<h1 id="styled" class="text-3xl font-bold text-red-600 border p-4">Styled</h1>
+const LIBRARY_HTML = `<!doctype html><html><head><title>Libraries</title><script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config = { theme: { extend: { colors: { brand: '#123456' } } } }</script></head><body>
+<h1 id="styled" class="text-3xl font-bold text-red-600 border p-4">Styled</h1><p id="brand" class="bg-brand">Brand</p>
 <pre class="mermaid" id="diagram">graph TD; A-->B</pre>
 <script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'
 mermaid.initialize({ startOnLoad: false }); await mermaid.run(); document.documentElement.dataset.mermaid = 'done'</script>
@@ -181,15 +194,18 @@ function tapReport(x: number, y: number): void {
 beforeAll(async () => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cez-html-reader-')))
   hitsFile = join(root, 'hits.ndjson')
+  udpFile = join(root, 'udp.log')
   probe = spawn(process.execPath, ['-e', `
-    const http = require('node:http'); const fs = require('node:fs')
+    const http = require('node:http'); const fs = require('node:fs'); const dgram = require('node:dgram')
+    const udp = dgram.createSocket('udp4'); udp.on('message', message => fs.appendFileSync(process.argv[2], message.length + '\\n'))
     const s = http.createServer((req, res) => { fs.appendFileSync(process.argv[1], JSON.stringify({ path: req.url, referer: req.headers.referer ?? null }) + '\\n'); res.setHeader('content-type', 'text/html'); res.end('<p>probe</p>') })
-    s.listen(0, '127.0.0.1', () => console.log(s.address().port))`, hitsFile], { stdio: ['ignore', 'pipe', 'inherit'] })
-  const port = await new Promise<string>((done, fail) => {
+    udp.bind(0, '127.0.0.1', () => s.listen(0, '127.0.0.1', () => console.log(s.address().port + ' ' + udp.address().port)))`, hitsFile, udpFile], { stdio: ['ignore', 'pipe', 'inherit'] })
+  const [port, udpPort] = (await new Promise<string>((done, fail) => {
     probe.stdout!.once('data', chunk => done(String(chunk).trim()))
     probe.once('exit', code => fail(new Error(`probe server exited with ${code}`)))
-  })
+  })).split(' ')
   probeOrigin = `http://127.0.0.1:${port}`
+  stunPort = udpPort!
 
   const project = join(root, 'project')
   execFileSync('git', ['init', '-q', '-b', 'main', project])
@@ -210,6 +226,7 @@ beforeAll(async () => {
   interactive = publish('interactive.html', INTERACTIVE_HTML)
   libraries = publish('libraries.html', LIBRARY_HTML)
   escape = publish('escape.html', reportHtml(probeOrigin, true))
+  webrtc = publish('webrtc.html', webrtcHtml(stunPort))
   const filler = Array.from({ length: 40 }, (_, i) => `Paragraph ${i + 1} of the long task description.`).join('\n\n')
   const run = makeRunRecord({
     id: runId, task: `${filler}\n\nRead ${publication.markdown} now.\n\n${filler}`, title: 'HTML report reader',
@@ -421,8 +438,21 @@ it('renders a report that loads Tailwind and Mermaid from CDNs with the pinned c
     return [s.fontSize, s.fontWeight, s.color, s.borderTopColor, s.paddingTop].join(' ') })()`, value => value.startsWith('30px'))
   // The v3 palette and border default: red-600 is #dc2626, the border gray-200 is #e5e7eb.
   expect(styled).toBe('30px 700 rgb(220, 38, 38) rgb(229, 231, 235) 16px')
+  // A v3 `tailwind.config` script adds its own theme colors.
+  await waitInReport<string>('brand', "getComputedStyle(document.getElementById('brand')).backgroundColor", value => value === 'rgb(18, 52, 86)')
   await waitInReport<string>('diagram', "document.documentElement.dataset.mermaid === 'done' && !!document.querySelector('#diagram svg') ? 'drawn' : ''", value => value === 'drawn')
   expect(browser.count('[data-slot="html-report-blocked"]')).toBe(0)
+})
+
+// ADR 0057: browsers let no page policy govern WebRTC ICE traffic, and Chrome does not know the
+// CSP `webrtc` directive. This pins the known residual channel. When it fails, Chrome blocks it:
+// add `webrtc 'block'` to REPORT_CSP and turn this into a block test.
+it('still lets WebRTC ICE traffic leave the report frame, the residual channel ADR 0057 records', async () => {
+  browser.goto(`${baseUrl}${readerPath()}?artifact=${webrtc.id}`)
+  browser.waitForFunction(`document.querySelector(${JSON.stringify(FRAME)}) !== null`)
+  await waitInReport<string>('rtc', 'document.documentElement.dataset.rtc ?? ""', value => value === 'gathering')
+  await pollFor(() => (existsSync(udpFile) && readFileSync(udpFile, 'utf8').trim() ? true : undefined), () => 'no STUN packet reached the probe')
+  expect(hits()).toEqual([])
 })
 
 // The external link's new tab is not driven here: agent-browser attaches to every new tab and

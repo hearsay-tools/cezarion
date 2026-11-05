@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { TAILWIND_V3_CONFIG_SHIM } from './report-libraries'
 import { isHtmlPath, prepareReport, REPORT_ALLOW, REPORT_CSP, REPORT_SANDBOX, WRAPPER_CSP, wrapReport } from './html-report'
 
 const parse = (srcdoc: string) => new DOMParser().parseFromString(srcdoc, 'text/html')
@@ -151,7 +152,7 @@ describe('prepareReport with report libraries', () => {
   ])('puts the pinned Tailwind code in place of %s', src => {
     const { srcdoc, blocked } = prepareReport(`<head><style>p{}</style><script src="${src}"></script><style>h1{}</style></head><body><p>x</p></body>`, { tailwind: TW, 'tailwind-v3': COMPAT })
     const head = [...parse(srcdoc).head.children].slice(2).map(node => `${node.tagName}:${node.getAttribute('type') ?? ''}:${node.textContent}`)
-    const compat = src.includes('cdn.tailwindcss.com') ? ['STYLE:text/tailwindcss:@theme{}'] : []
+    const compat = src.includes('cdn.tailwindcss.com') ? ['STYLE:text/tailwindcss:@theme{}', `SCRIPT::${TAILWIND_V3_CONFIG_SHIM}`] : []
     expect(head).toEqual(['STYLE::p{}', ...compat, `SCRIPT::${TW}`, 'STYLE::h1{}'])
     expect(blocked.scripts).toBe(0)
   })
@@ -161,6 +162,13 @@ describe('prepareReport with report libraries', () => {
       <script src="https://unpkg.com/mermaid@11.4.0/dist/mermaid.min.js"></script></head><body><pre class="mermaid">graph TD; A-->B</pre></body>`, { mermaid: MERMAID })
     expect(srcdoc).toContain('<pre class="mermaid">graph TD; A--&gt;B</pre><script>/* mermaid <\\/script> */</script></body>')
     expect(parse(srcdoc).querySelectorAll('script')).toHaveLength(1)
+  })
+
+  it('keeps the v3 compat sheet and config API at a deferred v3 tag, and runs the code at the end of body', () => {
+    const { srcdoc } = prepareReport('<head><script defer src="https://cdn.tailwindcss.com"></script><script>tailwind.config = {}</script></head><body><p>x</p></body>', { tailwind: TW, 'tailwind-v3': COMPAT })
+    const doc = parse(srcdoc)
+    expect([...doc.head.children].slice(2).map(node => node.textContent)).toEqual([COMPAT, TAILWIND_V3_CONFIG_SHIM, 'tailwind.config = {}'])
+    expect(doc.body.lastElementChild!.textContent).toBe(TW)
   })
 
   it('maps Mermaid module imports to the inline Mermaid code through an import map', () => {

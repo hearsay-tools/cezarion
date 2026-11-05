@@ -15,6 +15,17 @@ layers, set in `packages/web/src/lib/html-report.ts`:
 | Report CSP, first in `<head>` | `default-src 'none'; script-src 'unsafe-inline' data:` plus `data:` images, media, fonts and inline styles | Every request the document makes: `fetch`, XHR, WebSocket, image beacons, remote scripts, styles and fonts |
 | Wrapper frame | A second sandboxed `srcdoc` frame around the report frame, with the report CSP plus `frame-src 'none'` | Every navigation of the report frame: `location = …` and a meta refresh that a script adds at run time. A CSP does not cover navigations, so without this layer a script could send a request when the report opens |
 
+One channel stays open: **WebRTC**. A report script can create an `RTCPeerConnection` and start
+ICE gathering against a STUN or TURN server it names. Chromium applies neither `connect-src` nor
+`frame-src` to that traffic, Chrome does not know the CSP3 `webrtc 'block'` directive, and no
+Permissions-Policy feature covers WebRTC. A script that removes `RTCPeerConnection` first is not a
+boundary: the report can take a fresh one from a blank child frame of its own origin. So a report
+can send short data (a TURN username) and the viewer's IP address to a server it chooses, for
+example to learn that the report was opened. It still cannot reach the cockpit. The owner accepted
+this residual channel (hearsay-tools/cezarion#2716): the agent that writes a report already has the
+host's network. `html-report-reader.e2e.ts` pins the channel; when Chrome blocks it, add
+`webrtc 'block'` to `REPORT_CSP`.
+
 `script-src` allows `data:` only for the Mermaid import-map shim below. It opens no network path:
 an inline script can already run any code.
 
@@ -39,6 +50,10 @@ The library code loads in a lazy chunk, only for a report that names the library
 the page as an inline script, so no request leaves the frame for it either. Any other remote script
 stays blocked, and the blocked notice counts it as a remote script.
 
+For the v3 Play CDN, the page also gets its `tailwind.config = {…}` API: the setter writes the
+config's `theme` and `theme.extend` keys as a v4 `@theme` sheet, and `darkMode: 'class'` as a
+`dark` variant. Plugins and function values have no v4 browser equivalent and are skipped.
+
 The compat sheet imports Tailwind without cascade layers, as the v3 Play CDN emitted it. It also
 restores the v3 palette, fonts, line heights, the scales v4 renamed and the v3 preflight defaults.
 It was checked against Tailwind 3.4.17 on the four v3 reports published on the development host:
@@ -47,7 +62,7 @@ translucent background.
 
 ## Consequences
 
-A report script can still change its own document, run timers and use the CPU. It cannot reach the
-network, the cockpit or another window. A library outside the table needs a change to this record
+A report script can still change its own document, run timers and use the CPU. Apart from WebRTC,
+it cannot reach the network. It cannot reach the cockpit or another window. A library outside the table needs a change to this record
 and to `report-libraries.ts`. The published package grows by about 3.8 MB for the two libraries.
 The specs in `packages/web/e2e/html-report-reader.e2e.ts` prove each layer on its own.

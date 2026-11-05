@@ -60,6 +60,69 @@ export async function loadLibraries(ids: readonly ReportLibraryId[]): Promise<Re
 }
 
 /**
+ * Gives the page the v3 Play CDN's `tailwind.config = {…}` API. The setter writes the config as a
+ * `text/tailwindcss` sheet right after the compat sheet: `theme` keys replace a v4 theme namespace,
+ * `theme.extend` keys add to it, and `darkMode: 'class'` (or `'selector'`) becomes a `dark`
+ * variant. Plugins and function values have no v4 browser equivalent and are skipped.
+ * Runs in the report page: `TAILWIND_V3_CONFIG_SHIM` is its source, so it uses nothing outside.
+ */
+export function installTailwindConfig(): void {
+  const NAMESPACES: Record<string, string> = {
+    colors: 'color', fontFamily: 'font', fontSize: 'text', fontWeight: 'font-weight', spacing: 'spacing', borderRadius: 'radius',
+    boxShadow: 'shadow', dropShadow: 'drop-shadow', blur: 'blur', screens: 'breakpoint', letterSpacing: 'tracking',
+    lineHeight: 'leading', maxWidth: 'container', animation: 'animate', aspectRatio: 'aspect',
+  }
+  const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+  const declare = (lines: string[], namespace: string, name: string, value: unknown): void => {
+    if (isRecord(value)) {
+      for (const [key, nested] of Object.entries(value)) declare(lines, namespace, key === 'DEFAULT' ? name : name ? `${name}-${key}` : key, nested)
+      return
+    }
+    const variable = name ? `--${namespace}-${name}` : `--${namespace}`
+    if (namespace === 'text' && Array.isArray(value)) {
+      lines.push(`${variable}: ${String(value[0])};`)
+      const leading: unknown = isRecord(value[1]) ? value[1].lineHeight : value[1]
+      if (typeof leading === 'string') lines.push(`${variable}--line-height: ${leading};`)
+      return
+    }
+    if (typeof value === 'string' || typeof value === 'number') lines.push(`${variable}: ${value};`)
+    else if (Array.isArray(value)) lines.push(`${variable}: ${value.join(', ')};`)
+  }
+  const darkVariant = (mode: unknown): string => {
+    const [kind, selector] = Array.isArray(mode) ? mode : [mode]
+    if (kind !== 'class' && kind !== 'selector') return ''
+    const match = typeof selector === 'string' ? selector : '.dark'
+    return `@custom-variant dark (&:where(${match}, ${match} *));\n`
+  }
+  const toSheet = (config: unknown): string => {
+    const settings = isRecord(config) ? config : {}
+    const theme = isRecord(settings.theme) ? settings.theme : {}
+    const lines: string[] = []
+    for (const [key, value] of Object.entries(theme)) {
+      if (!NAMESPACES[key]) continue
+      lines.push(`--${NAMESPACES[key]}-*: initial;`)
+      declare(lines, NAMESPACES[key], '', value)
+    }
+    for (const [key, value] of Object.entries(isRecord(theme.extend) ? theme.extend : {})) if (NAMESPACES[key]) declare(lines, NAMESPACES[key], '', value)
+    return `${darkVariant(settings.darkMode)}@theme {\n${lines.join('\n')}\n}`
+  }
+  const sheet = document.createElement('style')
+  sheet.setAttribute('type', 'text/tailwindcss')
+  document.currentScript?.before(sheet)
+  let current: unknown = {}
+  Object.defineProperty(globalThis, 'tailwind', {
+    configurable: true,
+    value: {
+      get config() { return current },
+      set config(value: unknown) { current = value; sheet.textContent = toSheet(value) },
+    },
+  })
+}
+
+/** The source of `installTailwindConfig`, run as an inline script before the Tailwind code. */
+export const TAILWIND_V3_CONFIG_SHIM = `(${installTailwindConfig.toString()})()`
+
+/**
  * A `text/tailwindcss` sheet that gives Tailwind v4 the v3 Play CDN's look: unlayered output (v3
  * styles beat the report's own CSS of equal specificity), the v3 palette, fonts, line heights and
  * the scales v4 renamed, and the v3 preflight defaults. Checked against v3.4.17 on the reports

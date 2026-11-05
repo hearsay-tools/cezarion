@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { findLibraries, loadLibraries, scriptLibrary, TAILWIND_V3_COMPAT } from './report-libraries'
+import { afterEach, describe, expect, it } from 'vitest'
+import { findLibraries, installTailwindConfig, loadLibraries, scriptLibrary, TAILWIND_V3_COMPAT } from './report-libraries'
 
 describe('scriptLibrary', () => {
   it.each([
@@ -53,5 +53,58 @@ describe('TAILWIND_V3_COMPAT', () => {
     expect(TAILWIND_V3_COMPAT).not.toMatch(/layer\(/)
     expect(TAILWIND_V3_COMPAT).toContain('--color-red-600:#dc2626;')
     expect(TAILWIND_V3_COMPAT.match(/--color-[a-z]+-\d+:#[\da-f]{6};/g)).toHaveLength(242)
+  })
+})
+
+describe('installTailwindConfig', () => {
+  const install = () => {
+    document.head.innerHTML = '<script id="shim"></script>'
+    Object.defineProperty(document, 'currentScript', { configurable: true, value: document.getElementById('shim') })
+    installTailwindConfig()
+    return (globalThis as unknown as { tailwind: { config: unknown } }).tailwind
+  }
+  afterEach(() => { Reflect.deleteProperty(document, 'currentScript'); Reflect.deleteProperty(globalThis, 'tailwind') })
+
+  it('writes the config as a Tailwind v4 theme sheet just before its own script', () => {
+    const tailwind = install()
+    const config = {
+      darkMode: 'class',
+      plugins: [() => {}],
+      theme: {
+        colors: { ink: '#111', brand: { DEFAULT: '#123456', 500: '#654321' } },
+        extend: {
+          fontFamily: { display: ['"Open Sans"', 'sans-serif'] },
+          fontSize: { tiny: ['0.6rem', { lineHeight: '0.8rem' }], huge: ['5rem', '1'], plain: '1.1rem' },
+          spacing: { 18: '4.5rem' }, borderRadius: { blob: '2rem' }, zIndex: { 60: 60 }, colors: { accent: () => 'red' },
+        },
+      },
+    }
+    tailwind.config = config
+    expect(tailwind.config).toBe(config)
+    const sheet = document.head.firstElementChild!
+    expect(sheet.getAttribute('type')).toBe('text/tailwindcss')
+    expect(sheet.nextElementSibling!.id).toBe('shim')
+    expect(sheet.textContent).toBe([
+      '@custom-variant dark (&:where(.dark, .dark *));',
+      '@theme {', '--color-*: initial;', '--color-ink: #111;', '--color-brand-500: #654321;', '--color-brand: #123456;',
+      '--font-display: "Open Sans", sans-serif;', '--text-tiny: 0.6rem;', '--text-tiny--line-height: 0.8rem;', '--text-huge: 5rem;',
+      '--text-huge--line-height: 1;', '--text-plain: 1.1rem;', '--spacing-18: 4.5rem;', '--radius-blob: 2rem;', '}',
+    ].join('\n'))
+  })
+
+  it.each([
+    [['selector', '[data-theme="dark"]'], '@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));\n'],
+    ['media', ''],
+    [undefined, ''],
+  ])('maps darkMode %j', (darkMode, variant) => {
+    const tailwind = install()
+    tailwind.config = { darkMode }
+    expect(document.head.firstElementChild!.textContent).toBe(`${variant}@theme {\n\n}`)
+  })
+
+  it('tolerates a config that is not an object', () => {
+    const tailwind = install()
+    tailwind.config = null
+    expect(document.head.firstElementChild!.textContent).toBe('@theme {\n\n}')
   })
 })
