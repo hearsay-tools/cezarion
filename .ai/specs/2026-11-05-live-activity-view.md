@@ -8,9 +8,7 @@ changes, without a reload and without a poll in local mode.
 Plan: [2026-11-05-live-activity-view-plan.md](2026-11-05-live-activity-view-plan.md).
 Prototype (accepted by the owner on 2026-11-05):
 [assets/2026-11-05-live-activity-view/prototype.html](assets/2026-11-05-live-activity-view/prototype.html).
-Open it in a browser. It runs a scripted 50-second loop with sample data. Stills:
-[project.jpg](assets/2026-11-05-live-activity-view/project.jpg),
-[global.jpg](assets/2026-11-05-live-activity-view/global.jpg).
+Open it in a browser. It runs a scripted 50-second loop with sample data.
 
 ## Decisions
 
