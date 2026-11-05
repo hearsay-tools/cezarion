@@ -138,3 +138,12 @@ describe('workerLine', () => {
     expect(workerLine(worker({ status: RUN_STATUS.done, rung: 'done' }), ctx, 'late question').verb).toBe('Done')
   })
 })
+
+describe('rootNow: the check summary', () => {
+  it('summarizes the checks in words for screen readers, with the unlisted ones', () => {
+    expect(rootNow(STATE_TABLE.find(([name]) => name === 'waiting for CI')![1], ctx).checkSummary).toBe('6 passed, 3 pending, 1 skipped, 1 cancelled')
+    const listed = Array.from({ length: 100 }, (_, i) => ({ name: `c${String(i).padStart(3, '0')}`, bucket: 'pass' as const }))
+    const truncated = waiting('waiting-for-ci', { kind: ACTIVITY_WAIT_KIND.pr, since: iso(-1_000), deadline: iso(900_000), detail: { number: 9, target: 'checks', checks: listed, counts: { pass: 100, fail: 1, pending: 1, skipping: 0, cancel: 0 }, truncated: true } })
+    expect(rootNow(truncated, ctx).checkSummary).toBe('100 passed, 1 failed, 1 pending, +2 more not listed')
+  })
+})

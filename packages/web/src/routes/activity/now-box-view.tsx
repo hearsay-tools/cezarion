@@ -67,6 +67,7 @@ export function NowBoxView({ box, now, dense }: { box: NowBox; now: number; dens
         {box.main}
       </span>
       {box.checks ? <CheckSegments checks={box.checks} overflow={box.overflow} /> : null}
+      {box.checkSummary ? <span data-slot="activity-checks-summary" className="sr-only">{box.checkSummary}</span> : null}
       {box.bar !== undefined ? <Bar value={box.bar} ink={ink} /> : null}
       {box.detail && !dense ? (
         <span data-slot="activity-detail" className="col-start-2 text-[11.5px] text-muted-foreground tabular-nums">

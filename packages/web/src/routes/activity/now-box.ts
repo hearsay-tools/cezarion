@@ -30,6 +30,8 @@ export interface NowBox {
   checks?: ActivityPrProgress['checks']
   /** A truncated check list: the checks outside it, as one more segment in the worst tone. */
   overflow?: CheckOverflow
+  /** The segments in words, for screen readers: "6 passed, 1 failed, 2 pending". */
+  checkSummary?: string
   /** The button under the box: Answer opens the question, Open the task. */
   action?: 'answer' | 'open'
 }
@@ -125,11 +127,24 @@ export function checkOverflow(wait: Extract<ActivityWait, { kind: 'pr' }>): Chec
   return count > 0 && bucket ? { count, bucket } : undefined
 }
 
+const SUMMARY_WORDS: readonly (readonly [ActivityCheckBucket, string])[] = [['pass', 'passed'], ['fail', 'failed'], ['pending', 'pending'], ['skipping', 'skipped'], ['cancel', 'cancelled']]
+
+/** Every check by bucket, in words, from `counts` (or the list before the first count), and the
+ *  checks a truncated list leaves out. */
+export function checkSummary(wait: Extract<ActivityWait, { kind: 'pr' }>): string | undefined {
+  const { counts, checks } = wait.detail
+  const count = (bucket: ActivityCheckBucket) => counts ? counts[bucket] : (checks ?? []).filter((check) => check.bucket === bucket).length
+  const parts = SUMMARY_WORDS.filter(([bucket]) => count(bucket) > 0).map(([bucket, word]) => `${count(bucket)} ${word}`)
+  const overflow = checkOverflow(wait)
+  if (overflow) parts.push(`+${overflow.count} more not listed`)
+  return parts.length > 0 ? parts.join(', ') : undefined
+}
+
 function pullRequest(run: ActivityRun, wait: Extract<ActivityWait, { kind: 'pr' }>): NowBox {
   const base = { tone: toneOf(run), since: wait.since, ...defined('detail', deadlineDetail(wait.deadline)) }
   if (wait.detail.target !== 'checks') return { ...base, verb: 'Waiting for merge', icon: 'merge', main: `PR ${wait.detail.number}` }
   const checks = wait.detail.checks ? [...wait.detail.checks].sort((a, b) => a.name.localeCompare(b.name)) : undefined
-  return { ...base, verb: 'Waiting for CI', icon: 'ci', main: checksLine(wait), ...defined('checks', checks), ...defined('overflow', checkOverflow(wait)) }
+  return { ...base, verb: 'Waiting for CI', icon: 'ci', main: checksLine(wait), ...defined('checks', checks), ...defined('overflow', checkOverflow(wait)), ...defined('checkSummary', checkSummary(wait)) }
 }
 
 function defined<K extends string, V>(key: K, value: V | undefined): { [P in K]?: V } {

@@ -119,6 +119,15 @@ describe('ActivityBoard', () => {
     expect(within(card('turn')).getByRole('link', { name: 'Open task' })).toBeTruthy()
   })
 
+  it('reads the check segments out as a summary of passed, failed and pending checks', () => {
+    const ci = run({ runId: 'ci', status: RUN_STATUS.waiting, rung: 'waiting-for-ci', wait: { kind: ACTIVITY_WAIT_KIND.pr, since: iso(-1_000), deadline: iso(900_000), detail: {
+      number: 7, target: 'checks', checks: [{ name: 'a', bucket: 'pass' }, { name: 'b', bucket: 'fail' }, { name: 'c', bucket: 'pending' }], counts: { pass: 1, fail: 1, pending: 1, skipping: 0, cancel: 0 },
+    } } })
+    renderBoard(project({ tasks: [ci] }))
+    expect(card('ci').querySelector('[data-slot="activity-checks"]')?.getAttribute('aria-hidden')).toBe('true')
+    expect(card('ci').querySelector('[data-slot="activity-checks-summary"]')?.textContent).toBe('1 passed, 1 failed, 1 pending')
+  })
+
   describe('dense mode', () => {
     const cards = (n: number) => Array.from({ length: n }, (_, i) => run({
       runId: `t${i}`,
