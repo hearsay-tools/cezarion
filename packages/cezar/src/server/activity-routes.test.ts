@@ -1,6 +1,6 @@
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { activitySnapshotSchema } from '@open-mercato/cezar-contract/activity';
 import { ActivityDemand } from '../activity/demand.ts';
@@ -100,6 +100,21 @@ describe('workspace activity API', () => {
     const scoped = await get(`/api/v1/workspace/activity?project=${boot.id}`);
     expect(scoped.status).toBe(409);
     expect(await scoped.json()).toEqual({ error: failure.message });
+  });
+
+  it('keeps an unregistered boot project when the registry reads fine', async () => {
+    const other = await registerProject(otherRoot);
+    const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
+    const contexts = new ProjectContexts({ listProjects });
+
+    const body = activitySnapshotSchema.parse(await (await get('/api/v1/workspace/activity', contexts)).json());
+
+    expect(body.projects.map((project) => [project.name, project.loaded, project.tasks.map((task) => task.runId)]))
+      .toEqual([[basename(repoRoot), true, [run.id]], [other.name, false, []]]);
+    expect(body.projects[1]!.projectId).toBe(other.id);
+    expect(body.projects[0]!.projectId).not.toBe(other.id);
+    expect(contexts.ids()).toEqual([]);
+    contexts.disposeAll();
   });
 
   it('keeps the boot project when the registry cannot be read', async () => {

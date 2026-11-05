@@ -63,15 +63,14 @@ export function createActivityRoutes({ bootContext, contexts, workspaceProjects,
       return c.json(snapshot([loadedSource(project, projectName(await visibleProjects(), project.id, project.root))]), 200);
     }
     const projects = await visibleProjects();
-    if (!projects) {
-      // An unreadable registry still shows the boot project this process runs, loaded or unavailable.
-      const bootId = await workspaceProjects.resolveBootProject();
-      return c.json(snapshot([loadedSource({ ...bootContext, id: bootId }, projectName(undefined, bootId, bootContext.root))]), 200);
-    }
     const bootId = await workspaceProjects.resolveBootProject(projects);
-    return c.json(snapshot(projects.map((entry) => {
+    const sources = (projects ?? []).map((entry) => {
       const owned = entry.id === bootId ? { ...bootContext, id: bootId } : contexts.peek(entry.id);
       return owned ? loadedSource(owned, entry.name) : { projectId: entry.id, name: entry.name };
-    })), 200);
+    });
+    // The boot project this process runs is always in the snapshot, loaded or unavailable: also
+    // when it is not registered, or when the registry cannot be read. It comes first.
+    if (!projects?.some((entry) => entry.id === bootId)) sources.unshift(loadedSource({ ...bootContext, id: bootId }, projectName(undefined, bootId, bootContext.root)));
+    return c.json(snapshot(sources), 200);
   });
 }
