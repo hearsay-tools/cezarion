@@ -75,7 +75,7 @@ export const ciWaitResultSchema = z.object({
   totalChecks: z.number().int().nonnegative(),
   truncated: z.boolean(),
   diagnostic: z.string().max(4096).refine(value => utf8Bytes(value) <= 4096).optional(),
-}).strict().refine(value => (value.outcome === 'blocked') === (value.mergeBlock !== undefined), 'Only blocked outcomes require mergeBlock')
+}).strict().refine(value => { return (value.outcome === 'blocked') === (value.mergeBlock !== undefined); }, 'Only blocked outcomes require mergeBlock')
   .refine(value => utf8Bytes(JSON.stringify(value)) <= 32 * 1024, 'CI result exceeds 32 KiB');
 export type CiWaitResult = z.infer<typeof ciWaitResultSchema>;
 export const ciWaitSchema = ciPrIdentitySchema.extend({

@@ -15,8 +15,15 @@ lets the owner trace a dev-channel problem to its PR and revert it with one
 Follow the PR as usual: wait for CI, fix failures, answer review threads. The
 readiness workflow marks the PR ready when every required check passes and no
 thread is open; leave that change to it. Read
-`gh pr view <n> --json state,isDraft,autoMergeRequest,isInMergeQueue,headRefOid,labels` and act on
-the first row that matches:
+`gh pr view <n> --json state,isDraft,autoMergeRequest,headRefOid,labels`.
+Read queue membership separately with GraphQL (the `gh pr view --json` field list
+does not include it):
+
+```bash
+gh api graphql -f owner='<owner>' -f repo='<repo>' -F number=<n> -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){isInMergeQueue}}}' --jq '.data.repository.pullRequest.isInMergeQueue'
+```
+
+Act on the first row that matches:
 
 | State | Action |
 | --- | --- |

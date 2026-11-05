@@ -20,6 +20,7 @@ it('reads pending merge state and the latest rejection in one bounded structured
 it.each([
   { isInMergeQueue: true },
   { autoMergeRequest: { enabledAt: '2026-11-04T07:00:00Z' } },
+  { autoMergeRequest: { enabledAt: null } },
 ])('retains current pending state despite an older removal: %j', async patch => {
   const result = await client(patch).mergeProgress(pr, new AbortController().signal);
   expect(result.mergeRequest).toMatchObject({ isInMergeQueue: patch.isInMergeQueue === true, autoMergeEnabled: !!patch.autoMergeRequest });
@@ -62,4 +63,10 @@ it('uses the validated PR identity and requests only the latest lifecycle event'
 it('supports dry-run progress without a network request', async () => {
   const github = new GithubCiClient({ env: { ...process.env, CEZ_DRY_RUN: '1' } });
   expect(await github.mergeProgress(pr, new AbortController().signal)).toMatchObject({ state: 'MERGED' });
+});
+
+it('accepts a queue removal without an optional reason', async () => {
+  const event = { __typename: 'RemovedFromMergeQueueEvent', createdAt: '2026-11-04T06:33:39Z', reason: null };
+  const result = await client({ timelineItems: { nodes: [event] } }).mergeProgress(pr, new AbortController().signal);
+  expect(result.mergeRequest.event).toEqual({ kind: 'queue_removal', createdAt: event.createdAt });
 });

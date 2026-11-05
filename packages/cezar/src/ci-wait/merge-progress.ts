@@ -6,14 +6,14 @@ const cleanReason = z.string().transform(value => value
   .replace(/[\x00-\x1f\x7f-\x9f]/g, '').slice(0, 256));
 const createdAt = z.iso.datetime({ offset: true });
 const eventSchema = z.discriminatedUnion('__typename', [
-  z.object({ __typename: z.literal('RemovedFromMergeQueueEvent'), createdAt, reason: cleanReason }),
+  z.object({ __typename: z.literal('RemovedFromMergeQueueEvent'), createdAt, reason: cleanReason.nullable() }),
   z.object({ __typename: z.literal('AutoMergeDisabledEvent'), createdAt, reason: cleanReason.nullable(), reasonCode: cleanReason.nullable() }),
   z.object({ __typename: z.enum(['AddedToMergeQueueEvent', 'AutoMergeEnabledEvent']), createdAt }),
 ]);
 const progressSchema = z.object({
   state: z.enum(['OPEN', 'CLOSED', 'MERGED']),
   isInMergeQueue: z.boolean(),
-  autoMergeRequest: z.object({ enabledAt: createdAt }).nullable(),
+  autoMergeRequest: z.object({ enabledAt: createdAt.nullable() }).nullable(),
   timelineItems: z.object({ nodes: z.array(eventSchema).max(1) }),
 });
 export const mergeProgressResponseSchema = z.object({
@@ -44,7 +44,7 @@ export function mergeProgressArgs(pr: CiPrIdentity): string[] {
 export function mergeRequestObservation(value: z.infer<typeof progressSchema>) {
   const latest = value.timelineItems.nodes[0];
   const event = latest?.__typename === 'RemovedFromMergeQueueEvent'
-    ? { kind: 'queue_removal' as const, createdAt: latest.createdAt, reason: latest.reason }
+    ? { kind: 'queue_removal' as const, createdAt: latest.createdAt, ...(latest.reason === null ? {} : { reason: latest.reason }) }
     : latest?.__typename === 'AutoMergeDisabledEvent'
       ? { kind: 'auto_merge_disabled' as const, createdAt: latest.createdAt,
         ...(latest.reason === null ? {} : { reason: latest.reason }), ...(latest.reasonCode === null ? {} : { reasonCode: latest.reasonCode }) }
