@@ -203,6 +203,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
 
   it('claude staggered timers at 39 spent wakes: the first wakes at 40, the second is cancelled with the cap note and wakes nothing', async () => {
     nativeWire('claude');
+    vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(1);
     const { run, waits: [first, second] } = await parkedOnTimers({ seconds: 60, note: 'first' }, { seconds: 120, note: 'second' });
     store.updateRun(run.id, { automaticWakes: 39 });
     const turns = turnEnds(run.id);
@@ -224,6 +225,11 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     // (hearsay-tools/cezarion#1234).
     expect(store.getRun(run.id)?.waits).toMatchObject([{ kind: WAIT_KIND.human, via: WAIT_VIA.budget, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open }]);
     expect(label(run.id)).toBe('needs you');
+    // A competing monitoring park takes the one pool exemption. If the capped run stayed
+    // in the pool, these two live parks would hold one regular slot instead of none.
+    const { run: competitor, waits: [competingWait] } = await parkedOnTimers({ seconds: 7200, note: 'competing park' });
+    expect(waitById(competitor.id, competingWait.id)?.phase).toBe('open');
+    await Promise.all([...work.pending].filter(([, label]) => label === 'pump').map(([task]) => task));
     expect(semaphore.busy()).toBe(0);
   });
 
