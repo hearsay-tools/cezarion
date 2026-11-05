@@ -92,6 +92,8 @@ describe('peer waits (R9)', { timeout: 45_000 }, () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('running → waiting:peer: the turn end parks on the peer wait with no slot, the idle timer armed, and reads waiting on 1 task', async () => {
+    // With no monitoring exemption, a pool member costs one slot and a peer park costs none.
+    vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(0);
     const clock = observationClock(delay => delay === IDLE_TIMEOUT_MS && /armIdleTimer/.test(new Error().stack ?? ''));
     const { a, entry } = await parkedOnPeer();
     const run = store.getRun(a)!;
