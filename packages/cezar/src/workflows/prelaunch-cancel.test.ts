@@ -190,11 +190,11 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     const revokeCiTools = vi.fn();
     const revokeDelegation = vi.fn();
     const previous = createActiveRun({ cwd: p.root, pendingHumanAsk: false, autonomous: false });
-    previous.revokeCiTools = vi.fn();
-    previous.revokeDelegation = vi.fn();
+    previous.liveSession.installCiRevoker(vi.fn());
+    previous.liveSession.installDelegationRevoker(vi.fn());
     const replacement = createActiveRun({ cwd: p.root, pendingHumanAsk: false, autonomous: false });
-    replacement.revokeCiTools = revokeCiTools;
-    replacement.revokeDelegation = revokeDelegation;
+    replacement.liveSession.installCiRevoker(revokeCiTools);
+    replacement.liveSession.installDelegationRevoker(revokeDelegation);
     const active = new Map([[record.id, previous]]);
     const context = unused<RunModuleContext>('launch context', { store: p.store });
     const helper = unused<SessionHelperHost>('launch helper', { active,
@@ -203,8 +203,8 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     const toolsGate = new Promise<void>(resolve => { releaseTools = resolve; });
     let toolsEntered!: () => void;
     const entered = new Promise<void>(resolve => { toolsEntered = resolve; });
-    const delegation = unused<NonNullable<Awaited<ReturnType<LaunchPreambleHost['provisionSession']>>>>('delegation', { revoke: previous.revokeDelegation! });
-    const ciTools = { descriptor: unused<NonNullable<Awaited<ReturnType<LaunchPreambleHost['provisionCiSession']>>>['descriptor']>('CI descriptor'), env: {}, revoke: previous.revokeCiTools! };
+    const delegation = unused<NonNullable<Awaited<ReturnType<LaunchPreambleHost['provisionSession']>>>>('delegation', { revoke: previous.liveSession.revokeDelegation! });
+    const ciTools = { descriptor: unused<NonNullable<Awaited<ReturnType<LaunchPreambleHost['provisionCiSession']>>>['descriptor']>('CI descriptor'), env: {}, revoke: previous.liveSession.revokeCiTools! };
     const host: LaunchPreambleHost = {
       provisionSession: () => delegation,
       agentWebhooksPart: async () => undefined,
@@ -217,13 +217,13 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     const before = p.store.getRun(record.id);
     releaseTools();
     expect((await completion).stale).toBe(true);
-    expect(previous.revokeCiTools).toBeUndefined();
-    expect(previous.revokeDelegation).toBeUndefined();
+    expect(previous.liveSession.revokeCiTools).toBeUndefined();
+    expect(previous.liveSession.revokeDelegation).toBeUndefined();
     expect(ciTools.revoke).toHaveBeenCalledTimes(1);
     expect(delegation.revoke).toHaveBeenCalledTimes(1);
     expect(active.get(record.id)).toBe(replacement);
-    expect(replacement.revokeCiTools).toBe(revokeCiTools);
-    expect(replacement.revokeDelegation).toBe(revokeDelegation);
+    expect(replacement.liveSession.revokeCiTools).toBe(revokeCiTools);
+    expect(replacement.liveSession.revokeDelegation).toBe(revokeDelegation);
     expect(revokeCiTools).not.toHaveBeenCalled();
     expect(revokeDelegation).not.toHaveBeenCalled();
     expect(p.store.getRun(record.id)).toEqual(before);
@@ -241,8 +241,8 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     const revokeDelegation = vi.fn();
     // Inject only the replacement authority; the stale launch must leave it untouched.
     const replacement = createActiveRun({ cwd: p.root, pendingHumanAsk: false, autonomous: false });
-    replacement.revokeCiTools = revokeCiTools;
-    replacement.revokeDelegation = revokeDelegation;
+    replacement.liveSession.installCiRevoker(revokeCiTools);
+    replacement.liveSession.installDelegationRevoker(revokeDelegation);
     active.set(id, replacement);
     setRunStatus(p.store, id, RUN_STATUS.waiting, { stopping: undefined });
     const completion = executionWork(p, 'Continue');
