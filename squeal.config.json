@@ -21,6 +21,9 @@
     ],
     "exclude": []
   },
+  "checks": [
+    { "name": "lint", "lint": true, "at": "stop" }
+  ],
   "complexity": {
     "enabled": true
   },
