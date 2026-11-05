@@ -69,11 +69,10 @@ test('trusted no-files admission returns immediately and still requires resolved
   assert.equal(blocked.reason, 'unresolved-threads');
 });
 
-for (const state of ['missing', 'queued', 'in_progress']) {
+for (const state of ['queued', 'in_progress']) {
   test(`persistent ${state} review reaches the fixed deadline and blocks admission`, async () => {
     const h = fixture(), start = h.now(); let polls = 0;
-    if (state === 'missing') h.s.checks = [];
-    else { h.s.checks[0].status = state; h.s.checks[0].conclusion = null; }
+    h.s.checks[0].status = state; h.s.checks[0].conclusion = null;
     const result = await wait(h, { sleep: async ms => { polls++; await h.sleep(ms); } });
     assert.equal(result.admitted, false);
     assert.equal(result.reason, 'provider-wait-timeout');
@@ -83,6 +82,37 @@ for (const state of ['missing', 'queued', 'in_progress']) {
     assert.equal(h.s.calls.filter(([route]) => route.endsWith('/commits/{ref}/check-runs')).length, 80);
   });
 }
+
+test('missing check fails after its three-minute grace with manual recovery', async () => {
+  const h = fixture(), start = h.now(); h.s.checks = [];
+  const result = await wait(h);
+  assert.equal(h.now() - start, 3 * 60 * 1000);
+  assert.equal(result.admitted, false);
+  assert.equal(result.reason, 'provider-missing-timeout');
+  assert.match(result.action, /@coderabbitai full review/);
+  assert.match(result.action, /Reconcile CodeRabbit admission.*pr_number/);
+});
+
+test('missing-check grace counts API time and clips the next sleep', async () => {
+  const h = fixture(), start = h.now(); h.s.checks = [];
+  h.s.onRead = () => { h.s.clock += 4000; };
+  const sleeps = [];
+  const result = await wait(h, { sleep: async ms => { sleeps.push(ms); await h.sleep(ms); } });
+  assert.equal(result.reason, 'provider-missing-timeout');
+  assert.equal(h.now() - start, 200000);
+  assert.deepEqual(sleeps, [30000, 30000, 30000, 10000]);
+});
+
+test('check appearing just before grace expiry retains the overall pending budget', async () => {
+  const h = fixture(), start = h.now(), check = structuredClone(h.s.checks[0]); h.s.checks = [];
+  const result = await wait(h, { sleep: async ms => {
+    await h.sleep(ms);
+    if (h.now() - start === 150000) h.s.checks = [{ ...check, status: 'in_progress', conclusion: null }];
+    if (h.now() - start === 1170000) Object.assign(h.s.checks[0], { status: 'completed', conclusion: 'success' });
+  } });
+  assert.equal(result.admitted, true);
+  assert.equal(h.now() - start, 1170000);
+});
 
 test('poll count bounds the wait even if the clock does not advance', async () => {
   const h = fixture(); h.s.checks = []; let polls = 0;
@@ -103,7 +133,7 @@ test('each snapshot keeps short request limits and clips them to the overall dea
 });
 
 test('snapshot API time counts toward the overall wait', async () => {
-  const h = fixture(), start = h.now(); h.s.checks = [];
+  const h = fixture(), start = h.now(); h.s.checks[0].status = 'in_progress';
   h.s.onRead = () => { h.s.clock += 5000; };
   const result = await wait(h);
   assert.equal(result.admitted, false);
@@ -112,7 +142,7 @@ test('snapshot API time counts toward the overall wait', async () => {
 });
 
 test('overall deadline reached during a request returns a normal blocked result', async () => {
-  const h = fixture(), start = h.now(); h.s.checks = [];
+  const h = fixture(), start = h.now(); h.s.checks[0].status = 'in_progress';
   const result = await wait(h, { sleep: async () => {
     h.s.clock = start + 20 * 60 * 1000 - 25;
     h.s.onRead = () => { h.s.clock += 26; };
@@ -128,7 +158,7 @@ test('snapshot deadline before the overall deadline remains an error', async () 
 });
 
 test('request abort at the overall deadline returns a normal blocked result', async () => {
-  const h = fixture(), start = h.now(); h.s.checks = [];
+  const h = fixture(), start = h.now(); h.s.checks[0].status = 'in_progress';
   const request = h.github.request;
   h.github.request = async (...args) => {
     if (h.now() > start) {
