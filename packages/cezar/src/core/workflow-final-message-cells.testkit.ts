@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as realDelay } from 'node:timers/promises';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 import { FINAL_MESSAGE_CRITERIA, HARNESS_ADAPTERS, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
@@ -16,6 +16,13 @@ import { watchTurnOutcomes } from '../workflows/turn-outcomes.testkit.ts';
 function replyObservationClock() {
   return observationClock(delay => delay === 300 &&
     /\bat (?:[^ (\n]+\.)?armNoWaitNudgeReplyTimer \(/.test(new Error().stack ?? ''));
+}
+
+// A plain park must stay outside the pool even when its default exemption would hide it.
+function expectParkedOutsidePool(semaphore: WorkspaceSemaphore): void {
+  const limit = vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(0);
+  try { expect(semaphore.busy()).toBe(0); }
+  finally { limit.mockRestore(); }
 }
 
 // Poll native process/store signals while the product's reply clock is frozen.
@@ -145,7 +152,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               await waitForNativeContent(() => store.getRun(runId)?.status === 'waiting');
               expect(clock.captured).toBe(1);
             } finally { clock.restore(); }
-            expect(semaphore.busy()).toBe(0);
+            expectParkedOutsidePool(semaphore);
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(noReplyNotes(store.readEvents(runId))).toHaveLength(1);
             expect(turns.words(runId)).toContain('waiting');
@@ -174,7 +181,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               manager.enqueueOwnedRun(runId);
               await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
               expect(store.getRun(runId)?.status).toBe('waiting');
-              expect(semaphore.busy()).toBe(0);
+              expectParkedOutsidePool(semaphore);
               // The native reply stays blocked until parking and slot release are observed.
               // Capture the resumed slot in the store callback: DONE can follow in the same tick.
               let resumedSlots: number | undefined;
@@ -213,7 +220,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               manager.enqueueOwnedRun(runId);
               await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
               expect(store.getRun(runId)?.status).toBe('waiting');
-              expect(semaphore.busy()).toBe(0);
+              expectParkedOutsidePool(semaphore);
               const parkedSeq = store.readEvents(runId).length;
               // The mock waits for observed parking instead of racing a 200 ms window.
               writeFileSync(release, 'go');
