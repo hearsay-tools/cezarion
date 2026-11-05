@@ -260,6 +260,7 @@ export function makeUiSink(context: RunModuleContext, host: SessionHelperHost, r
   return new UiEventSink({
     persist: (event) => context.store.appendEvent(runId, { ...event, stepId }),
     emitLive: (event) => context.store.emitEphemeral(runId, { ...event, stepId }),
+    ...(context.toolActivity ? { observe: (event: UiEvent) => context.toolActivity?.observe(runId, event) } : {}),
   });
 }
 

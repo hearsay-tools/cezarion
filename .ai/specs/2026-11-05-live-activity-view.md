@@ -382,7 +382,10 @@ An in-memory `ToolActivityTracker` keyed by run id, fed by the UI event sink
   example `packages/cezar/src/core/opencode-ui-mapper.ts`); that item counts once, with
   `startedAt` and `endedAt` both at its event time.
 - A later `item.updated` of the latest tool that is not terminal replaces its `title`
-  (mappers replace placeholder titles) and does not count again.
+  (mappers replace placeholder titles) and its `status` (pending to running), and does
+  not count again. A tool item stays known until its `item.completed`, so an
+  `item.updated` to a terminal status followed by the completion counts once and keeps
+  the first `endedAt`.
 - `item.completed`, or `item.updated` to a terminal status, of the latest tool: set
   `status` and `endedAt`, and take its `title` when the event carries one (the omp
   mapper sets the final title of some edits only at completion:
@@ -391,7 +394,13 @@ An in-memory `ToolActivityTracker` keyed by run id, fed by the UI event sink
 - A run that leaves the active set is dropped from the tracker. A restart starts the
   tracker empty (D6).
 - Every runner emits tool items (AGENT_PROTOCOL.md §6 matrix). Hook telemetry and
-  background subagents are not tool calls and do not count.
+  background subagents are not tool calls and do not count. An event whose item carries
+  `background: true` never counts and never becomes the latest tool. Claude marks the
+  spawn call background only after the call returns, so that call has counted once at
+  its start; when it is still the latest tool, the flag ends it (`completed`, `endedAt`
+  at the flag's event). Codex marks the item background from its first event, so it
+  never counts. Child items of a subagent (`parentItemId`) are tool calls of the run
+  and count.
 - The title is the one the task thread already shows, clamped to 160 characters. The
   tracker stores no tool input or output.
 

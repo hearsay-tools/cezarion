@@ -42,7 +42,7 @@ import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { CheckoutProgressCache } from './checkout-progress.ts';
 import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract/projects';
 import { createLiveRoutes } from './live-routes.ts';
-import { createActivityRoutes } from './activity-routes.ts';
+import { createActivityRoutes, type ActivityServerDeps } from './activity-routes.ts';
 import { createWorkspaceProjects, createWorkspaceProjectContexts, createTaskWebhooks, type WorkspaceProjects } from './workspace-projects.ts';
 import { subscribeRunFeed } from './run-event-feed.ts';
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
@@ -310,7 +310,7 @@ import {
   resolveGetRequest,
 } from './static-ui.ts';
 
-export interface ServerDeps extends SelfUpdateServerDeps {
+export interface ServerDeps extends SelfUpdateServerDeps, ActivityServerDeps {
   /** Per-repository forge injection for embedded servers and tests. */
   forgeFactory?: ForgeFactory;
   /** CLI lifetime ownership, shared with secondary project contexts. */
@@ -5168,7 +5168,7 @@ export function createApp(deps: ServerDeps) {
     .route('/', fsBrowseRoutes)
     .route('/', automationChecksRoutes)
     .route('/', runsIndexRoutes)
-    .route('/', createActivityRoutes({ bootContext, contexts, workspaceProjects }))
+    .route('/', createActivityRoutes({ bootContext, contexts, workspaceProjects, toolActivity: deps.toolActivity }))
     .route('/', workspaceEventsRoutes);
 
   // ---- mount ---------------------------------------------------------------
