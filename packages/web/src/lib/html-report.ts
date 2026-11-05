@@ -33,6 +33,7 @@ export function isHtmlPath(path: string): boolean {
 
 const NEW_TAB = /^(?:https?:|mailto:)/i
 const DATA = /^data:/i
+const XLINK = 'http://www.w3.org/1999/xlink'
 const REMOTE = /^(?:[a-z][a-z\d+.-]*:|\/\/)/i
 const CSS_URL = /url\(\s*(['"]?)([^'")]*)\1\s*\)|@import\s+(['"])([^'"]+)\3/gi
 const RESOURCE_ATTRS = ['src', 'href', 'xlink:href', 'poster', 'background'] as const
@@ -64,6 +65,11 @@ function tailwindCompat(doc: Document, sheet: string): HTMLStyleElement {
   return style
 }
 
+/** Where a script loads its code from: `src`, or `href` / `xlink:href` on an SVG script; null when inline. */
+function scriptSource(script: Element): string | null {
+  return script.getAttribute('src') ?? script.getAttribute('href') ?? script.getAttributeNS(XLINK, 'href')
+}
+
 /**
  * Puts a library's code in place of its CDN tag; a deferred tag's code runs at the end of `<body>`.
  * The v3 compat sheet and the `tailwind.config` API stay where the tag was, so a config script
@@ -78,7 +84,8 @@ function placeLibrary(doc: Document, script: HTMLScriptElement, code: string, v3
 }
 
 /**
- * Keeps inline scripts. Removes every remote `<script src>` and counts it, except a library from
+ * Keeps inline scripts and `data:` scripts. Removes every remote script (`src`, or an SVG script's
+ * `href`) and counts it, except a library from
  * `report-libraries.ts`, whose pinned code takes the tag's place. A deferred tag's code moves to
  * the end of `<body>`, so it runs after the document's own styles, as the deferred tag would.
  * A Mermaid ES module import resolves through an import map to the same code.
@@ -87,7 +94,8 @@ function placeScripts(doc: Document, blocked: BlockedContent, libraries: ReportL
   const placed = new Set<ReportLibraryId>()
   const imports = new Set<string>()
   for (const script of [...doc.querySelectorAll('script')]) {
-    const src = script.getAttribute('src')
+    const src = scriptSource(script)
+    if (src !== null && DATA.test(src.trim())) continue
     if (src === null) {
       if (script.getAttribute('type') === 'module') for (const match of (script.textContent ?? '').matchAll(MERMAID_IMPORT)) imports.add(match[2]!)
       continue
@@ -120,8 +128,6 @@ function removeActive(doc: Document, blocked: BlockedContent, libraries: ReportL
   for (const form of doc.querySelectorAll('form')) { blocked.forms++; form.removeAttribute('action') }
   for (const control of doc.querySelectorAll('[formaction]')) control.removeAttribute('formaction')
 }
-
-const XLINK = 'http://www.w3.org/1999/xlink'
 
 
 /** `#anchors` scroll the report, web and mail links open a new tab, every other link is inert.

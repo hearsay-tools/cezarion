@@ -49,6 +49,16 @@ describe('prepareReport', () => {
     expect(blocked.embeds).toBe(3)
   })
 
+  it('reads a script source from src, or href and xlink:href on SVG, and keeps data URL sources', () => {
+    const XLINK = 'http://www.w3.org/1999/xlink'
+    const { srcdoc, blocked } = prepareReport(`<script src="data:text/javascript,window.a=1"></script>
+      <svg xmlns:xlink="${XLINK}"><script href="https://x.test/a.js"></script><script xlink:href="//x.test/b.js"></script>
+      <script href="data:text/javascript,window.b=1"></script></svg>`)
+    const scripts = [...parse(srcdoc).querySelectorAll('script')]
+    expect(scripts.map(script => script.getAttribute('src') ?? script.getAttribute('href'))).toEqual(['data:text/javascript,window.a=1', 'data:text/javascript,window.b=1'])
+    expect(blocked.scripts).toBe(2)
+  })
+
   it('keeps inline scripts, module scripts and event attributes', () => {
     const { srcdoc, blocked } = prepareReport(`<head><script>window.tabs = 1</script></head><body onload="init()">
       <button onclick="navigator.clipboard.writeText('x')">Copy</button><script type="module">document.body.dataset.ready = '1'</script></body>`)
