@@ -26,6 +26,8 @@ describe('CI wait registration', { timeout: 30_000 }, () => {
 
   it('persists registration while executing, then parks marker-free without nudges or timed wakes', async () => {
     const external = github();
+    // A parked pool member must retain its regular slot when no exemption is available.
+    vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(0);
     const gate = join(root, 'turn-boundary');
     const wire = controlledWire({ firstResultGate: gate });
     const run = await parent();
@@ -37,7 +39,7 @@ describe('CI wait registration', { timeout: 30_000 }, () => {
     writeFileSync(gate, 'end');
     await until(() => parked(run.id));
     expect(store.getRun(run.id)?.waits?.some(entry => entry.kind === 'timer')).toBeFalsy();
-    expect(semaphore.busy()).toBe(0); // its slot is a monitoring slot
+    expect(semaphore.busy()).toBe(1); // a nonmember park would cost zero
     expect(store.getRun(run.id)?.waits).toEqual([expect.objectContaining({ id: receipt.id, kind: WAIT_KIND.pr, phase: WAIT_PHASE.open })]);
     expect(external.aborted()).toBe(false);
   });
