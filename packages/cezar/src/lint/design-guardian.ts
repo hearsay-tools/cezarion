@@ -32,7 +32,8 @@ export const DESIGN_RULES: Rule[] = [
     // (`&#8203;`) and longer hashes, and comment stripping removes issue refs like `#402`.
     pattern: /(?<![&\w])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})(?![\w-])/g,
     applies: styleSources,
-    allowed: (rel) => rel === 'src/styles/index.css',
+    // report-libraries.ts holds Tailwind v3's palette for agent-written report documents, not cockpit UI.
+    allowed: (rel) => rel === 'src/styles/index.css' || rel === 'src/lib/report-libraries.ts',
   },
   {
     name: 'no-amber-text',
