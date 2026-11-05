@@ -181,6 +181,7 @@ test('the daily digest recommends at most the configured top groups in one publi
     'Ignore a comment from any other author',
     'from before the "Decisions" section existed counts as finalized',
     'lists a group by letter only',
+    'closed ones included, outside the review set',
     'the newest issue first',
     'need no approval',
   ]) assert.ok(prompt.includes(text), text);
