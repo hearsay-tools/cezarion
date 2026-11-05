@@ -174,6 +174,8 @@ test('the daily digest recommends at most the configured top groups in one publi
     'carry forward without a decision',
     'without asking',
     'stands alone',
+    'skip issues that a day without findings closed with no digest comment',
+    'need no approval',
   ]) assert.ok(prompt.includes(text), text);
   assert.ok(!/Offer a comment/.test(prompt), 'comments with new evidence are posted, not offered');
 });

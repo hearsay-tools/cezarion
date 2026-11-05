@@ -69,7 +69,9 @@ The digest ranks the Act groups by time lost × recurrence: the minutes all the
 group's runs lost, times the number of runs. It recommends at most 5, from the
 top of the ranking. The other Act groups carry forward without a decision. The
 next digest ranks them again, with its new evidence. A long backlog therefore
-never reaches the owner as one list.
+never reaches the owner as one list. The next digest reads the watch list and the
+carried-forward Act groups from the newest digest comment. A day without
+findings closes its inbox issue with no digest comment, so it loses nothing.
 
 The digest writes three things:
 
