@@ -58,7 +58,7 @@ import {
 import { type PastedContent, type PersistedAttachment } from './pasted-content.ts';
 export { contentBlocksOf, highestImageSeq, mediaTypeFor, pastedAttachmentsNote, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
 import type { ContentBlock } from '../core/agent-runner.ts';
-import type { ToolActivityTracker } from '../activity/tool-activity.ts';
+import type { ToolActivityFeed, ToolActivityTracker } from '../activity/tool-activity.ts';
 import { type Skill } from '../skills.ts';
 import * as queuedRevival from './run/queued-revival.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
@@ -133,8 +133,8 @@ export class RunManager {
    *  by dispose() so a torn-down manager stops receiving sampler ticks. */
   private readonly offUsage: () => void;
 
-  /** Stops dropping this store's settled runs from the tool activity tracker. */
-  private readonly offToolActivity: () => void;
+  /** This manager's feed into the process's tool activity tracker; dispose detaches it. */
+  private readonly toolActivity: ToolActivityFeed | undefined;
 
   /** The stalled-queue watchdog (see `rescueStalledQueue`). */
   private readonly queueWatchdog: ReturnType<typeof setInterval>;
@@ -161,7 +161,8 @@ export class RunManager {
     /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
     const unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
-    this.context = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed, work: options.work ?? new TrackedWork(), sweepBranches: options.sweepBranches, toolActivity: options.toolActivity };
+    this.toolActivity = options.toolActivity?.attach(store);
+    this.context = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed, work: options.work ?? new TrackedWork(), sweepBranches: options.sweepBranches, toolActivity: this.toolActivity };
     const facade = this;
     this.modules = composeRunModules(this.context, {
       unreadInputGraceMs: () => unreadInputGraceMs,
@@ -233,7 +234,6 @@ export class RunManager {
     this.repoRediscovery.unref?.();
     this.store.on('run', this.onDelegationRun);
     this.store.on('deleted', this.modules.wakeAdmission.onRunDeleted);
-    this.offToolActivity = options.toolActivity?.watch(store) ?? (() => undefined);
   }
 
   /**
@@ -262,7 +262,7 @@ export class RunManager {
     this.modules.workerExecutions.dispose();
     this.store.off('run', this.onDelegationRun);
     this.store.off('deleted', this.modules.wakeAdmission.onRunDeleted);
-    this.offToolActivity();
+    this.toolActivity?.detach();
     this.modules.familyReconciler.dispose();
     this.modules.inboxClaims.dispose();
     this.offUsage();

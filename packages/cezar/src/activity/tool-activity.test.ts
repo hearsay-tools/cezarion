@@ -173,30 +173,67 @@ describe('ToolActivityTracker', () => {
     expect(tracked.read('other', T0)?.tool?.title).toBe('Ran elsewhere');
   });
 
+  /** A run store as a feed sees it: run changes and a redactor that hides `secret`. */
+  function fakeStore() {
+    return Object.assign(new EventEmitter(), { redactText: (text: string) => text.split('hunter2-secret').join('[REDACTED]') });
+  }
+  const runChange = (id: string, status: RunRecord['status']) => makeRunRecord({ id, status });
+
   it('drops a run when it settles or is deleted, on the run change itself; a live change keeps it', () => {
     const { tracked } = tracker();
-    const store = new EventEmitter();
-    const unwatch = tracked.watch(store as never);
-    const run = (id: string, status: RunRecord['status']) => makeRunRecord({ id, status });
-    for (const id of ['settles', 'waits', 'deleted']) see(tracked, id, started(tool('a')));
+    const store = fakeStore();
+    const feed = tracked.attach(store);
+    for (const id of ['settles', 'waits', 'deleted']) feed.observe(id, started(tool('a')));
 
-    store.emit('run', run('waits', RUN_STATUS.waiting));
-    store.emit('run', run('settles', RUN_STATUS.review));
+    store.emit('run', runChange('waits', RUN_STATUS.waiting));
+    store.emit('run', runChange('settles', RUN_STATUS.review));
     store.emit('deleted', 'deleted');
     expect(['settles', 'waits', 'deleted'].map((id) => tracked.read(id, T0) !== undefined)).toEqual([false, true, false]);
-
-    unwatch();
-    store.emit('run', run('waits', RUN_STATUS.done));
-    expect(tracked.read('waits', T0)).toBeDefined();
-    expect(store.listenerCount('run') + store.listenerCount('deleted')).toBe(0);
   });
 
-  it('starts a settled run afresh when it runs again', () => {
+  it('redacts each title with the store’s redactor', () => {
+    const { tracked, read } = tracker();
+    tracked.attach(fakeStore()).observe(RUN, started(tool('a', { title: 'Ran login hunter2-secret' })));
+    expect(read()?.tool?.title).toBe('Ran login [REDACTED]');
+  });
+
+  it('keeps a cancelled run dropped when a late event of its session arrives', () => {
     const { clock, tracked, read } = tracker();
-    see(tracked, RUN, started(tool('a')));
-    tracked.drop(RUN);
+    const store = fakeStore();
+    const feed = tracked.attach(store);
+    feed.observe(RUN, started(tool('a')));
+    store.emit('run', runChange(RUN, RUN_STATUS.cancelled));
+    clock.now += 500;
+    feed.observe(RUN, completed(tool('a', { status: TOOL_STATUS.failed })));
+    feed.observe(RUN, started(tool('b')));
+    expect(read()).toBeUndefined();
+  });
+
+  it('tracks a run afresh once the store reports it live again (a resume)', () => {
+    const { clock, tracked, read } = tracker();
+    const store = fakeStore();
+    const feed = tracked.attach(store);
+    feed.observe(RUN, started(tool('a')));
+    store.emit('run', runChange(RUN, RUN_STATUS.review));
+    store.emit('run', runChange(RUN, RUN_STATUS.running));
     clock.now += 2_000;
-    see(tracked, RUN, updated(tool('a', { title: 'Ran a again' })));
-    expect(read()).toEqual({ tool: { title: 'Ran a again', toolKind: 'execute', status: TOOL_STATUS.running, startedAt: iso(T0 + 2_000) }, rate: rateWith({ 29: 1 }) });
+    feed.observe(RUN, started(tool('b', { title: 'Ran b after resume' })));
+    expect(read()).toEqual({ tool: { title: 'Ran b after resume', toolKind: 'execute', status: TOOL_STATUS.running, startedAt: iso(T0 + 2_000) }, rate: rateWith({ 29: 1 }) });
+  });
+
+  it('drops the runs a feed fed when it detaches, stops listening, and ignores later events', () => {
+    const { tracked } = tracker();
+    const store = fakeStore();
+    const other = tracked.attach(fakeStore());
+    const feed = tracked.attach(store);
+    feed.observe('mine', started(tool('a')));
+    other.observe('theirs', started(tool('a')));
+
+    feed.detach();
+    feed.observe('mine', started(tool('b')));
+    store.emit('run', runChange('theirs', RUN_STATUS.done));
+    expect(tracked.read('mine', T0)).toBeUndefined();
+    expect(tracked.read('theirs', T0)).toBeDefined();
+    expect(store.listenerCount('run') + store.listenerCount('deleted')).toBe(0);
   });
 });

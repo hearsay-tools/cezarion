@@ -223,7 +223,7 @@ export interface RunModuleContext {
   sweepBranches?: ((keep: number) => void) | undefined;
   /** The process's tool activity tracker (spec 2026-11-05-live-activity-view): every run's UI
    *  event sink feeds it. `serve` supplies it; `cez run` and tests leave it out. */
-  toolActivity?: import('../../activity/tool-activity.ts').ToolActivityTracker | undefined;
+  toolActivity?: import('../../activity/tool-activity.ts').ToolActivityFeed | undefined;
 }
 
 /** What a turn end said, as the entry that settles it reads it (hearsay-tools/cezarion#1525). The

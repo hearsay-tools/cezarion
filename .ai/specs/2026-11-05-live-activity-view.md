@@ -392,7 +392,13 @@ An in-memory `ToolActivityTracker` keyed by run id, fed by the UI event sink
   `toolEnded()` in `packages/cezar/src/core/omp-ui-mapper.ts`).
 - Buckets: a ring of 30 one-second counters. A read shifts the ring to the read time.
 - A run that leaves the active set is dropped from the tracker. A restart starts the
-  tracker empty (D6).
+  tracker empty (D6). A session can still emit events after the drop (a worker is
+  cancelled before its session shuts down), so the run's events are ignored until the
+  store reports it live again; a resume starts it afresh. A disposed run manager drops
+  the runs it fed and feeds nothing more.
+- The sink sees each event before the run store redacts it. The tracker redacts a
+  title with that run store's own redactor (the transcript's policy) and clamps it
+  after, so no part of a secret survives at the clamp boundary.
 - Every runner emits tool items (AGENT_PROTOCOL.md §6 matrix). Hook telemetry and
   background subagents are not tool calls and do not count. An event whose item carries
   `background: true` never counts and never becomes the latest tool. Claude marks the

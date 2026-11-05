@@ -2,18 +2,26 @@ import type { ActivityTool } from '@open-mercato/cezar-contract';
 import { ACTIVITY_RATE_SECONDS, ACTIVITY_TOOL_TITLE_MAX } from '@open-mercato/cezar-contract/activity';
 import { isLiveStatus } from '@open-mercato/cezar-contract/run-predicates';
 import type { ToolStatus, UiEvent, UiToolItem } from '../core/ui-events.ts';
-import type { RunRecord } from '../runs/store.ts';
+import type { RunRecord, RunStore } from '../runs/store.ts';
 import type { ToolActivitySource } from './read-model.ts';
 import { clampText } from './text.ts';
 
 const TERMINAL: ReadonlySet<ToolStatus> = new Set(['completed', 'failed', 'declined']);
 
-/** The run-change events the tracker drops a run on: a status out of the live set, or deletion. */
-export interface ToolActivityRunEvents {
+/** What a feed needs from a run store: the run changes it drops runs on, and the store's redactor. */
+export interface ToolActivityStore extends Pick<RunStore, 'redactText'> {
   on(event: 'run', listener: (run: RunRecord) => void): unknown;
   on(event: 'deleted', listener: (runId: string) => void): unknown;
   off(event: 'run', listener: (run: RunRecord) => void): unknown;
   off(event: 'deleted', listener: (runId: string) => void): unknown;
+}
+
+/** One run manager's way into the tracker: the UI event sinks of its runs feed it. */
+export interface ToolActivityFeed {
+  /** One UI event of a run of this store, redacted with the store's own redactor. */
+  observe(runId: string, event: UiEvent): void;
+  /** The manager is disposed: stop listening, drop this feed's runs, and ignore later events. */
+  detach(): void;
 }
 
 interface RunActivity {
@@ -86,17 +94,45 @@ export class ToolActivityTracker implements ToolActivitySource {
     this.runs.delete(runId);
   }
 
-  /** Drop each run of `store` that leaves the live set or is deleted, on the run change itself. */
-  watch(store: ToolActivityRunEvents): () => void {
-    const onRun = (run: RunRecord) => {
-      if (!isLiveStatus(run.status)) this.drop(run.id);
+  /**
+   * The feed of one run manager over its `store`. A run that leaves the live set or is deleted is
+   * dropped on that run change. A session can still emit events after the drop (a worker is
+   * cancelled before its session shuts down), so the feed ignores the run's events until the
+   * store reports it live again: a resume starts tracking afresh.
+   */
+  attach(store: ToolActivityStore): ToolActivityFeed {
+    /** Runs this feed holds an entry for. */
+    const fed = new Set<string>();
+    /** Runs this feed fed that left the live set: their late events are ignored. */
+    const dropped = new Set<string>();
+    let attached = true;
+    const forget = (runId: string) => {
+      if (!fed.delete(runId)) return;
+      this.drop(runId);
+      dropped.add(runId);
     };
-    const onDeleted = (runId: string) => this.drop(runId);
+    const onRun = (run: RunRecord) => {
+      if (isLiveStatus(run.status)) dropped.delete(run.id);
+      else forget(run.id);
+    };
     store.on('run', onRun);
-    store.on('deleted', onDeleted);
-    return () => {
-      store.off('run', onRun);
-      store.off('deleted', onDeleted);
+    store.on('deleted', forget);
+    const redact = (text: string) => store.redactText(text);
+    return {
+      observe: (runId, event) => {
+        if (!attached || dropped.has(runId)) return;
+        this.observe(runId, event, redact);
+        if (this.runs.has(runId)) fed.add(runId);
+      },
+      detach: () => {
+        if (!attached) return;
+        attached = false;
+        store.off('run', onRun);
+        store.off('deleted', forget);
+        for (const runId of fed) this.drop(runId);
+        fed.clear();
+        dropped.clear();
+      },
     };
   }
 

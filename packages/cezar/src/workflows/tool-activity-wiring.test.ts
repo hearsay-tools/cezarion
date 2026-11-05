@@ -34,4 +34,21 @@ describe('RunManager tool activity', () => {
     await fixture.waitFor(record.id, (run) => run?.status === 'cancelled');
     expect(toolActivity.read(record.id, Date.now())).toBeUndefined();
   }, 30_000);
+
+  it('clears its runs from the tracker when the manager is disposed', async () => {
+    fixture.manager.dispose();
+    const toolActivity = new ToolActivityTracker();
+    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { semaphore: fixture.semaphore, toolActivity });
+    const record = fixture.manager.startRun(fixture.SINGLE_STEP, { task: 'mock:schedule-wakeup keep going', runner: 'claude', worktree: false });
+    fixture.currentId = record.id;
+    await fixture.waitFor(record.id, (run) => run?.status === 'waiting');
+    runnerHook.uiEvent({ type: 'item.started', item: { kind: 'tool', id: 'tool-1', name: 'Bash', toolKind: 'execute', title: 'Ran npm test', status: TOOL_STATUS.running } });
+    expect(toolActivity.read(record.id, Date.now())).toBeDefined();
+
+    fixture.manager.dispose();
+    expect(toolActivity.read(record.id, Date.now())).toBeUndefined();
+    // The disposed manager's session lives on; its later events no longer reach the tracker.
+    runnerHook.uiEvent({ type: 'item.started', item: { kind: 'tool', id: 'tool-2', name: 'Bash', toolKind: 'execute', title: 'Ran ls', status: TOOL_STATUS.running } });
+    expect(toolActivity.read(record.id, Date.now())).toBeUndefined();
+  }, 30_000);
 });
