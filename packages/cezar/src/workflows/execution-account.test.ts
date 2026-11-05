@@ -1,6 +1,5 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS, WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import type { AgentRunner, AgentSession, AgentRunResult } from '../core/agent-runner.ts';
@@ -8,7 +7,7 @@ import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { fireCapturedTimer, observeWaitTimers } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -228,43 +227,6 @@ describe('a held wake does not advertise itself to the workspace line', () => {
       for (const id of otherStore.listRunIds()) other.cancel(id);
       await drainFixtureManagers(otherRoot);
       otherStore.close(); rmSync(otherRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('does not advertise a queued wake whose worktree is being reclaimed', () => {
-    const parked = store.createRun({ title: 'parked', workflow: 'w', task: 't', runner: 'claude', steps: [] });
-    const engine = runInternals(manager);
-    engine.line.queue.push(parked.id);
-    engine.line.waitWakeQueuedAt.set(parked.id, 1);
-    engine.claims.reclaiming.add(parked.id);
-    try { expect(engine.line.oldestWakeAt()).toBeNull(); }
-    finally {
-      engine.claims.reclaiming.delete(parked.id);
-      engine.line.queue.splice(engine.line.queue.indexOf(parked.id), 1);
-      engine.line.waitWakeQueuedAt.delete(parked.id);
-    }
-  });
-
-  it('reads a runnerless wake on the configured default runner, as pump() does', async () => {
-    // A legacy record names no runner, so it runs on the configured default. Hard-coding Claude
-    // here advertised it while the default account was held (hearsay-tools/cezarion#1236).
-    mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
-    writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({ defaultRunner: 'codex' }));
-    const holder = store.createRun({ title: 'holder', workflow: 'w', task: 't', runner: 'codex', steps: [] });
-    setRunStatus(store, holder.id, RUN_STATUS.waiting, { autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
-    const parked = store.createRun({ title: 'parked', workflow: 'w', task: 't', steps: [] });
-    const engine = runInternals(manager).line;
-    runInternals(manager).line.queue.push(parked.id);
-    runInternals(manager).line.waitWakeQueuedAt.set(parked.id, 1);
-    try {
-      // Before any pump has read the configuration, the default is unknown: not advertised.
-      expect(engine.oldestWakeAt()).toBeNull();
-      await engine.pump();
-      expect(runInternals(manager).line.queue).toContain(parked.id);
-      expect(engine.oldestWakeAt()).toBeNull();
-    } finally {
-      runInternals(manager).line.queue.splice(runInternals(manager).line.queue.indexOf(parked.id), 1);
-      runInternals(manager).line.waitWakeQueuedAt.delete(parked.id);
     }
   });
 

@@ -1,6 +1,5 @@
 import { registrationGroups } from '../core/registration-coverage.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
-import { runInternals } from './run-internals.testkit.ts';
 import { spawn } from 'node:child_process';
 import { setTimeout as nativeTimeout, clearTimeout as clearNativeTimeout } from 'node:timers';
 import { observationClock } from '../core/observation-clock.testkit.ts';
@@ -1971,7 +1970,7 @@ function answersCells(runners: RunnerId[], it: typeof registerTest = registerTes
 
     // hearsay-tools/cezarion#1906: the answer resets its accounting atomically, but its immediate
     // flush must still cancel an owed timer at the old cap. This guard passes on the old order too.
-    it(`${runner} U7q a live answer at the cap keeps the flush decisions, final counters and notes`, async () => {
+    it(`${runner} U7q a live answer at the cap resets counters atomically while an unadmitted timer stays owed`, async () => {
       nativeWire(runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
       await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === 'waiting');
@@ -1983,26 +1982,18 @@ function answersCells(runners: RunnerId[], it: typeof registerTest = registerTes
       // Hold it at the parked boundary, without asking the scheduler to send it before the answer.
       const timer = { ...registered.wait, phase: WAIT_PHASE.resolved, resolvedAt: new Date().toISOString() };
       store.commitWait(run.id, timer, { id: timer.id, parentRunId: run.id, source: 'lifecycle', createdAt: timer.resolvedAt, text: 'answer cap guard' });
-      const admitted = runInternals(manager).line.waitWakeAdmitted;
-      admitted.add(run.id);
       store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES, waitDeliveryFailures: 2 });
       const notesBefore = store.readEvents(run.id).filter(event => event.type === 'note').length;
       const commits = recordCommits(join(root, '.ai/cezar'));
       expect(manager.sendMessage(run.id, [{ type: 'text', text: answerOf(run.id) }])).toBe(true);
       commits.stop();
-      // Pin the live outcome separately from the crash invariant: both the old order and the fix
-      // cancel this timer, erase the old counters, and retain the same cap note.
-      // Claude and the Pi-family wires start the answer's turn synchronously in sendMessage.
-      // Their flush is mid-turn and keeps the timer owed; the other wires still flush at the
-      // parked boundary and cancel it. Pin each native wire's pre-fix behavior.
-      const midTurn = ['claude', 'pi', 'omp'].includes(runner);
-      expect(settled(run.id, timer.id)?.phase).toBe(midTurn ? undefined : 'cancelled');
-      expect(inputsFor(run.id, timer.id).map(input => input.deliveredAt)).toEqual(midTurn ? [undefined] : []);
+      // The admitted/mid-turn combinations are construction rows of cappedTimersBeforeFlush.
+      // This public answer pins the atomic reset without injecting scheduler admission.
+      expect(settled(run.id, timer.id)?.phase).toBeUndefined();
+      expect(inputsFor(run.id, timer.id).map(input => input.deliveredAt)).toEqual([undefined]);
       expect(store.getRun(run.id)).toMatchObject({ automaticWakes: 0 });
       expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
-      expect(store.readEvents(run.id).filter(event => event.type === 'note').slice(notesBefore).map(event => event.message))
-        .toEqual(midTurn ? [] : [`automatic timer wake-up cap reached (${MAX_AUTO_CONTINUES}); timer ${timer.id} cancelled`,
-          `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you`]);
+      expect(store.readEvents(run.id).filter(event => event.type === 'note').slice(notesBefore)).toEqual([]);
       commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => wait.id === human!.id && wait.phase === 'delivered') ||
         (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'a live answer and its reset wake budget');
       await until(() => answered(run.id, human!.askSeq!));
@@ -3669,9 +3660,9 @@ function processCells(runners: RunnerId[], it: typeof registerTest = registerTes
 // `waits-parity.test.ts`. They take no runner: a cell for every runner goes in its part's cell group
 // (the semantic row families in `WAIT_PARITY_CELLS`), which the per-runner files run.
 function singleRunnerCells(): void {
-  // hearsay-tools/cezarion#1301: a run owes at most one refusal. A gate that refuses the done again
-  // while the queued copy waits out a failed delivery's backoff adds no second copy and no charge.
-  it('a done blocked again while its queued refusal is owed queues no second copy', async () => {
+  // The first failure and its durable refusal remain a public native-wire case. Repeated
+  // closed-session gate effects use real-manager recovery in turn-nudges-decisions.test.ts.
+  it('a closed session leaves one charged refusal owed through its first delivery failure', async () => {
     const { p, w } = await parentWithWorker('claude');
     const refusal = `Workers are still live: ${w.id}.`;
     const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
@@ -3681,15 +3672,14 @@ function singleRunnerCells(): void {
     };
     store.on('event', closeAtTurnEnd);
     try {
+      const wakes = store.getRun(p.id)?.automaticWakes ?? 0;
       sessionOf(p.id).end();
       await until(() => store.getRun(p.id)?.waitDeliveryFailures === 1 && !manager.isActive(p.id) && retryClock.pending > 0);
       closing = false;
-      const wakes = store.getRun(p.id)?.automaticWakes;
-      expect(runInternals(manager).runFinish.deferParentCompletion(p.id)).toBe(true);
       expect(refusals()).toHaveLength(1);
       expect(refusals()[0]!.deliveredAt).toBeUndefined();
       expect(nudgeNotes(p.id)).toHaveLength(1);
-      expect(store.getRun(p.id)?.automaticWakes).toBe(wakes);
+      expect(store.getRun(p.id)?.automaticWakes).toBe(wakes + 1);
     } finally {
       store.off('event', closeAtTurnEnd);
     }
