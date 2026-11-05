@@ -47,9 +47,9 @@ function nativeWire(runner: RunnerId) {
   process.env.CEZ_MOCK_STDIN_FILE = join(root, 'stdin');
 }
 
-const engine = () => manager as unknown as {
+const engine = () => { return manager as unknown as {
   active: Map<string, { liveSession: { session?: AgentSession; ciGeneration: string; }; idleTimer?: NodeJS.Timeout & { _onTimeout(): void }; inputState: { agentInputFlight?: { inputIds: readonly string[] } } }>;
-};
+}; };
 async function openWait(id: string, request: CezarWaitRequestInput): Promise<TimedWait> {
   const tools = manager.cezarToolHandlers(id, engine().active.get(id)!.liveSession.ciGeneration);
   const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
