@@ -58,6 +58,7 @@ it.each([false, true])('monitoring synthetic delivery respects legacy pending Fi
     await withHeldResponse('claude', async release => {
       const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
       const w = await worker(p.id, 'mock:schedule-wakeup keep going');
+      vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(1);
       const clock = observationClock(() => /\bat WaitWatches\.armWait \(/.test(new Error().stack ?? ''));
       const sessions = new Set(work.liveSessions);
       manager.enqueueOwnedRun(w.id);
@@ -66,17 +67,22 @@ it.each([false, true])('monitoring synthetic delivery respects legacy pending Fi
       expect(session).toBeDefined();
       const send = vi.spyOn(session, 'sendAgentMessage');
       const deadline = monitoringWakeOf(store.getRun(w.id))!;
+      const competing = await worker(p.id, 'mock:schedule-wakeup keep going');
+      manager.enqueueOwnedRun(competing.id);
+      await until(() => !!monitoringWakeOf(store.getRun(competing.id)));
+      expect(semaphore.busy()).toBe(1);
       try {
         if (pending) store.commitRootFinishIntent(p.id);
-        expect(clock.captured).toBe(1);
+        expect(clock.captured).toBe(2);
         clock.fire(0);
         await Promise.all([...work.pending].filter(([, label]) => label === 'pump').map(([promise]) => promise));
+        expect(monitoringWakeOf(store.getRun(competing.id))).toBeDefined();
         if (pending) {
           expect(send).not.toHaveBeenCalled();
           expect((store.getRun(w.id)?.automaticWakes ?? 0)).toBe(0);
           expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: RUN_STATUS.waiting, monitoringWakeAt: deadline });
           expect(session.open).toBe(true);
-          expect(semaphore.busy()).toBe(0);
+          expect(semaphore.busy()).toBe(1);
           expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
           expect(manager.sendMessage(w.id, [{ type: 'text', text: 'synthetic retry' }])).toBe(false);
           expect(send).not.toHaveBeenCalled();
@@ -84,6 +90,10 @@ it.each([false, true])('monitoring synthetic delivery respects legacy pending Fi
           await until(() => store.getRun(w.id)?.automaticWakes === 1);
           expect(send).toHaveBeenCalledTimes(1);
           expect((store.getRun(w.id)?.automaticWakes ?? 0)).toBe(1);
+          // The resumed run must inherit the sole exemption when its competitor leaves.
+          expect(manager.cancel(competing.id)).toBe(true);
+          expect(await manager.awaitRunTermination(competing.id, 15000)).toBe(true);
+          await semaphore.release();
           // hearsay-tools/cezarion#1233: the wake turn keeps its pool slot until its own turn end.
           expect(session.open).toBe(true);
           expect(semaphore.busy()).toBe(0);
