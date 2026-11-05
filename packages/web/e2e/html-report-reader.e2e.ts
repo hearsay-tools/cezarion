@@ -27,11 +27,13 @@ let browser: AgentBrowser
 let publication: { id: string; link: string; markdown: string }
 let interactive: { id: string; link: string; markdown: string }
 let libraries: { id: string; link: string; markdown: string }
+let escape: { id: string; link: string; markdown: string }
 
 const FRAME = '[data-slot="html-report-frame"]'
 const LINK = '[data-slot="user-bubble"] a[data-streamdown="link"]'
 
-function reportHtml(origin: string): string {
+/** The probe report. With `navigate`, its script also tries to move its own frame away on load. */
+function reportHtml(origin: string, navigate = false): string {
   return `<!doctype html><html><head><title>Probe report</title>
 <meta http-equiv="refresh" content="0;url=${origin}/refresh">
 <link rel="stylesheet" href="${origin}/css">
@@ -51,10 +53,10 @@ attempt('socket', () => { new WebSocket('${origin.replace('http:', 'ws:')}/socke
 attempt('topNav', () => { top.location = '${origin}/top' })
 attempt('parentNav', () => { parent.location = '${origin}/parent' })
 document.documentElement.dataset.probe = JSON.stringify(tried)
-addEventListener('load', () => {
+${navigate ? `addEventListener('load', () => {
   const refresh = document.createElement('meta'); refresh.httpEquiv = 'refresh'; refresh.content = '0;url=${origin}/script-refresh'; document.head.append(refresh)
   queueMicrotask(() => { location.href = '${origin}/self' })
-})
+})` : ''}
 </script>
 </head><body>
 <a id="toc" href="#s2">Section two</a><a id="ext" href="${origin}/ext">External</a>
@@ -135,6 +137,27 @@ async function findReport(request: CdpRequest, marker: string): Promise<{ pageSe
   }, () => `no report document holds #${marker}`)
 }
 
+/** Polls every frame of the page until one has a URL `matches` accepts, and returns that URL. */
+async function waitForFrameUrl(matches: (url: string) => boolean): Promise<string> {
+  return browser.withCdp(async request => {
+    const url = browser.url()
+    const seen: string[] = []
+    return pollFor(async () => {
+      const { targetInfos } = await request('Target.getTargets')
+      const frames = targetInfos.filter((target: { type: string; url: string }) => target.type === 'iframe' || (target.type === 'page' && target.url === url))
+      seen.length = 0
+      for (const target of frames) {
+        const { sessionId } = await request('Target.attachToTarget', { targetId: target.targetId, flatten: true })
+        const { frameTree } = await request('Page.getFrameTree', {}, sessionId)
+        const walk = (tree: FrameTree & { frame: { url: string; unreachableUrl?: string } }) => { seen.push(tree.frame.unreachableUrl ? `${tree.frame.url} (${tree.frame.unreachableUrl})` : tree.frame.url); (tree.childFrames as typeof tree[] | undefined)?.forEach(walk) }
+        walk(frameTree)
+        await request('Target.detachFromTarget', { sessionId })
+      }
+      return seen.find(matches)
+    }, () => `no frame matched; frames: ${JSON.stringify(seen)}`)
+  })
+}
+
 /** Polls `expression` in the report document until `matches` accepts its value, and returns it. */
 async function waitInReport<T>(marker: string, expression: string, matches: (value: T) => boolean): Promise<T> {
   return browser.withCdp(async request => {
@@ -186,6 +209,7 @@ beforeAll(async () => {
   publication = publish('probe-report.html', reportHtml(probeOrigin))
   interactive = publish('interactive.html', INTERACTIVE_HTML)
   libraries = publish('libraries.html', LIBRARY_HTML)
+  escape = publish('escape.html', reportHtml(probeOrigin, true))
   const filler = Array.from({ length: 40 }, (_, i) => `Paragraph ${i + 1} of the long task description.`).join('\n\n')
   const run = makeRunRecord({
     id: runId, task: `${filler}\n\nRead ${publication.markdown} now.\n\n${filler}`, title: 'HTML report reader',
@@ -272,7 +296,7 @@ it('scrolls an anchor inside the report without requesting the cockpit or an aut
     expect(before.scrollY).toBe(0)
     const documents: string[] = []
     const off = subscribe(event => {
-      if ([pageSession, session].includes(event.sessionId) && event.method === 'Network.requestWillBeSent' && event.params.type === 'Document') documents.push(event.params.request.url)
+      if ((event.sessionId === pageSession || event.sessionId === session) && event.method === 'Network.requestWillBeSent' && event.params.type === 'Document') documents.push(event.params.request.url)
     })
     await request('Network.enable', {}, pageSession)
     if (session !== pageSession) await request('Network.enable', {}, session)
@@ -319,11 +343,18 @@ it('runs report scripts without reaching the cockpit, the network or another win
   expect(tried).toMatchObject({ parent: 'SecurityError', top: 'SecurityError', storage: 'SecurityError', cookie: 'SecurityError' })
   expect(tried.topNav).not.toBe('ran')
   expect(tried.parentNav).not.toBe('ran')
-  // The script queues a meta refresh and a self-navigation on load; the report must stay.
-  await waitInReport<string>('s2', 'location.href', value => value === 'about:srcdoc')
   expectCockpitUntouched(readerPath())
   expect(hits()).toEqual([])
   expect(browser.text('[data-slot="html-report-blocked"]')).toContain('1 remote script')
+})
+
+it('refuses a report script that moves its own frame away, with no request leaving', async () => {
+  browser.goto(`${baseUrl}${readerPath()}?artifact=${escape.id}`)
+  browser.waitForFunction(`document.querySelector(${JSON.stringify(FRAME)}) !== null`)
+  // The browser answers a refused frame navigation with its error page in that frame.
+  expect(await waitForFrameUrl(url => url.includes(`${probeOrigin}/`))).toMatch(/^chrome-error:/)
+  expectCockpitUntouched(readerPath())
+  expect(hits()).toEqual([])
 })
 
 it('keeps the cockpit and the top window by the sandbox alone, on unprepared HTML', () => {
@@ -332,7 +363,7 @@ it('keeps the cockpit and the top window by the sandbox alone, on unprepared HTM
   // The spec's own frame, built with the reader's sandbox and the raw report (no cleanup, no CSP, no wrapper).
   browser.evaluate(`(() => { const raw = document.createElement('iframe'); raw.id = 'raw-probe'
     raw.setAttribute('sandbox', document.querySelector(${JSON.stringify(FRAME)}).getAttribute('sandbox'))
-    raw.srcdoc = ${JSON.stringify(reportHtml(probeOrigin))}; document.body.append(raw) })()`)
+    raw.srcdoc = ${JSON.stringify(reportHtml(probeOrigin, true))}; document.body.append(raw) })()`)
   expectCockpitUntouched(readerPath())
   const paths = hits().map(hit => hit.path)
   for (const scripted of ['/top', '/parent']) expect(paths).not.toContain(scripted)
@@ -349,7 +380,7 @@ it('blocks every request but a navigation of the frame by the CSP alone, on unpr
   browser.evaluate(`(() => { const meta = ${REPORT_CSP_META}
     const raw = document.createElement('iframe'); raw.id = 'csp-probe'
     raw.setAttribute('sandbox', document.querySelector(${JSON.stringify(FRAME)}).getAttribute('sandbox'))
-    raw.srcdoc = ${JSON.stringify(reportHtml(probeOrigin))}.replace('<head>', '<head>' + meta); document.body.append(raw) })()`)
+    raw.srcdoc = ${JSON.stringify(reportHtml(probeOrigin, true))}.replace('<head>', '<head>' + meta); document.body.append(raw) })()`)
   expectCockpitUntouched(readerPath())
   // A CSP does not cover navigations: the meta refresh leaves. The wrapper frame closes that gap.
   const paths = await pollFor(() => { const seen = hits().map(hit => hit.path); return seen.length ? seen : undefined }, () => 'the frame did not navigate')
@@ -362,7 +393,7 @@ it('blocks every request, navigations included, by the wrapper frame alone, on u
   browser.waitForFunction(`document.querySelector(${JSON.stringify(FRAME)}) !== null`)
   // The reader's wrapper document around the raw report: no cleanup, no report CSP of its own.
   browser.evaluate(`(() => { const reader = document.querySelector(${JSON.stringify(FRAME)})
-    const report = ${JSON.stringify(reportHtml(probeOrigin))}.replaceAll('&', '&amp;').replaceAll('"', '&quot;')
+    const report = ${JSON.stringify(reportHtml(probeOrigin, true))}.replaceAll('&', '&amp;').replaceAll('"', '&quot;')
     const raw = document.createElement('iframe'); raw.id = 'wrapper-probe'
     raw.setAttribute('sandbox', reader.getAttribute('sandbox'))
     raw.srcdoc = reader.getAttribute('srcdoc').replace(/ srcdoc="[^"]*"/, () => ' srcdoc="' + report + '"'); document.body.append(raw) })()`)
@@ -399,7 +430,8 @@ it('renders a report that loads Tailwind and Mermaid from CDNs with the pinned c
 // pins the rewrite; the PR records a raw-CDP check of the opened tab.
 it('renders external links for a new tab without opener or referrer', () => {
   browser.goto(`${baseUrl}${readerPath()}?artifact=${publication.id}`)
-  const srcdoc = browser.waitForValue<string>(`document.querySelector(${JSON.stringify(FRAME)})?.getAttribute('srcdoc')`)
+  const srcdoc = browser.waitForValue<string>(`(() => { const wrapper = document.querySelector(${JSON.stringify(FRAME)})?.getAttribute('srcdoc')
+    return wrapper && new DOMParser().parseFromString(wrapper, 'text/html').querySelector('iframe').getAttribute('srcdoc') })()`)
   expect(srcdoc).toContain(`<a id="ext" href="${probeOrigin}/ext" target="_blank" rel="noopener noreferrer">`)
 })
 
