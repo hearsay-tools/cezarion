@@ -7,6 +7,7 @@ import { z } from 'zod';
 // file must not `.catch` away are the same constants the PATCH route validates against, so they
 // are imported rather than repeated.
 import {
+  PROJECT_ID_PATTERN,
   PROJECT_TAGS_MAX,
   PROJECT_TAG_MAX_LENGTH,
   PROJECT_WEBHOOK_DESCRIPTION_MAX_LENGTH,
@@ -37,8 +38,8 @@ import { assertCezarHomeWriteIsSandboxed, workspaceConfigPath } from '../paths.t
  *   next successful merge-write replaces it.
  */
 
-/** `id` slug rule — mirrors the spec: `^[a-z0-9][a-z0-9-]{0,63}$`. */
-export const PROJECT_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** `id` slug rule — the contract's, which the activity query shares. */
+export const PROJECT_ID_RE = PROJECT_ID_PATTERN;
 
 /** The states that send a delivery (hearsay-tools/cezarion#1356). Absent means the default; `[]`
  *  stays `[]`. An unknown value (a newer cezar's option) is dropped on its own and the rest of the

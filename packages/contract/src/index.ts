@@ -41,6 +41,7 @@ export * from './artifacts.ts';
 export * from './discovery.ts';
 
 export * from './live.ts';
+export * from './activity.ts';
 export * from './live-limits.ts';
 export * from './live-coordination.ts';
 
