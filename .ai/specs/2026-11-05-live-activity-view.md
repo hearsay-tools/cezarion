@@ -53,15 +53,18 @@ changes.
 | Run state (rung) | Verb | Main line | Detail and motion |
 | --- | --- | --- | --- |
 | running | Doing | The latest tool call title, for example `Edit workers/spawn.ts`. Before the first call, or 10 s after the last call ended: "Thinking". | "Last tool 6 s ago". The dot pulses, a light sweeps the box, and the main line slides in at each new call. |
-| needs-you (human wait) | Needs you | The ask card's first question. | The card glows in the pending tone. An Answer button opens the task. |
+| needs-you, with a question (`asksQuestion()`) | Needs you | The ask card's first question. | The card glows in the pending tone. An Answer button opens the task. |
+| needs-you, no question: a plain turn end, or Cezar's `no-wait` wait | Needs you | "Your turn". | The glow. An Open task button. |
+| needs-you, no question: Cezar's `budget` wait | Needs you | "Automatic wakes used up", with the count of queued messages when known. | The glow. An Open task button. |
 | needs-permission | Needs you | "Permission: <tool>". | Same as above. |
-| waiting-on-workers | Waiting for workers | "<mode> of N · M settled". With several open worker waits: "N workers · M settled", without a mode. | A bar fills as workers settle. The earliest deadline. |
+| waiting-on-workers, worker outcomes only | Waiting for workers | "<mode> of N · M settled". With several open worker waits: "N workers · M settled", without a mode. | A bar fills as workers settle. The earliest deadline. |
+| waiting-on-workers with `replies` (every open worker-kind wait names `requestIds`) | Waiting for reply | "From <task>", or "From N tasks". | Reply deadline. |
+| waiting-on-workers, mixed (some entries name workers, some name requests) | Waiting for workers | "N owed · M settled", the count `computeWaitingOn` reports. | The earliest deadline. The request lines show which replies are owed. |
 | waiting-on-subagents | Waiting for subagents | "N native subagents". | Deadline. |
 | waiting-for-ci | Waiting for CI | "PR <n> checks · P of T passed". | One segment for each check: passed, running (breathing) or failed. A segment flashes when it passes. Deadline. |
 | waiting-for-merge | Waiting for merge | "PR <n>". The merge poller keeps its PR state local until the wait settles (`runMerge()` in `supervisor.ts`), so the view shows no live merge state. | Deadline. |
 | waiting-for-command (process wait) | Waiting for command | The wait's `note`, or "Process <pid>" without one. The wait stores no command line. | Elapsed time and deadline. |
 | monitoring (timer) | Waiting for timer | The timer note. | "Wakes 16:00 · in 27:52", counting down. |
-| reply wait (worker wait with `requestIds`) | Waiting for reply | "From <task>", one name for each request, or "From N tasks". | Reply deadline. |
 | peer wait (`kind: 'peer'`, `cez message wait --peer`) | Waiting for a peer | "For <task>", or "For N tasks". A message from a named peer, or that peer settling, ends it. | Deadline. |
 | usage-limit | Paused | "Usage limit". | "Resumes 15:40", counting down. |
 | waiting-for-capacity, queued | Queued | "Waiting for a free slot". | Elapsed time. |
@@ -225,12 +228,18 @@ and the two trackers. It reads; it never writes a run.
   worker, peer and subagent entries and names no single entry, so the read model
   aggregates every open entry of that kind itself: the union of worker ids and the
   settled ones among them, the union of request ids and their recipients, and the
-  earliest deadline. It reports a mode only when one entry is open. A task with both
-  a worker wait and a request wait shows the kind `computeWaitingOn` ranks first; the
-  other kind's facts still show on the lines and the worker rows.
-- **Open requests**: from each root's `delegation.conversation`. A message is an open
-  request when its `kind` is `request`, its `state` is `accepted`, and the same ledger
-  holds no outcome with its id. A send that was not delivered (`state`
+  earliest deadline. It reports a mode only when one entry is open. Completion waits
+  and reply waits are both kind `worker`, and `computeWaitingOn` merges them into one
+  `workers` result with a `replies` flag only when every entry is a reply wait. The
+  view follows that flag: the three `waiting-on-workers` rows in the state table.
+- **Open requests**: from each root's `delegation.conversation`, after
+  `reconcileConversationState()` (`packages/cezar/src/delegation/conversations.ts`),
+  the same projection the delegation service uses. It adds the outcomes a stored
+  ledger has not written yet (a settled recipient, a closed sender, a passed
+  deadline), keeps a request to an unreadable recipient open, and projects nothing for
+  a ledger whose history is being deleted. A message is an open request when its
+  `kind` is `request`, its `state` is `accepted`, and the reconciled ledger holds no
+  outcome with its id. A send that was not delivered (`state`
   `continuation-required` or `destroyed`) never opened and is never drawn. Every
   message of one request sits in one ledger (`ledgerFor` in
   `packages/cezar/src/delegation/service.ts`): a family request, its reply and its
@@ -248,11 +257,18 @@ Case table for request state (a cross-run relationship):
 | Worker asks parent | family `request` in the root ledger, no outcome | Open family line from the worker row |
 | Parent replies | outcome `replied` | Closed: reply comet, fade |
 | Worker question times out | outcome `timed-out` | Closed: fade, no comet |
-| Worker destroyed while asking | outcome `destroyed` | Closed: fade; the worker row leaves |
+| Worker destroyed while asking | the worker is the sender: outcome `sender-closed` | Closed: fade; the worker row leaves |
+| Parent asks worker; worker destroyed | the worker is the recipient: outcome `destroyed` | Closed: fade; the worker row leaves |
+| Parent asks worker; worker rests at `review` | no outcome: the parent can resume it | Open line |
+| Recipient ends `done` (peer or worker), or a peer recipient rests at `review` | outcome `completed-without-reply` | Closed: fade |
+| Recipient ends `failed` or `cancelled` | outcome `failed` or `cancelled` | Closed: fade |
+| Sender ends `done`, `failed` or `cancelled`, or a human pressed Finish | outcome `sender-closed` | Closed: fade |
+| Recipient's record cannot be read | no outcome (reconcile keeps it open) | Open line to a placeholder card "Unreadable task" |
+| Sender's history deletion in progress | reconcile projects nothing | The sender's lines leave with no animation |
+| Recipient in another project | cannot happen: peers send only inside one project | — |
 | Root A asks root B | peer `request` in A's ledger, no outcome | Open peer line A → B |
 | B replies | B's reply and the outcome `replied`, both in A's ledger | Closed: reply comet B → A |
 | B's record deleted | outcome `deleted` | Closed: fade; B's card leaves |
-| A finishes before a reply | outcome `sender-closed` | Closed: fade |
 | Late reply after a timeout | `timed-out`, then amended to `replied-late` | Stays closed; no second animation |
 | Either side leaves D8's active set while open | no outcome | Line ends at the card that remains, labelled with the other task's name; the rail entry stays |
 | Send not delivered | `state: continuation-required` or `destroyed`, no outcome | Never drawn: the request never opened |
@@ -323,14 +339,16 @@ Case table for the probe (a detached process):
 
 ### Live transport
 
-- **Topics** `activity:<projectId>` and `activity:all`, workspace-level on the
+- **Topics** `activity:project:<projectId>` and `activity:workspace`, workspace-level on the
   existing bus (`/api/v1/ws`), with the default `loopbackReadable: false`: they carry
   run titles, tool titles and request text. The bus has no subscription parameter
   (`clientFrameSchema`, `TopicPublisher`, `subscribeTopic()` take a name only), and
   topics are registered by exact name. So the topic name carries the scope, and S4
-  adds a **topic family** to the hub: one registration for the prefix `activity:`
-  that creates a publisher for each concrete name on its first subscriber and drops
-  it on its last. Demand is counted per concrete name, as today.
+  adds a **topic family** to the hub: one registration for the prefix
+  `activity:project:` that creates a publisher for each concrete name on its first subscriber and drops
+  it on its last. Demand is counted per concrete name, as today. The global view uses
+  the plain topic `activity:workspace`. The two names cannot collide: a project id is a
+  slug and may be `all`, but it never contains a colon.
 - The publisher starts on the first subscriber and stops on the last. It sends a full
   snapshot on subscribe, then a new snapshot at most every 500 ms and only when
   something changed: a run change in the store, a tracker change, or a progress

@@ -32,7 +32,9 @@ can drive the view from the HTTP snapshot. One PR for each slice.
 - Route `GET /api/v1/workspace/activity`, chained into the workspace family, with a
   `queryZodValidator` for `project`. Contract parity and `typed-bodies` tests.
 - Tests:
-  - every row of the spec's request case table;
+  - every row of the spec's request case table, through `reconcileConversationState()`;
+  - each row of the state table, including the three needs-you rows and the three
+    `waiting-on-workers` rows;
   - the rows for retained terminal roots and settled workers;
   - D8: each root status in and out of the active set, a review root with a live
     worker in it;
@@ -73,8 +75,8 @@ can drive the view from the HTTP snapshot. One PR for each slice.
 
 - Add a topic family to the socket hub (`packages/cezar/src/server/ws.ts`): one
   registration for a name prefix, a publisher factory for each concrete name, demand
-  per concrete name, the same trust rules. Register the family `activity:` with
-  `loopbackReadable` false. Names: `activity:<projectId>` and `activity:all`. An
+  per concrete name, the same trust rules. Register the family `activity:project:`
+  and the topic `activity:workspace`, both with `loopbackReadable` false. An
   unknown project id answers the existing unknown-topic error.
 - Publisher: subscribe on 0→1, stop on 1→0. Triggers: the store's run changes, the
   tracker's changes, the progress registry's changes. Coalesce to at most one
