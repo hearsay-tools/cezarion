@@ -10,3 +10,18 @@ reviews:
     auto_incremental_review: true
     auto_pause_after_reviewed_commits: 0
     labels: []
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        For each finding, name the concrete defect class (the shared root cause),
+        search all changed files for other instances, and list every evidenced
+        instance with its file and line location in the same review. Group
+        instances of the same root cause in one finding where possible. Do not
+        report speculative instances or group unrelated defects together.
+
+        For a guard, scanner, or parser whose established validation or safety
+        contract requires rejecting inputs it cannot prove safe, prefer one
+        finding that requests a general fail-closed rule and representative
+        regression cases over separate findings for each unsupported syntax
+        form. Preserve intentional acceptance of unknown forms where the
+        established contract permits it.

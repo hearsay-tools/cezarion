@@ -255,6 +255,16 @@ The push-only `.github/workflows/ci-benchmark.yml` workflow runs controlled expe
 
 CodeRabbit starts automatic reviews on push, including drafts and incremental changes. `.coderabbit.yaml` clears label filtering and sets `auto_pause_after_reviewed_commits: 0`. The used keys were checked against the live [v2 schema](https://www.coderabbit.ai/integrations/schema.v2.json) on 2026-11-02. The owner removed the custom round/spend cap because this open-source integration is free. Automatic provider execution now starts before preflight; the native admission gate still follows cheap preflight. No review model keys, commands, provider output artifacts, posting schema or PAT fallback remain. Issue intake keeps its independent model integration.
 
+The all-path `reviews.path_instructions` in `.coderabbit.yaml` asks CodeRabbit to
+name each finding's concrete defect class, search all changed files, and group all
+evidenced file/line locations for that root cause in the same review. For guards,
+scanners and parsers whose established validation or safety contract requires it,
+the instruction prefers one general fail-closed recommendation with representative
+regression cases over separate findings for each unsupported syntax form. It
+preserves intentional acceptance of unknown forms where the contract permits it.
+These are reviewer instructions, not proof of complete coverage or a guarantee of
+fewer review rounds.
+
 The native gate requires trusted classification and applicable baseline, complexity and
 clone checks, plus typecheck, workflow lint and citations. Typecheck reads local
 source without building. The build/package job checks packaged test types after
