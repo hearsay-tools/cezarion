@@ -280,7 +280,10 @@ and the two trackers. It reads; it never writes a run.
   - the rows of foreign families with `live = 1` (the indexed column from
     `isLiveRecord()` in `packages/cezar/src/runs/run-row.ts`), read with `getRun()`.
     `listRuns()` leaves foreign families out of memory.
-  A root in both sets is read once. Known gap: a request whose sender rests at
+  A root in both sets is read once. A publisher also re-reads, once, every root
+  whose ledger held an open request in its previous snapshot, even when that root
+  left both sets. So a reply whose sender settles before the next snapshot still
+  shows its stored `replied` outcome and its comet. Known gap: a request whose sender rests at
   `review` with no open wait is not in the live set and is not drawn, although no
   outcome closes it. Drawing it needs an indexed column for open requests; that is a
   follow-up, not part of this work.
@@ -322,6 +325,7 @@ Case table for request state (a cross-run relationship):
 | Recipient queued or parked | `accepted`, no outcome | Open line; the recipient card shows its own state |
 | New send to a stopping recipient | `sendAdmission()` marks it resumable, so an ordinary request is `continuation-required`; `assertSendResume()` refuses `--resume` | Never drawn, as for any undelivered send |
 | Recipient starts stopping while an accepted request is open | `accepted`, no outcome until the recipient settles | Open line; it closes by the recipient rows above when the recipient settles |
+| Parent starts stopping while its worker's routed question is open | `closeRoutedQuestions()` (`packages/cezar/src/workflows/run/worker-questions.ts`), called by `FamilyReconciler.endStoppedParent()`, stores `cancelled` at once | Closed: fade, no comet |
 | Sender's Finish is pending (done refused while workers live) | sender stays `running` or `waiting` | Line stays |
 | Sender's history deleted | the ledger is gone | The card and its lines leave with no reply animation |
 | Recipient's history deleted | outcome `deleted` | Closed: fade |
@@ -371,8 +375,8 @@ active, it hands over to `gh pr checks --watch` and probes only the head SHA eve
 - A progress read never changes the wait's outcome. A failed read keeps the last
   progress and is not an error. The `--watch` process, the head probe and the result
   are unchanged.
-- Merge waits poll no checks today and get no progress (the detail shows the merge
-  state only).
+- Merge waits poll no checks today and get no progress. The detail shows the PR
+  number and the deadline only (see the state table).
 
 Case table for the probe (a detached process):
 
