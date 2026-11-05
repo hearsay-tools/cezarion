@@ -91,11 +91,7 @@ export class ToolActivityTracker implements ToolActivitySource {
       this.backgrounded(runId, item, at);
       return;
     }
-    if (run?.completed.includes(item.id)) {
-      // Only a new title of the latest tool counts; its status and times stay as they ended.
-      if (run.latest?.itemId === item.id && item.title) run.latest.tool = { ...run.latest.tool, title: toolTitle(item, redact) };
-      return;
-    }
+    if (run && repeated(run, item, redact)) return;
     if (!run?.open.has(item.id)) {
       this.started(runId, item, at, { terminal, closes, owner, title: toolTitle(item, redact) });
       return;
@@ -218,6 +214,16 @@ export class ToolActivityTracker implements ToolActivitySource {
       latest.tool = { ...latest.tool, status: 'completed', endedAt: iso(at) };
     }
   }
+}
+
+/**
+ * A later event of a tool item that already completed: it is not a new call. Only a new title of
+ * the latest tool counts; its status and times stay as they ended. True when the item was known.
+ */
+function repeated(run: RunActivity, item: UiToolItem, redact: (text: string) => string): boolean {
+  if (!run.completed.includes(item.id)) return false;
+  if (run.latest?.itemId === item.id && item.title) run.latest.tool = { ...run.latest.tool, title: toolTitle(item, redact) };
+  return true;
 }
 
 /** Remember a completed tool item, forgetting the oldest beyond the bound. */
