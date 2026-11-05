@@ -39,7 +39,7 @@ function events(fixture: string): UiEvent[] {
 /** Feed `fixture` through a UI event sink as a run's session does, the tracker observing it. */
 function track(fixture: string, runId = 'run-1'): ToolActivityTracker {
   const tracker = new ToolActivityTracker({ now: () => NOW });
-  const sink = new UiEventSink({ persist: () => undefined, emitLive: () => undefined, observe: (event) => tracker.observe(runId, event) });
+  const sink = new UiEventSink({ persist: () => undefined, emitLive: () => undefined, observe: (event) => tracker.observe(runId, event, (text) => text) });
   for (const event of events(fixture)) sink.handle(event);
   sink.sessionEnded('end_turn');
   return tracker;
@@ -62,7 +62,7 @@ describe('tool activity from each runner’s mapper output', () => {
     const tracker = new ToolActivityTracker({ now: () => NOW });
     const all = events('omp/rpc-edit-todo');
     const end = all.findIndex((event) => event.type === 'item.completed' && event.item.id === 'toolu_edit_1');
-    for (const event of all.slice(0, end + 1)) tracker.observe('run-1', event);
+    for (const event of all.slice(0, end + 1)) tracker.observe('run-1', event, (text) => text);
     expect(tracker.read('run-1', NOW)?.tool).toMatchObject({ title: 'Edit src/greet.ts', status: TOOL_STATUS.completed });
   });
 });

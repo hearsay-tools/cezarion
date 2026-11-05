@@ -23,6 +23,13 @@ describe('RunManager tool activity', () => {
     runnerHook.uiEvent({ type: 'item.started', item: { kind: 'tool', id: 'tool-1', name: 'Bash', toolKind: 'execute', title: 'Ran npm test', status: TOOL_STATUS.running } });
     expect(toolActivity.read(record.id, Date.now())?.tool).toMatchObject({ title: 'Ran npm test', status: TOOL_STATUS.running });
 
+    // The sink sees the event before the store redacts it: the tracker uses the store's own redactor.
+    const secret = 'Zq7-session-secret-0123456789';
+    fixture.store.registerSessionSecret(secret);
+    const title = `${'x'.repeat(150)}${secret}`;
+    runnerHook.uiEvent({ type: 'item.started', item: { kind: 'tool', id: 'tool-2', name: 'Bash', toolKind: 'execute', title, status: TOOL_STATUS.running } });
+    expect(toolActivity.read(record.id, Date.now())?.tool?.title).toBe(`${'x'.repeat(150)}[REDACTED]`);
+
     fixture.manager.cancel(record.id);
     await fixture.waitFor(record.id, (run) => run?.status === 'cancelled');
     expect(toolActivity.read(record.id, Date.now())).toBeUndefined();

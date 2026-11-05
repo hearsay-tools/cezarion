@@ -40,8 +40,13 @@ export class ToolActivityTracker implements ToolActivitySource {
     this.now = options.now ?? Date.now;
   }
 
-  /** One UI event of `runId`, as its UI event sink handles it. Only tool items count. */
-  observe(runId: string, event: UiEvent): void {
+  /**
+   * One UI event of `runId`, as its UI event sink handles it. Only tool items count. The sink sees
+   * the event before the run store redacts it, so `redact` is the run store's own redactor (the
+   * transcript's policy): a title is redacted first and clamped after, and no part of a secret
+   * that the clamp would cut can stay.
+   */
+  observe(runId: string, event: UiEvent, redact: (text: string) => string): void {
     if (event.type !== 'item.started' && event.type !== 'item.updated' && event.type !== 'item.completed') return;
     if (event.item.kind !== 'tool') return;
     const item = event.item;
@@ -55,14 +60,14 @@ export class ToolActivityTracker implements ToolActivitySource {
     }
     const run = this.runs.get(runId);
     if (!run?.open.has(item.id)) {
-      this.started(runId, item, at, { terminal, closes });
+      this.started(runId, item, at, { terminal, closes, title: toolTitle(item, redact) });
       return;
     }
     if (closes) run.open.delete(item.id);
     const latest = run.latest;
     if (latest?.itemId !== item.id) return;
     // A mapper replaces a placeholder title, or sets the final one only at completion.
-    const title = item.title ? { title: toolTitle(item) } : {};
+    const title = item.title ? { title: toolTitle(item, redact) } : {};
     latest.tool = terminal
       ? { ...latest.tool, ...title, status: item.status, endedAt: latest.tool.endedAt ?? iso(at) }
       : { ...latest.tool, ...title, status: item.status };
@@ -96,7 +101,7 @@ export class ToolActivityTracker implements ToolActivitySource {
   }
 
   /** The first event of a tool item: one call, and the latest tool. A tool first seen at its end counts once. */
-  private started(runId: string, item: UiToolItem, at: number, { terminal, closes }: { terminal: boolean; closes: boolean }): void {
+  private started(runId: string, item: UiToolItem, at: number, { terminal, closes, title }: { terminal: boolean; closes: boolean; title: string }): void {
     let run = this.runs.get(runId);
     if (!run) {
       run = { open: new Set(), buckets: Array.from({ length: ACTIVITY_RATE_SECONDS }, () => 0), second: secondOf(at) };
@@ -107,7 +112,7 @@ export class ToolActivityTracker implements ToolActivitySource {
     run.buckets[newest] = (run.buckets[newest] ?? 0) + 1;
     run.latest = {
       itemId: item.id,
-      tool: { title: toolTitle(item), toolKind: item.toolKind, status: item.status, startedAt: iso(at), ...(terminal ? { endedAt: iso(at) } : {}) },
+      tool: { title, toolKind: item.toolKind, status: item.status, startedAt: iso(at), ...(terminal ? { endedAt: iso(at) } : {}) },
     };
     if (!closes) run.open.add(item.id);
   }
@@ -143,4 +148,4 @@ function shift(run: RunActivity, second: number): void {
 
 const secondOf = (ms: number): number => Math.floor(ms / 1000);
 const iso = (ms: number): string => new Date(ms).toISOString();
-const toolTitle = (item: UiToolItem): string => clampText(item.title, ACTIVITY_TOOL_TITLE_MAX);
+const toolTitle = (item: UiToolItem, redact: (text: string) => string): string => clampText(redact(item.title), ACTIVITY_TOOL_TITLE_MAX);

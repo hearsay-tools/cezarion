@@ -81,7 +81,7 @@ describe('workspace activity API', () => {
     await registerProject(repoRoot);
     const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
     const toolActivity = new ToolActivityTracker();
-    toolActivity.observe(run.id, { type: 'item.started', item: { kind: 'tool', id: 'a', name: 'Bash', toolKind: 'execute', title: 'Ran npm test', status: TOOL_STATUS.running } });
+    toolActivity.observe(run.id, { type: 'item.started', item: { kind: 'tool', id: 'a', name: 'Bash', toolKind: 'execute', title: 'Ran npm test', status: TOOL_STATUS.running } }, (text) => text);
 
     const res = await apiRequest(createApp({ repoRoot, store, manager, version: '0.0.0-test', toolActivity }), '/api/v1/workspace/activity?project=default');
 
