@@ -1119,6 +1119,11 @@ export interface RunObservation {
   readonly events: readonly Record<string, unknown>[];
 }
 
+/** Omit an absent dependency under exact optional property types. */
+function optionalSemaphore(semaphore: WorkspaceSemaphore | undefined): { semaphore?: WorkspaceSemaphore } {
+  return semaphore ? { semaphore } : {};
+}
+
 /**
  * Drive one backend through a real `RunManager` run against its offline mock.
  *
@@ -1138,6 +1143,7 @@ export async function driveRun(
   afterSettled?: (context: { store: RunStore; manager: RunManager; runId: string }) => Promise<void>,
   options: {
     autonomous?: boolean;
+    semaphore?: WorkspaceSemaphore;
     workflowDef?: WorkflowDef;
     /** Called with the fresh store and manager before the run starts (to observe either), and
      *  the repo root, so a row can write the project's `.ai/cezar/config.json` (#917). */
@@ -1155,7 +1161,7 @@ export async function driveRun(
     mockBin?: string;
   } = {},
 ): Promise<RunObservation> {
-  const { beforeStart, beforeCleanup, during, env: extraEnv, mockBin, worktree, ...runOptions } = options;
+  const { beforeStart, beforeCleanup, during, env: extraEnv, mockBin, worktree, semaphore, ...runOptions } = options;
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
@@ -1190,7 +1196,7 @@ export async function driveRun(
     await execFileAsync('git', ['add', '-A'], { cwd: repoRoot });
     await execFileAsync('git', [...GIT_IDENTITY, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot, optionalSemaphore(semaphore));
     beforeStart?.({ store, manager, repoRoot });
     const started = manager.startRun(runOptions.workflowDef ?? SINGLE_STEP, {
       ...runOptions,

@@ -1,6 +1,8 @@
 import { monitoringTurnFiles } from '../workflows/monitoring-turn-partitions.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
-import { runInternals } from '../workflows/run-internals.testkit.ts';
+import { observationClock } from './observation-clock.testkit.ts';
+import { IDLE_TIMEOUT_MS } from '../workflows/run.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { createApp } from '../server/server.ts';
 import { apiRequest } from '../server/loopback-request.testkit.ts';
 /**
@@ -112,7 +114,7 @@ import {
 } from './harness-parity.testkit.ts';
 import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns, seedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
-import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWork } from '../workflows/fixture-cleanup.testkit.ts';
 
 /** One request the OpenCode serve mock recorded in `CEZ_MOCK_ARGS_FILE`. */
 type OpencodeRequestRow = { method?: string; url?: string; body?: { permission?: unknown } };
@@ -432,11 +434,38 @@ const askEvents = (obs: RunObservation) =>
 const openTimerWait = (run?: { waits?: readonly unknown[] | undefined } | null): TimerWaitEntry | undefined =>
   (run?.waits as TimerWaitEntry[] | undefined)?.find(wait => wait.kind === WAIT_KIND.timer && wait.phase === WAIT_PHASE.open);
 const timerWakeOf = (run?: { waits?: readonly unknown[] | undefined } | null): string | undefined => openTimerWait(run)?.deadline;
-/** The timer RunManager armed for the run's open timer wait. */
-const timerOf = (manager: RunManager, runId: string): (NodeJS.Timeout & { _onTimeout(): void }) | undefined => {
-  const id = openTimerWait(runInternals(manager).context.store.getRun(runId))?.id;
-  return id ? runInternals(manager).waitWatches.waitTimers.get(id)?.timer as NodeJS.Timeout & { _onTimeout(): void } | undefined : undefined;
-};
+/** Keep the exact fire-and-forget settlement promise owned by the fixture. */
+function observeSettlements(manager: RunManager) {
+  const work = fixtureWork(manager);
+  const track = work.track.bind(work);
+  const pending: Promise<unknown>[] = [];
+  const spy = vi.spyOn(work, 'track').mockImplementation((label, promise) => {
+    if (label === 'settleSuccess') pending.push(promise);
+    return track(label, promise);
+  });
+  return { pending, restore: () => spy.mockRestore() };
+}
+
+/** Drive the native run with owned capacity and only its idle timer frozen. */
+function driveObservedRun(
+  backend: Parameters<typeof driveRun>[0], scenario: Parameters<typeof driveRun>[1],
+  settled: Parameters<typeof driveRun>[2], timeout: number,
+  observe: (context: { store: RunStore; manager: RunManager; runId: string; repoRoot: string; idle: ReturnType<typeof observationClock>; semaphore: WorkspaceSemaphore }) => Promise<void>,
+  options: NonNullable<Parameters<typeof driveRun>[5]> = {},
+) {
+  let repoRoot = '';
+  let idle: ReturnType<typeof observationClock>;
+  const semaphore = new WorkspaceSemaphore();
+  return driveRun(backend, scenario, settled, timeout, context => observe({ ...context, repoRoot, idle, semaphore }), {
+    ...options, semaphore,
+    beforeStart: context => {
+      repoRoot = context.repoRoot;
+      idle = observationClock(delay => delay === IDLE_TIMEOUT_MS && /armIdleTimer/.test(new Error().stack ?? ''));
+      options.beforeStart?.(context);
+    },
+    beforeCleanup: () => { idle?.restore(); options.beforeCleanup?.(); },
+  });
+}
 
 const RUN_CRITERIA: readonly RunCriterion[] = [
   {
@@ -782,12 +811,9 @@ const FOLLOW_ON_CRITERION: SeamCriterion<FollowOnObservation> = {
 
 // #723: use the real RunManager on both event-handler construction paths.
 async function continueDiagnosticRun(backend: RunnerId, prompt: string): Promise<RunObservation> {
-  return driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
-    async ({ store, manager, runId }) => {
-      const internal = manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> };
-      const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
-      expect(timer).toBeDefined();
-      timer._onTimeout();
+  return driveObservedRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+    async ({ store, manager, runId, idle }) => {
+      await idle.advance(IDLE_TIMEOUT_MS);
       await waitFor(() => !manager.isActive(runId));
       expect(manager.continueRun(runId, { text: prompt }).ok).toBe(true);
       await waitFor(() => TERMINAL.includes(store.getRun(runId)?.status ?? ''), 30_000);
@@ -1149,10 +1175,9 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         let repaired = false, left = false;
         let continued: { ok: boolean; error?: string } = { ok: false };
         let final: RunRecord | undefined;
-        await driveRun(backend, 'cezar-done', record => TERMINAL.includes(record?.status ?? ''), 30_000,
-          async ({ store, manager, runId }) => {
+        await driveObservedRun(backend, 'cezar-done', record => TERMINAL.includes(record?.status ?? ''), 30_000,
+          async ({ store, manager, runId, repoRoot }) => {
             await waitFor(() => !manager.isActive(runId));
-            const repoRoot = manager['repoRoot'] as string;
             const dataDir = join(repoRoot, '.ai/cezar');
             store.flush();
             const records = readPersistedRuns(dataDir);
@@ -1199,9 +1224,8 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         let afterHeadless: string | undefined, afterRestart: string | undefined;
         let answered: { ok: boolean; error?: string } = { ok: false };
         let final: RunRecord | undefined;
-        await driveRun(backend, 'ask', record => record?.status === 'waiting', 30_000,
-          async ({ store, manager, runId }) => {
-            const repoRoot = manager['repoRoot'] as string;
+        await driveObservedRun(backend, 'ask', record => record?.status === 'waiting', 30_000,
+          async ({ store, runId, repoRoot }) => {
             const dataDir = join(repoRoot, '.ai/cezar');
             store.flush();
             // A headless `cez run` opens the project and exits while the owner still runs.
@@ -1251,9 +1275,9 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         let settled: RunRecord | undefined, resumed: RunRecord | undefined;
         let continued: { ok: boolean; error?: string } = { ok: false };
         // Mid-turn, with the session the owner opened recorded: what a restart would resume.
-        await driveRun(backend, 'hold', record => record?.status === 'running' && record.steps.some((step) => step.sessionId !== undefined), 30_000,
-          async ({ store, manager, runId }) => {
-            const repoRoot = manager['repoRoot'] as string;
+        await driveObservedRun(backend, 'hold', record => record?.status === 'running' && record.steps.some((step) => step.sessionId !== undefined), 30_000,
+          async ({ store, manager, runId, repoRoot }) => {
+            await waitFor(() => [...fixtureWork(manager).liveSessions].some(session => session.open));
             const dataDir = join(repoRoot, '.ai/cezar');
             store.flush();
             // This cockpit was already running beside the owner, which then crashed mid-session.
@@ -1264,7 +1288,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
               await drainFixtureManagers(repoRoot);
               const recovered = createFixtureManager(cockpit, repoRoot);
               let adopting = true;
-              const work = runInternals(recovered).context.work;
+              const work = fixtureWork(recovered);
               const realTrack = work.track.bind(work);
               vi.spyOn(work, 'track').mockImplementation((label, promise) => {
                 if (label === 'execute' || label === 'runContinuation') (adopting ? startedByAdoption : startedByContinue).push(label);
@@ -1309,9 +1333,9 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         let adopted = false;
         const started: string[] = [];
         let stopped: RunRecord | undefined;
-        await driveRun(backend, 'hold', record => record?.status === 'running' && record.steps.some((step) => step.sessionId !== undefined), 30_000,
-          async ({ store, manager, runId }) => {
-            const repoRoot = manager['repoRoot'] as string;
+        await driveObservedRun(backend, 'hold', record => record?.status === 'running' && record.steps.some((step) => step.sessionId !== undefined), 30_000,
+          async ({ store, manager, runId, repoRoot }) => {
+            await waitFor(() => [...fixtureWork(manager).liveSessions].some(session => session.open));
             const dataDir = join(repoRoot, '.ai/cezar');
             store.flush();
             const cockpit = RunStore.open(dataDir, { keepLive: true });
@@ -1320,7 +1344,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
               crashStore(store);
               await drainFixtureManagers(repoRoot);
               const recovered = createFixtureManager(cockpit, repoRoot);
-              const work = runInternals(recovered).context.work;
+              const work = fixtureWork(recovered);
               const realTrack = work.track.bind(work);
               vi.spyOn(work, 'track').mockImplementation((label, promise) => {
                 if (label === 'execute' || label === 'runContinuation') started.push(label);
@@ -1775,21 +1799,17 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
           manager.enqueueOwnedRun(runId);
           await waitFor(() => store.readEvents(runId).some(e => e.type === 'ask.requested'));
           const askSeq = store.readEvents(runId).find(e => e.type === 'ask.requested')!.seq;
-          const internal = manager as unknown as {
-            active: Map<string, { liveSession: { session: import('./agent-runner.ts').AgentSession; }; pendingHumanAsk: boolean; }>;
-            hasPendingHumanAsk(id: string): boolean;
-          };
           await waitFor(() => store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined && store.getRun(runId)?.status === 'waiting');
-          const state = internal.active.get(runId)!;
+          const session = [...fixtureWork(manager).liveSessions][0]!;
           // The session refuses the parent's answer once: it stays queued, and the ask stays pending.
-          const refuse = vi.spyOn(state.liveSession.session, 'sendMessage').mockReturnValue(false);
+          const refuse = vi.spyOn(session, 'sendMessage').mockReturnValue(false);
           const reply = await fixture.answer('refused answer');
           await waitFor(() => refuse.mock.calls.length > 0 || !!store.getRun(runId)?.agentInputs?.find(entry => entry.id === reply)?.deliveredAt);
           refuse.mockRestore();
           expect(store.getRun(runId)?.agentInputs?.find(entry => entry.id === reply)?.deliveredAt).toBeUndefined();
-          expect(state.pendingHumanAsk).toBe(true);
+          expect(store.transcriptFacts(runId).pendingAsk?.seq).toBe(askSeq);
           expect(store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toEqual([]);
-          expect(internal.hasPendingHumanAsk(runId)).toBe(true);
+          expect(hasPendingAsk(store, runId)).toBe(true);
           const input = agentInput(parentRunId);
           expect(manager.steerWorker(runId, input)).toBe('queued');
           withoutTaskScenario(store, runId);
@@ -2062,7 +2082,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
           const closed = { finished: 'finish', cancelled: 'worker-stopped', rejected: undefined }[outcome];
           expect(events.filter(e => e.type === 'human-ask-closed')).toEqual(closed ? [expect.objectContaining({ askSeq, reason: closed })] : []);
           const recovered = await fixture.restart();
-          expect((recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(outcome === 'rejected');
+          expect(hasPendingAsk(recovered.store, runId)).toBe(outcome === 'rejected');
           if (outcome === 'rejected') expect(recovered.manager.continueRun(runId).ok).toBe(false);
           expect(withoutReceipts(recovered.store.getRun(runId)?.agentInputs)).toEqual([input]);
         });
@@ -2626,16 +2646,10 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         it(`${backend} ${criterion} closes every live step when multi-Continue finishes as ${status}`, async () => {
           vi.stubEnv('CEZ_REVIEW_GATE', status === 'review' ? '1' : '0');
           try {
-            await driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
-              async ({ store, manager, runId }) => {
-                const internal = manager as unknown as {
-                  repoRoot: string;
-                  active: Map<string, { idleTimer?: NodeJS.Timeout }>;
-                };
+            await driveObservedRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+              async ({ store, manager, runId, repoRoot, idle }) => {
                 for (let turn = 0; turn < 2; turn++) {
-                  const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
-                  expect(timer).toBeDefined();
-                  timer._onTimeout();
+                  await idle.advance(IDLE_TIMEOUT_MS);
                   await waitFor(() => !manager.isActive(runId));
                   // Idle close remains a park, not successful task completion.
                   expect(store.getRun(runId)?.status).toBe('waiting');
@@ -2646,8 +2660,8 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
                 const before = store.getRun(runId)!;
                 expect(before.steps.map(step => step.id)).toEqual(['task', 'continue-1', 'continue-2']);
                 // driveRun uses an in-place repository; expose that real diff to the gate.
-                store.updateRun(runId, { worktreePath: internal.repoRoot, baseBranch: 'main' });
-                writeFileSync(join(internal.repoRoot, 'a.txt'), 'changed for review\n');
+                store.updateRun(runId, { worktreePath: repoRoot, baseBranch: 'main' });
+                writeFileSync(join(repoRoot, 'a.txt'), 'changed for review\n');
                 if (status === 'cancelled') {
                   let release!: (diff: string) => void;
                   const diff = vi.spyOn(gitWorktree, 'worktreeDiff').mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
@@ -2678,39 +2692,32 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       for (const queued of [false, true]) {
         const criterion = queued ? 'R34' : 'R33';
         it(`${backend} ${criterion} rejects stale Finish after Continue ${queued ? 'queues' : 'starts and idle-closes'}`, async () => {
-          await driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
-            async ({ store, manager, runId }) => {
-              const internal = manager as unknown as {
-                repoRoot: string;
-                active: Map<string, { idleTimer?: NodeJS.Timeout }>;
-                semaphore: { busy(): number };
-              };
+          await driveObservedRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+            async ({ store, manager, runId, repoRoot, idle, semaphore }) => {
               const idleClose = async () => {
-                const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
-                expect(timer).toBeDefined();
-                timer._onTimeout();
+                await idle.advance(IDLE_TIMEOUT_MS);
                 await waitFor(() => !manager.isActive(runId));
                 expect(store.getRun(runId)?.status).toBe('waiting');
               };
               await idleClose();
-              store.updateRun(runId, { worktreePath: internal.repoRoot, baseBranch: 'main' });
+              store.updateRun(runId, { worktreePath: repoRoot, baseBranch: 'main' });
               let release: ((diff: string) => void) | undefined;
               const diff = vi.spyOn(gitWorktree, 'worktreeDiff').mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
               // Observe the real fire-and-forget settlement, including its config I/O.
-              const settlement = vi.spyOn(runInternals(manager).runSettlement, 'settleSuccess');
+              const settlement = observeSettlements(manager);
               // Hold only scheduler capacity; the run and its idle close use native wires.
-              const capacity = queued ? vi.spyOn(internal.semaphore, 'busy').mockReturnValue(Number.MAX_SAFE_INTEGER) : undefined;
+              const capacity = queued ? vi.spyOn(semaphore, 'busy').mockReturnValue(Number.MAX_SAFE_INTEGER) : undefined;
               try {
                 expect(manager.finish(runId)).toBe(true);
                 await waitFor(() => release !== undefined);
-                expect(settlement).toHaveBeenCalledWith(runId);
-                const pending = settlement.mock.results[0]!.value as Promise<void>;
+                expect(settlement.pending).toHaveLength(1);
+                const pending = settlement.pending[0]!;
                 expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }, queued).ok).toBe(true);
                 if (!queued) {
                   await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
                   await idleClose();
                 }
-                expect(internal.active.get(runId)).toBeUndefined();
+                expect(fixtureWork(manager).liveSessions.size).toBe(0);
                 const before = structuredClone(store.getRun(runId)!);
                 expect(before.status).toBe(queued ? 'queued' : 'waiting');
                 expect(before.steps.at(-1)).toMatchObject({ id: 'continue-1', status: queued ? 'pending' : 'waiting' });
@@ -2724,9 +2731,9 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
                   (event.message === 'run finished' || (typeof event.message === 'string' && event.message.startsWith('changes ready for review'))))).toBe(false);
               } finally {
                 release?.('changed');
-                await Promise.allSettled(settlement.mock.results.map(result => result.value));
+                await Promise.allSettled(settlement.pending);
                 diff.mockRestore();
-                settlement.mockRestore();
+                settlement.restore();
                 // Cancel queued work before restoring capacity so teardown cannot launch it.
                 manager.cancel(runId);
                 capacity?.mockRestore();
@@ -2744,38 +2751,27 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         it(`${backend} ${criterion} honors ${continuation ? 'Continue' : 'fresh'} Finish when disposed during diff I/O`, async () => {
           vi.stubEnv('CEZ_REVIEW_GATE', '0');
           try {
-            await driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
-              async ({ store, manager, runId }) => {
-                const internal = manager as unknown as {
-                  repoRoot: string;
-                  active: Map<string, { idleTimer?: NodeJS.Timeout }>;
-                  dropActive(id: string): void;
-                };
+            await driveObservedRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+              async ({ store, manager, runId, repoRoot, idle }) => {
                 if (continuation) {
-                  const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
-                  expect(timer).toBeDefined();
-                  timer._onTimeout();
+                  await idle.advance(IDLE_TIMEOUT_MS);
                   await waitFor(() => !manager.isActive(runId));
                   expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
                   await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
                 }
-                store.updateRun(runId, { worktreePath: internal.repoRoot, baseBranch: 'main' });
+                store.updateRun(runId, { worktreePath: repoRoot, baseBranch: 'main' });
                 let release: ((diff: string) => void) | undefined;
                 const diff = vi.spyOn(gitWorktree, 'worktreeDiff').mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
                 // dispose clears active immediately. Observe actual engine cleanup,
                 // so assertions and fixture deletion wait for the settlement callback.
-                let cleanedUp = false;
-                const dropActive = internal.dropActive.bind(manager);
-                const cleanup = vi.spyOn(internal, 'dropActive').mockImplementation(id => {
-                  dropActive(id);
-                  if (id === runId) cleanedUp = true;
-                });
+                const settlement = observeSettlements(manager);
                 try {
                   expect(manager.finish(runId)).toBe(true);
                   await waitFor(() => release !== undefined);
                   manager.dispose();
                   release!('changed');
-                  await waitFor(() => cleanedUp);
+                  expect(settlement.pending).toHaveLength(1);
+                  await Promise.all(settlement.pending);
                   const completed = store.getRun(runId)!;
                   expect(completed.status).toBe('done');
                   expect(completed.finishedAt).toBeDefined();
@@ -2785,7 +2781,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
                 } finally {
                   release?.('changed');
                   diff.mockRestore();
-                  cleanup.mockRestore();
+                  settlement.restore();
                 }
               });
           } finally { vi.unstubAllEnvs(); }
@@ -2798,14 +2794,10 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
   describeRunners('scratch', 'harness parity — live task scratch', () => {
     for (const backend of runners) {
       it(`${backend} R22 retains scratch across idle close and Continue, then reaps on finish`, async () => {
-        await driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
-          async ({ store, manager, runId }) => {
-            const internal = manager as unknown as {
-              dataDir: string;
-              active: Map<string, { idleTimer?: NodeJS.Timeout }>;
-            };
-            const original = resolveAgentTmpDir(internal.dataDir, runId);
-            const dirs = new Set([agentTmpDir(internal.dataDir, runId), original]);
+        await driveObservedRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+          async ({ store, manager, runId, repoRoot, idle }) => {
+            const original = resolveAgentTmpDir(join(repoRoot, '.ai/cezar'), runId);
+            const dirs = new Set([agentTmpDir(join(repoRoot, '.ai/cezar'), runId), original]);
             const nextRoot = mkdtempSync(join(realpathSync('/tmp'), 'cez-next-'));
             const keys = ['TMPDIR', 'TEMP', 'TMP'] as const;
             const previous = keys.map(key => process.env[key]);
@@ -2816,13 +2808,11 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
                 writeFileSync(join(dir, 'notes'), 'keep across turns');
               }
               for (let turn = 0; turn < 2; turn++) {
-                const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
-                expect(timer).toBeDefined();
-                timer._onTimeout();
+                await idle.advance(IDLE_TIMEOUT_MS);
                 await waitFor(() => !manager.isActive(runId));
                 expect(store.getRun(runId)?.status).toBe('waiting');
                 for (const dir of dirs) expect(readFileSync(join(dir, 'notes'), 'utf8')).toBe('keep across turns');
-                expect(resolveAgentTmpDir(internal.dataDir, runId)).toBe(original);
+                expect(resolveAgentTmpDir(join(repoRoot, '.ai/cezar'), runId)).toBe(original);
                 expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
                 await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
                 for (const dir of dirs) expect(readFileSync(join(dir, 'notes'), 'utf8')).toBe('keep across turns');
@@ -2923,13 +2913,10 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       for (const continued of [false, true]) {
         it(`${backend} ${continued ? 'R37 Continue' : 'R36 fresh'} receives the shared monitoring wrap-up contract`, async () => {
           await recording(async dir => {
-            await driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
-              async ({ store, manager, runId }) => {
+            await driveObservedRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
+              async ({ store, manager, runId, idle }) => {
                 if (continued) {
-                  const internal = manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> };
-                  const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
-                  expect(timer).toBeDefined();
-                  timer._onTimeout();
+                  await idle.advance(IDLE_TIMEOUT_MS);
                   await waitFor(() => !manager.isActive(runId));
                   clearRecording(dir);
                   expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
@@ -2948,11 +2935,12 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
             fixture.manager.enqueueOwnedRun(fixture.runId);
             await waitFor(() => fixture.store.getRun(fixture.runId)?.status === 'waiting' && !!timerWakeOf(fixture.store.getRun(fixture.runId)));
             clearRecording(dir);
+            const wakeClock = observationClock(() => /WaitWatches\.armWait/.test(new Error().stack ?? ''));
             const { manager } = await fixture.restart();
             // hearsay-tools/cezarion#1233: recovery re-arms the park's persisted monitoring timer
             // instead of resuming at once; its wake starts the recovered session.
-            await waitFor(() => !!timerOf(manager, fixture.runId));
-            timerOf(manager, fixture.runId)!._onTimeout();
+            expect(wakeClock.pending).toBe(1);
+            wakeClock.fire(0);
             await waitFor(() => manager.isActive(fixture.runId) && messages(backend, dir).length > 0);
             assertRules(systemPrompt(backend, dir), promptRules);
           });
@@ -2965,12 +2953,12 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       // ScheduleWakeup and the live-workers timer).
       it(`${backend} R39 a timer wake delivers its result and next-step instruction on the native message channel`, async () => {
         await recording(async dir => {
+          const wakeClock = observationClock(() => /WaitWatches\.armWait/.test(new Error().stack ?? ''));
           await driveRun(backend, 'cezar-wait', record => record?.status === 'waiting' && !!timerWakeOf(record), 30_000,
-            async ({ store, manager, runId }) => {
+            async ({ store, runId }) => {
               const waitId = openTimerWait(store.getRun(runId))!.id;
-              const timer = timerOf(manager, runId)!;
-              expect(timer).toBeDefined();
-              timer._onTimeout();
+              expect(wakeClock.pending).toBe(1);
+              wakeClock.fire(0);
               await waitFor(() => messages(backend, dir).length > 1);
               const wake = messages(backend, dir)[1]!;
               expect(wake).toContain(`Timer ${waitId} fired: Re-check the downstream work.`);

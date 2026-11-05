@@ -1,18 +1,19 @@
 import { runInternals } from './run-internals.testkit.ts';
+import { observationClock } from '../core/observation-clock.testkit.ts';
+import * as runners from '../core/runner-factory.ts';
+import type { AgentSession, SessionOptions } from '../core/agent-runner.ts';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { WAIT_LIMIT, type SubagentWaitEntry, type Wait } from '@open-mercato/cezar-contract/waits';
-import { makePeerWait, makeWorkerWait, RUN_STATUS, SUBAGENT_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { makePeerWait, RUN_STATUS, SUBAGENT_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { ToolStatus, UiEvent, UiToolItem } from '../core/ui-events.ts';
-import { UiEventSink } from '../runs/ui-event-sink.ts';
-import { handleRunnerUiEvent } from './run/session-events.ts';
-import { MAX_AUTO_CONTINUES } from './run.ts';
+import { IDLE_TIMEOUT_MS, MAX_AUTO_CONTINUES } from './run.ts';
 import { stateOf } from './run-states.ts';
 import { NO_WAIT_NUDGE_NOTE } from './turn-end.ts';
-import { controlledWire, manager, parent, restart, root, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { controlledWire, manager, parent, restart, root, store, semaphore, work, toolGenerationOf, worker, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 
 /**
  * Cezar's wait on native subagents (hearsay-tools/cezarion#2431): one test per `waiting:subagents`
@@ -21,7 +22,46 @@ import { controlledWire, manager, parent, restart, root, store, until, useWorker
  * child's UI events reach the engine through the same handler the runners feed.
  */
 
-const internals = () => runInternals(manager);
+let idleClock: ReturnType<typeof observationClock>;
+const callbacks = new Map<string, SessionOptions>();
+const sessions = new Map<string, AgentSession>();
+function useSubagentFixture(options: Parameters<typeof useWorkerWaitFixture>[0]) {
+  useWorkerWaitFixture(options);
+  beforeEach(() => {
+    callbacks.clear();
+    sessions.clear();
+    vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(0);
+    idleClock = observationClock(delay => delay === IDLE_TIMEOUT_MS && /armIdleTimer/.test(new Error().stack ?? ''));
+    const create = runners.createRunner;
+    vi.spyOn(runners, 'createRunner').mockImplementation((...args) => {
+      const runner = create(...args);
+      const start = runner.startSession.bind(runner);
+      vi.spyOn(runner, 'startSession').mockImplementation((spec, event, options) => {
+        callbacks.set(spec.env!.CEZ_TASK_ID!, options ?? {});
+        const session = start(spec, event, options);
+        sessions.set(spec.env!.CEZ_TASK_ID!, session);
+        return session;
+      });
+      return runner;
+    });
+  });
+  afterEach(() => { idleClock.restore(); vi.restoreAllMocks(); });
+}
+async function noIdleClose(id: string) {
+  await idleClock.advance(IDLE_TIMEOUT_MS);
+  expect(manager.isActive(id)).toBe(true);
+  expect(sessions.get(id)?.open).toBe(true);
+}
+async function besideWait(runId: string, kind: 'peer' | 'worker') {
+  if (kind === 'worker') {
+    const child = await worker(runId);
+    manager.registerWorkerListWait(runId, { workerIds: [child.id], timeoutSeconds: 600 }, 'cezar_wait');
+  } else {
+    const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', steps: [], runner: 'claude' });
+    const result = await manager.cezarToolHandlers(runId, toolGenerationOf(runId)).registerWait({ kind: WAIT_KIND.peer, peer_ids: [peer.id] }, 'cezar_wait', new AbortController().signal);
+    expect(result.answer.ok).toBe(true);
+  }
+}
 const entryOf = (runId: string, waitId: string): Wait | undefined => store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
 const settledOf = (runId: string, waitId: string): Wait | undefined => store.getRun(runId)?.lastWaits?.filter(wait => wait.id === waitId).at(-1);
 const subagentWait = (runId: string): SubagentWaitEntry | undefined =>
@@ -46,10 +86,9 @@ const child = (id: string, status: ToolStatus, background = true): UiToolItem =>
 
 /** One UI event, through the handler every runner's `onUiEvent` reaches. */
 function emitUi(runId: string, event: UiEvent): void {
-  const engine = internals();
-  const stepId = engine.active.get(runId)!.liveSession.currentStepId;
-  const sink = new UiEventSink({ persist: next => store.appendEvent(runId, { ...next, ...(stepId ? { stepId } : {}) }), emitLive: () => undefined });
-  handleRunnerUiEvent(engine.context, engine.sessionHelperHost, runId, engine.active.get(runId)!, sink, event);
+  const callback = callbacks.get(runId)?.onUiEvent;
+  if (!callback) throw new Error(`No runner callback for ${runId}`);
+  callback(event);
 }
 const startChild = (runId: string, id: string) => emitUi(runId, { type: 'item.started', item: child(id, 'running') });
 const endChild = (runId: string, id: string, status: ToolStatus = 'completed') => emitUi(runId, { type: 'item.completed', item: child(id, status, false) });
@@ -68,12 +107,12 @@ async function parkedOnSubagents(children = ['toolu_bg_01'], beforeRelease?: (ru
   for (const id of children) startChild(run.id, id);
   await beforeRelease?.(run.id);
   release();
-  await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && subagentWait(run.id) !== undefined && internals().line.isParked(run.id));
+  await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && subagentWait(run.id) !== undefined);
   return { id: run.id, wait: subagentWait(run.id)! };
 }
 
 describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
-  useWorkerWaitFixture({ subagentGraceMs: 50 });
+  useSubagentFixture({ subagentGraceMs: 50 });
 
   it('running → waiting:subagents: the turn end parks on the subagent wait with no timer and no wake spent', async () => {
     const { id, wait } = await parkedOnSubagents();
@@ -84,20 +123,20 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     expect(run.waits?.filter(entry => entry.kind === WAIT_KIND.timer)).toEqual([]);
     expect(wakes(id)).toBe(0);
     // It keeps its session and a monitoring slot, so the idle close never applies.
-    expect(internals().line.inPool(id)).toBe(true);
-    expect(internals().active.get(id)?.idleTimer).toBeUndefined();
+    expect(semaphore.busy()).toBe(1);
+    await noIdleClose(id);
     expect(store.readEvents(id).some(event => event.type === 'note' && String(event.message).startsWith('no wait or done'))).toBe(false);
   });
 
-  for (const [kind, make] of [['peer', makePeerWait], ['worker', makeWorkerWait]] as const) {
+  for (const kind of ['peer', 'worker'] as const) {
     it(`a ${kind} wait beside the subagent wait still keeps the session and its slot, with no idle close`, async () => {
       const { id } = await parkedOnSubagents(['toolu_bg_01'], async runId => {
-        store.commitWait(runId, make({ turnId: internals().active.get(runId)!.ciTurnId ?? 'turn' }));
+        await besideWait(runId, kind);
       });
       // The other wait ranks first for display; the native child still needs this session.
-      expect(internals().line.inPool(id)).toBe(true);
-      expect(internals().active.get(id)?.idleTimer).toBeUndefined();
-      expect(internals().active.get(id)?.liveSession.session?.open).toBe(true);
+      expect(semaphore.busy()).toBe(1);
+      await noIdleClose(id);
+      expect(sessions.get(id)?.open).toBe(true);
     });
   }
 
@@ -156,6 +195,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
   });
 
   it('a child end whose checkpoint fails starts no grace, so no wake settles a stale snapshot', async () => {
+    const deadline = observationClock(() => /WaitWatches\.armWait/.test(new Error().stack ?? ''));
     const { id, wait } = await parkedOnSubagents();
     const commit = vi.spyOn(store, 'commitWait').mockImplementationOnce(() => { throw Error('injected: disk full'); });
     endChild(id, 'toolu_bg_01');
@@ -163,11 +203,12 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     await new Promise(resolve => setTimeout(resolve, 150)); // bound: outlasts the 50 ms grace
     // The saved wait still reads the child running; its armed deadline is the fallback.
     expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open, children: [{ id: 'toolu_bg_01', status: SUBAGENT_STATUS.running }] });
-    expect(internals().waitWatches.waitTimers.has(wait.id)).toBe(true);
+    expect(deadline.pending).toBe(1);
     expect(inputsNaming(id, 'Subagent wait')).toEqual([]);
   });
 
   it('a runner resume whose cancellation fails keeps every wait open and armed', async () => {
+    const deadline = observationClock(() => /WaitWatches\.armWait/.test(new Error().stack ?? ''));
     const { id, wait } = await parkedOnSubagents();
     const real = store.commitOutcome.bind(store);
     const commit = vi.spyOn(store, 'commitOutcome').mockImplementation((runId, outcome, ...rest) => {
@@ -178,48 +219,48 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     expect(commit.mock.calls.some(([, outcome]) => !Array.isArray(outcome) && (outcome as { kind?: string }).kind === 'cancelled')).toBe(true);
     commit.mockRestore();
     expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });
-    expect(internals().waitWatches.waitTimers.has(wait.id)).toBe(true);
+    expect(deadline.pending).toBe(1);
   });
 
   it('a question asked while the subagent wait is open keeps the session and its slot, with no idle close', async () => {
     const { id, wait } = await parkedOnSubagents();
     const turns = turnEnds(id);
     expect(manager.sendMessage(id, [{ type: 'text', text: 'mock:cezar-ask which one?' }])).toBe(true);
-    await until(() => turnEnds(id) > turns && store.getRun(id)?.status === RUN_STATUS.waiting && internals().line.isParked(id));
+    await until(() => turnEnds(id) > turns && store.getRun(id)?.status === RUN_STATUS.waiting);
     expect(store.getRun(id)?.waits?.some(entry => entry.kind === WAIT_KIND.human && entry.phase === WAIT_PHASE.open)).toBe(true);
     expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });
-    expect(internals().line.inPool(id)).toBe(true);
-    expect(internals().active.get(id)?.idleTimer).toBeUndefined();
-    expect(internals().active.get(id)?.liveSession.session?.open).toBe(true);
+    expect(semaphore.busy()).toBe(1);
+    await noIdleClose(id);
+    expect(sessions.get(id)?.open).toBe(true);
   });
 
   it('a first turn that asks with children running opens the wait beside the question and keeps the session and slot', async () => {
     const { run, release } = await heldParent(undefined, 'mock:cezar-ask which one?');
     startChild(run.id, 'toolu_bg_01');
     release();
-    await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && internals().line.isParked(run.id));
+    await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting);
     // The question ranks first for the user; the wait carries the children's deadline and restart.
     expect(deriveAttention(store.getRun(run.id)!).rung).toBe('needs-you');
     expect(subagentWait(run.id)).toMatchObject({ children: [{ id: 'toolu_bg_01', status: SUBAGENT_STATUS.running }] });
-    expect(internals().line.inPool(run.id)).toBe(true);
-    expect(internals().active.get(run.id)?.idleTimer).toBeUndefined();
+    expect(semaphore.busy()).toBe(1);
+    await noIdleClose(run.id);
   });
 
   it('a child end beside the question wakes the parent once; its park keeps the question and gives the slot back', async () => {
     const { run, release } = await heldParent(undefined, 'mock:cezar-ask which one?');
     startChild(run.id, 'toolu_bg_01');
     release();
-    await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && internals().line.isParked(run.id));
+    await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting);
     const wait = subagentWait(run.id)!;
     const turns = turnEnds(run.id);
     endChild(run.id, 'toolu_bg_01');
-    await until(() => settledOf(run.id, wait.id)?.phase === WAIT_PHASE.delivered && turnEnds(run.id) > turns && internals().line.isParked(run.id));
+    await until(() => settledOf(run.id, wait.id)?.phase === WAIT_PHASE.delivered && turnEnds(run.id) > turns);
     const parked = store.getRun(run.id)!;
     expect(deriveAttention(parked).rung).toBe('needs-you');
     expect(parked.waits?.map(entry => [entry.kind, entry.phase])).toEqual([[WAIT_KIND.human, WAIT_PHASE.open]]);
     expect(inputsNaming(run.id, `Subagent wait ${wait.id}`)).toEqual([expect.objectContaining({ deliveredAt: expect.any(String) })]);
-    expect(internals().line.inPool(run.id)).toBe(false);
-    expect(internals().active.get(run.id)?.idleTimer).toBeDefined();
+    expect(semaphore.busy()).toBe(0);
+    expect(idleClock.pending).toBe(1);
     expect(wakes(run.id)).toBe(0);
   });
 
@@ -251,7 +292,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
   it('a parent turn the runner starts closes the subagent wait and every timer, and takes no wake', async () => {
     let timerId = '';
     const { id, wait } = await parkedOnSubagents(['toolu_bg_01'], async runId => {
-      const handlers = manager.cezarToolHandlers(runId, internals().active.get(runId)!.liveSession.ciGeneration!);
+      const handlers = manager.cezarToolHandlers(runId, toolGenerationOf(runId));
       const registered = await handlers.registerWait({ kind: WAIT_KIND.timer, seconds: 600, note: 'beside the subagents' }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered)) throw new Error('timer not registered');
       timerId = registered.wait.id;
@@ -274,7 +315,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
   it('a human message keeps the subagent wait and its timers open, and the turn end parks on it again', async () => {
     let timerId = '';
     const { id, wait } = await parkedOnSubagents(['toolu_bg_01'], async runId => {
-      const handlers = manager.cezarToolHandlers(runId, internals().active.get(runId)!.liveSession.ciGeneration!);
+      const handlers = manager.cezarToolHandlers(runId, toolGenerationOf(runId));
       const registered = await handlers.registerWait({ kind: WAIT_KIND.timer, seconds: 600, note: 'beside the subagents' }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered)) throw new Error('timer not registered');
       timerId = registered.wait.id;
@@ -282,7 +323,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     const turns = turnEnds(id);
     // Claude starts the turn inside Cezar's own write: that turn is the human's, not the runner's.
     expect(manager.sendMessage(id, [{ type: 'text', text: 'how is it going?' }])).toBe(true);
-    await until(() => turnEnds(id) > turns && store.getRun(id)?.status === RUN_STATUS.waiting && internals().line.isParked(id));
+    await until(() => turnEnds(id) > turns && store.getRun(id)?.status === RUN_STATUS.waiting);
     expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });
     expect(entryOf(id, timerId)).toMatchObject({ phase: WAIT_PHASE.open });
     expect(stateOf(store.getRun(id)!)).toBe('waiting:subagents');
@@ -319,7 +360,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     const { run, release } = await heldParent(undefined, 'mock:cezar-ask which one?');
     startChild(run.id, 'toolu_bg_01');
     release();
-    await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && internals().line.isParked(run.id));
+    await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting);
     const wait = subagentWait(run.id)!;
     await restart();
     const now = () => entryOf(run.id, wait.id) ?? settledOf(run.id, wait.id);
@@ -345,7 +386,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
 });
 
 describe('the subagent wait deadline (hearsay-tools/cezarion#2431)', () => {
-  useWorkerWaitFixture({ subagentGraceMs: 50, subagentDeadlineMs: 1_000 });
+  useSubagentFixture({ subagentGraceMs: 50, subagentDeadlineMs: 1_000 });
 
   it('an interruption whose transcript write fails keeps the wait open and retries, so the wait never outruns the activity view', async () => {
     const { id, wait } = await parkedOnSubagents();
@@ -355,7 +396,8 @@ describe('the subagent wait deadline (hearsay-tools/cezarion#2431)', () => {
       if (refuse && event.type === 'item.completed') { refuse = false; throw Error('injected: disk full'); }
       return real(runId, event);
     });
-    internals().subagentWaits.interrupt(id, wait.id);
+    [...work.liveSessions][0]!.end();
+    await until(() => append.mock.calls.some(([, event]) => event.type === 'item.completed'));
     // The end did not land, so the wait still reads its children as running.
     expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });
     expect(backgroundEnds(id)).toEqual([]);
@@ -371,30 +413,32 @@ describe('the subagent wait deadline (hearsay-tools/cezarion#2431)', () => {
     startChild(run.id, 'toolu_bg_01');
     for (let index = 0; index < WAIT_LIMIT; index += 1) store.commitWait(run.id, makePeerWait({ turnId: 'full' }));
     release();
-    await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && internals().line.isParked(run.id));
+    await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting);
     expect(subagentWait(run.id)).toBeUndefined();
     return run.id;
   }
 
   it('a full wait list leaves no room for the subagent wait, yet the park keeps the session and slot until the last child ends', async () => {
     const id = await fullListParent();
-    expect(internals().line.inPool(id)).toBe(true);
-    expect(internals().active.get(id)?.idleTimer).toBeUndefined();
+    expect(semaphore.busy()).toBe(1);
+    await noIdleClose(id);
     endChild(id, 'toolu_bg_01');
-    expect(internals().line.inPool(id)).toBe(false);
-    expect(internals().active.get(id)?.idleTimer).toBeDefined();
+    expect(semaphore.busy()).toBe(0);
+    expect(idleClock.pending).toBe(1);
   });
 
   it('a worker-led park whose subagent wait closed early still gives its slot back when the last child ends', async () => {
     const { id, wait } = await parkedOnSubagents(['toolu_bg_01'], async runId => {
-      store.commitWait(runId, makeWorkerWait({ turnId: internals().active.get(runId)!.ciTurnId ?? 'turn' }));
+      await besideWait(runId, 'worker');
     });
-    expect(internals().line.inPool(id)).toBe(true);
+    expect(semaphore.busy()).toBe(1);
     store.commitOutcome(id, { kind: 'cancelled', waitIds: [wait.id] });
     endChild(id, 'toolu_bg_01');
-    expect(internals().line.inPool(id)).toBe(false);
-    expect(internals().active.get(id)?.idleTimer).toBeDefined();
+    expect(semaphore.busy()).toBe(0);
+    expect(idleClock.pending).toBe(1);
   });
+
+  const internals = () => runInternals(manager);
 
   it('a lost session with no subagent wait retries a failed transcript end', async () => {
     const id = await fullListParent();

@@ -1,11 +1,10 @@
 import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProcessWaitEntry, ProcessWaitResult, Wait } from '@open-mercato/cezar-contract';
 import { ProcessWaitSupervisor, type ProcessWatchRequest } from '../process-wait/supervisor.ts';
-import { manager, parent, restart, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, parent, restart, semaphore, store, toolGenerationOf, until, useWorkerWaitFixture, work } from './worker-wait.testkit.ts';
 import { waitResultText } from './waits.ts';
 
 // Tool transport is exercised by adapter parity; lifecycle tests control only the CI supervisor.
@@ -30,9 +29,8 @@ function processes() {
   };
 }
 
-const generationOf = (id: string) => (manager as unknown as { active: Map<string, { liveSession: { ciGeneration: string; };  }> }).active.get(id)!.liveSession.ciGeneration;
 const register = async (id: string, request: { pid: number; exit_file?: string; note?: string; timeout_seconds?: number }) =>
-  await manager.registerWait(id, { kind: WAIT_KIND.process, timeout_seconds: 1800, ...request }, 'cezar_wait', generationOf(id)) as ProcessWaitEntry;
+  await manager.registerWait(id, { kind: WAIT_KIND.process, timeout_seconds: 1800, ...request }, 'cezar_wait', toolGenerationOf(id)) as ProcessWaitEntry;
 const waitById = (id: string, waitId: string) => store.getRun(id)?.waits?.find(entry => entry.id === waitId);
 const settledById = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(entry => entry.id === waitId);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
@@ -56,7 +54,7 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     await expect(register(run.id, { pid: 1 })).rejects.toThrow();
     await expect(register(run.id, { pid: process.pid })).rejects.toMatchObject({ code: 'process_not_allowed' });
     await expect(register(run.id, { pid: sleeper(), exit_file: '/etc/cez-process-wait.exit' })).rejects.toMatchObject({ code: 'exit_file_outside' });
-    const answer = await manager.cezarToolHandlers(run.id, generationOf(run.id)).registerWait({ kind: WAIT_KIND.process, pid: sleeper(), exit_file: '../../x.exit', timeout_seconds: 60 }, 'cezar_wait', new AbortController().signal);
+    const answer = await manager.cezarToolHandlers(run.id, toolGenerationOf(run.id)).registerWait({ kind: WAIT_KIND.process, pid: sleeper(), exit_file: '../../x.exit', timeout_seconds: 60 }, 'cezar_wait', new AbortController().signal);
     expect(answer.answer).toMatchObject({ ok: false, code: 'exit_file_outside', message: expect.stringContaining('worktree') });
     // A batch that writes its own exit file elsewhere is waited on by PID alone, never through a watcher.
     expect(answer.answer).toMatchObject({ message: expect.stringContaining('leave exit_file out: wait on pid alone') });
@@ -81,6 +79,8 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
 
   it('a repeat returns the open wait; a park keeps the slot; the result is delivered and charged as one automatic wake', async () => {
     const external = processes();
+    // Count a monitoring reservation as a regular slot so public capacity proves it is held.
+    vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(0);
     const run = await waitingParent();
     const pid = sleeper();
     const wait = await register(run.id, { pid, exit_file: 'build.exit', note: 'build' });
@@ -88,7 +88,8 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     expect((await register(run.id, { pid, exit_file: 'build.exit', timeout_seconds: 60 })).id).toBe(wait.id);
     expect(external.watches).toHaveLength(1);
     expect(external.watches[0]!.request).toMatchObject({ pid, startToken: wait.startToken, exitFile: wait.exitFile, deadline: wait.deadline });
-    await until(() => store.getRun(run.id)?.status === 'waiting' && runInternals(manager).line.monitoring.has(run.id));
+    await until(() => store.getRun(run.id)?.status === 'waiting' && semaphore.busy() === 1);
+    expect(semaphore.busy()).toBe(1);
     const spentBefore = store.getRun(run.id)?.automaticWakes ?? 0;
     external.settle({ outcome: 'exit_file', exitCode: 0 });
     await until(() => settledById(run.id, wait.id)?.phase === 'delivered');
@@ -118,7 +119,8 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     const external = processes();
     const run = await waitingParent();
     const wait = await register(run.id, { pid: sleeper() });
-    (manager as unknown as { active: Map<string, { liveSession: { session: { end(): void }; };  }> }).active.get(run.id)!.liveSession.session.end();
+    expect(work.liveSessions.size).toBe(1);
+    [...work.liveSessions][0]!.end();
     await until(() => !manager.isActive(run.id));
     store.updateRun(run.id, { automaticWakes: 40 });
     external.settle({ outcome: 'exited' });

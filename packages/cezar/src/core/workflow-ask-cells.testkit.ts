@@ -1,13 +1,14 @@
-import { autoEndObservationClock } from './observation-clock.testkit.ts';
+import { autoEndObservationClock, observationClock } from './observation-clock.testkit.ts';
 import { AUTO_END_DELAY_MS } from './runner-runtime.ts';
-import { runInternals } from '../workflows/run-internals.testkit.ts';
+import { IDLE_TIMEOUT_MS } from '../workflows/run.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { CEZAR_ASK_QUESTION, driveRun, promptFor, waitFor, WORKFLOW_ASK_CRITERIA } from './harness-parity.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
-import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWork } from '../workflows/fixture-cleanup.testkit.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
 const STEP_TIMEOUT_MS = 2_000;
@@ -48,6 +49,9 @@ describe('intermediate workflow ASK parity — #427', () => {
     const modes = row.id === 'Q7' ? ['fresh', 'continuation'] : ['fresh'];
     for (const mode of modes) it(`${backend} ${row.id} ${row.name} (${mode})`, async () => {
       let clock: ReturnType<typeof autoEndObservationClock> | undefined;
+      const semaphore = new WorkspaceSemaphore();
+      let repoRoot = '';
+      let idleClock: ReturnType<typeof observationClock> | undefined;
       let expireDeadline: (() => void) | undefined;
       const workflowDef = workflowDefSchema.parse({ name: 'question-chain', source: 'file', steps: [
         { id: 'implement', prompt: '{{task}}', ...(row.id === 'Q8' ? { timeoutMs: STEP_TIMEOUT_MS } : {}) },
@@ -82,17 +86,17 @@ describe('intermediate workflow ASK parity — #427', () => {
             { stepId: 'implement', questions: [{ question: CEZAR_ASK_QUESTION }] },
           ]);
           expect(checks()).toEqual([]);
-          const session = manager['active'].get(runId)!.liveSession.session!;
+          const session = [...fixtureWork(manager).liveSessions][0]!;
           // The ask is durable before the native turn ends. Reach that boundary first.
-          await waitFor(() => manager['active'].get(runId)?.atTurnBoundary === session);
+          await waitFor(() => events().some(event => event.type === 'turn-end'));
+          await Promise.all([...fixtureWork(manager).pending].filter(([, label]) => label === 'recordTurnEnd').map(([work]) => work));
           expect(clock!.captured).toBe(0);
           await clock!.advance(AUTO_END_DELAY_MS + 100);
           expect(clock!.captured).toBe(0);
           if (row.id !== 'Q8') expect(session.open).toBe(true);
-          expect(runInternals(manager).line.busySlots()).toBe(0);
+          expect(semaphore.busy()).toBe(0);
 
           if (row.id === 'Q5') {
-            const repoRoot = manager['repoRoot'];
             store.flush();
             const dataDir = join(repoRoot, '.ai/cezar');
             const checkpoint = readPersistedRuns(dataDir);
@@ -124,10 +128,7 @@ describe('intermediate workflow ASK parity — #427', () => {
             if (row.id === 'Q4' || row.id === 'Q10' || mode === 'continuation') {
               if (row.id === 'Q10') session.end();
               else {
-                const timer = manager['active'].get(runId)!.idleTimer! as NodeJS.Timeout & { _onTimeout: () => void };
-                const expire = timer._onTimeout;
-                clearTimeout(timer);
-                expire();
+                await idleClock!.advance(IDLE_TIMEOUT_MS);
               }
               await waitFor(() => !manager.isActive(runId));
               expect(run().status).toBe('waiting');
@@ -138,7 +139,7 @@ describe('intermediate workflow ASK parity — #427', () => {
               if (row.id === 'Q10') {
                 // The continuation turn-end path must preserve a second ask
                 // if that reopened process also closes before its answer.
-                manager['active'].get(runId)!.liveSession.session!.end();
+                [...fixtureWork(manager).liveSessions][0]!.end();
                 await waitFor(() => !manager.isActive(runId));
                 expect(run().status).toBe('waiting');
                 expect(run().steps.map(s => s.status)).toEqual(['waiting', 'pending', 'waiting']);
@@ -152,7 +153,7 @@ describe('intermediate workflow ASK parity — #427', () => {
               await waitFor(() => !manager.isActive(runId));
               expect(run().status).toBe('done');
             } else {
-              if (row.id === 'Q1') expect(manager['active'].get(runId)?.liveSession.session).toBe(session);
+              if (row.id === 'Q1') expect(fixtureWork(manager).liveSessions.has(session)).toBe(true);
               expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest. mock:cezar-done' }])).toBe(true);
               if (row.id === 'Q3') {
                 await waitFor(() => !manager.isActive(runId));
@@ -165,8 +166,10 @@ describe('intermediate workflow ASK parity — #427', () => {
           }
           expect(run().steps.find(s => s.id === 'verify')?.status).toBe('pending');
           expect(checks()).toEqual([]);
-          expect(runInternals(manager).line.busySlots()).toBe(0);
-        }, { workflowDef, autonomous: row.id === 'Q9', beforeCleanup: () => { clock?.restore(); vi.restoreAllMocks(); }, beforeStart: () => {
+          expect(semaphore.busy()).toBe(0);
+        }, { workflowDef, semaphore, autonomous: row.id === 'Q9', beforeCleanup: () => { idleClock?.restore(); clock?.restore(); vi.restoreAllMocks(); }, beforeStart: context => {
+          repoRoot = context.repoRoot;
+          idleClock = observationClock(delay => delay === IDLE_TIMEOUT_MS && /armIdleTimer/.test(new Error().stack ?? ''));
           if (row.id !== 'Q9') clock = autoEndObservationClock();
           if (row.id === 'Q8') expireDeadline = holdStepDeadline();
         } });

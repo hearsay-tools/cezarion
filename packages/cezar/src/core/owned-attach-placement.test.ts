@@ -1,6 +1,5 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -43,6 +42,7 @@ const ATTACHED = { 'qa/1149/brief.md': 'the brief\n', 'qa/evidence.log': 'eviden
 // the worker's worktree holds at the moment its session starts (hearsay-tools/cezarion#1149).
 describe('attached parent files in the worker worktree', { timeout: 30_000 }, () => {
   let f: ReturnType<typeof fixture>;
+  const tools = new Map<string, ReturnType<typeof f.manager.cezarToolHandlers>>();
   const seen: Array<{ spec: AgentRunSpec; files: Record<string, string | undefined>; claudeLocal?: string | undefined; finish(): void; done(runId: string): Promise<void> }> = [];
   const spawn = (paths: readonly string[]) => f.service.spawn(f.caller, { task: 'inspect', baseline: 'parent-head', requestId: randomUUID(),
     context: { artifacts: paths.map(path => ({ kind: 'parent-file' as const, path })) } satisfies WorkerSpawnRequest['context'] });
@@ -65,6 +65,13 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
   beforeEach(() => {
     vi.stubEnv('CEZ_DELEGATION', '1'); vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     f = fixture();
+    tools.clear();
+    const handlers = f.manager.cezarToolHandlers.bind(f.manager);
+    vi.spyOn(f.manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
+      const launched = handlers(id, generation);
+      tools.set(id, launched);
+      return launched;
+    });
     vi.spyOn(runners, 'createRunner').mockImplementation(backend => ({ backend: backend ?? 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       interrupt: async () => {}, run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), startSession: (spec, onEvent) => {
         const read = (path: string) => existsSync(join(spec.cwd, path)) ? readFileSync(join(spec.cwd, path), 'utf8') : undefined;
@@ -78,8 +85,7 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
         // An earlier workflow step completes only on an accepted cezar_done (hearsay-tools/cezarion#1620).
         const done = async (runId: string) => {
           if (open) {
-            const state = runInternals(f.manager).active.get(runId)!;
-            const answer = await f.manager.cezarToolHandlers(runId, state.liveSession.ciGeneration!).finishTurn({}, new AbortController().signal);
+            const answer = await tools.get(runId)!.finishTurn({}, new AbortController().signal);
             if (!answer.ok) throw new Error(`cezar_done refused: ${answer.code}`);
             onEvent?.({ type: 'text', text: 'ok' }); onEvent?.({ type: 'turn-end' });
           }
@@ -165,8 +171,9 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     // The durable shape a restart re-queues: the first step done, the second still pending.
     f.store.updateStep(workerId, 'second', { status: STEP_STATUS.pending, finishedAt: undefined });
     setRunStatus(f.store, workerId, RUN_STATUS.queued, { finishedAt: undefined, error: undefined });
-    await (f.manager as unknown as { reviveQueuedRun(run: unknown, reason: string): Promise<void> }).reviveQueuedRun(f.store.getRun(workerId), 'cezar restarted');
-    await (runInternals(f.manager).line).pump();
+    // Recovery must see a parked parent, rather than fail an interrupted synthetic parent.
+    setRunStatus(f.store, f.parent.id, RUN_STATUS.waiting);
+    await f.manager.recover();
     await until(() => seen.length === 3);
     expect(seen[2]!.files).toEqual({ 'qa/1149/brief.md': undefined, 'qa/evidence.log': ATTACHED['qa/evidence.log'] });
   });
