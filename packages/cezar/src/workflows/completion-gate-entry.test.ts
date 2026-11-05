@@ -174,7 +174,7 @@ describe('the completion gate outside a turn end', () => {
       seedHandoffFile(join(root, '.ai/cezar'), store.getRun(id)!);
       seeded = handoff();
       state.atTurnBoundary = session;
-      state.heldHumanInputSince = Date.now();
+      state.inputState.beginHeldClock();
     });
     afterEach(() => expect(handoff()).toBe(seeded));
 
@@ -189,13 +189,13 @@ describe('the completion gate outside a turn end', () => {
       expect(turnEnd()).toBe(true);
       expect(state.doneAtBoundary).toBe(session);
       expect(state.doneClose).toEqual({ via: 'cezar_done' });
-      expect(state.heldHumanInputSince).toBeUndefined();
+      expect(state.inputState.heldHumanInputSince).toBeUndefined();
       expect(turns.words(id)).toEqual(['waiting']);
     });
 
     it('a turn end whose input checkpoint failed settles nothing', () => {
       const turns = watchTurnOutcomes();
-      state.agentInputError = 'agent input delivery checkpoint failed';
+      state.inputState.recordInputError('agent input delivery checkpoint failed');
       expect(turnEnd()).toBe(false);
       expect(state.doneAtBoundary).toBe(session);
       expect(turns.words(id)).toEqual([]);
@@ -206,7 +206,7 @@ describe('the completion gate outside a turn end', () => {
       state.doneAtBoundary = session;
       expect(ack()).toBe(true);
       expect(state.doneAtBoundary).toBe(session);
-      expect(state.heldHumanInputSince).toBeDefined();
+      expect(state.inputState.heldHumanInputSince).toBeDefined();
       expect(turns.words(id)).toEqual(['waiting']);
     });
   });

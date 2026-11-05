@@ -49,7 +49,7 @@ export function createSessionEventHandler(context: RunModuleContext, host: Sessi
     emit({ ...event, stepId });
     if (event.type === 'cost') recordReportedCost(context.store, runId, stepId, state, backend, event.usd);
     if (event.type === 'error') { host.recordSessionFault(state, turn, event.message); return; }
-    if (turn.sessionError || state.agentInputError) return;
+    if (turn.sessionError || state.inputState.agentInputError) return;
     if (event.type === 'session') {
       // Codex/OpenCode mint their own session id: persist it so resume works.
       context.store.updateStep(runId, stepId, { sessionId: event.sessionId, backend,
@@ -140,7 +140,7 @@ export function disposedSessionEvent(context: RunModuleContext, host: SessionHel
  *  session is interrupted. */
 export function recordSessionFault(context: RunModuleContext, host: SessionHelperHost, state: ActiveRun, turn: SessionTurn, message: string): void {
   // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
-  turn.sessionError ??= state.agentInputError ?? message;
+  turn.sessionError ??= state.inputState.agentInputError ?? message;
   state.liveSession.recordSessionError(turn.sessionError);
   state.liveSession.session?.interrupt();
 }
@@ -293,7 +293,7 @@ export function handleRunnerUiEvent(context: RunModuleContext, host: SessionHelp
   // (hearsay-tools/cezarion#1301), resumes the same way. A parent turn the runner starts itself, not
   // inside Cezar's own write, closes the subagent wait and every timer (hearsay-tools/cezarion#2431).
   if (host.line.isParked(runId) && (host.line.inPool(runId) || host.parkedOnWorkers(runId)) && isRunnerActivity(event)) {
-    if (!state.writingInput) host.supersedeOnRunnerResume(runId);
+    if (!state.inputState.writingInput) host.supersedeOnRunnerResume(runId);
     host.resumeParkedRun(runId, state);
   }
 }

@@ -49,7 +49,7 @@ export function isUnnamedLifecycleInput(run: RunRecord, input: AgentInput): bool
  * still awaiting its acknowledgement counts the unit it reserved.
  */
 export function automaticWakes(store: Pick<RunStore, 'getRun'>, active: Pick<Map<string, ActiveRun>, 'get'>, runId: string, beforeHumanReset?: { spent: number }): number {
-  const reserved = active.get(runId)?.agentInputFlight?.wakeReserved ? 1 : 0;
+  const reserved = active.get(runId)?.inputState.agentInputFlight?.wakeReserved ? 1 : 0;
   return (beforeHumanReset?.spent ?? store.getRun(runId)?.automaticWakes ?? 0) + reserved;
 }
 

@@ -187,7 +187,7 @@ export class TurnSettler {
     if (entry === 'turn-end') {
       this.recordDoneAtBoundary(state, true, turn.doneRequest);
       clearHeldHumanInputTimer(state);
-      if (state.agentInputError) return false;
+      if (state.inputState.agentInputError) return false;
     }
     this.host.settledTurnOutcome(runId, entry, { kind: 'park', keepsSlot: this.host.line.inPool(runId) });
     return true;
@@ -220,8 +220,8 @@ export class TurnSettler {
       sessionOpen: !state.liveSession.cancelled && !!session?.open,
       done: turn.done,
       ...(refused ? { doneRefused: { liveWorkers: refused.liveWorkerIds.length > 0 || !!refused.requestIds?.length } } : {}),
-      inputInFlight: !!state.agentInputFlight,
-      inputQueued: this.host.hasQueuedAgentInputs(runId, state.agentInputFlight?.inputIds),
+      inputInFlight: !!state.inputState.agentInputFlight,
+      inputQueued: this.host.hasQueuedAgentInputs(runId, state.inputState.agentInputFlight?.inputIds),
       inputTaken,
       nudgePending: !!session && state.autonomousNudgePending === session,
       turnAsk: !!turn.ask,
@@ -259,7 +259,7 @@ export class TurnSettler {
    *  submission is settled by its acknowledgement (parkAfterAck), not here. */
   private takeOwedInput(runId: string, state: ActiveRun, turn: SettledTurn): boolean {
     return this.host.flushAgentInputs(runId) || (!turn.humanGate && harnessOwesInput(state)) ||
-      !!state.agentInputFlight || harnessHoldsHumanInput(state);
+      !!state.inputState.agentInputFlight || harnessHoldsHumanInput(state);
   }
 
   /** A turn end's own steps after the rule decided (`settleTurn`): the unread and held input timers,
@@ -268,7 +268,7 @@ export class TurnSettler {
     if (tried) this.host.armUnreadInputTimer(runId, state);
     if (tried && harnessHoldsHumanInput(state)) this.host.armHeldHumanInputTimer(runId, state);
     else clearHeldHumanInputTimer(state);
-    if (state.agentInputError) return false;
+    if (state.inputState.agentInputError) return false;
     // The human wait's card surfaces as an ask card (#473) before the rule parks on it.
     if (turn.ask && turn.sink && decision.kind !== 'closed' && decision.kind !== 'input' && !this.host.humanWaits.humanWaitShown(runId, turn.humanWait)) {
       emitAskRequested(turn.sink, turn.ask);

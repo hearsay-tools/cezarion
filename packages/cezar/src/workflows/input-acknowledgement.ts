@@ -5,7 +5,7 @@ import { chargesBudget, chargesBudgetMessage, resolvedWaits, waitInputId } from 
 /** Facts read when the harness acknowledges its current flight, before its single commit.
  *  Retired markers are cleared here in the same order as the original acknowledgement path. */
 export function analyseAcknowledgedInput(runId: string, state: ActiveRun,
-  flight: NonNullable<ActiveRun['agentInputFlight']>, inputIds: readonly string[],
+  flight: NonNullable<ActiveRun['inputState']['agentInputFlight']>, inputIds: readonly string[],
   store: Pick<RunStore, 'getRun'>, admitted: ReadonlySet<string>, owesWake: (run: RunRecord) => boolean) {
   const queue = store.getRun(runId)?.agentInputs ?? [];
   if (!queue.some(input => inputIds.includes(input.id) && !input.deliveredAt)) return undefined;
@@ -19,12 +19,12 @@ export function analyseAcknowledgedInput(runId: string, state: ActiveRun,
   const conversationIds = inputIds.filter(id => !resolvedIds.includes(id) || carried.includes(id));
   // Input the harness reported unread while this very POST was pending stays queued:
   // the flush after this acknowledgement resubmits it (#505 review).
-  const accepted = conversationIds.filter(id => !state.retiredInFlight?.has(id));
-  for (const id of conversationIds) state.retiredInFlight?.delete(id);
+  const accepted = conversationIds.filter(id => !state.inputState.retiredInFlight?.has(id));
+  for (const id of conversationIds) state.inputState.forgetRetiredInput(id);
   // An observable harness still owes a read: mark it so a restart replays it (#505). A read
   // it reported while this acknowledgement was pending lands with it.
-  const observable = state.inputDelivery?.consumption === 'observable';
-  const early = observable ? accepted.filter(id => state.consumedBeforeAck?.has(id)) : [];
+  const observable = state.inputState.inputDelivery?.consumption === 'observable';
+  const early = observable ? accepted.filter(id => state.inputState.consumedBeforeAck?.has(id)) : [];
   // A timer expiry is a self-generated wake: one admitted turn that carries timer results
   // spends the one unit it reserved, however many it carries. CI wakes are external events
   // and do not count.

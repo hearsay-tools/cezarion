@@ -110,9 +110,9 @@ export class TurnNudges {
   canAutoContinue(runId: string, state: ActiveRun): boolean {
     const run = this.context.store.getRun(runId);
     return !!run && !this.context.disposed() && !run.stopping && !state.liveSession.cancelled && !state.liveSession.finishRequested &&
-      !state.agentInputError && !state.pendingHumanAsk && !hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id)) && !!state.liveSession.session?.open &&
+      !state.inputState.agentInputError && !state.pendingHumanAsk && !hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id)) && !!state.liveSession.session?.open &&
       !this.host.workerExecutionStopped(runId) && !this.host.executionBlockedByRootFinish(run) && !run.waits?.length &&
-      !state.agentInputFlight && !harnessOwesInput(state) && !this.host.hasQueuedAgentInputs(runId);
+      !state.inputState.agentInputFlight && !harnessOwesInput(state) && !this.host.hasQueuedAgentInputs(runId);
   }
 
   /**
@@ -142,7 +142,7 @@ export class TurnNudges {
     if (!this.host.submitAgentInput(runId, state, content)) {
       // Keep this exact boundary running until onAgentInputReady retries, without charging
       // the cap or claiming delivery. Missing readiness closes via the idle bound.
-      if (session.open && !state.agentInputError && !state.liveSession.agentSessionError) {
+      if (session.open && !state.inputState.agentInputError && !state.liveSession.agentSessionError) {
         state.autonomousNudgePending = session;
         this.host.armIdleTimer(runId, state);
       }

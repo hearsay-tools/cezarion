@@ -54,7 +54,7 @@ it("waits for capacity before a parent's answer resumes the worker", async () =>
         await Promise.all([sweep, ...pumps.map(([work]) => work)]);
         expect(engine.line.hasWake(f.w.id)).toBe(true);
         expect(engine.line.isAdmitted(f.w.id)).toBe(false);
-        expect(engine.active.get(f.w.id)?.agentInputFlight).toBeUndefined();
+        expect(engine.active.get(f.w.id)?.inputState.agentInputFlight).toBeUndefined();
         expect(answered(f.w.id)).toEqual([]);
         // Freeing the slot admits the worker, and the held answer goes in.
         manager.cancel(blocker.id);

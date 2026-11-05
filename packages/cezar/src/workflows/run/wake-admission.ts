@@ -332,7 +332,7 @@ export class WakeAdmission {
   retireEmptyWake(runId: string): void {
     const run = this.context.store.getRun(runId);
     const state = this.host.active.get(runId);
-    if (!run || this.owesWake(run) || state?.agentInputFlight) return;
+    if (!run || this.owesWake(run) || state?.inputState.agentInputFlight) return;
     this.host.line.removeWake(runId);
     if (this.host.line.retireAdmission(runId) && state && run.status === 'waiting' && state.atTurnBoundary === state.liveSession.session) this.host.line.park(runId);
     this.host.retries.stopRetry(runId);

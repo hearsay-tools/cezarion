@@ -261,7 +261,7 @@ export class RunSettlement {
     err: unknown,
   ): void {
     // Keep the provider failure that triggered teardown, even if teardown rejects.
-    const message = turn.sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
+    const message = turn.sessionError ?? state.inputState.agentInputError ?? (err instanceof Error ? err.message : String(err));
     sink.sessionEnded('error', message);
     this.context.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: new Date().toISOString() });
     this.humanWaits.withdrawCezarHumanWaits(runId);

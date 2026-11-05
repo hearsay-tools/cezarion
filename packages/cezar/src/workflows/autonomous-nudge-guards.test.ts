@@ -1,3 +1,4 @@
+import { InputFlight } from './run/input-delivery.ts';
 import { runnerHook, setupMonitoringFixture, waitForProduct } from './run-fixture.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import {
@@ -118,13 +119,13 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       case 'finish': state.liveSession.requestFinish(); break;
       case 'disposed': disposed = true; break;
       case 'stopping': store.updateRun(id, { stopping: true }); break;
-      case 'input-error': state.agentInputError = 'transport failed'; break;
+      case 'input-error': state.inputState.recordInputError('transport failed'); break;
       case 'native-ask': state.pendingHumanAsk = true; break;
       case 'persisted-ask': store.appendEvent(id, { type: 'ask.requested', requestId: randomUUID(), ...ask }); break;
       case 'closed': state.liveSession.attachSession({ ...session, open: false }); break;
       case 'queued-input': queued.mockReturnValue(true); store.commitAgentInputs(id, [{ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: randomUUID(), text: 'Read this first', createdAt: new Date().toISOString() }]); break;
-      case 'unread-input': state.unreadInputIds = new Set([randomUUID()]); break;
-      case 'input-flight': state.agentInputFlight = { session, inputIds: [randomUUID()] }; break;
+      case 'unread-input': state.inputState.resetUnreadInputs(); state.inputState.recordUnreadInput(randomUUID()); break;
+      case 'input-flight': state.inputState.attachFlight(new InputFlight(session, [randomUUID()])); break;
       // A worker wait is a list entry (hearsay-tools/cezarion#1235, #1301).
       case 'worker-wait': store.commitWait(id, { kind: WAIT_KIND.worker, id: randomUUID(), source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: new Date().toISOString(),
         deadline: new Date(Date.now() + 60_000).toISOString(), timeoutSeconds: 60, phase: WAIT_PHASE.open, turnId: 'turn', mode: 'all',

@@ -335,7 +335,7 @@ export class QueuedInput {
     for (const entry of pending) {
       const state = this.host.activeGet(runId);
       // A queue entry the delivery's checkpoint left in place stays buffered (`deliverMessage`).
-      if (state?.agentInputError || !this.host.sendMessage(runId, entry.content, entry.messageId) ||
+      if (state?.inputState.agentInputError || !this.host.sendMessage(runId, entry.content, entry.messageId) ||
         (entry.messageId && this.context.store.getRun(runId)?.queuedMessages?.some(message => message.id === entry.messageId))) unsent.push(entry);
     }
     if (unsent.length) this.deferredMessages.set(runId, unsent);

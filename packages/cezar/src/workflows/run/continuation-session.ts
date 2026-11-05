@@ -213,7 +213,7 @@ export class ContinuationSession {
   /** The human ask a human Continue answers, and the human waits that answer settles. */
   private openingAnswer(runId: string, state: ActiveRun, opening: ContinuationOpening): OpeningAnswer {
     const askSeq = opening.checkpoint?.origin === 'human' ? pendingHumanAskSeq(this.context.store, runId) : undefined;
-    state.openingAnswerAskSeq = askSeq;
+    state.inputState.answerOpeningAsk(askSeq);
     // The human waits this answer answers; one the opening turn opens is its next question.
     const waits = askSeq === undefined ? []
       : openWaits(this.context.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
@@ -228,7 +228,7 @@ export class ContinuationSession {
   private acknowledgeOpeningTurn(runId: string, state: ActiveRun, answer: OpeningAnswer): boolean {
     if (state.liveSession.cancelled) return true;
     const session = state.liveSession.session?.open ? state.liveSession.session : undefined;
-    const opening = session ? state.openingAgentInputId : undefined;
+    const opening = session ? state.inputState.openingAgentInputId : undefined;
     const askSeq = session ? answer.askSeq : undefined;
     // One commit (hearsay-tools/cezarion#1805): a store reopened after a crash never reads the
     // opening input handled while the question it answers is still open.
@@ -239,11 +239,11 @@ export class ContinuationSession {
     // Only the opening input's checkpoint stops the turn end; the rest is best effort, as before.
     try { this.context.store.commitOutcome(runId, outcomes, { patch: { continuationMessage: undefined } }, { bestEffort: !opening }); }
     catch (error) { this.host.latchAgentInputError(runId, state, session!, `agent input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return false; }
-    if (opening) { state.openingAgentInputId = undefined; this.host.reconcileWorkerWaits(); }
+    if (opening) { state.inputState.selectOpeningInput(undefined); this.host.reconcileWorkerWaits(); }
     if (askSeq !== undefined) {
       this.context.store.appendEvent(runId, { type: 'human-input-delivered', askSeq, ...(answer.answerSource ? { source: answer.answerSource } : {}) });
       answer.askSeq = undefined;
-      state.openingAnswerAskSeq = undefined;
+      state.inputState.clearOpeningAnswer();
     }
     return true;
   }
@@ -518,7 +518,7 @@ export class ContinuationSession {
       await this.releaseContinuationSession(runId, state, undefined, undefined, {});
       return;
     }
-    state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
+    state.inputState.declareDelivery(inputDeliveryOf(runner)); state.inputState.resetUnreadInputs(); state.inputState.resetEarlyConsumption();
     const session = this.startContinuationSession(runId, state, runner, {
       stepId, sessionId, prompt, setupNote, opening, skills, skipSkillOnResume, settings, delegation, webhooksPart, ciTools,
     }, onEvent, turn, sink);
@@ -610,7 +610,7 @@ export class ContinuationSession {
       this.humanWaits.withdrawCezarHumanWaits(runId);
       sessionEvents.persistWorkerAssistantResult(this.context, this.sharedHost, runId, stepId, result.text);
       // A durable CI wait keeps recovery live, not this failed attempt successful.
-      if (turn.sessionError || state.agentInputError) throw new Error(turn.sessionError ?? state.agentInputError);
+      if (turn.sessionError || state.inputState.agentInputError) throw new Error(turn.sessionError ?? state.inputState.agentInputError);
       const settled = this.runSettlement.settleClosedContinuation(runId, state, stepId, sink, resumedNext, close);
       if (settled) await settled;
     } catch (err) {

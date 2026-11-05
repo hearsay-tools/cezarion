@@ -44,7 +44,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
         const internals = runInternals(manager);
         const state = internals.active.get(runId)!;
         const session = state.liveSession.session!;
-        const settled = state.agentInputFlight?.settled;
+        const settled = state.inputState.agentInputFlight?.settled;
         expect(settled).toBeInstanceOf(Promise);
         try {
           if (stop === 'dispose') manager.dispose();

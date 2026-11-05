@@ -25,7 +25,7 @@ describe("worker waits through RunManager", { timeout: 30_000 }, () => {
       await until(() => store.getRun(p.id)?.status === 'waiting');
       const w = await worker(p.id, 'mock:slow');
       register(p.id, [w.id]); manager.enqueueOwnedRun(w.id);
-      const engine = manager as unknown as { active: Map<string, { liveSession: { sessionEverOpened?: boolean; }; agentInputFlight?: { settled?: Promise<void> } }> };
+      const engine = manager as unknown as { active: Map<string, { liveSession: { sessionEverOpened?: boolean; }; inputState: { agentInputFlight?: { settled?: Promise<void> } } }> };
       try {
         await until(() => !!engine.active.get(w.id)?.liveSession.sessionEverOpened);
         const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
@@ -35,9 +35,9 @@ describe("worker waits through RunManager", { timeout: 30_000 }, () => {
         await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
         await Promise.all(bookkeeping);
         store.flush(); // Earlier turn bookkeeping/debounce cannot satisfy the measured ACK checkpoint.
-        const settled = engine.active.get(p.id)?.agentInputFlight?.settled;
+        const settled = engine.active.get(p.id)?.inputState.agentInputFlight?.settled;
         expect(settled).toBeInstanceOf(Promise);
-        const wake = store.getRun(p.id)?.agentInputs?.find(input => input.source === 'lifecycle');
+        const wake = structuredClone(store.getRun(p.id)?.agentInputs?.find(input => input.source === 'lifecycle'));
         expect(wake?.deliveredAt).toBeUndefined();
         const charged = store.getRun(p.id)?.automaticWakes ?? 0; // the first turn's nudge
         release(); await settled;

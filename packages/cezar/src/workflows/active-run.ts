@@ -1,6 +1,7 @@
+import { createInputGroup, type InputGroup } from './run/input-delivery.ts';
 import { createSessionGroup, type SessionGroup } from './run/live-session-state.ts';
 import { createChildrenGroup, type ChildrenGroup } from './run/subagent-waits.ts';
-import type { AgentSession, InputDelivery } from '../core/agent-runner.ts';
+import type { AgentSession } from '../core/agent-runner.ts';
 import { createSkillsGroup, type SkillsGroup } from './run/run-skills.ts';
 import { createUsageGroup, type UsageGroup } from './run/usage-accounting.ts';
 
@@ -9,32 +10,12 @@ import { createUsageGroup, type UsageGroup } from './run/usage-accounting.ts';
  * (hearsay-tools/cezarion#1806). `RunManager` registers every instance through `activate`.
  */
 export interface ActiveRun {
+  readonly inputState: InputGroup;
   readonly usage: UsageGroup;
   readonly liveSession: SessionGroup;
   ciTurnId?: string;
   waitWakeTurn?: AgentSession | undefined;
   pendingHumanAsk: boolean;
-  agentInputError?: string;
-  agentInputFlight?: { session: AgentSession; inputIds: readonly string[]; settled?: Promise<void>;
-    /** This batch carries timer results: it holds one unit of the automatic-wake budget, which
-     *  every budget check counts, and charges it to the record on its acknowledgement. */
-    wakeReserved?: boolean;
-    /** This batch is an admitted wake (hearsay-tools/cezarion#1235): its acknowledgement spends
-     *  the admission, a wake of messages alone included. */
-    admittedWake?: boolean } | undefined;
-  /** The current session's declared input delivery (#505). */
-  inputDelivery?: InputDelivery;
-  /** Accepted by this session's harness, not yet reported read (observable backends only).
-   * The harness still owes a turn for them, so they count as pending work (#505). */
-  unreadInputIds?: Set<string>;
-  /** Read before the acceptance checkpoint landed; applied when it does. */
-  consumedBeforeAck?: Set<string>;
-  /** Conversation input carried by a human answer's own write; read at that turn's end. */
-  bundledInputIds?: string[] | undefined;
-  /** Reported unread while their own submission was still unacknowledged. */
-  retiredInFlight?: Set<string>;
-  /** Liveness bound for unread input (#505): timer, and IDs already resubmitted once. */
-  unreadInputTimer?: NodeJS.Timeout | undefined;
   /** Liveness bound for a no-wait nudge that was acknowledged without a turn (#544,
    *  hearsay-tools/cezarion#1234). */
   noWaitNudgeReplyTimer?: NodeJS.Timeout | undefined;
@@ -42,14 +23,6 @@ export interface ActiveRun {
   noWaitNudgeSawContent?: boolean | undefined;
   /** The reply bound expired on this session: a late reply from it resumes the run. */
   noWaitNudgeParked?: AgentSession | undefined;
-  unreadRetried?: Set<string>;
-  /** #486: re-settle a boundary that deferred only because holdsHumanInput() was true. */
-  heldHumanInputTimer?: NodeJS.Timeout | undefined;
-  heldHumanInputSince?: number | undefined;
-  heldHumanInputExpired?: boolean | undefined;
-  /** Only this older ask is being answered by the current continuation's opening turn. */
-  openingAnswerAskSeq?: number | undefined;
-  openingAgentInputId?: string | undefined;
   doneAtBoundary?: AgentSession | undefined;
   /** `cezar_done` accepted in this session since its last turn end (hearsay-tools/cezarion#1234). */
   doneRequested?: { session: AgentSession; summary?: string } | undefined;
@@ -91,9 +64,6 @@ export interface ActiveRun {
   completionNudgeAnswered?: AgentSession | undefined;
   readonly skills: SkillsGroup;
   readonly children: ChildrenGroup;
-  /** Cezar is writing input into the session now: a parent turn that starts during the write is
-   *  Cezar's, not one the runner started itself (hearsay-tools/cezarion#2431). */
-  writingInput?: boolean | undefined;
   /** A park for the user kept the session and its slot for running native subagents
    *  (hearsay-tools/cezarion#2431): their last end gives both back. */
   heldForSubagents?: boolean | undefined;
@@ -102,10 +72,7 @@ export interface ActiveRun {
 /** Run Cezar's own write into the session: a parent turn the runner starts during it is Cezar's
  *  (hearsay-tools/cezarion#2431). Claude emits `turn.started` inside the write itself. */
 export function writeInput<T>(state: ActiveRun, write: () => T): T {
-  const previous = state.writingInput;
-  state.writingInput = true;
-  try { return write(); }
-  finally { state.writingInput = previous; }
+  return state.inputState.writeInput(write);
 }
 
 /** What differs between the ways a run starts executing. Every other `ActiveRun` field starts the
@@ -131,6 +98,7 @@ export interface ActiveRunInit {
  */
 export function createActiveRun(init: ActiveRunInit): ActiveRun {
   const state = {
+    inputState: createInputGroup(),
     usage: createUsageGroup(),
     liveSession: createSessionGroup(init.cwd),
     pendingHumanAsk: init.pendingHumanAsk,
@@ -138,6 +106,7 @@ export function createActiveRun(init: ActiveRunInit): ActiveRun {
     skills: createSkillsGroup(),
     autonomous: init.autonomous,
   };
+  Object.defineProperty(state, 'inputState', { writable: false, configurable: false });
   Object.defineProperty(state, 'liveSession', { writable: false, configurable: false });
   Object.defineProperty(state, 'usage', { writable: false, configurable: false });
   Object.defineProperty(state, 'children', { writable: false, configurable: false });

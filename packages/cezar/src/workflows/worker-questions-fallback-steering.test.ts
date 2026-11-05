@@ -75,7 +75,7 @@ it("a worker's own question still holds a parent's steer", async () => {
       const sent = steer(f.w.id, f.p.id, 'mock:agent-echo Also lint');
       expect(sent.result).toBe('queued');
       // Nothing was submitted: the steer waits for the answer, and the question stands.
-      expect((manager as unknown as { active: Map<string, { agentInputFlight?: unknown }> }).active.get(f.w.id)?.agentInputFlight).toBeUndefined();
+      expect((manager as unknown as { active: Map<string, { inputState: { agentInputFlight?: unknown } }> }).active.get(f.w.id)?.inputState.agentInputFlight).toBeUndefined();
       expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([]);
       expect(hasPendingAsk(store, f.w.id)).toBe(true);
     } finally { f.close(); }
