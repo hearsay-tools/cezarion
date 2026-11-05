@@ -188,7 +188,7 @@ function parkedRung(run: AttentionInput, waitingOn: WaitingOn | undefined): Atte
     case 'workers':
     case 'peers': return 'waiting-on-workers';
     case 'subagents': return 'waiting-on-subagents';
-    case 'pr': return waitingOn.until === 'merge' ? 'waiting-for-merge' : 'waiting-for-ci';
+    case 'pr': return waitingOn.until === 'checks' ? 'waiting-for-ci' : 'waiting-for-merge';
     case 'process': return 'waiting-for-command';
     case 'timer': return 'monitoring';
   }

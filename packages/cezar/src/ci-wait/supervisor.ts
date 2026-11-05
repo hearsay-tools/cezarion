@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { ciWaitSchema, ciWaitResultSchema, type CiPrIdentity, type CiWait, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { CiGithubError, CiSemaphore, GithubCiClient, type GithubCheck, type GithubPrMergeState, type GithubPrMetadata } from './github.ts';
+import type { GithubMergeRequest } from './merge-progress.ts';
 
 export const CI_WATCHER_LIMIT = 4;
 /** PR-head probes, absent-check rechecks, and stale-watch rechecks. Not the discovery deadline. */
@@ -20,6 +21,12 @@ function safeLink(value: string): string {
     return url.href.length <= 2048 ? url.href : '';
   } catch { return ''; }
 }
+function transientQuery(error: unknown): error is CiGithubError {
+  return error instanceof CiGithubError && (error.code === 'command_failed' || error.code === 'query_timeout');
+}
+function failureDiagnostic(error: unknown): string {
+  return error instanceof CiGithubError ? `${error.code}: ${error.message}` : 'unavailable: CI watcher failed; register a new wait.';
+}
 function outcome(checks: GithubCheck[]): CiWaitResult['outcome'] | undefined {
   if (!checks.length || checks.some(c => c.bucket === 'pending')) return undefined;
   if (checks.some(c => c.bucket === 'fail')) return 'failed';
@@ -27,7 +34,14 @@ function outcome(checks: GithubCheck[]): CiWaitResult['outcome'] | undefined {
   if (checks.some(c => c.bucket === 'pass')) return 'passed';
   return 'skipped';
 }
-type ObservationExtra = Partial<Pick<CiWaitResult, 'observedHeadSha' | 'diagnostic' | 'mergeable' | 'mergeStateStatus' | 'mergedAt' | 'mergeCommitSha'>>;
+type ObservationExtra = Partial<Pick<CiWaitResult, 'observedHeadSha' | 'diagnostic' | 'mergeable' | 'mergeStateStatus' | 'mergedAt' | 'mergeCommitSha' | 'mergeBlock'>>;
+function blockedMerge(state: GithubPrMergeState, request: GithubMergeRequest): ObservationExtra | undefined {
+  const conflict = state.mergeable === 'CONFLICTING';
+  if (!conflict && (request.isInMergeQueue || request.autoMergeEnabled)) return undefined;
+  return { mergeBlock: { ...request, reason: conflict ? 'conflict' : 'no_pending_merge' },
+    diagnostic: conflict ? 'The initiated merge conflicts with its base. Inspect the PR before taking action.'
+      : 'No merge is pending: the PR is neither queued nor scheduled for auto-merge. Inspect the external evidence before taking action.' };
+}
 function observation(wait: CiWait, result: CiWaitResult['outcome'], rows: GithubCheck[], extra: ObservationExtra = {}): CiWaitResult {
   const checks = rows.slice(0, 100).map(row => ({name:clean(row.name,256),state:clean(row.state,256),link:safeLink(row.link)}));
   const value: CiWaitResult = { outcome: result, headSha: wait.headSha, observedAt: new Date().toISOString(), checks, totalChecks: rows.length, truncated: rows.length > checks.length || rows.some((row,i) => i < checks.length && (row.name !== checks[i]!.name || row.state !== checks[i]!.state || row.link !== checks[i]!.link)), ...extra };
@@ -72,25 +86,28 @@ export class CiWatcherSupervisor {
       ...(last && last.headSha !== wait.headSha ? { observedHeadSha: last.headSha } : {}),
       ...extra,
     });
-    const failed = (error: unknown) => observe('error', {diagnostic: error instanceof CiGithubError ? `${error.code}: ${error.message}` : 'unavailable: CI watcher failed; register a new wait.'});
+    const failed = (error: unknown) => observe('error', {diagnostic: failureDiagnostic(error)});
     const stopped = () => {
       const cancelled = caller.aborted || this.lifetime.signal.aborted;
       return observe(cancelled ? 'cancelled' : 'deadline', !cancelled && lastQueryError ? { diagnostic: `${lastQueryError.code}: ${lastQueryError.message}` } : {});
     };
     while (!signal.aborted) {
       try {
-        last = await this.github.mergeState(wait, signal);
+        const progress = wait.until === 'merge_or_blocked' ? await this.github.mergeProgress(wait, signal) : undefined;
+        last = progress ?? await this.github.mergeState(wait, signal);
         signal.throwIfAborted();
         retry = 0; lastQueryError = undefined;
         if (last.state === 'MERGED') return observe('merged', { ...(last.mergedAt ? { mergedAt: last.mergedAt } : {}), ...(last.mergeCommitSha ? { mergeCommitSha: last.mergeCommitSha } : {}) });
         if (last.state === 'CLOSED') return observe('closed', {diagnostic: 'The pull request was closed without merging.'});
+        const blocked = progress && blockedMerge(last, progress.mergeRequest);
+        if (blocked) return observe('blocked', blocked);
         if (wait.wakeOnConflict && last.mergeable === 'CONFLICTING') {
           return observe('conflicting', {diagnostic: 'The pull request conflicts with its base and cannot merge until someone resolves it.'});
         }
         await delay(CI_PROBE_MS, undefined, { signal });
       } catch (error) {
         if (signal.aborted) return stopped();
-        if (error instanceof CiGithubError && (error.code === 'command_failed' || error.code === 'query_timeout')) {
+        if (transientQuery(error)) {
           lastQueryError = error;
           const retryMs = CI_RETRY_MS[retry] ?? CI_PROBE_MS;
           retry = Math.min(retry + 1, CI_RETRY_MS.length);
@@ -101,6 +118,39 @@ export class CiWatcherSupervisor {
       }
     }
     return stopped();
+  }
+
+  /** Own one gh checks watcher until it exits, including abort cleanup, while probing PR changes. */
+  private async watchChecks(wait: CiWait, signal: AbortSignal, snapshot: () => Promise<CiWaitResult | undefined>,
+    probe: () => Promise<CiWaitResult | undefined>): Promise<CiWaitResult | undefined> {
+    const watchAbort = new AbortController();
+    const watchSignal = AbortSignal.any([signal, watchAbort.signal]);
+    // Attach a rejection handler immediately; the watcher may finish during a head probe.
+    const watcher = this.github.watch(wait, watchSignal).then(() => ({ done: true as const }), error => ({ done: true as const, error }));
+    try {
+      while (!signal.aborted) {
+        const tick = new AbortController();
+        const next = await Promise.race([watcher, delay(CI_PROBE_MS, { done: false as const },
+          { signal: AbortSignal.any([signal, tick.signal]) }).catch(() => ({ done: false as const }))]);
+        tick.abort();
+        signal.throwIfAborted();
+        if (next.done) {
+          if ('error' in next) throw next.error;
+          const final = await snapshot();
+          if (final) return final;
+          // A stale CLI watch completion never turns a pending snapshot into success.
+          await delay(CI_PROBE_MS, undefined, { signal });
+          break;
+        }
+        const changed = await probe();
+        if (changed) return changed;
+      }
+      return undefined;
+    } finally {
+      watchAbort.abort();
+      // Capacity is retained until the owned child (including forced termination) exits.
+      await watcher;
+    }
   }
 
   private async run(wait: CiWait, caller: AbortSignal): Promise<CiWaitResult> {
@@ -134,7 +184,7 @@ export class CiWatcherSupervisor {
     };
     if (remaining <= 0 || signal.aborted) return stopped();
     // A merge wait polls the PR's state and holds no watcher slot (hearsay-tools/cezarion#1425).
-    if (wait.until === 'merge') return this.runMerge(wait, caller, signal);
+    if (wait.until !== 'checks') return this.runMerge(wait, caller, signal);
     const snapshot = async (): Promise<CiWaitResult | undefined> => {
       const before = (await readMetadata()).headSha;
       if (before !== wait.headSha) return observe('head_changed', { observedHeadSha: before });
@@ -166,37 +216,14 @@ export class CiWatcherSupervisor {
             await delay(Math.min(CI_PROBE_MS, discoveryDeadline - Date.now()), undefined, { signal });
             continue;
           }
-          const watchAbort = new AbortController();
-          const watchSignal = AbortSignal.any([signal, watchAbort.signal]);
-          // Attach a rejection handler immediately; the watcher may finish during a head probe.
-          const watcher = this.github.watch(wait, watchSignal).then(() => ({done:true as const}), error => ({done:true as const,error}));
-          try {
-            while (!signal.aborted) {
-              const tick = new AbortController();
-              const next = await Promise.race([watcher, delay(CI_PROBE_MS, {done:false as const}, {signal:AbortSignal.any([signal,tick.signal])}).catch(() => ({done:false as const}))]);
-              tick.abort();
-              signal.throwIfAborted();
-              if (next.done) {
-                if ('error' in next) throw next.error;
-                const final = await snapshot();
-                if (final) return final;
-                // A stale CLI watch completion never turns a pending snapshot into success.
-                await delay(CI_PROBE_MS, undefined, {signal});
-                break;
-              }
-              const head = (await readMetadata()).headSha;
-              if (head !== wait.headSha) return observe('head_changed', {observedHeadSha:head});
-              const conflicting = conflict();
-              if (conflicting) return conflicting;
-            }
-          } finally {
-            watchAbort.abort();
-            // Capacity is retained until the owned child (including forced termination) exits.
-            await watcher;
-          }
+          const final = await this.watchChecks(wait, signal, snapshot, async () => {
+            const head = (await readMetadata()).headSha;
+            return head !== wait.headSha ? observe('head_changed', { observedHeadSha: head }) : conflict();
+          });
+          if (final) return final;
         } catch (error) {
           if (signal.aborted) return stopped();
-          if (error instanceof CiGithubError && (error.code === 'command_failed' || error.code === 'query_timeout')) {
+          if (transientQuery(error)) {
             lastQueryError = error;
             // Retain the initial backoff, then use the normal probe interval.
             // The original deadline and cancellation signal bound every retry.
@@ -205,13 +232,13 @@ export class CiWatcherSupervisor {
             await delay(retryMs, undefined, {signal});
             continue;
           }
-          return observe('error', {diagnostic:error instanceof CiGithubError ? `${error.code}: ${error.message}` : 'unavailable: CI watcher failed; register a new wait.'});
+          return observe('error', {diagnostic:failureDiagnostic(error)});
         }
       }
       return stopped();
     } catch (error) {
       if (signal.aborted) return stopped();
-      return observe('error', {diagnostic:error instanceof CiGithubError ? `${error.code}: ${error.message}` : 'unavailable: CI watcher failed; register a new wait.'});
+      return observe('error', {diagnostic:failureDiagnostic(error)});
     } finally { release?.(); }
   }
 }

@@ -830,16 +830,24 @@ Deleted Actions history loses the optimization and causes full fallback.
 
 ### Maintainer activation and rollback
 
-This implementation does not enable the queue or change repository protections.
-Until a maintainer activates it, the existing behind-main merge policy remains.
-Before activation, verify in a controlled GitHub repository or equivalent safe
-exercise that first-entry head/base semantics match this helper, a failing
-combined guard blocks merge, no model calls occur, squash lands the exact tested
-SHA, reuse succeeds, and absent proof forces full fallback. Fixture tests and a
-branch dispatch do not prove live queue semantics or equal cost.
+The maintainer enabled the merge queue for normal use on 2026-11-01 after the
+live pilot in hearsay-tools/cezarion#2404. Current ruleset `22473654` is active:
+squash, two concurrent queue builds, minimum/maximum merge count 1, `ALLGREEN`,
+and a 45-minute check timeout (verified 2026-11-05). Queue admission is pending
+work, not a completed merge. An agent that requests a merge follows it with
+`cezar_wait` using `kind: "pr"`, `until: "merge_or_blocked"`. A rejection that leaves
+neither queue membership nor enabled auto-merge wakes it with `blocked` and any
+known removal/disable reason. It inspects the PR before retrying under its existing
+authority. Dependency agents can keep an ordinary `until: "merge"` wait; queue
+removal does not end that wait.
 
-After the implementation lands and that evidence is accepted, proposed settings
-are squash, build concurrency 1 or 2 (§ Two speculative builds), minimum/maximum merge count 1, only passing
+Activation or rollback remains a maintainer action. Before changing the mechanism,
+verify that queue head/base semantics match the helper, a failing combined guard
+blocks merge, no model calls occur, squash lands the tested SHA, reuse succeeds,
+and absent proof forces full fallback. Fixtures do not prove live queue semantics
+or equal cost.
+
+The admitted settings are squash, build concurrency 1 or 2 (§ Two speculative builds), minimum/maximum merge count 1, only passing
 entries (`ALLGREEN`), and a 45-minute check timeout. Keep both required checks
 (`Unit, build, E2E, and package` and `Automated Code Review`) bound to GitHub Actions,
 review-thread resolution, strict checks false, all other protections, and no

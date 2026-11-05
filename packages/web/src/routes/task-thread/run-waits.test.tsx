@@ -330,6 +330,14 @@ describe('RunWaitDetails', () => {
   })
 
   // hearsay-tools/cezarion#1425: a merge wait says what it waits for and how it ended.
+  it('names merge supervision and its blocked result without claiming a merge', () => {
+    renderWaits(run('waiting', { waits: [ciEntry({ until: 'merge_or_blocked' })] }))
+    expect(screen.getByText('Waiting for merge or blockage')).toBeTruthy()
+    cleanup()
+    renderWaits(run('done', { lastWaits: [ciEntry({ until: 'merge_or_blocked', phase: WAIT_PHASE.delivered,
+      result: { ...observed('blocked')!, mergeBlock: { reason: 'no_pending_merge', isInMergeQueue: false, autoMergeEnabled: false } } })] }))
+    expect(screen.getByText('Initiated merge blocked — inspect the PR; not merged')).toBeTruthy()
+  })
   it('names an open merge wait and its merged, closed and timed-out results', () => {
     renderWaits(run('waiting', { waits: [ciEntry({ until: 'merge' })] }))
     expect(screen.getByText('Waiting for merge')).toBeTruthy()

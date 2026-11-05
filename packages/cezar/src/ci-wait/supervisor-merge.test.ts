@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { CiWait, CiPrIdentity } from '@open-mercato/cezar-contract';
 import { CiWatcherSupervisor } from './supervisor.ts';
 import { CiGithubError, GithubCiClient, type GithubCheck, type GithubPrMergeState } from './github.ts';
+import type { GithubMergeRequest } from './merge-progress.ts';
 
 /** A PR wait with `until: 'merge'` (hearsay-tools/cezarion#1425): it polls the PR's state and ends
  *  only on GitHub's merge or close, a conflict it was asked to wake on, an error, its deadline or
@@ -26,6 +27,12 @@ class ScriptedGithub extends GithubCiClient {
   fatal: CiGithubError | undefined;
   /** The state each read returns, by read number; the last one repeats. */
   states: Array<Partial<GithubPrMergeState>> = [{}];
+  requests: GithubMergeRequest[] = [{ isInMergeQueue: false, autoMergeEnabled: false }];
+  progressCalls = 0;
+  override async mergeProgress() {
+    const request = this.requests[Math.min(this.progressCalls++, this.requests.length - 1)]!;
+    return { ...await this.mergeState(), mergeRequest: request };
+  }
   override async mergeState(): Promise<GithubPrMergeState> {
     this.reads++;
     if (this.fatal) throw this.fatal;
@@ -100,23 +107,24 @@ it('keeps waiting through a head change and reports the last head seen', async (
   expect(await result).toMatchObject({outcome: 'merged', headSha: identity.headSha, observedHeadSha: 'c'.repeat(40)});
 });
 
-it('retries a transient failure and names it when the deadline passes', async () => {
+it.each(['merge', 'merge_or_blocked'] as const)('retries a transient %s query failure and names it at the deadline', async target => {
   vi.useFakeTimers(); const github = new ScriptedGithub(); github.failures = Infinity;
   const deadline = new AbortController(); const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValueOnce(deadline.signal);
-  const {result} = start(github); timeout.mockRestore();
+  const {result} = start(github, { until: target }); timeout.mockRestore();
   await vi.advanceTimersByTimeAsync(21_000); expect(github.reads).toBeGreaterThan(2);
   deadline.abort();
   expect(await result).toMatchObject({outcome: 'deadline', diagnostic: expect.stringMatching(/^command_failed: /)});
 });
 
-it('ends with error on a fatal query failure', async () => {
+it.each(['merge', 'merge_or_blocked'] as const)('ends %s with error on a fatal query failure', async target => {
   const github = new ScriptedGithub(); github.fatal = new CiGithubError('authentication', 'GitHub authentication failed');
-  expect(await start(github).result).toMatchObject({outcome: 'error', diagnostic: 'authentication: GitHub authentication failed'});
+  expect(await start(github, { until: target }).result).toMatchObject({outcome: 'error', diagnostic: 'authentication: GitHub authentication failed'});
 });
 
-it('reports cancellation when the caller aborts', async () => {
+it.each(['merge', 'merge_or_blocked'] as const)('reports %s cancellation when the caller aborts', async target => {
   vi.useFakeTimers(); const github = new ScriptedGithub();
-  const {result, controller} = start(github);
+  github.requests = [{ isInMergeQueue: true, autoMergeEnabled: false }];
+  const {result, controller} = start(github, { until: target });
   await vi.advanceTimersByTimeAsync(1); controller.abort();
   expect((await result).outcome).toBe('cancelled');
 });
@@ -131,4 +139,58 @@ it('holds no watcher slot, so a checks wait settles beside many open merge waits
   expect((await checks.result).outcome).toBe('passed');
   for (const merge of merges) merge.controller.abort();
   for (const merge of merges) expect((await merge.result).outcome).toBe('cancelled');
+});
+
+it('wakes the initiating agent when a queued merge is removed, within one poll', async () => {
+  vi.useFakeTimers(); const github = new ScriptedGithub();
+  const event = { kind: 'queue_removal' as const, reason: 'failed_checks', createdAt: '2026-11-04T06:33:39Z' };
+  github.requests = [{ isInMergeQueue: true, autoMergeEnabled: false }, { isInMergeQueue: false, autoMergeEnabled: false, event }];
+  const { result } = start(github, { until: 'merge_or_blocked' });
+  let settled = false; void result.then(() => { settled = true; });
+  await vi.advanceTimersByTimeAsync(1); expect(settled).toBe(false);
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(await result).toMatchObject({ outcome: 'blocked', mergeBlock: { reason: 'no_pending_merge', event } });
+  expect(github.progressCalls).toBe(2);
+});
+
+it('observes a rejection before registration and never invents a missing reason', async () => {
+  const github = new ScriptedGithub();
+  expect(await start(github, { until: 'merge_or_blocked' }).result).toMatchObject({ outcome: 'blocked',
+    mergeBlock: { reason: 'no_pending_merge', isInMergeQueue: false, autoMergeEnabled: false } });
+  const removed = new ScriptedGithub();
+  removed.requests = [{ isInMergeQueue: false, autoMergeEnabled: false,
+    event: { kind: 'auto_merge_disabled', reason: 'Disabled by GitHub', createdAt: '2026-11-04T06:33:39Z' } }];
+  expect(await start(removed, { until: 'merge_or_blocked' }).result).toMatchObject({ outcome: 'blocked',
+    mergeBlock: { event: { kind: 'auto_merge_disabled', reason: 'Disabled by GitHub' } } });
+});
+
+it.each([{ isInMergeQueue: true, autoMergeEnabled: false }, { isInMergeQueue: false, autoMergeEnabled: true }])(
+  'ignores historical rejection while a merge remains pending: %j', async pending => {
+    vi.useFakeTimers(); const github = new ScriptedGithub();
+    github.requests = [{ ...pending, event: { kind: 'queue_removal', reason: 'failed_checks', createdAt: '2026-11-04T06:33:39Z' } }];
+    github.states = [{}, merged];
+    const { result } = start(github, { until: 'merge_or_blocked' });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(await result).toMatchObject({ outcome: 'merged' });
+    expect(github.checksCalls).toBe(0);
+  });
+
+it('reports conflicts for merge supervision even when ordinary conflict wakes are disabled', async () => {
+  const github = new ScriptedGithub(); github.states = [{ mergeable: 'CONFLICTING' }];
+  github.requests = [{ isInMergeQueue: true, autoMergeEnabled: true }];
+  expect(await start(github, { until: 'merge_or_blocked', wakeOnConflict: false }).result)
+    .toMatchObject({ outcome: 'blocked', mergeBlock: { reason: 'conflict' } });
+});
+
+it.each([merged, { state: 'CLOSED' as const }])('ranks terminal PR state above blocked: %j', async state => {
+  const github = new ScriptedGithub(); github.states = [{ ...state, mergeable: 'CONFLICTING' }];
+  expect((await start(github, { until: 'merge_or_blocked' }).result).outcome).toBe(state.state === 'MERGED' ? 'merged' : 'closed');
+});
+
+it('keeps a dependency merge wait independent from a rejected merge', async () => {
+  vi.useFakeTimers(); const github = new ScriptedGithub(); github.states = [{}, merged];
+  const { result } = start(github, { until: 'merge', wakeOnConflict: false });
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect((await result).outcome).toBe('merged');
+  expect(github.progressCalls).toBe(0);
 });

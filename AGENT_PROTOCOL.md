@@ -924,7 +924,14 @@ polls the PR's state every 30 seconds, outside the watcher slots, and resolves `
 GitHub's `MERGED` state (with `mergedAt` and `mergeCommitSha` when GitHub gives them) or
 `closed` when the PR closed without merge. `wake_on_conflict` (default `true`) ends either
 target as `conflicting` on merge conflicts; an agent watching a PR it does not own sets it
-`false`. A checks wait and a merge wait on one PR are two waits. `cezar_wait({ kind: 'timer', seconds, note? })` opens a
+`false`. `until: 'merge_or_blocked'` follows an initiated merge: it resolves `blocked`
+on a conflict (regardless of `wake_on_conflict`) or when neither queue membership
+nor enabled auto-merge remains. Normal waiting for checks or queue admission keeps
+it open. A first poll can report no pending merge, including rejection before
+registration. `mergeBlock` carries current pending-state flags and, if known, the
+latest removal/disable event; its reason is external evidence, not permission to
+retry. Current pending state overrides historical rejection. Only `merged` confirms
+success. Each target on one PR is a separate wait. `cezar_wait({ kind: 'timer', seconds, note? })` opens a
 timer of 60–7,200 seconds with a note of at most 512 characters. Unknown keys, a
 field that does not fit its kind, and `kind: "human"` are `invalid_request`; the last one's
 message names `cezar_ask`. `cezar_wait({ kind: 'process', pid, exit_file?, timeout_seconds?, note? })`

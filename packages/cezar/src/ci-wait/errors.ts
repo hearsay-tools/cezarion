@@ -216,7 +216,7 @@ const WAIT_FIELD_RULES: Record<string, string> = {
   // hearsay-tools/cezarion#1425: an agent still sending kind "ci" learns the new spelling here.
   kind: 'must be "pr", "worker", "request", "peer", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask',
   pr: 'must be an HTTPS GitHub pull request URL (kind "pr")',
-  until: 'must be "checks" or "merge" (kind "pr")',
+  until: 'must be "checks", "merge" or "merge_or_blocked" (kind "pr")',
   wake_on_conflict: 'must be true or false (kind "pr")',
   timeout_seconds: 'must be an integer between 1 and 7200 (kind "pr" or "process") or between 1 and 1800 (kind "worker", "request" or "peer")',
   worker_ids: 'must be 1 to 32 unique worker ids you own (kind "worker")',

@@ -1,3 +1,5 @@
+import { MERGE_WAIT_MIGRATION, RUN_DATABASE_READABLE_FROM, RUN_DATABASE_SCHEMA_VERSION } from './run-database-version.ts';
+export { RUN_DATABASE_READABLE_FROM, RUN_DATABASE_SCHEMA_VERSION } from './run-database-version.ts';
 import { toRunRow, toRunBindings, writeMetadata } from './run-database-row.ts';
 import { reportRows, REPORTS_MIGRATION, type IndexedArtifact } from './report-rows.ts';
 import { readPeerSummaryPage, toSummaryRow, type PeerSummaryPageQuery } from './run-database-peer-page.ts';
@@ -16,20 +18,6 @@ export const RUNS_DB_FILE = 'runs.db';
  *  to import): from then on this database is authoritative and `runs.json` is history. Written in
  *  the same transaction as the imported rows, so it can never describe a half-finished import. */
 export const RUNS_IMPORT_COMPLETE_KEY = 'import-complete';
-
-/** `PRAGMA user_version` of a database this build created. A higher number means a newer cezar
- *  wrote it; that is refused rather than read, because a newer schema may store what this one
- *  would silently drop on its next write. */
-export const RUN_DATABASE_SCHEMA_VERSION = 10;
-
-/**
- * The oldest `user_version` the READ-ONLY reader can read as it stands (`openReadOnly`). It never
- * migrates, so a project this build has not opened yet is still at the version an earlier build
- * left; while every migration since only adds what readers can do without (indexes), that
- * database stays readable rather than reading as empty. Raise it with any migration that changes
- * a table or column a reader queries.
- */
-export const RUN_DATABASE_READABLE_FROM = 1;
 
 /** How long a statement waits on another connection's lock before failing as busy. Short on
  *  purpose: the store runs on the event loop, and a blocked write is a blocked cockpit. */
@@ -221,6 +209,7 @@ const MIGRATIONS: readonly string[] = [
   -- No live recompute: isLiveRecord already calls a row with an open wait live, of any kind.
   `,
   REPORTS_MIGRATION,
+  MERGE_WAIT_MIGRATION,
 ];
 
 /** What the caller writes for one run. Optional columns may be omitted or null. */

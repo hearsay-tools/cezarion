@@ -57,6 +57,21 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     const merge = [ci({ until: 'merge' })];
     expect(identicalWait(merge, { kind: WAIT_KIND.pr, pr: ci().prUrl, until: 'merge' }, 'turn-2')).toBe(merge[0]);
     expect(identicalWait(merge, { kind: WAIT_KIND.pr, pr: ci().prUrl }, 'turn-2')).toBeUndefined();
+    expect(identicalWait(merge, { kind: WAIT_KIND.pr, pr: ci().prUrl, until: 'merge_or_blocked' }, 'turn-2')).toBeUndefined();
+    const initiated = ci({ until: 'merge_or_blocked' });
+    expect(identicalWait([initiated], { kind: WAIT_KIND.pr, pr: ci().prUrl, until: 'merge_or_blocked' }, 'turn-2')).toBe(initiated);
+    expect(ciWatchRequest(initiated).until).toBe('merge_or_blocked');
+  });
+
+  it('names merge supervision and explains blocked as an observation, never merge authority', () => {
+    const wait = ci({ until: 'merge_or_blocked' });
+    expect(openWaitList([wait])[0]!.summary).toBe('merge or blockage of Acme/Repo#12');
+    expect(openWaitsFooter([wait])).toContain(`merge_or_blocked wait ${wait.id}`);
+    const text = waitResultText({ ...wait, phase: WAIT_PHASE.resolved, result: { ...result, outcome: 'blocked',
+      mergeBlock: { reason: 'no_pending_merge', isInMergeQueue: false, autoMergeEnabled: false } } });
+    expect(text).toContain('(until merge_or_blocked)');
+    expect(text).toContain('Only "merged" confirms a merge');
+    expect(text).toContain('does not authorize retrying or merging');
   });
 
   it('names a merge wait as one in its summary, footer and delivered text', () => {

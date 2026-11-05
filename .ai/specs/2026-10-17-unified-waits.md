@@ -1558,3 +1558,49 @@ as on any open wait.
 
 Every row but cancellation exits with no human action. A transient `gh` failure retries and
 never ends the wait before its deadline.
+
+
+## Initiated merge supervision (2026-11-05)
+
+hearsay-tools/cezarion#2712 adds `until: 'merge_or_blocked'` under the existing
+`pr` kind. The owner selected a separate target so dependencies can keep ordinary
+`merge` waits while the initiating agent follows the work it requested. Ordinary
+`merge` keeps its conflict option and ignores queue removal. Defaults remain
+`checks`, a 1,800-second deadline, and `wake_on_conflict: true`.
+
+The new target polls every 30 seconds outside watcher slots with the existing
+query permit, ten-second command limit, output cap, retry and absolute deadline.
+One structured read includes current queue membership, auto-merge state and the
+latest queue/auto-merge lifecycle event. Merged and closed states take precedence.
+A conflict always resolves `blocked`. Otherwise queued or enabled auto-merge stays
+pending; neither resolves `blocked` with `mergeBlock.reason: 'no_pending_merge'`.
+Optional event reason/time explains evidence without assigning a shell-command
+attempt or granting retry authority. No event is needed to truthfully report that
+no merge is pending. Historical rejection cannot override current pending state.
+This catches rejection before registration and after restart. It does not predict
+every stall while GitHub still retains an active request; the deadline bounds it.
+
+No run status, state file, configuration or merge authority is added. Schema 11
+is a no-op compatibility guard: older builds cannot read the new target/outcome
+enums and refuse the store rather than losing the accepted wait. Existing records
+remain readable. Recovery is to use a current build, not repair user-authored data.
+
+### Transitions out (initiated merge)
+
+| State | Trigger | Owner | Behavior |
+| --- | --- | --- | --- |
+| Open PR wait | Merged/closed | Supervisor poll | Persist `merged`/`closed`, normal wake |
+| Open PR wait | Conflict or no pending merge | Supervisor poll | Persist `blocked` and evidence, normal wake |
+| Open PR wait | Queue or auto-merge pending | Supervisor poll | Keep polling, same deadline |
+| Open PR wait | Transient query failure | Supervisor | Existing bounded retry |
+| Open PR wait | Fatal/malformed query or deadline | Supervisor | Existing `error`/`deadline`, never inferred `blocked` |
+| Open PR wait | Human input | Existing input delivery | Wake independently; wait stays open |
+| Open PR wait | Cancel, Stop, Finish or deletion | Existing lifecycle owner | Existing cancellation; no new continuation |
+| Open PR wait, no session after restart | Recovery | Re-arm watcher | Same target, ID and deadline |
+| Resolved PR wait, no session | Existing scheduler | Durable continuation | Deliver committed result under existing admission/budget policy |
+| Resolution write or delivery fails | Existing checkpoint/delivery owner | Existing retry | Retain outcome; preserve bounded delivery policy |
+
+The auto-merge playbook keeps the initiating session responsible until outcome or
+explicit handoff. It checks actual queue membership before treating a null
+`autoMergeRequest` as a missing merge request. No automatic repair, re-enqueue,
+completed-session revival, or merge is authorized by this observation.

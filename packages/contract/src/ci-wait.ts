@@ -11,7 +11,7 @@ export const ciPrUrlSchema = z.string().max(2048).regex(prPattern).refine(value 
   return !!match && Number.isSafeInteger(Number(match[4])) && match[3] !== '.' && match[3] !== '..';
 }, 'Expected an HTTPS GitHub PR URL with a positive integer PR number');
 /** What a PR wait waits for (hearsay-tools/cezarion#1425): its checks' outcome, or its merge. */
-export const prWaitUntilSchema = z.enum(['checks', 'merge']);
+export const prWaitUntilSchema = z.enum(['checks', 'merge', 'merge_or_blocked']);
 export type PrWaitUntil = z.infer<typeof prWaitUntilSchema>;
 export const ciWaitRequestSchema = z.object({
   pr: ciPrUrlSchema,
@@ -29,7 +29,7 @@ export const ciPrIdentitySchema = z.object({
   headSha: sha,
 }).strict();
 export type CiPrIdentity = z.infer<typeof ciPrIdentitySchema>;
-export const ciWaitOutcomeSchema = z.enum(['passed', 'failed', 'cancelled', 'skipped', 'no_checks', 'head_changed', 'conflicting', 'deadline', 'error', 'merged', 'closed']);
+export const ciWaitOutcomeSchema = z.enum(['passed', 'failed', 'cancelled', 'skipped', 'no_checks', 'head_changed', 'conflicting', 'deadline', 'error', 'merged', 'closed', 'blocked']);
 export const ciWaitErrorCodeSchema = z.enum(['invalid_request', 'unsupported_host', 'gh_missing', 'authentication', 'inaccessible_pr', 'malformed_data', 'output_limit', 'query_timeout', 'command_failed', 'wait_conflict', 'capacity', 'unavailable', 'unauthorized', 'persistence',
   'manager_disposed', 'capability_revoked', 'run_missing', 'run_not_running', 'run_stopping',
   'session_replaced', 'session_closed', 'run_cancelled', 'finish_requested', 'generation_mismatch',
@@ -47,6 +47,19 @@ function utf8Bytes(value: string): number {
   }
   return bytes;
 }
+/** Current merge progress, not attribution to a particular command or permission to retry it. */
+export const mergeBlockSchema = z.object({
+  reason: z.enum(['conflict', 'no_pending_merge']),
+  isInMergeQueue: z.boolean(),
+  autoMergeEnabled: z.boolean(),
+  event: z.object({
+    kind: z.enum(['queue_removal', 'auto_merge_disabled']),
+    createdAt: z.iso.datetime({ offset: true }),
+    reason: z.string().max(256).optional(),
+    reasonCode: z.string().max(256).optional(),
+  }).strict().optional(),
+}).strict();
+export type MergeBlock = z.infer<typeof mergeBlockSchema>;
 export const ciWaitResultSchema = z.object({
   outcome: ciWaitOutcomeSchema,
   headSha: sha,
@@ -56,12 +69,14 @@ export const ciWaitResultSchema = z.object({
   /** A merge wait's `merged` outcome: when, and as which commit, GitHub merged the PR. */
   mergedAt: z.iso.datetime({ offset: true }).optional(),
   mergeCommitSha: sha.optional(),
+  mergeBlock: mergeBlockSchema.optional(),
   observedAt: z.iso.datetime(),
   checks: z.array(z.object({ name: z.string().max(256), state: z.string().max(256), link: z.string().max(2048) }).strict()).max(100),
   totalChecks: z.number().int().nonnegative(),
   truncated: z.boolean(),
   diagnostic: z.string().max(4096).refine(value => utf8Bytes(value) <= 4096).optional(),
-}).strict().refine(value => utf8Bytes(JSON.stringify(value)) <= 32 * 1024, 'CI result exceeds 32 KiB');
+}).strict().refine(value => (value.outcome === 'blocked') === (value.mergeBlock !== undefined), 'Only blocked outcomes require mergeBlock')
+  .refine(value => utf8Bytes(JSON.stringify(value)) <= 32 * 1024, 'CI result exceeds 32 KiB');
 export type CiWaitResult = z.infer<typeof ciWaitResultSchema>;
 export const ciWaitSchema = ciPrIdentitySchema.extend({
   id: z.uuid(),

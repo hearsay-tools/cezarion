@@ -297,8 +297,8 @@ describe('open waits', () => {
   });
 
   // hearsay-tools/cezarion#1425: a PR wait's target names what the run waits for.
-  it('labels an open PR merge wait waiting for merge', () => {
-    expect(deriveAttention({ status: RUN_STATUS.waiting, waitingOn: { kind: WAIT_KIND.pr, until: 'merge', waitId: '11111111-1111-4111-8111-111111111111',
+  it.each(['merge', 'merge_or_blocked'] as const)('labels an open PR %s wait waiting for merge', target => {
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waitingOn: { kind: WAIT_KIND.pr, until: target, waitId: '11111111-1111-4111-8111-111111111111',
       prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' } } as never))
       .toMatchObject({ bucket: 'running', shape: 'ring', label: 'waiting for merge' });
   });
