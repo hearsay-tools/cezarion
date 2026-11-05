@@ -1,3 +1,4 @@
+import { createBoundaryGroup, type BoundaryGroup } from './run/turn-boundary.ts';
 import { createWaitGroup, type WaitGroup } from './run/wait-registry.ts';
 import { createAutosaveGroup, type AutosaveGroup } from './run/worktree-autosave.ts';
 import { createInputGroup, type InputGroup } from './run/input-delivery.ts';
@@ -12,6 +13,7 @@ import { createUsageGroup, type UsageGroup } from './run/usage-accounting.ts';
  * (hearsay-tools/cezarion#1806). `RunManager` registers every instance through `activate`.
  */
 export interface ActiveRun {
+  readonly boundary: BoundaryGroup;
   readonly waitIdentity: WaitGroup;
   readonly autosave: AutosaveGroup;
   readonly inputState: InputGroup;
@@ -100,6 +102,7 @@ export interface ActiveRunInit {
  */
 export function createActiveRun(init: ActiveRunInit): ActiveRun {
   const state = {
+    boundary: createBoundaryGroup(init.pendingHumanAsk, init.autonomous),
     waitIdentity: createWaitGroup(),
     autosave: createAutosaveGroup(),
     inputState: createInputGroup(),
@@ -110,6 +113,7 @@ export function createActiveRun(init: ActiveRunInit): ActiveRun {
     skills: createSkillsGroup(),
     autonomous: init.autonomous,
   };
+  Object.defineProperty(state, 'boundary', { writable: false, configurable: false });
   Object.defineProperty(state, 'waitIdentity', { writable: false, configurable: false });
   Object.defineProperty(state, 'autosave', { writable: false, configurable: false });
   Object.defineProperty(state, 'inputState', { writable: false, configurable: false });
