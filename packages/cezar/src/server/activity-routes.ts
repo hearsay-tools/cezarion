@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { ActivitySnapshot } from '@open-mercato/cezar-contract';
 import { activityQuerySchema } from '@open-mercato/cezar-contract/activity';
 import { ActivityDemand } from '../activity/demand.ts';
-import { buildActivitySnapshot, unreadableLogger, type ActivityDeps, type ActivityProjectSource } from '../activity/read-model.ts';
+import { buildActivitySnapshot, unreadableLogger, type ActivityDeps, type ActivityProjectSource, type CiProgressSource } from '../activity/read-model.ts';
 import type { ToolActivityTracker } from '../activity/tool-activity.ts';
 import type { CiProgressRegistry } from '../ci-wait/progress.ts';
 import type { ProjectContext } from './project-context.ts';
@@ -25,8 +25,8 @@ export interface ActivityRouteDeps extends ActivityServerDeps {
   workspaceProjects: Pick<WorkspaceProjects, 'listVisibleProjects' | 'resolveBootProject' | 'resolveLiveProject' | 'projectFailure'>;
   /** The projects activity readers watch; the CI progress registry reads it. */
   demand?: ActivityDemand;
-  /** The trackers (tool activity, CI progress) and the clock. Default CI progress: the boot
-   *  manager's registry, which the workspace's CI watchers publish to. */
+  /** The trackers (tool activity, CI progress) and the clock. Default CI progress: each loaded
+   *  project's own manager's registry, which its CI watchers publish to. */
   activity?: Omit<ActivityDeps, 'onUnreadable'>;
 }
 
@@ -39,17 +39,30 @@ export interface ActivityRouteDeps extends ActivityServerDeps {
  */
 export function createActivityRoutes({ bootContext, contexts, workspaceProjects, demand = new ActivityDemand(), activity = {}, toolActivity }: ActivityRouteDeps) {
   const tools = activity.tools ?? toolActivity;
-  // A manager test double may carry no registry.
-  const progress: CiProgressRegistry | undefined = bootContext.manager.ciProgress;
-  progress?.useDemand(demand);
-  const deps: ActivityDeps = { ...(progress ? { ci: progress } : {}), ...activity, ...(tools ? { tools } : {}), onUnreadable: unreadableLogger() };
+  const deps: ActivityDeps = { ...activity, ...(tools ? { tools } : {}), onUnreadable: unreadableLogger() };
+  const plugged = new WeakSet<CiProgressRegistry>();
+  /**
+   * The check progress of the project's own CI watchers: its manager's registry, which need not be
+   * the boot manager's (each workspace semaphore has its own). Each registry gets this route's
+   * demand once. An explicit `activity.ci` replaces them all.
+   */
+  const progressOf = (project: LoadedProject): CiProgressSource | undefined => {
+    if (activity.ci) return undefined;
+    // A manager test double may carry no registry.
+    const registry: CiProgressRegistry | undefined = project.manager.ciProgress;
+    if (registry && !plugged.has(registry)) {
+      registry.useDemand(demand);
+      plugged.add(registry);
+    }
+    return registry;
+  };
   /** A store that cannot open never reads as empty (docs/areas/runs-store.md): it carries the failure. */
   const loadedSource = (project: LoadedProject, name: string): ActivityProjectSource => ({
     projectId: project.id,
     name,
     ...(project.store.unavailable
       ? { unavailable: workspaceProjects.projectFailure(project.store.unavailable, project.id) }
-      : { loaded: { store: project.store, isActive: (runId: string) => project.manager.isActive(runId) } }),
+      : { loaded: { store: project.store, isActive: (runId: string) => project.manager.isActive(runId), ci: progressOf(project) } }),
   });
   /** The registry, or undefined when it cannot be read. */
   const visibleProjects = () => workspaceProjects.listVisibleProjects().catch(() => undefined);

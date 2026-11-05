@@ -18,11 +18,12 @@ export interface ToolActivitySource {
 /** What the read model needs from a project's run store. It reads; it never writes a run. */
 export type ActivityStore = ActivityRequestStore & Pick<RunStore, 'listRunSummaries' | 'listOwnedWorkers' | 'withReadCache'>;
 
-/** One project to read: its store and run manager when this process has loaded it. */
+/** One project to read: its store and run manager when this process has loaded it. `ci` is the
+ *  check progress of that project's own CI watchers; without it, `ActivityDeps.ci` is read. */
 export interface ActivityProjectSource {
   projectId: string;
   name: string;
-  loaded?: { store: ActivityStore; isActive: (runId: string) => boolean } | undefined;
+  loaded?: { store: ActivityStore; isActive: (runId: string) => boolean; ci?: CiProgressSource | undefined } | undefined;
   /** A loaded project whose run store cannot open. */
   unavailable?: ActivityProject['unavailable'];
 }
@@ -69,7 +70,8 @@ export function buildActivityProject(source: ActivityProjectSource, deps: Activi
   // One snapshot decodes each cold record once: claims, cards, workers, reconcile lookups and
   // request titles all read the same runs (hearsay-tools/cezarion#2378).
   const store = loggingUnreadable(loaded.store, (runId) => deps.onUnreadable?.(source.projectId, runId));
-  return loaded.store.withReadCache(() => loadedProject(store, loaded.isActive, deps, options, empty));
+  const ci = loaded.ci ?? deps.ci;
+  return loaded.store.withReadCache(() => loadedProject(store, loaded.isActive, { ...deps, ...(ci ? { ci } : {}) }, options, empty));
 }
 
 /**

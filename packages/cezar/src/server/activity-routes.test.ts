@@ -191,4 +191,49 @@ describe('workspace activity API', () => {
       ciProgress.remove(wait.id);
     }
   });
+
+  // Without a shared semaphore, each project's manager holds its own registry: its CI watchers
+  // publish there, and the read of that project must read it there.
+  it('reads each project’s check progress from its own manager, and plugs the demand into every registry', async () => {
+    const demand = new ActivityDemand();
+    const otherStore = RunStore.open(join(otherRoot, '.ai/cezar'));
+    try {
+      const pending = [{ name: 'build', state: 'PENDING', link: '', bucket: 'pending' as const }];
+      const seeded = (runs: RunStore, title: string) => {
+        const wait = makePrWait();
+        const run = runs.createRun({ title, workflow: 'build', task: 't', steps: [] });
+        setRunStatus(runs, run.id, RUN_STATUS.waiting, { waits: [wait] });
+        return wait;
+      };
+      const project = (id: string, root: string, runs: RunStore) => {
+        const registry = new CiProgressRegistry();
+        const owned = { id, root, store: runs, manager: { isActive: () => false, ciProgress: registry } } as never;
+        return { owned, registry };
+      };
+      const boot = project('shop', repoRoot, store);
+      const other = project('docs', otherRoot, otherStore);
+      const bootWait = seeded(store, 'Boot task');
+      const otherWait = seeded(otherStore, 'Docs task');
+      boot.registry.publish(bootWait.id, pending);
+      other.registry.publish(otherWait.id, pending);
+      const workspaceProjects = {
+        listVisibleProjects: async () => [{ id: 'shop', name: 'Shop', root: repoRoot }, { id: 'docs', name: 'Docs', root: otherRoot }],
+        resolveBootProject: async () => 'shop',
+        resolveLiveProject: async () => boot.owned,
+        projectFailure: () => ({ error: 'unknown project', status: 404 as const }),
+      } as unknown as WorkspaceProjects;
+      const routes = createActivityRoutes({ bootContext: boot.owned, contexts: { peek: (id) => (id === 'docs' ? other.owned : undefined) }, workspaceProjects, demand });
+
+      const res = await routes.request('/workspace/activity');
+
+      const body = activitySnapshotSchema.parse(await res.json());
+      const waitOf = (projectId: string) => body.projects.find((entry) => entry.projectId === projectId)!.tasks[0]!.wait;
+      for (const projectId of ['shop', 'docs']) {
+        expect(waitOf(projectId), projectId).toMatchObject({ kind: WAIT_KIND.pr, detail: { checks: [{ name: 'build', bucket: 'pending' }], counts: { pending: 1 } } });
+      }
+      expect([boot.registry.wanted(bootWait.id), other.registry.wanted(otherWait.id)]).toEqual([true, true]);
+    } finally {
+      otherStore.close();
+    }
+  });
 });
