@@ -43,7 +43,7 @@ describe('periodic autosave gate (#471)', () => {
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = new WorktreeAutosave({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
       work, semaphore: new WorkspaceSemaphore(), disposed: () => false,
-    }, unused('WorktreeAutosave.host', {
+    }, unused<ConstructorParameters<typeof WorktreeAutosave>[1]>('WorktreeAutosave.host', {
       saveWorktree: (id, state, reason) => manager.saveWorktree(id, state, reason),
       trackTurn: (_id, task) => { saves.push(task); },
     }));

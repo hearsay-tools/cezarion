@@ -1,3 +1,5 @@
+import { AttachmentWriter } from './run/attachment-writer.ts';
+import { QueuedInput } from './run/queued-input.ts';
 import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
 import { TrackedWork } from './run/tracked-work.ts';
 import { setRunStatus, crashStore } from '../runs/run-store.testkit.ts';
@@ -10,7 +12,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync, mkdirSync,
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi, afterAll, beforeAll } from 'vitest';
-import { type AgentRunResult, type AgentSession, type ContentBlock } from '../core/agent-runner.ts';
+import { type AgentRunResult, type AgentRunSpec, type AgentSession, type ContentBlock } from '../core/agent-runner.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { type UiEvent } from '../core/ui-events.ts';
 import { RunStore, type StepState, type RunRecord } from '../runs/store.ts';
@@ -350,7 +352,7 @@ describe('TurnBookkeeper.recordTurnEnd', () => {
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     bookkeeper = new TurnBookkeeper({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
       work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => false,
-    }, unused('TurnBookkeeper.host', { isDisposedDelegatedRun: () => false }));
+    }, unused<ConstructorParameters<typeof TurnBookkeeper>[1]>('TurnBookkeeper.host', { isDisposedDelegatedRun: () => false }));
   });
 
   afterAll(async () => {
@@ -501,18 +503,32 @@ describe('RunManager.continueRun override', () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
+  const launches: AgentRunSpec[] = [];
 
-  beforeEach(() => {
+  beforeEach(async () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-continue-'));
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    writeFileSync(join(repoRoot, 'base.txt'), 'base');
+    await run('git', ['add', 'base.txt'], { cwd: repoRoot });
+    await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot);
-    // No live agent — we only assert the synchronous persistence continueRun does before it
-    // hands off to the (stubbed) continuation.
-    (manager as unknown as { runContinuation: () => Promise<void> }).runContinuation = async () => {};
+    launches.length = 0;
+    runnerHook.runner = {
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
+      run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => undefined,
+      startSession: spec => {
+        launches.push(spec);
+        return { result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
+          sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => undefined,
+          holdsHumanInput: () => false, end: () => undefined, interrupt: () => undefined, open: false };
+      },
+    };
   });
 
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
+    runnerHook.runner = undefined;
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
   });
@@ -549,12 +565,10 @@ describe('RunManager.continueRun override', () => {
     manager.dispose(); crashStore(store);
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
     manager = createFixtureManager(store, repoRoot);
-    const internals = runInternals(manager).line;
-    const pump = vi.spyOn(internals, 'pump').mockResolvedValue();
     await manager.recover();
-    expect(pump).toHaveBeenCalled();
-    expect(runInternals(manager).line.pendingContinuations.get(id)?.prompt).toContain('read this with the chosen account');
-    expect(runInternals(manager).line.pendingContinuations.get(id)?.sessionId).toBeUndefined();
+    await waitForProduct(manager, store, () => launches.length === 1);
+    expect(launches[0]?.userPrompt).toContain('read this with the chosen account');
+    expect(launches[0]?.resume).not.toBe(true);
     expect(store.getRun(id)?.agentProfile).toBe(after);
   });
 
@@ -577,29 +591,25 @@ describe('RunManager.continueRun override', () => {
     expect(after?.model).toBe('gpt-5.1-codex');
   });
 
-  it('starts fresh when Continue switches to a backend that does not own the session', () => {
+  it('starts fresh when Continue switches to a backend that does not own the session', async () => {
     const id = resumableRun();
-    const calls: unknown[][] = [];
-    (manager as unknown as { runContinuation: (...args: unknown[]) => Promise<void> }).runContinuation = async (...args) => {
-      calls.push(args);
-    };
+
 
     expect(manager.continueRun(id, { runner: 'codex' })).toEqual({ ok: true });
-    expect(calls[0]?.[2]).toBeUndefined();
-    expect(calls[0]?.[3]).toBe('codex');
+    await waitForProduct(manager, store, () => launches.length === 1);
+    expect(launches[0]?.resume).not.toBe(true);
+    expect(store.getRun(id)?.steps.at(-1)?.backend).toBe('codex');
   });
 
-  it('resumes when Continue stays on the backend that owns the session', () => {
+  it('resumes when Continue stays on the backend that owns the session', async () => {
     const id = resumableRun();
     store.updateStep(id, 's1', { backend: 'claude' });
-    const calls: unknown[][] = [];
-    (manager as unknown as { runContinuation: (...args: unknown[]) => Promise<void> }).runContinuation = async (...args) => {
-      calls.push(args);
-    };
+
 
     expect(manager.continueRun(id, { runner: 'claude' })).toEqual({ ok: true });
-    expect(calls[0]?.[2]).toBe('sess-1');
-    expect(calls[0]?.[3]).toBe('claude');
+    await waitForProduct(manager, store, () => launches.length === 1);
+    expect(launches[0]).toMatchObject({ resume: true, sessionId: 'sess-1' });
+    expect(store.getRun(id)?.steps.at(-1)?.backend).toBe('claude');
   });
 
   it('an omitted override preserves the run current backend/model (backward compat)', () => {
@@ -610,14 +620,12 @@ describe('RunManager.continueRun override', () => {
     expect(after?.model).toBe('sonnet');
   });
 
-  it('persists an effort override and keeps it when Continue omits it (#45)', () => {
+  it('persists an effort override and keeps it when Continue omits it (#45)', async () => {
     const id = resumableRun();
     store.updateRun(id, { effort: 'medium' });
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     expect(store.getRun(id)?.effort).toBe('medium');
-    // The stub bypasses startup teardown; simulate its completed lifecycle before
-    // accepting a second Continue (terminal status alone never proves termination).
-    runInternals(manager).line.starting.delete(id);
+    await waitForProduct(manager, store, () => !manager.isActive(id));
     setRunStatus(store, id, RUN_STATUS.done);
 
     expect(manager.continueRun(id, { effort: 'xhigh' })).toEqual({ ok: true });
@@ -727,45 +735,39 @@ describe('RunManager.continueRun override', () => {
     expect(store.getRun(id)?.model).toBe('sonnet');
   });
 
-  it('starts fresh when Continue switches to another login of the same agent', () => {
+  it('starts fresh when Continue switches to another login of the same agent', async () => {
     const id = resumableRun();
     store.updateStep(id, 's1', { backend: 'claude', profileId: 'default' });
-    const calls: unknown[][] = [];
-    (manager as unknown as { runContinuation: (...args: unknown[]) => Promise<void> }).runContinuation = async (...args) => {
-      calls.push(args);
-    };
+
 
     expect(manager.continueRun(id, { agentProfile: 'klaudiusz' })).toEqual({ ok: true });
     // `claude --resume <id>` under another login would find nothing and silently open a fresh
     // conversation, so the session id is deliberately not passed.
-    expect(calls[0]?.[2]).toBeUndefined();
-    expect(calls[0]?.[3]).toBe('claude');
+    await waitForProduct(manager, store, () => launches.length === 1);
+    expect(launches[0]?.resume).not.toBe(true);
+    expect(store.getRun(id)?.steps.at(-1)?.backend).toBe('claude');
   });
 
-  it('resumes when the picked account is the one that owns the session', () => {
+  it('resumes when the picked account is the one that owns the session', async () => {
     const id = resumableRun();
     store.updateStep(id, 's1', { backend: 'claude', profileId: 'klaudiusz' });
-    const calls: unknown[][] = [];
-    (manager as unknown as { runContinuation: (...args: unknown[]) => Promise<void> }).runContinuation = async (...args) => {
-      calls.push(args);
-    };
+
 
     expect(manager.continueRun(id, { agentProfile: 'klaudiusz' })).toEqual({ ok: true });
-    expect(calls[0]?.[2]).toBe('sess-1');
+    await waitForProduct(manager, store, () => launches.length === 1);
+    expect(launches[0]).toMatchObject({ resume: true, sessionId: 'sess-1' });
   });
 
-  it('treats a step that recorded no account as the discovered one', () => {
+  it('treats a step that recorded no account as the discovered one', async () => {
     // Pre-accounts sessions ran under whatever `agentHomePaths()` finds, so re-picking `default`
     // is not a switch and must still resume.
     const id = resumableRun();
     store.updateStep(id, 's1', { backend: 'claude' });
-    const calls: unknown[][] = [];
-    (manager as unknown as { runContinuation: (...args: unknown[]) => Promise<void> }).runContinuation = async (...args) => {
-      calls.push(args);
-    };
+
 
     expect(manager.continueRun(id, { agentProfile: 'default' })).toEqual({ ok: true });
-    expect(calls[0]?.[2]).toBe('sess-1');
+    await waitForProduct(manager, store, () => launches.length === 1);
+    expect(launches[0]).toMatchObject({ resume: true, sessionId: 'sess-1' });
   });
 
   it('an omitted account preserves the one the run is on (backward compat)', () => {
@@ -855,7 +857,11 @@ describe('RunSettlement.settleSuccess — optional review gate', () => {
     return store.getRun(record.id) as RunRecord;
   }
 
-  const settle = (id: string) => runInternals(manager).runSettlement.settleSuccess(id);
+  const settle = async (id: string) => {
+    setRunStatus(store, id, RUN_STATUS.waiting);
+    expect(manager.finish(id)).toBe(true);
+    await waitForProduct(manager, store, () => FINISHED_RUN_STATUSES.has(store.getRun(id)!.status));
+  };
 
   it('gate off (default) + changes → done, diff left in the worktree', async () => {
     const record = await changedRun();
@@ -1124,7 +1130,8 @@ describe('RunManager monitoring turns', () => {
     expect(clock.pending).toBe(1);
     clock.fire(clock.captured - 1);
     await waitFor(record.id, () => !fixture.manager.isActive(record.id));
-    expect(fixture.store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.waiting, finishedAt: undefined });
+    expect(fixture.store.getRun(record.id)?.status).toBe(RUN_STATUS.waiting);
+    expect(fixture.store.getRun(record.id)?.finishedAt).toBeUndefined();
     expect(monitoringTimerWait(fixture.store.getRun(record.id))).toBeUndefined();
   }, 30_000);
 });
@@ -1368,9 +1375,13 @@ describe('RunManager workflow remainder opening', () => {
     });
     fixture.currentId = record.id;
     fixture.store.updateStep(record.id, 'preflight', { status: STEP_STATUS.done, iterations: 1 });
-    await (fixture.manager as unknown as {
-      execute(id: string, definition: WorkflowDef, input: { task: string; worktree: boolean; images: ContentBlock[] }, startAt: number): Promise<void>;
-    }).execute(record.id, workflow, { task: record.task, worktree: false, images: [openingImage] }, 1);
+    const imageDir = join(fixture.repoRoot, '.ai/cezar/runs', `${record.id}-images`);
+    mkdirSync(imageDir, { recursive: true });
+    writeFileSync(join(imageDir, 'pasted-1.png'), Buffer.from('aW1hZ2U=', 'base64'));
+    fixture.store.updateStep(record.id, 'task', { status: STEP_STATUS.pending });
+    fixture.store.updateRun(record.id, { workflowDef: workflow, worktree: false, taskImages: [`/api/v1/runs/${record.id}/images/pasted-1.png`] });
+    await fixture.manager.recover();
+    await waitForProduct(fixture.manager, fixture.store, () => !fixture.manager.isActive(record.id) && FINISHED_RUN_STATUSES.has(fixture.store.getRun(record.id)!.status));
 
     expect(receivedImages).toEqual([openingImage]);
   }, 30_000);
@@ -1399,9 +1410,10 @@ describe('RunManager check retry recovery', () => {
     fixture.store.updateStep(record.id, 'verify', { status: STEP_STATUS.failed, iterations: 1, retriesUsed: 1 });
     setRunStatus(fixture.store, record.id, RUN_STATUS.queued, { workflowDef: workflow });
 
-    await (fixture.manager as unknown as {
-      execute(id: string, workflow: WorkflowDef, input: { task: string; worktree: boolean }, startAt: number): Promise<void>;
-    }).execute(record.id, workflow, { task: 'mock:cezar-done', worktree: false }, 1);
+    fixture.store.updateStep(record.id, 'verify', { status: STEP_STATUS.pending });
+    fixture.store.updateRun(record.id, { workflowDef: workflow, worktree: false });
+    await fixture.manager.recover();
+    await waitForProduct(fixture.manager, fixture.store, () => !fixture.manager.isActive(record.id) && FINISHED_RUN_STATUSES.has(fixture.store.getRun(record.id)!.status));
 
     expect(fixture.store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.failed });
     expect(fixture.store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
@@ -1436,9 +1448,10 @@ describe('RunManager check retry recovery', () => {
       flushes.push(structuredClone(fixture.store.getRun(record.id)!));
       originalFlush();
     });
-    await (fixture.manager as unknown as {
-      execute(id: string, workflow: WorkflowDef, input: { task: string; worktree: boolean }, startAt: number): Promise<void>;
-    }).execute(record.id, workflow, { task: 'mock:cezar-done', worktree: false }, 1);
+    fixture.store.updateStep(record.id, 'gate', { status: STEP_STATUS.pending });
+    fixture.store.updateRun(record.id, { workflowDef: workflow, worktree: false });
+    await fixture.manager.recover();
+    await waitForProduct(fixture.manager, fixture.store, () => !fixture.manager.isActive(record.id) && FINISHED_RUN_STATUSES.has(fixture.store.getRun(record.id)!.status));
 
     expect(fixture.store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'task', iterations: 2 }),
@@ -1638,17 +1651,19 @@ describe('cezar_ask parks as waiting and emits ask.requested (#473)', () => {
 describe('AttachmentWriter.persistAttachment without a session (#472)', () => {
   let repoRoot: string;
   let store: RunStore;
-  let manager: RunManager;
+  let attachments: AttachmentWriter;
   const PNG = Buffer.from('fake-png-bytes').toString('base64');
 
   const persist = (id: string, prefix?: string) =>
-    runInternals(manager).attachments.persistAttachment(id, 'image/png', PNG, prefix);
+    attachments.persistAttachment(id, 'image/png', PNG, prefix);
   const imagesDir = (id: string) => join(repoRoot, '.ai/cezar', 'runs', `${id}-images`);
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-persist-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot);
+    attachments = new AttachmentWriter({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+      work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => false,
+    }, unused('AttachmentWriter.host'));
   });
 
   afterEach(async () => {
@@ -1686,7 +1701,7 @@ describe('AttachmentWriter.persistAttachment without a session (#472)', () => {
     mkdirSync(imagesDir('run-d'), { recursive: true });
     // Force a stale counter: the map says 0, but pasted-1 already exists.
     writeFileSync(join(imagesDir('run-d'), 'pasted-1.png'), 'original');
-    runInternals(manager).attachments.queuedImageSeq.set('run-d', 0);
+    attachments.queuedImageSeq.set('run-d', 0);
 
     const saved = persist('run-d', 'pasted');
     expect(saved?.name).toBe('pasted-2.png');
@@ -1698,6 +1713,8 @@ describe('RunManager queued-stack mutators (#472)', () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
+  let semaphore: WorkspaceSemaphore;
+  let capacity = 0;
   const PNG = Buffer.from('png').toString('base64');
 
   const WORKFLOW: WorkflowDef = {
@@ -1714,22 +1731,28 @@ describe('RunManager queued-stack mutators (#472)', () => {
 
   /** Seed a run that the engine still holds as queued. */
   const seedQueued = (task = 'ship it') => {
-    const record = store.createRun({ title: 't', workflow: 'w', task, steps: [] });
-    runInternals(manager).line.pendingJobs.set(record.id, { workflow: WORKFLOW, input: { task } });
-    return record;
+    const record = manager.startRun(WORKFLOW, { task, worktree: false });
+    store.updateRun(record.id, { title: 't' });
+    return store.getRun(record.id)!;
   };
-  const dequeue = (id: string) =>
-    runInternals(manager).line.pendingJobs.delete(id);
+  const dequeue = (id: string) => manager.cancel(id);
   const imagesDir = (id: string) => join(repoRoot, '.ai/cezar', 'runs', `${id}-images`);
 
-  beforeEach(() => {
+  beforeEach(async () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-stack-'));
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    writeFileSync(join(repoRoot, 'base.txt'), 'base');
+    await run('git', ['add', 'base.txt'], { cwd: repoRoot });
+    await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
+    capacity = 0;
+    semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: capacity }) });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot, { semaphore });
   });
 
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
+    runnerHook.runner = undefined;
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
@@ -1773,79 +1796,40 @@ describe('RunManager queued-stack mutators (#472)', () => {
   });
 
   it('hydrates edits and stacked messages into a queued restart continuation', async () => {
-    const r = store.createRun({
-      title: 'interrupted task',
-      workflow: 'quick-task',
-      task: 'original recovery goal',
-      steps: [],
-    });
-    setRunStatus(store, r.id, RUN_STATUS.queued);
-
-    const internals = manager as unknown as {
-      runContinuation(
-        runId: string,
-        stepId: string,
-        sessionId: string | undefined,
-        backend: 'claude',
-        prompt: string,
-        images: ContentBlock[],
-        persistedImages: ContentBlock[],
-        persistedAttachments: Array<{ name: string; url: string; path: string }>,
-      ): Promise<void>;
-    };
-    runInternals(manager).line.pendingContinuations.set(r.id, {
-      stepId: 'continue-1',
-      sessionId: 'session-interrupted',
-      backend: 'claude',
-      prompt: 'restart recovery',
-      images: [],
-      lineJoinedAt: Date.parse(r.createdAt),
-    });
-    runInternals(manager).line.queue.push(r.id);
+    const r = store.createRun({ title: 'interrupted task', workflow: 'quick-task', task: 'original recovery goal',
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
+    setRunStatus(store, r.id, RUN_STATUS.done, { worktree: false });
+    store.updateStep(r.id, 'task', { sessionId: 'session-interrupted', backend: 'claude' });
+    expect(manager.continueRun(r.id, { text: 'restart recovery' }, true)).toEqual({ ok: true });
 
     expect(manager.editTask(r.id, 'amended recovery goal')).toBe(true);
     expect(
       manager.enqueueMessage(r.id, [image(), { type: 'file', mediaType: 'text/markdown', data: Buffer.from('# queued brief').toString('base64') }, { type: 'text', text: 'also verify the queue' }]),
     ).not.toBeNull();
 
-    let delivered:
-      | {
-          prompt: string;
-          images: ContentBlock[];
-          persistedImages: ContentBlock[];
-          persistedAttachments: Array<{ name: string; url: string; path: string }>;
-        }
-      | undefined;
-    internals.runContinuation = async (
-      _runId,
-      _stepId,
-      _sessionId,
-      _backend,
-      prompt,
-      images,
-      persistedImages,
-      persistedAttachments,
-    ) => {
-      delivered = { prompt, images, persistedImages, persistedAttachments };
+    let delivered: AgentRunSpec | undefined;
+    runnerHook.runner = {
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
+      run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => undefined,
+      startSession: spec => {
+        delivered = spec;
+        return { result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
+          sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => undefined,
+          holdsHumanInput: () => false, end: () => undefined, interrupt: () => undefined, open: false };
+      },
     };
-    await runInternals(manager).line.pump();
-
-    expect(delivered?.prompt).toBe(
+    capacity = 1;
+    await semaphore.refresh();
+    await semaphore.release();
+    await waitForProduct(manager, store, () => !!delivered);
+    expect(delivered?.userPrompt).toContain(
       'restart recovery\n\nCurrent task and queued updates:\n\n' +
         'amended recovery goal\n\nalso verify the queue',
     );
-    expect(delivered?.images).toEqual([]);
-    expect(delivered?.persistedImages).toEqual([image()]);
-    expect(delivered?.persistedAttachments).toEqual([
-      {
-        name: 'pasted-1.png',
-        url: `/api/v1/runs/${r.id}/images/pasted-1.png`,
-        path: join(imagesDir(r.id), 'pasted-1.png'),
-      },
-      { name: 'pasted-2.md', url: `/api/v1/runs/${r.id}/images/pasted-2.md`, path: join(imagesDir(r.id), 'pasted-2.md') },
-    ]);
+    expect(delivered?.images).toEqual([image()]);
+    expect(delivered?.userPrompt).toContain(join(imagesDir(r.id), 'pasted-1.png'));
+    expect(delivered?.userPrompt).toContain(join(imagesDir(r.id), 'pasted-2.md'));
     expect(readdirSync(imagesDir(r.id)).sort()).toEqual(['pasted-1.png', 'pasted-2.md']);
-    expect(runInternals(manager).line.pendingContinuations.has(r.id)).toBe(false);
     expect(manager.editTask(r.id, 'too late')).toBe(false);
   });
 
@@ -2016,10 +2000,10 @@ describe('RunManager queued-stack mutators (#472)', () => {
 describe('QueuedInput.hydrateQueuedInput (#472)', () => {
   let repoRoot: string;
   let store: RunStore;
-  let manager: RunManager;
+  let queuedInput: QueuedInput;
 
   const hydrate = (id: string, task: string) =>
-    runInternals(manager).queuedInput.hydrateQueuedInput(id, { task });
+    queuedInput.hydrateQueuedInput(id, { task });
 
   const stack = (id: string, ...messages: Array<{ text: string; images?: string[] }>) =>
     store.updateRun(id, {
@@ -2034,7 +2018,9 @@ describe('QueuedInput.hydrateQueuedInput (#472)', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-hydrate-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot);
+    queuedInput = new QueuedInput({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+      work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => false,
+    }, unused('QueuedInput.host'));
   });
 
   afterEach(async () => {
@@ -2232,11 +2218,10 @@ describe('queued stacking reaches the backend (#472)', () => {
     const second = manager.startRun(WORKFLOW, { task: 'mock:cezar-done original prompt', worktree: false });
 
     // Wait for the scheduler's owned capacity check, not only startRun's initial queued record.
-    await waitForProduct(manager, store, () => ![...runInternals(manager).context.work.pending.values()].includes('pump') &&
-      !runInternals(manager).line.hasStarting(second.id));
+    await waitForProduct(manager, store, () => ![...fixtureWork(manager).pending.values()].includes('pump') &&
+      !manager.isActive(second.id));
 
     // The second run is holding in the queue — amend it there.
-    expect(runInternals(manager).line.hasQueued(second.id)).toBe(true);
     expect(store.getRun(second.id)?.status).toBe('queued');
     const typo = manager.enqueueMessage(second.id, [{ type: 'text', text: 'STACKEDONE with a typo' }]);
     expect(typo).not.toBeNull();
@@ -2276,36 +2261,59 @@ describe('recover() carries the queued stack exactly once (#472)', () => {
     steps: [{ id: 'task', name: 'Do the task', prompt: '{{task}}' }],
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-recover-'));
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    writeFileSync(join(repoRoot, 'base.txt'), 'base');
+    await run('git', ['add', 'base.txt'], { cwd: repoRoot });
+    await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
   });
 
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
+    runnerHook.runner = undefined;
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
   it('folds once across repeated recoveries', async () => {
     const r = store.createRun({ title: 't', workflow: '(planned)', task: 'the original task', steps: [] });
-    setRunStatus(store, r.id, RUN_STATUS.queued, { workflowDef: WORKFLOW, queuedMessages: [
+    setRunStatus(store, r.id, RUN_STATUS.queued, { workflowDef: WORKFLOW, worktree: false, queuedMessages: [
         { id: 'm1', text: 'the stacked bit', createdAt: '2026-07-21T10:00:00.000Z' },
       ] });
 
     const expected = 'the original task\n\nthe stacked bit';
-    const jobsOf = (m: RunManager) =>
-      runInternals(m).line.pendingJobs;
-
+    let capacity = 0;
+    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: capacity }) });
+    let delivered: AgentRunSpec | undefined;
+    runnerHook.runner = {
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
+      run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => undefined,
+      startSession: spec => {
+        delivered = spec;
+        return { result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
+          sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => undefined,
+          holdsHumanInput: () => false, end: () => undefined, interrupt: () => undefined, open: false };
+      },
+    };
+    let manager!: RunManager;
     // Two successive restarts, each re-adopting the same record.
     for (let restart = 0; restart < 2; restart += 1) {
-      const manager = createFixtureManager(store, repoRoot);
-      // Keep the run parked in the queue: recover() pushes and pumps, but with the
-      // job still pending we can read exactly what it rebuilt.
+      manager = createFixtureManager(store, repoRoot, { semaphore });
+      // Keep each recovered task queued until both restarts have rebuilt its input.
       await manager.recover();
-      expect(jobsOf(manager).get(r.id)?.input.task).toBe(expected);
+      expect(store.getRun(r.id)?.status).toBe(RUN_STATUS.queued);
       // The record is never rewritten — that is what stops the compounding.
       expect(store.getRun(r.id)?.task).toBe('the original task');
+      if (restart === 0) manager.dispose();
     }
+    capacity = 1;
+    await semaphore.refresh();
+    await semaphore.release();
+    await waitForProduct(manager, store, () => !!delivered);
+    expect(delivered?.userPrompt).toContain(expected);
+    expect(delivered?.userPrompt?.split('the stacked bit')).toHaveLength(2);
+    expect(store.getRun(r.id)?.task).toBe('the original task');
   });
 });
 
