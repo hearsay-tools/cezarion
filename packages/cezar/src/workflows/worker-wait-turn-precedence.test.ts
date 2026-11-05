@@ -21,9 +21,6 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           store.updateRun(p.id, { autonomous: true });
           wire = controlledWire({ firstResultGate: release });
           expect(manager.continueRun(p.id, { text: marker }).ok).toBe(true);
-          await until(() => {
-            return (manager as unknown as { active: Map<string, { liveSession: { sessionEverOpened?: boolean; };  }> }).active.get(p.id)?.liveSession.sessionEverOpened === true;
-          });
         }
         await until(wire!.initialReceived);
         const w = await worker(p.id); const wait = register(p.id, [w.id]);

@@ -1,3 +1,4 @@
+import { agentEnvForStep } from './run/launch-context.ts';
 import { fireCapturedTimer } from './waits.testkit.ts';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +8,11 @@ import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { manager, parent, restart, root, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
 import { handlers, entryOf, settledOf } from './worker-waits-shared.testkit.ts';
+
+vi.mock('./run/launch-context.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('./run/launch-context.ts')>();
+  return { ...actual, agentEnvForStep: vi.fn(actual.agentEnvForStep) };
+});
 
 /**
  * A human message beside an owed wait of any kind (hearsay-tools/cezarion#1235): withdrawing
@@ -28,10 +34,9 @@ describe('human messages beside an owed timer wait', { timeout: 45_000 }, () => 
     if (!answer.ok) throw Error('refused');
     const timer = entryOf(p.id, answer.wait_id)!;
     if (timer.kind === 'human') throw Error('unexpected human wait');
+    const before = store.readEvents(blocker.id).at(-1)?.seq ?? 0;
     await restart();
-    await until(() => {
-      return (manager as unknown as { active: Map<string, { liveSession: { sessionEverOpened?: boolean; };  }> }).active.get(blocker.id)?.liveSession.sessionEverOpened === true;
-    });
+    await until(() => store.readEvents(blocker.id).some(event => event.seq > before && event.type === 'turn.started'));
     fireCapturedTimer(timer.id);
     await until(() => store.getRun(p.id)?.status === 'queued');
     expect(entryOf(p.id, timer.id)?.phase).toBe('resolved');
@@ -56,14 +61,13 @@ describe('human messages beside an owed timer wait', { timeout: 45_000 }, () => 
 
   it('a startup human message beside an owed timer wait survives a crash before its delivery', async () => {
     const { p, blocker, timer } = await queuedTimerWake();
-    const engine = manager as unknown as { agentEnvForStep(id: string, ...args: unknown[]): Promise<unknown> };
-    const real = engine.agentEnvForStep.bind(manager);
+    const real = await vi.importActual<typeof import('./run/launch-context.ts')>('./run/launch-context.ts');
     let release!: () => void; let entered = false;
     const gate = new Promise<void>(resolve => { release = resolve; });
-    engine.agentEnvForStep = async (id, ...args) => {
-      if (id === p.id) { entered = true; await gate; }
-      return real(id, ...args);
-    };
+    vi.mocked(agentEnvForStep).mockImplementation(async (...args) => {
+      if (args[2] === p.id) { entered = true; await gate; }
+      return real.agentEnvForStep(...args);
+    });
     manager.cancel(blocker.id); await until(() => entered);
     let checkpoint: unknown[];
     try {

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import type { SubagentWaitEntry, TimerWaitEntry, Wait } from '@open-mercato/cezar-contract/waits';
 import { RUN_STATUS, SUBAGENT_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -12,7 +12,7 @@ import { MAX_AUTO_CONTINUES } from './run.ts';
 import { stateOf } from './run-states.ts';
 import { NO_WAIT_NUDGE_NOTE } from './turn-end.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { manager, restart, root, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, restart, root, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 
 /**
  * Cezar's wait on native subagents (hearsay-tools/cezarion#2431) on each runner's own native mock
@@ -62,14 +62,18 @@ const nudges = (id: string) => store.readEvents(id).filter(event => event.type =
 /** Wakes the waits spent: the count less the no-wait nudges a mock's markerless reply earns. */
 const wakes = (id: string) => (store.getRun(id)?.automaticWakes ?? 0) - nudges(id);
 const wakeInputs = (id: string, waitId: string) => (store.getRun(id)?.agentInputs ?? []).filter(input => input.id === waitId);
-const isParked = (id: string) => (manager as unknown as { modules: { line: { isParked(id: string): boolean } } }).modules.line.isParked(id);
 
 /** A run parked on the subagent wait; `release()` lets the mock end its children. */
 async function parkedOnSubagents(runner: RunnerId, tokens = '') {
   nativeWire(runner);
+  // With no monitoring exemptions, a pool member holds exactly one slot; an ordinary park holds none.
+  vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(0);
   const release = join(root, `release-${randomUUID()}`);
   const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: `${SCENARIO[runner]!} ${tokens} parity-release=${release}` });
-  await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && subagentWait(run.id) !== undefined && isParked(run.id));
+  await until(() => store.readEvents(run.id).some(event => event.type === 'turn-end'));
+  expect(store.getRun(run.id)?.status).toBe(RUN_STATUS.waiting);
+  expect(subagentWait(run.id)).toBeDefined();
+  expect(semaphore.busy()).toBe(1);
   return { id: run.id, wait: subagentWait(run.id)!, release: () => writeFileSync(release, 'go') };
 }
 
