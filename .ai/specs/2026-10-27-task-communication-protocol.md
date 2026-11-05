@@ -702,7 +702,7 @@ their existing meanings. An unchanged receipt can still report queued, delivered
 consumed or not-delivered. Retry projection and delivery repair remain active.
 
 A reply to the sender's own request is refused with `incompatible_state` and a
-`message follow-up` command naming the recipient and request. The error also
+`cez message follow-up` command naming the recipient and request. The error also
 shows how to send a new request. Scope and ownership checks still run first.
 The refusal accepts no message and changes no request outcome.
 
@@ -722,3 +722,42 @@ Existing equality tests pinned identical stored receipts across retries. They no
 compare every receipt field while requiring `unchanged` for the second call.
 The receipt guarantee remains; only the per-call effect differs. No wait, store,
 workflow or CI-wait behavior changes in this portion.
+
+
+### Receipt recovery and transport uncertainty
+
+After a send commits, a projection, wait reconciliation or delivery error must
+not discard its receipt. Return `applied` (or `refused` if no input was queued)
+for the fresh call and `unchanged` for an exact retry. Keep the existing repair
+order and delivery conditions. A failed repair stops that repair pass; an exact
+retry can attempt it again. A receipt still reports the stored delivery and
+request outcome, never presumed provider delivery.
+
+The CLI reports `unavailable_transport`, `effect: unknown`, the `messageId` and
+same-command retry guidance if a dispatched send, progress, follow-up or reply
+has no valid response. It exits 1 and sends no automatic retry. Missing session
+settings and invalid arguments fail before dispatch and do not claim uncertain
+acceptance. Valid service rejections retain their existing error fields.
+Other CLI operations retain their existing transport errors.
+
+| Call boundary | Call result | Delivery and settlement |
+| --- | --- | --- |
+| Fresh send commits, projection/reconcile/delivery fails | Stored receipt with `applied`, or `refused` for recorded refusal | Existing input and outcome preserved; no extra wake attempt |
+| Exact retry repair fails | Stored receipt with `unchanged` | No new input or obligation; original delivery condition retained |
+| Failure before commit | Existing error | No accepted message or input |
+| Dispatched message call loses or cannot validate response | CLI error with `unknown` and original message ID | Acceptance cannot be inferred; retry only with the same payload and ID |
+| Invalid CLI input or unavailable session before dispatch | Existing error without `unknown` | No message dispatched |
+| Valid service rejection or non-message transport failure | Existing error | Existing policy unchanged |
+
+
+Regression proof for receipt recovery and CLI uncertainty uses
+`proof_base=686b758047ccaf476c4650a8a174fc38d582313f`. In a detached scratch
+worktree, run `npm test -- --passWithNoTests=false
+packages/cezar/src/delegation/conversation-effects.test.ts
+packages/cezar/src/delegation/cli-message-effects.test.ts` (one command).
+With the baseline source and the new tests: 22 failed, 7 passed. Failures show
+lost postcommit receipts, missing executable guidance and missing CLI uncertainty.
+With the same tests and the three fixed source files: 29 passed. Guards cover
+precommit failure, predispatch rejection, valid service rejection and unrelated
+transport errors. Additional cases pin a delivery acknowledgement written before
+a callback throws and a committed reply outcome during failed repair.

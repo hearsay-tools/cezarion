@@ -306,9 +306,13 @@ export class DelegationService {
     const input = sendInput(pair, root, message, requestHash, now);
     const next = { messages: [...state.messages, message], outcomes };
     this.commitSend(pair, root, next, input, resume, enqueue);
-    projectConversationEvents(project.store, project.store.getRun(root.id)!);
-    project.manager.reconcileWorkerWaits();
-    if (enqueue) project.manager.deliverConversationInput(recipient.id);
+    try {
+      projectConversationEvents(project.store, project.store.getRun(root.id)!);
+      project.manager.reconcileWorkerWaits();
+      if (enqueue) project.manager.deliverConversationInput(recipient.id);
+    } catch {
+      // The ledger and input already committed. Preserve their receipt; an exact retry repairs delivery.
+    }
     return { ...this.conversationReceipt(project, root.id, message), effect: enqueue ? conversationSendEffectSchema.enum.applied : conversationSendEffectSchema.enum.refused };
   }
   private assertSendScope(pair: ConversationPair, root: RunRecord, request: ConversationSendRequest): void {
@@ -322,9 +326,13 @@ export class DelegationService {
   private retrySend(pair: ConversationPair, root: RunRecord, existing: ConversationMessage, requestHash: string): ConversationSendResult {
     const { project, recipient } = pair;
     if (existing.requestHash !== requestHash) throw new DelegationPolicyError('invalid_input', 'Message ID payload conflict');
-    projectConversationEvents(project.store, project.store.getRun(root.id)!);
-    project.manager.reconcileWorkerWaits();
-    if (recipient.agentInputs?.some(input => input.id === existing.id && !input.deliveredAt)) project.manager.deliverConversationInput(recipient.id);
+    try {
+      projectConversationEvents(project.store, project.store.getRun(root.id)!);
+      project.manager.reconcileWorkerWaits();
+      if (recipient.agentInputs?.some(input => input.id === existing.id && !input.deliveredAt)) project.manager.deliverConversationInput(recipient.id);
+    } catch {
+      // Repair cannot revoke the stored receipt or turn an exact retry into a new send.
+    }
     return { ...this.conversationReceipt(project, root.id, existing), effect: conversationSendEffectSchema.enum.unchanged };
   }
   private commitSend(pair: ConversationPair, root: RunRecord, next: ConversationState, input: AgentInput, resume: boolean, enqueue: boolean): void {
