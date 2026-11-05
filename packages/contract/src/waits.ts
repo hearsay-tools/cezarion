@@ -337,12 +337,12 @@ export const waitRegistrationReceiptSchema = z.object({
 }).strict();
 export type WaitRegistrationReceipt = z.infer<typeof waitRegistrationReceiptSchema>;
 const registrationAnswerFields = {
-  effect: z.enum(['applied', 'unchanged', 'refused', 'unknown']).optional(),
   operation_id: z.uuid().optional(),
 };
 export const cezarWaitAnswerSchema = z.discriminatedUnion('ok', [
   z.object({
     ok: z.literal(true), ...registrationAnswerFields,
+    effect: z.enum(['applied', 'unchanged']).optional(),
     deduplicated: z.boolean().optional(), replayed: z.boolean().optional(), wait_phase: z.enum([...waitPhaseSchema.options, 'unavailable']).optional(),
     wait_id: z.uuid(),
     /** The kind the call asked for: a `request` wait is stored as a `worker` entry. */
@@ -352,6 +352,7 @@ export const cezarWaitAnswerSchema = z.discriminatedUnion('ok', [
   }).strict(),
   z.object({
     ok: z.literal(false), ...registrationAnswerFields,
+    effect: z.enum(['refused', 'unknown']).optional(),
     retained_wait: openWaitSchema.optional(),
     code: waitErrorCodeSchema,
     message,

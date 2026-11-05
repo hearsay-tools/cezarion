@@ -302,6 +302,14 @@ describe('answers', () => {
     expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind: WAIT_KIND.pr, deadline: openWait.deadline }).success).toBe(false);
   });
 
+  it.each([undefined, 'applied', 'unchanged', 'refused', 'unknown'] as const)('ties wait answer effect %s to success or failure', effect => {
+    const fields = effect === undefined ? {} : { effect };
+    const success = { ok: true, wait_id: CI_ID, kind: WAIT_KIND.pr, deadline: openWait.deadline, open_waits: [openWait], ...fields };
+    const failure = { ok: false, code: 'timers_disabled', message: 'no timers', ...fields };
+    expect(cezarWaitAnswerSchema.safeParse(success).success).toBe(effect === undefined || effect === 'applied' || effect === 'unchanged');
+    expect(cezarWaitAnswerSchema.safeParse(failure).success).toBe(effect === undefined || effect === 'refused' || effect === 'unknown');
+  });
+
   // hearsay-tools/cezarion#1234: a CI or timer wait always carries its deadline; a human wait never does.
   it('ties the deadline to the kind, in the answer and in every open wait', () => {
     const human = { wait_id: HUMAN_ID, kind: WAIT_KIND.human, summary: 'human: Which module?' };

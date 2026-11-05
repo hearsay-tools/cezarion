@@ -1567,6 +1567,10 @@ Wait registration reports `effect`: `applied`, `unchanged`, `refused` or
 fields stay valid. Legacy answers without effect information do not establish an
 effect. No new run state, wake budget, deadline limit or automatic resume is added.
 
+An `ok: true` answer permits only `applied` or `unchanged` when `effect` is
+present. An `ok: false` answer permits only `refused` or `unknown`. Both branches
+still accept legacy answers without `effect`.
+
 The tool adapter generates an operation UUID before dispatch, unless the caller
 supplies `operation_id`. The run store commits the operation fingerprint and wait
 snapshot atomically with registration. Reusing that operation with different

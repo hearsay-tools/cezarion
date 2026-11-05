@@ -249,7 +249,6 @@ export class DelegationService {
    *  progress message in the sender's family ledger, a follow-up or reply with the request it names. */
   private ledgerFor(pair: ConversationPair, request: ConversationSendRequest): RunRecord {
     if (pair.relationship === 'family') return pair.root;
-    if (pair.sender.delegation?.role === 'root') assertReplyDirection(pair.sender.delegation.conversation ?? { messages: [], outcomes: [] }, request, pair.sender, pair.recipient);
     const ledger = request.kind === 'reply' ? pair.recipient : pair.sender;
     // A peer that never opened a session has no ledger, so it holds no request to reply to.
     if (ledger.delegation?.role !== 'root') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
@@ -284,6 +283,7 @@ export class DelegationService {
     const { project, sender, recipient } = pair;
     const root = this.ledgerFor(pair, request);
     this.assertSendScope(pair, root, request);
+    if (pair.relationship === 'peer' && sender.delegation?.role === 'root') assertReplyDirection(sender.delegation.conversation ?? { messages: [], outcomes: [] }, request, sender, recipient);
     const requestHash = createHash('sha256').update(JSON.stringify({ senderRunId: sender.id, ...request })).digest('hex');
     const state = this.currentConversation(project, root);
     const existing = state.messages.find(message => message.id === request.id);

@@ -706,6 +706,23 @@ A reply to the sender's own request is refused with `incompatible_state` and a
 shows how to send a new request. Scope and ownership checks still run first.
 The refusal accepts no message and changes no request outcome.
 
+Scope checks precede that guidance both before queueing and at the ledger queue
+head. Ledger selection does not inspect reply direction. The locked send checks
+the current pair, selected ledger and send scope before checking direction.
+
+| Reply case | Send behavior | Settlement behavior |
+| --- | --- | --- |
+| Own outgoing request, peer has no root ledger | `denied_scope` | No change |
+| Own outgoing request, authorized peer and send scope | `incompatible_state` with follow-up and new-request commands | No change |
+| Reply with resume flag | Cannot reach send scope: the request schema refuses this combination | No change |
+| Peer loses ledger or starts history deletion before queue head | Re-read scope and refuse | No change |
+
+The lifecycle cases below still apply to queued, running, waiting,
+Finish-pending, stopping, review, done, failed, cancelled, deleted,
+history-deletion-pending, restarted, foreign-owned and unreadable recipients.
+This correction changes error precedence only; it adds no relationship or
+settlement path.
+
 | Call or recipient case | Send result at shipped defaults | Settlement behavior |
 | --- | --- | --- |
 | Fresh send to queued, running or waiting recipient | `applied`; existing delivery receipt | Existing request settlement |
