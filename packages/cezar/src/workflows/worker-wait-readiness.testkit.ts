@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeEach, expect, onTestFinished, vi } from 'vitest';
-import * as runnerFactory from '../core/runner-factory.ts';
+import { beforeEach, expect, onTestFinished } from 'vitest';
+import { captureSessions } from './runner-session-capture.testkit.ts';
 import { observationClock } from '../core/observation-clock.testkit.ts';
 import { IDLE_TIMEOUT_MS } from './run/constants.ts';
 import type { RunManager } from './run.ts';
@@ -17,30 +17,19 @@ import { gate, thenSay, toolCall } from './waits-parity.testkit.ts';
 
 import { manager, root, store, until } from './worker-wait.testkit.ts';
 
-const sessions = new Map<string, AgentSession>();
+let sessions: ReturnType<typeof captureSessions>;
 const answers = new Map<string, string>();
 
 // Own the real runner boundary. Never inspect manager state.
 beforeEach(() => {
-  sessions.clear(); answers.clear();
+  answers.clear();
   const responses = mkdtempSync(join(tmpdir(), 'cez-readiness-tools-'));
   onTestFinished(() => rmSync(responses, { recursive: true, force: true }));
-  const create = runnerFactory.createRunner;
-  const capture = vi.spyOn(runnerFactory, 'createRunner').mockImplementation((...args) => {
-    const runner = create(...args);
-    const start = runner.startSession.bind(runner);
-    runner.startSession = (spec, ...rest) => {
-      const id = spec.env?.CEZ_TASK_ID;
-      if (!id) throw new Error('runner launched without task identity');
-      const answer = join(responses, `${id}.json`);
-      const session = start({ ...spec, env: { ...spec.env, CEZ_MOCK_CI_RESULT: answer } }, ...rest);
-      answers.set(id, answer);
-      sessions.set(id, session);
-      return session;
-    };
-    return runner;
-  });
-  onTestFinished(() => capture.mockRestore());
+  sessions = captureSessions({ env: id => {
+    const answer = join(responses, `${id}.json`);
+    answers.set(id, answer);
+    return { CEZ_MOCK_CI_RESULT: answer };
+  } });
 });
 
 /** Freeze only TurnSettler's idle timers; child-process drain timers keep real time. */
@@ -111,8 +100,4 @@ export async function blockedDone<T>(id: string, block: () => Promise<T>, send: 
   writeFileSync(opened, '');
   return blocker;
 }
-export const sessionOf = (id: string): AgentSession => {
-  const session = sessions.get(id);
-  if (!session) throw new Error(`No runner session observed for ${id}`);
-  return session;
-};
+export const sessionOf = (id: string): AgentSession => sessions(id);
