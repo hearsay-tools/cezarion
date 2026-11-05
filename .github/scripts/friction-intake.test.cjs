@@ -163,6 +163,31 @@ test('the daily digest is a non-autonomous weekday schedule that uses only sched
   }
 });
 
+test('the daily digest recommends at most the configured top groups in one published HTML report', () => {
+  const { prompt } = buildDigestAutomation().task;
+  assert.equal(INBOX.recommend, 5);
+  for (const text of [
+    'time lost × recurrence',
+    `at most ${INBOX.recommend}`,
+    'cez artifact publish',
+    'HTML report',
+    'carry forward without a decision',
+    'without asking',
+    'stands alone',
+    'issues that a day without findings closed with no digest comment',
+    'newest finalized digest comment',
+    'That section marks the digest finalized',
+    'the account gh api user names wrote',
+    'Ignore a comment from any other author',
+    'from before the "Decisions" section existed counts as finalized',
+    'lists a group by letter only',
+    'closed ones included, outside the review set',
+    'the newest issue first',
+    'need no approval',
+  ]) assert.ok(prompt.includes(text), text);
+  assert.ok(!/Offer a comment/.test(prompt), 'comments with new evidence are posted, not offered');
+});
+
 test('inbox labels stay out of the routing labels the intake applicator manages', () => {
   const managed = LABELS.map(label => label.name);
   for (const label of [INBOX.label, INBOX.reviewedLabel]) assert.ok(!managed.includes(label), label);

@@ -1,9 +1,8 @@
-import { runInternals } from './run-internals.testkit.ts';
 import { observationClock } from '../core/observation-clock.testkit.ts';
 import * as runners from '../core/runner-factory.ts';
 import type { AgentSession, SessionOptions } from '../core/agent-runner.ts';
 import { randomUUID } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
@@ -438,21 +437,45 @@ describe('the subagent wait deadline (hearsay-tools/cezarion#2431)', () => {
     expect(idleClock.pending).toBe(1);
   });
 
-  const internals = () => runInternals(manager);
-
-  it('a lost session with no subagent wait retries a failed transcript end', async () => {
-    const id = await fullListParent();
+  it('a lost continuation session with no subagent wait retries a failed transcript end', async () => {
+    const first = await heldParent();
+    first.release();
+    // bound: Continue requires the first turn to park and its runner session to close.
+    await until(() => store.getRun(first.run.id)?.status === RUN_STATUS.waiting);
+    sessions.get(first.run.id)!.end();
+    // bound: session teardown removes the first execution before Continue can start.
+    await until(() => !manager.isActive(first.run.id));
+    rmSync(join(root, 'first-input-received'));
+    const gate = join(root, `continue-${randomUUID()}`);
+    const wire = controlledWire({ firstResultGate: gate, replay: true });
+    const id = first.run.id;
+    expect(manager.continueRun(id, { text: 'continue with background child' })).toMatchObject({ ok: true });
+    // bound: the controlled continuation reports receiving its opening input before UI events.
+    await until(wire.initialReceived);
+    startChild(id, 'toolu_bg_01');
+    for (let index = 0; index < WAIT_LIMIT; index += 1) store.commitWait(id, makePeerWait({ turnId: 'full' }));
+    const turns = turnEnds(id);
+    writeFileSync(gate, 'release');
+    // bound: turn end is the public signal that the full list prevented a subagent wait.
+    await until(() => turnEnds(id) > turns && store.getRun(id)?.status === RUN_STATUS.waiting);
+    expect(subagentWait(id)).toBeUndefined();
+    const retry = observationClock(() => /\bat SubagentWaits\.armRetry \(/.test(new Error().stack ?? ''));
     const real = store.appendEvent.bind(store);
     let refuse = true;
     const append = vi.spyOn(store, 'appendEvent').mockImplementation((runId, event) => {
       if (refuse && event.type === 'item.completed') { refuse = false; throw Error('injected: disk full'); }
       return real(runId, event);
     });
-    internals().subagentWaits.afterSessionGone(id, internals().active.get(id));
+    sessions.get(id)!.end();
+    // bound: dropActive runs the transcript-end attempt before removing its execution.
+    await until(() => !manager.isActive(id));
+    expect(refuse).toBe(false);
     expect(backgroundEnds(id)).toEqual([]);
-    await until(() => backgroundEnds(id).length > 0);
-    append.mockRestore();
+    expect(retry.pending).toBe(1);
+    retry.fire(0);
     expect(backgroundEnds(id).map(([child, status]) => [child, status])).toEqual([['toolu_bg_01', 'declined']]);
+    expect(retry.pending).toBe(0);
+    append.mockRestore();
   });
 
   it('the deadline wakes the parent and spends one wake', async () => {
