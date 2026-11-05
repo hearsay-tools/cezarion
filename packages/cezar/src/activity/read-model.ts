@@ -6,7 +6,7 @@ import { workerRevision } from '../delegation/results.ts';
 import type { RunRecord, RunStore } from '../runs/store.ts';
 import { readActivityRequests, type ActivityRequestStore } from './requests.ts';
 import { firstLine } from './text.ts';
-import { activityWait, type CiProgressSource } from './wait.ts';
+import { activityWait, type CiProgressSource, type ProjectCiProgress } from './wait.ts';
 
 export type { CiProgressSource } from './wait.ts';
 
@@ -104,7 +104,8 @@ function loggingUnreadable(store: ActivityStore, log: (runId: string) => void): 
 function loadedProject(store: ActivityStore, isActive: (runId: string) => boolean, deps: ActivityDeps,
   options: { now: number; carryOver?: Iterable<string> }, empty: Omit<ActivityProject, 'loaded'>): { project: ActivityProject; openLedgers: Set<string> } {
   const { active, inReview } = activeRoots(store);
-  const context: RunContext = { now: options.now, tools: deps.tools ?? noTools, ci: deps.ci ?? noProgress };
+  const ci = deps.ci ?? noProgress;
+  const context: RunContext = { now: options.now, tools: deps.tools ?? noTools, ci: { read: (waitId) => ci.read(waitId, empty.projectId) } };
   const roots: RunRecord[] = [];
   for (const id of active) {
     const root = store.getRun(id);
@@ -134,7 +135,7 @@ function activeRoots(store: ActivityStore): { active: Set<string>; inReview: num
 
 const byCreation = (a: RunRecord, b: RunRecord) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
 
-type RunContext = { now: number; tools: ToolActivitySource; ci: CiProgressSource };
+type RunContext = { now: number; tools: ToolActivitySource; ci: ProjectCiProgress };
 
 function activityRoot(store: ActivityStore, root: RunRecord, context: RunContext): ActivityRun {
   const ledger = root.delegation?.role === 'root' ? root.delegation.conversation : undefined;

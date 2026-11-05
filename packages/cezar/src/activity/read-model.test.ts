@@ -211,8 +211,11 @@ describe('tool activity and check progress providers', () => {
     const root = makeRoot({ status: RUN_STATUS.waiting, waits: [wait] });
     const progress = { checks: [{ name: 'test', bucket: 'pending' as const }], counts: { pass: 3, fail: 0, pending: 1, skipping: 0, cancel: 0 } };
     expect(card([root], root.id).wait).toEqual({ kind: WAIT_KIND.pr, since: wait.registeredAt, deadline: wait.deadline, detail: { number: 12, target: 'checks' } });
-    expect(card([root], root.id, { deps: { ci: { read: (id) => (id === wait.id ? progress : undefined) } } }).wait)
+    const read = vi.fn((id: string) => (id === wait.id ? progress : undefined));
+    expect(card([root], root.id, { deps: { ci: { read } } }).wait)
       .toEqual({ kind: WAIT_KIND.pr, since: wait.registeredAt, deadline: wait.deadline, detail: { number: 12, target: 'checks', ...progress } });
+    // The registry learns the wait's project from the snapshot that reads it.
+    expect(read).toHaveBeenCalledWith(wait.id, 'shop');
   });
 });
 

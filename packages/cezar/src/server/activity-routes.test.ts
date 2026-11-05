@@ -3,9 +3,12 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { activitySnapshotSchema, activityToolSchema } from '@open-mercato/cezar-contract/activity';
+import { makePrWait, RUN_STATUS, WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { ActivityDemand } from '../activity/demand.ts';
 import { ToolActivityTracker } from '../activity/tool-activity.ts';
+import { CiProgressRegistry } from '../ci-wait/progress.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
@@ -45,7 +48,8 @@ describe('workspace activity API', () => {
     }
   });
 
-  const manager = { finishBlockedReason: () => 'no open session', isActive: () => false } as unknown as RunManager;
+  const ciProgress = new CiProgressRegistry();
+  const manager = { finishBlockedReason: () => 'no open session', isActive: () => false, ciProgress } as unknown as RunManager;
   const get = async (path: string, contexts?: ProjectContexts) =>
     apiRequest(createApp({ repoRoot, store, manager, version: '0.0.0-test', ...(contexts ? { contexts } : {}) }), path);
 
@@ -169,5 +173,22 @@ describe('workspace activity API', () => {
     expect(res.status).toBe(200);
     expect(demand.has('shop')).toBe(true);
     expect(demand.has('docs')).toBe(false);
+  });
+
+  it('reads the check progress the boot manager’s CI watchers publish, and plugs in the demand it marks', async () => {
+    const boot = await registerProject(repoRoot);
+    const wait = makePrWait();
+    const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
+    setRunStatus(store, run.id, RUN_STATUS.waiting, { waits: [wait] });
+    ciProgress.publish(wait.id, [{ name: 'build', state: 'PENDING', link: '', bucket: 'pending' }]);
+    try {
+      expect(ciProgress.wanted(wait.id)).toBe(false);
+      const res = await get(`/api/v1/workspace/activity?project=${boot.id}`);
+      const body = activitySnapshotSchema.parse(await res.json());
+      expect(body.projects[0]!.tasks[0]!.wait).toMatchObject({ kind: WAIT_KIND.pr, detail: { checks: [{ name: 'build', bucket: 'pending' }], counts: { pending: 1 } } });
+      expect(ciProgress.wanted(wait.id)).toBe(true);
+    } finally {
+      ciProgress.remove(wait.id);
+    }
   });
 });

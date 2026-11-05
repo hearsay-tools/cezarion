@@ -5,6 +5,7 @@ import { activityQuerySchema } from '@open-mercato/cezar-contract/activity';
 import { ActivityDemand } from '../activity/demand.ts';
 import { buildActivitySnapshot, unreadableLogger, type ActivityDeps, type ActivityProjectSource } from '../activity/read-model.ts';
 import type { ToolActivityTracker } from '../activity/tool-activity.ts';
+import type { CiProgressRegistry } from '../ci-wait/progress.ts';
 import type { ProjectContext } from './project-context.ts';
 import { queryZodValidator } from './validators.ts';
 import type { WorkspaceProjects } from './workspace-projects.ts';
@@ -24,7 +25,8 @@ export interface ActivityRouteDeps extends ActivityServerDeps {
   workspaceProjects: Pick<WorkspaceProjects, 'listVisibleProjects' | 'resolveBootProject' | 'resolveLiveProject' | 'projectFailure'>;
   /** The projects activity readers watch; the CI progress registry reads it. */
   demand?: ActivityDemand;
-  /** The trackers (tool activity, CI progress) and the clock. */
+  /** The trackers (tool activity, CI progress) and the clock. Default CI progress: the boot
+   *  manager's registry, which the workspace's CI watchers publish to. */
   activity?: Omit<ActivityDeps, 'onUnreadable'>;
 }
 
@@ -37,7 +39,10 @@ export interface ActivityRouteDeps extends ActivityServerDeps {
  */
 export function createActivityRoutes({ bootContext, contexts, workspaceProjects, demand = new ActivityDemand(), activity = {}, toolActivity }: ActivityRouteDeps) {
   const tools = activity.tools ?? toolActivity;
-  const deps: ActivityDeps = { ...activity, ...(tools ? { tools } : {}), onUnreadable: unreadableLogger() };
+  // A manager test double may carry no registry.
+  const progress: CiProgressRegistry | undefined = bootContext.manager.ciProgress;
+  progress?.useDemand(demand);
+  const deps: ActivityDeps = { ...(progress ? { ci: progress } : {}), ...activity, ...(tools ? { tools } : {}), onUnreadable: unreadableLogger() };
   /** A store that cannot open never reads as empty (docs/areas/runs-store.md): it carries the failure. */
   const loadedSource = (project: LoadedProject, name: string): ActivityProjectSource => ({
     projectId: project.id,

@@ -1,17 +1,21 @@
 import { CiToolController } from './controller.ts';
+import { CiProgressRegistry } from './progress.ts';
 import { CiWatcherSupervisor } from './supervisor.ts';
 
 /** The workspace semaphore is shared by cockpit projects; headless callers have one too. */
 const workspaces = new WeakMap<object, {
   refs: number;
   supervisor: CiWatcherSupervisor;
+  /** The check progress the supervisor publishes, for the activity view. */
+  progress: CiProgressRegistry;
   controller?: Promise<CiToolController> | undefined;
 }>();
 
 export function acquireCiResources(workspace: object) {
   let resource = workspaces.get(workspace);
   if (!resource) {
-    resource = { refs: 0, supervisor: new CiWatcherSupervisor() };
+    const progress = new CiProgressRegistry();
+    resource = { refs: 0, supervisor: new CiWatcherSupervisor({ progress }), progress };
     workspaces.set(workspace, resource);
   }
   const shared = resource;
@@ -19,6 +23,7 @@ export function acquireCiResources(workspace: object) {
   let released = false;
   return {
     supervisor: shared.supervisor,
+    progress: shared.progress,
     // hearsay-tools/cezarion#2397: only a started controller is kept. A failed start is forgotten,
     // so the next launch after a repair starts it again.
     controller: () => {

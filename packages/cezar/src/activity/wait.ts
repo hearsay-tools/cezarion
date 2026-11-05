@@ -5,8 +5,15 @@ import { asksQuestion, computeWaitingOn } from '@open-mercato/cezar-contract/wai
 import type { RunRecord } from '../runs/store.ts';
 import { clampText } from './text.ts';
 
-/** The check progress of an open PR wait, by wait id. The CI progress registry implements it. */
+/** The check progress of an open PR wait, by wait id. The CI progress registry implements it.
+ *  `projectId` names the project whose snapshot reads the wait: the registry gates its extra
+ *  checks reads on that project's demand. */
 export interface CiProgressSource {
+  read(waitId: string, projectId: string): ActivityPrProgress | undefined;
+}
+
+/** The progress of one project's waits: a `CiProgressSource` bound to the project it reads. */
+export interface ProjectCiProgress {
   read(waitId: string): ActivityPrProgress | undefined;
 }
 
@@ -22,7 +29,7 @@ const earliest = (values: readonly (string | undefined)[]): string | undefined =
  * names none, so those kinds aggregate every open entry here too. `ledger` holds the family's
  * requests: the root's own, or a worker's parent's.
  */
-export function activityWait(run: RunRecord, ledger: ConversationState | undefined, ci: CiProgressSource): ActivityWait | undefined {
+export function activityWait(run: RunRecord, ledger: ConversationState | undefined, ci: ProjectCiProgress): ActivityWait | undefined {
   if (!isLiveStatus(run.status)) return undefined;
   const waitingOn = computeWaitingOn(run);
   switch (waitingOn?.kind) {

@@ -2,6 +2,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { ciWaitSchema, ciWaitResultSchema, type CiPrIdentity, type CiWait, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { CiGithubError, CiSemaphore, GithubCiClient, type GithubCheck, type GithubPrMergeState, type GithubPrMetadata } from './github.ts';
 import type { GithubMergeRequest } from './merge-progress.ts';
+import { CiProgressRegistry } from './progress.ts';
+import { stripTerminal } from './text.ts';
 
 export const CI_WATCHER_LIMIT = 4;
 /** PR-head probes, absent-check rechecks, and stale-watch rechecks. Not the discovery deadline. */
@@ -11,7 +13,7 @@ export const CI_RETRY_MS = [1_000, 5_000, 15_000] as const;
 export const CI_RESULT_LIMIT = 32 * 1024;
 
 function clean(value: string, max: number): string {
-  return value.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/[\x00-\x1f\x7f-\x9f]/g, '').slice(0, max);
+  return stripTerminal(value).slice(0, max);
 }
 function safeLink(value: string): string {
   if (value.length > 2048 || /[\x00-\x20\x7f]/.test(value)) return '';
@@ -55,7 +57,12 @@ export class CiWatcherSupervisor {
   private readonly slots = new CiSemaphore(CI_WATCHER_LIMIT);
   private readonly github: GithubCiClient;
   private readonly current = new Map<string, Promise<CiWaitResult>>();
-  constructor(options: { github?: GithubCiClient } = {}) { this.github = options.github ?? new GithubCiClient(); }
+  /** The check progress of each watched wait, for the activity view. It never decides an outcome. */
+  private readonly progress: CiProgressRegistry;
+  constructor(options: { github?: GithubCiClient; progress?: CiProgressRegistry } = {}) {
+    this.github = options.github ?? new GithubCiClient();
+    this.progress = options.progress ?? new CiProgressRegistry();
+  }
 
   async resolve(pr: string, signal?: AbortSignal): Promise<CiPrIdentity> {
     const bounded = AbortSignal.any([this.lifetime.signal, ...(signal ? [signal] : []), AbortSignal.timeout(10_000)]);
@@ -65,7 +72,7 @@ export class CiWatcherSupervisor {
   watch(wait: CiWait, signal: AbortSignal): Promise<CiWaitResult> {
     const existing = this.current.get(wait.id);
     if (existing) return existing;
-    const task = this.run(wait, signal).finally(() => { this.current.delete(wait.id); });
+    const task = this.run(wait, signal).finally(() => { this.current.delete(wait.id); this.progress.remove(wait.id); });
     this.current.set(wait.id, task);
     return task;
   }
@@ -118,6 +125,21 @@ export class CiWatcherSupervisor {
       }
     }
     return stopped();
+  }
+
+  /**
+   * The `--watch` phase's extra checks read (spec 2026-11-05-live-activity-view), only while someone
+   * watches the wait's project. It updates the progress and nothing else: its rows never reach
+   * `observe`, and a failed read keeps the last progress and is not an error.
+   */
+  private async readProgress(wait: CiWait, signal: AbortSignal): Promise<void> {
+    if (!this.progress.wanted(wait.id)) return;
+    try {
+      const rows = await this.github.checks(wait, signal);
+      if (!signal.aborted) this.progress.publish(wait.id, rows);
+    } catch {
+      // The wait continues on the head probe and the --watch process.
+    }
   }
 
   /** Own one gh checks watcher until it exits, including abort cleanup, while probing PR changes. */
@@ -193,6 +215,7 @@ export class CiWatcherSupervisor {
       const after = (await readMetadata()).headSha;
       if (after !== wait.headSha) return observe('head_changed', { observedHeadSha: after });
       rows = observed;
+      this.progress.publish(wait.id, observed);
       const conflicting = conflict();
       if (conflicting) return conflicting;
       const settled = workflowActive ? undefined : outcome(rows);
@@ -218,7 +241,10 @@ export class CiWatcherSupervisor {
           }
           const final = await this.watchChecks(wait, signal, snapshot, async () => {
             const head = (await readMetadata()).headSha;
-            return head !== wait.headSha ? observe('head_changed', { observedHeadSha: head }) : conflict();
+            if (head !== wait.headSha) return observe('head_changed', { observedHeadSha: head });
+            const conflicting = conflict();
+            if (!conflicting) await this.readProgress(wait, signal);
+            return conflicting;
           });
           if (final) return final;
         } catch (error) {
