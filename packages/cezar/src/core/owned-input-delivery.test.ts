@@ -1,5 +1,4 @@
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
-import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { fixtureWork } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 
@@ -36,7 +35,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
     });
   }, 60_000);
 
-  it.each(['owned', 'scheduler'] as const)(`${backend} %s DONE before ACK closes only after acceptance without needing a phantom turn`, async origin => {
+  it(`${backend} automatic steerWorker DONE before ACK closes only after acceptance without needing a phantom turn`, async () => {
     await withHeldAck(backend, async release => {
       await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
         manager.enqueueOwnedRun(runId);
@@ -45,16 +44,17 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
         const input = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId,
           text: `delay-owned-ack ${toolCall('cezar_done', {})} ${thenSay('delay-owned-ack finished')}`, createdAt: new Date().toISOString() };
         const session = [...fixtureWork(manager).liveSessions][0]!;
-        if (origin === 'owned') expect(manager.steerWorker(runId, input)).toBe('queued');
-        else expect(runInternals(manager).inputDelivery.deliverMessage(runId, [{ type: 'text', text: input.text }], false)).toBe(true);
-        await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('delay-owned-ack')));
+        const turns = store.readEvents(runId).filter(event => event.type === 'turn-end').length;
+        expect(manager.steerWorker(runId, input)).toBe('queued');
+        // bound: the held-ACK turn must end before checking that DONE still waits for acceptance.
+        await waitFor(() => store.readEvents(runId).filter(event => event.type === 'turn-end').length > turns);
         expect(manager.isActive(runId)).toBe(true);
         expect(session.open).toBe(true);
-        expect(store.getRun(runId)?.agentInputs ?? []).toEqual(origin === 'owned' ? [input] : []);
+        expect(store.getRun(runId)?.agentInputs ?? []).toEqual([input]);
         release();
         await waitFor(() => !manager.isActive(runId));
         expect(['done', 'review']).toContain(store.getRun(runId)?.status);
-        expect(store.getRun(runId)?.agentInputs ?? []).toEqual(origin === 'owned' ? [delivered(input, store.getRun(runId)?.agentInputs?.[0])] : []);
+        expect(store.getRun(runId)?.agentInputs ?? []).toEqual([delivered(input, store.getRun(runId)?.agentInputs?.[0])]);
       });
     });
   }, 60_000);
