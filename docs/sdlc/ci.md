@@ -497,7 +497,7 @@ that leave the workflow files unchanged do not invalidate the proof.
 
 ### Re-running a review
 
-CodeRabbit owns review execution and finding discussion. CI never requests a model review or resolves findings. Push fixes or discuss a finding with its reviewer. A flaky verification failure uses **Re-run failed jobs**, which retains successful review and heavy jobs. A failed review job rerun the same way reruns only the review and `verify`, never a suite.
+CodeRabbit owns review execution and finding discussion. CI never requests a model review or resolves findings. Push fixes or discuss a finding with its reviewer. A flaky verification failure uses **Re-run failed jobs**, which retains successful review and heavy jobs. **Re-run failed jobs** reruns every failed job: when only the review failed, it reruns the review and `verify`; when a suite also failed, it reruns that suite too. A targeted rerun of the review job alone, as the reconciler does, never reruns a suite.
 
 `coderabbit-reconcile.yml` uses default-branch code, no PR checkout or secrets, and only the Actions write permission needed for targeted retries. It reacts to genuine CodeRabbit check `created`/`completed`, native CI completion, and completion of **CodeRabbit review signal**. Review/comment events run that no-permission, no-checkout signal in PR merge-ref context. The trusted consumer validates official workflow identity, native event and same-repository signal association. The association selects a stable PR number; queued proof validates the exact live PR head. Signal success, artifacts and comment bodies grant no authority. Missing signal associations fail closed; use manual recovery.
 
