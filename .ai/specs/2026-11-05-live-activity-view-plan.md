@@ -36,7 +36,9 @@ can drive the view from the HTTP snapshot. One PR for each slice.
   - every row of the spec's request case table, through `reconcileConversationState()`;
   - each row of the state table, including the three needs-you rows and the three
     `waiting-on-workers` rows;
-  - the rows for retained terminal roots and settled workers;
+  - the rows for retained terminal roots and settled workers, with `error`, and
+    `collected` for no result, a result for the current revision, and a result for
+    an older revision;
   - a request closed only by reconcile has no `closed` entry; a stored reply has one;
   - D8: each root status in and out of the active set, a review root with a live
     worker in it;

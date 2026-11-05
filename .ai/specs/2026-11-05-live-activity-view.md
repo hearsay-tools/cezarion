@@ -204,6 +204,10 @@ ActivityRun = {
   tool?: { title, toolKind, status, startedAt, endedAt? },
   rate: number[30],           // tool calls started per second, oldest first
   workers: ActivityRun[],     // only on roots; settled workers included with status
+  error?: string,             // one line from `RunRecord.error`, clamped to 200 characters
+  revision?: number,          // workers: the current execution revision
+  collected?: boolean,        // workers: the parent holds a collected result for this
+                              // revision (see Read model)
 }
 ActivityWait = { kind, since, deadline?, detail } // detail is per kind, e.g.
   // pr: { number, target: 'checks'|'merge',
@@ -230,7 +234,13 @@ A new module `packages/cezar/src/activity/` builds the snapshot from the run sto
 and the two trackers. It reads; it never writes a run.
 
 - **Active roots**: D8, from the store's root summaries in the project.
-- **Workers**: `store.listOwnedWorkers(rootId)` for each active root.
+- **Workers**: `store.listOwnedWorkers(rootId)` for each active root. A worker's
+  `collected` is true when the root's `delegation.results` holds a reference
+  (`workerResultReferenceSchema`) for that worker whose `revision` equals the worker's
+  current revision. A reference to an older revision means the worker ran again
+  after the last collect, so `collected` is false and the row says "Ready to
+  collect". Collection is not part of `status`; it is written by
+  `DelegationService.collect()` through `RunStore.commitWorkerResult()`.
 - **Top wait**: the kind that `computeWaitingOn` reports, so the view and the Tasks
   list never disagree about what a task waits for. `computeWaitingOn` aggregates
   worker, peer and subagent entries and names no single entry, so the read model
