@@ -17,6 +17,8 @@ function project(id: string, title: string): LoadedProject {
 function wire() {
   const boot = project('boot', 'Boot task');
   const loaded = new Map<string, LoadedProject>();
+  /** Ids whose context cannot build now: a store that cannot open (503). */
+  const failing = new Set<string>();
   const registry = [{ id: 'boot', name: 'Boot' }, { id: 'docs', name: 'Docs' }];
   // While held, every source read waits: a test can land a registry event in the middle of one.
   let gate: Promise<void> | undefined;
@@ -33,6 +35,7 @@ function wire() {
       : { error: 'unavailable', status: 503 as const },
     resolveLiveProject: async (id: string): Promise<LoadedProject> => {
       if (id === 'default' || id === 'boot') return boot;
+      if (failing.has(id)) throw new Error(`store of ${id} cannot open`);
       const found = loaded.get(id);
       if (!found) throw new ProjectContextError('unknown-project', id);
       return found;
@@ -58,7 +61,7 @@ function wire() {
     onProjectEvent: (listener) => { projectListeners.add(listener); return () => projectListeners.delete(listener); },
   });
   const emit = (event: ProjectEvent, projectId: string) => { for (const listener of [...projectListeners]) listener(event, projectId); };
-  return { topics, families, demand, loaded, scopeListeners, projectListeners, emit, hold };
+  return { topics, families, demand, loaded, failing, scopeListeners, projectListeners, emit, hold };
 }
 
 describe('the activity topics', () => {
@@ -140,7 +143,8 @@ describe('the activity topics', () => {
   it('reads the registry events off the workspace bus', () => {
     expect(projectEventOf('project-removed', { id: 'docs' })).toEqual({ event: 'removed', projectId: 'docs' });
     expect(projectEventOf('project-added', { project: { id: 'docs', name: 'Docs' } })).toEqual({ event: 'added', projectId: 'docs' });
-    expect(projectEventOf('project-ready', { project: 'docs' })).toBeUndefined();
+    expect(projectEventOf('project-ready', { project: 'docs' })).toEqual({ event: 'ready', projectId: 'docs' });
+    expect(projectEventOf('checkout-progress', { project: 'docs' })).toBeUndefined();
     expect(projectEventOf('project-removed', {})).toBeUndefined();
   });
 
@@ -186,6 +190,60 @@ describe('the activity topics', () => {
     expect(await publisher.snapshot()).toMatchObject({ projects: [{ unavailable: { status: 404 } }] });
     expect((again.store as unknown as EventEmitter).listenerCount('run')).toBe(0);
     expect(demand.has('docs')).toBe(false);
+    stop();
+  });
+
+  it('says why a re-add cannot resolve, and binds when the project gets ready', async () => {
+    const { families, demand, loaded, failing, emit } = wire();
+    loaded.set('docs', project('docs', 'Old task'));
+    const publisher = (await families.get(ACTIVITY_PROJECT_TOPIC_PREFIX)!.resolve('docs'))!;
+    const frames: ActivitySnapshot[] = [];
+    let next: (() => void) | undefined;
+    const stop = publisher.start((data) => { frames.push(data as ActivitySnapshot); next?.(); });
+    await publisher.snapshot();
+    loaded.delete('docs');
+    emit('removed', 'docs');
+
+    // Re-added, but its store cannot open yet: the frame says 503, not 404.
+    const again = project('docs', 'New task');
+    loaded.set('docs', again);
+    failing.add('docs');
+    let failed = new Promise<void>((resolve) => { next = resolve; });
+    emit('added', 'docs');
+    await failed;
+    expect(frames.map((frame) => frame.projects[0]!.unavailable?.status)).toEqual([404, 503]);
+
+    // The context builds later: the topic binds without any subscriber leaving.
+    failing.delete('docs');
+    failed = new Promise<void>((resolve) => { next = resolve; });
+    emit('ready', 'docs');
+    await failed;
+    expect(frames.at(-1)!.projects[0]).toMatchObject({ loaded: true, tasks: [{ title: 'New task' }] });
+    expect(frames.at(-1)!.projects[0]!.unavailable).toBeUndefined();
+    expect(demand.has('docs')).toBe(true);
+    stop();
+  });
+
+  it('retries a failed resolution once for a new subscriber', async () => {
+    const { families, loaded, failing, emit } = wire();
+    loaded.set('docs', project('docs', 'Old task'));
+    const publisher = (await families.get(ACTIVITY_PROJECT_TOPIC_PREFIX)!.resolve('docs'))!;
+    const frames: ActivitySnapshot[] = [];
+    let next: (() => void) | undefined;
+    const stop = publisher.start((data) => { frames.push(data as ActivitySnapshot); next?.(); });
+    await publisher.snapshot();
+    loaded.delete('docs');
+    emit('removed', 'docs');
+    loaded.set('docs', project('docs', 'New task'));
+    failing.add('docs');
+    const failed = new Promise<void>((resolve) => { next = resolve; });
+    emit('added', 'docs');
+    await failed;
+
+    failing.delete('docs');
+    const second = await publisher.snapshot() as ActivitySnapshot;
+    expect(second.projects[0]).toMatchObject({ loaded: true, tasks: [{ title: 'New task' }] });
+    expect(frames.at(-1)!.projects[0]).toMatchObject({ tasks: [{ title: 'New task' }] });
     stop();
   });
 });

@@ -27,7 +27,8 @@ export interface ActivityTopicDeps {
  * default `loopbackReadable: false`: they carry run titles, tool titles and request text. A
  * project id the workspace cannot resolve answers the hub's unknown-topic error; the project
  * routes answer its real failure. A project topic follows the registry: a removed project sends
- * one unavailable frame and stops its work, and a re-added one binds to its new context. A project
+ * one unavailable frame and stops its work, and a re-added one binds to its new context, retrying
+ * a failed resolution when the project's context gets built or a subscriber arrives. A project
  * id never holds a colon, so the names cannot collide.
  */
 export function registerActivityTopics(hub: SocketHub, deps: ActivityTopicDeps): void {
@@ -43,7 +44,8 @@ export function registerActivityTopics(hub: SocketHub, deps: ActivityTopicDeps):
       demand: deps.demand,
       publisher: deps.publisher,
       resolve: (id) => deps.workspaceProjects.resolveLiveProject(id),
-      removed: (id) => deps.workspaceProjects.projectFailure(new ProjectContextError('unknown-project', id), id),
+      failure: (error, id) => deps.workspaceProjects.projectFailure(error, id),
+      removedError: (id) => new ProjectContextError('unknown-project', id),
       onProjectEvent: deps.onProjectEvent,
     });
   });
