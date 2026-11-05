@@ -35,7 +35,7 @@ describe('CI wait recovery and conversations', { timeout: 30_000 }, () => {
   });
 
   // hearsay-tools/cezarion#1425: recovery re-arms a merge wait as a merge wait, with no live session.
-  it('rebuilds a parked merge wait after restart and delivers its merged result once', async () => {
+  it.each(['merge', 'merge_or_blocked'] as const)('rebuilds a parked %s wait with no session and commits its outcome before delivery', async target => {
     let settle!: (result: CiWaitResult) => void;
     const watched: CiWait[] = [];
     const supervisor = { resolve: async () => identity, watch: (wait: CiWait) => { watched.push(wait); return new Promise<CiWaitResult>(done => { settle = done; }); }, close() {} };
@@ -43,10 +43,10 @@ describe('CI wait recovery and conversations', { timeout: 30_000 }, () => {
     manager.dispose();
     reopenRuntime();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
-    const receipt = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, until: 'merge', wake_on_conflict: false, timeout_seconds: 30 }, 'cezar_wait', toolGenerationOf(run.id));
+    const receipt = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, until: target, wake_on_conflict: false, timeout_seconds: 30 }, 'cezar_wait', toolGenerationOf(run.id));
     await restart();
     expect(manager.isActive(run.id)).toBe(false);
-    expect(watched.at(-1)).toMatchObject({ id: receipt.id, until: 'merge', wakeOnConflict: false });
+    expect(watched.at(-1)).toMatchObject({ id: receipt.id, until: target, wakeOnConflict: false });
     // The committed row at the wake boundary already holds the result and its input.
     let committed: { waits?: Wait[]; agentInputs?: Array<{ id: string; text: string }> } | undefined;
     const observe = (row: { id: string; waits?: Wait[] }) => {
@@ -55,12 +55,14 @@ describe('CI wait recovery and conversations', { timeout: 30_000 }, () => {
       }
     };
     store.on('run', observe);
-    settle({ outcome: 'merged', headSha: identity.headSha, observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false, mergedAt: '2026-10-23T09:00:00Z' });
+    const outcome = target === 'merge' ? 'merged' : 'blocked';
+    settle({ outcome, headSha: identity.headSha, observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false,
+      ...(target === 'merge' ? { mergedAt: '2026-10-23T09:00:00Z' } : { mergeBlock: { reason: 'no_pending_merge' as const, isInMergeQueue: false, autoMergeEnabled: false } }) });
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
     store.off('run', observe);
     expect(committed).toBeDefined();
-    expect(committed?.waits?.find(wait => wait.id === receipt.id)).toMatchObject({ phase: WAIT_PHASE.resolved, until: 'merge', result: { outcome: 'merged' } });
-    expect(committed?.agentInputs?.find(input => input.id === receipt.id)?.text).toContain('(until merge)');
+    expect(committed?.waits?.find(wait => wait.id === receipt.id)).toMatchObject({ phase: WAIT_PHASE.resolved, until: target, result: { outcome } });
+    expect(committed?.agentInputs?.find(input => input.id === receipt.id)?.text).toContain(`(until ${target})`);
     expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === receipt.id)).toHaveLength(1);
   });
 

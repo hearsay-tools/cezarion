@@ -15,19 +15,42 @@ lets the owner trace a dev-channel problem to its PR and revert it with one
 Follow the PR as usual: wait for CI, fix failures, answer review threads. The
 readiness workflow marks the PR ready when every required check passes and no
 thread is open; leave that change to it. Read
-`gh pr view <n> --json state,isDraft,autoMergeRequest,headRefOid,labels` and act on
-the first row that matches:
+`gh pr view <n> --json state,isDraft,autoMergeRequest,headRefOid,labels`.
+Read queue membership separately with GraphQL (the `gh pr view --json` field list
+does not include it):
+
+```bash
+gh api graphql -f owner='<owner>' -f repo='<repo>' -F number=<n> -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){isInMergeQueue}}}' --jq '.data.repository.pullRequest.isInMergeQueue'
+```
+
+Act on the first row that matches:
 
 | State | Action |
 | --- | --- |
 | `MERGED` | Finished. |
 | No `auto-merge` label | The owner took the PR back. Follow it as an ordinary PR. |
 | New head or title since your last decision | Run the decision in [`.ai/skills/auto-merge/SKILL.md`](../SKILL.md) again. On `DOES NOT QUALIFY`, leave auto-merge. |
+| `isInMergeQueue` is true | The merge is pending. Keep following it with `until: "merge_or_blocked"`; a null `autoMergeRequest` does not mean it needs another merge command. |
 | `autoMergeRequest` is null | Run `gh pr merge <n> --auto --squash`. When GitHub refuses because the PR is a draft, wait for the next event. When GitHub answers that the PR is in clean status, merge it now: `gh pr merge <n> --squash --match-head-commit <headRefOid>`. |
 | `autoMergeRequest` is set | Wait for the next event. |
 
-To wait in Cezar, open a `ci` wait on the PR, or a short `timer` wait when the
-checks are green and the PR is still a draft.
+After requesting a merge, keep responsibility for the PR and register:
+
+```json
+{ "kind": "pr", "pr": "<PR URL>", "until": "merge_or_blocked" }
+```
+
+End the turn to park. `merged` confirms success. `blocked` reports a conflict or
+that neither queue membership nor enabled auto-merge remains; inspect its current
+state and any removal reason before taking action under the existing merge rules.
+Do not re-enqueue merely because a wait woke. A `deadline` or `error` leaves the
+merge unresolved: inspect and register another wait, or hand responsibility to the
+human. Queue admission is not completion.
+
+An agent whose work only depends on another PR merging uses `until: "merge"`
+with `wake_on_conflict: false`; queue removals do not wake it. When this PR is still
+a draft, follow its checks or use a short timer rather than supervising a merge
+that has not been requested.
 
 **Done when** the state is `MERGED`, or you left auto-merge.
 

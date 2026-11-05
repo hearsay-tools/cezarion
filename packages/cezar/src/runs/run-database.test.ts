@@ -546,13 +546,13 @@ describe('RunDatabase', () => {
     // which a schema-7 build would strip of its appointment and show as Needs you.
     // Schema 9 (hearsay-tools/cezarion#1446): records may carry process waits, which a schema-8
     // build would drop as unreadable.
-    it('creates a fresh database at schema 10, migrates a v3 one keeping its rows, and refuses version 11', () => {
-      expect(RUN_DATABASE_SCHEMA_VERSION).toBe(10);
+    it('creates a fresh database at schema 11, migrates a v3 one keeping its rows, and refuses version 12', () => {
+      expect(RUN_DATABASE_SCHEMA_VERSION).toBe(11);
       openDb().close();
       open.length = 0;
       const fresh = new DatabaseSync(path, { readOnly: true });
       try {
-        expect(fresh.prepare('PRAGMA user_version').get()).toEqual({ user_version: 10 });
+        expect(fresh.prepare('PRAGMA user_version').get()).toEqual({ user_version: 11 });
       } finally {
         fresh.close();
       }
@@ -567,13 +567,25 @@ describe('RunDatabase', () => {
       for (const db of open.splice(0)) db.close();
       const migrated = new DatabaseSync(path);
       try {
-        expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 10 });
-        migrated.exec('PRAGMA user_version = 11');
+        expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 11 });
+        migrated.exec('PRAGMA user_version = 12');
       } finally {
         migrated.close();
       }
       expect(() => openDb()).toThrow(RunDatabaseUnsupportedSchemaError);
       expect(() => RunDatabase.openReadOnly(path)).toThrow(RunDatabaseUnsupportedSchemaError);
+    });
+
+    it('migrates schema 10 without rewriting runs and refuses readers without the new wait enums', () => {
+      const db = openDb();
+      db.transaction({ upserts: [row('kept')], deletes: [] });
+      db.close(); open.length = 0;
+      const previous = new DatabaseSync(path);
+      previous.exec('PRAGMA user_version = 10');
+      previous.close();
+      expect(openDb().get('kept')?.data).toBe(row('kept').data);
+      expect(() => RunDatabase.open(path, 10)).toThrow(RunDatabaseUnsupportedSchemaError);
+      expect(() => RunDatabase.openReadOnly(path, 10)).toThrow(RunDatabaseUnsupportedSchemaError);
     });
 
     it('reports a file that is not a database as corrupt and never deletes or resets it', () => {

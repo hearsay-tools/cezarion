@@ -10,6 +10,18 @@ import { waitInvalidInput } from './errors.ts';
 const OBSOLETE_HUMAN_WAIT_KIND = 'human';
 
 describe('CI wait contract', () => {
+  it('accepts merge supervision and requires bounded evidence for blocked results only', () => {
+    expect(cezarWaitRequestSchema.parse({ kind: WAIT_KIND.pr, pr: 'https://github.com/org/repo/pull/12', until: 'merge_or_blocked' }))
+      .toMatchObject({ until: 'merge_or_blocked' });
+    const blocked = { outcome: 'blocked', headSha: 'a'.repeat(40), observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false,
+      mergeBlock: { reason: 'no_pending_merge', isInMergeQueue: false, autoMergeEnabled: false,
+        event: { kind: 'queue_removal', createdAt: '2026-11-04T06:33:39Z', reason: 'failed_checks' } } };
+    expect(ciWaitResultSchema.parse(blocked)).toEqual(blocked);
+    const { mergeBlock, ...withoutEvidence } = blocked;
+    expect(ciWaitResultSchema.safeParse(withoutEvidence).success).toBe(false);
+    expect(ciWaitResultSchema.safeParse({ ...blocked, outcome: 'merged' }).success).toBe(false);
+    expect(ciWaitResultSchema.safeParse({ ...blocked, mergeBlock: { ...mergeBlock, event: { ...mergeBlock.event, reason: 'x'.repeat(257) } } }).success).toBe(false);
+  });
   it('defaults timeout and rejects model-supplied authority and malformed PR URLs', () => {
     expect(ciWaitRequestSchema.parse({ pr: 'https://github.com/org/repo/pull/12' })).toEqual({ pr: 'https://github.com/org/repo/pull/12', until: 'checks', wake_on_conflict: true, timeout_seconds: 1800 });
     for (const pr of ['http://github.com/a/b/pull/1', 'https://user@github.com/a/b/pull/1', 'https://github.com:443/a/b/pull/1', 'https://github.com/a/b/pull/0', 'https://github.com/a/b/pull/1?q=x', 'https://github.com/a/b/pull/1#x', 'https://github.com/a/b/pull/1/', 'https://github.com/a/b/pull/9007199254740993']) {
