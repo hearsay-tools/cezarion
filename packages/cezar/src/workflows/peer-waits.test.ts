@@ -1,4 +1,4 @@
-import { runInternals } from './run-internals.testkit.ts';
+import { observationClock } from '../core/observation-clock.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -11,10 +11,10 @@ import type { RunRecord } from '../runs/store.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { MAX_AUTO_CONTINUES } from './run.ts';
+import { IDLE_TIMEOUT_MS, MAX_AUTO_CONTINUES } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { stateOf } from './run-states.ts';
-import { controlledWire, fixtureUpdateRun, manager, parent, restart, root, semaphore, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { controlledWire, fixtureUpdateRun, manager, parent, restart, root, semaphore, store, toolGenerationOf, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
 /**
  * The `peer` wait (hearsay-tools/cezarion#1995), spec 2026-10-27-task-communication-protocol § 7:
@@ -22,8 +22,7 @@ import { controlledWire, fixtureUpdateRun, manager, parent, restart, root, semap
  * A peer is a root task of the project; it needs no session to send, so it is a record here.
  */
 
-const internals = () => runInternals(manager);
-const handlers = (runId: string) => manager.cezarToolHandlers(runId, internals().active.get(runId)!.liveSession.ciGeneration!);
+const handlers = (runId: string) => manager.cezarToolHandlers(runId, toolGenerationOf(runId));
 const entryOf = (runId: string, waitId: string): Wait | undefined => store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
 const settledOf = (runId: string, waitId: string): Wait | undefined => store.getRun(runId)?.lastWaits?.filter(wait => wait.id === waitId).at(-1);
 const anyOf = (runId: string, waitId: string) => entryOf(runId, waitId) ?? settledOf(runId, waitId);
@@ -93,13 +92,16 @@ describe('peer waits (R9)', { timeout: 45_000 }, () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('running → waiting:peer: the turn end parks on the peer wait with no slot, the idle timer armed, and reads waiting on 1 task', async () => {
+    const clock = observationClock(delay => delay === IDLE_TIMEOUT_MS && /armIdleTimer/.test(new Error().stack ?? ''));
     const { a, entry } = await parkedOnPeer();
     const run = store.getRun(a)!;
     expect(stateOf(run)).toBe('waiting:peer');
     expect(entry).toMatchObject({ kind: WAIT_KIND.peer, phase: WAIT_PHASE.open, timeoutSeconds: 600 });
-    expect(runInternals(manager).line.monitoring.has(a)).toBe(false);
     expect(semaphore.busy()).toBe(0);
-    expect(internals().active.get(a)?.idleTimer).toBeDefined();
+    await clock.advance(IDLE_TIMEOUT_MS);
+    await until(() => !manager.isActive(a));
+    expect(store.readEvents(a).some(event => event.type === 'lifecycle' && String(event.message).includes('inactivity'))).toBe(true);
+    expect(entryOf(a, entry.id)).toMatchObject({ phase: WAIT_PHASE.open });
     expect(deriveAttention(run)).toMatchObject({ rung: 'waiting-on-workers', bucket: 'none', label: 'waiting on 1 task' });
   });
 
