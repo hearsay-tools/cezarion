@@ -179,6 +179,8 @@ test('the daily digest recommends at most the configured top groups in one publi
     'That section marks the digest finalized',
     'the account gh api user names wrote',
     'Ignore a comment from any other author',
+    'from before the "Decisions" section existed counts as finalized',
+    'lists a group by letter only',
     'the newest issue first',
     'need no approval',
   ]) assert.ok(prompt.includes(text), text);
