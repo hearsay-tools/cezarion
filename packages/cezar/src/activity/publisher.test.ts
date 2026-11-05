@@ -169,6 +169,44 @@ describe('the activity publisher', () => {
     stop();
   });
 
+  it('shows a foreign owner that settles and exits before the first check', async () => {
+    const root = makeRoot({ title: 'elsewhere' });
+    const { store, foreign } = liveStore([root], { held: [], foreign: [root.id] });
+    const { publisher } = publisherFor(store);
+    const { frames, first, stop } = await subscribe(publisher);
+    expect(titles(first)).toEqual(['elsewhere']);
+
+    // The other process finishes the task and exits: its claim is gone at the first check.
+    root.status = RUN_STATUS.done;
+    foreign.splice(0);
+    await vi.advanceTimersByTimeAsync(ONE_CHECK_MS);
+    expect(frames.map(titles)).toEqual([[]]);
+    stop();
+  });
+
+  it('tells existing subscribers about a change a new subscriber saw through the 500 ms gate', async () => {
+    const root = makeRoot({ title: 'one' });
+    const { store, changed } = liveStore([root]);
+    const { publisher } = publisherFor(store);
+    const { frames, stop } = await subscribe(publisher);
+    root.title = 'two';
+    changed(root);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(frames.map(titles)).toEqual([['two']]);
+
+    // A write this store never announced, seen first by a second subscriber 100 ms later.
+    root.title = 'three';
+    await vi.advanceTimersByTimeAsync(100);
+    const second = await publisher.snapshot() as ActivitySnapshot;
+    expect(titles(second)).toEqual(['three']); // the new subscriber's own frame is immediate
+    expect(frames).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(ACTIVITY_COALESCE_MS - 101);
+    expect(frames).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(frames.map(titles)).toEqual([['two'], ['three']]);
+    stop();
+  });
+
   it('keeps a reply whose sender settles before the next build: the carry-over', async () => {
     const sender = makeRoot();
     const recipient = makeRoot();

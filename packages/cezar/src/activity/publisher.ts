@@ -55,6 +55,7 @@ interface Running {
   release: Array<() => void>;
 }
 
+const claimsKey = (ids: readonly string[]): string => [...ids].sort().join('\n');
 const beats = (run: ActivityRun | ActivityWorker): boolean => run.rate.some((count) => count > 0);
 const nonzero = (run: ActivityRun): boolean => beats(run) || run.workers.some(beats);
 
@@ -92,6 +93,9 @@ export function createActivityPublisher(scope: ActivityScope, deps: ActivityPubl
     for (const [store, entry] of run.stores) if (!wanted.has(store)) { entry.off(); run.stores.delete(store); }
     for (const [store, projectId] of wanted) {
       if (run.stores.has(store)) continue;
+      // The claims as this build reads them: a foreign owner that settles and exits before the
+      // first check empties the list, and that change must count.
+      run.foreignSeen.set(projectId, claimsKey(store.listForeignClaimedRunIds()));
       const onChange = () => schedule(run);
       store.on('run', onChange);
       store.on('deleted', onChange);
@@ -109,14 +113,21 @@ export function createActivityPublisher(scope: ActivityScope, deps: ActivityPubl
     if (!hot && run.drain) { clearInterval(run.drain); run.drain = undefined; }
   };
 
-  const emit = (run: Running, snapshot: ActivitySnapshot, toAll: boolean): void => {
+  const emit = (run: Running, snapshot: ActivitySnapshot): void => {
     drain(run, snapshot);
     const body = JSON.stringify(snapshot.projects);
     if (body === run.last) return;
-    const first = run.last === undefined;
     run.last = body;
-    // The subscribe snapshot of the first subscriber is its own frame: nobody else is waiting.
-    if (toAll || !first) run.publish(snapshot);
+    run.publish(snapshot);
+  };
+
+  /** A subscriber's own snapshot goes to that subscriber only. The first one sets the baseline;
+   *  a later one that differs tells the others through the coalescing gate, not at once. */
+  const subscribed = (run: Running, snapshot: ActivitySnapshot): void => {
+    drain(run, snapshot);
+    const body = JSON.stringify(snapshot.projects);
+    if (run.last === undefined) run.last = body;
+    else if (body !== run.last) schedule(run);
   };
 
   const flush = (run: Running): void => {
@@ -126,7 +137,7 @@ export function createActivityPublisher(scope: ActivityScope, deps: ActivityPubl
     run.building = true;
     run.lastBuildAt = Date.now();
     void build(run)
-      .then((snapshot) => { if (running === run) emit(run, snapshot, true); })
+      .then((snapshot) => { if (running === run) emit(run, snapshot); })
       .catch((error: unknown) => deps.onBuildError?.(error))
       .finally(() => {
         run.building = false;
@@ -146,7 +157,7 @@ export function createActivityPublisher(scope: ActivityScope, deps: ActivityPubl
     let changed = false;
     for (const [store, { projectId }] of run.stores) {
       const ids = store.listForeignClaimedRunIds();
-      const seen = [...ids].sort().join('\n');
+      const seen = claimsKey(ids);
       if (ids.length > 0 || seen !== (run.foreignSeen.get(projectId) ?? '')) changed = true;
       run.foreignSeen.set(projectId, seen);
     }
@@ -157,7 +168,7 @@ export function createActivityPublisher(scope: ActivityScope, deps: ActivityPubl
     async snapshot() {
       const run = running;
       const snapshot = await build(run);
-      if (run && running === run) emit(run, snapshot, false);
+      if (run && running === run) subscribed(run, snapshot);
       return snapshot;
     },
     start(publish) {
