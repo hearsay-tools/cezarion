@@ -38,7 +38,7 @@ function failureContext(runner: RunnerId, it: typeof registerTest = registerTest
       const messages = native(runner);
       const id = await start(runner, 'provider-error');
       for (const text of [`${HARNESS_ADAPTERS[runner].scenarios['provider-error']}\nKeep this second line.`, '']) {
-        const failed = store.getRun(id)!.steps.at(-1)!;
+        const failed = structuredClone(store.getRun(id)!.steps.at(-1)!);
         expect(failed.status).toBe(STEP_STATUS.failed);
         expect(failed.error).toBeTruthy();
         const before = messages().length;
@@ -161,7 +161,7 @@ function savedContinuation(runner: RunnerId, it: typeof registerTest = registerT
       it(`${runner} R86 explains restart ahead of a saved ${status} continuation, without a live session`, async () => {
         const messages = native(runner);
         const id = await start(runner, 'cezar-done');
-        const original = store.getRun(id)!.steps[0]!;
+        const original = structuredClone(store.getRun(id)!.steps[0]!);
         const text = 'Saved human text.\nDo not change it.';
         store.addStep(id, { id: 'continue-1', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation' });
         store.updateStep(id, 'continue-1', { status: status === RUN_STATUS.queued ? STEP_STATUS.pending : STEP_STATUS.running });

@@ -410,7 +410,7 @@ describe('automation task templates', () => {
       const enabledAt = new Date(now - 2 * 60_000).toISOString();
       automations.setState(recent.id, (current) => ({ ...current, baselineAt: enabledAt, nextCheckAt: new Date(now + 58 * 60_000).toISOString() }));
       automations.setState(forgotten.id, (current) => ({ ...current, baselineAt: new Date(now - 30 * DAY).toISOString() }));
-      const recentBefore = automations.state(recent.id);
+      const recentBefore = structuredClone(automations.state(recent.id));
       expect(rebaselineIdleAutomations(automations, undefined, now)).toBe(1);
       expect(automations.state(recent.id)).toEqual(recentBefore);
       expect(automations.logs({ automationId: recent.id })).toEqual([]);
@@ -429,7 +429,7 @@ describe('automation task templates', () => {
       const poll = automations.create({ name: 'Resumed', enabled: true, events: ['issue.opened'], intervalSeconds: 3_600, filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'x' } }, 'resumed');
       const reEnabledAt = new Date(now - 3 * 60_000).toISOString();
       automations.setState(poll.id, (current) => ({ ...current, lastSuccessAt: new Date(now - 10 * DAY).toISOString(), baselineAt: reEnabledAt, cursor: { timestamp: reEnabledAt }, nextCheckAt: new Date(now + 57 * 60_000).toISOString() }));
-      const before = automations.state(poll.id);
+      const before = structuredClone(automations.state(poll.id));
       expect(rebaselineIdleAutomations(automations, undefined, now)).toBe(0);
       expect(automations.state(poll.id)).toEqual(before);
       expect(automations.logs({ automationId: poll.id })).toEqual([]);
@@ -447,7 +447,7 @@ describe('automation task templates', () => {
       const old = new Date(now - 30 * DAY).toISOString();
       automations.setState(stale.id, (current) => ({ ...current, lastSuccessAt: old, cursor: { timestamp: old }, backoffUntil: old }));
       automations.setState(fresh.id, (current) => ({ ...current, lastSuccessAt: new Date(now - DAY).toISOString(), cursor: { timestamp: new Date(now - DAY).toISOString() } }));
-      const freshBefore = automations.state(fresh.id);
+      const freshBefore = structuredClone(automations.state(fresh.id));
       const changes: string[] = [];
       expect(rebaselineIdleAutomations(automations, (id) => changes.push(id), now)).toBe(1);
       expect(automations.state(stale.id)).toMatchObject({ baselineAt: new Date(now).toISOString(), cursor: { timestamp: new Date(now).toISOString() }, nextCheckAt: new Date(now + 300_000).toISOString() });

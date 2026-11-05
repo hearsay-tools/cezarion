@@ -58,7 +58,7 @@ for (const backend of RUNNER_IDS) {
         expect(store.readEvents(runId).filter(event => event.type === 'user-message' && String(event.text).includes(request.text))).toEqual([]);
         manager.finish(runId);
         await waitFor(() => !manager.isActive(runId));
-        const revision = store.getRun(runId)?.delegation;
+        const revision = structuredClone(store.getRun(runId)?.delegation);
         // #505: the successful opening turn handled the resume instruction, so it reads as consumed.
         expect(await service.send(caller, request)).toMatchObject({ delivery: 'consumed', message: first.message });
         expect(store.getRun(runId)?.delegation).toEqual(revision);

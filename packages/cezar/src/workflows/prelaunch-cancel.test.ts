@@ -214,7 +214,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     const completion = launchPreamble(host, record.id, previous);
     await entered;
     active.set(record.id, replacement);
-    const before = p.store.getRun(record.id);
+    const before = structuredClone(p.store.getRun(record.id));
     releaseTools();
     expect((await completion).stale).toBe(true);
     expect(previous.liveSession.revokeCiTools).toBeUndefined();
