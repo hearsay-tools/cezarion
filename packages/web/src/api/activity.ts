@@ -22,7 +22,9 @@ export async function getActivity(project: string | undefined, opts?: ReadOption
   return parsed.data
 }
 
-export const activityQueryKey = (project: string | undefined) => ['workspace', 'activity', project ?? 'all'] as const
+/** One cache entry per read: a project's id, or null for the global read. A project may be named
+ *  `all`, so no project id stands for the global read. Slice S4's hook uses the same shape. */
+export const activityQueryKey = (project: string | undefined) => ['workspace', 'activity', project ?? null] as const
 
 /** One project's snapshot (the active project scope), or every project's with `scope: 'all'`. */
 export function useActivity(scope: 'project' | 'all') {
