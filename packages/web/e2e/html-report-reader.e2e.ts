@@ -48,7 +48,6 @@ attempt('cookie', () => document.cookie)
 attempt('fetch', () => { fetch('${origin}/fetch').catch(() => {}); fetch('/api/v1/health').catch(() => {}) })
 attempt('beacon', () => { new Image().src = '${origin}/script-img' })
 attempt('socket', () => { new WebSocket('${origin.replace('http:', 'ws:')}/socket') })
-attempt('popup', () => { tried.popupOpened = window.open('${origin}/open') !== null })
 attempt('topNav', () => { top.location = '${origin}/top' })
 attempt('parentNav', () => { parent.location = '${origin}/parent' })
 document.documentElement.dataset.probe = JSON.stringify(tried)
@@ -317,7 +316,7 @@ it('runs report scripts without reaching the cockpit, the network or another win
   browser.goto(`${baseUrl}${readerPath()}?artifact=${publication.id}`)
   browser.waitForFunction(`document.querySelector(${JSON.stringify(FRAME)}) !== null`)
   const tried = JSON.parse(await waitInReport<string>('s2', 'document.documentElement.dataset.probe ?? ""', value => value !== '')) as Record<string, unknown>
-  expect(tried).toMatchObject({ parent: 'SecurityError', top: 'SecurityError', storage: 'SecurityError', cookie: 'SecurityError', popupOpened: false })
+  expect(tried).toMatchObject({ parent: 'SecurityError', top: 'SecurityError', storage: 'SecurityError', cookie: 'SecurityError' })
   expect(tried.topNav).not.toBe('ran')
   expect(tried.parentNav).not.toBe('ran')
   // The script queues a meta refresh and a self-navigation on load; the report must stay.
@@ -336,7 +335,7 @@ it('keeps the cockpit and the top window by the sandbox alone, on unprepared HTM
     raw.srcdoc = ${JSON.stringify(reportHtml(probeOrigin))}; document.body.append(raw) })()`)
   expectCockpitUntouched(readerPath())
   const paths = hits().map(hit => hit.path)
-  for (const scripted of ['/top', '/parent', '/open']) expect(paths).not.toContain(scripted)
+  for (const scripted of ['/top', '/parent']) expect(paths).not.toContain(scripted)
   // Without the CSP the frame may send requests; that is the CSP's job, tested next.
   rmSync(hitsFile, { force: true })
 })

@@ -129,6 +129,11 @@ describe('prepareReport', () => {
     expect(blocked.forms).toBe(1)
   })
 
+  it('counts nothing for a style sheet that is not CSS, such as a Tailwind source sheet', () => {
+    const { blocked } = prepareReport('<style type="text/tailwindcss">@import "tailwindcss"; @theme { --c: url(x.png) }</style><style type="TEXT/CSS">a{background:url(y.png)}</style>')
+    expect(blocked.relative).toBe(1)
+  })
+
   it('reports nothing blocked for a self-contained report', () => {
     const { blocked } = prepareReport('<style>p{color:red}</style><p>Ok</p><a href="#top">Top</a>')
     expect(blocked).toEqual({ scripts: 0, remote: 0, relative: 0, forms: 0, embeds: 0 })

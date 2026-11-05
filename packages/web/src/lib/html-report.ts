@@ -139,7 +139,8 @@ function rewriteLinks(doc: Document, blocked: BlockedContent): void {
 /** Counts what the CSP will refuse to load, for the reader's notice. Changes nothing. */
 function countResources(doc: Document, blocked: BlockedContent): void {
   for (const element of doc.querySelectorAll('[style]')) countCss(element.getAttribute('style')!, blocked)
-  for (const style of doc.querySelectorAll('style')) countCss(style.textContent ?? '', blocked)
+  // A sheet of another type, such as Tailwind's `text/tailwindcss`, is never applied, so it loads nothing.
+  for (const style of doc.querySelectorAll('style')) if (/^(?:text\/css)?$/i.test(style.getAttribute('type')?.trim() ?? '')) countCss(style.textContent ?? '', blocked)
   for (const link of doc.querySelectorAll('link[href]')) classify(link.getAttribute('href')!, blocked)
   for (const element of doc.querySelectorAll('img, source, video, audio, track, input, image, use, body, table, td')) {
     for (const name of RESOURCE_ATTRS) {
