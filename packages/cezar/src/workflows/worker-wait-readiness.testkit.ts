@@ -49,7 +49,7 @@ export function observeIdleClose(ownedStore: RunStore = store) {
   const timerOf = new Map<string, number>();
   const onRun = (run: { id: string; status: string }) => { published = run.status === 'waiting' ? run.id : undefined; };
   ownedStore.on('run', onRun);
-  onTestFinished(() => ownedStore.off('run', onRun));
+  onTestFinished(() => { ownedStore.off('run', onRun); });
   const clock = observationClock(delay => {
     if (delay !== IDLE_TIMEOUT_MS || !/\bat (?:[^ (\n]+\.)?armIdleTimer \(/.test(new Error().stack ?? '')) return false;
     if (!published) throw new Error('idle timer armed without a published waiting run');
