@@ -1,4 +1,4 @@
-import { runInternals } from '../workflows/run-internals.testkit.ts';
+import { agentEnvForStep, workerStep } from '../workflows/run/launch-context.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,7 +17,7 @@ import { provisionWorkflowFixture, delegationToken, until, PROVISION_ROWS } from
 describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   const context = provisionWorkflowFixture();
   let f: typeof context.f, controller: typeof context.controller;
-  const { sessions, launchAccepted } = context;
+  const { sessions, acceptedBeforeLaunch, launchAccepted } = context;
   beforeEach(() => { f = context.f; controller = context.controller; });
 
   async function acceptClaudeLayout(layout: 'native' | 'override' | 'named') {
@@ -31,11 +31,11 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const parent = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner: 'claude', worktree: false, ...(layout === 'named' ? { agentProfile: 'named-native-dir' } : {}) });
     await until(() => sessions.length === 1);
     const caller = controller.credentials.authenticate(delegationToken(sessions[0]!.spec))!;
-    const pump = vi.spyOn(runInternals(f.manager).line, 'pump').mockResolvedValue();
+    await f.holdAdmission();
     const request = { task: 'child', baseline: 'HEAD', requestId: randomUUID() };
     const child = await controller.service.spawn(caller, request);
-    expect(pump).toHaveBeenCalled();
-    return { home, nativeHome, parent, caller, pump, request, child };
+    await acceptedBeforeLaunch(child.workerId);
+    return { home, nativeHome, parent, caller, request, child };
   }
   function claudeState(spec: AgentRunSpec) {
     const env = buildChildEnv({ backend: 'claude', extraEnv: spec.env });
@@ -76,12 +76,12 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   });
   it('checks native Claude layout against merged session env, not only the host env', async () => {
     const a = await acceptClaudeLayout('native');
-    const engine = f.manager as unknown as { agentEnv(...args: unknown[]): Record<string, string> };
-    const prepare = engine.agentEnv.bind(f.manager);
-    vi.spyOn(engine, 'agentEnv').mockImplementation((...args) => ({ ...prepare(...args), CLAUDE_CONFIG_DIR: a.home }));
-    const { store } = await launchAccepted(a, 'queued');
-    await until(() => store.getRun(a.child.workerId)?.status === 'failed' || sessions.length > 1);
-    expect(store.getRun(a.child.workerId)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('layout') }); expect(sessions).toHaveLength(1);
+    const launchContext = { store: f.store, repoRoot: f.root, dataDir: join(f.root, '.ai/cezar') };
+    const host = { workerStep: (id: string, stepId: string | undefined) => workerStep(launchContext, id, stepId),
+      agentEnv: () => ({ CLAUDE_CONFIG_DIR: a.home }) };
+    await expect(agentEnvForStep(launchContext, host, a.child.workerId, 'claude', { stepId: 'task' })).rejects.toThrow(/layout/);
+    await expect(agentEnvForStep(launchContext, { ...host, agentEnv: () => ({}) }, a.child.workerId, 'claude', { stepId: 'task' }))
+      .resolves.toMatchObject({ profileId: 'default', env: {} });
   });
   it.each(PROVISION_ROWS.privateLayout)('refuses missing private Claude layout evidence on %s', async mode => {
     const a = await acceptClaudeLayout('native');

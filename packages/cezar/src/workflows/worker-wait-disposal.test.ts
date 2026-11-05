@@ -1,4 +1,7 @@
-import { runInternals } from './run-internals.testkit.ts';
+import { captureSessions } from './runner-session-capture.testkit.ts';
+import { isDisposedDelegatedRun } from './run/run-guards.ts';
+import { randomUUID } from 'node:crypto';
+import { makeTimerWait } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
 import { currentUsage } from '../core/process-usage.ts';
 import { bookkeeping, executions, manager, parent, register, reopenRuntime, store, until, useWorkerWaitFixture, waitOf, worker, work } from './worker-wait.testkit.ts';
@@ -11,6 +14,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   for (const mode of ['fresh', 'continuation'] as const) {
     for (const completion of ['result', 'error'] as const) {
       it(`${mode}: disposal ignores late ${completion} and restart retains the wait and children`, async () => {
+        const sessionOf = captureSessions();
         const p = await parent();
         if (mode === 'continuation') {
           await until(() => store.getRun(p.id)?.status === 'waiting');
@@ -21,13 +25,12 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         const w = await worker(p.id); const wait = register(p.id, [w.id]);
         await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
         await Promise.all(bookkeeping.splice(0));
-        const state = (manager as unknown as { active: Map<string, { liveSession: { session: { end(): void; sendMessage(content: unknown[]): boolean }; };  }> }).active.get(p.id)!;
+        const session = sessionOf(p.id);
         await until(() => currentUsage(p.id) !== undefined);
         manager.dispose();
         const snapshot = JSON.stringify(store.getRun(p.id));
-        await runInternals(manager).turnBookkeeper.recordTurnEnd(p.id, 'CEZ:TITLE=late disposed callback');
-        if (completion === 'error') state.liveSession.session.sendMessage([{ type: 'text', text: 'mock:auth-error' }]);
-        else state.liveSession.session.end();
+        if (completion === 'error') session.sendMessage([{ type: 'text', text: 'mock:auth-error' }]);
+        else session.end();
         await Promise.all(executions.splice(0));
         expect(store.getRun(p.id)?.status).toBe('waiting');
         expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id);
@@ -41,6 +44,18 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       });
     }
   }
+
+  it('recognizes disposed roots, workers and waits without treating ordinary runs as delegated', async () => {
+    const p = await parent(); const w = await worker(p.id);
+    const ordinary = store.createRun({ title: 'ordinary', task: 'ordinary', workflow: 'quick-task', steps: [] });
+    const waiting = store.createRun({ title: 'waits only', task: 'waits only', workflow: 'quick-task', steps: [] });
+    store.commitWait(waiting.id, makeTimerWait({ id: randomUUID(),
+      registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 60_000).toISOString(), seconds: 60, turnId: 'turn' }));
+    for (const disposed of [false, true]) {
+      for (const id of [p.id, w.id, waiting.id]) expect(isDisposedDelegatedRun(store, () => disposed, id)).toBe(disposed);
+      for (const id of [ordinary.id, 'missing']) expect(isDisposedDelegatedRun(store, () => disposed, id)).toBe(false);
+    }
+  });
 
   for (const intent of ['cancel'] as const) {
     it(`explicit ${intent} before disposal is not resurrected on restart`, async () => {

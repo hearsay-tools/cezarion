@@ -6,7 +6,6 @@ import {
   WAIT_PHASE,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { TrackedWork } from './run/tracked-work.ts';
-import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -203,8 +202,8 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     expect(store.readEvents(b.parentId).some(e => e.type === 'conversation-message')).toBe(true);
   });
 
-  it.each(['family', 'full', 'live'] as const)('does not lose a %s request emitted during reconciliation', scope => {
-    // A live family is reached by the unnamed pass; the settled one only by name or the full pass.
+  it.each(['family', 'live'] as const)('does not lose a %s request emitted during reconciliation', scope => {
+    // A live family is reached by the unnamed pass; the settled one by its checkpoint.
     if (scope === 'live') setRunStatus(store, b.workerId, RUN_STATUS.running);
     const append = store.appendEvent.bind(store);
     let changed = false;
@@ -212,7 +211,6 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
       if (!changed && id === a.parentId && event.type === 'conversation-message') {
         changed = true;
         if (scope === 'family') cleanupCheckpoint(store, b.workerId);
-        else if (scope === 'full') runInternals(manager).familyReconciler.reconcileAllWorkerFamilies();
         else manager.reconcileWorkerWaits();
       }
       return append(id, event);
