@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 
 /**
  * The tab bar's "More" destination (#621): a bottom sheet holding the views that do not earn a
- * permanent slot. Skills, Workflows and Project settings are always there; Automations
+ * permanent slot. Git, Skills, Workflows, Reports and Project settings are always there; Automations
  * sit below a divider and only exist while their flag is on, so `items` (the shell's
  * `visibleNavItems`) is the single gate — the same list the desktop sidebar and the ⌘K palette
  * render from, which is what keeps the three from disagreeing.
@@ -23,6 +23,7 @@ type Row = { to: string; label: string; icon: ComponentType<SVGProps<SVGSVGEleme
 /** The settled rows, in the mock's order. Labels differ from the nav's where the sheet is more
  *  specific: the `/settings` nav item is "Settings", but here it is the project's. */
 const FIXED_ROWS: readonly { to: string; label: string }[] = [
+  { to: '/git', label: 'Git' },
   { to: '/skills', label: 'Skills' },
   { to: '/workflows', label: 'Workflows' },
   { to: '/reports', label: 'Reports' },

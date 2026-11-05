@@ -1,0 +1,83 @@
+/**
+ * The shapes of the lines between tasks (spec 2026-11-05-live-activity-view, "Lines between
+ * tasks"). Pure: boxes in, an SVG path and a label point out. All boxes are relative to the graph
+ * host, in CSS pixels.
+ */
+
+export interface Box {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export interface Point {
+  x: number
+  y: number
+}
+
+export interface LinePath {
+  d: string
+  /** Where the label sits: the middle of the line, or the free end of a stub. */
+  label: Point
+}
+
+/** How far below a card's top edge a peer line meets it: level with the title. */
+export const PEER_ANCHOR_Y = 22
+/** How far the family line bows into the card's left margin. */
+export const FAMILY_MARGIN = 18
+/** A line whose other end is not on the view ends this far from the card that remains. */
+export const STUB_LENGTH = 72
+
+const round = (n: number) => Math.round(n * 10) / 10
+const pt = (p: Point) => `${round(p.x)} ${round(p.y)}`
+
+export const center = (box: Box): Point => ({ x: box.x + box.w / 2, y: box.y + box.h / 2 })
+
+/**
+ * A peer line from the sender card to the recipient card. Cards in one column (their left edges
+ * within 40 px) bow out to the right; otherwise the line leaves the facing edges.
+ */
+export function peerPath(from: Box, to: Box): LinePath {
+  const ay = from.y + PEER_ANCHOR_Y
+  const by = to.y + PEER_ANCHOR_Y
+  if (Math.abs(from.x - to.x) < 40) {
+    const x = Math.max(from.x + from.w, to.x + to.w)
+    const bow = 70
+    return { d: `M${pt({ x, y: ay })} C ${pt({ x: x + bow, y: ay })}, ${pt({ x: x + bow, y: by })}, ${pt({ x: x + 2, y: by })}`, label: { x: x + bow * 0.75, y: (ay + by) / 2 } }
+  }
+  const right = to.x > from.x
+  const ax = right ? from.x + from.w : from.x
+  const bx = right ? to.x : to.x + to.w
+  const k = Math.max(40, Math.abs(bx - ax) * 0.5) * (right ? 1 : -1)
+  const end = bx - (right ? 2 : -2)
+  return { d: `M${pt({ x: ax, y: ay })} C ${pt({ x: ax + k, y: ay })}, ${pt({ x: bx - k, y: by })}, ${pt({ x: end, y: by })}`, label: { x: (ax + bx) / 2, y: (ay + by) / 2 } }
+}
+
+/**
+ * A peer line whose other end is not on the view: a short stub from the card's right edge. The
+ * stub points into the card when the card is the recipient.
+ */
+export function stubPath(card: Box, cardIs: 'sender' | 'recipient'): LinePath {
+  const y = card.y + PEER_ANCHOR_Y
+  const edge = card.x + card.w
+  const free = edge + STUB_LENGTH
+  const d = cardIs === 'sender' ? `M${pt({ x: edge, y })} L ${pt({ x: free, y })}` : `M${pt({ x: free, y })} L ${pt({ x: edge + 2, y })}`
+  return { d, label: { x: free, y } }
+}
+
+/**
+ * A family line between two rows of one card (worker and parent, either direction), bowed
+ * through the card's left margin. `from` and `to` are the rows' status shapes.
+ */
+export function familyPath(from: Box, to: Box, card: Box): LinePath {
+  const a = { x: from.x, y: from.y + from.h / 2 }
+  const b = { x: to.x - 2, y: to.y + to.h / 2 }
+  const gx = card.x - FAMILY_MARGIN
+  return { d: `M${pt(a)} C ${pt({ x: gx, y: a.y })}, ${pt({ x: gx, y: b.y })}, ${pt(b)}`, label: { x: gx, y: (a.y + b.y) / 2 } }
+}
+
+/** A box relative to the host's top-left corner. */
+export function relativeBox(rect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>, host: Pick<DOMRect, 'left' | 'top'>): Box {
+  return { x: rect.left - host.left, y: rect.top - host.top, w: rect.width, h: rect.height }
+}

@@ -38,7 +38,7 @@ const hasForge = (projectId: string) => projectId === bootProject && forgeAvaila
 
 /** Keep NAV_ITEMS order, including optional Automations before Workflows and Reports. */
 function expectedOverflowHrefs(projectId: string): string[] {
-  return [...(automationsAvailable ? ['/automations'] : []), '/workflows', '/reports'].map(path => scoped(projectId, path))
+  return ['/git', ...(automationsAvailable ? ['/automations'] : []), '/workflows', '/reports'].map(path => scoped(projectId, path))
 }
 
 /** The main-row tab links every group renders: the health-gated list minus the More views. */
@@ -46,7 +46,7 @@ function expectedNavHrefs(projectId: string): string[] {
   const overflow = expectedOverflowHrefs(projectId)
   return [
     scoped(projectId, '/'),
-    scoped(projectId, '/git'),
+    scoped(projectId, '/activity'),
     ...(hasForge(projectId) ? [scoped(projectId, '/github')] : []),
     scoped(projectId, '/skills'),
     scoped(projectId, '/workflows'),
@@ -126,10 +126,17 @@ function assertProject(projectId: string, path: string): void {
   const expected = expectedNavHrefs(projectId)
   expect(browser.waitForValue(`Array.from(document.querySelectorAll('${nav} a')).map(a => new URL(a.href).pathname)`,
     value => JSON.stringify(value) === JSON.stringify(expected))).toEqual(expected)
-  expect(browser.waitForValue(`Array.from(document.querySelectorAll('${nav} a[aria-current="page"]')).map(a => new URL(a.href).pathname)`,
-    value => JSON.stringify(value) === JSON.stringify([scoped(projectId, path)]))).toEqual([scoped(projectId, path)])
   // The More views scope to the same project: every path the main row does not carry is in the menu.
   const overflow = expectedOverflowHrefs(projectId)
+  // A view in More (Git) lights the More button, and no link in the main row.
+  const inMore = overflow.includes(scoped(projectId, path))
+  const lit = inMore ? [] : [scoped(projectId, path)]
+  expect(browser.waitForValue(`Array.from(document.querySelectorAll('${nav} a[aria-current="page"]')).map(a => new URL(a.href).pathname)`,
+    value => JSON.stringify(value) === JSON.stringify(lit))).toEqual(lit)
+  if (inMore) {
+    expect(browser.waitForValue(`document.querySelector('${nav} [aria-label="More views"]')?.getAttribute('data-active') ?? null`,
+      value => value === 'true')).toBe('true')
+  }
   // Health can settle after the primary links, which are unchanged by optional views on a bare repo.
   expect(browser.waitForValue(`document.querySelectorAll('${nav} [aria-label="More views"]').length`,
     value => value === (overflow.length ? 1 : 0))).toBe(overflow.length ? 1 : 0)
@@ -166,7 +173,12 @@ describe('the project sidebar in a multi-project workspace', () => {
     browser.click(mark(ALPHA.id))
     assertProject(ALPHA.id, '/')
     expect(browser.waitForValue(`document.querySelector('${header} [data-slot="project-header-name"]')?.textContent`, value => value === ALPHA.name)).toBe(ALPHA.name)
-    browser.click(`${nav} a[href="${scoped(ALPHA.id, '/git')}"]`)
+    // Git lives in the More menu.
+    browser.click(`${nav} [aria-label="More views"]`)
+    browser.waitForFunction(`document.querySelector('[role="menu"] a[href="${scoped(ALPHA.id, '/git')}"]') !== null`)
+    browser.click(`[role="menu"] a[href="${scoped(ALPHA.id, '/git')}"]`)
+    // A More click while this menu still closes would toggle it shut again.
+    browser.waitForFunction(`document.querySelector('[role="menu"]') === null`)
     assertProject(ALPHA.id, '/git')
     expect(browser.waitForValue(`document.querySelectorAll('${nav} a[aria-label="GitHub"]').length`, value => value === 0)).toBe(0)
     browser.goto(baseUrl + scoped(ALPHA.id, '/git'))

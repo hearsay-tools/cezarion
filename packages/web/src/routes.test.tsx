@@ -169,6 +169,8 @@ describe('pageTitleContext', () => {
   it.each([
     ['/p/cezar/', 'Tasks'],
     ['/new', 'New task'],
+    ['/p/cezar/activity', 'Activity'],
+    ['/activity', 'Activity'],
     ['/p/cezar/git', 'Git'],
     ['/p/cezar/git/commits/abc123', 'Git'],
     ['/p/cezar/github/issues/543', 'GitHub'],
@@ -248,6 +250,18 @@ describe('scoped route map (/p/:projectId)', () => {
     renderAt('/tools')
     expect(routeName()).toBe('workspace-tools')
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Workspace tools')
+  })
+  it('opens the global activity view without forcing a project redirect', async () => {
+    renderAt('/activity')
+    expect(screen.getByTestId('location').getAttribute('data-pathname')).toBe('/activity')
+    expect((await screen.findByRole('link', { name: 'All projects' })).getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('link', { name: 'This project' }).getAttribute('href')).toBe(`/p/${BOOT}/activity`)
+  })
+  // Not a ROUTE_CASES row: the flat `/activity` is the global view, never a legacy redirect.
+  it(`/p/${BOOT}/activity → activity`, () => {
+    renderAt(`/p/${BOOT}/activity`)
+    expect(routeName()).toBe('activity')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Activity')
   })
   for (const [url, route, title] of ROUTE_CASES) {
     it(`/p/${BOOT}${url} → ${route}`, () => {

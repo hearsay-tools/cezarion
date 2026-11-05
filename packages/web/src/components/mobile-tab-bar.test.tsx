@@ -29,26 +29,32 @@ const bar = () => screen.getByRole('navigation', { name: 'Views' })
 const tabLabels = () => Array.from(bar().children).map((el) => el.textContent?.replace(/\d+\+?$/, '').trim())
 
 describe('MobileTabBar', () => {
-  it('shows Tasks, Git, GitHub and More when the forge is available', () => {
+  it('shows Tasks, Activity, GitHub and More when the forge is available', () => {
     renderBar('/')
-    expect(tabLabels()).toEqual(['Tasks', 'Git', 'GitHub', 'More'])
+    expect(tabLabels()).toEqual(['Tasks', 'Activity', 'GitHub', 'More'])
   })
 
   it('drops the GitHub tab without a forge, leaving three slots', () => {
     renderBar('/', { forge: false })
-    expect(tabLabels()).toEqual(['Tasks', 'Git', 'More'])
+    expect(tabLabels()).toEqual(['Tasks', 'Activity', 'More'])
   })
 
   it('never puts flag-gated or More views in the bar, even with every flag on', () => {
     renderBar('/', { forge: true, automations: true })
-    expect(tabLabels()).toEqual(['Tasks', 'Git', 'GitHub', 'More'])
+    expect(tabLabels()).toEqual(['Tasks', 'Activity', 'GitHub', 'More'])
   })
 
   it('marks the tab that owns the route, including project-scoped and nested routes', () => {
-    renderBar('/p/cezarion/git/commits')
-    expect(within(bar()).getByRole('link', { name: 'Git' }).getAttribute('aria-current')).toBe('page')
+    renderBar('/p/cezarion/activity')
+    expect(within(bar()).getByRole('link', { name: 'Activity' }).getAttribute('aria-current')).toBe('page')
     expect(within(bar()).getByRole('link', { name: 'Tasks' }).hasAttribute('aria-current')).toBe(false)
     expect(within(bar()).getByRole('button', { name: 'More' }).hasAttribute('data-active')).toBe(false)
+  })
+
+  it('lights More for Git, which lives in the More sheet, on nested routes too', () => {
+    renderBar('/p/cezarion/git/commits')
+    expect(within(bar()).queryByRole('link', { name: 'Git' })).toBeNull()
+    expect(within(bar()).getByRole('button', { name: 'More' }).getAttribute('data-active')).toBe('true')
   })
 
   it('lights More, and no tab, for a route that lives in the More sheet', () => {
@@ -90,10 +96,10 @@ describe('More sheet', () => {
   const open = () => fireEvent.click(within(bar()).getByRole('button', { name: 'More' }))
   const sheet = () => screen.getByRole('dialog', { name: 'More' })
 
-  it('lists Skills, Workflows, Reports and Project settings, without flagged rows when flags are off', () => {
+  it('lists Git, Skills, Workflows, Reports and Project settings, without flagged rows when flags are off', () => {
     renderBar('/')
     open()
-    expect(within(sheet()).getAllByRole('link').map((a) => a.textContent)).toEqual(['Skills', 'Workflows', 'Reports', 'Project settings'])
+    expect(within(sheet()).getAllByRole('link').map((a) => a.textContent)).toEqual(['Git', 'Skills', 'Workflows', 'Reports', 'Project settings'])
     expect(within(sheet()).queryByText('Shown when their flag is on')).toBeNull()
     expect(within(sheet()).getByText('cezarion')).toBeTruthy()
   })

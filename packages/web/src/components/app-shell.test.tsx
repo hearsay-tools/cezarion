@@ -65,9 +65,20 @@ describe('AppShell', () => {
     expect(screen.getByTestId('location').textContent).toBe('/workflows')
   })
 
+  it('keeps Git in More and lights the More button on a Git route', async () => {
+    renderShell('/git/commits', { })
+    expect(within(nav()).queryByRole('link', { name: 'Git' })).toBeNull()
+    const more = within(nav()).getByRole('button', { name: 'More views' })
+    expect(more.getAttribute('data-active')).toBe('true')
+    fireEvent.keyDown(more, { key: 'Enter' })
+    const git = await screen.findByRole('menuitem', { name: 'Git' })
+    expect(git.getAttribute('aria-current')).toBe('page')
+    expect(git.getAttribute('href')).toBe('/git')
+  })
+
   it('moves Workflows into More when six views would crowd the overflow button', async () => {
     renderShell('/workflows', { })
-    expect(allNavLinks().map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Git', 'GitHub', 'Skills', 'Settings'])
+    expect(allNavLinks().map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Activity', 'GitHub', 'Skills', 'Settings'])
     const more = within(nav()).getByRole('button', { name: 'More views' })
     expect(more.getAttribute('data-active')).toBe('true')
     fireEvent.keyDown(more, { key: 'Enter' })
@@ -78,11 +89,11 @@ describe('AppShell', () => {
     renderShell('/reports', { automationsAvailable })
     const more = within(nav()).getByRole('button', { name: 'More views' })
     expect(more.getAttribute('data-active')).toBe('true')
-    expect(allNavLinks().map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Git', 'GitHub', 'Skills', 'Settings'])
+    expect(allNavLinks().map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Activity', 'GitHub', 'Skills', 'Settings'])
     fireEvent.keyDown(more, { key: 'Enter' })
     await screen.findByRole('menuitem', { name: 'Reports' })
     expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([
-      ...(automationsAvailable ? ['Automations'] : []), 'Workflows', 'Reports',
+      'Git', ...(automationsAvailable ? ['Automations'] : []), 'Workflows', 'Reports',
     ])
     expect(screen.getByRole('menuitem', { name: 'Reports' }).getAttribute('aria-current')).toBe('page')
   })
@@ -353,8 +364,8 @@ describe('AppShell', () => {
     // Reports always supplies More; Workflows shares it to keep five primary tabs.
     renderShell('/', { automationsAvailable: false })
     const links = allNavLinks()
-    expect(links.map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Git', 'GitHub', 'Skills', 'Settings'])
-    expect(links.map(a => a.getAttribute('href'))).toEqual(['/', '/git', '/github', '/skills', '/settings'])
+    expect(links.map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Activity', 'GitHub', 'Skills', 'Settings'])
+    expect(links.map(a => a.getAttribute('href'))).toEqual(['/', '/activity', '/github', '/skills', '/settings'])
   })
 
   // R6 Step 1.1: no forge, no GitHub tab — the nav item disappears entirely (spec's
@@ -384,7 +395,7 @@ describe('AppShell', () => {
   describe('active nav state follows the current route', () => {
     const cases: Array<[entry: string, active: string]> = [
       ['/', 'Tasks'],
-      ['/git', 'Git'],
+      ['/activity', 'Activity'],
       ['/skills', 'Skills'],
       // Tasks stays lit while a task thread is open (spec's "Task list & table").
       ['/tasks/abc123', 'Tasks'],
@@ -981,7 +992,7 @@ describe('AppShell', () => {
       const root = drawer() as HTMLElement
       expect(root.querySelector('[data-slot="sidebar-content"]')).toBeNull()
       expect(within(root).queryByRole('navigation', { name: 'Main' })).toBeNull()
-      expect(within(root).queryByRole('link', { name: 'Git' })).toBeNull()
+      expect(within(root).queryByRole('link', { name: 'Activity' })).toBeNull()
       expect(within(root).queryByRole('link', { name: /New task/ })).toBeNull()
       expect(within(root).getByText('list')).toBeTruthy()
       // The desktop sidebar still carries all of it.

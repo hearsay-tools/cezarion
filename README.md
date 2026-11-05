@@ -427,7 +427,7 @@ the repo: per-project state stays exactly where it was, in that repo's
 Every view is project-scoped:
 
 ```
-/p/<projectId>/            tasks · git · github · skills · workflows · settings
+/p/<projectId>/            tasks · activity · git · github · skills · workflows · reports · settings
 ```
 
 `<projectId>` is a slug derived from the folder name (`my-app`, then `my-app-2`
@@ -443,7 +443,8 @@ indicators, including tasks outside the visible row limit. These controls work
 in the mobile drawer too. **Archive all** appears only on Finished and archives
 all eligible unpinned tasks, including hidden rows; individual archive actions
 and Undo remain available. Archived keeps its existing history view.
-Inbox and Automations appear in More views when enabled. The project menu
+The view tabs are Tasks, Activity, GitHub, Skills and Settings. More views holds Git,
+Workflows and Reports, and Automations when enabled. The project menu
 offers Mark all read and project settings; local mode also offers Open in and
 Copy path. Active/Archived remains below the Tasks heading. The new-task
 composer names the project it will run in.
@@ -537,7 +538,7 @@ The Git sidebar lists **Task worktrees** that still exist on disk, including ret
 worktrees from finished tasks. Each row shows its branch, task title, status and
 available diff counts, and opens that task's Changes tab. Reclaimed worktrees disappear
 from the list. Changes, Commits and Branches remain tabs in the main repository header.
-On mobile, the Git tab opens the worktree list; **Open repository** opens the repository
+On mobile, Git sits in the More sheet and opens the worktree list; **Open repository** opens the repository
 view, and **Back to worktrees** returns to the list.
 
 ### Grouping connected repositories: tags and the All tasks page
@@ -1490,7 +1491,7 @@ over a file that is not valid JSON):
   "defaultRunner": "claude", // agent backend: "claude" (default) · "codex" · "opencode" · "cursor" · "pi" · "omp"
   "modelsLocked": true,      // optional: native per-runner model is fixed/read-only; runner stays selectable
   "plannerModel": "sonnet",  // model the "Plan first" button uses to draft chains
-  "baseBranch": "develop",   // branch worktrees fork from + PRs target (also settable in the Git tab)
+  "baseBranch": "develop",   // branch worktrees fork from + PRs target (also settable in the Git view)
   "worktreeSetup": { "commands": ["npm ci"] } // prepare each new worktree before the agent starts (below)
 }
 ```

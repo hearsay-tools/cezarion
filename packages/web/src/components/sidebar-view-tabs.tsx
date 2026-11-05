@@ -6,6 +6,9 @@ import { cn } from '@/lib/utils'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 
+/** The views the desktop More menu holds. */
+const OVERFLOW_PATHS: readonly string[] = ['/git', '/automations', '/workflows', '/reports']
+
 export function SidebarViewTabs({ items, activeTo, needsYou = false, onNavigate }: {
   items: NavItem[]
   activeTo: string | null
@@ -14,9 +17,10 @@ export function SidebarViewTabs({ items, activeTo, needsYou = false, onNavigate 
 }) {
   const [open, setOpen] = useState(false)
   const nav = useRef<HTMLElement>(null)
-  // Reports always needs More. Keep Workflows beside it so five primary tabs fit unclipped.
-  // Filtering preserves the existing NAV_ITEMS order, including optional Automations first.
-  const overflow = items.filter(item => ['/automations', '/workflows', '/reports'].includes(item.to))
+  // Five primary tabs fit unclipped: Tasks, Activity, GitHub, Skills, Settings. Git, Workflows and
+  // Reports always sit in More (spec 2026-11-05-live-activity-view, Navigation). Filtering
+  // preserves the NAV_ITEMS order: Git first, then the optional Automations.
+  const overflow = items.filter(item => OVERFLOW_PATHS.includes(item.to))
   const primary = items.filter(item => !overflow.includes(item))
   const overflowActive = overflow.some(item => item.to === activeTo)
   const moveFocus = (event: KeyboardEvent) => {

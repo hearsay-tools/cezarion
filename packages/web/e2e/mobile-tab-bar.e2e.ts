@@ -124,7 +124,7 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
 
     const tabs = [
       { to: '/', route: 'tasks' },
-      { to: '/git', route: 'repo-git' },
+      { to: '/activity', route: 'activity' },
       ...(forge ? [{ to: '/github', route: 'github' }] : []),
     ]
     // The tab bar carries exactly the views it promises (GitHub only with a forge) plus More.
@@ -136,8 +136,9 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
       expect(browser.waitForValue(`document.querySelector('${TAB_BAR} a[data-tab="${to}"]')?.getAttribute('aria-current')`)).toBe('page')
     }
 
-    // More: Skills, Workflows, Reports, Project settings always; Automations only with its flag.
+    // More: Git, Skills, Workflows, Reports, Project settings always; Automations only with its flag.
     const rows = [
+      { to: '/git', route: 'repo-git' },
       { to: '/skills', route: 'skills' },
       { to: '/workflows', route: 'workflows' },
       { to: '/reports', route: 'reports' },
@@ -168,7 +169,7 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
     // One run waits on the user, so the Tasks tab carries the current project's top pill.
     const badge = browser.waitForValue(`[...document.querySelectorAll('${TAB_BAR} a[data-tab="/"] [data-slot="rail-pill-top"] [data-segment]')].map((el) => el.getAttribute('data-segment'))`, (tones: string[] | null) => Array.isArray(tones) && tones.length > 0)
     expect(badge).toContain('amber')
-    expect(browser.count(`${TAB_BAR} a[data-tab="/git"] [data-slot="rail-pill-top"]`)).toBe(0)
+    expect(browser.count(`${TAB_BAR} a[data-tab="/activity"] [data-slot="rail-pill-top"]`)).toBe(0)
     // The in-motion pill is status, not a reason to tap: never on the bar.
     expect(browser.count(`${TAB_BAR} [data-slot="rail-pill-bottom"]`)).toBe(0)
     // The list's own round FAB is gone: one floating button, the bar's.
@@ -295,11 +296,11 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
         expect(sample.ratio, `${variant.id} ${label} ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(min)
       }
       check(`${TAB_BAR} a[data-tab="/"]`, 'active tab label')
-      check(`${TAB_BAR} a[data-tab="/git"]`, 'inactive tab label')
+      check(`${TAB_BAR} a[data-tab="/activity"]`, 'inactive tab label')
       check(MORE_TAB, 'More tab label')
       check(FAB, 'New task button')
       // The bar's icons are graphics: 3:1.
-      check(`${TAB_BAR} a[data-tab="/git"] svg`, 'inactive tab icon', 3)
+      check(`${TAB_BAR} a[data-tab="/activity"] svg`, 'inactive tab icon', 3)
       openMore()
       for (const to of ['/skills', '/workflows', '/settings']) {
         check(`${SHEET} [data-more-row="${to}"] span`, `More row ${to}`)

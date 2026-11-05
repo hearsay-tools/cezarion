@@ -16,6 +16,7 @@ describe('activeNavPath', () => {
     ['/tasks/abc123/files', '/'],
 
     ['/inbox', null],
+    ['/activity', '/activity'],
     ['/git', '/git'],
     ['/github', '/github'],
     ['/github/issues/42', '/github'],
@@ -67,6 +68,7 @@ describe('NAV_ITEMS', () => {
   it('is the nav from the spec, in mockup order', () => {
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
       'Tasks',
+      'Activity',
       'Git',
       'GitHub',
       'Automations',
@@ -101,6 +103,7 @@ describe('visibleNavItems', () => {
   it('without a forge, only the GitHub item drops out; Automations stays', () => {
     expect(labelsOf({ forge: false, automations: true })).toEqual([
       'Tasks',
+      'Activity',
       'Git',
       'Automations',
       'Skills',
@@ -113,6 +116,7 @@ describe('visibleNavItems', () => {
   it('keeps Inbox out of the full navigation', () => {
     expect(labelsOf({ forge: true, automations: true })).toEqual([
       'Tasks',
+      'Activity',
       'Git',
       'GitHub',
       'Automations',
@@ -126,6 +130,7 @@ describe('visibleNavItems', () => {
   it('without the automations opt-in, exactly the Automations item drops out (#801)', () => {
     expect(labelsOf({ forge: true, automations: false })).toEqual([
       'Tasks',
+      'Activity',
       'Git',
       'GitHub',
       'Skills',
@@ -144,6 +149,7 @@ describe('visibleNavItems', () => {
   it('drops gated items when nothing is available', () => {
     expect(labelsOf({ forge: false, automations: false })).toEqual([
       'Tasks',
+      'Activity',
       'Git',
       'Skills',
       'Workflows',

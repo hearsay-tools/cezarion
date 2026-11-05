@@ -16,6 +16,11 @@ it('follows inherited ink and size through expressions and fragments', () => {
 it('accepts safe ink, separate surfaces, large text, icons and unrelated text', () => {
   expect(scan(`<><div className="bg-card-2"><p className="text-muted-foreground text-xs">ok</p><svg className="text-danger"/><p className="text-danger text-[24px]">large</p><p className="bg-background text-danger">other</p></div><p className="text-danger">elsewhere</p></>`)).toEqual([])
 })
+it('treats small amber ink as unsafe on card-2 and the amber signal word as safe', () => {
+  expect(scan(`<p className="bg-card-2 text-pending-strong text-[11px]">bad</p>`)).toHaveLength(1)
+  expect(scan(`<div className="bg-card-2"><span className={cn('text-[11px]', { 'text-pending-strong': amber, 'text-muted-foreground': !amber })}>bad</span></div>`)).toHaveLength(1)
+  expect(scan(`<div className="bg-card-2"><span className={cn('text-[11px]', { 'text-signal-word-amber': amber, 'text-muted-foreground': !amber })}>ok</span></div>`)).toEqual([])
+})
 it('checks every possible size and background branch conservatively', () => {
   expect(scan(`<p className={cn('bg-card-2 text-danger', ok ? 'text-2xl' : 'text-xs')}>bad</p>`)).toHaveLength(1)
   expect(scan(`<p className={cn('text-xs text-danger', ok ? 'bg-background' : 'bg-card-2')}>bad</p>`)).toHaveLength(1)

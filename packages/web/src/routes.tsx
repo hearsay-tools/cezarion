@@ -17,6 +17,7 @@ import { useHealth, useProjects, useRunsIndex, useRunsSearch } from './api/queri
 import { ProjectScopeProvider } from './api/project-scope-context'
 import { locationToRestore, readStoredLastLocation } from './lib/last-location'
 import { Navigate as ScopedNavigate, stripProjectPrefix } from './lib/project-router'
+import { ActivityLoading } from './routes/activity/activity-loading'
 import { GithubLoading } from './routes/github/github-loading'
 import { InboxRoute } from './routes/inbox'
 import { NewTaskRoute } from './routes/new-task'
@@ -89,6 +90,15 @@ const GithubRoute = lazy(() =>
 const ReportsRoute = lazy(() => import('./routes/reports').then(m => { return { default: m.ReportsRoute }; }))
 const WorkflowsRoute = lazy(() =>
   import('./routes/workflows/workflows').then((m) => ({ default: m.WorkflowsRoute })),
+)
+
+/** Lazy: the activity view (spec 2026-11-05-live-activity-view) is a graph surface only its own
+ *  tab uses, so the home screen does not pay for it. */
+const ProjectActivityRoute = lazy(() =>
+  import('./routes/activity/activity-route').then((m) => ({ default: m.ProjectActivityRoute })),
+)
+const GlobalActivityRoute = lazy(() =>
+  import('./routes/activity/global-activity-route').then((m) => ({ default: m.GlobalActivityRoute })),
 )
 
 /** Lazy because the skill detail renders the skill body through the same markdown stack the
@@ -320,6 +330,8 @@ const PAGE_TITLE_ROUTES = [
   { pattern: '/tasks', pageLabel: 'All tasks' },
   { pattern: '/tools', pageLabel: 'Workspace tools' },
   { pattern: '/new', pageLabel: 'New task' },
+  // The project view and the global `/activity` share one row: the global path has no prefix.
+  { pattern: '/activity', pageLabel: 'Activity' },
   { pattern: '/git/*', pageLabel: 'Git' },
   { pattern: '/github/*', pageLabel: 'GitHub' },
   { pattern: '/automations/*', pageLabel: 'Automations' },
@@ -350,6 +362,14 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
     <Route path="/p/:projectId" element={<ProjectScopeRoute />}>
       <Route index element={<TasksOverviewRoute />} />
       <Route path="new" element={<NewTaskProjectRoute />} />
+      <Route
+        path="activity"
+        element={
+          <Suspense fallback={<ActivityLoading />}>
+            <ProjectActivityRoute />
+          </Suspense>
+        }
+      />
       {/* Every task tab shares one layout, which hosts the live preview pane (#781). */}
       <Route path="tasks/:id" element={<TaskPreviewLayout />}>
         <Route
@@ -643,6 +663,17 @@ export function AppRoutes() {
           React Router ranks this static segment above that `*`, so the two never compete. */}
       <Route path="/tasks" element={<GlobalTasksRoute />} />
       <Route path="/tools" element={<WorkspaceToolsRoute />} />
+      {/* The global activity view, beside `/tasks` for the same reason: every project's activity
+          scoped to one project is a contradiction, and without this route `LegacyPathRedirect`
+          would send `/activity` to the boot project. */}
+      <Route
+        path="/activity"
+        element={
+          <Suspense fallback={<ActivityLoading />}>
+            <GlobalActivityRoute />
+          </Suspense>
+        }
+      />
 
       {/* Global settings (multi-project spec, step 3.5) — the one cockpit area that is NOT
           under `/p/:projectId`, because nothing here belongs to a project: appearance and
