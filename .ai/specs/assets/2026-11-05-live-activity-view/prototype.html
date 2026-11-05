@@ -164,7 +164,10 @@ svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-eve
 #global .proj > header { display: flex; align-items: center; gap: 12px; margin-bottom: 34px; }
 #global .proj h3 { margin: 0; font-size: 14px; font-weight: 600; }
 #global .proj .sec { color: var(--text-secondary); }
-#global .open { margin-left: auto; font-size: 12px; color: var(--accent-text); cursor: pointer; }
+#global .open { all: unset; margin-left: auto; font-size: 12px; color: var(--accent-text); cursor: pointer; }
+#global .open:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+#global .open-note { margin-left: auto; font-size: 12px; }
+.btn { border: 0; cursor: pointer; font-family: inherit; }
 .strip { position: relative; display: flex; gap: 14px; flex-wrap: wrap; }
 .pill { position: relative; z-index: 1; width: 200px; background: var(--surface-muted); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 8px 10px; transition: border-color .5s; }
 .pill.s-you { border-color: color-mix(in oklch, var(--action) 60%, var(--border-subtle)); animation: glow 2.6s ease-in-out infinite; }
@@ -204,7 +207,7 @@ svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-eve
     <span class="proto">Prototype · scripted 50 s loop</span>
     <div class="seg"><button id="b-project" class="on">This project</button><button id="b-global">All projects</button></div>
   </div>
-  <div class="summary" id="summary"></div>
+  <div class="summary" id="summary" aria-live="polite"></div>
 
   <div id="project" class="board">
     <div class="graph" id="graph">
@@ -229,11 +232,11 @@ svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-eve
   </div>
 
   <div id="global" class="hidden">
-    <div class="proj"><header><h3>cezarion</h3><span class="sec" id="g-cz-sub"></span><span class="open" data-go="project">Open project activity →</span></header>
+    <div class="proj"><header><h3>cezarion</h3><span class="sec" id="g-cz-sub"></span><button type="button" class="open" data-go="project">Open project activity →</button></header>
       <div class="strip" id="s-cz"><svg class="edges" id="g-edges"></svg></div></div>
-    <div class="proj"><header><h3>squeal</h3><span class="sec">2 active tasks · 2 workers</span><span class="open">Open project activity →</span></header>
+    <div class="proj"><header><h3>squeal</h3><span class="sec">2 active tasks · 2 workers</span><span class="sec open-note">Sample project: no project view in this prototype</span></header>
       <div class="strip" id="s-sq"></div></div>
-    <div class="proj"><header><h3>mega-course</h3><span class="sec">1 active task</span><span class="open">Open project activity →</span></header>
+    <div class="proj"><header><h3>mega-course</h3><span class="sec">1 active task</span><span class="sec open-note">Sample project: no project view in this prototype</span></header>
       <div class="strip" id="s-mg"></div></div>
     <div class="empty">2 more projects have no active work: notes, hearsay-site</div>
   </div>
@@ -331,7 +334,7 @@ function renderTask(t, changed) {
   if (changed) { void el.offsetWidth; el.classList.add('changed'); }
   el.innerHTML = `<header>${shape(t.state)}<h3>${t.title}</h3><svg class="spark" viewBox="0 0 62 16"></svg></header>
     <div class="meta">${t.meta}</div>${nowBox(t)}
-    ${t.state === 'you' ? '<div class="act"><span class="btn">Answer</span><span class="btn ghost">Open task</span></div>' : ''}
+    ${t.state === 'you' ? '<div class="act"><button type="button" class="btn" data-open-task>Answer</button><button type="button" class="btn ghost" data-open-task>Open task</button></div>' : ''}
     ${t.workers.length ? `<ul class="workers">${t.workers.map(workerRow).join('')}</ul>` : ''}
     ${t.finished ? `<div class="finished"><b>✓ ${t.finished}</b> worker${t.finished > 1 ? 's' : ''} finished</div>` : ''}`;
   for (const w of t.workers) { w.enter = w.flash = false; }
@@ -572,6 +575,8 @@ function scope(which) {
 }
 $('#b-project').onclick = () => scope('project'); $('#b-global').onclick = () => scope('global');
 document.querySelector('[data-go="project"]').onclick = () => scope('project');
+// Prototype: the task actions note the click in the feed (the real view opens the task).
+document.addEventListener('click', (ev) => { if (ev.target.closest && ev.target.closest('[data-open-task]')) pushFeed('t-you', 'You opened Designing activity view'); });
 
 /* ---------- loop ---------- */
 let lastBeat = 0, lastLive = -1;

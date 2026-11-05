@@ -408,6 +408,18 @@ active, it hands over to `gh pr checks --watch` and probes only the head SHA eve
   view), and for 15 s after each HTTP snapshot read of it. So a remote or fallback
   view that re-reads every 5 s keeps its check counts fresh, and demand ends 15 s
   after the last reader leaves.
+- A wait does not name its project, and one supervisor serves every project of the
+  workspace. The registry learns a wait's project from the snapshot that reads it
+  (`CiProgressSource.read(waitId, projectId)`), so demand uses the same project ids the
+  activity route marks. A project is read before anyone watches it, so a watched wait
+  has its project by the time its demand matters. The registry records nothing for a
+  wait this process does not watch.
+- The shared CI resource (`acquireCiResources`) holds one `CiProgressRegistry` for each
+  workspace, next to its supervisor, and `RunManager.ciProgress` exposes it. A
+  `RunManager` builds the supervisor, outside the cockpit and often before it, so the
+  registry owns a one-slot demand: the activity route plugs its `ActivityDemand` in with
+  `useDemand(demand)`, which returns a release. With no demand plugged in, nobody
+  watches, and the `--watch` phase reads no extra checks.
 - A progress read never changes the wait's outcome. A failed read keeps the last
   progress and is not an error. The `--watch` process, the head probe and the result
   are unchanged.
