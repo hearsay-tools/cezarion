@@ -239,6 +239,41 @@ describe('ToolActivityTracker', () => {
     expect(read()).toEqual({ tool: { title: 'Ran b after resume', toolKind: 'execute', status: TOOL_STATUS.running, startedAt: iso(T0 + 2_000) }, rate: rateWith({ 29: 1 }) });
   });
 
+  it('shows no tool from before a resume: a late tool start after a stop is cleared when the run turns live', () => {
+    const { clock, tracked, read } = tracker();
+    const store = fakeStore();
+    const feed = tracked.attach(store);
+    // Stopped before its first tool; its session still reports a tool that never completes.
+    store.emit('run', runChange(RUN, RUN_STATUS.cancelled));
+    feed.observe(RUN, started(tool('late', { title: 'Ran late' })));
+    expect(read()).toBeUndefined();
+    // A running tool is never pruned: the marked entry outlives 60 s and another run's sweep.
+    clock.now += 120_000;
+    feed.observe('other', started(tool('a')));
+
+    store.emit('run', runChange(RUN, RUN_STATUS.running));
+    expect(read()).toBeUndefined();
+    feed.observe(RUN, started(tool('new', { title: 'Ran after resume' })));
+    expect(read()).toEqual({ tool: { title: 'Ran after resume', toolKind: 'execute', status: TOOL_STATUS.running, startedAt: iso(T0 + 120_000) }, rate: rateWith({ 29: 1 }) });
+  });
+
+  it('keeps a live run’s entry on a live run change, and holds a stop marker for 60 s only', () => {
+    const { clock, tracked, read } = tracker();
+    const store = fakeStore();
+    const feed = tracked.attach(store);
+    feed.observe(RUN, started(tool('a')));
+    store.emit('run', runChange(RUN, RUN_STATUS.waiting));
+    expect(read()?.tool?.title).toBe('Ran a');
+
+    store.emit('run', runChange('stopped', RUN_STATUS.done));
+    clock.now += 60_000;
+    feed.observe(RUN, completed(tool('a', { status: TOOL_STATUS.completed })));
+    // The sweep pruned the idle marker: a much later event is a plain entry again (still hidden by the
+    // read model, which shows tool activity only for a live run).
+    feed.observe('stopped', completed(tool('b', { status: TOOL_STATUS.completed, title: 'Ran b' })));
+    expect(tracked.read('stopped', clock.now)?.tool?.title).toBe('Ran b');
+  });
+
   it('drops the runs a feed fed when it detaches, stops listening, and ignores later events', () => {
     const { tracked } = tracker();
     const store = fakeStore();

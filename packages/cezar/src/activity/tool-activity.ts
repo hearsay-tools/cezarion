@@ -22,7 +22,7 @@ export interface ToolActivityStore extends Pick<RunStore, 'redactText'> {
 export interface ToolActivityFeed {
   /** One UI event of a run of this store, redacted with the store's own redactor. */
   observe(runId: string, event: UiEvent): void;
-  /** The manager is disposed: stop listening, drop the runs this feed fed, and ignore later events. */
+  /** The manager is disposed: stop listening, drop this feed's entries, and ignore later events. */
   detach(): void;
 }
 
@@ -35,8 +35,12 @@ interface RunActivity {
   buckets: number[];
   /** The epoch second of the newest bucket. */
   second: number;
-  /** When the run's last tool event arrived. */
+  /** When the run's last tool event arrived, or when it stopped. */
   lastEventAt: number;
+  /** The run left the live set: the entry holds no tool from before, only late events after. */
+  stopped?: true;
+  /** The feed that made the entry; its detach drops it. */
+  owner?: object;
 }
 
 /**
@@ -61,6 +65,10 @@ export class ToolActivityTracker implements ToolActivitySource {
    * that the clamp would cut can stay.
    */
   observe(runId: string, event: UiEvent, redact: (text: string) => string): void {
+    this.record(undefined, runId, event, redact);
+  }
+
+  private record(owner: object | undefined, runId: string, event: UiEvent, redact: (text: string) => string): void {
     if (event.type !== 'item.started' && event.type !== 'item.updated' && event.type !== 'item.completed') return;
     if (event.item.kind !== 'tool') return;
     const item = event.item;
@@ -76,7 +84,7 @@ export class ToolActivityTracker implements ToolActivitySource {
       return;
     }
     if (!run?.open.has(item.id)) {
-      this.started(runId, item, at, { terminal, closes, title: toolTitle(item, redact) });
+      this.started(runId, item, at, { terminal, closes, owner, title: toolTitle(item, redact) });
       return;
     }
     if (closes) run.open.delete(item.id);
@@ -89,7 +97,10 @@ export class ToolActivityTracker implements ToolActivitySource {
       : { ...latest.tool, ...title, status: item.status };
   }
 
-  /** The run's latest tool and its rate, the ring shifted to `now`; undefined when it ran no tool. */
+  /**
+   * The run's latest tool and its rate, the ring shifted to `now`; undefined when it ran no tool
+   * or has stopped.
+   */
   read(runId: string, now: number): { tool?: ActivityTool; rate: readonly number[] } | undefined {
     const run = this.runs.get(runId);
     if (!run) return undefined;
@@ -97,6 +108,7 @@ export class ToolActivityTracker implements ToolActivitySource {
       this.runs.delete(runId);
       return undefined;
     }
+    if (run.stopped) return undefined;
     shift(run, secondOf(now));
     return { ...(run.latest ? { tool: { ...run.latest.tool } } : {}), rate: [...run.buckets] };
   }
@@ -107,39 +119,47 @@ export class ToolActivityTracker implements ToolActivitySource {
   }
 
   /**
-   * The feed of one run manager over its `store`. A run that leaves the live set or is deleted is
-   * dropped on that run change. A session can still emit events after the drop (a worker is
-   * cancelled before its session shuts down); such an entry is harmless, because the read model
-   * shows tool activity only for a live run, and the idle prune removes it.
+   * The feed of one run manager over its `store`. A run change out of the live set drops the run's
+   * tool activity and leaves a stop marker in its place; a deletion drops the entry. A session can
+   * still emit events after the stop (a worker is cancelled before its session shuts down): they
+   * land in the marked entry, which read() never shows, and the read model shows tool activity
+   * only for a live run anyway. A run change back into the live set (a resume) clears a marked
+   * entry, so a resumed run starts empty. A marker with no tool in flight is pruned like any idle
+   * entry, after 60 s.
    */
   attach(store: ToolActivityStore): ToolActivityFeed {
-    /** Runs this feed has fed and not dropped yet: detach drops them. */
-    const fed = new Set<string>();
+    const owner = {};
     let attached = true;
-    const forget = (runId: string) => {
-      if (fed.delete(runId)) this.drop(runId);
-    };
     const onRun = (run: RunRecord) => {
-      if (!isLiveStatus(run.status)) forget(run.id);
+      if (isLiveStatus(run.status)) {
+        if (this.runs.get(run.id)?.stopped) this.runs.delete(run.id);
+      } else {
+        this.stop(run.id, owner);
+      }
     };
+    const onDeleted = (runId: string) => this.drop(runId);
     store.on('run', onRun);
-    store.on('deleted', forget);
+    store.on('deleted', onDeleted);
     const redact = (text: string) => store.redactText(text);
     return {
       observe: (runId, event) => {
-        if (!attached) return;
-        this.observe(runId, event, redact);
-        if (this.runs.has(runId)) fed.add(runId);
+        if (attached) this.record(owner, runId, event, redact);
       },
       detach: () => {
         if (!attached) return;
         attached = false;
         store.off('run', onRun);
-        store.off('deleted', forget);
-        for (const runId of fed) this.drop(runId);
-        fed.clear();
+        store.off('deleted', onDeleted);
+        for (const [runId, run] of this.runs) if (run.owner === owner) this.runs.delete(runId);
       },
     };
+  }
+
+  /** Replace the run's entry with an empty, marked one: the run left the live set. */
+  private stop(runId: string, owner: object): void {
+    const at = this.now();
+    this.sweep(at);
+    this.runs.set(runId, { open: new Set(), buckets: zeros(), second: secondOf(at), lastEventAt: at, stopped: true, owner });
   }
 
   /** Prune every idle entry, at most once a second. Reads prune the run they read. */
@@ -151,10 +171,10 @@ export class ToolActivityTracker implements ToolActivitySource {
   }
 
   /** The first event of a tool item: one call, and the latest tool. A tool first seen at its end counts once. */
-  private started(runId: string, item: UiToolItem, at: number, { terminal, closes, title }: { terminal: boolean; closes: boolean; title: string }): void {
+  private started(runId: string, item: UiToolItem, at: number, { terminal, closes, owner, title }: { terminal: boolean; closes: boolean; owner: object | undefined; title: string }): void {
     let run = this.runs.get(runId);
     if (!run) {
-      run = { open: new Set(), buckets: Array.from({ length: ACTIVITY_RATE_SECONDS }, () => 0), second: secondOf(at), lastEventAt: at };
+      run = { open: new Set(), buckets: zeros(), second: secondOf(at), lastEventAt: at, ...(owner ? { owner } : {}) };
       this.runs.set(runId, run);
     }
     shift(run, secondOf(at));
@@ -204,5 +224,6 @@ const idle = (run: RunActivity, now: number): boolean =>
   now - run.lastEventAt >= TOOL_ACTIVITY_IDLE_MS && (run.latest === undefined || run.latest.tool.endedAt !== undefined);
 
 const secondOf = (ms: number): number => Math.floor(ms / 1000);
+const zeros = (): number[] => Array.from({ length: ACTIVITY_RATE_SECONDS }, () => 0);
 const iso = (ms: number): string => new Date(ms).toISOString();
 const toolTitle = (item: UiToolItem, redact: (text: string) => string): string => clampText(redact(item.title), ACTIVITY_TOOL_TITLE_MAX);
