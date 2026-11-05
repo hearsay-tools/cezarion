@@ -177,6 +177,8 @@ describe('the project sidebar in a multi-project workspace', () => {
     browser.click(`${nav} [aria-label="More views"]`)
     browser.waitForFunction(`document.querySelector('[role="menu"] a[href="${scoped(ALPHA.id, '/git')}"]') !== null`)
     browser.click(`[role="menu"] a[href="${scoped(ALPHA.id, '/git')}"]`)
+    // A More click while this menu still closes would toggle it shut again.
+    browser.waitForFunction(`document.querySelector('[role="menu"]') === null`)
     assertProject(ALPHA.id, '/git')
     expect(browser.waitForValue(`document.querySelectorAll('${nav} a[aria-label="GitHub"]').length`, value => value === 0)).toBe(0)
     browser.goto(baseUrl + scoped(ALPHA.id, '/git'))
