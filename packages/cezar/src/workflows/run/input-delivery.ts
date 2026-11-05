@@ -524,7 +524,7 @@ export class InputDelivery {
       state.inputState.agentInputFlight === flight && !state.liveSession.cancelled && !state.liveSession.finishRequested && !this.host.workerExecutionStopped(runId) &&
       !!this.context.store.getRun(runId) && !this.host.executionBlockedByRootFinish(this.context.store.getRun(runId)!);
     const fail = (error: unknown, checkpoint: boolean): void => {
-      if (!current() || state.liveSession.agentSessionError || state.inputState.agentInputError) return;
+      if (!latchInputFault({ current, sessionFault: () => state.liveSession.agentSessionError, inputFault: () => state.inputState.agentInputError })) return;
       this.latchAgentInputError(runId, state, session, `${checkpoint ? 'agent input delivery checkpoint failed' : 'agent input delivery failed'}: ${error instanceof Error ? error.message : String(error)}`);
     };
     let acknowledgement: false | Promise<void>;
@@ -760,4 +760,8 @@ export class InputDelivery {
     if (answeringAskSeq !== undefined && !state.boundary.pendingHumanAsk) this.flushAgentInputs(runId, beforeHumanReset);
     this.resumeParkedRun(runId, state, beforeHumanReset);
   }
+}
+
+export function latchInputFault(reads: { current(): boolean; sessionFault(): string | undefined; inputFault(): string | undefined }): boolean {
+  return !(!reads.current() || reads.sessionFault() || reads.inputFault());
 }

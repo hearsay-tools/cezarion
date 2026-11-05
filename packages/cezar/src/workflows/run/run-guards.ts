@@ -17,6 +17,12 @@ export function historyDeletionPending(store: Pick<RunStore, 'getRun'>, runId: s
   return parent?.delegation?.role === 'root' && parent.delegation.historyDeletion === 'pending';
 }
 
+export function workerExecutionStopped(store: Pick<RunStore, 'getRun'>, runId: string, stopped: (id: string) => boolean): boolean {
+  const run = store.getRun(runId);
+  return historyDeletionPending(store, runId) || run?.delegation?.role === 'invalid' || (run?.delegation?.role === 'worker' &&
+    (!!run.delegation.destroy || stopped(runId)));
+}
+
 export function canProceedWithRun(
   run: RunRecord | undefined,
   workerExecutionStopped: () => boolean,

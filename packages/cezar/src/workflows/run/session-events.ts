@@ -141,9 +141,13 @@ export function disposedSessionEvent(context: RunModuleContext, host: SessionHel
  *  session is interrupted. */
 export function recordSessionFault(context: RunModuleContext, host: SessionHelperHost, state: ActiveRun, turn: SessionTurn, message: string): void {
   // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
-  turn.sessionError ??= state.inputState.agentInputError ?? message;
+  turn.sessionError ??= selectSessionFault(undefined, () => state.inputState.agentInputError, message);
   state.liveSession.recordSessionError(turn.sessionError);
   state.liveSession.session?.interrupt();
+}
+
+export function selectSessionFault(existing: string | undefined, inputFault: () => string | undefined, providerMessage: string): string {
+  return existing ?? inputFault() ?? providerMessage;
 }
 
 /** The session reached a turn end: retire the inputs it left unread, read the bundled inputs, and
