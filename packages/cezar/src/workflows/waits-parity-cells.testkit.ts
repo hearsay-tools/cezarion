@@ -472,15 +472,30 @@ async function completionParkOnMessenger(runner: RunnerId) {
 /** One competing monitor uses the exemption; membership of this park then costs a slot. */
 async function expectPoolCapacity(runner: RunnerId, id: string, member: boolean) {
   const limit = vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(1);
-  const competitor = manager.startRun(QUICK_TASK_WORKFLOW, { runner,
-    task: toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 7200, note: 'pool capacity competitor' }) });
+  const previousSessionsFile = process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE;
+  let competitor: RunRecord | undefined;
   try {
-    await until(() => manager.isActive(competitor.id) && parkedOn(competitor.id, waitOfKind(competitor.id, WAIT_KIND.timer)));
+    // Each mock server inherits its own environment; the parked server keeps its original file.
+    if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, `pool-competitor-${randomUUID()}.json`);
+    competitor = manager.startRun(QUICK_TASK_WORKFLOW, { runner,
+      task: toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 7200, note: 'pool capacity competitor' }) });
+    const competitorId = competitor.id;
+    await until(() => manager.isActive(competitorId) && parkedOn(competitorId, waitOfKind(competitorId, WAIT_KIND.timer)));
     expect(semaphore.busy(), `monitoring capacity for ${id}`).toBe(member ? 1 : 0);
   } finally {
-    manager.cancel(competitor.id);
-    await until(() => !manager.isActive(competitor.id));
-    limit.mockRestore();
+    try {
+      if (competitor) {
+        const competitorId = competitor.id;
+        manager.cancel(competitorId);
+        await until(() => !manager.isActive(competitorId));
+      }
+    } finally {
+      if (runner === 'opencode') {
+        if (previousSessionsFile === undefined) delete process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE;
+        else process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = previousSessionsFile;
+      }
+      limit.mockRestore();
+    }
   }
 }
 
