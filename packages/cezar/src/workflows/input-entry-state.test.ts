@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { randomUUID } from 'node:crypto';
@@ -300,7 +301,7 @@ it('retries accepted unread input once before leaving its receipt unconfirmed', 
 
 it('acknowledges claimed inbox input without leaving a provider delivery or an owed wake', async () => {
   const { record, group, input } = await openInputRun();
-  const message = { ...input('read through the inbox'), source: 'agent' as const,
+  const message = { ...input('read through the inbox'), source: agentInputSchema.shape.source.enum.agent,
     conversation: { senderRunId: randomUUID(), recipientRunId: record.id, kind: 'progress' as const } };
   f.store.commitAgentInputs(record.id, [message]);
   const generation = randomUUID();
