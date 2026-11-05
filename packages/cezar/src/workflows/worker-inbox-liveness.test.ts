@@ -1,9 +1,9 @@
+import { captureSessions } from './runner-session-capture.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentSession } from '../core/agent-runner.ts';
 import {
   controlledWire, manager, root, semaphore, store, terminal, until,
   useWorkerWaitFixture,
@@ -25,6 +25,7 @@ describe('worker inbox holds nonfinal agent completion', { timeout: 30_000 }, ()
   }
 
   it.each(['release', 'expiry', 'ack'] as const)('keeps the agent→check recipient live until inbox %s', async action => {
+    const sessionOf = captureSessions();
     const { run, sender, gate } = await startChain();
     const input = { id: randomUUID(), parentRunId: run.id, source: agentInputSchema.shape.source.enum.agent,
       text: 'Review this before checking mock:cezar-done', createdAt: new Date().toISOString(),
@@ -34,8 +35,7 @@ describe('worker inbox holds nonfinal agent completion', { timeout: 30_000 }, ()
     const generation = randomUUID();
     const receipt = manager.reserveInboxInputs(run.id, generation, [input.id])!;
     expect(receipt).toBeDefined();
-    const engine = manager as unknown as { active: Map<string, { liveSession: { session?: AgentSession; };  }> };
-    const session = engine.active.get(run.id)!.liveSession.session!;
+    const session = sessionOf(run.id);
     writeFileSync(gate, 'release');
     await until(() => store.readEvents(run.id).some(event => event.type === 'turn-end'));
     await vi.advanceTimersByTimeAsync(400); // Beyond the runner's actual auto-end window.

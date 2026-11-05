@@ -1,8 +1,8 @@
+import { captureSessions } from './runner-session-capture.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentInput, ConversationMessage } from '@open-mercato/cezar-contract';
-import type { AgentSession } from '../core/agent-runner.ts';
 import { WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { manager, parent, store, timeline, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
@@ -20,7 +20,6 @@ function conversation(rootId: string) {
 }
 const inputOf = (runId: string, id: string) => store.getRun(runId)?.agentInputs?.find(input => input.id === id);
 const turnEnds = (runId: string) => store.readEvents(runId).filter(event => event.type === 'turn-end').length;
-const sessionOf = (runId: string) => (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; };  }> }).active.get(runId)!.liveSession.session;
 
 describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
   useWorkerWaitFixture();
@@ -94,6 +93,7 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
   });
 
   it('drains a 40-message burst as FIFO submissions of 32 and 8', async () => {
+    const sessionOf = captureSessions();
     vi.stubEnv('CEZ_MOCK_STEER_MS', '2500');
     const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:steer-tool'); manager.enqueueOwnedRun(w.id);
@@ -112,6 +112,7 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
   // `cezar_ask` question does not hold conversation input. The messages go beside the card in one
   // submission, and the human's answer still answers it alone, through the answer seam.
   it('delivers messages beside a pending cezar_ask question in one submission, never as its answer', async () => {
+    const sessionOf = captureSessions();
     const p = await parent('mock:cezar-ask');
     await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
     await until(() => store.getRun(p.id)?.status === 'waiting');

@@ -1,14 +1,16 @@
+import { captureSessions } from './runner-session-capture.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { controlledWire, manager, parent, restart, root, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 
 describe('request wait during a parent-resumed opening turn', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   it('does not treat the opening instruction as a new interruption, including after recovery', async () => {
     const release = join(root, 'opening-turn'); writeFileSync(release, 'go');
+    const sessionOf = captureSessions();
     controlledWire({ firstResultGate: release });
     const p = await parent('mock:cezar-ask');
     await until(() => store.getRun(p.id)?.status === 'waiting');
@@ -24,7 +26,8 @@ describe('request wait during a parent-resumed opening turn', { timeout: 30_000 
       conversation: { senderRunId: p.id, recipientRunId: w.id, kind: 'request' as const } };
     try {
       expect(manager.continueRun(w.id, { text: opening.text }, true, { rootId: p.id, state: { messages: [request, opening], outcomes: [] }, input }).ok).toBe(true);
-      await until(() => (manager as unknown as { active: Map<string, { liveSession: { sessionEverOpened?: boolean; };  }> }).active.get(w.id)?.liveSession.sessionEverOpened === true);
+      // bound: capture the resumed session before its opening delivery is acknowledged.
+      await vi.waitFor(() => expect(sessionOf(w.id).open).toBe(true), { timeout: 15_000, interval: 1 });
       const wait = manager.registerRequestWait(w.id, { requestIds: [request.id], timeoutSeconds: 600 });
       expect(wait.phase).toBe('registered');
       expect(store.getRun(w.id)?.agentInputs?.[0]?.deliveredAt).toBeUndefined();
