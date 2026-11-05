@@ -59,6 +59,8 @@ export class CiWatcherSupervisor {
   private readonly current = new Map<string, Promise<CiWaitResult>>();
   /** The check progress of each watched wait, for the activity view. It never decides an outcome. */
   private readonly progress: CiProgressRegistry;
+  /** The extra checks read in flight for each wait, by wait id: at most one. */
+  private readonly progressReads = new Map<string, AbortController>();
   constructor(options: { github?: GithubCiClient; progress?: CiProgressRegistry } = {}) {
     this.github = options.github ?? new GithubCiClient();
     this.progress = options.progress ?? new CiProgressRegistry();
@@ -72,7 +74,12 @@ export class CiWatcherSupervisor {
   watch(wait: CiWait, signal: AbortSignal): Promise<CiWaitResult> {
     const existing = this.current.get(wait.id);
     if (existing) return existing;
-    const task = this.run(wait, signal).finally(() => { this.current.delete(wait.id); this.progress.remove(wait.id); });
+    const task = this.run(wait, signal).finally(() => {
+      this.current.delete(wait.id);
+      this.progressReads.get(wait.id)?.abort();
+      this.progressReads.delete(wait.id);
+      this.progress.remove(wait.id);
+    });
     this.current.set(wait.id, task);
     return task;
   }
@@ -130,16 +137,22 @@ export class CiWatcherSupervisor {
   /**
    * The `--watch` phase's extra checks read (spec 2026-11-05-live-activity-view), only while someone
    * watches the wait's project. It updates the progress and nothing else: its rows never reach
-   * `observe`, and a failed read keeps the last progress and is not an error.
+   * `observe`, and a failed read keeps the last progress and is not an error. The loop never awaits
+   * it, so a slow read delays neither a --watch completion nor the next head probe. One read runs
+   * at a time; the end of the watch aborts it, and an aborted read publishes nothing.
    */
-  private async readProgress(wait: CiWait, signal: AbortSignal): Promise<void> {
-    if (!this.progress.wanted(wait.id)) return;
-    try {
-      const rows = await this.github.checks(wait, signal);
-      if (!signal.aborted) this.progress.publish(wait.id, rows);
-    } catch {
+  private startProgressRead(wait: CiWait, signal: AbortSignal): void {
+    if (this.progressReads.has(wait.id) || !this.progress.wanted(wait.id)) return;
+    const own = new AbortController();
+    const readSignal = AbortSignal.any([signal, own.signal]);
+    this.progressReads.set(wait.id, own);
+    void this.github.checks(wait, readSignal).then(rows => {
+      if (!readSignal.aborted) this.progress.publish(wait.id, rows);
+    }, () => {
       // The wait continues on the head probe and the --watch process.
-    }
+    }).finally(() => {
+      if (this.progressReads.get(wait.id) === own) this.progressReads.delete(wait.id);
+    });
   }
 
   /** Own one gh checks watcher until it exits, including abort cleanup, while probing PR changes. */
@@ -243,7 +256,7 @@ export class CiWatcherSupervisor {
             const head = (await readMetadata()).headSha;
             if (head !== wait.headSha) return observe('head_changed', { observedHeadSha: head });
             const conflicting = conflict();
-            if (!conflicting) await this.readProgress(wait, signal);
+            if (!conflicting) this.startProgressRead(wait, signal);
             return conflicting;
           });
           if (final) return final;

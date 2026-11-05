@@ -32,21 +32,31 @@ class ScriptedGithub extends GithubCiClient {
   calls: string[] = [];
   heads: string[] = [identity.headSha];
   active: boolean[] = [false];
-  /** Each checks read, in order: rows, or an error to throw. */
-  reads: Array<GithubCheck[] | Error> = [pending];
+  /** Each checks read, in order: rows, an error to throw, or a read held until `releaseHeld`. A
+   *  held read rejects on abort, as gh does, unless it is `held-ignoring-abort`. */
+  reads: Array<GithubCheck[] | Error | 'held' | 'held-ignoring-abort'> = [pending];
   private finish: (() => void) | undefined;
+  private held: ((rows: GithubCheck[]) => void) | undefined;
   private next<T>(script: T[], name: string): T { const count = this.calls.filter(call => call === name).length; return script[Math.min(count - 1, script.length - 1)]!; }
   override async metadata(): Promise<GithubPrMetadata> {
     this.calls.push('metadata');
     return {headSha: this.next(this.heads, 'metadata'), mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN'};
   }
   override async hasActiveRuns(): Promise<boolean> { this.calls.push('active'); return this.next(this.active, 'active'); }
-  override async checks(): Promise<GithubCheck[]> {
+  override async checks(_pr: CiPrIdentity, signal: AbortSignal): Promise<GithubCheck[]> {
     this.calls.push('checks');
     const read = this.next(this.reads, 'checks');
     if (read instanceof Error) throw read;
+    if (read === 'held' || read === 'held-ignoring-abort') {
+      return new Promise((resolve, reject) => {
+        this.held = resolve;
+        if (read === 'held') signal.addEventListener('abort', () => reject(signal.reason), {once: true});
+      });
+    }
     return read;
   }
+  /** The held checks read answers. */
+  releaseHeld(rows: GithubCheck[]): void { this.held!(rows); }
   override watch(_pr: CiPrIdentity, signal: AbortSignal): Promise<void> {
     this.calls.push('watch');
     return new Promise((resolve, reject) => {
@@ -194,5 +204,66 @@ describe('the check progress of a CI wait', () => {
     expect(await watch.result).toMatchObject({outcome: 'cancelled'});
     expect(watch.progress.read(watch.request.id, 'shop')).toBeUndefined();
     expect(watch.progress.wanted(watch.request.id)).toBe(false);
+  });
+
+  // A held extra read never delays the wait (pre-PR review of S3). Before S3 the --watch
+  // completion at 31 s settled the wait; the read held from the 30 s probe must not change that.
+  it('--watch completes while an extra read is held: the wait settles then, with the outcome it had before S3', async () => {
+    vi.useFakeTimers(); const github = new ScriptedGithub();
+    github.reads = [pending, 'held', passed];
+    const deadline = new AbortController();
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValueOnce(deadline.signal);
+    const started = Date.now();
+    const {request, progress, result} = start(github, true);
+    let settledAt: number | undefined;
+    void result.then(() => { settledAt = Date.now() - started; });
+    setTimeout(() => deadline.abort(), 35_000);
+    await tick();
+    progress.read(request.id, 'shop');
+    await probe();
+    expect(github.calls.slice(5)).toEqual(['metadata', 'checks']);
+    // The clock is at 30 001 ms: --watch completes at 31 s.
+    await vi.advanceTimersByTimeAsync(999);
+    github.finishWatch();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settledAt).toBe(31_000);
+    expect(await result).toMatchObject({outcome: 'passed', totalChecks: 1, checks: [{name: 'build', state: 'SUCCESS'}]});
+  });
+
+  it('a held extra read keeps the head probe at its 30 s cadence, and the next probe starts no second read', async () => {
+    vi.useFakeTimers(); const github = new ScriptedGithub();
+    github.reads = [pending, 'held', passed];
+    const {request, progress, state} = start(github, true);
+    await tick();
+    progress.read(request.id, 'shop');
+    await probe();
+    expect(github.calls.slice(5)).toEqual(['metadata', 'checks']);
+    await probe();
+    // One read at a time: the 60 s probe checks the head and skips the read still in flight.
+    expect(github.calls.slice(7)).toEqual(['metadata']);
+    github.releaseHeld(passed);
+    await tick();
+    expect(progress.read(request.id, 'shop')?.checks).toEqual([{name: 'build', bucket: 'pass'}]);
+    expect(state.settled).toBe(false);
+    await probe();
+    expect(github.calls.slice(8)).toEqual(['metadata', 'checks']);
+    expect(github.count('watch')).toBe(1);
+  });
+
+  it('a held extra read released after the wait settled publishes nothing and changes nothing', async () => {
+    vi.useFakeTimers(); const github = new ScriptedGithub();
+    github.reads = [pending, 'held-ignoring-abort', passed];
+    const {request, progress, result} = start(github, true);
+    await tick();
+    progress.read(request.id, 'shop');
+    await probe();
+    github.finishWatch();
+    const outcome = await result;
+    expect(outcome).toMatchObject({outcome: 'passed', totalChecks: 1});
+    github.releaseHeld([row('build', 'pass'), row('lint', 'pass')]);
+    await tick();
+    expect(progress.read(request.id, 'shop')).toBeUndefined();
+    expect(progress.wanted(request.id)).toBe(false);
+    expect(await result).toBe(outcome);
   });
 });
