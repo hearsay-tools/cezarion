@@ -49,9 +49,11 @@ describe('createActiveRun', () => {
     // The keys the `execute` and `runContinuation` literals both set. A field added to `ActiveRun`
     // as required fails to compile in the factory; an optional one lands here.
     expect(Object.keys(state).sort()).toEqual([
-      'autonomous', 'children', 'inputState', 'liveSession', 'pendingHumanAsk', 'skills', 'usage',
+      'autonomous', 'autosave', 'children', 'inputState', 'liveSession', 'pendingHumanAsk', 'skills', 'usage', 'waitIdentity',
     ]);
     expect(state).toMatchObject({ liveSession: { cwd: '/work/tree', cancelled: false }, pendingHumanAsk: true, autonomous: true });
+    expect(state.waitIdentity.ciTurnId).toBeUndefined();
+    expect(state.autosave.autosaveTimer).toBeUndefined();
     expect(state.liveSession.delegationSettings).toBeUndefined();
     expect(state.liveSession.revokeDelegation).toBeUndefined();
     expect(state.liveSession.interrupt()).toBeUndefined();
