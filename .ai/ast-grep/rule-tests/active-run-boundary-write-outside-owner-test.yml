@@ -1,0 +1,44 @@
+id: active-run-boundary-write-outside-owner
+valid:
+  - "const view = state.boundary; view.idleTimer;"
+  - "class BoundaryGroup { #idleTimer; get idleTimer() { return this.#idleTimer; } }"
+  - "function createActiveRun() { Object.defineProperty(container, \"boundary\", { writable: false, configurable: false }); }"
+  - "const unrelated = {}; Object.assign(unrelated, { value: 1 });"
+invalid:
+  - "function f(state: ActiveRun) { state.boundary = other.boundary; }"
+  - "function f(state: ActiveRun) { state[\"boundary\"] = other.boundary; }"
+  - "function f(state: ActiveRun) { delete state.boundary; }"
+  - "function f(state: ActiveRun) { state.boundary ??= other.boundary; }"
+  - "state.boundary.idleTimer = replacement;"
+  - "delete state.boundary.idleTimer;"
+  - "state.boundary.idleTimer++;"
+  - "const view = state.boundary; view.idleTimer = replacement;"
+  - "function f(state: ActiveRun) { const { boundary: view } = state; view.idleTimer = replacement; }"
+  - "function f(view: BoundaryGroup) { view.idleTimer = replacement; }"
+  - "import type { BoundaryGroup as View } from \"./turn-boundary.ts\"; function f(view: View) { Object.assign(view, { idleTimer: replacement }); }"
+  - "state.boundary as any"
+  - "state.boundary as unknown"
+  - "state.boundary as unknown as Mutable"
+  - "<Mutable>state.boundary"
+  - "const view = state.boundary; view as any;"
+  - "({ ...state.boundary }) as BoundaryGroup"
+  - "Object.assign(state.boundary, { idleTimer: replacement });"
+  - "Object.defineProperty(state.boundary, \"idleTimer\", { value: replacement });"
+  - "Object.defineProperties(state.boundary, { idleTimer: { value: replacement } });"
+  - "Reflect.defineProperty(state.boundary, \"idleTimer\", { value: replacement });"
+  - "Reflect.set(state.boundary, \"idleTimer\", replacement);"
+  - "Object.setPrototypeOf(state.boundary, other);"
+  - "Reflect.setPrototypeOf(state.boundary, other);"
+  - "Reflect.deleteProperty(state.boundary, \"idleTimer\");"
+  - "Object.assign(state.boundary, { ...other });"
+  - "function f(state: ActiveRun) { Object.assign(state, { boundary: other.boundary }); }"
+  - "const state = createActiveRun(init); Object.assign(state, { boundary: other.boundary });"
+  - "function f(state: ActiveRun) { const alias = state; alias.boundary = other.boundary; }"
+  - "function f(target: ActiveRun, key: string, replacement: BoundaryGroup) { Reflect.set(target, key, replacement); }"
+  - "class BoundaryGroup { readonly backing = {}; }"
+  - "const view = createBoundaryGroup(); Object.assign(view, { idleTimer: replacement });"
+  - 'const { doneRequested: request } = state.boundary; Object.assign(request, { summary: "forged" });'
+  - 'const request = state.boundary.doneRequested; request.summary = "forged";'
+  - 'function f(view: DoneRequest) { view.summary = "forged"; }'
+  - 'state.boundary["parkAfterAck"].monitoring = true;'
+  - 'function f(state: ActiveRun) { const { boundary: view } = state; Object.defineProperty(view, "pendingHumanAsk", { value: true }); }'

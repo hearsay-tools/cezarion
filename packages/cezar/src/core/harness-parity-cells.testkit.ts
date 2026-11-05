@@ -1,3 +1,5 @@
+import { transitionTurnBoundary } from '../workflows/run/turn-boundary.ts';
+import type { ActiveRun } from '../workflows/active-run.ts';
 import { monitoringTurnFiles } from '../workflows/monitoring-turn-partitions.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { observationClock } from './observation-clock.testkit.ts';
@@ -2840,11 +2842,11 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
           // Native asks can hold the turn open without an idle timer. Close the
           // actual session through the same idle-close state, after its native ask.
           const internal = manager as unknown as {
-            active: Map<string, { liveSession: { session: import('./agent-runner.ts').AgentSession; }; idleClosed: boolean; }>;
+            active: Map<string, ActiveRun>;
           };
           const state = internal.active.get(runId)!;
-          state.idleClosed = true;
-          state.liveSession.session.end();
+          transitionTurnBoundary(state, { kind: 'idle-expired', phase: 'close', session: state.liveSession.session });
+          state.liveSession.session!.end();
           await waitFor(() => !manager.isActive(runId));
           expect(store.getRun(runId)?.status).toBe('waiting');
           expect(store.readWorkerExecution(runId)?.phase).toBe('complete');

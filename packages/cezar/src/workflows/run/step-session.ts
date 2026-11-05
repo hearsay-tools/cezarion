@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { AgentEvent, AgentSession, ContentBlock, RunnerId } from '../../core/agent-runner.ts';
@@ -109,7 +110,7 @@ export class StepSession {
     const runner = createRunner(stepBackend);
     state.liveSession.recordSessionError(undefined);
     state.liveSession.selectStep(step.id);
-    state.completedStepId = undefined;
+    transitionTurnBoundary(state, { kind: 'session-open', phase: 'reset-step', session: state.liveSession.session });
     this.host.beginUsageInvocation(runId, state, step.id);
     const launch = await sessionEvents.launchPreamble(this.launchPreambleHost, runId, state);
     const { delegation, webhooksPart, ciTools } = launch;
@@ -263,7 +264,7 @@ export class StepSession {
     const { stepId, sink, turn } = launch;
     const sessionClosed = this.host.trackWorkerSessionResult(runId, session);
     state.liveSession.attachSession(session);
-    state.nextStep = stepScope(session, launch.nextStep);
+    transitionTurnBoundary(state, { kind: 'session-open', phase: 'scope-step', session, next: stepScope(session, launch.nextStep) });
     state.liveSession.markSessionOpened();
     state.liveSession.selectStep(stepId);
     state.liveSession.installInterrupt(() => session.interrupt());
@@ -307,11 +308,7 @@ export class StepSession {
     clearIdleTimer(state);
     this.line.leavePool(runId);
     this.line.unpark(runId);
-    state.nextStep = undefined;
-    state.waitWakeTurn = undefined;
-    state.atTurnBoundary = undefined;
-    state.doneAtBoundary = undefined;
-    state.parkAfterAck = undefined;
+    transitionTurnBoundary(state, { kind: 'session-retired', phase: 'reset', session: state.liveSession.session });
     state.liveSession.retireSession();
     state.liveSession.clearStep();
     state.liveSession.installInterrupt(() => undefined);

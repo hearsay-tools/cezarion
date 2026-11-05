@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import { computeWaitingOn, isUsageLimitHold, type HumanWaitEntry, type Wait, type WaitingOn } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord } from '../../runs/store.ts';
@@ -66,7 +67,7 @@ export class WakeAdmission {
    *  turn end. */
   reparkWithoutWaits(runId: string, state: ActiveRun): void {
     const run = this.context.store.getRun(runId);
-    if (!run || run.status !== 'waiting' || !this.host.line.isParked(runId) || state.atTurnBoundary !== state.liveSession.session || run.waits?.length) return;
+    if (!run || run.status !== 'waiting' || !this.host.line.isParked(runId) || state.boundary.atTurnBoundary !== state.liveSession.session || run.waits?.length) return;
     this.host.humanWaits.surfaceHumanWait(runId, state, this.host.humanWaits.openHumanAlias(runId, state, 'budget'));
     this.leaveMonitoringPool(runId);
     this.host.armIdleTimer(runId, state);
@@ -162,7 +163,7 @@ export class WakeAdmission {
    */
   parkOnWaits(runId: string, state: ActiveRun): boolean {
     const run = this.context.store.getRun(runId);
-    if (!run?.waits?.length || !state.liveSession.session?.open || state.liveSession.cancelled || state.pendingHumanAsk) return false;
+    if (!run?.waits?.length || !state.liveSession.session?.open || state.liveSession.cancelled || state.boundary.pendingHumanAsk) return false;
     const human = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
     if (human) {
       this.host.humanWaits.surfaceHumanWait(runId, state, human);
@@ -301,7 +302,7 @@ export class WakeAdmission {
     if (!run || this.host.countAutomaticWakes(runId) < this.maxAutoContinues ||
       !run.agentInputs?.some(input => !input.deliveredAt && !hasLiveInboxClaim(input) && chargesBudgetMessage(input))) return;
     const state = this.host.active.get(runId);
-    if (state?.liveSession.session?.open && state.atTurnBoundary !== state.liveSession.session) { if (!this.host.recoveringRun(runId)) this.host.flushAgentInputs(runId); return; }
+    if (state?.liveSession.session?.open && state.boundary.atTurnBoundary !== state.liveSession.session) { if (!this.host.recoveringRun(runId)) this.host.flushAgentInputs(runId); return; }
     if (run.status === 'waiting') this.host.humanWaits.surfaceHumanWait(runId, state, this.host.humanWaits.openHumanAlias(runId, state, 'budget'));
   }
 
@@ -322,7 +323,7 @@ export class WakeAdmission {
    *  else as one submission. */
   deliverAdmittedWake(runId: string): void {
     const state = this.host.active.get(runId);
-    const midTurn = !!state && state.atTurnBoundary !== state.liveSession.session;
+    const midTurn = !!state && state.boundary.atTurnBoundary !== state.liveSession.session;
     if ((midTurn || !resolvedWaits(this.context.store.getRun(runId) ?? {}).length) && this.routedAnswer(runId)) this.host.answerRoutedQuestion(runId, true);
     else this.host.flushAgentInputs(runId);
   }
@@ -334,7 +335,7 @@ export class WakeAdmission {
     const state = this.host.active.get(runId);
     if (!run || this.owesWake(run) || state?.inputState.agentInputFlight) return;
     this.host.line.removeWake(runId);
-    if (this.host.line.retireAdmission(runId) && state && run.status === 'waiting' && state.atTurnBoundary === state.liveSession.session) this.host.line.park(runId);
+    if (this.host.line.retireAdmission(runId) && state && run.status === 'waiting' && state.boundary.atTurnBoundary === state.liveSession.session) this.host.line.park(runId);
     this.host.retries.stopRetry(runId);
   }
 
@@ -411,7 +412,7 @@ function parkHold(run: RunRecord, state: ActiveRun, top: WaitingOn['kind'] | und
   const waited = holdsNativeSubagents(run);
   const holdsSubagents = waited || liveSubagents(state) > 0;
   const topKeepsSlot = parkTopKeepsSlot(run, top);
-  state.heldForSubagents = (liveSubagents(state) > 0 && !topKeepsSlot) || undefined;
+  transitionTurnBoundary(state, { kind: 'wait-wake-admitted', phase: 'hold-children', session: state.liveSession.session, held: (liveSubagents(state) > 0 && !topKeepsSlot) || undefined });
   return { holdsSubagents, keepsSlot: holdsSubagents || topKeepsSlot };
 }
 

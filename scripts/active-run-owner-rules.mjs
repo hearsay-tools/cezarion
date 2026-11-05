@@ -4,6 +4,14 @@ import { resolve } from 'node:path';
 import { isMap, isSeq, parseDocument, visit } from 'yaml';
 
 export const ownerGroups = {
+  boundary: {
+    owner: 'turn-boundary.ts', factory: 'createBoundaryGroup',
+    types: ['BoundaryGroup', 'DoneRequest', 'NextStep', 'DoneClose', 'AckBoundary'],
+    getters: ['boundary'],
+    bindings: ['boundary', 'doneRequested', 'nextStep', 'doneClose', 'parkAfterAck'],
+    fields: ['boundary', 'waitWakeTurn', 'pendingHumanAsk', 'noWaitNudgeReplyTimer', 'noWaitNudgeSawContent', 'noWaitNudgeParked', 'doneAtBoundary', 'doneRequested', 'nextStep', 'completedStepId', 'doneClose', 'parkAfterAck', 'atTurnBoundary', 'idleTimer', 'idleClosed', 'monitoringCapNoted', 'autonomous', 'autonomousNudgePending', 'noWaitNudged', 'incomingRequestRefused', 'sentRequestRefused', 'completionNudged', 'completionNudgeAnswered', 'heldForSubagents', 'session', 'summary', 'label', 'via', 'monitoring', 'humanGate', 'nudgedLastTurn', 'scheduleWakeup'],
+  },
+
   wait: {
     slot: 'waitIdentity', owner: 'wait-registry.ts', factory: 'createWaitGroup',
     types: ['WaitGroup'], getters: ['waitIdentity'],

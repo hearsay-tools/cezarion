@@ -49,9 +49,10 @@ describe('createActiveRun', () => {
     // The keys the `execute` and `runContinuation` literals both set. A field added to `ActiveRun`
     // as required fails to compile in the factory; an optional one lands here.
     expect(Object.keys(state).sort()).toEqual([
-      'autonomous', 'autosave', 'children', 'inputState', 'liveSession', 'pendingHumanAsk', 'skills', 'usage', 'waitIdentity',
+      'autosave', 'boundary', 'children', 'inputState', 'liveSession', 'skills', 'usage', 'waitIdentity',
     ]);
-    expect(state).toMatchObject({ liveSession: { cwd: '/work/tree', cancelled: false }, pendingHumanAsk: true, autonomous: true });
+    expect(state).toMatchObject({ liveSession: { cwd: '/work/tree', cancelled: false }, boundary: { pendingHumanAsk: true, autonomous: true } });
+    expect(Object.isFrozen(state)).toBe(true);
     expect(state.waitIdentity.ciTurnId).toBeUndefined();
     expect(state.autosave.autosaveTimer).toBeUndefined();
     expect(state.liveSession.delegationSettings).toBeUndefined();
@@ -67,8 +68,8 @@ describe('createActiveRun', () => {
   it('takes cwd, the pending ask and the mode from its caller, and shares no mutable state', () => {
     const first = createActiveRun({ cwd: '/a', pendingHumanAsk: false, autonomous: false });
     const second = createActiveRun({ cwd: '/b', pendingHumanAsk: true, autonomous: true });
-    expect(first).toMatchObject({ liveSession: { cwd: '/a' }, pendingHumanAsk: false, autonomous: false });
-    expect(second).toMatchObject({ liveSession: { cwd: '/b' }, pendingHumanAsk: true, autonomous: true });
+    expect(first).toMatchObject({ liveSession: { cwd: '/a' }, boundary: { pendingHumanAsk: false, autonomous: false } });
+    expect(second).toMatchObject({ liveSession: { cwd: '/b' }, boundary: { pendingHumanAsk: true, autonomous: true } });
     first.liveSession.requestPermission('p');
     expect(second.liveSession.pendingPermissions?.size).toBe(0);
     expect(first.children).not.toBe(second.children);

@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './run/turn-boundary.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { runnerHook, setupMonitoringFixture, waitForProduct } from './run-fixture.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
@@ -154,7 +155,7 @@ describe('the completion gate outside a turn end', () => {
 
   it.each([['queued input', queueInput], ['an open agent wait', openWorkerWait]])(
     'at the boundary, %s delegates the refusal to turn settlement', (_name, setup) => {
-      state.atTurnBoundary = session;
+      transitionTurnBoundary(state, { kind: 'turn-end', phase: 'ui-completed', session: session });
       setup();
       expect(finish.deferParentCompletion(id)).toBe(true);
       expect(settleBoundary).toHaveBeenCalledExactlyOnceWith(id, state, 'gate',
@@ -173,7 +174,7 @@ describe('the completion gate outside a turn end', () => {
     beforeEach(() => {
       seedHandoffFile(join(root, '.ai/cezar'), store.getRun(id)!);
       seeded = handoff();
-      state.atTurnBoundary = session;
+      transitionTurnBoundary(state, { kind: 'turn-end', phase: 'ui-completed', session: session });
       state.inputState.beginHeldClock();
     });
     afterEach(() => expect(handoff()).toBe(seeded));
@@ -187,8 +188,8 @@ describe('the completion gate outside a turn end', () => {
     it('a turn end keeps the done at the boundary, resets the held-input clock and settles the park', () => {
       const turns = watchTurnOutcomes();
       expect(turnEnd()).toBe(true);
-      expect(state.doneAtBoundary).toBe(session);
-      expect(state.doneClose).toEqual({ via: 'cezar_done' });
+      expect(state.boundary.doneAtBoundary).toBe(session);
+      expect(state.boundary.doneClose).toEqual({ via: 'cezar_done' });
       expect(state.inputState.heldHumanInputSince).toBeUndefined();
       expect(turns.words(id)).toEqual(['waiting']);
     });
@@ -197,15 +198,15 @@ describe('the completion gate outside a turn end', () => {
       const turns = watchTurnOutcomes();
       state.inputState.recordInputError('agent input delivery checkpoint failed');
       expect(turnEnd()).toBe(false);
-      expect(state.doneAtBoundary).toBe(session);
+      expect(state.boundary.doneAtBoundary).toBe(session);
       expect(turns.words(id)).toEqual([]);
     });
 
     it('an acknowledgement settles the park and leaves the boundary and the held-input clock as they were', () => {
       const turns = watchTurnOutcomes();
-      state.doneAtBoundary = session;
+      transitionTurnBoundary(state, { kind: 'turn-end', phase: 'retain-done', session: session });
       expect(ack()).toBe(true);
-      expect(state.doneAtBoundary).toBe(session);
+      expect(state.boundary.doneAtBoundary).toBe(session);
       expect(state.inputState.heldHumanInputSince).toBeDefined();
       expect(turns.words(id)).toEqual(['waiting']);
     });

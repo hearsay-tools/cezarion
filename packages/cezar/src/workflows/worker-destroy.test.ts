@@ -1,6 +1,5 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, fixtureWork } from './fixture-cleanup.testkit.ts';
 
 import { randomUUID } from 'node:crypto';
@@ -60,12 +59,13 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(existsSync(workspace(w).path)).toBe(false);
   });
 
-  it('stop in starting-before-ActiveRun waits for startup finalization and prevents launch', async () => {
+  it('Stop during config preflight waits for startup finalization and prevents launch', async () => {
     const w = await worker(); const hold = gate(); releases.push(hold.release);
-    const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown>; };
-    const real = engine.execute.bind(manager);
-    engine.execute = async (...args) => { await hold.promise; return real(...args); };
-    manager.enqueueOwnedRun(w.id); await until(() => runInternals(manager).line.starting.has(w.id));
+    const real = config.loadConfig; let entered = false;
+    vi.spyOn(config, 'loadConfig').mockImplementation(async (...args) => { entered = true; await hold.promise; return real(...args); });
+    manager.enqueueOwnedRun(w.id);
+    // bound: config lookup is the public preflight boundary before any worktree or session.
+    await until(() => entered);
     expect(store.readWorkerExecution(w.id)).toMatchObject({ phase: 'starting' });
     expect(existsSync(workspace(w).path)).toBe(false);
     destroy(w); expect(manager.requestWorkerStop(w.id).state).toBe('stopping');
@@ -356,9 +356,11 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     store.move(parent.id, 'cancel-root');
     setRunStatus(store, parent.id, RUN_STATUS.waiting);
     const another = await worker(); const hold = gate(); releases.push(hold.release);
-    const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown>; };
-    const real = engine.execute.bind(manager); engine.execute = async (...args) => { await hold.promise; return real(...args); };
-    manager.enqueueOwnedRun(another.id); await until(() => runInternals(manager).line.starting.has(another.id));
+    const real = config.loadConfig; let entered = false;
+    vi.spyOn(config, 'loadConfig').mockImplementation(async (...args) => { entered = true; await hold.promise; return real(...args); });
+    manager.enqueueOwnedRun(another.id);
+    // bound: config lookup holds this worker before it can open a session.
+    await until(() => entered);
     destroy(another);
     expect(manager.deferMessage(another.id, [{ type: 'text', text: 'new work' }])).toBe(false);
     manager.requestWorkerStop(another.id); hold.release(); expect(await manager.awaitRunTermination(another.id, 15_000)).toBe(true);

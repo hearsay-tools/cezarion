@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './run/turn-boundary.ts';
 import type { CezarDoneAnswer, ConversationMessage } from '@open-mercato/cezar-contract';
 import { WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord, RunStore } from '../runs/store.ts';
@@ -49,20 +50,14 @@ export function rootCompletionRefusal({ questions, blockers, requests, incomingR
 
 /** Tool answers and delivered nudges count once in the same completion cycle. */
 export function recordRequestRefusal(state: ActiveRun, refusal: CompletionRefusal, tool = false): void {
-  if (refusal.code === 'requests_unanswered') state.incomingRequestRefused = true;
-  if (refusal.code !== 'requests_outstanding') return;
-  if (tool && state.sentRequestRefused && state.liveSession.session) state.doneRequested = { session: state.liveSession.session };
-  state.sentRequestRefused = true;
+  transitionTurnBoundary(state, { kind: 'completion-refusal', phase: 'record', session: state.liveSession.session, code: refusal.code, tool });
 }
 
 
 /** A human message or a wake (hearsay-tools/cezarion#1301): the turn it opens or steers no longer
  *  answers a refusal nudge, so its blocked done gets a fresh nudge rather than the second step. */
 export function startCompletionCycle(state: ActiveRun): void {
-  state.incomingRequestRefused = undefined;
-  state.sentRequestRefused = undefined;
-  state.completionNudged = undefined;
-  state.completionNudgeAnswered = undefined;
+  transitionTurnBoundary(state, { kind: 'input-submitted', phase: 'completion-cycle', session: state.liveSession.session });
 }
 
 
