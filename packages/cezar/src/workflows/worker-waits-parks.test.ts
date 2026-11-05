@@ -26,6 +26,21 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
   const idleClock = () => observationClock(delay => delay === IDLE_TIMEOUT_MS &&
     /\bat (?:[^ (\n]+\.)?armIdleTimer \(/.test(new Error().stack ?? ''));
 
+  // A competing timer park consumes the sole monitoring exemption.
+  async function expectPoolCapacity(id: string, member: boolean) {
+    const limit = vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(1);
+    const competitor = await parent('mock:cezar-wait');
+    try {
+      await until(() => store.getRun(competitor.id)?.status === 'waiting' &&
+        store.getRun(competitor.id)?.waits?.some(wait => wait.kind === WAIT_KIND.timer && wait.phase === WAIT_PHASE.open) === true);
+      expect(semaphore.busy(), `monitoring capacity for ${id}`).toBe(member ? 1 : 0);
+    } finally {
+      manager.cancel(competitor.id);
+      await until(() => !manager.isActive(competitor.id));
+      limit.mockRestore();
+    }
+  }
+
   it('a worker park holds no slot at maxParallel 1 and its worker runs', async () => {
     const clock = idleClock();
     const { run: p, release } = await heldParent();
@@ -33,7 +48,7 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     const entry = manager.registerWorkerListWait(p.id, { workerIds: [w.id], timeoutSeconds: 600 }, 'cezar_wait');
     release();
     await until(() => parkedOn(p.id, entry.id));
-    expect(semaphore.busy()).toBe(0);
+    await expectPoolCapacity(p.id, false);
     const wire = controlledWire({ firstResultGate: join(root, 'worker-release') });
     manager.enqueueOwnedRun(w.id);
     await until(wire.initialReceived);
@@ -147,11 +162,12 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     if (!ci.ok || !workers.ok) throw Error('refused');
     release();
     await until(() => parkedOn(p.id, workers.wait_id));
-    expect(semaphore.busy()).toBe(0);
+    await expectPoolCapacity(p.id, false);
     expect(manager.isActive(p.id)).toBe(true);
     fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     await until(() => settledOf(p.id, workers.wait_id)?.phase === 'delivered' && store.getRun(p.id)?.status === 'waiting');
     expect(entryOf(p.id, ci.wait_id)?.phase).toBe('open');
+    await expectPoolCapacity(p.id, true);
     // A CI park needs no idle timer: its slot is the monitoring pool's.
     await clock.advance(IDLE_TIMEOUT_MS);
     expect(manager.isActive(p.id)).toBe(true);

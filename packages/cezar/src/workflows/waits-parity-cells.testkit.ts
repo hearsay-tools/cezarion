@@ -469,6 +469,21 @@ async function completionParkOnMessenger(runner: RunnerId) {
   return { f: { p, w, ...messenger(service, callerFor, p, w) }, entry: workerWaits(p.id)[0]! };
 }
 
+/** One competing monitor uses the exemption; membership of this park then costs a slot. */
+async function expectPoolCapacity(runner: RunnerId, id: string, member: boolean) {
+  const limit = vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(1);
+  const competitor = manager.startRun(QUICK_TASK_WORKFLOW, { runner,
+    task: toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 7200, note: 'pool capacity competitor' }) });
+  try {
+    await until(() => manager.isActive(competitor.id) && parkedOn(competitor.id, waitOfKind(competitor.id, WAIT_KIND.timer)));
+    expect(semaphore.busy(), `monitoring capacity for ${id}`).toBe(member ? 1 : 0);
+  } finally {
+    manager.cancel(competitor.id);
+    await until(() => !manager.isActive(competitor.id));
+    limit.mockRestore();
+  }
+}
+
 const timerText = (wait: Wait, note: string) => `Timer ${wait.id} fired: ${note}. Continue toward the task goal; register another wait if you are still waiting.`;
 
 // A failed run cannot wake itself. Its absence shows at once, and no admission retry or backoff is left to start one later.
@@ -809,7 +824,7 @@ function registrationCells(runners: RunnerId[], it: typeof registerTest = regist
       // hearsay-tools/cezarion#1234: the spent budget leaves a cezar human wait, so the run waits on the user.
       expect(store.getRun(run.id)?.waits ?? []).toMatchObject([{ kind: WAIT_KIND.human, via: WAIT_VIA.budget, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open }]);
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
-      expect(semaphore.busy()).toBe(0);
+      await expectPoolCapacity(runner, run.id, false);
     });
 
     it(`${runner} U10 a timer due while a charged batch awaits its acknowledgement is cancelled at the cap, and CI still wakes`, async () => {
@@ -1076,7 +1091,7 @@ function inputCells(runners: RunnerId[], it: typeof registerTest = registerTest)
         const parked = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr }), runner });
         await until(() => parkedOn(parked.id, waitOfKind(parked.id, 'pr')));
         const wait = waitOfKind(parked.id, 'pr')!;
-        expect(idleClock.pending).toBe(0);
+        await expectPoolCapacity(runner, parked.id, true);
         // Another task on the same account waits out a usage limit, or its resume is testing the
         // window (hearsay-tools/cezarion#1236).
         const { agentProfile } = store.getRun(parked.id)!;
@@ -1337,7 +1352,7 @@ function deliveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
       expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE))).toBe(false);
       expect(prompted(runner, refusal)).toEqual([]);
       // A timer park keeps its slot, and the timer's result wakes the agent.
-      expect(idleClock.pending).toBe(0);
+      await expectPoolCapacity(runner, p.id, true);
       fireTimer(timer.id);
       await until(() => settled(p.id, timer.id)?.phase === 'delivered' && inputsFor(p.id, timer.id).length > 0
         && prompted(runner, inputsFor(p.id, timer.id)[0]!.text).length > 0);
@@ -2611,7 +2626,7 @@ function completionCells(runners: RunnerId[], it: typeof registerTest = register
       expect(entry).not.toHaveProperty('timeoutSeconds');
       expect(listed(p.id, entry.id)).toEqual(entry);
       expect(inputsFor(p.id, entry.id)).toEqual([]);
-      expect(semaphore.busy()).toBe(0);
+      await expectPoolCapacity(runner, p.id, false);
       expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
       expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
       expect(toRunSummary(store.getRun(p.id)!).waitingOn).toEqual({ kind: 'workers', count: 1 });
@@ -2654,7 +2669,7 @@ function completionCells(runners: RunnerId[], it: typeof registerTest = register
       await until(() => turnEnds(f.p.id) > turns && parkedOn(f.p.id, workerWaits(f.p.id)[0]));
       expect(store.getRun(f.p.id)?.waits).toEqual([expect.objectContaining({ id: entry.id, via: WAIT_VIA.completion, phase: WAIT_PHASE.open })]);
       expect(inputsFor(f.p.id, entry.id)).toEqual([]);
-      expect(semaphore.busy()).toBe(0);
+      await expectPoolCapacity(runner, f.p.id, false);
       // The wait still ends on its own event, once.
       expect(manager.finish(f.w.id)).toBe(true);
       await until(() => settled(f.p.id, entry.id)?.phase === 'delivered' && prompted(runner, workerWake(entry)).length > 0);
@@ -3265,11 +3280,11 @@ function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTes
       return viaOf(id, WAIT_VIA.cezar_wait)!;
     };
     const refusalNoted = (id: string, refusal: string) => store.readEvents(id).some(event => event.type === 'note' && String(event.message).includes(refusal));
-    const expectTimerPark = (id: string, timer: Wait, refusal: string) => {
+    const expectTimerPark = async (id: string, timer: Wait, refusal: string) => {
       expect(store.getRun(id)?.waits).toEqual([expect.objectContaining({ id: timer.id, phase: WAIT_PHASE.open })]);
       expect(nudgeNotes(id)).toEqual([]);
       expect(prompted(runner, refusal)).toEqual([]);
-      expect(idleClock.pending).toBe(0);
+      await expectPoolCapacity(runner, id, true);
       expect(words(id).slice(-1)).toEqual(['monitoring']);
     };
 
@@ -3279,7 +3294,7 @@ function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTes
       const turns = turnEnds(p.id);
       const refusal = liveRefusal(await blockedDone(p.id, () => blockingWorker(p.id)));
       await until(() => turnEnds(p.id) > turns && parkedOn(p.id, viaOf(p.id, WAIT_VIA.cezar_wait)) && refusalNoted(p.id, refusal));
-      expectTimerPark(p.id, timer, refusal);
+      await expectTimerPark(p.id, timer, refusal);
     });
 
     it(`${runner} U27 U11 a Continue's refused done beside an open timer parks on it and settles monitoring`, async () => {
@@ -3290,7 +3305,7 @@ function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTes
       const refusal = liveRefusal(await blockedDone(p.id, () => blockingWorker(p.id), continued(p.id)));
       await until(() => store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true &&
         parkedOn(p.id, viaOf(p.id, WAIT_VIA.cezar_wait)) && refusalNoted(p.id, refusal) && manager.isActive(p.id));
-      expectTimerPark(p.id, timer, refusal);
+      await expectTimerPark(p.id, timer, refusal);
     });
 
     // A human message's acknowledgement held past its turn end (hearsay-tools/cezarion#2022), as the
@@ -3306,7 +3321,7 @@ function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTes
         await until(() => turnEnds(p.id) > turns, () => timeline(p.id));
         release();
         await until(() => parkedOn(p.id, viaOf(p.id, WAIT_VIA.cezar_wait)) && refusalNoted(p.id, refusal) && words(p.id).at(-1) === 'monitoring');
-        expectTimerPark(p.id, timer, refusal);
+        await expectTimerPark(p.id, timer, refusal);
       }, 'delay-human-ack');
     });
 
@@ -3410,7 +3425,7 @@ function processCells(runners: RunnerId[], it: typeof registerTest = registerTes
       const wait = waitOfKind(run.id, 'process')!;
       expect(wait).toMatchObject({ via: WAIT_VIA.cezar_wait, source: WAIT_SOURCE.agent, pid, note: 'u1p', startToken: expect.any(String),
         exitFile: join(store.getRun(run.id)!.worktreePath!, 'u1p.exit') });
-      expect(idleClock.pending).toBe(0);
+      await expectPoolCapacity(runner, run.id, true);
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('waiting for a command');
       external.settle({ outcome: 'exit_file', exitCode: 0 });
       await until(() => settled(run.id, wait.id)?.phase === 'delivered' && prompted(runner, processText(wait, ' (u1p): exited with code 0')).length > 0);
