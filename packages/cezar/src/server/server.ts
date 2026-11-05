@@ -5168,7 +5168,7 @@ export function createApp(deps: ServerDeps) {
     .route('/', fsBrowseRoutes)
     .route('/', automationChecksRoutes)
     .route('/', runsIndexRoutes)
-    .route('/', createActivityRoutes({ bootContext, contexts, workspaceProjects, toolActivity: deps.toolActivity }))
+    .route('/', createActivityRoutes({ bootContext, contexts, workspaceProjects, toolActivity: deps.toolActivity, socketHub: deps.socketHub, workspaceEvents }))
     .route('/', workspaceEventsRoutes);
 
   // ---- mount ---------------------------------------------------------------

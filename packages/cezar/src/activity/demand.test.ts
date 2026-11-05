@@ -17,4 +17,21 @@ describe('activity demand', () => {
     now += 1;
     expect(demand.has('shop')).toBe(false);
   });
+
+  it('counts topic watchers per project, and the workspace watcher covers every project', () => {
+    const demand = new ActivityDemand(() => 0);
+    const first = demand.watch('shop');
+    const second = demand.watch('shop');
+    expect(demand.has('shop')).toBe(true);
+    expect(demand.has('docs')).toBe(false);
+    first();
+    first(); // a second release of the same watch releases nothing more
+    expect(demand.has('shop')).toBe(true);
+    second();
+    expect(demand.has('shop')).toBe(false);
+    const workspace = demand.watch();
+    expect(demand.has('docs')).toBe(true);
+    workspace();
+    expect(demand.has('docs')).toBe(false);
+  });
 });
