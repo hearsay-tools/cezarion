@@ -108,7 +108,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             expect(input).toBeDefined();
             expect(input?.deliveredAt).toBeUndefined();
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
-            await waitFor(() => nudgeNotes(store.readEvents(runId).slice(startSeq)).length === 1);
+            await waitFor(() => store.getRun(runId)?.agentInputs?.find(input => input.id === inputId)?.deliveredAt !== undefined);
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toEqual([expect.objectContaining({
               stepId: store.getRun(runId)?.steps.at(-1)?.id,
             })]);
@@ -147,7 +147,6 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               expect(semaphore.busy()).toBe(1);
               expect(noReplyNotes(store.readEvents(runId))).toHaveLength(0);
               await clock.advance(150);
-              await waitForNativeContent(() => store.getRun(runId)?.status === 'waiting');
               expect(clock.captured).toBe(1);
             } finally { clock.restore(); }
             expectParkedOutsidePool(semaphore);
@@ -251,12 +250,12 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
                 await waitForNativeContent(() => store.readEvents(runId).slice(startSeq).some(e =>
                   e.type === 'text' && String(e.text).includes('Working on the wrap-up.')));
                 expect(clock.captured).toBe(1);
-                expect(clock.pending).toBe(0);
                 // The native mock holds DONE until this test crosses the reply bound.
                 await clock.advance(300);
                 expect(store.getRun(runId)?.status).toBe('running');
                 expect(semaphore.busy()).toBe(1);
                 expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
+                expect(clock.pending).toBe(0);
               } finally { clock.restore(); }
               writeFileSync(join(gateRoot, 'done'), 'go');
             } else manager.enqueueOwnedRun(runId);

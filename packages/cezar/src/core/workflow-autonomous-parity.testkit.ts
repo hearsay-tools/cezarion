@@ -6,7 +6,8 @@ import * as runners from './runner-factory.ts';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, vi } from 'vitest';
+import { expect, onTestFinished, vi } from 'vitest';
+import type { RunRecord } from '../runs/store.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { AUTONOMOUS_CRITERIA, driveRun, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { handoffPath } from '../handoff.ts';
@@ -296,17 +297,29 @@ describe('autonomous turn-end parity — #426', () => {
           // Every status write applies a run exit through the store's move (ADR 0056).
           const moves = vi.spyOn(store, 'move');
           const statusWrites = () => moves.mock.calls.filter(([id]) => id === runId).map(([, exit]) => RUN_EXITS[exit].to);
+          const priorHumanWaits = new Set((store.getRun(runId)?.waits ?? []).filter(wait => wait.kind === WAIT_KIND.human).map(wait => wait.id));
+          const publishedHumanWaits = new Set<string>();
+          const observeHumanWaits = (run: RunRecord) => {
+            if (run.id !== runId) return;
+            for (const wait of run.waits ?? []) {
+              if (wait.kind === WAIT_KIND.human && wait.phase === WAIT_PHASE.open && !priorHumanWaits.has(wait.id)) publishedHumanWaits.add(wait.id);
+            }
+          };
+          store.on('run', observeHumanWaits);
+          onTestFinished(() => { store.off('run', observeHumanWaits); });
           // A refused cezar_ask answers the agent and leaves no run event; the registry's warning is its trace.
           const warnings = vi.spyOn(console, 'warn');
           const askRefusals = () => warnings.mock.calls.filter(([message]) => String(message).includes('wait registration refused: autonomous_run')).length;
           const startSeq = store.readEvents(runId).length;
           if (mode === 'continuation') expect(manager.continueRun(runId, { text: promptFor(backend, row.scenario) }).ok).toBe(true);
           else manager.enqueueOwnedRun(runId);
-          // Assert on the first stable outcome, so a missing nudge fails directly as
-          // waiting rather than burning the whole timeout waiting for completion.
-          // Progress is the manager's own nudge count (see ROW_SETTLE_MS).
+          // Done rows reach their terminal outcome before we check publication history.
+          // Other rows settle at their park. Nudge progress resets the stall bound.
+          const expectsDone = ['A1', 'A2', 'A3', 'A4', 'A8'].includes(row.id);
           await waitForProgressing(
-            () => store.getRun(runId)?.status === 'waiting' || ['done', 'review', 'failed'].includes(store.getRun(runId)?.status ?? ''),
+            () => {
+              return (!expectsDone && store.getRun(runId)?.status === 'waiting') || ['done', 'review', 'failed'].includes(store.getRun(runId)?.status ?? '');
+            },
             () => store.getRun(runId)?.automaticWakes,
             ROW_SETTLE_MS,
           );
@@ -339,6 +352,7 @@ describe('autonomous turn-end parity — #426', () => {
             expect(store.getRun(runId)?.status).toBe('done');
             expect(notes).toHaveLength(row.id === 'A8' ? 0 : 1);
             expect(statusWrites()).not.toContain(RUN_STATUS.waiting);
+            expect([...publishedHumanWaits]).toEqual([]);
             expect(store.getRun(runId)?.waits?.filter(wait => wait.kind === WAIT_KIND.human && wait.phase === WAIT_PHASE.open) ?? []).toEqual([]);
             const stepId = store.getRun(runId)!.steps.at(-1)!.id;
             expect(notes.every(note => note.stepId === stepId)).toBe(true);
