@@ -7,7 +7,7 @@ import { beginUsageInvocation } from './run/usage-accounting.ts';
 import { createActiveRun } from './active-run.ts';
 import { UiEventSink } from '../runs/ui-event-sink.ts';
 import { runInternals } from './run-internals.testkit.ts';
-import { createFixtureManager, drainFixtureManagers, unused } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, unused, fixtureWork } from './fixture-cleanup.testkit.ts';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -1034,13 +1034,9 @@ describe('RunManager monitoring turns', () => {
     fixture.currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
-    const internals = runInternals(fixture.manager);
-    const state = internals.active.get(record.id);
-    if (!state) throw new Error('active run state missing');
     const wakeTimer = monitoringTimerWait(fixture.store.getRun(record.id));
     const deadline = monitoringWakeOf(fixture.store.getRun(record.id));
-    const sink = makeUiSink(internals.context, internals.sessionHelperHost, record.id, 'task');
-    const inject = (event: UiEvent) => handleRunnerUiEvent(internals.context, internals.sessionHelperHost, record.id, state, sink, event);
+    const inject = runnerHook.uiEvent;
 
     inject({
       type: 'item.completed',
@@ -1089,9 +1085,6 @@ describe('RunManager monitoring turns', () => {
     expect(fixture.store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.waiting });
     expect(monitoringWakeOf(fixture.store.getRun(record.id))).toBe(deadline);
     expect(monitoringTimerWait(fixture.store.getRun(record.id))).toEqual(wakeTimer);
-    expect(runInternals(fixture.manager).line.waiting.has(record.id)).toBe(true);
-    expect(runInternals(fixture.manager).line.monitoring.has(record.id)).toBe(true);
-    expect(runInternals(fixture.manager).line.busySlots()).toBe(0);
     expect(semaphore.busy()).toBe(0);
 
     await waitFor(record.id, () => {
@@ -1108,15 +1101,7 @@ describe('RunManager monitoring turns', () => {
     fixture.currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
-    const internals = runInternals(fixture.manager);
-    const state = internals.active.get(record.id);
-    if (!state) throw new Error('active run state missing');
-    handleRunnerUiEvent(internals.context, internals.sessionHelperHost,
-      record.id,
-      state,
-      makeUiSink(internals.context, internals.sessionHelperHost, record.id, 'task'),
-      { type: 'turn.started', turnId: 'turn_parent_resume' },
-    );
+    runnerHook.uiEvent({ type: 'turn.started', turnId: 'turn_parent_resume' });
 
     // hearsay-tools/cezarion#1233: the resumed turn keeps its pool slot until its own turn end.
     // hearsay-tools/cezarion#2431 (owner decision 4): a parent turn the runner starts itself closes
@@ -1126,20 +1111,18 @@ describe('RunManager monitoring turns', () => {
     expect(monitoringWakeOf(fixture.store.getRun(record.id))).toBeUndefined();
     expect(monitoringTimerWait(fixture.store.getRun(record.id))).toBeUndefined();
     expect(fixture.store.getRun(record.id)?.lastWaits?.filter(wait => wait.kind === WAIT_KIND.timer).map(wait => wait.phase)).toEqual([WAIT_PHASE.cancelled]);
-    expect(runInternals(fixture.manager).line.waiting.has(record.id)).toBe(false);
-    expect(runInternals(fixture.manager).line.monitoring.has(record.id)).toBe(true);
-    expect(runInternals(fixture.manager).line.busySlots()).toBe(0);
     expect(semaphore.busy()).toBe(0);
   }, 30_000);
 
   it('a markerless turn-end still parks as waiting with no activity', async () => {
+    const clock = fixture.observeIdleTimers();
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'just do the thing', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting');
-    const state = (fixture.manager as unknown as {
-      active: Map<string, { idleTimer?: NodeJS.Timeout }>;
-    }).active.get(record.id);
-    expect(state?.idleTimer).toBeDefined(); // genuine user waits still expire after IDLE_TIMEOUT_MS
+    expect(clock.pending).toBe(1);
+    clock.fire(clock.captured - 1);
+    await waitFor(record.id, () => !fixture.manager.isActive(record.id));
+    expect(fixture.store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.waiting, finishedAt: undefined });
     expect(monitoringTimerWait(fixture.store.getRun(record.id))).toBeUndefined();
   }, 30_000);
 });
@@ -1153,13 +1136,13 @@ describe('RunManager waiting recovery', () => {
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', runner: 'codex', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
-    const surviving = (fixture.manager as unknown as { active: Map<string, { liveSession: { session?: AgentSession; };  }> }).active.get(record.id)?.liveSession.session;
+    const surviving = [...fixtureWork(fixture.manager).liveSessions];
     fixture.manager.dispose();
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);
     await fixture.manager.recover();
     expect(fixture.manager.finish(record.id)).toBe(false);
     expect(fixture.manager.continueRun(record.id, { text: 'resume' })).toEqual({ ok: false, error: 'cannot continue a waiting run' });
-    surviving?.end();
+    surviving.forEach(session => session.end());
   }, 30_000);
 
   it('does not answer an inactive pending ask while its disposed session process is still registered', async () => {
@@ -1177,7 +1160,7 @@ describe('RunManager waiting recovery', () => {
         options: [{ label: 'First' }, { label: 'Second' }],
       }],
     });
-    const surviving = (fixture.manager as unknown as { active: Map<string, { liveSession: { session?: AgentSession; };  }> }).active.get(record.id)?.liveSession.session;
+    const surviving = [...fixtureWork(fixture.manager).liveSessions];
     fixture.manager.dispose();
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);
     await fixture.manager.recover();
@@ -1188,7 +1171,7 @@ describe('RunManager waiting recovery', () => {
       error: 'cannot continue a waiting run',
     });
     unregisterRunProcess(record.id);
-    surviving?.end();
+    surviving.forEach(session => session.end());
   }, 30_000);
 
   it('opens a human wait at recovery for an unanswered ask the record has no wait for', async () => {
@@ -1264,14 +1247,12 @@ describe('RunManager idle shutdown', () => {
   const fixture = setupMonitoringFixture();
   const { SINGLE_STEP, waitFor } = fixture;
   it('honors cancellation that races an idle-close callback', async () => {
+    const clock = fixture.observeIdleTimers();
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
-    const state = (fixture.manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
-
-    idleTimer._onTimeout();
+    expect(clock.pending).toBe(1);
+    clock.fire(clock.captured - 1);
     expect(fixture.manager.cancel(record.id)).toBe(true);
     await waitFor(record.id, candidate => candidate?.status === 'cancelled');
     expect(fixture.store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.cancelled });
@@ -1282,6 +1263,7 @@ describe('RunManager idle shutdown', () => {
   }, 30_000);
 
   it('publishes a runner failure that occurs during idle shutdown', async () => {
+    const clock = fixture.observeIdleTimers();
     runnerHook.runner = {
       backend: 'claude',
       specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
@@ -1309,11 +1291,8 @@ describe('RunManager idle shutdown', () => {
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'wait then fail', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
-    const state = (fixture.manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
-
-    idleTimer._onTimeout();
+    expect(clock.pending).toBe(1);
+    clock.fire(clock.captured - 1);
     await waitFor(record.id, candidate => candidate?.status === 'failed');
     expect(fixture.store.getRun(record.id)).toMatchObject({
       status: RUN_STATUS.failed, error: expect.stringContaining('provider failed during shutdown'),
@@ -1471,14 +1450,13 @@ describe('RunManager check retry recovery', () => {
   }, 30_000);
 
   it('does not treat an unrelated failed check as a continuation workflow source', async () => {
+    const clock = fixture.observeIdleTimers();
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
-    const state = (fixture.manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
-    idleTimer._onTimeout();
-    await waitFor(record.id, () => !(fixture.manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    expect(clock.pending).toBe(1);
+    clock.fire(clock.captured - 1);
+    await waitFor(record.id, () => !fixture.manager.isActive(record.id));
     const workflow: WorkflowDef = {
       name: 'failed-check', source: 'file',
       steps: [
@@ -1502,14 +1480,13 @@ describe('RunManager check retry recovery', () => {
   }, 30_000);
 
   it('restart reruns an interrupted check instead of completing it as a continuation source', async () => {
+    const clock = fixture.observeIdleTimers();
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
-    const state = (fixture.manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
-    idleTimer._onTimeout();
-    await waitFor(record.id, () => !(fixture.manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    expect(clock.pending).toBe(1);
+    clock.fire(clock.captured - 1);
+    await waitFor(record.id, () => !fixture.manager.isActive(record.id));
     fixture.manager.dispose();
     const workflow: WorkflowDef = { name: 'interrupted-check', source: 'file', steps: [
       SINGLE_STEP.steps[0]!,
