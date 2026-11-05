@@ -67,14 +67,14 @@ export function ActivityBoard({ project, now, watchingSince }: { project: Activi
           style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))`, columnGap: narrow ? 0 : COLUMN_GAP }}
         >
           {columns.map((column, i) => (
-            <div key={i} data-slot="activity-column" className="grid min-w-0 content-start gap-[30px] max-md:gap-4">
+            <div key={i} data-slot="activity-column" className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-[30px] max-md:gap-4">
               {column.map((id) => {
                 const task = tasks.get(id)
                 return task ? <ActivityCard key={id} task={task} requests={project.requests} index={index} ctx={ctx} dense={dense} narrow={narrow} /> : null
               })}
             </div>
           ))}
-          <ActivityLines hostRef={hostRef} requests={project.requests} index={index} peers={!narrow} layoutKey={layoutKey} now={now} />
+          <ActivityLines requests={project.requests} index={index} peers={!narrow} layoutKey={layoutKey} now={now} />
         </div>
       </div>
       <ActivityRail requests={project.requests} index={index} now={now} watchingSince={watchingSince} />

@@ -126,10 +126,17 @@ function assertProject(projectId: string, path: string): void {
   const expected = expectedNavHrefs(projectId)
   expect(browser.waitForValue(`Array.from(document.querySelectorAll('${nav} a')).map(a => new URL(a.href).pathname)`,
     value => JSON.stringify(value) === JSON.stringify(expected))).toEqual(expected)
-  expect(browser.waitForValue(`Array.from(document.querySelectorAll('${nav} a[aria-current="page"]')).map(a => new URL(a.href).pathname)`,
-    value => JSON.stringify(value) === JSON.stringify([scoped(projectId, path)]))).toEqual([scoped(projectId, path)])
   // The More views scope to the same project: every path the main row does not carry is in the menu.
   const overflow = expectedOverflowHrefs(projectId)
+  // A view in More (Git) lights the More button, and no link in the main row.
+  const inMore = overflow.includes(scoped(projectId, path))
+  const lit = inMore ? [] : [scoped(projectId, path)]
+  expect(browser.waitForValue(`Array.from(document.querySelectorAll('${nav} a[aria-current="page"]')).map(a => new URL(a.href).pathname)`,
+    value => JSON.stringify(value) === JSON.stringify(lit))).toEqual(lit)
+  if (inMore) {
+    expect(browser.waitForValue(`document.querySelector('${nav} [aria-label="More views"]')?.getAttribute('data-active') ?? null`,
+      value => value === 'true')).toBe('true')
+  }
   // Health can settle after the primary links, which are unchanged by optional views on a bare repo.
   expect(browser.waitForValue(`document.querySelectorAll('${nav} [aria-label="More views"]').length`,
     value => value === (overflow.length ? 1 : 0))).toBe(overflow.length ? 1 : 0)

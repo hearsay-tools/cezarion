@@ -91,6 +91,13 @@ describe('ActivityBoard', () => {
     expect(within(card('task-b')).queryByRole('link', { name: /^→/ })).toBeNull()
   })
 
+  it('keeps the family line inside a card in one column', () => {
+    setGraphWidth(500)
+    renderBoard(project({ tasks: [PARENT], requests: [FAMILY] }))
+    expect(document.querySelector('[data-slot="activity-graph"]')?.getAttribute('data-columns')).toBe('1')
+    expect(document.querySelector(`path[data-request="${FAMILY.requestId}"]`)?.getAttribute('data-kind')).toBe('family')
+  })
+
   it('folds settled workers into the finished count and keeps a review worker as a row', () => {
     const root = run({ runId: 'root', workers: [
       worker({ runId: 'w-live' }),

@@ -69,7 +69,7 @@ function Legend() {
 
 export function ActivityRail({ requests, index, now, watchingSince }: { requests: readonly ActivityRequest[]; index: ReadonlyMap<string, RunEntry>; now: number; watchingSince: string }) {
   return (
-    <aside data-slot="activity-rail" aria-label="Activity details" className="grid content-start gap-4">
+    <aside data-slot="activity-rail" aria-label="Activity details" className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-4">
       <section data-slot="activity-open-requests" className={PANEL}>
         <h2 className={PANEL_TITLE}>Open requests <b className="text-foreground">{requests.length}</b></h2>
         {requests.length === 0 ? (

@@ -9,7 +9,7 @@ import { measureLines, sameLines, type LineShape } from './line-measure'
 
 /**
  * The static lines between tasks (spec 2026-11-05-live-activity-view, "Lines between tasks"): an
- * SVG overlay over the graph and one HTML label per peer line. Geometry is measured from the
+ * SVG overlay over the graph (its parent element) and one HTML label per peer line. Geometry is measured from the
  * laid-out cards and measured again when the graph or a card changes size (`ResizeObserver`),
  * never on a frame loop. Slice S6 adds the march and the comets.
  */
@@ -31,8 +31,13 @@ export function windowUsed(request: Pick<ActivityRequest, 'createdAt' | 'deadlin
   return Math.min(1, Math.max(0, (now - start) / (end - start)))
 }
 
+/**
+ * The host is the overlay's parent element, read through the overlay's own ref: React attaches a
+ * parent's ref only after its children's layout effects run, so a ref passed down from the graph
+ * is still null at the first measure.
+ */
 function useMeasuredLines(
-  hostRef: React.RefObject<HTMLElement | null>,
+  overlayRef: React.RefObject<SVGSVGElement | null>,
   requests: readonly ActivityRequest[],
   index: ReadonlyMap<string, RunEntry>,
   peers: boolean,
@@ -40,7 +45,7 @@ function useMeasuredLines(
 ): LineShape[] {
   const [lines, setLines] = React.useState<LineShape[]>([])
   React.useLayoutEffect(() => {
-    const host = hostRef.current
+    const host = overlayRef.current?.parentElement
     if (!host) return
     const measure = () => {
       const next = measureLines(host, requests, index, { peers })
@@ -52,7 +57,7 @@ function useMeasuredLines(
     observer.observe(host)
     for (const card of host.querySelectorAll('[data-activity-card]')) observer.observe(card)
     return () => observer.disconnect()
-  }, [hostRef, requests, index, peers, layoutKey])
+  }, [overlayRef, requests, index, peers, layoutKey])
   return lines
 }
 
@@ -78,14 +83,12 @@ function PeerLabel({ line, request, now }: { line: LineShape; request: ActivityR
 }
 
 export function ActivityLines({
-  hostRef,
   requests,
   index,
   peers,
   layoutKey,
   now,
 }: {
-  hostRef: React.RefObject<HTMLElement | null>
   requests: readonly ActivityRequest[]
   index: ReadonlyMap<string, RunEntry>
   /** False in the one-column layout: peer requests become links on the sender card. */
@@ -94,11 +97,12 @@ export function ActivityLines({
   layoutKey: string
   now: number
 }) {
-  const lines = useMeasuredLines(hostRef, requests, index, peers, layoutKey)
+  const overlayRef = React.useRef<SVGSVGElement>(null)
+  const lines = useMeasuredLines(overlayRef, requests, index, peers, layoutKey)
   const byId = new Map(requests.map((request) => [request.requestId, request]))
   return (
     <>
-      <svg data-slot="activity-lines" aria-hidden="true" className="pointer-events-none absolute inset-0 z-[3] size-full overflow-visible">
+      <svg ref={overlayRef} data-slot="activity-lines" aria-hidden="true" className="pointer-events-none absolute inset-0 z-[3] size-full overflow-visible">
         <defs>
           <marker id="activity-arrow-peer" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
             <path d="M0 0 10 5 0 10z" className="fill-message-peer-accent" />

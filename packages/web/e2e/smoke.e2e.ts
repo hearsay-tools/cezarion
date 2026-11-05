@@ -221,9 +221,14 @@ describe('cockpit app shell', () => {
     // Keyboard walk to the LAST overflow item (Reports) and activate it.
     const last = expected[expected.length - 1]!
     browser.evaluate(`document.querySelector('${trigger}').focus()`)
+    // Wait for each item to hold focus before the next key: a key pressed while focus moves is lost.
+    const focusedItem = (label: string) => `document.activeElement?.getAttribute('role') === 'menuitem' && document.activeElement.textContent.trim().replace(/\\d+$/, '').trim() === '${label}'`
     browser.press('ArrowDown')
-    for (let i = 0; i < expected.length - 1; i++) browser.press('ArrowDown')
-    browser.waitForFunction(`document.activeElement?.getAttribute('role') === 'menuitem' && document.activeElement.textContent.trim().replace(/\\d+$/, '').trim() === '${last}'`)
+    browser.waitForFunction(focusedItem(expected[0]!))
+    for (const label of expected.slice(1)) {
+      browser.press('ArrowDown')
+      browser.waitForFunction(focusedItem(label))
+    }
     browser.press('Enter')
     browser.waitForFunction(`location.pathname === '${scoped('')}' + '${OVERFLOW_PATHS[last]}' && document.querySelector('[role="menu"]') === null`)
     browser.waitForFunction(`document.querySelector('${trigger}').getAttribute('data-active') === 'true'`)
