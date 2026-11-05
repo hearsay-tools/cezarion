@@ -67,10 +67,13 @@ export class RunSettlement {
    * unfinished private worker generation must retain its files until exit. */
   reapTerminalScratch(runId: string): void {
     const run = this.context.store.getRun(runId);
-    if (!run || ['queued', 'running', 'waiting'].includes(run.status)) return;
-    if (this.host.active.has(runId) || this.line.hasStarting(runId) || this.line.hasQueued(runId) || this.host.hasClaim(runId) || !!this.host.autosaveCleanupBlocker(runId)) return;
-    const privateWorkers = workerEvidenceRunIds(this.context.dataDir);
-    if (run.delegation?.role === 'worker' || run.delegation?.role === 'invalid' || !privateWorkers || privateWorkers.includes(runId)) { this.host.workerScratchCleanup.schedule(runId); return; }
+    const disposition = terminalScratchDisposition(runId, run, {
+      active: () => this.host.active.has(runId), starting: () => this.line.hasStarting(runId), queued: () => this.line.hasQueued(runId),
+      claimed: () => this.host.hasClaim(runId), autosaveBlocker: () => this.host.autosaveCleanupBlocker(runId),
+      privateWorkers: () => workerEvidenceRunIds(this.context.dataDir),
+    });
+    if (disposition === 'keep') return;
+    if (disposition === 'schedule') { this.host.workerScratchCleanup.schedule(runId); return; }
     removeAgentTmpDir(this.context.dataDir, runId);
   }
 
@@ -162,7 +165,8 @@ export class RunSettlement {
     sink.sessionEnded(state.liveSession.cancelled ? 'cancelled' : 'end_turn');
     const incomplete = this.continuationLeftOpen(state, stepId, resumedNext);
     const kind = stepDecisions.continuationCloseKind(state.liveSession.cancelled, incomplete,
-      !state.liveSession.cancelled && !incomplete && (state.boundary.idleClosed || this.supersedeFallbackThenWorkflowAsk(runId, state)));
+      sessionCloseKeepsWaiting({ get cancelled() { return state.liveSession.cancelled; }, get incomplete() { return incomplete; },
+        get idleClosed() { return state.boundary.idleClosed; } }, () => this.supersedeFallbackThenWorkflowAsk(runId, state)));
     if (kind === 'cancelled') {
       this.settleCancelledContinuation(runId, stepId);
       return undefined;
@@ -297,7 +301,8 @@ export class RunSettlement {
       return;
     }
     const settlement = stepDecisions.executionSettlementKind(state.liveSession.cancelled, loop.runError, loop.incompleteStepId,
-      !state.liveSession.cancelled && !loop.runError && !loop.incompleteStepId && (state.boundary.idleClosed || this.supersedeFallbackThenWorkflowAsk(runId, state)));
+      sessionCloseKeepsWaiting({ get cancelled() { return state.liveSession.cancelled; }, get incomplete() { return !!loop.runError || !!loop.incompleteStepId; },
+        get idleClosed() { return state.boundary.idleClosed; } }, () => this.supersedeFallbackThenWorkflowAsk(runId, state)));
     if (settlement.kind === 'cancelled') {
       this.settleCancelledRun(runId);
     } else if (settlement.kind === 'failed') {
@@ -528,4 +533,19 @@ export class RunSettlement {
     void this.enforceRetention();
     this.reapTerminalScratch(runId);
   }
+}
+
+export function sessionCloseKeepsWaiting(input: { readonly cancelled: boolean; readonly incomplete: boolean; readonly idleClosed: boolean | undefined }, workflowAsk: () => boolean): boolean {
+  return !input.cancelled && !input.incomplete && (input.idleClosed || workflowAsk());
+}
+
+export function terminalScratchDisposition(runId: string, run: RunRecord | undefined, reads: {
+  active(): boolean; starting(): boolean; queued(): boolean; claimed(): boolean;
+  autosaveBlocker(): string | undefined; privateWorkers(): string[] | undefined;
+}): 'keep' | 'schedule' | 'remove' {
+  if (!run || ['queued', 'running', 'waiting'].includes(run.status)) return 'keep';
+  if (reads.active() || reads.starting() || reads.queued() || reads.claimed() || !!reads.autosaveBlocker()) return 'keep';
+  const privateWorkers = reads.privateWorkers();
+  if (run.delegation?.role === 'worker' || run.delegation?.role === 'invalid' || !privateWorkers || privateWorkers.includes(runId)) return 'schedule';
+  return 'remove';
 }

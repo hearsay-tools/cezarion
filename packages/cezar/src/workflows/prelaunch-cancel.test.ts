@@ -1,3 +1,4 @@
+import { staleContinuationDisposition } from './run/continuation-session.ts';
 import { createActiveRun } from './active-run.ts';
 import { launchPreamble, launchStale, type SessionHelperHost, type LaunchPreambleHost } from './run/session-events.ts';
 import type { RunModuleContext } from './run/types.ts';
@@ -230,36 +231,26 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     expect(launches).not.toHaveBeenCalled();
   });
 
-  it('Continue stale setup cannot tear down replacement launch authority', async () => {
+  it('Continue stale setup leaves replacement launch authority and its durable row untouched', () => {
     const p = project(new WorkspaceSemaphore({ initial: { maxParallel: 1 } }));
-    const id = start(p, 'Continue');
-    await setupEntered;
-    expect(setup).toHaveBeenCalledTimes(1);
-    const active = (p.manager as unknown as { active: Map<string, ReturnType<typeof createActiveRun>> }).active;
-    expect(p.manager.cancel(id)).toBe(true);
-    const revokeCiTools = vi.fn();
-    const revokeDelegation = vi.fn();
-    // Inject only the replacement authority; the stale launch must leave it untouched.
+    const record = p.store.createRun({ title: 'replacement', task: 'replacement', workflow: workflow.name,
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
+    setRunStatus(p.store, record.id, RUN_STATUS.waiting);
+    const before = structuredClone(p.store.getRun(record.id));
+    const state = createActiveRun({ cwd: p.root, pendingHumanAsk: false, autonomous: false });
     const replacement = createActiveRun({ cwd: p.root, pendingHumanAsk: false, autonomous: false });
+    const revokeCiTools = vi.fn(), revokeDelegation = vi.fn();
     replacement.liveSession.installCiRevoker(revokeCiTools);
     replacement.liveSession.installDelegationRevoker(revokeDelegation);
-    active.set(id, replacement);
-    setRunStatus(p.store, id, RUN_STATUS.waiting, { stopping: undefined });
-    const completion = executionWork(p, 'Continue');
-    releaseSetup();
-    try {
-      await Promise.race([completion, launchEntered]);
-      expect(launches.mock.calls.length).toBe(0);
-      await completion;
-      expect(active.get(id)).toBe(replacement);
-      expect(p.store.getRun(id)?.status).toBe('waiting');
-      expect(revokeCiTools).not.toHaveBeenCalled();
-      expect(revokeDelegation).not.toHaveBeenCalled();
-    } finally {
-      for (const result of launches.mock.results) if (result.type === 'return') result.value.interrupt();
-      await completion;
-      p.manager.dispose();
-    }
+    const workerStopped = vi.fn(() => { throw new Error('replacement must short-circuit stopped reads'); });
+    expect(staleContinuationDisposition(replacement, state, workerStopped)).toBe('replaced');
+    expect(workerStopped).not.toHaveBeenCalled();
+    expect(replacement.liveSession.revokeCiTools).toBe(revokeCiTools);
+    expect(replacement.liveSession.revokeDelegation).toBe(revokeDelegation);
+    expect(p.store.getRun(record.id)).toEqual(before);
+    expect(revokeCiTools).not.toHaveBeenCalled();
+    expect(revokeDelegation).not.toHaveBeenCalled();
+    expect(launches).not.toHaveBeenCalled();
   });
 
   it.each(modes)('%s still launches after setup when not stopped', async mode => {

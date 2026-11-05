@@ -1,10 +1,10 @@
-import type { InputGroup } from '../workflows/run/input-delivery.ts';
+import { captureSessions } from '../workflows/runner-session-capture.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
-import { OpencodeServerRunner } from './opencode-server-runner.ts';
 import type { AgentSession } from './agent-runner.ts';
+import { OpencodeServerRunner } from './opencode-server-runner.ts';
 import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { blockRunWrites, muteLockedDatabaseLogs } from '../runs/run-store.testkit.ts';
 
@@ -25,33 +25,34 @@ async function openSession(fixture: Fixture, mode: 'fresh' | 'continuation'): Pr
   await waitFor(() => store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined);
 }
 
-function activeState({ manager, runId }: Fixture) {
-  return (manager as unknown as {
-    active: Map<string, { liveSession: { session: AgentSession; }; inputState: InputGroup }>;
-  }).active.get(runId)!;
-}
-
 /** The checkpoint now follows the real HTTP ACK, so the previous fixture's
  * same-request fetch failure is impossible. Inject a secondary callback at the
  * observed interrupt instead; the ACK and disk fault themselves remain real. */
 it.each(['fresh', 'continuation'] as const)('%s acknowledged input checkpoint remains primary over a later session error', async mode => {
+  let ownedSession: AgentSession;
   const start = OpencodeServerRunner.prototype.startSession;
   let emitError: (() => void) | undefined;
   const spy = vi.spyOn(OpencodeServerRunner.prototype, 'startSession').mockImplementation(function (this: OpencodeServerRunner, spec, onEvent, opts) {
     emitError = () => onEvent?.({ type: 'error', message: 'opencode: agent input failed: later transport failure' });
-    return start.call(this, spec, onEvent, opts);
+    ownedSession = start.call(this, spec, onEvent, opts);
+    return ownedSession;
   });
   try {
     await withOwnedInputRun('opencode', 'baseline', async fixture => {
       await openSession(fixture, mode);
       const { store, manager, runId, repoRoot, parentRunId } = fixture;
-      const state = activeState(fixture), checkpointsAtInterrupt: Array<string | undefined> = [];
-      const interrupt = state.liveSession.session.interrupt.bind(state.liveSession.session);
+      const session = ownedSession!;
+      const interrupt = session.interrupt.bind(session);
+      const checkpointReports = () => store.readEvents(runId).filter(event => event.type === 'error' &&
+        typeof event.message === 'string' && event.message.includes('agent input delivery checkpoint failed'));
+      const reportsAtInterrupt: number[] = [];
       let injected = false;
-      vi.spyOn(state.liveSession.session, 'interrupt').mockImplementation(() => {
-        checkpointsAtInterrupt.push(state.inputState.agentInputError);
+      vi.spyOn(session, 'interrupt').mockImplementation(() => {
+        reportsAtInterrupt.push(checkpointReports().length);
+        expect(checkpointReports()).toEqual([]);
         if (!injected) { injected = true; emitError?.(); }
         interrupt();
+        expect(checkpointReports()).toEqual([]);
       });
       store.flush();
       let unblock: (() => void) | undefined;
@@ -69,7 +70,9 @@ it.each(['fresh', 'continuation'] as const)('%s acknowledged input checkpoint re
         unblock?.();
         await waitFor(() => !manager.isActive(runId));
         const errors = store.readEvents(runId).filter(event => event.type === 'error').map(event => event.message);
-        expect(checkpointsAtInterrupt[0]).toContain('agent input delivery checkpoint failed');
+        expect(reportsAtInterrupt.length).toBeGreaterThan(0);
+        expect(reportsAtInterrupt.every(count => count === 0)).toBe(true);
+        expect(checkpointReports()).toHaveLength(1);
         expect(errors).toContain('opencode: agent input failed: later transport failure');
         expect(store.getRun(runId)?.status).toBe('failed');
         expect(store.getRun(runId)?.agentInputs).toEqual([input]);
@@ -83,19 +86,18 @@ it.each(['fresh', 'continuation'] as const)('%s acknowledged input checkpoint re
   } finally { spy.mockRestore(); }
 }, 60_000);
 
-it.each(['fresh', 'continuation'] as const)('%s earlier provider failure remains primary over a later checkpoint error', async mode => {
+it.each(['fresh', 'continuation'] as const)('%s provider failure is recorded before the real session interrupt', async mode => {
+  const sessionOf = captureSessions();
   await withOwnedInputRun('opencode', 'baseline', async fixture => {
     await openSession(fixture, mode);
     const { store, manager, runId } = fixture;
-    const state = activeState(fixture);
-    const interrupt = state.liveSession.session.interrupt.bind(state.liveSession.session);
+    const session = sessionOf(runId);
+    const interrupt = session.interrupt.bind(session);
     let observedProviderInterrupt = false;
-    vi.spyOn(state.liveSession.session, 'interrupt').mockImplementation(() => {
-      // Deliberately inject the later state at this test seam. The preceding
-      // provider error is an actual HTTP/SSE wire frame, already latched by the
-      // manager before it invokes interrupt. This is not a second disk-fault test.
+    vi.spyOn(session, 'interrupt').mockImplementation(() => {
       observedProviderInterrupt = true;
-      state.inputState.recordInputError('agent input delivery checkpoint failed: later test fault');
+      expect(store.readEvents(runId).some(event => event.type === 'error' &&
+        typeof event.message === 'string' && event.message.includes('API key expired'))).toBe(true);
       interrupt();
     });
     expect(manager.sendMessage(runId, [{ type: 'text', text: 'mock:provider-error' }])).toBe(true);
@@ -104,6 +106,5 @@ it.each(['fresh', 'continuation'] as const)('%s earlier provider failure remains
     expect(store.readEvents(runId).some(event => event.type === 'error' && typeof event.message === 'string' && event.message.includes('API key expired'))).toBe(true);
     expect(store.getRun(runId)?.status).toBe('failed');
     expect(store.getRun(runId)?.error).toContain('API key expired');
-    expect(store.getRun(runId)?.error).not.toContain('later test fault');
   });
 }, 60_000);

@@ -427,8 +427,9 @@ export class ContinuationSession {
     state: ActiveRun,
     held: Omit<PendingContinuation, 'lineJoinedAt'>,
   ): void {
-    if (this.sharedHost.active.get(runId) !== state) return;
-    if (state.liveSession.cancelled || this.sharedHost.workerExecutionStopped(runId)) {
+    const disposition = staleContinuationDisposition(this.sharedHost.active.get(runId), state, () => this.sharedHost.workerExecutionStopped(runId));
+    if (disposition === 'replaced') return;
+    if (disposition === 'cancel') {
       state.liveSession.cancel();
       this.settleContinuationPrelaunchCancel(runId, stepId, state);
     } else {
@@ -657,4 +658,9 @@ export class ContinuationSession {
       void this.host.pump();
     }
   }
+}
+
+export function staleContinuationDisposition(current: ActiveRun | undefined, state: ActiveRun, workerStopped: () => boolean): 'replaced' | 'cancel' | 'hold' {
+  if (current !== state) return 'replaced';
+  return state.liveSession.cancelled || workerStopped() ? 'cancel' : 'hold';
 }

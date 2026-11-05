@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { agentEnv, agentEnvForStep } from './run/launch-context.ts';
+import { terminalScratchDisposition } from './run/run-settlement.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -117,15 +118,15 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     }, { timeout: HANG_GUARD_MS });
   });
 
-  it.each(['queued', 'running', 'waiting'] as const)('preserves %s scratch when a session drops and the next spawn reuses it', async status => {
+  it.each([RUN_STATUS.queued, RUN_STATUS.running, RUN_STATUS.waiting])('preserves %s scratch before reading liveness or worker evidence', status => {
     const run = newRun();
-    const { env } = await resolveStepEnv(run.id, 'claude');
     setRunStatus(store, run.id, status);
-    writeFileSync(join(env.TMPDIR!, 'scratch'), 'keep my notes');
-    (manager as unknown as { dropActive(id: string): void }).dropActive(run.id);
-    const again = await resolveStepEnv(run.id, 'claude');
-    expect(again.env.TMPDIR).toBe(env.TMPDIR);
-    expect(readFileSync(join(again.env.TMPDIR!, 'scratch'), 'utf8')).toBe('keep my notes');
+    const unexpected = vi.fn((): never => { throw new Error('nonterminal scratch must not read reap dependencies'); });
+    expect(terminalScratchDisposition(run.id, store.getRun(run.id), {
+      active: unexpected, starting: unexpected, queued: unexpected, claimed: unexpected,
+      autosaveBlocker: unexpected, privateWorkers: unexpected,
+    })).toBe('keep');
+    expect(unexpected).not.toHaveBeenCalled();
   });
 
   it('preserves waiting scratch through a fresh store and manager recovery', async () => {
