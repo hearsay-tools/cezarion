@@ -1,7 +1,8 @@
 import { fireCapturedTimer } from './waits.testkit.ts';
 import { MONITORING_PARTITIONS, type MonitoringPartitionName } from './monitoring-turn-partitions.testkit.ts';
 import { RUN_STATUS, WAIT_KIND, WAIT_VIA, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
+import { observationClock } from '../core/observation-clock.testkit.ts';
+import { IDLE_TIMEOUT_MS } from './run.ts';
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,14 +15,13 @@ import { attentionFields, projectStatus } from '../task-cli/projections.ts';
 import { endsWait } from '../task-cli/watch.ts';
 import { TaskWebhook, type TaskWebhookPayload } from '../runs/webhook.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture, register, waitOf } from './worker-wait.testkit.ts';
+import { manager, store, root, worker, until, semaphore, useWorkerWaitFixture, register, waitOf, toolGenerationOf, bookkeeping, executions, work } from './worker-wait.testkit.ts';
 import { MONITORING_TURN_CRITERIA, messagesPrompt, ACK_TEXT } from './monitoring-turn.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 import { thenSay, toolCall } from './waits-parity.testkit.ts';
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 
 type MonitoringRun = NonNullable<ReturnType<typeof store.getRun>>;
-interface TurnEndTracker { recorded: number; pending: Set<Promise<void>> }
 interface RowContext {
   backend: RunnerId;
   runId: string;
@@ -29,7 +29,7 @@ interface RowContext {
   attention(label: string, wants: boolean): void;
   /** One turn: the prompt is a `toolCall`/`thenSay` script or a `messagesPrompt`. */
   send(prompt: string): Promise<void>;
-  turnEnds: TurnEndTracker;
+  idleClock: ReturnType<typeof observationClock>;
 }
 type RowId = (typeof MONITORING_TURN_CRITERIA)[number]['id'];
 interface RowSpec {
@@ -99,7 +99,7 @@ async function laterAskBeatsMonitoring({ runId, send, attention }: RowContext): 
 }
 
 // M5 and M19 differ in the turn's script only.
-async function reachesReview({ runId, send, attention, run, turnEnds }: RowContext, prompt: string): Promise<void> {
+async function reachesReview({ runId, send, attention, run }: RowContext, prompt: string): Promise<void> {
   process.env.CEZ_REVIEW_GATE = '1';
   const cwd = run().worktreePath!;
   expect(cwd).toBeDefined();
@@ -108,8 +108,8 @@ async function reachesReview({ runId, send, attention, run, turnEnds }: RowConte
   // (M5 opencode, M19 omp and cursor) and in local full runs, and on Codex under load
   // (hearsay-tools/cezarion#887). With the stat's lock held for 0.5s, these rows fail
   // without this wait and pass with it.
-  expect(turnEnds.recorded).toBeGreaterThan(0);
-  await until(() => turnEnds.pending.size === 0);
+  expect(bookkeeping.length).toBeGreaterThan(0);
+  await Promise.all(bookkeeping);
   writeFileSync(join(cwd, 'review.txt'), 'review this change');
   execFileSync('git', ['add', 'review.txt'], { cwd });
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '-qm', 'review change'], { cwd });
@@ -128,15 +128,19 @@ async function idleClosureKeepsQuestion(ctx: RowContext): Promise<void> {
   await laterAskBeatsMonitoring(ctx);
   await answerClearsMonitoringAfterIdleClosure(ctx);
 }
-async function answerClearsMonitoringAfterIdleClosure({ runId, attention, run }: RowContext): Promise<void> {
+async function answerClearsMonitoringAfterIdleClosure({ runId, attention, run, idleClock }: RowContext): Promise<void> {
   const askSeq = store.readEvents(runId).filter(event => event.type === 'ask.requested').at(-1)!.seq;
-  const timer = manager['active'].get(runId)!.idleTimer! as NodeJS.Timeout & { _onTimeout(): void };
-  const expire = timer._onTimeout; clearTimeout(timer); expire();
+  // Other observed wait timers stay frozen: this row expires only the idle close.
+  expect(idleClock.pending).toBe(1);
+  idleClock.fire(idleClock.captured - 1);
   await until(() => !manager.isActive(runId));
+  await Promise.all(executions);
+  expect(store.readEvents(runId)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'lifecycle', message: `session closed after ${IDLE_TIMEOUT_MS / 60_000}m of inactivity` })]));
   expect(hasPendingAsk(store, runId)).toBe(true);
   attention('needs you', true);
+  const boundaries = store.readEvents(runId).filter(event => event.type === 'turn-end').length;
   expect(manager.continueRun(runId, { text: script(WAIT, thenSay(ACK_TEXT)) }).ok).toBe(true);
-  await until(() => run().status === 'waiting' && manager['active'].get(runId)?.atTurnBoundary !== undefined);
+  await until(() => run().status === 'waiting' && store.readEvents(runId).filter(event => event.type === 'turn-end').length > boundaries && semaphore.busy() === 0);
   attention('monitoring', false);
   expect(hasPendingAsk(store, runId)).toBe(false);
   expect(store.readEvents(runId).some(event => event.type === 'human-input-delivered' && event.askSeq === askSeq)).toBe(true);
@@ -161,7 +165,7 @@ function laterDoneSurvivesAck(ctx: RowContext): Promise<void> {
 async function doneRefusedBesideQuestion({ runId, send, attention, run }: RowContext): Promise<void> {
   await send(script(WAIT, ASK, thenSay(ACK_TEXT)));
   attention('needs you', true);
-  const tools = manager.cezarToolHandlers(runId, runInternals(manager).active.get(runId)!.liveSession.ciGeneration!);
+  const tools = manager.cezarToolHandlers(runId, toolGenerationOf(runId));
   const answer = await tools.finishTurn({ summary: 'Complete.' }, new AbortController().signal);
   expect(answer).toMatchObject({ ok: false, code: 'human_question_pending' });
   attention('needs you', true);
@@ -187,17 +191,8 @@ const ROW_SPECS: Record<RowId, RowSpec> = {
 export async function runMonitoringRow(backend: RunnerId, mode: 'fresh' | 'continuation', row: { id: RowId }): Promise<void> {
   process.env.CEZ_DRY_RUN = '0';
   process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
-  // Turn-end bookkeeping (diff stat: `git add -N .`) runs after the run already reads
-  // `waiting`. Track it so a row that runs its own git in the worktree can wait it out.
-  const turnEnds: TurnEndTracker = { recorded: 0, pending: new Set() };
-  const recordTurnEnd = runInternals(manager).turnBookkeeper.recordTurnEnd.bind(runInternals(manager).turnBookkeeper);
-  runInternals(manager).turnBookkeeper.recordTurnEnd = (id, text) => {
-    const task = recordTurnEnd(id, text);
-    turnEnds.recorded += 1;
-    turnEnds.pending.add(task);
-    void task.finally(() => turnEnds.pending.delete(task));
-    return task;
-  };
+  const idleClock = observationClock(delay => delay === IDLE_TIMEOUT_MS &&
+    /\bat (?:[^ (\n]+\.)?armIdleTimer \(/.test(new Error().stack ?? ''));
   const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: backend });
   await until(() => store.getRun(p.id)?.status === 'waiting');
   if (mode === 'continuation') {
@@ -218,7 +213,7 @@ export async function runMonitoringRow(backend: RunnerId, mode: 'fresh' | 'conti
     expect(manager.sendMessage(p.id, [{ type: 'text', text: prompt }])).toBe(true);
     await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && semaphore.busy() === 0);
   };
-  const ctx: RowContext = { backend, runId: p.id, run, attention, send, turnEnds };
+  const ctx: RowContext = { backend, runId: p.id, run, attention, send, idleClock };
   const spec = ROW_SPECS[row.id];
   await spec.setup?.(ctx);
   const calls: TaskWebhookPayload[] = [];
@@ -267,7 +262,9 @@ export function registerClose(backend: RunnerId): void {
     expect(manager.sendMessage(p.id, [{ type: 'text', text: script(WAIT, thenSay(ACK_TEXT)) }])).toBe(true);
     register(p.id, [w.id]);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    manager['active'].get(p.id)!.liveSession.session!.end();
+    // The fixture owns the only live session; the worker has not started.
+    expect(work.liveSessions.size).toBe(1);
+    [...work.liveSessions][0]!.end();
     await until(() => !manager.isActive(p.id));
     // hearsay-tools/cezarion#1235: an agent's worker wait is a list entry, so a clean close parks
     // on it like any open wait; only the completion gate's wait still fails the session.

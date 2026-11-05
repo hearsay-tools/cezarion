@@ -1,6 +1,5 @@
 import { fireCapturedTimer } from './waits.testkit.ts';
-import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
+import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -9,12 +8,12 @@ import { cezarDoneAnswerSchema } from '@open-mercato/cezar-contract/waits';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import type { AskQuestion, HumanWaitEntry } from '@open-mercato/cezar-contract';
-import type { AgentSession } from '../core/agent-runner.ts';
+import { questionMessage } from '../delegation/questions.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { handoffInstructions } from '../handoff.ts';
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { eventCheckpoint, manager, parent, restart, root, store, terminal, until, delegatingParent, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { eventCheckpoint, manager, parent, restart, root, store, terminal, until, delegatingParent, useWorkerWaitFixture, worker, work, toolGenerationOf, fixtureUpdateRun } from './worker-wait.testkit.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
 import { MAX_AUTO_CONTINUES, NO_WAIT_NUDGE_NOTE } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
@@ -37,15 +36,11 @@ async function heldTurn(options: { autonomous?: boolean } = {}) {
   const gate = join(root, 'release');
   process.env.CEZ_MOCK_RELEASE_FILE = gate;
   const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios['hold-gated']!, runner: 'claude', ...options });
-  await until(() => engine().active.get(run.id)?.liveSession.session?.open === true && turnStarted(run.id));
+  await until(() => manager.isActive(run.id) && turnStarted(run.id));
   return { run, release: () => writeFileSync(gate, '') };
 }
 
-const engine = () => manager as unknown as {
-  active: Map<string, { liveSession: { session?: AgentSession & { end(): void }; ciGeneration: string; };  }>;
-
-};
-const tools = (id: string) => manager.cezarToolHandlers(id, engine().active.get(id)!.liveSession.ciGeneration);
+const tools = (id: string) => manager.cezarToolHandlers(id, toolGenerationOf(id));
 const ask = (id: string, questions: AskQuestion[], context = '## Draft\n\nThe plan.') => tools(id).ask({ context, questions }, new AbortController().signal);
 const turnStarted = (id: string) => store.readEvents(id).some(event => event.type === 'turn.started');
 const asks = (id: string) => store.readEvents(id).filter(event => event.type === 'ask.requested');
@@ -119,7 +114,7 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     release();
     await until(() => needsYou(run.id));
     expect(asks(run.id)).toMatchObject([{ questions: [...card('Which module?'), ...open] }]);
-    expect((asks(run.id)[0] as unknown as { questions: object[] }).questions[1]).not.toHaveProperty('options');
+    expect((asks(run.id)[0]!.questions as AskQuestion[])[1]).not.toHaveProperty('options');
   });
 
   it('an autonomous run refuses cezar_ask with autonomous_run until the budget is spent', async () => {
@@ -155,7 +150,7 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     process.env.CEZ_MOCK_RELEASE_FILE = gate;
     const w = await worker(p.id, HARNESS_ADAPTERS.claude.scenarios['hold-gated']!);
     manager.enqueueOwnedRun(w.id);
-    await until(() => engine().active.get(w.id)?.liveSession.session?.open === true && turnStarted(w.id));
+    await until(() => manager.isActive(w.id) && turnStarted(w.id));
     const registered = await ask(w.id, card('Which module?'));
     if (!registered.ok) throw Error('registration refused');
     writeFileSync(gate, '');
@@ -247,7 +242,8 @@ describe('the lifecycle prompt teaches the cezar tools', { timeout: 45_000 }, ()
   it('a session is taught the tools when it opens and when it continues', async () => {
     wire();
     const run = await opened();
-    engine().active.get(run.id)!.liveSession.session!.end();
+    expect(work.liveSessions.size).toBe(1);
+    [...work.liveSessions][0]!.end();
     // The run waits on the card the mock answered the no-wait nudge with; Continue answers it.
     await until(() => !manager.isActive(run.id) && store.getRun(run.id)?.status === 'waiting');
     expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
@@ -278,10 +274,6 @@ describe('cezar_done refusals at worker capacity', { timeout: 45_000 }, () => {
   useWorkerWaitFixture({ nudgeReply: 'card' });
   afterEach(() => vi.restoreAllMocks());
 
-  const ids = () => Array.from({ length: 32 }, () => randomUUID());
-  const internals = () => manager as unknown as {
-    parentCompletionBlockers(id: string): { workerId: string; reason: string }[];
-  };
   const done = (id: string) => tools(id).finishTurn({}, new AbortController().signal);
 
   it('every refusal naming 32 workers parses as a CezarDoneAnswer', async () => {
@@ -289,20 +281,33 @@ describe('cezar_done refusals at worker capacity', { timeout: 45_000 }, () => {
     // A parent parked on a timer, not on a question of its own: the worker checks decide.
     const p = await parent(toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 600, note: 'recheck' }), 'claude');
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    const asked = vi.spyOn(runInternals(manager).workerQuestions, 'unansweredQuestions').mockReturnValue(ids().map(workerId => ({ workerId, messageId: randomUUID() })));
+    const workers = [];
+    const messages = [];
+    for (let index = 0; index < 32; index++) {
+      const w = await worker(p.id);
+      workers.push(w);
+      const requested = store.appendEvent(w.id, { type: 'ask.requested', requestId: randomUUID(), context: 'A worker decision.', questions: card('Which module?') });
+      const message = questionMessage({ workerRunId: w.id, parentRunId: p.id, askSeq: requested.seq,
+        request: { context: 'A worker decision.', questions: card('Which module?') }, now: new Date().toISOString() });
+      messages.push(message);
+      store.appendEvent(w.id, { type: 'worker-question-routed', askSeq: requested.seq, messageId: message.id, parentRunId: p.id });
+    }
+    store.commitConversation(p.id, { messages, outcomes: [] });
     const questions = await done(p.id);
     expect(cezarDoneAnswerSchema.safeParse(questions).success).toBe(true);
     expect(questions).toMatchObject({ ok: false, code: 'worker_questions' });
     expect(questions.ok === false && questions.workers).toHaveLength(32);
-    expect(asked).toHaveBeenCalledWith(p.id);
-    asked.mockReturnValue([]);
-    const blockers = vi.spyOn(internals(), 'parentCompletionBlockers');
-    for (const reason of ['outstanding', 'uncollected'] as const) {
-      blockers.mockReturnValue(ids().map(workerId => ({ workerId, reason })));
-      const refused = await done(p.id);
-      expect(cezarDoneAnswerSchema.safeParse(refused).success).toBe(true);
-      expect(refused).toMatchObject({ ok: false, code: reason === 'outstanding' ? 'workers_outstanding' : 'workers_uncollected' });
-      expect(refused.ok === false && refused.workers).toHaveLength(32);
-    }
+    // Each routed question now has a durable answer. The same live workers still block completion.
+    store.commitConversation(p.id, { messages, outcomes: messages.map(message => ({ requestId: message.id,
+      status: 'replied', observedAt: new Date().toISOString(), replyId: randomUUID() })) });
+    const outstanding = await done(p.id);
+    expect(cezarDoneAnswerSchema.safeParse(outstanding).success).toBe(true);
+    expect(outstanding).toMatchObject({ ok: false, code: 'workers_outstanding' });
+    expect(outstanding.ok === false && outstanding.workers).toHaveLength(32);
+    for (const w of workers) fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
+    const uncollected = await done(p.id);
+    expect(cezarDoneAnswerSchema.safeParse(uncollected).success).toBe(true);
+    expect(uncollected).toMatchObject({ ok: false, code: 'workers_uncollected' });
+    expect(uncollected.ok === false && uncollected.workers).toHaveLength(32);
   });
 });
