@@ -236,8 +236,9 @@ and the two trackers. It reads; it never writes a run.
   `reconcileConversationState()` (`packages/cezar/src/delegation/conversations.ts`),
   the same projection the delegation service uses. It adds the outcomes a stored
   ledger has not written yet (a settled recipient, a closed sender, a passed
-  deadline), keeps a request to an unreadable recipient open, and projects nothing for
-  a ledger whose history is being deleted. A message is an open request when its
+  deadline), and keeps a request to an unreadable recipient open. It has no guard for history
+  deletion, so the read model skips a root whose `delegation.historyDeletion` is set,
+  as `projectConversationEvents()` does. A message is an open request when its
   `kind` is `request`, its `state` is `accepted`, and the reconciled ledger holds no
   outcome with its id. A send that was not delivered (`state`
   `continuation-required` or `destroyed`) never opened and is never drawn. Every
@@ -264,7 +265,10 @@ Case table for request state (a cross-run relationship):
 | Recipient ends `failed` or `cancelled` | outcome `failed` or `cancelled` | Closed: fade |
 | Sender ends `done`, `failed` or `cancelled`, or a human pressed Finish | outcome `sender-closed` | Closed: fade |
 | Recipient's record cannot be read | no outcome (reconcile keeps it open) | Open line to a placeholder card "Unreadable task" |
-| Sender's history deletion in progress | reconcile projects nothing | The sender's lines leave with no animation |
+| Sender's history deletion in progress | `delegation.historyDeletion` set on the ledger's root | The read model skips that ledger: the sender's lines leave with no animation |
+| Recipient's history deletion in progress | the request sits in the sender's ledger, which is not being deleted | Open line until the deletion removes the recipient's record; then outcome `deleted` (peer) or `destroyed` (worker): fade |
+| Recipient's Finish is pending (done refused while its workers live) | the recipient stays `running` or `waiting`; no outcome | Open line |
+| Sender or recipient owned by another cockpit process on the same store | the read model reads the shared run store; the ledger is the same | Same as any other row: the view shows what the store holds |
 | Recipient in another project | cannot happen: peers send only inside one project | — |
 | Root A asks root B | peer `request` in A's ledger, no outcome | Open peer line A → B |
 | B replies | B's reply and the outcome `replied`, both in A's ledger | Closed: reply comet B → A |
@@ -273,7 +277,8 @@ Case table for request state (a cross-run relationship):
 | Either side leaves D8's active set while open | no outcome | Line ends at the card that remains, labelled with the other task's name; the rail entry stays |
 | Send not delivered | `state: continuation-required` or `destroyed`, no outcome | Never drawn: the request never opened |
 | Recipient queued or parked | `accepted`, no outcome | Open line; the recipient card shows its own state |
-| Recipient stopping | `sendAdmission()` marks it resumable, so an ordinary request is `continuation-required` | Never drawn, as for any undelivered send. A `--resume` request that was accepted is drawn. |
+| New send to a stopping recipient | `sendAdmission()` marks it resumable, so an ordinary request is `continuation-required`; `assertSendResume()` refuses `--resume` | Never drawn, as for any undelivered send |
+| Recipient starts stopping while an accepted request is open | `accepted`, no outcome until the recipient settles | Open line; it closes by the recipient rows above when the recipient settles |
 | Sender's Finish is pending (done refused while workers live) | sender stays `running` or `waiting` | Line stays |
 | Sender's history deleted | the ledger is gone | The card and its lines leave with no reply animation |
 | Recipient's history deleted | outcome `deleted` | Closed: fade |
