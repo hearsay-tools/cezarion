@@ -70,8 +70,10 @@ group's runs lost, times the number of runs. It recommends at most 5, from the
 top of the ranking. The other Act groups carry forward without a decision. The
 next digest ranks them again, with its new evidence. A long backlog therefore
 never reaches the owner as one list. The next digest reads the watch list and the
-carried-forward Act groups from the newest digest comment. A day without
-findings closes its inbox issue with no digest comment, so it loses nothing.
+carried-forward Act groups from the newest finalized digest comment: one with the
+`Decisions` section that the digest adds after the owner answers. A digest that
+nobody answered, or a day without findings that closes its inbox issue with no
+digest comment, therefore changes nothing that the next digest reads.
 
 The digest writes three things:
 
