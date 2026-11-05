@@ -1038,8 +1038,11 @@ describe('RunManager monitoring turns', () => {
   const { SINGLE_STEP, waitFor } = fixture;
   it('nested Codex subagent items after park do not unpark monitoring (#121)', async () => {
     fixture.manager.dispose();
-    const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.01 } });
+    const semaphore = new WorkspaceSemaphore({ initial: { maxMonitoringSessions: 1, monitoringWakeIntervalMinutes: 0.01 } });
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { semaphore });
+    const clock = fixture.observeWakeTimers();
+    const competing = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:schedule-wakeup competing park', runner: 'claude' });
+    await waitFor(competing.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:schedule-wakeup keep going', runner: 'claude', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
@@ -1095,23 +1098,31 @@ describe('RunManager monitoring turns', () => {
     expect(fixture.store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.waiting });
     expect(monitoringWakeOf(fixture.store.getRun(record.id))).toBe(deadline);
     expect(monitoringTimerWait(fixture.store.getRun(record.id))).toEqual(wakeTimer);
-    expect(semaphore.busy()).toBe(0);
+    expect(semaphore.busy()).toBe(1);
 
+    clock.fire(clock.captured - 1);
     await waitFor(record.id, () => {
       const events = readFileSync(join(fixture.repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8');
       return events.includes('automatic monitoring wake-up (1/40)');
     });
+    fixture.manager.cancel(competing.id);
   }, 30_000);
 
   it('parent turn.started after park still unparks monitoring (#61, #121)', async () => {
     fixture.manager.dispose();
-    const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.02 } });
+    const semaphore = new WorkspaceSemaphore({ initial: { maxMonitoringSessions: 1, monitoringWakeIntervalMinutes: 0.02 } });
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { semaphore });
+    fixture.observeWakeTimers();
+    const competing = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:schedule-wakeup competing park', runner: 'claude' });
+    await waitFor(competing.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:schedule-wakeup keep going', runner: 'claude', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
+    expect(semaphore.busy()).toBe(1);
     runnerHook.uiEvent({ type: 'turn.started', turnId: 'turn_parent_resume' });
+    fixture.manager.cancel(competing.id);
+    await waitFor(competing.id, () => !fixture.manager.isActive(competing.id));
 
     // hearsay-tools/cezarion#1233: the resumed turn keeps its pool slot until its own turn end.
     // hearsay-tools/cezarion#2431 (owner decision 4): a parent turn the runner starts itself closes
