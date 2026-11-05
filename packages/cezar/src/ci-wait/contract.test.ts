@@ -4,7 +4,7 @@ import { request } from 'node:http';
 import { ciWaitRequestSchema, ciWaitSchema, ciWaitResultSchema, ciWaitReceiptSchema } from '@open-mercato/cezar-contract/ci-wait';
 import { previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { cezarWaitRequestSchema } from '@open-mercato/cezar-contract/waits';
-import { cezarServerInstructions, cezarToolEnvNames, cezarTools, doneToolDefinition, waitToolDefinition } from './tools.ts';
+import { cezarServerInstructions, cezarToolEnvNames, cezarTools, doneToolDefinition, waitToolDefinition, waitAnswerHint } from './tools.ts';
 import { waitInvalidInput } from './errors.ts';
 
 const OBSOLETE_HUMAN_WAIT_KIND = 'human';
@@ -252,4 +252,11 @@ it('tells the agent when to enable a scheduled task and which ones to change', (
   const tools = cezarTools({ CEZ_AUTOMATIONS: '1' });
   expect(tools.find(tool => tool.definition.name === 'cezar_schedule_task')!.definition.description).toMatch(/enable: true only when the user/);
   expect(tools.find(tool => tool.definition.name === 'cezar_scheduled_tasks')!.definition.description).toMatch(/only the schedules the user asked you to manage/);
+});
+
+it('keeps legacy unavailable wait hints uncertain without an effect receipt', () => {
+  const hint = waitAnswerHint({ ok: false, code: 'unavailable', message: 'transport failed' });
+  expect(hint).toContain('Outcome unknown');
+  expect(hint).not.toContain('Not registered');
+  expect(hint).toContain('do not add a fallback wait');
 });

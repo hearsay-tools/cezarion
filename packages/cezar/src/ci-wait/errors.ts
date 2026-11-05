@@ -1,4 +1,4 @@
-import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type AskErrorCode, type DoneErrorCode, type WaitErrorCode } from '@open-mercato/cezar-contract/waits';
+import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type AskErrorCode, type DoneErrorCode, type WaitErrorCode, type Wait } from '@open-mercato/cezar-contract/waits';
 import { ASK_LIMITS } from '@open-mercato/cezar-contract/ask-schema';
 import type { CiWaitErrorCode, PreviewResultCode, PreviewServeResult } from '@open-mercato/cezar-contract';
 import type { ScheduledTaskRefusalCode } from '@open-mercato/cezar-contract/scheduled-tasks';
@@ -274,4 +274,12 @@ export function scheduleInvalidInput(error?: z.ZodError): string {
   const field = error?.issues.map(entry => entry.path[0]).find((key): key is string => typeof key === 'string' && key in SCHEDULE_FIELD_RULES);
   if (field) return `\`${field}\` ${SCHEDULE_FIELD_RULES[field]}.`;
   return 'The arguments must be a JSON object.';
+}
+
+/** A safe refusal shared by tool and delegation transports. */
+export class WaitDeadlineConflict extends Error {
+  readonly code = 'duplicate_deadline';
+  constructor(readonly retainedWait: Wait) {
+    super(`Deadline change refused. Wait ${retainedWait.id} remains active until ${'deadline' in retainedWait ? retainedWait.deadline : 'its original deadline'}. Do not cancel it to remove a duplicate.`);
+  }
 }

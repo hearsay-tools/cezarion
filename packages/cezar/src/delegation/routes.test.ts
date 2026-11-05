@@ -7,6 +7,7 @@ import { RunStore } from '../runs/store.ts';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
+import { WaitDeadlineConflict } from '../ci-wait/errors.ts';
 import { createDelegationRoutes } from './routes.ts';
 import { fixture, seedWorkerWait } from './service.testkit.ts';
 import { conversationSendResultSchema, conversationInspectResultSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
@@ -31,6 +32,18 @@ describe('authenticated delegation HTTP family', () => {
     const response = await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
     expect(response.status).toBe(201); return workerSpawnResultSchema.parse(await response.json());
   }
+  it('preserves retained wait guidance for CLI deadline refusals', async () => {
+    const workerId = randomUUID();
+    const waitId = seedWorkerWait(f.store, f.parent.id, [workerId]);
+    const wait = f.store.getRun(f.parent.id)!.waits!.find(row => row.id === waitId)!;
+    if (wait.kind !== 'worker') throw new Error('expected worker wait');
+    vi.spyOn(f.service, 'wait').mockRejectedValue(new WaitDeadlineConflict(wait));
+    const response = await request('/wait', { workerIds: [workerId], timeoutSeconds: 60 });
+    expect(response.status).toBe(409);
+    expect(delegationErrorResponseSchema.parse(await response.json())).toMatchObject({
+      code: 'incompatible_state', error: expect.stringContaining(`Wait ${wait.id} remains active until ${wait.deadline}`),
+    });
+  });
   it('lists only the parent’s workers, including incomplete cleanup and destroyed resources', async () => {
     expect(await (await request('/list')).json()).toEqual({ workers: [] });
     const { workerId } = await spawn();

@@ -114,7 +114,7 @@ export const cancelWaitToolDefinition = {
 
 /** JSON first, then one hint sentence, as `invokePreviewTool` answers. */
 export function waitAnswerHint(answer: CezarWaitAnswer): string {
-  if (!answer.ok) return answer.effect === 'unknown' ? 'Outcome unknown. Retry the same operation_id and arguments; do not add a fallback wait.'
+  if (!answer.ok) return answer.effect === undefined || answer.effect === 'unknown' ? 'Outcome unknown. Retry the same operation_id and arguments; do not add a fallback wait.'
     : answer.code === 'duplicate_deadline' ? 'Deadline change refused. The retained wait remains active; do not cancel it as a duplicate.'
       : 'Not registered by this call. Follow the message; previously registered waits remain unchanged.';
   if (answer.wait_phase === 'unavailable') return 'Registration receipt recovered; current wait state is unavailable. Inspect task history before arranging another wait.';

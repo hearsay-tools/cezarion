@@ -1,3 +1,4 @@
+import { WaitDeadlineConflict } from '../../ci-wait/errors.ts';
 import { createHash } from 'node:crypto';
 import type { CezarWaitRequest, Wait, WaitRegistrationReceipt } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
@@ -28,7 +29,7 @@ export function registrationReceipt(identity: RegistrationIdentity | undefined, 
 export function repeatRegistration(store: RunStore, runId: string, wait: Wait, requestedTimeout: number | undefined, identity?: RegistrationIdentity): Wait {
   const keptTimeout = wait.kind === 'timer' ? wait.seconds : 'timeoutSeconds' in wait ? wait.timeoutSeconds : undefined;
   if (requestedTimeout !== undefined && keptTimeout !== requestedTimeout) {
-    throw Object.assign(new Error('The requested deadline change was refused; the existing wait remains active. Do not cancel it to remove a duplicate.'), { code: 'duplicate_deadline', retainedWait: wait });
+    throw new WaitDeadlineConflict(wait);
   }
   const receipt = registrationReceipt(identity, wait, true);
   if (receipt) store.commitWaitRegistration(runId, receipt);
