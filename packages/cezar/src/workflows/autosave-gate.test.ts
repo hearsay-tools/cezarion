@@ -1,14 +1,15 @@
 import { clearAutosaveTimer } from './run/input-timers.ts';
-import { runInternals } from './run-internals.testkit.ts';
 import { createActiveRun } from './active-run.ts';
-import type { WorktreeAutosave } from './run/worktree-autosave.ts';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { WorktreeAutosave } from './run/worktree-autosave.ts';
+import { unused } from './fixture-cleanup.testkit.ts';
+import { TrackedWork } from './run/tracked-work.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { autosaveCommit, createWorktree } from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
 import { AUTOSAVE_INTERVAL_MS, periodicAutosaveEnabled } from './run.ts';
@@ -18,8 +19,7 @@ const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 
 /**
  * The periodic autosave timer is opt-in via CEZ_AUTOSAVE=1 (#471). armAutosave is
- * driven directly (the recordTurnEnd precedent) because a live agent session is the
- * only other way to reach it. The turn-end/pre-PR flushes are a separate, ungated
+ * driven on its owner module with interval time controlled by the test. The turn-end/pre-PR flushes are a separate, ungated
  * call to autosaveCommit — proven env-independent below.
  */
 describe('periodic autosave gate (#471)', () => {
@@ -27,6 +27,8 @@ describe('periodic autosave gate (#471)', () => {
   let store: RunStore;
   let manager: WorktreeAutosave;
   let worktreePath: string;
+  const work = new TrackedWork();
+  const saves: Promise<void>[] = [];
   let runId: string;
   const savedEnv = process.env.CEZ_AUTOSAVE;
 
@@ -39,19 +41,26 @@ describe('periodic autosave gate (#471)', () => {
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = runInternals(createFixtureManager(store, repoRoot)).worktreeAutosave;
+    manager = new WorktreeAutosave({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+      work, semaphore: new WorkspaceSemaphore(), disposed: () => false,
+    }, unused('WorktreeAutosave.host', {
+      saveWorktree: (id, state, reason) => manager.saveWorktree(id, state, reason),
+      trackTurn: (_id, task) => { saves.push(task); },
+    }));
     const record = store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] });
     runId = record.id;
     worktreePath = (await createWorktree(repoRoot, record.id, 'main')).path;
   });
 
   afterAll(async () => {
-    await drainFixtureManagers(repoRoot);
+    await Promise.all(saves);
+    manager.dispose();
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     if (savedEnv === undefined) delete process.env.CEZ_AUTOSAVE;
     else process.env.CEZ_AUTOSAVE = savedEnv;
   });
@@ -65,25 +74,53 @@ describe('periodic autosave gate (#471)', () => {
     expect(periodicAutosaveEnabled()).toBe(false); // defaults to process.env
   });
 
-  it('does not arm the timer when the env is off (default)', () => {
+  async function head(): Promise<string> {
+    return (await run('git', ['rev-parse', 'HEAD'], { cwd: worktreePath })).stdout.trim();
+  }
+
+  it('does not save periodically when the env is off (default)', async () => {
     delete process.env.CEZ_AUTOSAVE;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const before = await head();
+    writeFileSync(join(worktreePath, 'gate.txt'), 'off');
     const state = createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false });
     manager.armAutosave(runId, state);
-    expect(state.autosaveTimer).toBeUndefined();
+    vi.advanceTimersByTime(AUTOSAVE_INTERVAL_MS);
+    await Promise.all(saves);
+    expect(await head()).toBe(before);
   });
 
-  it('arms the timer when CEZ_AUTOSAVE=1, but never for a repo-root run', () => {
+  it('saves once per interval with CEZ_AUTOSAVE=1, stops after clear, and never saves a repo-root run', async () => {
     process.env.CEZ_AUTOSAVE = '1';
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const state = createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false });
+    writeFileSync(join(worktreePath, 'gate.txt'), 'on');
+    const before = await head();
     manager.armAutosave(runId, state);
-    expect(state.autosaveTimer).toBeDefined();
-    manager.armAutosave(runId, state); // idempotent — the second call must not double-arm
+    manager.armAutosave(runId, state);
+    const savesBefore = saves.length;
+    vi.advanceTimersByTime(AUTOSAVE_INTERVAL_MS);
+    await Promise.all(saves);
+    expect(saves).toHaveLength(savesBefore + 1);
+    expect([...work.pending.values()]).not.toContain('saveWorktree');
+    const saved = await head();
+    expect(saved).not.toBe(before);
+    expect((await run('git', ['log', '-1', '--format=%s'], { cwd: worktreePath })).stdout.trim()).toBe('cezar autosave (periodic)');
     clearAutosaveTimer(state);
-    expect(state.autosaveTimer).toBeUndefined();
+    writeFileSync(join(worktreePath, 'gate.txt'), 'after clear');
+    vi.advanceTimersByTime(AUTOSAVE_INTERVAL_MS);
+    await Promise.all(saves);
+    expect(await head()).toBe(saved);
+    expect(saves).toHaveLength(savesBefore + 1);
 
+    const rootBefore = (await run('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
+    writeFileSync(join(repoRoot, 'root.txt'), 'root edit');
     const rootState = createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false });
     manager.armAutosave(runId, rootState);
-    expect(rootState.autosaveTimer).toBeUndefined();
+    vi.advanceTimersByTime(AUTOSAVE_INTERVAL_MS);
+    await Promise.all(saves);
+    expect(saves).toHaveLength(savesBefore + 1);
+    expect((await run('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim()).toBe(rootBefore);
   });
 
   it('AUTOSAVE_INTERVAL_MS stays the spec-006 90 s contract', () => {
