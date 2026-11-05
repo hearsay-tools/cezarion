@@ -1,10 +1,9 @@
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
-import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { controlledWire, manager, parent, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { controlledWire, manager, parent, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker, work } from './worker-wait.testkit.ts';
 import type { TimerWaitEntry, Wait } from '@open-mercato/cezar-contract/waits';
 import { conversationPair, turnEnds } from './worker-wait-conversations.testkit.ts';
 
@@ -70,46 +69,47 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
   // hearsay-tools/cezarion#1235: the message wake is the wait list's admission, not a stand-in wait.
   it.each(['queued', 'admitted'] as const)('inbox ACK retires an unsubmitted message wake (%s) without resolving the request', async mode => {
     const f = await conversationPair();
-    const engine = runInternals(manager);
-    const pump = vi.spyOn(engine.line, 'pump').mockResolvedValue();
-    const send = vi.spyOn(engine.active.get(f.p.id)!.liveSession.session!, 'sendAgentMessage');
+    const capacity = vi.spyOn(semaphore, 'maxParallel').mockReturnValue(0);
+    const send = vi.spyOn([...work.liveSessions][0]!, 'sendAgentMessage');
     try {
       const first = randomUUID();
       await f.service.send(f.workerCaller, { id: first, recipientRunId: f.p.id, kind: 'request', text: 'Unanswered request mock:hold', timeoutSeconds: 600 });
       expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
-      expect(runInternals(manager).line.queue).toContain(f.p.id);
-      expect(pump).toHaveBeenCalled();
+      expect(manager.canClaimInboxInput(f.p.id, first)).toBe(true);
+      expect(send).not.toHaveBeenCalled();
       if (mode === 'admitted') {
-        send.mockReturnValue(false); pump.mockRestore(); await runInternals(manager).line.pump();
-        expect(runInternals(manager).line.waitWakeAdmitted.has(f.p.id)).toBe(true);
+        send.mockReturnValue(false); capacity.mockRestore(); await semaphore.release();
+        await until(() => send.mock.calls.some(call => call[1]?.includes(first)));
+        expect(store.getRun(f.p.id)?.agentInputs?.find(input => input.id === first)?.deliveredAt).toBeUndefined();
       }
-      const before = store.getRun(f.p.id)?.delegation;
+      const before = structuredClone(store.getRun(f.p.id)?.delegation);
       const beforeOutcomes = before?.role === 'root' ? before.conversation?.outcomes : undefined;
       const generation = randomUUID();
       expect(manager.canClaimInboxInput(f.p.id, first)).toBe(true);
       const receipt = manager.reserveInboxInputs(f.p.id, generation, [first])!;
-      runInternals(manager).wakeAdmission.queueWaitWake(f.p.id);
-      pump.mockRestore(); await runInternals(manager).line.pump();
+      manager.reconcileWorkerWaits();
+      capacity.mockRestore(); await semaphore.release();
       if (mode === 'queued') {
         // The claimed message owes no wake: the queued one is dropped rather than admitted.
         expect(semaphore.busy()).toBe(0);
-        expect(runInternals(manager).line.queue).not.toContain(f.p.id);
+        expect(send).not.toHaveBeenCalled();
       }
       expect(manager.acknowledgeInbox(f.p.id, generation, receipt.receiptId)).toBe('acknowledged');
       expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
-      expect(runInternals(manager).line.queue).not.toContain(f.p.id);
-      expect(runInternals(manager).line.waitWakeQueuedAt.has(f.p.id)).toBe(false);
-      expect(runInternals(manager).line.waitWakeAdmitted.has(f.p.id)).toBe(false);
+      const attempts = send.mock.calls.length;
+      await semaphore.release();
+      expect(send).toHaveBeenCalledTimes(attempts);
       expect(semaphore.busy()).toBe(0);
       const after = store.getRun(f.p.id)?.delegation;
       expect(after?.role === 'root' ? after.conversation?.outcomes : undefined).toEqual(beforeOutcomes);
       expect(store.getRun(f.p.id)?.agentInputs?.find(input => input.id === first)?.deliveredAt).toBeDefined();
-    } finally { send.mockRestore(); pump.mockRestore(); f.close(); }
+    } finally { send.mockRestore(); capacity.mockRestore(); f.close(); }
   });
 
   it('a claimed message cannot interrupt a registered wait or acquire a wake admission', async () => {
     const f = await conversationPair();
-    const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();
+    const capacity = vi.spyOn(semaphore, 'maxParallel').mockReturnValue(0);
+    const send = vi.spyOn([...work.liveSessions][0]!, 'sendAgentMessage');
     try {
       const request = randomUUID();
       await f.service.send(f.parentCaller, { id: request, recipientRunId: f.w.id, kind: 'request', text: 'Waiting for reply mock:hold', timeoutSeconds: 600 });
@@ -120,11 +120,14 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       const generation = randomUUID(); const receipt = manager.reserveInboxInputs(f.p.id, generation, [incoming.id])!;
       manager.reconcileWorkerWaits();
       expect(waitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: 'parked' });
-      expect(runInternals(manager).line.queue).not.toContain(f.p.id);
+      expect(send).not.toHaveBeenCalled();
       expect(manager.releaseInbox(f.p.id, generation, receipt.receiptId)).toBe('released');
       // hearsay-tools/cezarion#1235: the released message wakes the run on its own; the wait stays open.
       expect(waitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: 'parked' });
-      expect(runInternals(manager).line.queue).toContain(f.p.id);
-    } finally { expect(pump).toHaveBeenCalled(); pump.mockRestore(); f.close(); }
+      capacity.mockRestore(); await semaphore.release();
+      await until(() => send.mock.calls.some(call => call[1]?.includes(incoming.id)));
+      await until(() => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === incoming.id)?.deliveredAt);
+      expect(waitOf(store.getRun(f.p.id))?.id).toBe(wait.id);
+    } finally { send.mockRestore(); capacity.mockRestore(); f.close(); }
   });
 });

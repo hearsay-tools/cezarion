@@ -1,12 +1,12 @@
+import { observationClock } from '../core/observation-clock.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { type RunRecord } from '../runs/store.ts';
 import { withHeldResponse } from '../core/owned-input-delivery.testkit.ts';
-import { bookkeeping, collect, manager, parent, restart, root, store, until, worker } from './worker-wait.testkit.ts';
+import { bookkeeping, collect, manager, parent, restart, root, store, until, worker, work, semaphore } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 import { useWorkerCapacityFixture } from './worker-wait-capacity.testkit.ts';
@@ -58,33 +58,37 @@ it.each([false, true])('monitoring synthetic delivery respects legacy pending Fi
     await withHeldResponse('claude', async release => {
       const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
       const w = await worker(p.id, 'mock:schedule-wakeup keep going');
-      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      const clock = observationClock(() => /\bat WaitWatches\.armWait \(/.test(new Error().stack ?? ''));
+      const sessions = new Set(work.liveSessions);
       manager.enqueueOwnedRun(w.id);
       await until(() => !!monitoringWakeOf(store.getRun(w.id)));
-      const engine = manager as unknown as {
-        active: Map<string, { liveSession: { session: { sendAgentMessage(...args: unknown[]): false | Promise<void> }; };  }>;
-      };
-      const state = engine.active.get(w.id)!;
-      const send = vi.spyOn(state.liveSession.session, 'sendAgentMessage');
+      const session = [...work.liveSessions].find(session => !sessions.has(session))!;
+      expect(session).toBeDefined();
+      const send = vi.spyOn(session, 'sendAgentMessage');
       const deadline = monitoringWakeOf(store.getRun(w.id))!;
       try {
         if (pending) store.commitRootFinishIntent(p.id);
-        await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
+        expect(clock.captured).toBe(1);
+        clock.fire(0);
+        await Promise.all([...work.pending].filter(([, label]) => label === 'pump').map(([promise]) => promise));
         if (pending) {
           expect(send).not.toHaveBeenCalled();
-          expect(runInternals(manager).wakeAdmission.automaticWakes(w.id)).toBe(0);
+          expect((store.getRun(w.id)?.automaticWakes ?? 0)).toBe(0);
           expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: RUN_STATUS.waiting, monitoringWakeAt: deadline });
-          expect(runInternals(manager).line.monitoring.has(w.id)).toBe(true);
+          expect(session.open).toBe(true);
+          expect(semaphore.busy()).toBe(0);
           expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
-          expect(runInternals(manager).inputDelivery.deliverMessage(w.id, [{ type: 'text', text: 'synthetic retry' }], false)).toBe(false);
+          expect(manager.sendMessage(w.id, [{ type: 'text', text: 'synthetic retry' }])).toBe(false);
           expect(send).not.toHaveBeenCalled();
         } else {
+          await until(() => store.getRun(w.id)?.automaticWakes === 1);
           expect(send).toHaveBeenCalledTimes(1);
-          expect(runInternals(manager).wakeAdmission.automaticWakes(w.id)).toBe(1);
+          expect((store.getRun(w.id)?.automaticWakes ?? 0)).toBe(1);
           // hearsay-tools/cezarion#1233: the wake turn keeps its pool slot until its own turn end.
-          expect(runInternals(manager).line.monitoring.has(w.id)).toBe(true);
+          expect(session.open).toBe(true);
+          expect(semaphore.busy()).toBe(0);
         }
-      } finally { release(); vi.useRealTimers(); }
+      } finally { release(); clock.restore(); }
     }, 'Re-check the downstream work');
   });
 });

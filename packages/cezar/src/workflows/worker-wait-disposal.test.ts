@@ -1,7 +1,7 @@
 import { runInternals } from './run-internals.testkit.ts';
 import { describe, expect, it } from 'vitest';
 import { currentUsage } from '../core/process-usage.ts';
-import { bookkeeping, executions, manager, parent, register, reopenRuntime, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { bookkeeping, executions, manager, parent, register, reopenRuntime, store, until, useWorkerWaitFixture, waitOf, worker, work } from './worker-wait.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -62,8 +62,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent(); const w = await worker(p.id); const wait = register(p.id, [w.id]);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     // Stop fixture processes only AFTER disposal; disposal itself must not mutate records.
-    const active = (manager as unknown as { active: Map<string, { liveSession: { session?: { interrupt(): void }; };  }> }).active;
-    const sessions = [...active.values()].map(s => s.liveSession.session);
+    const sessions = [...work.liveSessions];
     manager.dispose();
     expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id); expect(store.getRun(w.id)?.status).toBe('queued');
     for (const session of sessions) session?.interrupt();
