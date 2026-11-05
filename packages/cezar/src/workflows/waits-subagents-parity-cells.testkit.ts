@@ -70,7 +70,10 @@ async function parkedOnSubagents(runner: RunnerId, tokens = '') {
   vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(0);
   const release = join(root, `release-${randomUUID()}`);
   const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: `${SCENARIO[runner]!} ${tokens} parity-release=${release}` });
-  await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && subagentWait(run.id) !== undefined && semaphore.busy() === 1);
+  await until(() => store.readEvents(run.id).some(event => event.type === 'turn-end'));
+  expect(store.getRun(run.id)?.status).toBe(RUN_STATUS.waiting);
+  expect(subagentWait(run.id)).toBeDefined();
+  expect(semaphore.busy()).toBe(1);
   return { id: run.id, wait: subagentWait(run.id)!, release: () => writeFileSync(release, 'go') };
 }
 

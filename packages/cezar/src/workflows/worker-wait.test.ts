@@ -1,3 +1,4 @@
+import { setImmediate } from 'node:timers/promises';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -105,7 +106,17 @@ for (const mode of ['fresh', 'continuation'] as const) {
             expect(acknowledgement).toBeInstanceOf(Promise);
             checkpoint('acknowledgement settled'); release(); await acknowledgement;
           }
-          checkpoint('parent parked after nudge'); await until(() => store.getRun(p.id)?.status === 'waiting');
+          if (!delayedAck) {
+            const note = completionNudges(p.id)[0]!.seq;
+            await until(() => store.readEvents(p.id).some(event => event.type === 'turn-end' && event.seq > note));
+            expect(acknowledgement).toBeInstanceOf(Promise);
+            await acknowledgement;
+          }
+          // The runner ACK precedes Cezar's chained delivery bookkeeping. Drain its
+          // promise reactions before reading the row; this does not wait for a park.
+          await setImmediate();
+          checkpoint('parent parked after nudge');
+          expect(store.getRun(p.id)?.status).toBe('waiting');
           expect(sentTexts(sent, `Workers are still live: ${w.id}.`)).toHaveLength(1);
           expect(completionNudges(p.id)).toEqual([expect.objectContaining({ message: `${COMPLETION_NUDGE_NOTE} (1/${MAX_AUTO_CONTINUES}): workers_outstanding` })]);
           expect(waitOf(store.getRun(p.id))).toBeUndefined();

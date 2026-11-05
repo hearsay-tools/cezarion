@@ -29,7 +29,9 @@ it('readiness repeated done with live workers: one nudge, then a park on the re-
     store.updateRun(p.id, { agentInputs: [...store.getRun(p.id)?.agentInputs ?? [], input] });
     manager.deliverConversationInput(p.id);
     const refused = () => store.readEvents(p.id).filter(event => event.type === 'text' && String(event.text).includes('workers_outstanding') && String(event.text).includes(`worker stop ${w.id}`));
-    await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && refused().length === 1 && store.getRun(p.id)?.status === 'waiting');
+    await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
+    expect(refused()).toHaveLength(1);
+    expect(store.getRun(p.id)?.status).toBe('waiting');
     expect(completionNudges(p.id)).toHaveLength(1);
     expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ id: timer!.id, phase: WAIT_PHASE.open })]);
     expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
