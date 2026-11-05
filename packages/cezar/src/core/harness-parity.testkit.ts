@@ -716,7 +716,7 @@ export interface ParityExemption {
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   ...(['codex', 'opencode'] as const).map(backend => ({
     criterion: 'R23', backend, kind: 'capability-absent' as const,
-    reason: 'A native ask holds its turn open and clears its idle timer, so its parked session never idle-closes (hearsay-tools/cezarion#2701). sessionCloseKeepsWaiting and terminalScratchDisposition construction tables cover the close and scratch decisions.',
+    reason: 'A native ask clears its idle timer, so its parked session never idle-closes (hearsay-tools/cezarion#2701).',
   })),
   ...(['claude', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'P1', backend, kind: 'scenario-unconstructible' as const,

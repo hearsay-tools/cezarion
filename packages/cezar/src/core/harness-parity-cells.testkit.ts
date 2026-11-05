@@ -2831,8 +2831,6 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
           });
       }, 60_000);
 
-      // The pure sessionCloseKeepsWaiting and terminalScratchDisposition tables cover
-      // synthetic close decisions. This cell drives the runner's public idle bound.
       parityRow(backend, {
         id: 'R23', scenario: 'ask', name: 'R23 retains pending-question worker scratch after its process completes',
         assert(observation: { active: boolean; status: string | undefined; phase: string | undefined; scratch: string }) {
