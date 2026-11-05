@@ -8,11 +8,14 @@ message: >-
 note: >-
   The rule refuses the retired name runInternals in every identifier position (calls in any
   wrapping, members, optional chains, imports, destructuring, shorthand properties) and any
-  static or dynamic import whose specifier names run-internals.testkit.
+  static import, dynamic import() or require() whose specifier (a string or template literal, in any wrapping)
+  names run-internals.testkit. A specifier computed at run time is not a literal and is out of scope.
 utils:
   internals-testkit:
-    kind: string
-    regex: '(^|/)run-internals\.testkit(\.ts)?["\x27]$'
+    any:
+      - kind: string
+      - kind: template_string
+    regex: '(^["\x27\x60]|/)run-internals\.testkit(\.ts)?["\x27\x60]$'
 rule:
   any:
     - all:
@@ -31,8 +34,13 @@ rule:
         - kind: call_expression
         - has:
             field: function
-            kind: import
+            any:
+              - kind: import
+              - all:
+                  - kind: identifier
+                  - regex: '^require$'
         - has:
             field: arguments
             has:
+              stopBy: end
               matches: internals-testkit

@@ -1,12 +1,16 @@
 id: run-internals
 valid:
+  - 'const kit = require("./other.testkit.ts");'
   - 'const runInternalsCount = 1;'
   - 'otherInternals(manager);'
   - 'import { helper } from "./other.testkit.ts"; helper(manager);'
   - 'const kit = await import("./other.testkit.ts"); kit.helper(manager);'
   - 'const label = "run-internals.testkit.ts";'
   - '// runInternals(manager)'
+  - 'const name = `run-internals.testkit.ts`;'
+  - 'const kit = await import("./other.testkit.ts", { with: { note: "x" } });'
 invalid:
+  - 'const kit = require("./run-internals.testkit.ts");'
   - 'runInternals(manager);'
   - 'runInternals();'
   - '(runInternals)(manager);'
@@ -26,3 +30,7 @@ invalid:
   - 'const kit = await import("./run-internals.testkit.ts");'
   - 'const kit = await import("../workflows/run-internals.testkit");'
   - 'const kit = await import("./run-internals.testkit.ts", {});'
+  - 'const kit = await import(("./run-internals.testkit.ts"));'
+  - 'const kit = await import(`./run-internals.testkit.ts`);'
+  - 'const kit = await import("run-internals.testkit.ts");'
+  - 'import { x } from "run-internals.testkit";'
