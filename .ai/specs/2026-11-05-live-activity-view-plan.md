@@ -101,7 +101,7 @@ can drive the view from the HTTP snapshot. One PR for each slice.
   change. Tests: a foreign write with no local event reaches subscribers within one
   check; a foreign run created after subscribe appears within one check; nothing
   runs without a subscriber.
-- Cockpit: `packages/web/src/api/activity.ts`: `useActivity(scope)` reads the HTTP
+- Cockpit: `packages/web/src/api/activity-live.ts`: `useActivityLive(scope)` reads the HTTP
   snapshot, then subscribes when the live coordinator has topics, or re-reads every
   5 s while visible when it has none (remote mode, no SharedWorker, failed
   SharedWorker). Add the read to the coordinator's shared-read allowlist. It follows

@@ -201,6 +201,12 @@ ActivityProject = {
   projectId, name,
   loaded: boolean,             // false: this process has built no context for the
                                // project, so its lists are empty, not idle
+  unavailable?: { status: 404|409|503, error },
+                               // the project is loaded but its run store cannot
+                               // open: the failure its project routes answer.
+                               // `loaded` stays true and the lists stay empty; a
+                               // store that cannot open never reads as empty
+                               // (docs/areas/runs-store.md)
   inReview: number,            // D8 chip
   tasks: ActivityRun[],        // active roots (D8)
   requests: ActivityRequest[], // open requests only (D2)
