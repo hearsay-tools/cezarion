@@ -245,20 +245,26 @@ describe('a held wake does not advertise itself to the workspace line', () => {
     }
   });
 
-  it('does not advertise a runnerless wake before any pump reads the configured default', () => {
+  it('reads a runnerless wake on the configured default runner, as pump() does', async () => {
+    // A legacy record names no runner, so it runs on the configured default. Hard-coding Claude
+    // here advertised it while the default account was held (hearsay-tools/cezarion#1236).
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({ defaultRunner: 'codex' }));
     const holder = store.createRun({ title: 'holder', workflow: 'w', task: 't', runner: 'codex', steps: [] });
     setRunStatus(store, holder.id, RUN_STATUS.waiting, { autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
     const parked = store.createRun({ title: 'parked', workflow: 'w', task: 't', steps: [] });
     const engine = runInternals(manager).line;
-    engine.queue.push(parked.id);
-    engine.waitWakeQueuedAt.set(parked.id, 1);
+    runInternals(manager).line.queue.push(parked.id);
+    runInternals(manager).line.waitWakeQueuedAt.set(parked.id, 1);
     try {
+      // Before any pump has read the configuration, the default is unknown: not advertised.
+      expect(engine.oldestWakeAt()).toBeNull();
+      await engine.pump();
+      expect(runInternals(manager).line.queue).toContain(parked.id);
       expect(engine.oldestWakeAt()).toBeNull();
     } finally {
-      engine.queue.splice(engine.queue.indexOf(parked.id), 1);
-      engine.waitWakeQueuedAt.delete(parked.id);
+      runInternals(manager).line.queue.splice(runInternals(manager).line.queue.indexOf(parked.id), 1);
+      runInternals(manager).line.waitWakeQueuedAt.delete(parked.id);
     }
   });
 
