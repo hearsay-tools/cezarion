@@ -1741,7 +1741,6 @@ describe('RunManager queued-stack mutators (#472)', () => {
     store.updateRun(record.id, { title: 't' });
     return store.getRun(record.id)!;
   };
-  const dequeue = (id: string) => manager.cancel(id);
   const imagesDir = (id: string) => join(repoRoot, '.ai/cezar', 'runs', `${id}-images`);
 
   beforeEach(async () => {
@@ -1839,17 +1838,35 @@ describe('RunManager queued-stack mutators (#472)', () => {
     expect(manager.editTask(r.id, 'too late')).toBe(false);
   });
 
-  it('refuses every mutation once the run has been dequeued', () => {
+  it('refuses every mutation once the run has been dequeued', async () => {
     const r = seedQueued();
     const msg = manager.enqueueMessage(r.id, text('while queued'))!;
-    dequeue(r.id);
+    await waitForProduct(manager, store, () => ![...fixtureWork(manager).pending.values()].includes('pump'));
+    let observed: { status: RunRecord['status']; results: unknown[]; messages: string[] } | undefined;
+    const pin = store.pin.bind(store);
+    vi.spyOn(store, 'pin').mockImplementation((id, reason) => {
+      const result = pin(id, reason);
+      if (id !== r.id || reason !== 'active') return result;
+      // Admission removed the job, but execution has not changed the queued row yet.
+      const status = store.getRun(id)!.status;
+      const results = [
+        manager.enqueueMessage(id, text('too late')),
+        manager.editQueuedMessage(id, msg.id, { text: 'too late' }),
+        manager.removeQueuedMessage(id, msg.id),
+        manager.editTask(id, 'too late'),
+      ];
+      observed = { status, results, messages: store.getRun(id)?.queuedMessages?.map(message => message.text) ?? [] };
+      manager.cancel(id);
+      return result;
+    });
+    capacity = 1;
+    await semaphore.refresh();
+    await semaphore.release();
+    await waitForProduct(manager, store, () => observed !== undefined && !manager.isActive(r.id));
 
-    expect(manager.enqueueMessage(r.id, text('too late'))).toBeNull();
-    expect(manager.editQueuedMessage(r.id, msg.id, { text: 'too late' })).toBeNull();
-    expect(manager.removeQueuedMessage(r.id, msg.id)).toBe(false);
-    expect(manager.editTask(r.id, 'too late')).toBe(false);
-    // …and the stack is untouched by the refused calls.
-    expect(store.getRun(r.id)?.queuedMessages?.map((m) => m.text)).toEqual(['while queued']);
+    expect(observed?.status).toBe(RUN_STATUS.queued);
+    expect(observed?.results).toEqual([null, null, false, false]);
+    expect(observed?.messages).toEqual(['while queued']);
   });
 
   it('edits a message in place, keeping its id and createdAt', () => {
