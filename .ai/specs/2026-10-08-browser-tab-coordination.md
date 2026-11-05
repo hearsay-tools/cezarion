@@ -64,7 +64,10 @@ and invalidate shared reads. Automation state/log reads and the bounded
 The live activity view's snapshot (`GET /api/v1/workspace/activity`) joins that allowlist.
 A view whose topic has an HTTP twin follows the coordinator's transport (`liveTransport()`,
 `onLiveTransport()`): it holds the topic, and adds the recurring read only while the
-transport is `finite`, because the finite fallback carries no topic data.
+transport is `finite`, because the finite fallback carries no topic data. A finite read
+that fails reaches its consumers as `HTTP <status>` with the answer's JSON body (`HTTP 0`
+for no answer); the cycle still backs off. The activity view shows a project whose scoped
+read answers 404, 409 or 503 as unavailable, and any other failure as its query error.
 
 Remote fallback trades connection safety for up to two seconds of task latency and
 five seconds of workspace latency, plus request/backoff time. Ephemeral intermediate

@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ActivitySnapshot } from '@open-mercato/cezar-api-client'
 import { liveRefetchInterval } from '@/lib/live-refetch'
-import { cez, init, unwrap, type ReadOptions } from './client'
+import { ApiError, cez, init, unwrap, type ReadOptions } from './client'
 import { liveTransport, onLiveTransport } from './live-coordinator'
 import { subscribeLiveRead } from './live-reads'
 import { subscribeTopic } from './ws'
@@ -34,6 +34,33 @@ export function newerActivity(cached: ActivitySnapshot | undefined, fetched: Act
   return cached !== undefined && Date.parse(fetched.generatedAt) < Date.parse(cached.generatedAt) ? cached : fetched
 }
 
+/** The answers a project route gives for a project it cannot serve: removed, its folder gone,
+ *  or its store unavailable. The view shows the project as unavailable, as the topic does. */
+const UNAVAILABLE_STATUSES = new Set([404, 409, 503])
+
+/**
+ * The snapshot a scoped read that the project route refused stands for: the project, unavailable,
+ * in the shape the topic sends on removal. It keeps the cached name, and the cached `generatedAt`,
+ * so any snapshot the server builds later replaces it.
+ */
+export function unavailableActivity(cached: ActivitySnapshot | undefined, projectId: string, status: 404 | 409 | 503, error: string): ActivitySnapshot {
+  const name = cached?.projects.find((project) => project.projectId === projectId)?.name ?? projectId
+  return {
+    generatedAt: cached?.generatedAt ?? new Date(0).toISOString(),
+    projects: [{ projectId, name, loaded: true, unavailable: { status, error }, inReview: 0, tasks: [], requests: [], closed: [] }],
+  }
+}
+
+/** A failed shared read (`HTTP <status>` with the answer's body) as the error the query reports. */
+export function readFailure(body: unknown, error: string): ApiError {
+  const status = Number(/^HTTP (\d+)$/.exec(error)?.[1] ?? 0)
+  const message = body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string' ? (body as { error: string }).error : error
+  return new ApiError(status, message)
+}
+
+const unavailableStatus = (scope: ActivityScope, error: ApiError): 404 | 409 | 503 | undefined =>
+  scope.kind === 'project' && UNAVAILABLE_STATUSES.has(error.status) ? (error.status as 404 | 409 | 503) : undefined
+
 /**
  * The activity snapshot of a scope, live (spec 2026-11-05-live-activity-view, Live transport). It
  * reads the HTTP snapshot once for a fast first paint, then holds the scope's topic, whose frames
@@ -49,7 +76,16 @@ export function useActivityLive(scope: ActivityScope) {
   const client = useQueryClient()
   const query = useQuery({
     queryKey: key,
-    queryFn: async ({ signal }) => newerActivity(client.getQueryData<ActivitySnapshot>(key), await getActivity(stable, { signal })),
+    queryFn: async ({ signal }) => {
+      const cached = client.getQueryData<ActivitySnapshot>(key)
+      try {
+        return newerActivity(cached, await getActivity(stable, { signal }))
+      } catch (error) {
+        const status = error instanceof ApiError ? unavailableStatus(stable, error) : undefined
+        if (status === undefined || stable.kind !== 'project') throw error
+        return unavailableActivity(cached, stable.projectId, status, (error as ApiError).message)
+      }
+    },
     // The topic or the shared read keeps the cache fresh; a refetch on focus would only repeat it.
     staleTime: Infinity,
   })
@@ -63,13 +99,30 @@ export function useActivityLive(scope: ActivityScope) {
         client.setQueryData<ActivitySnapshot>(key, (cached) => (http ? newerActivity(cached, next) : next))
       })
     }
+    // A refused scoped read shows the project unavailable; any other failure is the query's
+    // error, and the last good snapshot stays.
+    const failed = (error: ApiError) => {
+      void client.cancelQueries({ queryKey: key, exact: true }).then(() => {
+        if (!active) return
+        const status = unavailableStatus(stable, error)
+        if (status !== undefined && stable.kind === 'project') {
+          client.setQueryData<ActivitySnapshot>(key, (cached) => unavailableActivity(cached, stable.projectId, status, error.message))
+          return
+        }
+        const query = client.getQueryCache().find<ActivitySnapshot>({ queryKey: key, exact: true })
+        query?.setState({ status: 'error', error, errorUpdatedAt: Date.now(), errorUpdateCount: query.state.errorUpdateCount + 1, fetchStatus: 'idle' })
+      })
+    }
     const releaseTopic = subscribeTopic(activityTopic(stable), (value) => fold(value, false))
     const intervalMs = liveRefetchInterval<number | false>(ACTIVITY_READ_MS)
     let releaseRead: (() => void) | undefined
     const follow = () => {
       const finite = liveTransport() === 'finite' && intervalMs !== false
       if (finite && !releaseRead) {
-        releaseRead = subscribeLiveRead({ path: activityPath(stable), intervalMs }, (value, error) => { if (!error) fold(value, true) })
+        releaseRead = subscribeLiveRead({ path: activityPath(stable), intervalMs }, (value, error) => {
+          if (error === undefined) fold(value, true)
+          else failed(readFailure(value, error))
+        })
       } else if (!finite && releaseRead) {
         releaseRead()
         releaseRead = undefined

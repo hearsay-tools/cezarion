@@ -53,4 +53,17 @@ describe('finite HTTP recovery', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it('hands a failed read to its consumers with the status and the answer, then backs off', async () => {
+    vi.useFakeTimers()
+    const entry: FallbackEntry = { ...run(), demand: { kind: 'read', path: '/api/v1/workspace/activity?project=shop', intervalMs: 5_000 } }
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: 'unknown project: shop' }), { status: 404 }))
+    const recovery = createLiveFallback(() => [entry], async () => {}, fetcher)
+    recovery.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(entry.value).toHaveBeenCalledExactlyOnceWith({ error: 'unknown project: shop' }, 'HTTP 404')
+    await vi.advanceTimersByTimeAsync(1_000) // the first back-off step is 2 s, not the 5 s cadence
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    recovery.stop()
+  })
+
 })

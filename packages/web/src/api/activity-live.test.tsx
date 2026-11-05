@@ -23,12 +23,17 @@ const shop: ActivityScope = { kind: 'project', projectId: 'shop' }
 const readPath = '/api/v1/workspace/activity?project=shop'
 
 let served = 'first'
+/** When set, the activity route refuses the read with this answer. */
+let refusal: { status: number; error: string } | undefined
 beforeEach(() => {
   vi.useFakeTimers()
   Worker.all = []
   served = 'first'
+  refusal = undefined
   vi.stubGlobal('SharedWorker', Worker)
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(snapshot(served)))))
+  vi.stubGlobal('fetch', vi.fn(async () => refusal
+    ? new Response(JSON.stringify({ error: refusal.error }), { status: refusal.status })
+    : new Response(JSON.stringify(snapshot(served)))))
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
 })
 afterEach(() => { cleanup(); resetLiveSession(); vi.useRealTimers(); vi.unstubAllGlobals() })
@@ -39,7 +44,8 @@ function mount(scope: ActivityScope = shop) {
     wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
   })
   const title = () => (client.getQueryData(activityQueryKey(scope)) as ReturnType<typeof snapshot> | undefined)?.projects[0]?.tasks[0]?.title
-  return { client, hook, title }
+  const project = () => (client.getQueryData(activityQueryKey(scope)) as ReturnType<typeof snapshot> | undefined)?.projects[0]
+  return { client, hook, title, project }
 }
 
 const reads = () => vi.mocked(fetch).mock.calls.filter(([path]) => String(path) === readPath)
@@ -136,5 +142,40 @@ describe('useActivityLive', () => {
     hook.unmount()
     await act(async () => { await vi.advanceTimersByTimeAsync(3 * ACTIVITY_READ_MS) })
     expect(reads().length).toBe(first + 1)
+  })
+
+  it('shows a project the finite read finds removed as unavailable', async () => {
+    const { project } = mount()
+    configureLiveSession({ local: false, bootProject: 'boot', apiBase: '' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(project()).toMatchObject({ loaded: true, tasks: [{ title: 'first' }] })
+
+    refusal = { status: 404, error: 'unknown project: shop' } // removed in another tab
+    await act(async () => { await vi.advanceTimersByTimeAsync(ACTIVITY_READ_MS) })
+    expect(project()).toEqual({ projectId: 'shop', name: 'Shop', loaded: true, unavailable: { status: 404, error: 'unknown project: shop' },
+      inReview: 0, tasks: [], requests: [], closed: [] })
+  })
+
+  it('reports any other failed finite read as the query error and keeps the last snapshot', async () => {
+    const { title, client } = mount()
+    configureLiveSession({ local: false, bootProject: 'boot', apiBase: '' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    refusal = { status: 500, error: 'boom' }
+    await act(async () => { await vi.advanceTimersByTimeAsync(ACTIVITY_READ_MS) })
+    expect(client.getQueryState(activityQueryKey(shop))).toMatchObject({ status: 'error', error: { status: 500, message: 'boom' } })
+    expect(title()).toBe('first')
+
+    refusal = undefined
+    served = 'back'
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000) }) // past the fallback's back-off
+    expect(title()).toBe('back')
+    expect(client.getQueryState(activityQueryKey(shop))).toMatchObject({ status: 'success', error: null })
+  })
+
+  it('shows a project its first read finds removed as unavailable', async () => {
+    refusal = { status: 404, error: 'unknown project: shop' }
+    const { project } = mount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(project()).toMatchObject({ projectId: 'shop', name: 'shop', unavailable: { status: 404 } })
   })
 })

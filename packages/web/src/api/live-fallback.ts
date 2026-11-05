@@ -77,8 +77,19 @@ export function createLiveFallback(
         if (!readAt.has(path)) { readAt.set(path, Date.now()); continue }
         if (Date.now() - readAt.get(path)! < intervalMs) continue
         readAt.set(path, Date.now())
-        const response = await fetcher(path, { credentials: 'include', signal: current.signal })
-        if (!response.ok) throw new Error(`read HTTP ${response.status}`)
+        const consumers = () => active.filter(consumer => consumer.demand.kind === 'read' && consumer.demand.path === path)
+        // A failed read reaches its consumers as `HTTP <status>` with the answer's JSON body
+        // (`HTTP 0`: no answer), as the shared owner reports it; the cycle still backs off.
+        const response = await fetcher(path, { credentials: 'include', signal: current.signal }).catch((error: unknown) => {
+          if (!current.signal.aborted) for (const consumer of consumers()) consumer.value(undefined, 'HTTP 0')
+          throw error
+        })
+        if (!response.ok) {
+          const body: unknown = await response.json().catch(() => undefined)
+          current.signal.throwIfAborted()
+          for (const consumer of consumers()) consumer.value(body, `HTTP ${response.status}`)
+          throw new Error(`read HTTP ${response.status}`)
+        }
         const value: unknown = await response.json()
         current.signal.throwIfAborted()
         for (const consumer of active) if (consumer.demand.kind === 'read' && consumer.demand.path === path) consumer.value(value)
