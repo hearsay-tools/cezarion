@@ -575,6 +575,8 @@ jobs:
         run: npm run typecheck
 
   # Cheap deterministic checks precede review admission and heavy verification.
+  # For PRs into main, review admission and heavy verification then run side by
+  # side; verify requires both.
   preflight:
     name: Review preflight
     needs: [queue-proof, change-surface, classify-pr, complexity-gate, clone-gate, typecheck]
@@ -617,8 +619,8 @@ jobs:
 
   build-and-package:
     name: Unit, build, and package
-    needs: [queue-proof, preflight, review-result]
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && (github.event_name != 'pull_request_target' || github.event.pull_request.base.ref != 'main' || needs.review-result.result == 'success') && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') }}
+    needs: [queue-proof, preflight]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -711,9 +713,9 @@ jobs:
     # bumps, do not need to repeat the suites already covered by the relevant
     # release or docs gate; infra-only diffs cannot reach the package sources
     # Vitest covers, and their script tests run under build-and-package.
-    needs: [ queue-proof, change-surface, classify-pr, preflight, review-result, pr-test-input, pr-test-proof ]
+    needs: [ queue-proof, change-surface, classify-pr, preflight, pr-test-input, pr-test-proof ]
     if: >-
-      !cancelled() && needs.preflight.result == 'success' && (github.event_name != 'pull_request_target' || github.event.pull_request.base.ref != 'main' || needs.review-result.result == 'success') && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') && needs.change-surface.outputs.surface == 'full-matrix' && needs.classify-pr.outputs.bump_pr != 'true' && (github.event_name != 'pull_request_target' || needs.pr-test-input.result == 'success')
+      !cancelled() && needs.preflight.result == 'success' && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') && needs.change-surface.outputs.surface == 'full-matrix' && needs.classify-pr.outputs.bump_pr != 'true' && (github.event_name != 'pull_request_target' || needs.pr-test-input.result == 'success')
     strategy:
       fail-fast: false
       matrix:
@@ -901,9 +903,9 @@ jobs:
   cockpit-browser:
     name: Cockpit browser E2E shard ${{ matrix.shard }}/4
     # Same docs-only, infra-only, and verified bump-PR skips as Vitest.
-    needs: [ queue-proof, change-surface, classify-pr, preflight, review-result, pr-test-input, pr-test-proof ]
+    needs: [ queue-proof, change-surface, classify-pr, preflight, pr-test-input, pr-test-proof ]
     if: >-
-      !cancelled() && needs.preflight.result == 'success' && (github.event_name != 'pull_request_target' || github.event.pull_request.base.ref != 'main' || needs.review-result.result == 'success') && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') && needs.change-surface.outputs.surface == 'full-matrix' && needs.classify-pr.outputs.bump_pr != 'true' && (github.event_name != 'pull_request_target' || needs.pr-test-input.result == 'success')
+      !cancelled() && needs.preflight.result == 'success' && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') && needs.change-surface.outputs.surface == 'full-matrix' && needs.classify-pr.outputs.bump_pr != 'true' && (github.event_name != 'pull_request_target' || needs.pr-test-input.result == 'success')
     strategy:
       fail-fast: false
       matrix:

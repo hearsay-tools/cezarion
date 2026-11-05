@@ -9,9 +9,11 @@ trusting an uploaded artifact’s metadata.
 
 Model calls receive only their required credentials and tools. Intake choices are bounded by
 the prefetched candidate set; a decision engine cannot invent another target. CodeRabbit now owns review generation and posting (2026-11-02). Trusted deterministic
-admission follows cheap preflight and releases heavy verification only after the
+admission follows cheap preflight and passes only after the
 newest trusted exact-head check reports success or skipped with exact title
 `No files to review`, and all review threads resolve (owner policy, 2026-11-03).
+Heavy verification runs beside admission after preflight, and the `verify` aggregate
+requires both (2026-11-05, hearsay-tools/cezarion#2727).
 The named skip is a provider decision, not proof of model execution. A default-branch reconciler can
 retry only the native review gate; a PR-context review signal grants no authority.
 Only the new admission marker permits promotion. A green historical execution-only

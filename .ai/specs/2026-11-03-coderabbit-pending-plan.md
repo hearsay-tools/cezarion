@@ -1,10 +1,14 @@
 # Keep unfinished CodeRabbit admission pending
 
+2026-11-05: heavy verification no longer waits for review admission. It runs beside the
+native review gate after preflight, and `verify` requires both (hearsay-tools/cezarion#2727).
+
 The native review gate currently marks a running CodeRabbit review as failed.
 Reconciliation later retries it. The owner asked to fix this and open a PR.
 
-Preserve exact-head trusted newest provider evidence, resolved threads, review-first
-heavy verification, native required checks, cancellation and bounded API reads.
+Preserve exact-head trusted newest provider evidence, resolved threads, heavy
+verification after preflight beside the native review gate, native required checks,
+cancellation and bounded API reads.
 Keep the shared admission reader immediate for readiness, reconciliation and queue
 admission. Preserve the no-files policy in hearsay-tools/cezarion#2584.
 
@@ -13,7 +17,8 @@ intervals, within a fixed 20-minute deadline. Each read keeps its 60-second tota
 and 10-second request caps, clipped to the wait deadline. Set the native job limit
 to 25 minutes for checkout and reporting. This deliberately holds one Actions
 runner while review is pending; it avoids failure/retry churn without changing
-protected-check provenance or the heavy-job graph. No model requests or new flags.
+protected-check provenance. Heavy jobs start after preflight with no review
+dependency (hearsay-tools/cezarion#2727). No model requests or new flags.
 
 Only missing and pending provider states wait. Retry the narrow changing-snapshot
 error with fresh evidence; never grant admission from an inconsistent snapshot.
@@ -23,13 +28,13 @@ The current marker remains the marker for the admission policy on main.
 
 | Case | Result |
 | --- | --- |
-| Missing, queued or running provider | Keep native job active; heavy jobs remain blocked |
+| Missing, queued or running provider | Keep native job active; `verify` remains blocked; heavy jobs run beside it |
 | Running provider with open findings | Wait for provider completion before settled admission |
 | Newest successful or accepted no-files check; all threads resolved | Pass in the same native job |
 | Older success, newer pending execution | Wait for newest execution |
 | Completed unsuccessful provider or completed review with open threads | Block immediately; keep existing recovery |
 | Provider changes during snapshot | Discard snapshot; bounded fresh read |
-| Changed head, invalid target, API/schema/incomplete evidence | Error; never release heavy work |
+| Changed head, invalid target, API/schema/incomplete evidence | Error; never grant admission, so `verify` stays blocked |
 | Missing or pending beyond deadline/read cap | Fail visibly; later reconciliation can recover |
 | Cancelled or superseded workflow | Existing cancellation and concurrency prevent admission |
 | Verified provider exception | Return immediately; still require resolved threads |
