@@ -6,10 +6,9 @@ import { type RunRecord } from '../runs/store.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { COMPLETION_WILL_WAIT } from './run.ts';
-import type { AgentSession } from '../core/agent-runner.ts';
 import { fixtureUpdateRun, manager, parent, register, restart, root, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { completionNudges } from './worker-wait-readiness.testkit.ts';
+import { completionNudges, idleClose, observeIdleClose, sessionOf } from './worker-wait-readiness.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -28,8 +27,7 @@ describe('worker waits: readiness', { timeout: 30_000 }, () => {
 
 it('readiness closed session reopens to refuse a successful done with outstanding workers', async () => {
     const p = await parent(); const w = await worker(p.id);
-    const state = (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; };  }> }).active.get(p.id)!;
-    state.liveSession.session.end();
+    sessionOf(p.id).end();
     const refusal = (run: RunRecord | undefined) => run?.agentInputs?.find(input => input.source === 'lifecycle' && input.text.includes(`Workers are still live: ${w.id}.`));
     await until(() => !!refusal(store.getRun(p.id))?.deliveredAt && store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true);
     expect(refusal(store.getRun(p.id))?.text).toContain(COMPLETION_WILL_WAIT);
@@ -44,12 +42,10 @@ it('readiness collects a markerless worker after its idle timer closes the sessi
     const p = await parent();
     const w = await worker(p.id);
     const wait = register(p.id, [w.id]);
+    const clock = observeIdleClose();
     manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'waiting');
-    const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(w.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting worker did not arm an idle timer');
-    idleTimer._onTimeout();
+    await idleClose(clock, w.id, manager, store, until);
 
     await until(() => store.getRun(w.id)?.status === 'done');
     await until(() => store.getRun(p.id)?.agentInputs?.some(input => input.id === wait.id && !!input.deliveredAt) === true);
@@ -60,13 +56,11 @@ it('readiness fails rather than collects success for a worker with a rejected AS
     const p = await parent();
     const w = await worker(p.id);
     const wait = register(p.id, [w.id]);
+    const clock = observeIdleClose();
     manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'waiting');
     store.updateRun(w.id, { invalidAsk: true });
-    const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(w.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting worker did not arm an idle timer');
-    idleTimer._onTimeout();
+    await idleClose(clock, w.id, manager, store, until);
 
     await until(() => store.getRun(w.id)?.status === 'failed');
     await until(() => store.getRun(p.id)?.agentInputs?.some(input => input.id === wait.id && !!input.deliveredAt) === true);

@@ -1,3 +1,4 @@
+import { idleClose, observeIdleClose } from './worker-wait-readiness.testkit.ts';
 import { fireCapturedTimer } from './waits.testkit.ts';
 import { spawn } from 'node:child_process';
 import * as fc from 'fast-check';
@@ -88,12 +89,7 @@ function target(id: string, from: RunState, pick?: RunState): RunState {
   return pick!;
 }
 
-function engine() {
-  return manager as unknown as {
-    active: Map<string, { idleTimer?: NodeJS.Timeout & { _onTimeout(): void } }>;
-
-  };
-}
+let idleClock: ReturnType<typeof observeIdleClose>;
 const turnEnds = (id: string) => store.readEvents(id).filter((event) => event.type === 'turn-end').length;
 const isPark = (state: RunState) => state.startsWith('waiting:');
 const final = (state: RunState) => state === 'done' || state === 'failed' || state === 'cancelled';
@@ -189,10 +185,7 @@ class IdleElapses implements Command {
     m.state = target(cezarAsks ? 'human.idle-cezar-question' : 'waiting.idle', m.state);
     if (cezarAsks) m.question = false;
     m.session = false;
-    const idle = engine().active.get(r.id)?.idleTimer;
-    expect(idle, 'the table promises the idle timer the engine arms').toBeDefined();
-    const expire = idle!._onTimeout;
-    clearTimeout(idle); expire();
+    await idleClose(idleClock, r.id, manager, store, until);
     await settle(r, m, turnEnds(r.id), 0);
   }
   toString = () => 'IdleElapses';
@@ -226,7 +219,9 @@ class Restart implements Command {
   async run(m: Model, r: Real) {
     if (isPark(m.state)) target(m.state === 'waiting:human' ? 'human.restart' : 'waiting.restart', m.state);
     m.session = false;
+    idleClock.restore();
     await restart();
+    idleClock = observeIdleClose();
     await settle(r, m, turnEnds(r.id), 0);
   }
   toString = () => 'Restart';
@@ -260,6 +255,7 @@ describe('the run state table drives a real run', { timeout: 600_000 }, () => {
     process.env.CEZ_DRY_RUN = '0';
     process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
     controlExternalWatches();
+    idleClock = observeIdleClose();
     await fc.assert(fc.asyncProperty(reply, commands, async (first, steps) => {
       const model: Model = { state: 'running', open: new Set(), question: false, session: true };
       expect(target('queued.start', 'queued')).toBe('running');
