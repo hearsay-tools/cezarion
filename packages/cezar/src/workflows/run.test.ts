@@ -6,7 +6,6 @@ import { setRunStatus, crashStore } from '../runs/run-store.testkit.ts';
 import { runnerHook, run, GIT_ID, waitForProduct, TURN_TEXT, setupMonitoringFixture, FINISHED_RUN_STATUSES } from './run-fixture.testkit.ts';
 import { beginUsageInvocation, recordUsageUiEvent } from './run/usage-accounting.ts';
 import { createActiveRun } from './active-run.ts';
-import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers, unused, fixtureWork } from './fixture-cleanup.testkit.ts';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -858,7 +857,10 @@ describe('RunSettlement.settleSuccess — optional review gate', () => {
   }
 
   const settle = async (id: string) => {
-    setRunStatus(store, id, RUN_STATUS.waiting);
+    store.addStep(id, { id: 'task', name: 'Task', kind: STEP_KIND.agent });
+    store.updateStep(id, 'task', { status: STEP_STATUS.waiting });
+    setRunStatus(store, id, RUN_STATUS.waiting, { currentStepId: 'task' });
+    expect(manager.finishBlockedReason(id)).toBeUndefined();
     expect(manager.finish(id)).toBe(true);
     await waitForProduct(manager, store, () => FINISHED_RUN_STATUSES.has(store.getRun(id)!.status));
   };
@@ -1311,7 +1313,7 @@ describe('RunManager idle shutdown', () => {
 
 describe('RunManager workflow remainder opening', () => {
   const fixture = setupMonitoringFixture();
-  it('preserves startedAt when a resumed workflow remainder is held and requeued', () => {
+  it('preserves startedAt when a resumed workflow remainder is held and requeued', async () => {
     const startedAt = '2026-09-01T00:00:00.000Z';
     const workflow: WorkflowDef = { name: 'held-remainder', source: 'file', steps: [
       { id: 'task', name: 'Task', prompt: '{{task}}' },
@@ -1326,14 +1328,18 @@ describe('RunManager workflow remainder opening', () => {
     });
     fixture.currentId = record.id;
     fixture.store.updateRun(record.id, { startedAt });
-    const semaphore = (fixture.manager as unknown as { semaphore: WorkspaceSemaphore }).semaphore;
-    vi.spyOn(semaphore, 'accountHolds').mockReturnValue({
-      deadline: new Set(['claude:default']),
-      inFlight: new Set(),
+    fixture.store.updateStep(record.id, 'task', { status: STEP_STATUS.done });
+    fixture.store.updateRun(record.id, { workflowDef: workflow, worktree: false, runner: 'claude' });
+    const pin = fixture.store.pin.bind(fixture.store);
+    vi.spyOn(fixture.store, 'pin').mockImplementation((id, reason) => {
+      pin(id, reason);
+      if (id !== record.id || reason !== 'active') return;
+      const hold = fixture.store.createRun({ title: 'account hold', task: 'hold', workflow: 'quick-task', runner: 'claude', steps: [] });
+      setRunStatus(fixture.store, hold.id, RUN_STATUS.waiting, { autoResumeAt: new Date(Date.now() + 60_000).toISOString() });
     });
-    const held = runInternals(fixture.manager).stepLoop.requeueWhileHeld(record.id, workflow, { task: record.task }, 'claude', undefined, 1);
-
-    expect(held).toBe(true);
+    await fixture.manager.recover();
+    await waitForProduct(fixture.manager, fixture.store, () => fixture.store.readEvents(record.id).some(event =>
+      event.type === 'note' && String(event.message).includes('held in the queue')));
     expect(fixture.store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.queued, startedAt });
   });
 
@@ -1381,7 +1387,7 @@ describe('RunManager workflow remainder opening', () => {
     fixture.store.updateStep(record.id, 'task', { status: STEP_STATUS.pending });
     fixture.store.updateRun(record.id, { workflowDef: workflow, worktree: false, taskImages: [`/api/v1/runs/${record.id}/images/pasted-1.png`] });
     await fixture.manager.recover();
-    await waitForProduct(fixture.manager, fixture.store, () => !fixture.manager.isActive(record.id) && FINISHED_RUN_STATUSES.has(fixture.store.getRun(record.id)!.status));
+    await waitForProduct(fixture.manager, fixture.store, () => !fixture.manager.isActive(record.id));
 
     expect(receivedImages).toEqual([openingImage]);
   }, 30_000);
@@ -1745,7 +1751,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
     await run('git', ['add', 'base.txt'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     capacity = 0;
-    semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: capacity }) });
+    semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: capacity, memoryLimitMb: null }) });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot, { semaphore });
   });
@@ -1928,71 +1934,80 @@ describe('RunManager queued-stack mutators (#472)', () => {
     expect(store.getRun(r.id)?.title).toBe('t');
   });
 
-  it('defers a message only while the run is starting up', () => {
-    const r = seedQueued();
-    const starting = runInternals(manager).line.starting;
+  async function launchDeferred(record: RunRecord, beforeSession: () => void = () => undefined) {
+    const delivered: ContentBlock[][] = [];
+    let session!: AgentSession;
+    runnerHook.runner = {
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
+      run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => undefined,
+      startSession: () => {
+        beforeSession();
+        let finish!: (result: AgentRunResult) => void;
+        let open = true;
+        const result = new Promise<AgentRunResult>(resolve => { finish = resolve; });
+        const close = () => { open = false; finish({ text: '', toolCalls: [], tokensUsed: 0 }); };
+        session = { result, sendMessage: content => { delivered.push(content); return true; },
+          sendAgentMessage: async content => { delivered.push(content); },
+          discardQueuedMessages: () => undefined, holdsHumanInput: () => false,
+          end: close, interrupt: close, get open() { return open; } };
+        return session;
+      },
+    };
+    capacity = 1;
+    await semaphore.refresh();
+    await semaphore.release();
+    await waitForProduct(manager, store, () => !!session && delivered.length === 1);
+    expect(store.readEvents(record.id).some(event => event.type === 'user-message')).toBe(true);
+    return { delivered, session };
+  }
 
-    // Not starting yet → the ladder falls through to 409.
+  it('defers a message only while the run is starting up', async () => {
+    const r = seedQueued();
     expect(manager.deferMessage(r.id, text('nope'))).toBe(false);
-
-    starting.add(r.id);
-    expect(manager.deferMessage(r.id, text('buffer me'))).toBe(true);
-    expect(
-      runInternals(manager).queuedInput.deferredMessages.get(
-        r.id,
-      ),
-    ).toHaveLength(1);
+    const pin = store.pin.bind(store);
+    vi.spyOn(store, 'pin').mockImplementation((id, reason) => {
+      pin(id, reason);
+      if (id === r.id && reason === 'active') expect(manager.deferMessage(id, text('buffer me'))).toBe(true);
+    });
+    const { delivered } = await launchDeferred(r);
+    expect(delivered).toEqual([text('buffer me')]);
   });
 
-  /**
-   * The sub-window that `starting` alone misses: `execute()` drops the run from
-   * `starting` as soon as it builds the ActiveRun, seconds before the backend is
-   * spawned. A message arriving there must still buffer, not 409.
-   */
-  it('still defers after `starting` is cleared but before the session opens', () => {
+  it('still defers after starting is cleared but before the session opens', async () => {
     const r = seedQueued();
-    (manager as unknown as { active: Map<string, unknown> }).active.set(r.id,
-      createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false }));
-    expect(manager.deferMessage(r.id, text('mid-spawn'))).toBe(true);
+    const { delivered } = await launchDeferred(r, () => {
+      expect(manager.deferMessage(r.id, text('mid-spawn'))).toBe(true);
+    });
+    expect(delivered).toEqual([text('mid-spawn')]);
   });
 
-  /**
-   * Review fix: `flushDeferred` used to drop its buffer before sending, so a message the
-   * session refused was silently lost — precisely the failure `deferMessage` exists to
-   * prevent. Anything unsent must stay buffered for the next session that opens.
-   */
   it('re-buffers a deferred message the session refuses, instead of dropping it', () => {
     const r = seedQueued();
-    const starting = runInternals(manager).line.starting;
-    const buffer = runInternals(manager).queuedInput.deferredMessages;
-
-    starting.add(r.id);
-    manager.deferMessage(r.id, text('buffer me'));
-    expect(buffer.get(r.id)).toHaveLength(1);
-
-    // Flush with no open session — `sendMessage` refuses.
-    ;runInternals(manager).queuedInput.flushDeferred(r.id);
-    expect(buffer.get(r.id)).toHaveLength(1);
-
-    // Now a session that accepts it: the buffer drains.
-    const delivered: ContentBlock[][] = [];
-    (manager as unknown as { sendMessage(id: string, c: ContentBlock[]): boolean }).sendMessage = (
-      _id,
-      content,
-    ) => {
-      delivered.push(content);
-      return true;
-    };
-    ;runInternals(manager).queuedInput.flushDeferred(r.id);
+    let accepts = false;
+    const delivered: Array<Parameters<RunManager['sendMessage']>[1]> = [];
+    const queuedInput = new QueuedInput({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+      work: new TrackedWork(), semaphore, disposed: () => false,
+    }, unused<ConstructorParameters<typeof QueuedInput>[1]>('QueuedInput.host', {
+      startingHas: () => true, activeGet: () => undefined,
+      canProceedWithRun: (_id, run): run is RunRecord => run !== undefined,
+      sendMessage: (_id, content) => { if (accepts) delivered.push(content); return accepts; },
+    }));
+    expect(queuedInput.deferMessage(r.id, text('buffer me'))).toBe(true);
+    queuedInput.flushDeferred(r.id);
+    expect(delivered).toEqual([]);
+    accepts = true;
+    queuedInput.flushDeferred(r.id);
+    expect(delivered).toEqual([text('buffer me')]);
+    queuedInput.flushDeferred(r.id);
     expect(delivered).toHaveLength(1);
-    expect(buffer.has(r.id)).toBe(false);
   });
 
-  it('stops deferring once a session has opened (a closed session is a real 409)', () => {
+  it('stops deferring once a session has opened (a closed session is a real 409)', async () => {
     const r = seedQueued();
-    const state = createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false });
-    state.liveSession.markSessionOpened();
-    (manager as unknown as { active: Map<string, unknown> }).active.set(r.id, state);
+    const { session } = await launchDeferred(r, () => {
+      expect(manager.deferMessage(r.id, text('opening message'))).toBe(true);
+    });
+    session.end();
     expect(manager.deferMessage(r.id, text('too late'))).toBe(false);
   });
 });
@@ -2218,8 +2233,7 @@ describe('queued stacking reaches the backend (#472)', () => {
     const second = manager.startRun(WORKFLOW, { task: 'mock:cezar-done original prompt', worktree: false });
 
     // Wait for the scheduler's owned capacity check, not only startRun's initial queued record.
-    await waitForProduct(manager, store, () => ![...fixtureWork(manager).pending.values()].includes('pump') &&
-      !manager.isActive(second.id));
+    await waitForProduct(manager, store, () => ![...fixtureWork(manager).pending.values()].includes('pump'));
 
     // The second run is holding in the queue — amend it there.
     expect(store.getRun(second.id)?.status).toBe('queued');
@@ -2284,7 +2298,7 @@ describe('recover() carries the queued stack exactly once (#472)', () => {
 
     const expected = 'the original task\n\nthe stacked bit';
     let capacity = 0;
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: capacity }) });
+    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: capacity, memoryLimitMb: null }) });
     let delivered: AgentRunSpec | undefined;
     runnerHook.runner = {
       backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
