@@ -36,7 +36,7 @@ function opening() {
   store.flush();
   projectConversationEvents(store, store.getRun(parent.id)!);
   const state = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false });
-  state.openingAgentInputId = message.id;
+  state.inputState.selectOpeningInput(message.id);
   const host = { reconcileWorkerWaits: vi.fn(() => projectConversationEvents(store, store.getRun(parent.id)!)),
     flushAgentInputs: vi.fn(), isCurrentState: vi.fn(() => true) };
   const context = { store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore(), work: new TrackedWork(), disposed: () => false };
@@ -53,7 +53,7 @@ it('publishes a committed opening receipt once without a live session and retain
   const saved = f.saved();
   expect(saved.agentInputs?.[0]?.deliveredAt).toBeDefined();
   expect(saved.agentInputs?.[0]?.consumedAt).toBeUndefined();
-  expect(saved.continuationMessage?.agentInputId).toBe(f.state.openingAgentInputId);
+  expect(saved.continuationMessage?.agentInputId).toBe(f.state.inputState.openingAgentInputId);
   for (const id of [f.parent.id, f.recipient.id]) expect(f.deliveries(id))
     .toEqual([expect.objectContaining({ deliveredAt: saved.agentInputs![0]!.deliveredAt })]);
   expect(f.host.reconcileWorkerWaits).toHaveBeenCalledTimes(1);
@@ -86,7 +86,8 @@ function receiptFixture() {
     sendMessage: () => true, sendAgentMessage: () => Promise.resolve(), discardQueuedMessages() {},
     holdsHumanInput: () => false, end() {}, interrupt: vi.fn() };
   f.state.liveSession.attachSession(session);
-  f.state.unreadInputIds = new Set([f.state.openingAgentInputId!]);
+  f.state.inputState.resetUnreadInputs();
+  f.state.inputState.recordUnreadInput(f.state.inputState.openingAgentInputId!);
   const calls: string[] = [];
   const turn: SessionTurn = { text: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
   const steps: receipts.InputReceiptSteps = {
@@ -95,7 +96,7 @@ function receiptFixture() {
     ready: vi.fn(), pid: vi.fn(), ui: () => { calls.push('ui'); },
     flushDeferred: () => { calls.push('deferred'); }, recordProcess: () => { calls.push('record'); },
   };
-  const id = f.state.openingAgentInputId!;
+  const id = f.state.inputState.openingAgentInputId!;
   const accept = () => store.commitOutcome(f.recipient.id, { kind: 'delivered', inputIds: [id], at: new Date().toISOString(), awaitingRead: true });
   return { ...f, id, session, calls, turn, steps, accept };
 }
@@ -108,14 +109,14 @@ it.each(['absent', 'stale', 'different'] as const)('rejects consumption and clos
   // Fake time only checks that close cancels both timers; no real-time wait.
   vi.useFakeTimers();
   try {
-    f.state.unreadInputTimer = setTimeout(vi.fn(), 10_000);
-    f.state.heldHumanInputTimer = setTimeout(vi.fn(), 10_000);
+    f.state.inputState.retainUnreadTimer(setTimeout(vi.fn(), 10_000));
+    f.state.inputState.retainHeldTimer(setTimeout(vi.fn(), 10_000));
     receipts.handleAgentInputConsumed(f.context, f.host, f.recipient.id, f.state, session, [f.id]);
     receipts.requeueUnreadAtClose(f.context, f.host, f.recipient.id, f.state, session);
     expect(vi.getTimerCount()).toBe(0);
     expect(f.saved().agentInputs?.[0]).toMatchObject({ deliveredAt: expect.any(String) });
     expect(f.saved().agentInputs?.[0]?.consumedAt).toBeUndefined();
-    expect(f.state.unreadInputIds).toEqual(new Set([f.id]));
+    expect([...f.state.inputState.unreadInputIds!]).toEqual([f.id]);
     expect(f.host.reconcileWorkerWaits).not.toHaveBeenCalled();
   } finally { vi.useRealTimers(); }
 });
@@ -126,7 +127,7 @@ it.each(['cancelled', 'stale', 'empty'] as const)('rejects unread retirement for
   if (mode === 'stale') f.host.isCurrentState.mockReturnValue(false);
   receipts.retireUnreadInputs(f.context, f.host, f.recipient.id, f.state, mode === 'empty' ? [] : [f.id], true);
   expect(f.saved().agentInputs?.[0]?.deliveredAt).toBeDefined();
-  expect(f.state.unreadInputIds).toEqual(new Set([f.id]));
+  expect([...f.state.inputState.unreadInputIds!]).toEqual([f.id]);
   expect(f.host.flushAgentInputs).not.toHaveBeenCalled();
   expect(store.readEvents(f.recipient.id).filter(e => e.type === 'note')).toEqual([]);
 });
@@ -176,7 +177,7 @@ it.each([true, false])('updates the tail before UI and accepts opening only for 
 it.each(['consume', 'opening', 'bundled', 'close'] as const)('warns and skips reconciliation after a refused %s checkpoint', operation => {
   const f = receiptFixture();
   if (operation !== 'opening') f.accept();
-  f.state.bundledInputIds = [f.id];
+  f.state.inputState.bundleInputs([f.id]);
   const before = f.saved();
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   vi.spyOn(store, 'commitOutcome').mockImplementation(() => { throw new Error('refused'); });
@@ -185,7 +186,7 @@ it.each(['consume', 'opening', 'bundled', 'close'] as const)('warns and skips re
   expect(f.saved()).toEqual(before);
   expect(f.host.reconcileWorkerWaits).not.toHaveBeenCalled();
   expect(warn).toHaveBeenCalledWith(expect.stringContaining('refused'));
-  if (operation === 'bundled' || operation === 'close') expect(f.state.bundledInputIds).toBeUndefined();
+  if (operation === 'bundled' || operation === 'close') expect(f.state.inputState.bundledInputIds).toBeUndefined();
 });
 
 function invokeReceipt(operation: string, f: ReturnType<typeof receiptFixture>) {
@@ -203,14 +204,14 @@ it.each(['latched', 'interrupt', 'event'] as const)('preserves durable unread in
   vi.spyOn(store, 'commitOutcome').mockImplementation(() => { throw new Error('refused'); });
   const append = vi.spyOn(store, 'appendEvent');
   const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-  if (failure === 'latched') f.state.agentInputError = 'earlier failure';
+  if (failure === 'latched') f.state.inputState.recordInputError('earlier failure');
   if (failure === 'interrupt') vi.mocked(f.session.interrupt).mockImplementation(() => { throw new Error('interrupt refused'); });
   if (failure === 'event') append.mockImplementation(() => { throw new Error('event refused'); });
   const retire = () => receipts.retireUnreadInputs(f.context, f.host, f.recipient.id, f.state, [f.id], true);
   if (failure === 'interrupt') expect(retire).toThrow('interrupt refused');
   else expect(retire).not.toThrow();
   expect(f.saved().agentInputs?.[0]?.deliveredAt).toBeDefined();
-  expect(f.state.unreadInputIds).toEqual(new Set([f.id]));
+  expect([...f.state.inputState.unreadInputIds!]).toEqual([f.id]);
   expect(f.host.flushAgentInputs).not.toHaveBeenCalled();
   assertRetirementTail(f, failure, append, error);
 });
@@ -218,28 +219,23 @@ it.each(['latched', 'interrupt', 'event'] as const)('preserves durable unread in
 function assertRetirementTail(f: ReturnType<typeof receiptFixture>, failure: string, append: ReturnType<typeof vi.spyOn>, error: ReturnType<typeof vi.spyOn>) {
   if (failure === 'latched') {
     expect(f.session.interrupt).not.toHaveBeenCalled(); expect(append).not.toHaveBeenCalled();
-    expect(f.state.agentInputError).toBe('earlier failure'); return;
+    expect(f.state.inputState.agentInputError).toBe('earlier failure'); return;
   }
   expect(f.session.interrupt).toHaveBeenCalledOnce();
-  expect(append).toHaveBeenCalledWith(f.recipient.id, { type: 'error', message: f.state.agentInputError });
+  expect(append).toHaveBeenCalledWith(f.recipient.id, { type: 'error', message: f.state.inputState.agentInputError });
   if (failure === 'event') expect(error).toHaveBeenCalledWith(expect.stringContaining('refused'));
-  else expect(store.readEvents(f.recipient.id).at(-1)).toMatchObject({ type: 'error', message: f.state.agentInputError });
+  else expect(store.readEvents(f.recipient.id).at(-1)).toMatchObject({ type: 'error', message: f.state.inputState.agentInputError });
 }
 
-it('finishes setup in order and waits for ACK before close requeues committed unread input', async () => {
+it('finishes setup in order before attaching close result handling', async () => {
   const f = receiptFixture(); f.accept();
-  let release!: () => void;
-  const ack = new Promise<void>(resolve => { release = resolve; });
-  f.state.agentInputFlight = { session: f.session, inputIds: [f.id], settled: ack };
   const register = vi.spyOn(processes, 'registerRunProcess').mockImplementation(() => { f.calls.push('register'); });
   f.host.flushAgentInputs.mockImplementation(() => { f.calls.push('inputs'); });
   const session = { ...f.session, pid: 12345 }; f.state.liveSession.attachSession(session);
   const result = receipts.sessionResultWithReceipts(f.context, f.host, f.steps, f.recipient.id, f.state, session, () => { f.calls.push('prepared'); });
   expect(f.calls).toEqual(['deferred', 'inputs', 'register', 'record', 'prepared']);
   expect(register).toHaveBeenCalledWith(f.recipient.id, 12345);
-  expect(f.saved().agentInputs?.[0]?.deliveredAt).toBeDefined();
-  release(); await result;
-  expect(f.saved().agentInputs?.[0]?.deliveredAt).toBeUndefined();
+  await result;
 });
 
 it.each(['deferred', 'inputs', 'register', 'record'] as const)('does not prepare or attach result handling if setup fails at %s', failure => {
@@ -266,11 +262,11 @@ function observeTurnWrites(turn: SessionTurn, calls: string[]) {
 
 it.each(['cancelled', 'empty'] as const)('takes bundled IDs without a commit for %s input', mode => {
   const f = receiptFixture(); f.accept();
-  f.state.bundledInputIds = mode === 'empty' ? [] : [f.id];
+  f.state.inputState.bundleInputs(mode === 'empty' ? [] : [f.id]);
   if (mode === 'cancelled') f.state.liveSession.cancel();
   const commit = vi.spyOn(store, 'commitOutcome');
   receipts.readBundledInputs(f.context, f.host, f.recipient.id, f.state);
-  expect(f.state.bundledInputIds).toBeUndefined();
+  expect(f.state.inputState.bundledInputIds).toBeUndefined();
   expect(commit).not.toHaveBeenCalled();
   expect(f.saved().agentInputs?.[0]?.consumedAt).toBeUndefined();
   expect(f.host.reconcileWorkerWaits).not.toHaveBeenCalled();

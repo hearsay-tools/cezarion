@@ -94,8 +94,8 @@ for (const mode of ['fresh', 'continuation'] as const) {
             const note = completionNudges(p.id)[0]!.seq;
             checkpoint('nudge turn-end');
             await until(() => store.readEvents(p.id).some(event => event.type === 'turn-end' && event.seq > note));
-            const engine = manager as unknown as { active: Map<string, { agentInputFlight?: { settled?: Promise<void> } }> };
-            const settled = engine.active.get(p.id)?.agentInputFlight?.settled;
+            const engine = manager as unknown as { active: Map<string, { inputState: { agentInputFlight?: { settled?: Promise<void> } } }> };
+            const settled = engine.active.get(p.id)?.inputState.agentInputFlight?.settled;
             expect(settled).toBeInstanceOf(Promise);
             checkpoint('acknowledgement settled'); release(); await settled;
           }

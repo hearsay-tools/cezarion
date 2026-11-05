@@ -48,7 +48,7 @@ function nativeWire(runner: RunnerId) {
 }
 
 const engine = () => manager as unknown as {
-  active: Map<string, { liveSession: { session?: AgentSession; ciGeneration: string; }; idleTimer?: NodeJS.Timeout & { _onTimeout(): void }; agentInputFlight?: { inputIds: string[] } }>;
+  active: Map<string, { liveSession: { session?: AgentSession; ciGeneration: string; }; idleTimer?: NodeJS.Timeout & { _onTimeout(): void }; inputState: { agentInputFlight?: { inputIds: readonly string[] } } }>;
 };
 async function openWait(id: string, request: CezarWaitRequestInput): Promise<TimedWait> {
   const tools = manager.cezarToolHandlers(id, engine().active.get(id)!.liveSession.ciGeneration);
@@ -62,7 +62,7 @@ async function openWait(id: string, request: CezarWaitRequestInput): Promise<Tim
 async function parkedOnTimers<const T extends readonly { seconds: number; note: string }[]>(...timers: T) {
   const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: timers.map(timer => toolCall('cezar_wait', { kind: WAIT_KIND.timer, ...timer })).join(' '), runner: 'claude' });
   await until(() => store.getRun(run.id)?.status === 'waiting' && store.getRun(run.id)?.waits?.length === timers.length);
-  const waits = timers.map(timer => store.getRun(run.id)!.waits!.find(wait => wait.kind === 'timer' && wait.note === timer.note)!) as { [K in keyof T]: Wait };
+  const waits = timers.map(timer => structuredClone(store.getRun(run.id)!.waits!.find(wait => wait.kind === 'timer' && wait.note === timer.note)!)) as { [K in keyof T]: Wait };
   return { run, waits };
 }
 const fireTimer = (waitId: string) => fireCapturedTimer(waitId);
@@ -366,7 +366,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
       return ack && ack.then(() => gate);
     });
     fireTimer(second.id);
-    await until(() => engine().active.get(run.id)?.agentInputFlight?.inputIds.includes(second.id) === true);
+    await until(() => engine().active.get(run.id)?.inputState.agentInputFlight?.inputIds.includes(second.id) === true);
     store.flush();
     const beforeAck = readPersistedRuns(join(root, '.ai/cezar'));
     expect(beforeAck.find(row => row.id === run.id)?.automaticWakes).toBe(1);

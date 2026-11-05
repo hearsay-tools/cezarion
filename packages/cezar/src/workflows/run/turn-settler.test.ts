@@ -1,3 +1,5 @@
+import { InputDelivery } from './input-delivery.ts';
+import { unused } from '../fixture-cleanup.testkit.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActiveRun } from '../active-run.ts';
 import type { AgentSession } from '../../core/agent-runner.ts';
@@ -135,10 +137,11 @@ describe('turn settler entry orders', () => {
   it.each(['ack', 'ready', 'gate'] as const)('held %s preserves boundary and input timer before reporting park', entry => {
     const f = fixture();
     f.state.doneAtBoundary = f.session;
-    f.state.heldHumanInputSince = 42;
+    vi.spyOn(Date, 'now').mockReturnValue(42);
+    f.state.inputState.beginHeldClock();
     f.host.completionGate.mockImplementation(() => { f.log.push('gate'); return 'held'; });
     f.host.line.inPool.mockImplementation(() => {
-      expect(f.state.doneAtBoundary).toBe(f.session); expect(f.state.heldHumanInputSince).toBe(42);
+      expect(f.state.doneAtBoundary).toBe(f.session); expect(f.state.inputState.heldHumanInputSince).toBe(42);
       f.log.push('inPool'); return false;
     });
     f.log.length = 0;
@@ -165,12 +168,40 @@ describe('turn settler entry orders', () => {
   });
 
   it('input checkpoint failure stops before ask emission or a carrier', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const f = fixture();
     decide({ kind: 'take-input' }, { kind: 'park' });
-    f.state.agentInputError = 'checkpoint failed';
+    vi.mocked(f.session.holdsHumanInput!).mockReturnValue(true);
+    type InputArgs = ConstructorParameters<typeof InputDelivery>;
+    const input = new InputDelivery(unused<InputArgs[0]>('input context'),
+      unused<InputArgs[1]>('input host'), 10, 'workers');
+    input.armHeldHumanInputTimer('run', f.state);
+    const held = f.state.inputState.heldHumanInputTimer;
+    expect(held).toBeDefined();
+    vi.mocked(f.session.holdsHumanInput!).mockReturnValue(false);
+    const clear = clearTimeout;
+    let cleared = false;
+    vi.spyOn(globalThis, 'clearTimeout').mockImplementation(handle => {
+      if (handle === held) {
+        cleared = true;
+        expect(f.log.slice(-2)).toEqual(['input', 'unread']);
+        expect(f.log).not.toContain('emitAsk');
+        expect(f.log).not.toContain('route');
+        expect(f.log).not.toContain('parkWaits');
+        expect(f.log).not.toContain('outcome');
+      }
+      clear(handle);
+    });
+    f.host.countAutomaticWakes.mockReturnValue(0);
+    f.host.hasQueuedAgentInputs.mockReturnValue(false);
+    f.host.humanWaits.holdsAgentWaits.mockReturnValue(false);
+    f.log.length = 0;
+    f.state.inputState.recordInputError('checkpoint failed');
     const result = f.settler.settleTurn('run', f.state, 'turn-end', { ...turn, ask });
     expect(result).toBe(false);
-    order(f, ['input', 'unread', 'state:heldHumanInputTimer', 'state:heldHumanInputSince', 'state:heldHumanInputExpired']);
+    expect(cleared).toBe(true);
+    expect(f.state.inputState.heldHumanInputSince).toBeUndefined();
+    expect(f.state.inputState.heldHumanInputExpired).toBeUndefined();
     expect(f.host.parkOnWaits).not.toHaveBeenCalled();
     expect(f.host.routeWorkerQuestion).not.toHaveBeenCalled();
     expect(f.host.settledTurnOutcome).not.toHaveBeenCalled();

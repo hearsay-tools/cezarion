@@ -285,7 +285,7 @@ it.each(['replacement session', 'replacement state'] as const)(
     }), 10, 'unused');
     try {
       expect(owner.submitAgentInput(record.id, state, [{ type: 'text', text: input.text }], [input.id])).toBe(true);
-      const settled = state.agentInputFlight?.settled;
+      const settled = state.inputState.agentInputFlight?.settled;
       expect(settled).toBeInstanceOf(Promise);
       if (transition === 'replacement session') state.liveSession.attachSession({ ...session });
       else {

@@ -1,3 +1,4 @@
+import type { InputGroup } from '../workflows/run/input-delivery.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -26,7 +27,7 @@ async function openSession(fixture: Fixture, mode: 'fresh' | 'continuation'): Pr
 
 function activeState({ manager, runId }: Fixture) {
   return (manager as unknown as {
-    active: Map<string, { liveSession: { session: AgentSession; }; agentInputError?: string }>;
+    active: Map<string, { liveSession: { session: AgentSession; }; inputState: InputGroup }>;
   }).active.get(runId)!;
 }
 
@@ -48,7 +49,7 @@ it.each(['fresh', 'continuation'] as const)('%s acknowledged input checkpoint re
       const interrupt = state.liveSession.session.interrupt.bind(state.liveSession.session);
       let injected = false;
       vi.spyOn(state.liveSession.session, 'interrupt').mockImplementation(() => {
-        checkpointsAtInterrupt.push(state.agentInputError);
+        checkpointsAtInterrupt.push(state.inputState.agentInputError);
         if (!injected) { injected = true; emitError?.(); }
         interrupt();
       });
@@ -94,7 +95,7 @@ it.each(['fresh', 'continuation'] as const)('%s earlier provider failure remains
       // provider error is an actual HTTP/SSE wire frame, already latched by the
       // manager before it invokes interrupt. This is not a second disk-fault test.
       observedProviderInterrupt = true;
-      state.agentInputError = 'agent input delivery checkpoint failed: later test fault';
+      state.inputState.recordInputError('agent input delivery checkpoint failed: later test fault');
       interrupt();
     });
     expect(manager.sendMessage(runId, [{ type: 'text', text: 'mock:provider-error' }])).toBe(true);
