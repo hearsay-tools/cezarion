@@ -82,6 +82,36 @@ test('exact latest App execution and all resolved threads admit without review o
   assert.equal(h.s.calls.filter(([route]) => route.endsWith('/commits/{ref}/check-runs')).length, 2);
   assert.ok(h.s.calls.every(([, args]) => args.request.timeout <= 10000 && args.request.retries === 0));
 });
+test('green legacy commit status cannot admit an in-progress exact-head execution', async () => {
+  const h = fixture(), request = h.github.request;
+  h.s.checks[0].status = 'in_progress';
+  h.s.checks[0].conclusion = null;
+  h.github.request = async (route, args) => route.endsWith('/commits/{ref}/status')
+    ? { data: { sha: HEAD, state: 'success', statuses: [{ context: 'CodeRabbit', state: 'success' }] } }
+    : request(route, args);
+  const result = await admission(h);
+  assert.equal(result.admitted, false);
+  assert.equal(result.reason, 'provider-pending');
+  assert.match(result.action, /Wait for the current CodeRabbit execution to complete/);
+});
+test('reads threads after completed provider evidence and revalidates evidence afterward', async () => {
+  const h = fixture();
+  h.s.onRead = route => {
+    if (route !== 'POST /graphql') return;
+    assert.equal(h.s.checks[0].status, 'completed');
+    h.s.threads = [{ id: 'posted-before-completion', isResolved: false }];
+  };
+  const result = await admission(h);
+  assert.equal(result.admitted, false);
+  assert.equal(result.reason, 'unresolved-threads');
+  assert.deepEqual(h.s.calls.map(([route]) => route), [
+    'GET /repos/{owner}/{repo}/pulls/{pull_number}',
+    'GET /repos/{owner}/{repo}/commits/{ref}/check-runs',
+    'POST /graphql',
+    'GET /repos/{owner}/{repo}/commits/{ref}/check-runs',
+    'GET /repos/{owner}/{repo}/pulls/{pull_number}',
+  ]);
+});
 for (const [name, mutate] of Object.entries({
   missing: s => { s.checks = []; }, pending: s => { s.checks[0].status = 'in_progress'; s.checks[0].conclusion = null; },
   skipped: s => { s.checks[0].conclusion = 'skipped'; }, neutral: s => { s.checks[0].conclusion = 'neutral'; },
