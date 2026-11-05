@@ -261,11 +261,16 @@ and the two trackers. It reads; it never writes a run.
   the **sender's** ledger, because the reply's recipient is the original sender. So
   the read model reads one ledger for each request and joins nothing. The outcome
   status `replied-late` closes nothing again: the request closed when it timed out.
-- **Which ledgers**: only roots in the store's live set (the indexed `live` column,
-  `isLiveRecord()` in `packages/cezar/src/runs/run-row.ts`; the live set is in memory).
-  The read model never scans finished rows (docs/areas/runs-store.md). A terminal
-  root whose lifecycle is not settled yet is still live, so its open requests stay
-  drawn until reconcile closes them. Known gap: a request whose sender rests at
+- **Which ledgers**: the union of two bounded sets, never a scan of finished rows
+  (docs/areas/runs-store.md):
+  - the records this process holds or pins (`listRuns()` in
+    `packages/cezar/src/runs/store.ts`: the held live set plus local pins). Pins keep
+    a terminal root whose lifecycle is not settled yet, which `isLiveRecord()` alone
+    does not, so its open requests stay drawn until reconcile closes them;
+  - the rows of foreign families with `live = 1` (the indexed column from
+    `isLiveRecord()` in `packages/cezar/src/runs/run-row.ts`), read with `getRun()`.
+    `listRuns()` leaves foreign families out of memory.
+  A root in both sets is read once. Known gap: a request whose sender rests at
   `review` with no open wait is not in the live set and is not drawn, although no
   outcome closes it. Drawing it needs an indexed column for open requests; that is a
   follow-up, not part of this work.
@@ -390,8 +395,10 @@ Case table for the probe (a detached process):
   to flat after a task parks. A project with running work sends about one frame a
   second. The client draws each frame's buckets as sent; it never ages them itself.
 - **Writes by another process**: no cross-process change signal exists. While a
-  publisher has subscribers, it reads `store.listForeignClaimedRunIds()` every 5 s
-  (one query on the private claims table). When that list has a run in its scope,
+  publisher has subscribers, it reads `store.listForeignClaimedRunIds()` every 5 s.
+  That read lists the claims, checks each foreign owner's liveness, and can run one
+  query for each family of a dead owner, so its cost grows with the number of claims,
+  not with history. When that list has a run in its scope,
   or changed since the last check, it rebuilds the snapshot and sends it when it
   changed. So a task that another process starts after the view opened appears
   within 5 s. With no subscriber, nothing runs.

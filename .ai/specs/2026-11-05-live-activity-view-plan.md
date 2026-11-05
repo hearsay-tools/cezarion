@@ -25,7 +25,8 @@ can drive the view from the HTTP snapshot. One PR for each slice.
   and asks two optional providers for tool activity and check progress
   (`ToolActivitySource`, `CiProgressSource`). In S1 both providers return nothing.
 - `packages/cezar/src/activity/requests.ts`: open and recently closed requests from
-  the ledgers of live roots only (no scan of finished rows) (one ledger for each request: the root's for family, the sender's
+  the ledgers of held and pinned roots plus foreign `live = 1` rows (no scan of
+  finished rows); test a pinned terminal root and a foreign live root (one ledger for each request: the root's for family, the sender's
   for peer). Only `accepted` requests open.
 - `packages/cezar/src/activity/demand.ts`: per-project demand. An HTTP read marks
   the project for 15 s; S4 adds topic subscribers. S3 reads it.
