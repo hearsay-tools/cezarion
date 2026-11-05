@@ -57,11 +57,11 @@ changes.
 | needs-you, no question: a plain turn end, or Cezar's `no-wait` wait | Needs you | "Your turn". | The glow. An Open task button. |
 | needs-you, no question: Cezar's `budget` wait | Needs you | "Automatic wakes used up", with the count of queued messages when known. | The glow. An Open task button. |
 | needs-permission | Needs you | "Permission: <tool>". | Same as above. |
-| waiting-on-workers, worker outcomes only | Waiting for workers | "<mode> of N · M settled". With several open worker waits: "N workers · M settled", without a mode. | A bar fills as workers settle. The earliest deadline. |
+| waiting-on-workers, worker outcomes only | Waiting for workers | "<mode> of N · M settled". With several open worker waits: "N owed", the count `computeWaitingOn` reports, without a mode. | A bar fills as workers settle. The earliest deadline. |
 | waiting-on-workers with `replies` (every open worker-kind wait names `requestIds`) | Waiting for reply | "From <task>", or "From N tasks". | Reply deadline. |
 | waiting-on-workers, mixed (some entries name workers, some name requests) | Waiting for workers | "N owed · M settled", the count `computeWaitingOn` reports. | The earliest deadline. The request lines show which replies are owed. |
 | waiting-on-subagents | Waiting for subagents | "N native subagents". | Deadline. |
-| waiting-for-ci | Waiting for CI | "PR <n> checks · P of T passed". | One segment for each check: passed, running (breathing) or failed. A segment flashes when it passes. Deadline. |
+| waiting-for-ci | Waiting for CI | "PR <n> checks · P of T passed". T counts every check except `skipping` and `cancel`. | One segment for each check, in name order, by its GitHub bucket: `pass` success tone, `fail` danger tone, `pending` info tone (breathing), `skipping` and `cancel` neutral and hollow. A segment flashes when its check moves from `pending` to `pass`. Deadline. |
 | waiting-for-merge | Waiting for merge | "PR <n>". The merge poller keeps its PR state local until the wait settles (`runMerge()` in `supervisor.ts`), so the view shows no live merge state. | Deadline. |
 | waiting-for-command (process wait) | Waiting for command | The wait's `note`, or "Process <pid>" without one. The wait stores no command line. | Elapsed time and deadline. |
 | monitoring (timer) | Waiting for timer | The timer note. | "Wakes 16:00 · in 27:52", counting down. |
@@ -205,7 +205,9 @@ ActivityRun = {
   workers: ActivityRun[],     // only on roots; settled workers included with status
 }
 ActivityWait = { kind, since, deadline?, detail } // detail is per kind, e.g.
-  // pr: { number, target: 'checks'|'merge', checks?: { passed, failed, pending, total } }
+  // pr: { number, target: 'checks'|'merge',
+  //       checks?: { name, bucket: 'pass'|'fail'|'pending'|'skipping'|'cancel' }[] }
+  //       (at most 100 checks, names clamped to 100 characters; the client counts)
   // worker: { mode, total, settled }   timer: { wakeAt, note? }   human: { question? }
   // peer: { recipientRunId }           process: { command }      usage: { resumeAt }
 ActivityRequest = {
@@ -226,9 +228,14 @@ and the two trackers. It reads; it never writes a run.
 - **Top wait**: the kind that `computeWaitingOn` reports, so the view and the Tasks
   list never disagree about what a task waits for. `computeWaitingOn` aggregates
   worker, peer and subagent entries and names no single entry, so the read model
-  aggregates every open entry of that kind itself: the union of worker ids and the
-  settled ones among them, the union of request ids and their recipients, and the
-  earliest deadline. It reports a mode only when one entry is open. Completion waits
+  aggregates every open entry of that kind itself. The owed count is always
+  `computeWaitingOn`'s `count`: it counts the unanswered targets inside each entry and
+  sums the entries, and two entries may name the same worker
+  (`packages/cezar/src/workflows/waits.ts` merges only equal target sets with equal
+  modes). The bar uses the same per-entry sums: targets settled over targets named,
+  summed over the entries. The read model also reports the recipients of the open
+  reply waits, deduplicated, for the "From <task>" line, and the earliest deadline.
+  It reports a mode only when one entry is open. Completion waits
   and reply waits are both kind `worker`, and `computeWaitingOn` merges them into one
   `workers` result with a `replies` flag only when every entry is a reply wait. The
   view follows that flag: the three `waiting-on-workers` rows in the state table.
@@ -357,8 +364,10 @@ Case table for the probe (a detached process):
 - The publisher starts on the first subscriber and stops on the last. It sends a full
   snapshot on subscribe, then a new snapshot at most every 500 ms and only when
   something changed: a run change in the store, a tracker change, or a progress
-  change. Rate buckets move every second while any visible run is running, so a
-  project with running work sends about one frame a second.
+  change. Rate buckets move every second while any watched run has a nonzero bucket:
+  while it runs, and for up to 30 s after its last tool call, so a heartbeat drains
+  to flat after a task parks. A project with running work sends about one frame a
+  second. The client draws each frame's buckets as sent; it never ages them itself.
 - **HTTP**: `GET /api/v1/workspace/activity?project=<id>` (or no `project` for all)
   returns the same snapshot. The view reads it once on mount for a fast first paint.
   The topic takes over when the live coordinator has topics. When it has none (remote

@@ -40,6 +40,7 @@ can drive the view from the HTTP snapshot. One PR for each slice.
     worker in it;
   - the top wait's kind matches `computeWaitingOn` for each wait kind, and the
     aggregation of several open worker waits, several request waits, and a mix;
+    two entries that name the same worker (count matches `computeWaitingOn`);
   - a family request in each direction; a request with no deadline;
   - `rung` matches `deriveAttention` for each rung.
 
@@ -66,7 +67,8 @@ can drive the view from the HTTP snapshot. One PR for each slice.
 - Wire it as the read model's `CiProgressSource`. Demand comes from S4's topic
   subscribers and from S1's HTTP reads (15 s after each read). Until S4 lands, only
   HTTP reads create demand.
-- Tests: every row of the spec's probe case table. Prove the "result only updates
+- Tests: every row of the spec's probe case table; all five buckets; a check that
+  moves `pending` → `pass` between two snapshots. Prove the "result only updates
   progress" row red against a version that lets a failed read resolve the wait. Read
   `.ai/skills/load-bearing-change/SKILL.md` first: this slice touches a working
   watcher.
@@ -80,8 +82,11 @@ can drive the view from the HTTP snapshot. One PR for each slice.
   unknown project id answers the existing unknown-topic error.
 - Publisher: subscribe on 0→1, stop on 1→0. Triggers: the store's run changes, the
   tracker's changes, the progress registry's changes. Coalesce to at most one
-  snapshot every 500 ms, only on change. While any watched run is running, tick
-  once a second for the rate buckets.
+  snapshot every 500 ms, only on change. While any watched run has a nonzero rate
+  bucket, tick once a second, so a heartbeat drains to flat within 30 s after the
+  last running task parks.
+- Tests (also): the last running task parks with nonzero buckets and no later
+  event; frames continue until every bucket is zero, then stop.
 - Report demand per project to `CiProgressRegistry`.
 - Cockpit: `packages/web/src/api/activity.ts`: `useActivity(scope)` reads the HTTP
   snapshot, then subscribes when the live coordinator has topics, or re-reads every
