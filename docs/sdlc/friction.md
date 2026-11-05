@@ -50,9 +50,9 @@ or a configuration value.
 The `Friction — daily digest` schedule (weekdays at 09:00, cockpit time)
 reviews every inbox issue dated before today that does not carry
 `friction-inbox-reviewed`. On Monday, that is the issues from Friday to Sunday.
-The digest groups the findings, and the watch items from the previous digest,
-by root cause. It checks each group against `main`, the docs and the trackers,
-and gives it one verdict:
+The digest groups the findings, and the watch items and act groups that the
+previous digest carried forward, by root cause. It checks each group against
+`main`, the docs and the trackers, and gives it one verdict:
 
 | Verdict | When |
 | --- | --- |
@@ -65,8 +65,35 @@ class, and places any new rule as
 [Where a new agent rule goes](#where-a-new-agent-rule-goes) says. It also lists
 the rules that the evidence shows are obsolete or duplicated.
 
-The digest posts its report on the newest issue it reviewed and asks the owner
-which groups to file. It files one issue per approved group:
+The digest ranks the Act groups by time lost × recurrence: the minutes all the
+group's runs lost, times the number of runs. It recommends at most 5, from the
+top of the ranking. The other Act groups carry forward without a decision. The
+next digest ranks them again, with its new evidence. A long backlog therefore
+never reaches the owner as one list. The next digest reads the watch list and
+the carried-forward Act groups from the newest finalized digest comment on any
+reviewed issue, closed ones included: one that the digest's own GitHub account
+wrote, with the `Decisions` section that the digest adds after the owner
+answers. A comment from any other author is ignored. A digest from before the
+`Decisions` section counts as finalized when the same account wrote it and its
+issue carries `friction-inbox-reviewed`. When it lists a group by letter only,
+the next digest reads that group from the earlier digest it names and writes it
+in full. The digest labels the newest issue first, because that issue holds its
+comment. A digest that nobody answered, or a day without findings that closes
+its inbox issue with no digest comment, therefore changes nothing that the next
+digest reads.
+
+The digest writes three things:
+
+| Output | What it holds |
+| --- | --- |
+| A comment on the newest issue it reviewed | The full record. Every group with its verdict, evidence links, fix and destination in full, the recommended groups marked, the carried-forward Act groups and the whole watch list. It stands alone: it never says "unchanged" or points to an earlier digest instead of the content |
+| An HTML report, published with `cez artifact publish` | One card per recommended group, in rank order: title, cost chips (runs, time lost), what happens, the fix, the destination, and the evidence links folded. Everything else is folded at the bottom. The report uses no scripts and no external resources |
+| A comment on each tracked issue that its evidence is new to | The new evidence links. The digest posts these without asking |
+
+Then it asks the owner through `cezar_ask`. The card lists the recommended
+groups as a short list and links the report. All of them are filed by default;
+the owner can leave some out, and a group left out carries forward. The digest
+files one issue per approved group:
 
 | Destination | Repository | Labels |
 | --- | --- | --- |
@@ -89,6 +116,15 @@ and is never closed as a duplicate of an earlier inbox issue.
 | Awaiting review | The owner does not answer | Only the owner | The digest task stays parked. The next weekday's digest reviews the same issues and the new ones; whichever digest the owner answers first files, and the other stops when it finds `friction-inbox-reviewed` |
 | Awaiting review | The digest automation is paused | Only the owner, by enabling it or running it once | Issues collect; none is lost |
 | Reviewed | None | Nothing | Final |
+
+An Act group has its own lifecycle across digests:
+
+| State | Trigger | Who or what fires it | Behavior at shipped defaults |
+| --- | --- | --- | --- |
+| Carried forward | The next digest runs | The schedule | Ranked again with the new evidence: recommended, carried forward again, or dropped when it is fixed or tracked |
+| Recommended | The owner approves it, or answers without leaving it out | The owner | Filed |
+| Recommended | The owner leaves it out | The owner | Carried forward |
+| Filed | None | Nothing | Final; later evidence becomes a comment on the filed issue |
 
 ## Categories
 
