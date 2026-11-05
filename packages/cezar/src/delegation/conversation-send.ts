@@ -9,6 +9,7 @@ export type ConversationPair = { project: DelegationProject; sender: RunRecord; 
   ({ relationship: 'peer' } | { relationship: 'family'; root: RunRecord; worker: RunRecord });
 
 export function sendRequestContext(state: ConversationState, request: ConversationSendRequest, sender: RunRecord, recipient: RunRecord) {
+  assertReplyDirection(state, request, sender, recipient);
   const original = request.requestId ? state.messages.find(message => message.id === request.requestId && message.kind === 'request' && message.state === 'accepted') : undefined;
   if (request.requestId && (!original || (request.kind === 'reply'
     ? original.recipientRunId !== sender.id || original.senderRunId !== recipient.id
@@ -17,6 +18,13 @@ export function sendRequestContext(state: ConversationState, request: Conversati
   // A worker's question has exactly one answer (hearsay-tools/cezarion#505): a second reply is refused, not recorded late.
   if (request.kind === 'reply' && settled && original?.question) throw new DelegationPolicyError('incompatible_state', 'This question was already answered');
   return { original, settled };
+}
+export function assertReplyDirection(state: ConversationState, request: ConversationSendRequest, sender: RunRecord, recipient: RunRecord): void {
+  if (request.kind !== 'reply') return;
+  const original = state.messages.find(message => message.id === request.requestId && message.kind === 'request' &&
+    message.state === 'accepted' && message.senderRunId === sender.id && message.recipientRunId === recipient.id);
+  if (original) throw new DelegationPolicyError('incompatible_state',
+    `Cannot reply to your own request. Use message follow-up ${recipient.id} "<text>" --id <new-message-UUID> --request-id ${original.id}; for a new request, use message request ${recipient.id} "<text>" --id <new-message-UUID>.`);
 }
 export function sendAdmission(pair: ConversationPair, root: RunRecord, request: ConversationSendRequest) {
   const { recipient, relationship } = pair;

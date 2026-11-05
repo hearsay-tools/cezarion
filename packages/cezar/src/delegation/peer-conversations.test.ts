@@ -42,6 +42,14 @@ describe('peer conversations', () => {
   }
   const message = (recipientRunId: string, kind: ConversationSendRequest['kind'] = 'request', extra: Partial<ConversationSendRequest> = {}): ConversationSendRequest =>
     ({ id: randomUUID(), recipientRunId, kind, text: `${kind} text`, timeoutSeconds: 600, ...extra });
+  it('guides a reply to its own peer request without changing either ledger', async () => {
+    const b = peer();
+    const sent = await f.service.send(f.caller, message(b.id));
+    const before = structuredClone(f.store.getRun(f.parent.id)?.delegation);
+    await expect(f.service.reply(f.caller, message(b.id, 'reply', { requestId: sent.message.id })))
+      .rejects.toMatchObject({ code: 'incompatible_state', message: expect.stringContaining(`message follow-up ${b.id}`) });
+    expect(f.store.getRun(f.parent.id)?.delegation).toEqual(before);
+  });
   const ledger = (id: string) => { const run = f.store.getRun(id); return run?.delegation?.role === 'root' ? run.delegation.conversation : undefined; };
   const projections = (id: string) => f.store.readEvents(id).filter(event => event.type === 'conversation-message' || event.type === 'request-outcome').map(event => String(event.projectionId));
 
@@ -232,7 +240,7 @@ describe('peer conversations', () => {
     expect(f.store.getRun(f.parent.id)?.agentInputs).toEqual([expect.objectContaining({ id, text: first.request.text, conversation: expect.objectContaining({ senderRunId: first.ledger }) })]);
     expect(projections(f.parent.id).filter(projection => projection.startsWith(`conversation-message:${id}:`))).toEqual([`conversation-message:${id}:queued`]);
     // An exact retry of the first returns its receipt.
-    expect(await f.service.send(first.caller, first.request)).toEqual(receipt);
+    expect(await f.service.send(first.caller, first.request)).toEqual({ ...receipt, effect: 'unchanged' });
   });
 
   it('R14 a message ID already projected on the recipient is refused even when the recipient never queued it', async () => {

@@ -690,3 +690,35 @@ the change it documents.
 - Hard isolation from the same-user shell.
 - Peers across projects or across cockpits.
 - Lateral messaging between workers of one family (hearsay-tools/cezarion#114, not planned).
+
+## Message call effects (hearsay-tools/cezarion#2709)
+
+The optional `effect` on a send result describes this call. `applied` means a
+fresh send accepted an input. `unchanged` means an exact retry returned the stored
+receipt. `refused` means a fresh send recorded a refusal and queued no input.
+`unknown` is available when the effect cannot be established. Older servers omit
+the field; callers treat absence as unknown. Delivery and request outcome retain
+their existing meanings. An unchanged receipt can still report queued, delivered,
+consumed or not-delivered. Retry projection and delivery repair remain active.
+
+A reply to the sender's own request is refused with `incompatible_state` and a
+`message follow-up` command naming the recipient and request. The error also
+shows how to send a new request. Scope and ownership checks still run first.
+The refusal accepts no message and changes no request outcome.
+
+| Call or recipient case | Send result at shipped defaults | Settlement behavior |
+| --- | --- | --- |
+| Fresh send to queued, running or waiting recipient | `applied`; existing delivery receipt | Existing request settlement |
+| Exact retry, including after restart | `unchanged`; current stored delivery receipt; no duplicate input | Existing outcome retained |
+| Review, done or failed owned worker, without resume | `refused`, not-delivered; existing resume command; CLI exits 1 | No new obligation |
+| Explicit parent resume of eligible owned worker | `applied`; existing atomic continuation | Existing request settlement |
+| Stopping, cancelled or destroyed worker | `refused`, not-delivered; existing new-worker guidance | No new obligation |
+| Review, done, failed, cancelled, stopping or Finish-pending peer | `refused`, not-delivered; existing human-continuation guidance | No new obligation |
+| Wrong-direction reply within an authorized pair | Actionable error; no successful result | No change |
+| Deleted, history-deletion-pending or unrelated pair | Existing scope refusal | Existing settlement unchanged |
+| Other process owns recipient, or unreadable record | Existing admission refusal | Existing settlement unchanged |
+
+Existing equality tests pinned identical stored receipts across retries. They now
+compare every receipt field while requiring `unchanged` for the second call.
+The receipt guarantee remains; only the per-call effect differs. No wait, store,
+workflow or CI-wait behavior changes in this portion.

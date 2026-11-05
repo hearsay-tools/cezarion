@@ -14,6 +14,8 @@ import { RunStore } from '../runs/store.ts';
 import { fixture } from './service.testkit.ts';
 import { projectConversationEvents } from './conversations.ts';
 import {
+  conversationSendResultSchema,
+  conversationSendEffectSchema,
   requestOutcomeSchema,
   conversationInspectResultSchema,
   conversationStateSchema,
@@ -33,6 +35,14 @@ describe('message inbox contract', () => {
   const outcome = { requestId: message.id, status: 'replied', observedAt: at, replyId: randomUUID() };
   const receiptId = randomUUID();
 
+  it('accepts all message effects and legacy receipts without an effect', () => {
+    const legacy = { message, delivery: 'queued', outcome };
+    expect(conversationSendResultSchema.parse(legacy)).toEqual(legacy);
+    for (const effect of conversationSendEffectSchema.options) {
+      expect(conversationSendResultSchema.parse({ ...legacy, effect })).toEqual({ ...legacy, effect });
+    }
+    expect(conversationSendResultSchema.safeParse({ ...legacy, effect: 'delivered' }).success).toBe(false);
+  });
   it('parses bounded snapshots and requires receipt fields together only for a nonempty batch', () => {
     const batch = { messages: [message], outcomes: [outcome], receiptId, expiresAt: '2026-09-06T12:02:00.000Z' };
     expect(inboxReserveResultSchema.parse(batch)).toEqual(batch);
@@ -170,7 +180,7 @@ describe('durable conversations', () => {
     const w = await completedWorker(status);
     const request = { id: randomUUID(), recipientRunId: w.id, kind: 'request' as const, text: 'Correct the returned result', timeoutSeconds: 600, resume: true };
     const [a, b] = await Promise.all([f.service.send(f.caller, request), f.service.send(f.caller, request)]);
-    expect(a).toEqual(b);
+    expect(b).toEqual({ ...a, effect: 'unchanged' });
     expect(a).toMatchObject({ delivery: 'queued', message: { state: 'accepted', resumed: true } });
     expect(f.store.getRun(w.id)).toMatchObject({ status: RUN_STATUS.queued, delegation: { executionRevision: 1 },
       continuationMessage: { origin: 'lifecycle', agentInputId: request.id, text: expect.stringContaining(request.text) },
@@ -210,7 +220,7 @@ describe('durable conversations', () => {
       const sent = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id,
         kind: 'request', text: 'Fix the review findings', resume: true, timeoutSeconds: 3600 });
       expect(sent.message.deadline).toBe('2026-10-18T11:00:00.000Z');
-      expect(await f.service.send(f.caller, { id: sent.message.id, recipientRunId: w.id, kind: 'request', text: 'Fix the review findings', resume: true, timeoutSeconds: 3600 })).toEqual(sent);
+      expect(await f.service.send(f.caller, { id: sent.message.id, recipientRunId: w.id, kind: 'request', text: 'Fix the review findings', resume: true, timeoutSeconds: 3600 })).toEqual({ ...sent, effect: 'unchanged' });
       setRunStatus(f.store, w.id, RUN_STATUS.running);
       vi.setSystemTime(new Date('2026-10-18T10:45:00.000Z'));
       expect((await f.service.conversation(f.caller, { recipientRunId: w.id })).outcomes).toEqual([]);
@@ -232,7 +242,7 @@ describe('durable conversations', () => {
         requestId: sent.message.id, text: 'Fixed', timeoutSeconds: 600 };
       const reply = await f.service.reply(w.caller, request);
       expect(reply).toMatchObject({ message: { state: 'late' }, outcome: { status: 'replied-late', replyId: request.id } });
-      expect(await f.service.reply(w.caller, request)).toEqual(reply);
+      expect(await f.service.reply(w.caller, request)).toEqual({ ...reply, effect: 'unchanged' });
       const later = await f.service.reply(w.caller, { ...request, id: randomUUID() });
       expect(later.outcome?.replyId).toBe(request.id);
       expect((await f.service.conversation(f.caller, { recipientRunId: w.id })).outcomes).toEqual([reply.outcome]);
@@ -250,11 +260,11 @@ describe('durable conversations', () => {
     const w = await completedWorker();
     const request = { id: randomUUID(), recipientRunId: w.id, kind: 'progress' as const, text: 'Correct this', timeoutSeconds: 600 };
     const rejected = await f.service.send(f.caller, request);
-    expect(rejected).toMatchObject({ delivery: 'not-delivered', message: { instruction: expect.stringContaining(`worker resume ${w.id}`) } });
+    expect(rejected).toMatchObject({ delivery: 'not-delivered', effect: 'refused', message: { instruction: expect.stringContaining(`worker resume ${w.id}`) } });
     expect(rejected.message.instruction).toMatch(/worker resume.*new.*ID/i);
     await expect(f.service.send(f.caller, { ...request, resume: true })).rejects.toMatchObject({ code: 'invalid_input' });
     await f.service.send(f.caller, { ...request, id: randomUUID(), resume: true });
-    expect(await f.service.send(f.caller, request)).toEqual(rejected);
+    expect(await f.service.send(f.caller, request)).toEqual({ ...rejected, effect: 'unchanged' });
   });
   it('checkpoints the resumed opening input and retires its replay prompt atomically', async () => {
     const w = await completedWorker();
@@ -297,7 +307,7 @@ describe('durable conversations', () => {
   it('atomically accepts one obligation and input across concurrent retries and restart', async () => {
     const w = await worker(); const request = { id: randomUUID(), recipientRunId: w.id, kind: 'request' as const, text: 'Which file?', timeoutSeconds: 600 };
     const [a, b] = await Promise.all([f.service.send(f.caller, request), f.service.send(f.caller, request)]);
-    expect(a).toEqual(b); expect(f.store.getRun(w.id)?.agentInputs).toHaveLength(1);
+    expect(b).toEqual({ ...a, effect: 'unchanged' }); expect(f.store.getRun(w.id)?.agentInputs).toHaveLength(1);
     await expect(f.service.send(f.caller, { ...request, text: 'changed' })).rejects.toMatchObject({ code: 'invalid_input' });
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.getRun(f.parent.id)?.delegation).toMatchObject({ conversation: { messages: [a.message], outcomes: [] } });
@@ -354,7 +364,7 @@ describe('durable conversations', () => {
     const request = { id: randomUUID(), recipientRunId: w.id, kind: 'request' as const, text: 'question', timeoutSeconds: 600 };
     const first = await f.service.send(f.caller, request);
     setRunStatus(f.store, w.id, RUN_STATUS.running);
-    expect(await f.service.send(f.caller, request)).toEqual(first);
+    expect(await f.service.send(f.caller, request)).toEqual({ ...first, effect: 'unchanged' });
     expect(f.store.getRun(w.id)?.agentInputs ?? []).toEqual([]);
     expect(f.store.readEvents(w.id).filter(event => event.type === 'conversation-message')).toHaveLength(1);
     expect(await f.service.send(f.caller, { ...request, id: randomUUID() })).toMatchObject({ message: { state: 'accepted' }, delivery: 'queued' });
@@ -388,7 +398,7 @@ describe('durable conversations', () => {
     const request = { id: randomUUID(), recipientRunId: w.id, kind: 'request' as const, text: `Inspect ${token}`, timeoutSeconds: 600 };
     const sent = await f.service.send(f.caller, request);
     expect(sent.message.text).toBe('Inspect [REDACTED]');
-    expect(await f.service.send(f.caller, request)).toEqual(sent);
+    expect(await f.service.send(f.caller, request)).toEqual({ ...sent, effect: 'unchanged' });
     await expect(f.service.send(f.caller, { ...request, text: 'Inspect [REDACTED]' })).rejects.toMatchObject({ code: 'invalid_input' });
     const inspected = await f.service.conversation(f.caller, { recipientRunId: w.id });
     expect(inspected.messages[0]?.text).toBe('Inspect [REDACTED]');
