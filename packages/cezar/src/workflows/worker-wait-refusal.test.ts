@@ -3,9 +3,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES } from './run.ts';
-import type { AgentSession } from '../core/agent-runner.ts';
 import { toolCall } from './waits-parity.testkit.ts';
-import { writeInput, type ActiveRun } from './active-run.ts';
+import { randomUUID } from 'node:crypto';
 import { collect, manager, parent, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { completionNudges, sentTexts, recordAgentInput, blockedDone, sessionOf } from './worker-wait-readiness.testkit.ts';
 
@@ -24,18 +23,18 @@ it('readiness repeated done with live workers: one nudge, then a park on the re-
     const timer = store.getRun(p.id)?.waits?.find(wait => wait.kind === 'timer' && wait.via === 'monitoring-line');
     expect(timer).toBeDefined();
     const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
-    const engine = manager as unknown as { active: Map<string, ActiveRun> };
-    // Cezar's own write, as its nudges are, so the turn it starts is not the runner's
-    // (hearsay-tools/cezarion#2431 closes timers only on a turn the runner starts itself).
-    const state = engine.active.get(p.id)!;
-    writeInput(state, () => state.liveSession.session!.sendMessage([{ type: 'text', text: toolCall('cezar_done', {}) }]));
+    // Deliver Cezar's own lifecycle input through the public route, without a human budget reset.
+    const input = { id: randomUUID(), source: 'lifecycle' as const, parentRunId: p.id,
+      text: toolCall('cezar_done', {}), createdAt: new Date().toISOString() };
+    store.updateRun(p.id, { agentInputs: [...store.getRun(p.id)?.agentInputs ?? [], input] });
+    manager.deliverConversationInput(p.id);
     const refused = () => store.readEvents(p.id).filter(event => event.type === 'text' && String(event.text).includes('workers_outstanding') && String(event.text).includes(`worker stop ${w.id}`));
     await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && refused().length === 1 && store.getRun(p.id)?.status === 'waiting');
     expect(completionNudges(p.id)).toHaveLength(1);
     expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ id: timer!.id, phase: WAIT_PHASE.open })]);
     expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
-    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle') ?? []).toEqual([]);
+    expect(store.getRun(p.id)?.agentInputs?.filter(found => found.source === 'lifecycle')).toEqual([expect.objectContaining({ id: input.id, deliveredAt: expect.any(String) })]);
     expect(store.getRun(w.id)?.status).toBe('queued');
   });
 it('a blocked done with the automatic-wake budget spent opens the budget human wait instead of a nudge', async () => {
@@ -73,8 +72,7 @@ it('readiness settled uncollected completion sends the collect refusal without t
     await collect(w.id);
     process.env.CEZ_REVIEW_GATE = '1';
     writeFileSync(join(store.getRun(p.id)!.worktreePath!, 'parent-result.txt'), 'parent result');
-    const state = (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; };  }> }).active.get(p.id)!;
-    state.liveSession.session.sendMessage([{ type: 'text', text: toolCall('cezar_done', {}) }]);
+    sessionOf(p.id).sendMessage([{ type: 'text', text: toolCall('cezar_done', {}) }]);
     await until(() => !manager.isActive(p.id));
     expect(store.getRun(p.id)?.status).toBe('review');
   });

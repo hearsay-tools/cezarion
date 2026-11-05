@@ -7,7 +7,7 @@ import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withHeldAck } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { checkpoint, collect, manager, parent, semaphore, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
-import { completionNudges, sentTexts, recordAgentInput, blockedDone } from './worker-wait-readiness.testkit.ts';
+import { completionNudges, sentTexts, recordAgentInput, blockedDone, sessionOf } from './worker-wait-readiness.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -85,6 +85,14 @@ for (const mode of ['fresh', 'continuation'] as const) {
             checkpoint('continuation parked'); await until(() => store.getRun(p.id)?.status === 'waiting');
           }
           const sent = recordAgentInput(p.id);
+          let acknowledgement: false | Promise<void> = false;
+          const session = sessionOf(p.id);
+          const send = session.sendAgentMessage.bind(session);
+          session.sendAgentMessage = (...args) => {
+            const result = send(...args);
+            if (args[0].some(block => block.type === 'text' && block.text.includes('Workers are still live'))) acknowledgement = result;
+            return result;
+          };
           checkpoint('worker spawned'); const w = await blockedDone(p.id, () => worker(p.id));
           checkpoint('completion nudge note'); await until(() => completionNudges(p.id).length === 1);
           if (delayedAck) {
@@ -94,10 +102,8 @@ for (const mode of ['fresh', 'continuation'] as const) {
             const note = completionNudges(p.id)[0]!.seq;
             checkpoint('nudge turn-end');
             await until(() => store.readEvents(p.id).some(event => event.type === 'turn-end' && event.seq > note));
-            const engine = manager as unknown as { active: Map<string, { inputState: { agentInputFlight?: { settled?: Promise<void> } } }> };
-            const settled = engine.active.get(p.id)?.inputState.agentInputFlight?.settled;
-            expect(settled).toBeInstanceOf(Promise);
-            checkpoint('acknowledgement settled'); release(); await settled;
+            expect(acknowledgement).toBeInstanceOf(Promise);
+            checkpoint('acknowledgement settled'); release(); await acknowledgement;
           }
           checkpoint('parent parked after nudge'); await until(() => store.getRun(p.id)?.status === 'waiting');
           expect(sentTexts(sent, `Workers are still live: ${w.id}.`)).toHaveLength(1);
