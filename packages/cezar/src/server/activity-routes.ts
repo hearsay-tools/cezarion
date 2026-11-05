@@ -37,10 +37,10 @@ export function createActivityRoutes({ bootContext, contexts, workspaceProjects,
       ? { unavailable: workspaceProjects.projectFailure(project.store.unavailable, project.id) }
       : { loaded: { store: project.store, isActive: (runId: string) => project.manager.isActive(runId) } }),
   });
-  const projectNames = async () => {
-    const projects = await workspaceProjects.listVisibleProjects().catch(() => []);
-    return { projects, name: (id: string, root: string) => projects.find((project) => project.id === id)?.name ?? basename(root) };
-  };
+  /** The registry, or undefined when it cannot be read. */
+  const visibleProjects = () => workspaceProjects.listVisibleProjects().catch(() => undefined);
+  const projectName = (projects: readonly { id: string; name: string }[] | undefined, id: string, root: string) =>
+    projects?.find((project) => project.id === id)?.name ?? basename(root);
   const snapshot = (sources: ActivityProjectSource[]): ActivitySnapshot => {
     const body = buildActivitySnapshot(sources, deps);
     for (const project of body.projects) if (project.loaded && !project.unavailable) demand.markRead(project.projectId);
@@ -60,10 +60,14 @@ export function createActivityRoutes({ bootContext, contexts, workspaceProjects,
         const failure = workspaceProjects.projectFailure(project.store.unavailable, project.id);
         return c.json({ error: failure.error }, failure.status);
       }
-      const { name } = await projectNames();
-      return c.json(snapshot([loadedSource(project, name(project.id, project.root))]), 200);
+      return c.json(snapshot([loadedSource(project, projectName(await visibleProjects(), project.id, project.root))]), 200);
     }
-    const { projects } = await projectNames();
+    const projects = await visibleProjects();
+    if (!projects) {
+      // An unreadable registry still shows the boot project this process runs, loaded or unavailable.
+      const bootId = await workspaceProjects.resolveBootProject();
+      return c.json(snapshot([loadedSource({ ...bootContext, id: bootId }, projectName(undefined, bootId, bootContext.root))]), 200);
+    }
     const bootId = await workspaceProjects.resolveBootProject(projects);
     return c.json(snapshot(projects.map((entry) => {
       const owned = entry.id === bootId ? { ...bootContext, id: bootId } : contexts.peek(entry.id);

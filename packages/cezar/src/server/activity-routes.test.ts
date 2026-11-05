@@ -102,6 +102,27 @@ describe('workspace activity API', () => {
     expect(await scoped.json()).toEqual({ error: failure.message });
   });
 
+  it('keeps the boot project when the registry cannot be read', async () => {
+    const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
+    const unavailable = { status: 409 as const, error: 'runs.db is damaged' };
+    const boot = (over: object) => ({ id: 'default', root: '/repo/shop', manager, ...over }) as never;
+    const routesWith = (bootContext: never) => createActivityRoutes({ bootContext, contexts: { peek: () => undefined }, workspaceProjects: {
+      listVisibleProjects: async () => { throw new Error('config.json is not JSON'); },
+      resolveBootProject: async () => 'shop',
+      resolveLiveProject: async () => bootContext,
+      projectFailure: () => unavailable,
+    } as unknown as WorkspaceProjects });
+
+    const loaded = activitySnapshotSchema.parse(await (await routesWith(boot({ store })).request('/workspace/activity')).json());
+    expect(loaded.projects.map((project) => [project.projectId, project.name, project.loaded, project.tasks.map((task) => task.runId)]))
+      .toEqual([['shop', 'shop', true, [run.id]]]);
+
+    const failure = new RunStoreOpenError('corrupt', join(repoRoot, '.ai/cezar', RUNS_DB_FILE), 'runs.db is damaged');
+    const broken = activitySnapshotSchema.parse(await (await routesWith(boot({ store: RunStore.unavailable(join(repoRoot, '.ai/cezar'), failure) }))
+      .request('/workspace/activity')).json());
+    expect(broken.projects).toEqual([{ projectId: 'shop', name: 'shop', loaded: true, unavailable, inReview: 0, tasks: [], requests: [], closed: [] }]);
+  });
+
   it('marks each loaded project it read as watched', async () => {
     const demand = new ActivityDemand();
     const loaded = { id: 'shop', root: '/repo/shop', store, manager } as never;
