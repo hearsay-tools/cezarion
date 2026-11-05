@@ -134,8 +134,8 @@ failure and the fixed result, including lease and checkout isolation.
 
 Required verification has ten verification jobs, plus the complexity and clone
 gates. Typecheck, workflow lint, citations, classification and policy ratchets
-feed the `Review preflight` gate. On PRs into main, the other nine jobs wait for
-the protected review result. Other events keep their existing test inventory. Eight test jobs use the current Node LTS; typecheck and build/package use
+feed the `Review preflight` gate. On PRs into main, the other nine jobs start after
+preflight and run beside the protected review result; `verify` requires both. Other events keep their existing test inventory. Eight test jobs use the current Node LTS; typecheck and build/package use
 exactly the `engines.node` minimum (Node 24.21.0):
 
 - Four Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/4 --maxWorkers=4` for N=1..4.
