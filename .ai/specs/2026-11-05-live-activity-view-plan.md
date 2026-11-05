@@ -25,7 +25,7 @@ can drive the view from the HTTP snapshot. One PR for each slice.
   and asks two optional providers for tool activity and check progress
   (`ToolActivitySource`, `CiProgressSource`). In S1 both providers return nothing.
 - `packages/cezar/src/activity/requests.ts`: open and recently closed requests from
-  the root ledgers (one ledger for each request: the root's for family, the sender's
+  the ledgers of live roots only (no scan of finished rows) (one ledger for each request: the root's for family, the sender's
   for peer). Only `accepted` requests open.
 - `packages/cezar/src/activity/demand.ts`: per-project demand. An HTTP read marks
   the project for 15 s; S4 adds topic subscribers. S3 reads it.
@@ -36,6 +36,7 @@ can drive the view from the HTTP snapshot. One PR for each slice.
   - each row of the state table, including the three needs-you rows and the three
     `waiting-on-workers` rows;
   - the rows for retained terminal roots and settled workers;
+  - a request closed only by reconcile has no `closed` entry; a stored reply has one;
   - D8: each root status in and out of the active set, a review root with a live
     worker in it;
   - the top wait's kind matches `computeWaitingOn` for each wait kind, and the
@@ -89,9 +90,11 @@ can drive the view from the HTTP snapshot. One PR for each slice.
 - Tests (also): the last running task parks with nonzero buckets and no later
   event; frames continue until every bucket is zero, then stop.
 - Report demand per project to `CiProgressRegistry`.
-- While the scope has a run another process owns, rebuild every 5 s and send on
-  change. Test: a foreign write with no local event reaches subscribers within one
-  rebuild; no rebuild timer runs without a foreign run.
+- Every 5 s while subscribed, read the foreign claims; when one is in scope or the
+  list changed, rebuild and send on
+  change. Tests: a foreign write with no local event reaches subscribers within one
+  check; a foreign run created after subscribe appears within one check; nothing
+  runs without a subscriber.
 - Cockpit: `packages/web/src/api/activity.ts`: `useActivity(scope)` reads the HTTP
   snapshot, then subscribes when the live coordinator has topics, or re-reads every
   5 s while visible when it has none (remote mode, no SharedWorker, failed

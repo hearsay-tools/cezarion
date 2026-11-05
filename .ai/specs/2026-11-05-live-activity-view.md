@@ -194,7 +194,8 @@ ActivityProject = {
   inReview: number,            // D8 chip
   tasks: ActivityRun[],        // active roots (D8)
   requests: ActivityRequest[], // open requests only (D2)
-  closed: ActivityClosedRequest[], // closed in the last 30 s, for the reply comet
+  closed: ActivityClosedRequest[], // outcomes **stored** in a ledger whose
+                                   // observedAt is in the last 30 s
 }
 ActivityRun = {
   runId, title, status, rung, // `deriveAttention` rung id, never a label
@@ -216,6 +217,8 @@ ActivityWait = { kind, since, deadline?, detail } // detail is per kind, e.g.
 ActivityRequest = {
   requestId, relationship: 'family'|'peer',
   senderRunId, recipientRunId, text,        // text clamped to 500 characters
+  senderTitle, recipientTitle,              // so a line to a task with no card can
+                                            // still name it
   createdAt, deadline?,
 }
 ActivityClosedRequest = { requestId, senderRunId, recipientRunId, status, observedAt }
@@ -258,6 +261,20 @@ and the two trackers. It reads; it never writes a run.
   the **sender's** ledger, because the reply's recipient is the original sender. So
   the read model reads one ledger for each request and joins nothing. The outcome
   status `replied-late` closes nothing again: the request closed when it timed out.
+- **Which ledgers**: only roots in the store's live set (the indexed `live` column,
+  `isLiveRecord()` in `packages/cezar/src/runs/run-row.ts`; the live set is in memory).
+  The read model never scans finished rows (docs/areas/runs-store.md). A terminal
+  root whose lifecycle is not settled yet is still live, so its open requests stay
+  drawn until reconcile closes them. Known gap: a request whose sender rests at
+  `review` with no open wait is not in the live set and is not drawn, although no
+  outcome closes it. Drawing it needs an indexed column for open requests; that is a
+  follow-up, not part of this work.
+- **Closure times**: `reconcileConversationState()` stamps the outcomes it adds
+  with the read's time, and they are not stored until the delegation service writes
+  them. So `closed` lists only outcomes stored in the ledger, by their stored
+  `observedAt`. A request that only reconcile closes leaves the open list with no
+  `closed` entry: the client fades it with no comet. A reply always stores its
+  outcome with the reply, so a reply always gets its comet.
 - **Unreadable records**: a run whose record fails to parse is left out of the
   snapshot and logged once. It is not an error for the view.
 
@@ -274,6 +291,7 @@ Case table for request state (a cross-run relationship):
 | Recipient ends `done` (peer or worker), or a peer recipient rests at `review` | outcome `completed-without-reply` | Closed: fade |
 | Recipient ends `failed` or `cancelled` | outcome `failed` or `cancelled` | Closed: fade |
 | Sender ends `done`, `failed` or `cancelled`, or a human pressed Finish | outcome `sender-closed` | Closed: fade |
+| Sender or recipient is `done`, `failed` or `cancelled` but its lifecycle is not settled yet (reconcile's `isSettled` is false) | no outcome: status alone closes nothing | Open line until the lifecycle settles; then the row above or the recipient rows apply |
 | Recipient's record cannot be read | no outcome (reconcile keeps it open) | Open line to a placeholder card "Unreadable task" |
 | Sender's history deletion in progress | `delegation.historyDeletion` set on the ledger's root | The read model skips that ledger: the sender's lines leave with no animation |
 | Recipient's history deletion in progress | the request sits in the sender's ledger, which is not being deleted | Open line until the deletion removes the recipient's record; then outcome `deleted` (peer) or `destroyed` (worker): fade |
@@ -372,9 +390,11 @@ Case table for the probe (a detached process):
   to flat after a task parks. A project with running work sends about one frame a
   second. The client draws each frame's buckets as sent; it never ages them itself.
 - **Writes by another process**: no cross-process change signal exists. While a
-  publisher has subscribers and its scope contains a run that another process owns
-  (`store.listForeignClaimedRunIds()`), it rebuilds the snapshot every 5 s and sends
-  it when it changed. Without such a run, no rebuild timer runs.
+  publisher has subscribers, it reads `store.listForeignClaimedRunIds()` every 5 s
+  (one query on the private claims table). When that list has a run in its scope,
+  or changed since the last check, it rebuilds the snapshot and sends it when it
+  changed. So a task that another process starts after the view opened appears
+  within 5 s. With no subscriber, nothing runs.
 - **HTTP**: `GET /api/v1/workspace/activity?project=<id>` (or no `project` for all)
   returns the same snapshot. The view reads it once on mount for a fast first paint.
   The topic takes over when the live coordinator has topics. When it has none (remote
@@ -402,3 +422,5 @@ Case table for the probe (a detached process):
 - Cross-project lines (peers cannot message across projects).
 - Persisting tool activity or check progress.
 - A per-user layout or saved filters.
+- Requests whose sender rests at `review` with no open wait (see Which ledgers). A
+  follow-up adds an indexed column for open requests.
