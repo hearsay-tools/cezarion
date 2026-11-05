@@ -3,15 +3,18 @@ import type { AgentSession } from '../core/agent-runner.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
 
 /** Own the real sessions at the runner boundary, keyed by the task environment. */
-export function captureSessions() {
+export function captureSessions(options: { env?: (id: string) => Record<string, string> } = {}) {
   const sessions = new Map<string, AgentSession>();
   const create = runnerFactory.createRunner;
   const capture = vi.spyOn(runnerFactory, 'createRunner').mockImplementation((...args) => {
     const runner = create(...args);
     const start = runner.startSession.bind(runner);
     vi.spyOn(runner, 'startSession').mockImplementation((spec, ...rest) => {
-      const session = start(spec, ...rest);
-      sessions.set(spec.env!.CEZ_TASK_ID!, session);
+      const id = spec.env?.CEZ_TASK_ID;
+      if (!id) throw new Error('runner launched without task identity');
+      const env = options.env?.(id);
+      const session = start(env ? { ...spec, env: { ...spec.env, ...env } } : spec, ...rest);
+      sessions.set(id, session);
       return session;
     });
     return runner;
