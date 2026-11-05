@@ -7,7 +7,8 @@ export const ownerGroups = {
   input: {
     slot: 'inputState', owner: 'input-delivery.ts', factory: 'createInputGroup',
     types: ['InputGroup', 'InputFlight', 'ReadonlySetView'],
-    getters: ['inputState', 'agentInputFlight', 'inputDelivery', 'unreadInputIds', 'consumedBeforeAck', 'bundledInputIds', 'retiredInFlight', 'unreadRetried', 'inputIds'],
+    getters: ['inputState'],
+    bindings: ['inputState', 'agentInputFlight', 'inputDelivery', 'unreadInputIds', 'consumedBeforeAck', 'bundledInputIds', 'retiredInFlight', 'unreadRetried', 'inputIds'],
     fields: ['inputState', 'agentInputError', 'agentInputFlight', 'inputDelivery', 'unreadInputIds', 'consumedBeforeAck', 'bundledInputIds', 'retiredInFlight', 'unreadInputTimer', 'unreadRetried', 'heldHumanInputTimer', 'heldHumanInputSince', 'heldHumanInputExpired', 'openingAnswerAskSeq', 'openingAgentInputId', 'writingInput', 'session', 'inputIds', 'settled', 'wakeReserved', 'admittedWake', 'mode', 'consumption', 'via', 'length', 'size'],
   },
   session: {

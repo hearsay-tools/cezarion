@@ -122,7 +122,7 @@ export class StepSession {
     }
     // The step fails before anything spawns, like a refused model (hearsay-tools/cezarion#2397).
     if (launch.toolsError !== undefined) return launch.toolsError;
-    state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
+    state.inputState.declareDelivery(inputDeliveryOf(runner)); state.inputState.resetUnreadInputs(); state.inputState.resetEarlyConsumption();
     const launchOpening = sessionEvents.launchOpening(this.context, this.sharedHost, runId, state, step.id, { body: opening.userPrompt, ciTools });
     const session = this.startStepSession(runId, state, runner, {
       step, sessionId, images, opening: launchOpening, skillPrompt: opening.skillPrompt, extraSystemPrompt,
@@ -272,7 +272,7 @@ export class StepSession {
       const result = await inputReceipts.sessionResultWithReceipts(this.context, this.inputReceiptHost, this.inputReceiptSteps, runId, state, session, () => { setupComplete = true; });
       if (isDisposedDelegatedRun(this.context.store, this.context.disposed, runId)) return null;
       sessionEvents.persistWorkerAssistantResult(this.context, this.sharedHost, runId, stepId, result.text);
-      const inputOrSessionError = turn.sessionError ?? state.agentInputError;
+      const inputOrSessionError = turn.sessionError ?? state.inputState.agentInputError;
       if (inputOrSessionError) {
         sink.sessionEnded('error', inputOrSessionError);
         return inputOrSessionError;
@@ -289,7 +289,7 @@ export class StepSession {
       }
       if (isDisposedDelegatedRun(this.context.store, this.context.disposed, runId)) return null;
       // Keep the provider failure that triggered teardown, even if teardown rejects.
-      const message = turn.sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
+      const message = turn.sessionError ?? state.inputState.agentInputError ?? (err instanceof Error ? err.message : String(err));
       sink.sessionEnded('error', message); // alongside v1's fatal `error`
       return message;
     } finally {

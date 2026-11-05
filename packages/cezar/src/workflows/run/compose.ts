@@ -262,7 +262,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     markHumanWaitSurfaced: (id, wait, card) => modules.humanWaits.markHumanWaitSurfaced(id, wait, card), withdrawCezarHumanWaits: id => modules.humanWaits.withdrawCezarHumanWaits(id),
     routeWorkerQuestion: id => modules.workerQuestions.routeWorkerQuestion(id), noticeParkedWorker: id => modules.workerQuestions.noticeParkedWorker(id),
     retireUnreadParentQuestion: (id, request) => modules.workerQuestions.retireUnreadParentQuestion(id, request),
-    deleteUnreadInput: (id, input) => { host.active.get(id)?.unreadInputIds?.delete(input); },
+    deleteUnreadInput: (id, input) => { host.active.get(id)?.inputState.forgetUnreadInput(input); },
     updatePendingHumanAsk: (id, value) => { const state = host.active.get(id); if (state) state.pendingHumanAsk = value; },
   }, MAX_AUTO_CONTINUES);
   modules.familyReconciler = new FamilyReconciler(context, {

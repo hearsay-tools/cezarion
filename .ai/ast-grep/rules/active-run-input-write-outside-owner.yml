@@ -127,16 +127,8 @@ utils:
   inputState-receiver: { any: [ { kind: identifier, regex: ^(state|active)$ }, { matches: container-reference } ] }
   getter-reference:
     any:
-      - all:
-          - { kind: member_expression }
-          - has:
-              field: property
-              regex: ^(inputState|agentInputFlight|inputDelivery|unreadInputIds|consumedBeforeAck|bundledInputIds|retiredInFlight|unreadRetried|inputIds)$
-      - all:
-          - { kind: subscript_expression }
-          - has:
-              field: index
-              regex: ^["'](inputState|agentInputFlight|inputDelivery|unreadInputIds|consumedBeforeAck|bundledInputIds|retiredInFlight|unreadRetried|inputIds)["']$
+      - { all: [ { kind: member_expression }, { has: { field: property, regex: ^(inputState)$ } } ] }
+      - { all: [ { kind: subscript_expression }, { has: { field: index, regex: "^[\"'](inputState)[\"']$" } } ] }
       - all:
           - { kind: member_expression }
           - { has: { field: property, regex: ^inputState$ } }
@@ -168,7 +160,7 @@ utils:
       - inside:
           kind: program
           stopBy: end
-          regex: \.(inputState|inputState|agentInputFlight|inputDelivery|unreadInputIds|consumedBeforeAck|bundledInputIds|retiredInFlight|unreadRetried|inputIds)\b|\[\s*["'](inputState|inputState|agentInputFlight|inputDelivery|unreadInputIds|consumedBeforeAck|bundledInputIds|retiredInFlight|unreadRetried|inputIds)["']|\b(InputGroup|InputFlight|ReadonlySetView|createInputGroup|inputState|agentInputFlight|inputDelivery|unreadInputIds|consumedBeforeAck|bundledInputIds|retiredInFlight|unreadRetried|inputIds)\b|[,{]\s*inputState\b
+          regex: \.(inputState|inputState)\b|\[\s*["'](inputState|inputState)["']|\b(InputGroup|InputFlight|ReadonlySetView|createInputGroup|inputState)\b|[,{]\s*inputState\b
       - { pattern: $GROUP_BOUND_REF }
       - inside:
           stopBy: { any: [ { kind: statement_block }, { kind: program } ] }
@@ -184,7 +176,7 @@ utils:
       - inside:
           kind: program
           stopBy: end
-          regex: \.(inputState|inputState|agentInputFlight|inputDelivery|unreadInputIds|consumedBeforeAck|bundledInputIds|retiredInFlight|unreadRetried|inputIds)\b|\[\s*["'](inputState|inputState|agentInputFlight|inputDelivery|unreadInputIds|consumedBeforeAck|bundledInputIds|retiredInFlight|unreadRetried|inputIds)["']|\b(InputGroup|InputFlight|ReadonlySetView|createInputGroup|inputState|agentInputFlight|inputDelivery|unreadInputIds|consumedBeforeAck|bundledInputIds|retiredInFlight|unreadRetried|inputIds)\b|[,{]\s*inputState\b
+          regex: \.(inputState|inputState)\b|\[\s*["'](inputState|inputState)["']|\b(InputGroup|InputFlight|ReadonlySetView|createInputGroup|inputState)\b|[,{]\s*inputState\b
       - { pattern: $DESTRUCTURED_REF }
       - inside:
           stopBy: { any: [ { kind: statement_block }, { kind: program } ] }

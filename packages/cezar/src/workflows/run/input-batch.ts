@@ -9,8 +9,8 @@ import { chargesBudget, chargesBudgetMessage, resolvedWaits } from '../waits.ts'
 export function pendingConversationBatch(run: RunRecord | undefined, state: ActiveRun, formatAgentInput: (input: AgentInput) => string, answerId?: string): { inputs: AgentInput[]; text: string } | undefined {
   // The answer this batch rides on settles every human wait, so only a CI or timer wait holds it
   // (hearsay-tools/cezarion#1234).
-  if (!run || run.waits?.some(wait => wait.kind !== 'human') || state.agentInputFlight) return undefined;
-  const batch = agentInputBatch((run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId && input.id !== answerId),
+  if (!run || run.waits?.some(wait => wait.kind !== 'human') || state.inputState.agentInputFlight) return undefined;
+  const batch = agentInputBatch((run.agentInputs ?? []).filter(input => input.id !== state.inputState.openingAgentInputId && input.id !== answerId),
     input => formatAgentInput(input));
   return batch?.inputs.every(input => input.conversation) ? batch : undefined;
 }
@@ -18,7 +18,7 @@ export function pendingConversationBatch(run: RunRecord | undefined, state: Acti
 /** A batch with timer results is an automatic wake, and so is an admitted wake turn a peer message
  *  opens (spec 2026-10-27-task-communication-protocol § 8). Past the budget a peer message opens
  *  no turn (`pendingConversationWakes`), so one carried by another wake is free. */
-export function reservesAutomaticWake(run: RunRecord | undefined, flight: NonNullable<ActiveRun['agentInputFlight']>, inputIds: readonly string[], automaticWakes: () => number, MAX_AUTO_CONTINUES: number): boolean {
+export function reservesAutomaticWake(run: RunRecord | undefined, flight: NonNullable<ActiveRun['inputState']['agentInputFlight']>, inputIds: readonly string[], automaticWakes: () => number, MAX_AUTO_CONTINUES: number): boolean {
   if (resolvedWaits(run ?? {}).some(wait => chargesBudget(wait) && inputIds.includes(wait.id))) return true;
   return !!flight.admittedWake && automaticWakes() < MAX_AUTO_CONTINUES &&
     !!run?.agentInputs?.some(input => inputIds.includes(input.id) && chargesBudgetMessage(input));

@@ -1,0 +1,53 @@
+id: active-run-input-write-outside-owner
+valid:
+  - const flight = state.inputState.agentInputFlight; flight?.settled;
+  - const ids = state.inputState.unreadInputIds; ids?.has('id');
+  - state.inputState.forgetRetiredInput('id'); state.inputState.clearHeldTimer();
+  - 'modules.inputDelivery = new InputDelivery(context, host);'
+  - 'const unrelated = {}; Object.assign(unrelated, { inputDelivery: policy });'
+  - 'class InputGroup { #writingInput; get writingInput() { return this.#writingInput; } }'
+  - 'function createActiveRun() { Object.defineProperty(container, "inputState", { writable: false, configurable: false }); }'
+invalid:
+  - 'function f(state: ActiveRun) { state.inputState = other.inputState; }'
+  - 'function f(state: ActiveRun) { state["inputState"] = other.inputState; }'
+  - 'function f(state: ActiveRun) { delete state.inputState; }'
+  - 'function f(state: ActiveRun) { state.inputState ??= other.inputState; }'
+  - state.inputState.agentInputError = 'forged';
+  - state.inputState.agentInputFlight.wakeReserved = false;
+  - state.inputState.agentInputFlight.settled = promise;
+  - state.inputState.openingAnswerAskSeq++;
+  - state.inputState.unreadInputIds.add('forged');
+  - state.inputState.consumedBeforeAck['delete']('id');
+  - state.inputState.bundledInputIds.push('forged');
+  - state.inputState.agentInputFlight.inputIds.push('forged');
+  - state.inputState.inputDelivery.consumption = 'unobservable';
+  - 'const view = state.inputState.retiredInFlight; view.clear();'
+  - 'const { unreadInputIds: ids } = state.inputState; ids.clear();'
+  - 'const { agentInputFlight: flight } = state.inputState; flight.wakeReserved = false;'
+  - 'function f(view: InputGroup) { view.writingInput = true; }'
+  - 'function f(view: InputFlight) { view.wakeReserved = true; }'
+  - 'import type { InputGroup as InputView } from "./input-delivery.ts"; function f(view: InputView) { Object.assign(view, { writingInput: true }); }'
+  - state.inputState as any
+  - state.inputState as unknown
+  - state.inputState as unknown as MutableInput
+  - state.inputState.unreadInputIds as Set<string>
+  - <Set<string>>state.inputState.retiredInFlight
+  - const view = state.inputState; view as any;
+  - 'function f(state: ActiveRun) { const { inputState: view } = state; view as unknown as MutableInput; }'
+  - '({ ...state.inputState }) as InputGroup'
+  - 'Object.assign(state.inputState, { writingInput: true });'
+  - 'Object.defineProperty(state.inputState, "agentInputError", { value: "forged" });'
+  - 'Object.defineProperties(state.inputState, { writingInput: { value: true } });'
+  - 'Reflect.defineProperty(state.inputState.agentInputFlight, "wakeReserved", { value: true });'
+  - 'Reflect.set(state.inputState, "openingAgentInputId", "forged");'
+  - Object.setPrototypeOf(state.inputState, other);
+  - Reflect.setPrototypeOf(state.inputState, other);
+  - 'Reflect.deleteProperty(state.inputState, "writingInput");'
+  - Object.assign(state.inputState, { ...other });
+  - 'function f(state: ActiveRun) { Object.assign(state, { inputState: other.inputState }); }'
+  - 'const state = createActiveRun(init); Object.assign(state, { inputState: other.inputState });'
+  - 'function f(state: ActiveRun) { const alias = state; alias.inputState = other.inputState; }'
+  - 'function f(target: ActiveRun, key: string, replacement: InputGroup) { Reflect.set(target, key, replacement); }'
+  - 'class InputGroup { readonly backing = new Set(); }'
+  - 'class InputFlight { readonly inputIds = []; }'
+  - 'const view = createInputGroup(); Object.assign(view, { writingInput: true });'

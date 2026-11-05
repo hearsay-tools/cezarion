@@ -34,7 +34,7 @@ export class InboxClaims {
   /** A wait wake is only a pointer. Only provider submission/opening prompts own delivery. */
   providerOwnsInboxInput(runId: string, id: string): boolean {
     const state = this.host.activeGet(runId);
-    return !!state?.agentInputFlight?.inputIds.includes(id) || state?.openingAgentInputId === id ||
+    return !!state?.inputState.agentInputFlight?.inputIds.includes(id) || state?.inputState.openingAgentInputId === id ||
       this.context.store.getRun(runId)?.continuationMessage?.agentInputId === id;
   }
 

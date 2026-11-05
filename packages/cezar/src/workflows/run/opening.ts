@@ -26,7 +26,7 @@ export function continuationOpening(
   input: { prompt: string; images: PastedContent[]; persistedImages: ContentBlock[]; persistedAttachments: PersistedAttachment[] },
 ): ContinuationOpening {
   const checkpoint = record?.continuationMessage;
-  state.openingAgentInputId = checkpoint?.agentInputId;
+  state.inputState.selectOpeningInput(checkpoint?.agentInputId);
   const openingInput = record?.agentInputs?.find(input => input.id === checkpoint?.agentInputId);
   // Hydration has already included later human updates and task edits. Append
   // the current obligation outcome without replacing that composed prompt.

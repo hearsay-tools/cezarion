@@ -215,7 +215,7 @@ export class WaitRegistry {
     // The question this turn's opening answers stays open only until the turn end settles it, so
     // a question asked in that turn is a new one, never the answered one returned
     // (hearsay-tools/cezarion#2397).
-    const answering = active.liveSession.session?.open ? active.openingAnswerAskSeq : undefined;
+    const answering = active.liveSession.session?.open ? active.inputState.openingAnswerAskSeq : undefined;
     const open = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human' && wait.source !== 'cezar' &&
       (answering === undefined || wait.askSeq !== answering));
     if (open?.askSeq !== undefined) return open;
