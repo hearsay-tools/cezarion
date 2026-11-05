@@ -68,6 +68,7 @@ export function fakeStore(runs: readonly RunRecord[], options: FakeStoreOptions 
     listRuns: () => runs.filter((run) => (options.held ? options.held.includes(run.id) : isLiveStatus(run.status))),
     listForeignClaimedRunIds: () => [...(options.foreign ?? [])],
     getRun,
+    withReadCache: <T>(fn: () => T): T => fn(),
     isUnreadable: (id: string) => unreadable.has(id),
     readWorkerExecution: (id: string) => (options.complete?.includes(id) ? { phase: 'complete' } : undefined),
     listRunSummaries: () => ({ runs: runs.filter((run) => !run.archived).map((run) => toRunSummary(run)), truncated: false }),

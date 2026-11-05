@@ -16,13 +16,15 @@ export interface ToolActivitySource {
 }
 
 /** What the read model needs from a project's run store. It reads; it never writes a run. */
-export type ActivityStore = ActivityRequestStore & Pick<RunStore, 'listRunSummaries' | 'listOwnedWorkers'>;
+export type ActivityStore = ActivityRequestStore & Pick<RunStore, 'listRunSummaries' | 'listOwnedWorkers' | 'withReadCache'>;
 
 /** One project to read: its store and run manager when this process has loaded it. */
 export interface ActivityProjectSource {
   projectId: string;
   name: string;
   loaded?: { store: ActivityStore; isActive: (runId: string) => boolean } | undefined;
+  /** A loaded project whose run store cannot open. */
+  unavailable?: ActivityProject['unavailable'];
 }
 
 export interface ActivityDeps {
@@ -61,15 +63,23 @@ export function buildActivitySnapshot(sources: readonly ActivityProjectSource[],
 export function buildActivityProject(source: ActivityProjectSource, deps: ActivityDeps, options: { now: number; carryOver?: Iterable<string> }):
   { project: ActivityProject; openLedgers: Set<string> } {
   const empty = { projectId: source.projectId, name: source.name, inReview: 0, tasks: [], requests: [], closed: [] };
+  if (source.unavailable) return { project: { ...empty, loaded: true, unavailable: source.unavailable }, openLedgers: new Set() };
   if (!source.loaded) return { project: { ...empty, loaded: false }, openLedgers: new Set() };
-  const { store, isActive } = source.loaded;
+  const loaded = source.loaded;
+  // One snapshot decodes each cold record once: claims, cards, workers, reconcile lookups and
+  // request titles all read the same runs (hearsay-tools/cezarion#2378).
+  return loaded.store.withReadCache(() => loadedProject(source.projectId, loaded, deps, options, empty));
+}
+
+function loadedProject(projectId: string, { store, isActive }: NonNullable<ActivityProjectSource['loaded']>, deps: ActivityDeps,
+  options: { now: number; carryOver?: Iterable<string> }, empty: Omit<ActivityProject, 'loaded'>): { project: ActivityProject; openLedgers: Set<string> } {
   const { active, inReview } = activeRoots(store);
   const context: RunContext = { now: options.now, tools: deps.tools ?? noTools, ci: deps.ci ?? noProgress };
   const roots: RunRecord[] = [];
   for (const id of active) {
     const root = store.getRun(id);
     if (root && root.delegation?.role !== 'worker') roots.push(root);
-    else if (!root && store.isUnreadable(id)) deps.onUnreadable?.(source.projectId, id);
+    else if (!root && store.isUnreadable(id)) deps.onUnreadable?.(projectId, id);
   }
   const tasks = roots.sort(byCreation).map((root) => activityRoot(store, root, context));
   const read = readActivityRequests(store, { now: options.now, isActive, roots: active, ...(options.carryOver ? { carryOver: options.carryOver } : {}) });

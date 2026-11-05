@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { activitySnapshotSchema } from '@open-mercato/cezar-contract/activity';
 import { ActivityDemand } from '../activity/demand.ts';
+import { RUNS_DB_FILE } from '../runs/run-database.ts';
+import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { clearProjectProbeCache, listProjects, registerProject } from '../workspace/projects.ts';
@@ -80,6 +82,24 @@ describe('workspace activity API', () => {
     const unknown = await get('/api/v1/workspace/activity?project=no-such-project');
     expect(unknown.status).toBe(404);
     expect(await unknown.json()).toEqual({ error: expect.any(String) });
+  });
+
+  it('reports a boot store that cannot open as the failure, never as an empty project', async () => {
+    const boot = await registerProject(repoRoot);
+    store.close();
+    const failure = new RunStoreOpenError('unsupported-schema', join(repoRoot, '.ai/cezar', RUNS_DB_FILE), 'runs.db was written by a newer cezar.');
+    store = RunStore.unavailable(join(repoRoot, '.ai/cezar'), failure);
+
+    const res = await get('/api/v1/workspace/activity');
+
+    expect(res.status).toBe(200);
+    const body = activitySnapshotSchema.parse(await res.json());
+    expect(body.projects).toEqual([{ projectId: boot.id, name: boot.name, loaded: true, unavailable: { status: 409, error: failure.message },
+      inReview: 0, tasks: [], requests: [], closed: [] }]);
+    // The scoped read answers the same failure as its status.
+    const scoped = await get(`/api/v1/workspace/activity?project=${boot.id}`);
+    expect(scoped.status).toBe(409);
+    expect(await scoped.json()).toEqual({ error: failure.message });
   });
 
   it('marks each loaded project it read as watched', async () => {

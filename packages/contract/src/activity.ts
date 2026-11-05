@@ -178,6 +178,9 @@ export const activityProjectSchema = z.object({
   name: z.string(),
   /** False for a project this process has not loaded: its lists are empty because nothing was read. */
   loaded: z.boolean(),
+  /** The project is loaded but its run store cannot open: the failure its project routes answer.
+   *  The lists are empty because nothing could be read, not because nothing runs. */
+  unavailable: z.object({ status: z.union([z.literal(404), z.literal(409), z.literal(503)]), error: z.string() }).strict().optional(),
   /** Root tasks in review: the summary chip (D8). */
   inReview: count,
   tasks: z.array(activityRunSchema),
