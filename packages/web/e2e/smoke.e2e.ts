@@ -47,17 +47,17 @@ beforeAll(async () => {
   writeSharedProjects(readSharedProjects().filter((project) => project.id === bootProject))
 })
 
-/** Preserve NAV_ITEMS order: optional Automations, then permanent Workflows and Reports. */
+/** Preserve NAV_ITEMS order: Git, the optional Automations, then Workflows and Reports. */
 function expectedOverflowLabels(): string[] {
-  return [...(automationsAvailable ? ['Automations'] : []), 'Workflows', 'Reports']
+  return ['Git', ...(automationsAvailable ? ['Automations'] : []), 'Workflows', 'Reports']
 }
 
-/** Reports always needs More; Workflows shares it to keep the primary row unclipped. */
+/** Git, Workflows and Reports live in More, so the primary row stays unclipped. */
 function expectedNavLabels(): string[] {
-  return ['Tasks', 'Git', ...(forgeAvailable ? ['GitHub'] : []), 'Skills', 'Settings']
+  return ['Tasks', 'Activity', ...(forgeAvailable ? ['GitHub'] : []), 'Skills', 'Settings']
 }
 
-const OVERFLOW_PATHS: Record<string, string> = { Automations: '/automations', Workflows: '/workflows', Reports: '/reports' }
+const OVERFLOW_PATHS: Record<string, string> = { Git: '/git', Automations: '/automations', Workflows: '/workflows', Reports: '/reports' }
 
 afterAll(() => {
   browser?.close()
@@ -335,8 +335,8 @@ describe('cockpit app shell', () => {
   })
 
   it('marks exactly one nav item active, following the route', () => {
-    // Every URL below is a LEGACY flat one, so each load settles in two hops: the boot-project
-    // redirect, then whatever the route itself redirects to. Pathname can update a tick before
+    // The `/` and `/settings/skills` URLs below are LEGACY flat ones, so each settles in two hops:
+    // the boot-project redirect, then whatever the route itself redirects to. Pathname can update a tick before
     // React commits `aria-current`, so wait for both — sampling the nav on URL alone reads the
     // previous screen's answer. Scoped to the Main landmark: a view's own sidebar list is a
     // separate nav that marks its open row too (the Git Repository facets, #622).
@@ -355,8 +355,8 @@ describe('cockpit app shell', () => {
     browser.goto(baseUrl + '/')
     expect(settleAt(scoped('/'), 'Tasks')).toEqual(['Tasks'])
 
-    browser.goto(baseUrl + '/git')
-    expect(settleAt(scoped('/git'), 'Git')).toEqual(['Git'])
+    browser.goto(baseUrl + scoped('/activity'))
+    expect(settleAt(scoped('/activity'), 'Activity')).toEqual(['Activity'])
 
     // The nested Settings area: the more specific item wins, and only it. `/settings/skills`
     // is itself a redirect onto the top-level catalog, so this asserts both hops.
@@ -578,9 +578,9 @@ describe('mobile shell', () => {
       // Wait for bootstrap before tapping: it can replace the initial navigation tree.
       browser.waitForFunction('window.__cezIdle === true')
       // The views the drawer used to list: a tab is one tap from any list screen (#621).
-      browser.click(`[data-slot="mobile-tab-bar"] a[data-tab="/git"]`)
-      browser.waitForFunction(`location.pathname === ${JSON.stringify(scoped('/git'))}`)
-      browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]')?.textContent.includes('Git')`)
+      browser.click(`[data-slot="mobile-tab-bar"] a[data-tab="/activity"]`)
+      browser.waitForFunction(`location.pathname === ${JSON.stringify(scoped('/activity'))}`)
+      browser.waitForFunction(`document.querySelector('[data-slot="mobile-top-bar"]')?.textContent.includes('Activity')`)
     })
 
     it('closes when the backdrop is tapped, without navigating', () => {

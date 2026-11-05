@@ -96,14 +96,14 @@ describe('project header actions', () => {
     browser.setViewport(360, 640)
     browser.goto(`${fixture.url}/p/${fixture.project}/`)
     browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
-    // The view tabs moved out of the drawer (#621): the tab bar holds Tasks/Git/GitHub and its
+    // The view tabs moved out of the drawer (#621): the tab bar holds Tasks/Activity/GitHub and its
     // More sheet the rest, so "every view is reachable at 360px" is asserted there, at 44px.
     const tabs = waitForSettledSample(browser, `Array.from(document.querySelectorAll('[data-slot="mobile-tab-bar"] a, [data-slot="mobile-tab-bar"] button')).map(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height }))`, value => Array.isArray(value) && value.length > 0) as Array<{ width: number; height: number }>
     expect(tabs.length).toBeGreaterThanOrEqual(3)
     expect(tabs.every(size => size.width >= 44 && size.height >= 44)).toBe(true)
     browser.click('[data-slot="mobile-tab-bar"] [data-tab="more"]')
     // Automations arrives with health capabilities, after the permanent rows render.
-    const expectedRows = ['/skills', '/workflows', '/reports', '/settings', '/automations']
+    const expectedRows = ['/git', '/skills', '/workflows', '/reports', '/settings', '/automations']
     const rows = browser.waitForValue(`Array.from(document.querySelectorAll('[data-slot="more-sheet"] [data-slot="more-row"]')).map(el => el.getAttribute('data-more-row'))`, value => Array.isArray(value) && value.length === expectedRows.length) as string[]
     expect(rows).toEqual(expectedRows)
     browser.press('Escape')

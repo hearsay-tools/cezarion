@@ -38,7 +38,7 @@ const hasForge = (projectId: string) => projectId === bootProject && forgeAvaila
 
 /** Keep NAV_ITEMS order, including optional Automations before Workflows and Reports. */
 function expectedOverflowHrefs(projectId: string): string[] {
-  return [...(automationsAvailable ? ['/automations'] : []), '/workflows', '/reports'].map(path => scoped(projectId, path))
+  return ['/git', ...(automationsAvailable ? ['/automations'] : []), '/workflows', '/reports'].map(path => scoped(projectId, path))
 }
 
 /** The main-row tab links every group renders: the health-gated list minus the More views. */
@@ -46,7 +46,7 @@ function expectedNavHrefs(projectId: string): string[] {
   const overflow = expectedOverflowHrefs(projectId)
   return [
     scoped(projectId, '/'),
-    scoped(projectId, '/git'),
+    scoped(projectId, '/activity'),
     ...(hasForge(projectId) ? [scoped(projectId, '/github')] : []),
     scoped(projectId, '/skills'),
     scoped(projectId, '/workflows'),
@@ -166,7 +166,10 @@ describe('the project sidebar in a multi-project workspace', () => {
     browser.click(mark(ALPHA.id))
     assertProject(ALPHA.id, '/')
     expect(browser.waitForValue(`document.querySelector('${header} [data-slot="project-header-name"]')?.textContent`, value => value === ALPHA.name)).toBe(ALPHA.name)
-    browser.click(`${nav} a[href="${scoped(ALPHA.id, '/git')}"]`)
+    // Git lives in the More menu.
+    browser.click(`${nav} [aria-label="More views"]`)
+    browser.waitForFunction(`document.querySelector('[role="menu"] a[href="${scoped(ALPHA.id, '/git')}"]') !== null`)
+    browser.click(`[role="menu"] a[href="${scoped(ALPHA.id, '/git')}"]`)
     assertProject(ALPHA.id, '/git')
     expect(browser.waitForValue(`document.querySelectorAll('${nav} a[aria-label="GitHub"]').length`, value => value === 0)).toBe(0)
     browser.goto(baseUrl + scoped(ALPHA.id, '/git'))

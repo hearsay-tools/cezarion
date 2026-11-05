@@ -141,7 +141,9 @@ const PRESENTATION_OF_RUNG: Record<AttentionRung, Omit<Attention, 'rung'>> = {
 
 const CAPACITY: Attention = { rung: 'waiting-for-capacity', ...PRESENTATION_OF_RUNG['waiting-for-capacity'] };
 
-function attentionOfRung(rung: AttentionRung): Attention {
+/** A rung's presentation without the run behind it: what a reader that holds only the rung id
+ *  (the activity snapshot) paints. Worker and subagent labels carry no count here. */
+export function attentionOfRung(rung: AttentionRung): Attention {
   return rung === 'waiting-for-capacity' ? CAPACITY : { rung, ...PRESENTATION_OF_RUNG[rung] };
 }
 

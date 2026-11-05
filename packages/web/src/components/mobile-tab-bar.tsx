@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 const DESKTOP_MEDIA_QUERY = '(min-width: 768px)'
 
 /**
- * The phone's view switcher (#621), mirroring the desktop view tabs: Tasks, Git, GitHub (only
+ * The phone's view switcher (#621), mirroring the desktop view tabs: Tasks, Activity, GitHub (only
  * while the forge is available) and More, in the slot the shell reserves as grid row 4. It is
  * for LIST screens; the shell does not render it on a pushed screen (an opened task) or while
  * the keyboard is up, and the floating New task button rides along with it for the same reasons.

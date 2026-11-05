@@ -555,8 +555,8 @@ describe('document title wiring', () => {
     renderShell('/p/cezar/')
 
     await waitFor(() => expect(document.title).toBe('cezar — Tasks · cezar'))
-    fireEvent.click(inSidebar().getByRole('link', { name: 'Git' }))
-    await waitFor(() => expect(document.title).toBe('cezar — Git · cezar'))
+    fireEvent.click(inSidebar().getByRole('link', { name: 'Activity' }))
+    await waitFor(() => expect(document.title).toBe('cezar — Activity · cezar'))
   })
 
   it('reacts to live project and task title cache updates', async () => {
@@ -959,7 +959,7 @@ it('shows the Git view\'s checkout and sections, read for the URL project, inste
   expect(document.querySelector('[data-slot="quick-list"]')).toBeNull()
 })
 
-it.each(['/tasks', '/tools'])('keeps sidebar navigation on its displayed boot project from %s', async (entry) => {
+it.each(['/tasks', '/tools', '/activity'])('keeps sidebar navigation on its displayed boot project from %s', async (entry) => {
   setApiScope('shop')
   serve({
     '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
@@ -972,7 +972,7 @@ it.each(['/tasks', '/tools'])('keeps sidebar navigation on its displayed boot pr
   const sidebar = within(document.querySelector('[data-slot="sidebar"]') as HTMLElement)
   expect(sidebar.getByRole('link', { name: 'All' }).getAttribute('href')).toBe('/p/cezar/')
   expect(sidebar.getByRole('link', { name: 'Tasks' }).getAttribute('href')).toBe('/p/cezar/')
-  expect(sidebar.getByRole('link', { name: 'Git' }).getAttribute('href')).toBe('/p/cezar/git')
+  expect(sidebar.getByRole('link', { name: 'Activity' }).getAttribute('href')).toBe('/p/cezar/activity')
   expect(sidebar.getByRole('link', { name: /New task/ }).getAttribute('href')).toBe('/p/cezar/new')
   expect(document.querySelector('[data-slot="task-row"] a')?.getAttribute('href')).toBe('/p/cezar/tasks/boot-task')
   // Publishing navigation context must not change the routed view's API scope.

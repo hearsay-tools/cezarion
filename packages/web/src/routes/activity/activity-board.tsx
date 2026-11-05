@@ -1,0 +1,83 @@
+import * as React from 'react'
+import type { ActivityProject } from '@open-mercato/cezar-api-client/contract/activity'
+
+import { ActivityCard } from './activity-card'
+import { ActivityLines } from './activity-lines'
+import { nameOf, runIndex } from './activity-model'
+import { ActivityRail } from './activity-rail'
+import { COLUMN_GAP, DENSE_AFTER, columnCount, placeCards, samePlacement, type Columns } from './layout'
+import type { NowContext } from './now-box'
+
+/**
+ * The project graph and its rail (spec 2026-11-05-live-activity-view, "Project view"): task cards
+ * in stable columns (D9), the static lines between them, and the right rail. The column count
+ * follows the graph's width; one column is the narrow layout.
+ */
+
+/** The graph's width, measured now and again on every resize. */
+function useWidth(ref: React.RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = React.useState(0)
+  React.useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const read = () => setWidth(el.clientWidth)
+    read()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(read)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [ref])
+  return width
+}
+
+/** D9: the placement survives snapshot changes; only the ids that came or went move. */
+function useStablePlacement(ids: readonly string[], count: number, weight: (id: string) => number): Columns {
+  const [placement, setPlacement] = React.useState<Columns | undefined>(undefined)
+  const next = placeCards(placement, ids, count, weight)
+  // Derived state: React re-renders at once with the stored placement, before painting.
+  if (!samePlacement(placement, next)) setPlacement(next)
+  return next
+}
+
+export function ActivityBoard({ project, now, watchingSince }: { project: ActivityProject; now: number; watchingSince: string }) {
+  const hostRef = React.useRef<HTMLDivElement>(null)
+  const count = columnCount(useWidth(hostRef))
+  const index = React.useMemo(() => runIndex(project), [project])
+  const tasks = new Map(project.tasks.map((task) => [task.runId, task]))
+  // A card with workers is taller; the weight keeps the columns near the same height.
+  const weight = (id: string) => 1 + 0.35 * (tasks.get(id)?.workers.length ?? 0)
+  const columns = useStablePlacement(project.tasks.map((task) => task.runId), count, weight)
+  const narrow = count === 1
+  const dense = project.tasks.length > DENSE_AFTER
+  const ctx: NowContext = { now, titleOf: (runId) => nameOf(index, runId) }
+  const layoutKey = `${project.tasks.length}:${count}:${dense}:${columns.map((column) => column.join(',')).join('|')}:${project.requests.length}`
+
+  return (
+    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="min-w-0 pl-5">
+        {project.tasks.length === 0 ? (
+          <p data-slot="activity-empty" className="py-6 text-[13px] text-muted-foreground">No active work in this project.</p>
+        ) : null}
+        <div
+          ref={hostRef}
+          data-slot="activity-graph"
+          data-columns={count}
+          data-dense={dense ? 'true' : undefined}
+          className="relative grid items-start"
+          style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))`, columnGap: narrow ? 0 : COLUMN_GAP }}
+        >
+          {columns.map((column, i) => (
+            <div key={i} data-slot="activity-column" className="grid min-w-0 content-start gap-[30px] max-md:gap-4">
+              {column.map((id) => {
+                const task = tasks.get(id)
+                return task ? <ActivityCard key={id} task={task} requests={project.requests} index={index} ctx={ctx} dense={dense} narrow={narrow} /> : null
+              })}
+            </div>
+          ))}
+          <ActivityLines hostRef={hostRef} requests={project.requests} index={index} peers={!narrow} layoutKey={layoutKey} now={now} />
+        </div>
+      </div>
+      <ActivityRail requests={project.requests} index={index} now={now} watchingSince={watchingSince} />
+    </div>
+  )
+}

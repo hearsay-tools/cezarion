@@ -410,7 +410,7 @@ describe('GitHub desktop sidebar (#622)', () => {
         overflow: tabs.map((tab) => Math.round(tab.getBoundingClientRect().right - inner)).filter((over) => over > 0),
       };
     })()`) as { tabs: number; sidebar: number; overflow: number[] }
-    // Tasks, Git, GitHub, Skills, Settings and More: Workflows and Reports join Automations in the menu.
+    // Tasks, Activity, GitHub, Skills, Settings and More: Git, Workflows and Reports join Automations in the menu.
     expect(fit.tabs).toBe(6)
     const label = waitForSettledSample(browser, `(() => { const span = document.querySelector('[data-slot="view-tabs"] a[aria-current="page"] span.truncate'); return span.scrollWidth - span.clientWidth })()`)
     expect(label).toBe(0)

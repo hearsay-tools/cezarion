@@ -44,11 +44,11 @@ const SELECTED = ['bg-sidebar-row-selected', 'text-foreground', 'font-medium']
 
 describe('sidebar nav selection (#619)', () => {
   it('shows a neutral active pill and accessible icon-only inactive links', () => {
-    renderShell('/git')
-    const git = within(nav()).getByRole('link', { name: 'Git' })
-    expect(git.getAttribute('aria-current')).toBe('page')
-    expect(git.textContent).toBe('Git')
-    expect(classes(git)).toEqual(expect.arrayContaining(['bg-sidebar-row-selected', 'text-foreground', 'font-semibold']))
+    renderShell('/activity')
+    const activity = within(nav()).getByRole('link', { name: 'Activity' })
+    expect(activity.getAttribute('aria-current')).toBe('page')
+    expect(activity.textContent).toBe('Activity')
+    expect(classes(activity)).toEqual(expect.arrayContaining(['bg-sidebar-row-selected', 'text-foreground', 'font-semibold']))
     const skills = within(nav()).getByRole('link', { name: 'Skills' })
     expect(skills.textContent).toBe('')
     expect(skills.className).toContain('text-soft-foreground')
@@ -67,29 +67,32 @@ describe('sidebar nav selection (#619)', () => {
     renderShell('/', { needsYou: true })
     expect(sidebar().querySelector('[data-slot="nav-needs-you-dot"]')).toBeNull()
     cleanup()
-    renderShell('/git', { needsYou: true })
+    renderShell('/activity', { needsYou: true })
     expect(classes(sidebar().querySelector('[data-slot="nav-needs-you-dot"]'))).toEqual(expect.arrayContaining(['size-[7px]', 'bg-pending-strong']))
   })
 
   it('shows no retired Inbox or Skills update markers', () => {
-    renderShell('/git')
+    renderShell('/activity')
     expect(sidebar().querySelector('[data-slot="overflow-inbox-dot"]')).toBeNull()
     expect(sidebar().querySelector('[data-slot="nav-update-marker"]')).toBeNull()
   })
 
   it('moves keyboard focus across the view row without changing routes', () => {
-    renderShell('/git')
-    const git = within(nav()).getByRole('link', { name: 'Git' })
-    git.focus()
-    fireEvent.keyDown(git, { key: 'ArrowRight' })
+    renderShell('/activity')
+    const tasks = within(nav()).getByRole('link', { name: 'Tasks' })
+    const activity = within(nav()).getByRole('link', { name: 'Activity' })
+    tasks.focus()
+    fireEvent.keyDown(tasks, { key: 'ArrowRight' })
+    expect(document.activeElement).toBe(activity)
+    fireEvent.keyDown(activity, { key: 'ArrowRight' })
     expect(document.activeElement).toBe(within(nav()).getByRole('link', { name: 'GitHub' }))
     fireEvent.keyDown(document.activeElement!, { key: 'End' })
     expect(document.activeElement).toBe(within(nav()).getByRole('button', { name: 'More views' }))
-    expect(git.getAttribute('aria-current')).toBe('page')
+    expect(activity.getAttribute('aria-current')).toBe('page')
   })
 
   it('leaves the mobile drawer without a nav list, so only the desktop pill is selected (#621)', () => {
-    renderShell('/git')
+    renderShell('/activity')
     fireEvent.click(screen.getByRole('button', { name: /^Open projects/ }))
     const selected = document.querySelectorAll('nav[aria-label="Main"] a[aria-current="page"]')
     expect(selected).toHaveLength(1)
