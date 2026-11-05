@@ -36,7 +36,9 @@ can drive the view from the HTTP snapshot. One PR for each slice.
   - the rows for retained terminal roots and settled workers;
   - D8: each root status in and out of the active set, a review root with a live
     worker in it;
-  - the top wait matches `computeWaitingOn` for each wait kind;
+  - the top wait's kind matches `computeWaitingOn` for each wait kind, and the
+    aggregation of several open worker waits, several request waits, and a mix;
+  - a family request in each direction; a request with no deadline;
   - `rung` matches `deriveAttention` for each rung.
 
 ### S2: tool activity tracker

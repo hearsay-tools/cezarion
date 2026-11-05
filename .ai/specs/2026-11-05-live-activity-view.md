@@ -55,10 +55,10 @@ changes.
 | running | Doing | The latest tool call title, for example `Edit workers/spawn.ts`. Before the first call, or 10 s after the last call ended: "Thinking". | "Last tool 6 s ago". The dot pulses, a light sweeps the box, and the main line slides in at each new call. |
 | needs-you (human wait) | Needs you | The ask card's first question. | The card glows in the pending tone. An Answer button opens the task. |
 | needs-permission | Needs you | "Permission: <tool>". | Same as above. |
-| waiting-on-workers | Waiting for workers | "<mode> of N · M settled". | A bar fills as workers settle. Deadline. |
+| waiting-on-workers | Waiting for workers | "<mode> of N · M settled". With several open worker waits: "N workers · M settled", without a mode. | A bar fills as workers settle. The earliest deadline. |
 | waiting-on-subagents | Waiting for subagents | "N native subagents". | Deadline. |
 | waiting-for-ci | Waiting for CI | "PR <n> checks · P of T passed". | One segment for each check: passed, running (breathing) or failed. A segment flashes when it passes. Deadline. |
-| waiting-for-merge | Waiting for merge | "PR <n> · in queue" or the merge state. | Deadline. |
+| waiting-for-merge | Waiting for merge | "PR <n>". The merge poller keeps its PR state local until the wait settles (`runMerge()` in `supervisor.ts`), so the view shows no live merge state. | Deadline. |
 | waiting-for-command (process wait) | Waiting for command | The wait's `note`, or "Process <pid>" without one. The wait stores no command line. | Elapsed time and deadline. |
 | monitoring (timer) | Waiting for timer | The timer note. | "Wakes 16:00 · in 27:52", counting down. |
 | reply wait (worker wait with `requestIds`) | Waiting for reply | "From <task>", one name for each request, or "From N tasks". | Reply deadline. |
@@ -86,12 +86,16 @@ second on the client from the server's timestamps.
 
 - task to task (peer): from the sender card to the recipient card, in the peer
   message tone (`--message-peer-accent`);
-- worker to parent (family): from the worker row to its parent's status shape, in the
-  card's left margin, in the family tone (`--message-inbound-accent`).
+- inside one family (worker and parent, either direction: `familyPair()` in
+  `packages/cezar/src/delegation/conversations.ts` lets a parent ask a worker too):
+  from the sender's row to the recipient's row, in the card's left margin, in the
+  family tone (`--message-inbound-accent`). The parent's row is its status shape.
 
 The line is dashed, and the dashes march from the sender to the recipient. A peer line
 carries a label: "Request · 4:12", a short form of the question, and a bar that shows
-how much of the reply window is used.
+how much of the reply window is used. A request with no deadline (a routed worker
+question: `questionMessage()` in `packages/cezar/src/delegation/questions.ts` sets
+none) shows its age only: no bar and no "reply due" countdown, here and in the rail.
 
 When a request opens, a **comet** (a bright head with a short tail) travels along the
 new line from the sender to the recipient, and the line fades in behind it. When the
@@ -216,8 +220,14 @@ and the two trackers. It reads; it never writes a run.
 
 - **Active roots**: D8, from the store's root summaries in the project.
 - **Workers**: `store.listOwnedWorkers(rootId)` for each active root.
-- **Top wait**: `computeWaitingOn` and the wait entry it names, so the view and the
-  Tasks list never disagree about what a task waits for.
+- **Top wait**: the kind that `computeWaitingOn` reports, so the view and the Tasks
+  list never disagree about what a task waits for. `computeWaitingOn` aggregates
+  worker, peer and subagent entries and names no single entry, so the read model
+  aggregates every open entry of that kind itself: the union of worker ids and the
+  settled ones among them, the union of request ids and their recipients, and the
+  earliest deadline. It reports a mode only when one entry is open. A task with both
+  a worker wait and a request wait shows the kind `computeWaitingOn` ranks first; the
+  other kind's facts still show on the lines and the worker rows.
 - **Open requests**: from each root's `delegation.conversation`. A message is an open
   request when its `kind` is `request`, its `state` is `accepted`, and the same ledger
   holds no outcome with its id. A send that was not delivered (`state`
@@ -240,13 +250,14 @@ Case table for request state (a cross-run relationship):
 | Worker question times out | outcome `timed-out` | Closed: fade, no comet |
 | Worker destroyed while asking | outcome `destroyed` | Closed: fade; the worker row leaves |
 | Root A asks root B | peer `request` in A's ledger, no outcome | Open peer line A → B |
-| B replies | reply in B's ledger; outcome `replied` on the request | Closed: reply comet B → A |
+| B replies | B's reply and the outcome `replied`, both in A's ledger | Closed: reply comet B → A |
 | B's record deleted | outcome `deleted` | Closed: fade; B's card leaves |
 | A finishes before a reply | outcome `sender-closed` | Closed: fade |
 | Late reply after a timeout | `timed-out`, then amended to `replied-late` | Stays closed; no second animation |
 | Either side leaves D8's active set while open | no outcome | Line ends at the card that remains, labelled with the other task's name; the rail entry stays |
 | Send not delivered | `state: continuation-required` or `destroyed`, no outcome | Never drawn: the request never opened |
-| Recipient queued, parked or stopping | `accepted`, no outcome | Open line; the recipient card shows its own state |
+| Recipient queued or parked | `accepted`, no outcome | Open line; the recipient card shows its own state |
+| Recipient stopping | `sendAdmission()` marks it resumable, so an ordinary request is `continuation-required` | Never drawn, as for any undelivered send. A `--resume` request that was accepted is drawn. |
 | Sender's Finish is pending (done refused while workers live) | sender stays `running` or `waiting` | Line stays |
 | Sender's history deleted | the ledger is gone | The card and its lines leave with no reply animation |
 | Recipient's history deleted | outcome `deleted` | Closed: fade |
@@ -330,8 +341,10 @@ Case table for the probe (a detached process):
   The topic takes over when the live coordinator has topics. When it has none (remote
   mode, or a local browser with no SharedWorker or a failed one:
   `createLiveCoordinator()` disables topics in those cases), the view re-reads the
-  snapshot every 5 s while it is visible (D7). The read joins the coordinator's
-  allowlist of shared recurring reads, so several tabs share one read.
+  snapshot every 5 s while it is visible (D7). When a SharedWorker works, the read
+  joins the coordinator's allowlist of shared recurring reads, so
+  several tabs share one read. Without one, the fallback (`createLiveFallback()`) is
+  local to each document, and each tab reads on its own.
 - The client derives every animation from the difference between two snapshots: a new
   request id (open comet), an id in `closed` (reply comet or fade), a changed rung
   (flash), a new or settled worker, a passed check. No event stream is added.
