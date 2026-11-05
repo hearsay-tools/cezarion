@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-rou
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
-import { REPORT_CSP, REPORT_SANDBOX } from '@/lib/html-report'
+import { REPORT_ALLOW, REPORT_CSP, REPORT_SANDBOX, WRAPPER_CSP } from '@/lib/html-report'
 
 import { TaskReportRoute } from './report-reader'
 
@@ -54,9 +54,13 @@ describe('the HTML report reader', () => {
     renderAt([`/p/a/tasks/r1/report?artifact=${ID}`])
     await waitFor(() => expect(frame()).not.toBeNull())
     expect(frame()!.getAttribute('sandbox')).toBe(REPORT_SANDBOX)
-    expect(REPORT_SANDBOX).not.toMatch(/allow-scripts|allow-same-origin|allow-top-navigation|allow-forms/)
-    expect(frame()!.getAttribute('srcdoc')).toContain(`content="${REPORT_CSP}"`)
-    expect(frame()!.getAttribute('srcdoc')).toContain('<h1>Quarterly</h1>')
+    expect(frame()!.getAttribute('allow')).toBe(REPORT_ALLOW)
+    expect(REPORT_SANDBOX).not.toMatch(/allow-same-origin|allow-top-navigation|allow-forms/)
+    const wrapper = new DOMParser().parseFromString(frame()!.getAttribute('srcdoc')!, 'text/html')
+    expect(wrapper.head.firstElementChild!.getAttribute('content')).toBe(WRAPPER_CSP)
+    const report = new DOMParser().parseFromString(wrapper.querySelector('iframe')!.getAttribute('srcdoc')!, 'text/html')
+    expect(report.head.firstElementChild!.getAttribute('content')).toBe(REPORT_CSP)
+    expect(report.body.innerHTML).toBe('<h1>Quarterly</h1>')
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('report.html')
     expect(screen.getByText(/Published snapshot/)).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Download' }).getAttribute('href')).toBe(`/api/v1/runs/r1/artifacts/${ID}/download`)
@@ -73,17 +77,17 @@ describe('the HTML report reader', () => {
     renderAt([`/p/a/tasks/r1/report?artifact=${ID}${hash}`])
     await waitFor(() => expect(frame()).not.toBeNull())
     const replace = vi.fn()
-    Object.defineProperty(frame(), 'contentWindow', { configurable: true, value: { location: { replace } } })
+    Object.defineProperty(frame(), 'contentWindow', { configurable: true, value: { frames: [{ location: { replace } }] } })
     fireEvent.load(frame()!)
     if (target) expect(replace).toHaveBeenCalledExactlyOnceWith(target)
     else expect(replace).not.toHaveBeenCalled()
   })
 
   it('explains what it blocked', async () => {
-    stubFetch({ [`/api/v1/runs/r1/artifacts/${ID}`]: () => json(file('r.html', '<script>x()</script><img src="https://x.test/a.png"><img src="b.png">')) })
+    stubFetch({ [`/api/v1/runs/r1/artifacts/${ID}`]: () => json(file('r.html', '<script>x()</script><script src="https://x.test/a.js"></script><img src="https://x.test/a.png"><img src="b.png">')) })
     renderAt([`/p/a/tasks/r1/report?artifact=${ID}`])
     await waitFor(() => expect(document.querySelector('[data-slot="html-report-blocked"]')?.textContent).toBe(
-      'Blocked for your safety: 1 script, 1 remote resource, 1 linked file next to the report. Reports show only what they carry inside the file.'))
+      'Blocked for your safety: 1 remote script, 1 remote resource, 1 linked file next to the report. Reports show only what they carry inside the file.'))
   })
 
   it('sends a non-HTML publication to Files with the same query, replacing the history entry', async () => {

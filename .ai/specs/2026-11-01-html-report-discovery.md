@@ -23,7 +23,9 @@ What phase 1 gives the later slices (read `packages/web/src/routes/task-git/repo
 - `taskFileHref` (`task-thread/file-links.ts`) rewrites publication links
   (`…/files?artifact=<uuid>`) to the reader.
 - Sanitizing, sandbox and CSP live in `lib/html-report.ts`. No later slice adds
-  a second renderer or changes the isolation boundary.
+  a second renderer. hearsay-tools/cezarion#2716 changed the isolation boundary: report
+  scripts run in a nested opaque frame, as
+  [ADR 0057](../../docs/adr/0057-run-report-scripts-in-a-nested-opaque-frame.md) records.
 
 ## Shared decisions
 
