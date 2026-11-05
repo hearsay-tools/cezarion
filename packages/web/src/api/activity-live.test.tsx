@@ -15,8 +15,8 @@ class Worker {
   constructor() { Worker.all.push(this) }
 }
 
-const snapshot = (title: string) => ({
-  generatedAt: '2026-11-05T00:00:00.000Z',
+const snapshot = (title: string, generatedAt = '2026-11-05T00:00:00.000Z') => ({
+  generatedAt,
   projects: [{ projectId: 'shop', name: 'Shop', loaded: true, inReview: 0, tasks: [{ title }], requests: [], closed: [] }],
 })
 const shop: ActivityScope = { kind: 'project', projectId: 'shop' }
@@ -61,7 +61,10 @@ describe('useActivityLive', () => {
     const sync = synced(worker)
     expect(sync.entries.map((entry) => entry.demand)).toEqual([{ kind: 'topic', topic: 'activity:project:shop' }])
 
-    act(() => worker.port.onmessage?.({ data: { type: 'value', version: LIVE_PROTOCOL, epoch: sync.epoch, id: sync.entries[0]!.id, value: snapshot('pushed') } }))
+    await act(async () => {
+      worker.port.onmessage?.({ data: { type: 'value', version: LIVE_PROTOCOL, epoch: sync.epoch, id: sync.entries[0]!.id, value: snapshot('pushed') } })
+      await vi.advanceTimersByTimeAsync(0)
+    })
     expect(title()).toBe('pushed')
     // No recurring HTTP read rides along with a working topic.
     await act(async () => { await vi.advanceTimersByTimeAsync(3 * ACTIVITY_READ_MS) })
@@ -69,6 +72,35 @@ describe('useActivityLive', () => {
 
     hook.unmount()
     expect(worker.port.close).toHaveBeenCalled()
+  })
+
+  it('keeps a topic snapshot when an older initial read answers after it', async () => {
+    let answer!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { answer = resolve })))
+    configureLiveSession({ local: true, bootProject: 'boot', apiBase: '' })
+    const { title } = mount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const worker = Worker.all[0]!
+    const sync = synced(worker)
+    await act(async () => {
+      worker.port.onmessage?.({ data: { type: 'value', version: LIVE_PROTOCOL, epoch: sync.epoch, id: sync.entries[0]!.id, value: snapshot('pushed', '2026-11-05T00:00:02.000Z') } })
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    await act(async () => {
+      answer(new Response(JSON.stringify(snapshot('first', '2026-11-05T00:00:01.000Z'))))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(title()).toBe('pushed')
+  })
+
+  it('never lets an older HTTP answer replace a newer cached snapshot', async () => {
+    configureLiveSession({ local: true, bootProject: 'boot', apiBase: '' })
+    const { client, title } = mount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    act(() => { client.setQueryData(activityQueryKey(shop), snapshot('pushed', '2026-11-05T00:00:02.000Z')) })
+    await act(async () => { await client.refetchQueries({ queryKey: activityQueryKey(shop) }) })
+    expect(reads()).toHaveLength(2)
+    expect(title()).toBe('pushed')
   })
 
   it('subscribes the workspace topic for the global view', async () => {

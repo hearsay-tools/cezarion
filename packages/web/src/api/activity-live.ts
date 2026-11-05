@@ -29,6 +29,11 @@ export async function getActivity(scope: ActivityScope, opts?: ReadOptions): Pro
   return unwrap(await cez.api.v1.workspace.activity.$get({ query }, init(opts)), '/workspace/activity')
 }
 
+/** An HTTP snapshot never replaces a cached one the server built later. */
+export function newerActivity(cached: ActivitySnapshot | undefined, fetched: ActivitySnapshot): ActivitySnapshot {
+  return cached !== undefined && Date.parse(fetched.generatedAt) < Date.parse(cached.generatedAt) ? cached : fetched
+}
+
 /**
  * The activity snapshot of a scope, live (spec 2026-11-05-live-activity-view, Live transport). It
  * reads the HTTP snapshot once for a fast first paint, then holds the scope's topic, whose frames
@@ -44,19 +49,27 @@ export function useActivityLive(scope: ActivityScope) {
   const client = useQueryClient()
   const query = useQuery({
     queryKey: key,
-    queryFn: ({ signal }) => getActivity(stable, { signal }),
+    queryFn: async ({ signal }) => newerActivity(client.getQueryData<ActivitySnapshot>(key), await getActivity(stable, { signal })),
     // The topic or the shared read keeps the cache fresh; a refetch on focus would only repeat it.
     staleTime: Infinity,
   })
   useEffect(() => {
-    const fold = (value: unknown) => client.setQueryData(key, value as ActivitySnapshot)
-    const releaseTopic = subscribeTopic(activityTopic(stable), fold)
+    let active = true
+    // A pending HTTP read is cancelled first, so its older answer cannot land on top of this one.
+    const fold = (value: unknown, http: boolean) => {
+      void client.cancelQueries({ queryKey: key, exact: true }).then(() => {
+        if (!active) return
+        const next = value as ActivitySnapshot
+        client.setQueryData<ActivitySnapshot>(key, (cached) => (http ? newerActivity(cached, next) : next))
+      })
+    }
+    const releaseTopic = subscribeTopic(activityTopic(stable), (value) => fold(value, false))
     const intervalMs = liveRefetchInterval<number | false>(ACTIVITY_READ_MS)
     let releaseRead: (() => void) | undefined
     const follow = () => {
       const finite = liveTransport() === 'finite' && intervalMs !== false
       if (finite && !releaseRead) {
-        releaseRead = subscribeLiveRead({ path: activityPath(stable), intervalMs }, (value, error) => { if (!error) fold(value) })
+        releaseRead = subscribeLiveRead({ path: activityPath(stable), intervalMs }, (value, error) => { if (!error) fold(value, true) })
       } else if (!finite && releaseRead) {
         releaseRead()
         releaseRead = undefined
@@ -65,6 +78,7 @@ export function useActivityLive(scope: ActivityScope) {
     follow()
     const releaseTransport = onLiveTransport(follow)
     return () => {
+      active = false
       releaseTransport()
       releaseRead?.()
       releaseTopic()
