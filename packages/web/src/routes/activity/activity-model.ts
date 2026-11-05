@@ -72,7 +72,19 @@ export function sentPeerRequests(cardId: string, requests: readonly ActivityRequ
 /** The rail's words for a request's direction. */
 export function directionOf(request: ActivityRequest, index: ReadonlyMap<string, RunEntry>): { kind: 'Request' | 'Question'; relation: string } {
   if (request.relationship === 'peer') return { kind: 'Request', relation: 'Peer' }
-  return { kind: 'Question', relation: index.get(request.senderRunId)?.role === 'worker' ? 'Worker → parent' : 'Parent → worker' }
+  return { kind: 'Question', relation: FAMILY_RELATION[familyAsker(request, index)] }
+}
+
+const FAMILY_RELATION = { worker: 'Worker → parent', parent: 'Parent → worker', unknown: 'Family' } as const
+
+/** Who asks in a family request: read from the sender's role, or, when the sender is not on the
+ *  view (an unreadable worker), from the recipient's. */
+function familyAsker(request: ActivityRequest, index: ReadonlyMap<string, RunEntry>): keyof typeof FAMILY_RELATION {
+  const sender = index.get(request.senderRunId)?.role
+  if (sender) return sender === 'worker' ? 'worker' : 'parent'
+  const recipient = index.get(request.recipientRunId)?.role
+  if (recipient) return recipient === 'root' ? 'worker' : 'parent'
+  return 'unknown'
 }
 
 export interface ActivitySummary {
