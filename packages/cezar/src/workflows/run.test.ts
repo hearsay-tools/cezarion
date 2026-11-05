@@ -1,16 +1,17 @@
+import { AttachmentWriter } from './run/attachment-writer.ts';
+import { QueuedInput } from './run/queued-input.ts';
+import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
+import { TrackedWork } from './run/tracked-work.ts';
 import { setRunStatus, crashStore } from '../runs/run-store.testkit.ts';
 import { runnerHook, run, GIT_ID, waitForProduct, TURN_TEXT, setupMonitoringFixture, FINISHED_RUN_STATUSES } from './run-fixture.testkit.ts';
-import { handleRunnerUiEvent, makeUiSink } from './run/session-events.ts';
-import { beginUsageInvocation } from './run/usage-accounting.ts';
+import { beginUsageInvocation, recordUsageUiEvent } from './run/usage-accounting.ts';
 import { createActiveRun } from './active-run.ts';
-import { UiEventSink } from '../runs/ui-event-sink.ts';
-import { runInternals } from './run-internals.testkit.ts';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, unused, fixtureWork } from './fixture-cleanup.testkit.ts';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi, afterAll, beforeAll } from 'vitest';
-import { type AgentRunResult, type AgentSession, type ContentBlock } from '../core/agent-runner.ts';
+import { type AgentRunResult, type AgentRunSpec, type AgentSession, type ContentBlock } from '../core/agent-runner.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { type UiEvent } from '../core/ui-events.ts';
 import { RunStore, type StepState, type RunRecord } from '../runs/store.ts';
@@ -89,6 +90,7 @@ describe('RunManager directional usage accounting', () => {
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
     manager.dispose();
+    runnerHook.runner = undefined;
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
   });
@@ -102,26 +104,25 @@ describe('RunManager directional usage accounting', () => {
     });
     store.updateStep(run.id, 'work', { iterations: 1, status: STEP_STATUS.running });
     const state = createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false });
-    const sink = new UiEventSink({ persist: () => undefined, emitLive: () => undefined });
-    return { run, state, sink };
+    return { run, state };
   }
 
   it('deduplicates starts and completions while summing multiple turns in one invocation', () => {
-    const { run, state, sink } = fixture();
-    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
+    const { run, state } = fixture();
+    beginUsageInvocation(store, run.id, state, 'work');
     const started: UiEvent = { type: 'turn.started', turnId: 'turn_1' };
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, started);
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, started);
+    recordUsageUiEvent(store, run.id, state, started);
+    recordUsageUiEvent(store, run.id, state, started);
     const completed: UiEvent = {
       type: 'turn.completed',
       turnId: 'turn_1',
       stopReason: 'end_turn',
       usage: { input: 10, output: 2, total: 12 },
     };
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, completed);
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, completed);
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, { type: 'turn.started', turnId: 'turn_2' });
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
+    recordUsageUiEvent(store, run.id, state, completed);
+    recordUsageUiEvent(store, run.id, state, completed);
+    recordUsageUiEvent(store, run.id, state, { type: 'turn.started', turnId: 'turn_2' });
+    recordUsageUiEvent(store, run.id, state, {
       type: 'turn.completed',
       turnId: 'turn_2',
       stopReason: 'end_turn',
@@ -140,12 +141,12 @@ describe('RunManager directional usage accounting', () => {
   });
 
   it('keeps the run aggregate absent after a pre-turn failure even when a later invocation is metered', () => {
-    const { run, state, sink } = fixture();
-    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
+    const { run, state } = fixture();
+    beginUsageInvocation(store, run.id, state, 'work');
     // The first startSession attempt fails before emitting turn.started.
-    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, { type: 'turn.started', turnId: 'turn_1' });
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
+    beginUsageInvocation(store, run.id, state, 'work');
+    recordUsageUiEvent(store, run.id, state, { type: 'turn.started', turnId: 'turn_1' });
+    recordUsageUiEvent(store, run.id, state, {
       type: 'turn.completed',
       turnId: 'turn_1',
       stopReason: 'end_turn',
@@ -164,51 +165,51 @@ describe('RunManager directional usage accounting', () => {
     expect(store.getRun(run.id)?.outputTokens).toBeUndefined();
   });
 
-  it('writes each completeness checkpoint before launching or forwarding its boundary event', () => {
-    const { run, state } = fixture();
-    store.flush();
-
-    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
-    expect(RunStore.open(join(repoRoot, '.ai/cezar')).getRun(run.id)?.steps[0]).toMatchObject({
-      usageInvocationsStarted: 1,
-    });
-
+  it('writes each completeness checkpoint before launching or forwarding its boundary event', async () => {
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    writeFileSync(join(repoRoot, 'a.txt'), 'base');
+    await run('git', ['add', 'a.txt'], { cwd: repoRoot });
+    await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
+    manager.dispose();
+    manager = createFixtureManager(store, repoRoot);
     const persistedAtSink: StepState[] = [];
-    const sink = new UiEventSink({ persist: () => undefined, emitLive: () => undefined });
-    vi.spyOn(sink, 'handle').mockImplementation((_event: UiEvent) => {
-        const persisted = RunStore.open(join(repoRoot, '.ai/cezar')).getRun(run.id)?.steps[0];
-        if (persisted) persistedAtSink.push(persisted);
+    store.on('event', ({ runId, event }) => {
+      if (event.type !== 'turn.started' && event.type !== 'turn.completed') return;
+      const persisted = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true }).getRun(runId)?.steps[0];
+      expect(persisted).toMatchObject(event.type === 'turn.started'
+        ? { usageInvocationsObserved: 1, usageTurnsStarted: 1 }
+        : { usageTurnsRecorded: 1, inputTokens: 8, outputTokens: 2 });
+      persistedAtSink.push(persisted!);
     });
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, { type: 'turn.started', turnId: 'turn_1' });
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
-      type: 'turn.completed',
-      turnId: 'turn_1',
-      stopReason: 'end_turn',
-      usage: { input: 8, output: 2, total: 10 },
-    });
-
-    expect(persistedAtSink[0]).toMatchObject({
-      usageInvocationsObserved: 1,
-      usageTurnsStarted: 1,
-    });
-    expect(persistedAtSink[1]).toMatchObject({
-      usageTurnsRecorded: 1,
-      inputTokens: 8,
-      outputTokens: 2,
-    });
+    runnerHook.runner = {
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
+      run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => undefined,
+      startSession: (_spec, _onEvent, options) => {
+        const persisted = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true }).getRun(record.id)?.steps[0];
+        expect(persisted).toMatchObject({ usageInvocationsStarted: 1 });
+        options?.onUiEvent?.({ type: 'turn.started', turnId: 'turn_1' });
+        options?.onUiEvent?.({ type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn', usage: { input: 8, output: 2, total: 10 } });
+        return { result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
+          sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => undefined,
+          holdsHumanInput: () => false, end: () => undefined, interrupt: () => undefined, open: false };
+      },
+    };
+    const record = manager.startRun({ name: 'usage', source: 'built-in', steps: [{ id: 'work', prompt: '{{task}}' }] }, { task: 'usage', worktree: false });
+    await waitForProduct(manager, store, () => persistedAtSink.length === 2 && !manager.isActive(record.id));
+    expect(persistedAtSink).toHaveLength(2);
   });
 
   it('tracks an unmetered turn without recording it and ignores a completion that never started', () => {
-    const { run, state, sink } = fixture();
-    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
+    const { run, state } = fixture();
+    beginUsageInvocation(store, run.id, state, 'work');
+    recordUsageUiEvent(store, run.id, state, {
       type: 'turn.completed',
       turnId: 'ghost',
       stopReason: 'end_turn',
       usage: { input: 99, output: 9, total: 108 },
     });
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, { type: 'turn.started', turnId: 'turn_1' });
-    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
+    recordUsageUiEvent(store, run.id, state, { type: 'turn.started', turnId: 'turn_1' });
+    recordUsageUiEvent(store, run.id, state, {
       type: 'turn.completed',
       turnId: 'turn_1',
       stopReason: 'end_turn',
@@ -253,6 +254,11 @@ describe('RunManager reported cost accounting', () => {
 
   it.each(['fresh', 'legacy-inflated', 'missed-persist'] as const)('counts cumulative Claude USD across Continue steps (%s)', async (priorState) => {
     let launches = 0;
+    const tools = new Map<string, ReturnType<RunManager['cezarToolHandlers']>>();
+    const handlers = manager.cezarToolHandlers.bind(manager);
+    vi.spyOn(manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
+      const result = handlers(id, generation); tools.set(id, result); return result;
+    });
     runnerHook.runner = {
       backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
@@ -274,8 +280,7 @@ describe('RunManager reported cost accounting', () => {
           });
           onEvent?.({ type: 'text', text: 'Finished.' });
           // The turn finishes through cezar_done, as an agent's does (hearsay-tools/cezarion#2397).
-          const state = runInternals(manager).active.get(record.id)!;
-          await manager.cezarToolHandlers(record.id, state.liveSession.ciGeneration!).finishTurn({}, new AbortController().signal);
+          await tools.get(record.id)!.finishTurn({}, new AbortController().signal);
           onEvent?.({ type: 'turn-end' });
         })());
         const close = () => {
@@ -333,7 +338,7 @@ describe('TurnBookkeeper.recordTurnEnd', () => {
   });
   let repoRoot: string;
   let store: RunStore;
-  let manager: RunManager;
+  let bookkeeper: TurnBookkeeper;
 
   beforeAll(async () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-turnend-'));
@@ -344,12 +349,13 @@ describe('TurnBookkeeper.recordTurnEnd', () => {
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot);
+    bookkeeper = new TurnBookkeeper({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+      work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => false,
+    }, unused<ConstructorParameters<typeof TurnBookkeeper>[1]>('TurnBookkeeper.host', { isDisposedDelegatedRun: () => false }));
   });
 
   afterAll(async () => {
     await drainFixtureManagers(repoRoot);
-    manager.dispose();
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
   });
@@ -366,7 +372,7 @@ describe('TurnBookkeeper.recordTurnEnd', () => {
 
   it('computes a real diffStat and never derives a title from turn text', async () => {
     const record = await makeWorktreeRun();
-    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, TURN_TEXT);
+    await bookkeeper.recordTurnEnd(record.id, TURN_TEXT);
 
     const after = store.getRun(record.id);
     // The agent's words are not a title source (they produced "Reading the
@@ -376,7 +382,7 @@ describe('TurnBookkeeper.recordTurnEnd', () => {
 
     // Second turn: the diff stat keeps refreshing.
     writeFileSync(join(store.getRun(record.id)!.worktreePath!, 'more.txt'), 'z\n');
-    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, 'Now I rewrote everything from scratch with a different approach.');
+    await bookkeeper.recordTurnEnd(record.id, 'Now I rewrote everything from scratch with a different approach.');
     const later = store.getRun(record.id);
     expect(later?.titleSummary).toBeUndefined();
     expect(later?.diffStat).toEqual({ adds: 4, dels: 1, files: 3 });
@@ -400,7 +406,7 @@ describe('TurnBookkeeper.recordTurnEnd', () => {
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'their work'], { cwd: wt });
     writeFileSync(join(wt, 'mine.txt'), 'z\n'); // the 1 line this task produced
 
-    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, TURN_TEXT);
+    await bookkeeper.recordTurnEnd(record.id, TURN_TEXT);
 
     // 1 uncommitted line, flagged — not the 6 committed ones the foreign branch carries
     // (which, with `a.txt`'s edit and `new.txt`, would have read `+10 −1 / 4 files`).
@@ -416,13 +422,13 @@ describe('TurnBookkeeper.recordTurnEnd', () => {
     const record = await makeWorktreeRun();
     const wt = record.worktreePath as string;
     await run('git', ['checkout', '-q', '-b', 'a-detour'], { cwd: wt });
-    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, TURN_TEXT);
+    await bookkeeper.recordTurnEnd(record.id, TURN_TEXT);
     expect(store.getRun(record.id)?.diffStat?.repointed).toBe(true);
 
     // `updateRun` replaces `diffStat` wholesale, so a stale `repointed: true` can
     // never outlive the repoint that caused it.
     await run('git', ['checkout', '-q', record.branch as string], { cwd: wt });
-    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, TURN_TEXT);
+    await bookkeeper.recordTurnEnd(record.id, TURN_TEXT);
     const after = store.getRun(record.id);
     expect(after?.diffStat).toEqual({ adds: 3, dels: 1, files: 2 });
     expect(after?.diffStat).not.toHaveProperty('repointed');
@@ -432,25 +438,25 @@ describe('TurnBookkeeper.recordTurnEnd', () => {
     const record = await makeWorktreeRun();
     // What PATCH /api/v1/runs/:id does on a rename:
     store.updateRun(record.id, { title: 'My name', titleSummary: 'My name', titleOrigin: 'user' });
-    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, TURN_TEXT);
+    await bookkeeper.recordTurnEnd(record.id, TURN_TEXT);
     expect(store.getRun(record.id)?.titleSummary).toBe('My name');
   });
 
   it('skips diffStat for a worktree-less run, and never throws', async () => {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'do the thing', steps: [] });
-    await expect(runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, TURN_TEXT)).resolves.toBeUndefined();
+    await expect(bookkeeper.recordTurnEnd(record.id, TURN_TEXT)).resolves.toBeUndefined();
     const after = store.getRun(record.id);
     expect(after?.titleSummary).toBeUndefined();
     expect(after?.diffStat).toBeUndefined();
   });
 
   it('is a quiet no-op for an unknown run', async () => {
-    await expect(runInternals(manager).turnBookkeeper.recordTurnEnd('nope', TURN_TEXT)).resolves.toBeUndefined();
+    await expect(bookkeeper.recordTurnEnd('nope', TURN_TEXT)).resolves.toBeUndefined();
   });
 
   it('applies in-band CEZ markers from the turn text (spec 2026-07-18-task-ref-markers)', async () => {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'implement comment threads', steps: [] });
-    await runInternals(manager).turnBookkeeper.recordTurnEnd(
+    await bookkeeper.recordTurnEnd(
       record.id,
       'Progress so far.\nCEZ:PR=500\nCEZ:ISSUE=433\nCEZ:TITLE=implementing comment threads\nMore to come.',
     );
@@ -466,7 +472,7 @@ describe('TurnBookkeeper.recordTurnEnd', () => {
   it('a marker title never overwrites a user rename — but the numbers still land', async () => {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     store.updateRun(record.id, { title: 'My name', titleSummary: 'My name', titleOrigin: 'user' });
-    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, 'CEZ:PR=500\nCEZ:TITLE=implementing comment threads');
+    await bookkeeper.recordTurnEnd(record.id, 'CEZ:PR=500\nCEZ:TITLE=implementing comment threads');
     const after = store.getRun(record.id);
     expect(after?.titleSummary).toBe('My name');
     expect(after?.titleOrigin).toBe('user');
@@ -475,7 +481,7 @@ describe('TurnBookkeeper.recordTurnEnd', () => {
 
   it('a junk CEZ:TITLE never blanks the title', async () => {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
-    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, 'CEZ:PR=500\nCEZ:TITLE=...');
+    await bookkeeper.recordTurnEnd(record.id, 'CEZ:PR=500\nCEZ:TITLE=...');
     const after = store.getRun(record.id);
     expect(after?.titleSummary).toBeUndefined();
     expect(after?.titleOrigin).toBeUndefined();
@@ -484,7 +490,7 @@ describe('TurnBookkeeper.recordTurnEnd', () => {
 
   it('prose that merely mentions a marker changes nothing', async () => {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
-    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, 'I will emit CEZ:PR=442 once the PR exists.');
+    await bookkeeper.recordTurnEnd(record.id, 'I will emit CEZ:PR=442 once the PR exists.');
     const after = store.getRun(record.id);
     expect(after?.markerRefs).toBeUndefined();
     expect(after?.prNumber).toBeUndefined();
@@ -496,18 +502,32 @@ describe('RunManager.continueRun override', () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
+  const launches: AgentRunSpec[] = [];
 
-  beforeEach(() => {
+  beforeEach(async () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-continue-'));
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    writeFileSync(join(repoRoot, 'base.txt'), 'base');
+    await run('git', ['add', 'base.txt'], { cwd: repoRoot });
+    await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot);
-    // No live agent — we only assert the synchronous persistence continueRun does before it
-    // hands off to the (stubbed) continuation.
-    (manager as unknown as { runContinuation: () => Promise<void> }).runContinuation = async () => {};
+    launches.length = 0;
+    runnerHook.runner = {
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
+      run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => undefined,
+      startSession: spec => {
+        launches.push(spec);
+        return { result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
+          sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => undefined,
+          holdsHumanInput: () => false, end: () => undefined, interrupt: () => undefined, open: false };
+      },
+    };
   });
 
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
+    runnerHook.runner = undefined;
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
   });
@@ -544,12 +564,10 @@ describe('RunManager.continueRun override', () => {
     manager.dispose(); crashStore(store);
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
     manager = createFixtureManager(store, repoRoot);
-    const internals = runInternals(manager).line;
-    const pump = vi.spyOn(internals, 'pump').mockResolvedValue();
     await manager.recover();
-    expect(pump).toHaveBeenCalled();
-    expect(runInternals(manager).line.pendingContinuations.get(id)?.prompt).toContain('read this with the chosen account');
-    expect(runInternals(manager).line.pendingContinuations.get(id)?.sessionId).toBeUndefined();
+    await waitForProduct(manager, store, () => launches.length === 1);
+    expect(launches[0]?.userPrompt).toContain('read this with the chosen account');
+    expect(launches[0]?.resume).not.toBe(true);
     expect(store.getRun(id)?.agentProfile).toBe(after);
   });
 
@@ -572,29 +590,25 @@ describe('RunManager.continueRun override', () => {
     expect(after?.model).toBe('gpt-5.1-codex');
   });
 
-  it('starts fresh when Continue switches to a backend that does not own the session', () => {
+  it('starts fresh when Continue switches to a backend that does not own the session', async () => {
     const id = resumableRun();
-    const calls: unknown[][] = [];
-    (manager as unknown as { runContinuation: (...args: unknown[]) => Promise<void> }).runContinuation = async (...args) => {
-      calls.push(args);
-    };
+
 
     expect(manager.continueRun(id, { runner: 'codex' })).toEqual({ ok: true });
-    expect(calls[0]?.[2]).toBeUndefined();
-    expect(calls[0]?.[3]).toBe('codex');
+    await waitForProduct(manager, store, () => launches.length === 1);
+    expect(launches[0]?.resume).not.toBe(true);
+    expect(store.getRun(id)?.steps.at(-1)?.backend).toBe('codex');
   });
 
-  it('resumes when Continue stays on the backend that owns the session', () => {
+  it('resumes when Continue stays on the backend that owns the session', async () => {
     const id = resumableRun();
     store.updateStep(id, 's1', { backend: 'claude' });
-    const calls: unknown[][] = [];
-    (manager as unknown as { runContinuation: (...args: unknown[]) => Promise<void> }).runContinuation = async (...args) => {
-      calls.push(args);
-    };
+
 
     expect(manager.continueRun(id, { runner: 'claude' })).toEqual({ ok: true });
-    expect(calls[0]?.[2]).toBe('sess-1');
-    expect(calls[0]?.[3]).toBe('claude');
+    await waitForProduct(manager, store, () => launches.length === 1);
+    expect(launches[0]).toMatchObject({ resume: true, sessionId: 'sess-1' });
+    expect(store.getRun(id)?.steps.at(-1)?.backend).toBe('claude');
   });
 
   it('an omitted override preserves the run current backend/model (backward compat)', () => {
@@ -605,14 +619,12 @@ describe('RunManager.continueRun override', () => {
     expect(after?.model).toBe('sonnet');
   });
 
-  it('persists an effort override and keeps it when Continue omits it (#45)', () => {
+  it('persists an effort override and keeps it when Continue omits it (#45)', async () => {
     const id = resumableRun();
     store.updateRun(id, { effort: 'medium' });
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     expect(store.getRun(id)?.effort).toBe('medium');
-    // The stub bypasses startup teardown; simulate its completed lifecycle before
-    // accepting a second Continue (terminal status alone never proves termination).
-    runInternals(manager).line.starting.delete(id);
+    await waitForProduct(manager, store, () => !manager.isActive(id));
     setRunStatus(store, id, RUN_STATUS.done);
 
     expect(manager.continueRun(id, { effort: 'xhigh' })).toEqual({ ok: true });
@@ -722,45 +734,39 @@ describe('RunManager.continueRun override', () => {
     expect(store.getRun(id)?.model).toBe('sonnet');
   });
 
-  it('starts fresh when Continue switches to another login of the same agent', () => {
+  it('starts fresh when Continue switches to another login of the same agent', async () => {
     const id = resumableRun();
     store.updateStep(id, 's1', { backend: 'claude', profileId: 'default' });
-    const calls: unknown[][] = [];
-    (manager as unknown as { runContinuation: (...args: unknown[]) => Promise<void> }).runContinuation = async (...args) => {
-      calls.push(args);
-    };
+
 
     expect(manager.continueRun(id, { agentProfile: 'klaudiusz' })).toEqual({ ok: true });
     // `claude --resume <id>` under another login would find nothing and silently open a fresh
     // conversation, so the session id is deliberately not passed.
-    expect(calls[0]?.[2]).toBeUndefined();
-    expect(calls[0]?.[3]).toBe('claude');
+    await waitForProduct(manager, store, () => launches.length === 1);
+    expect(launches[0]?.resume).not.toBe(true);
+    expect(store.getRun(id)?.steps.at(-1)?.backend).toBe('claude');
   });
 
-  it('resumes when the picked account is the one that owns the session', () => {
+  it('resumes when the picked account is the one that owns the session', async () => {
     const id = resumableRun();
     store.updateStep(id, 's1', { backend: 'claude', profileId: 'klaudiusz' });
-    const calls: unknown[][] = [];
-    (manager as unknown as { runContinuation: (...args: unknown[]) => Promise<void> }).runContinuation = async (...args) => {
-      calls.push(args);
-    };
+
 
     expect(manager.continueRun(id, { agentProfile: 'klaudiusz' })).toEqual({ ok: true });
-    expect(calls[0]?.[2]).toBe('sess-1');
+    await waitForProduct(manager, store, () => launches.length === 1);
+    expect(launches[0]).toMatchObject({ resume: true, sessionId: 'sess-1' });
   });
 
-  it('treats a step that recorded no account as the discovered one', () => {
+  it('treats a step that recorded no account as the discovered one', async () => {
     // Pre-accounts sessions ran under whatever `agentHomePaths()` finds, so re-picking `default`
     // is not a switch and must still resume.
     const id = resumableRun();
     store.updateStep(id, 's1', { backend: 'claude' });
-    const calls: unknown[][] = [];
-    (manager as unknown as { runContinuation: (...args: unknown[]) => Promise<void> }).runContinuation = async (...args) => {
-      calls.push(args);
-    };
+
 
     expect(manager.continueRun(id, { agentProfile: 'default' })).toEqual({ ok: true });
-    expect(calls[0]?.[2]).toBe('sess-1');
+    await waitForProduct(manager, store, () => launches.length === 1);
+    expect(launches[0]).toMatchObject({ resume: true, sessionId: 'sess-1' });
   });
 
   it('an omitted account preserves the one the run is on (backward compat)', () => {
@@ -850,7 +856,14 @@ describe('RunSettlement.settleSuccess — optional review gate', () => {
     return store.getRun(record.id) as RunRecord;
   }
 
-  const settle = (id: string) => runInternals(manager).runSettlement.settleSuccess(id);
+  const settle = async (id: string) => {
+    store.addStep(id, { id: 'task', name: 'Task', kind: STEP_KIND.agent });
+    store.updateStep(id, 'task', { status: STEP_STATUS.waiting });
+    setRunStatus(store, id, RUN_STATUS.waiting, { currentStepId: 'task' });
+    expect(manager.finishBlockedReason(id)).toBeUndefined();
+    expect(manager.finish(id)).toBe(true);
+    await waitForProduct(manager, store, () => FINISHED_RUN_STATUSES.has(store.getRun(id)!.status));
+  };
 
   it('gate off (default) + changes → done, diff left in the worktree', async () => {
     const record = await changedRun();
@@ -1025,19 +1038,18 @@ describe('RunManager monitoring turns', () => {
   const { SINGLE_STEP, waitFor } = fixture;
   it('nested Codex subagent items after park do not unpark monitoring (#121)', async () => {
     fixture.manager.dispose();
-    const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.01 } });
+    const semaphore = new WorkspaceSemaphore({ initial: { maxMonitoringSessions: 1, monitoringWakeIntervalMinutes: 0.01 } });
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { semaphore });
+    const clock = fixture.observeWakeTimers();
+    const competing = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:schedule-wakeup competing park', runner: 'claude' });
+    await waitFor(competing.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:schedule-wakeup keep going', runner: 'claude', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
-    const internals = runInternals(fixture.manager);
-    const state = internals.active.get(record.id);
-    if (!state) throw new Error('active run state missing');
     const wakeTimer = monitoringTimerWait(fixture.store.getRun(record.id));
     const deadline = monitoringWakeOf(fixture.store.getRun(record.id));
-    const sink = makeUiSink(internals.context, internals.sessionHelperHost, record.id, 'task');
-    const inject = (event: UiEvent) => handleRunnerUiEvent(internals.context, internals.sessionHelperHost, record.id, state, sink, event);
+    const inject = runnerHook.uiEvent;
 
     inject({
       type: 'item.completed',
@@ -1086,34 +1098,31 @@ describe('RunManager monitoring turns', () => {
     expect(fixture.store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.waiting });
     expect(monitoringWakeOf(fixture.store.getRun(record.id))).toBe(deadline);
     expect(monitoringTimerWait(fixture.store.getRun(record.id))).toEqual(wakeTimer);
-    expect(runInternals(fixture.manager).line.waiting.has(record.id)).toBe(true);
-    expect(runInternals(fixture.manager).line.monitoring.has(record.id)).toBe(true);
-    expect(runInternals(fixture.manager).line.busySlots()).toBe(0);
-    expect(semaphore.busy()).toBe(0);
+    expect(semaphore.busy()).toBe(1);
 
+    clock.fire(clock.captured - 1);
     await waitFor(record.id, () => {
       const events = readFileSync(join(fixture.repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8');
       return events.includes('automatic monitoring wake-up (1/40)');
     });
+    fixture.manager.cancel(competing.id);
   }, 30_000);
 
   it('parent turn.started after park still unparks monitoring (#61, #121)', async () => {
     fixture.manager.dispose();
-    const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.02 } });
+    const semaphore = new WorkspaceSemaphore({ initial: { maxMonitoringSessions: 1, monitoringWakeIntervalMinutes: 0.02 } });
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { semaphore });
+    fixture.observeWakeTimers();
+    const competing = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:schedule-wakeup competing park', runner: 'claude' });
+    await waitFor(competing.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:schedule-wakeup keep going', runner: 'claude', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
-    const internals = runInternals(fixture.manager);
-    const state = internals.active.get(record.id);
-    if (!state) throw new Error('active run state missing');
-    handleRunnerUiEvent(internals.context, internals.sessionHelperHost,
-      record.id,
-      state,
-      makeUiSink(internals.context, internals.sessionHelperHost, record.id, 'task'),
-      { type: 'turn.started', turnId: 'turn_parent_resume' },
-    );
+    expect(semaphore.busy()).toBe(1);
+    runnerHook.uiEvent({ type: 'turn.started', turnId: 'turn_parent_resume' });
+    fixture.manager.cancel(competing.id);
+    await waitFor(competing.id, () => !fixture.manager.isActive(competing.id));
 
     // hearsay-tools/cezarion#1233: the resumed turn keeps its pool slot until its own turn end.
     // hearsay-tools/cezarion#2431 (owner decision 4): a parent turn the runner starts itself closes
@@ -1123,20 +1132,19 @@ describe('RunManager monitoring turns', () => {
     expect(monitoringWakeOf(fixture.store.getRun(record.id))).toBeUndefined();
     expect(monitoringTimerWait(fixture.store.getRun(record.id))).toBeUndefined();
     expect(fixture.store.getRun(record.id)?.lastWaits?.filter(wait => wait.kind === WAIT_KIND.timer).map(wait => wait.phase)).toEqual([WAIT_PHASE.cancelled]);
-    expect(runInternals(fixture.manager).line.waiting.has(record.id)).toBe(false);
-    expect(runInternals(fixture.manager).line.monitoring.has(record.id)).toBe(true);
-    expect(runInternals(fixture.manager).line.busySlots()).toBe(0);
     expect(semaphore.busy()).toBe(0);
   }, 30_000);
 
   it('a markerless turn-end still parks as waiting with no activity', async () => {
+    const clock = fixture.observeIdleTimers();
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'just do the thing', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting');
-    const state = (fixture.manager as unknown as {
-      active: Map<string, { idleTimer?: NodeJS.Timeout }>;
-    }).active.get(record.id);
-    expect(state?.idleTimer).toBeDefined(); // genuine user waits still expire after IDLE_TIMEOUT_MS
+    expect(clock.pending).toBe(1);
+    clock.fire(clock.captured - 1);
+    await waitFor(record.id, () => !fixture.manager.isActive(record.id));
+    expect(fixture.store.getRun(record.id)?.status).toBe(RUN_STATUS.waiting);
+    expect(fixture.store.getRun(record.id)?.finishedAt).toBeUndefined();
     expect(monitoringTimerWait(fixture.store.getRun(record.id))).toBeUndefined();
   }, 30_000);
 });
@@ -1150,13 +1158,13 @@ describe('RunManager waiting recovery', () => {
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', runner: 'codex', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
-    const surviving = (fixture.manager as unknown as { active: Map<string, { liveSession: { session?: AgentSession; };  }> }).active.get(record.id)?.liveSession.session;
+    const surviving = [...fixtureWork(fixture.manager).liveSessions];
     fixture.manager.dispose();
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);
     await fixture.manager.recover();
     expect(fixture.manager.finish(record.id)).toBe(false);
     expect(fixture.manager.continueRun(record.id, { text: 'resume' })).toEqual({ ok: false, error: 'cannot continue a waiting run' });
-    surviving?.end();
+    surviving.forEach(session => session.end());
   }, 30_000);
 
   it('does not answer an inactive pending ask while its disposed session process is still registered', async () => {
@@ -1174,7 +1182,7 @@ describe('RunManager waiting recovery', () => {
         options: [{ label: 'First' }, { label: 'Second' }],
       }],
     });
-    const surviving = (fixture.manager as unknown as { active: Map<string, { liveSession: { session?: AgentSession; };  }> }).active.get(record.id)?.liveSession.session;
+    const surviving = [...fixtureWork(fixture.manager).liveSessions];
     fixture.manager.dispose();
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);
     await fixture.manager.recover();
@@ -1185,7 +1193,7 @@ describe('RunManager waiting recovery', () => {
       error: 'cannot continue a waiting run',
     });
     unregisterRunProcess(record.id);
-    surviving?.end();
+    surviving.forEach(session => session.end());
   }, 30_000);
 
   it('opens a human wait at recovery for an unanswered ask the record has no wait for', async () => {
@@ -1261,14 +1269,12 @@ describe('RunManager idle shutdown', () => {
   const fixture = setupMonitoringFixture();
   const { SINGLE_STEP, waitFor } = fixture;
   it('honors cancellation that races an idle-close callback', async () => {
+    const clock = fixture.observeIdleTimers();
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
-    const state = (fixture.manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
-
-    idleTimer._onTimeout();
+    expect(clock.pending).toBe(1);
+    clock.fire(clock.captured - 1);
     expect(fixture.manager.cancel(record.id)).toBe(true);
     await waitFor(record.id, candidate => candidate?.status === 'cancelled');
     expect(fixture.store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.cancelled });
@@ -1279,6 +1285,7 @@ describe('RunManager idle shutdown', () => {
   }, 30_000);
 
   it('publishes a runner failure that occurs during idle shutdown', async () => {
+    const clock = fixture.observeIdleTimers();
     runnerHook.runner = {
       backend: 'claude',
       specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
@@ -1306,11 +1313,8 @@ describe('RunManager idle shutdown', () => {
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'wait then fail', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
-    const state = (fixture.manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
-
-    idleTimer._onTimeout();
+    expect(clock.pending).toBe(1);
+    clock.fire(clock.captured - 1);
     await waitFor(record.id, candidate => candidate?.status === 'failed');
     expect(fixture.store.getRun(record.id)).toMatchObject({
       status: RUN_STATUS.failed, error: expect.stringContaining('provider failed during shutdown'),
@@ -1320,7 +1324,7 @@ describe('RunManager idle shutdown', () => {
 
 describe('RunManager workflow remainder opening', () => {
   const fixture = setupMonitoringFixture();
-  it('preserves startedAt when a resumed workflow remainder is held and requeued', () => {
+  it('preserves startedAt when a resumed workflow remainder is held and requeued', async () => {
     const startedAt = '2026-09-01T00:00:00.000Z';
     const workflow: WorkflowDef = { name: 'held-remainder', source: 'file', steps: [
       { id: 'task', name: 'Task', prompt: '{{task}}' },
@@ -1335,14 +1339,18 @@ describe('RunManager workflow remainder opening', () => {
     });
     fixture.currentId = record.id;
     fixture.store.updateRun(record.id, { startedAt });
-    const semaphore = (fixture.manager as unknown as { semaphore: WorkspaceSemaphore }).semaphore;
-    vi.spyOn(semaphore, 'accountHolds').mockReturnValue({
-      deadline: new Set(['claude:default']),
-      inFlight: new Set(),
+    fixture.store.updateStep(record.id, 'task', { status: STEP_STATUS.done });
+    fixture.store.updateRun(record.id, { workflowDef: workflow, worktree: false, runner: 'claude' });
+    const pin = fixture.store.pin.bind(fixture.store);
+    vi.spyOn(fixture.store, 'pin').mockImplementation((id, reason) => {
+      pin(id, reason);
+      if (id !== record.id || reason !== 'active') return;
+      const hold = fixture.store.createRun({ title: 'account hold', task: 'hold', workflow: 'quick-task', runner: 'claude', steps: [] });
+      setRunStatus(fixture.store, hold.id, RUN_STATUS.waiting, { autoResumeAt: new Date(Date.now() + 60_000).toISOString() });
     });
-    const held = runInternals(fixture.manager).stepLoop.requeueWhileHeld(record.id, workflow, { task: record.task }, 'claude', undefined, 1);
-
-    expect(held).toBe(true);
+    await fixture.manager.recover();
+    await waitForProduct(fixture.manager, fixture.store, () => fixture.store.readEvents(record.id).some(event =>
+      event.type === 'note' && String(event.message).includes('held in the queue')));
     expect(fixture.store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.queued, startedAt });
   });
 
@@ -1384,9 +1392,13 @@ describe('RunManager workflow remainder opening', () => {
     });
     fixture.currentId = record.id;
     fixture.store.updateStep(record.id, 'preflight', { status: STEP_STATUS.done, iterations: 1 });
-    await (fixture.manager as unknown as {
-      execute(id: string, definition: WorkflowDef, input: { task: string; worktree: boolean; images: ContentBlock[] }, startAt: number): Promise<void>;
-    }).execute(record.id, workflow, { task: record.task, worktree: false, images: [openingImage] }, 1);
+    const imageDir = join(fixture.repoRoot, '.ai/cezar/runs', `${record.id}-images`);
+    mkdirSync(imageDir, { recursive: true });
+    writeFileSync(join(imageDir, 'pasted-1.png'), Buffer.from('aW1hZ2U=', 'base64'));
+    fixture.store.updateStep(record.id, 'task', { status: STEP_STATUS.pending });
+    fixture.store.updateRun(record.id, { workflowDef: workflow, worktree: false, taskImages: [`/api/v1/runs/${record.id}/images/pasted-1.png`] });
+    await fixture.manager.recover();
+    await waitForProduct(fixture.manager, fixture.store, () => !fixture.manager.isActive(record.id));
 
     expect(receivedImages).toEqual([openingImage]);
   }, 30_000);
@@ -1415,9 +1427,10 @@ describe('RunManager check retry recovery', () => {
     fixture.store.updateStep(record.id, 'verify', { status: STEP_STATUS.failed, iterations: 1, retriesUsed: 1 });
     setRunStatus(fixture.store, record.id, RUN_STATUS.queued, { workflowDef: workflow });
 
-    await (fixture.manager as unknown as {
-      execute(id: string, workflow: WorkflowDef, input: { task: string; worktree: boolean }, startAt: number): Promise<void>;
-    }).execute(record.id, workflow, { task: 'mock:cezar-done', worktree: false }, 1);
+    fixture.store.updateStep(record.id, 'verify', { status: STEP_STATUS.pending });
+    fixture.store.updateRun(record.id, { workflowDef: workflow, worktree: false });
+    await fixture.manager.recover();
+    await waitForProduct(fixture.manager, fixture.store, () => !fixture.manager.isActive(record.id) && FINISHED_RUN_STATUSES.has(fixture.store.getRun(record.id)!.status));
 
     expect(fixture.store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.failed });
     expect(fixture.store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
@@ -1452,9 +1465,10 @@ describe('RunManager check retry recovery', () => {
       flushes.push(structuredClone(fixture.store.getRun(record.id)!));
       originalFlush();
     });
-    await (fixture.manager as unknown as {
-      execute(id: string, workflow: WorkflowDef, input: { task: string; worktree: boolean }, startAt: number): Promise<void>;
-    }).execute(record.id, workflow, { task: 'mock:cezar-done', worktree: false }, 1);
+    fixture.store.updateStep(record.id, 'gate', { status: STEP_STATUS.pending });
+    fixture.store.updateRun(record.id, { workflowDef: workflow, worktree: false });
+    await fixture.manager.recover();
+    await waitForProduct(fixture.manager, fixture.store, () => !fixture.manager.isActive(record.id) && FINISHED_RUN_STATUSES.has(fixture.store.getRun(record.id)!.status));
 
     expect(fixture.store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'task', iterations: 2 }),
@@ -1468,14 +1482,13 @@ describe('RunManager check retry recovery', () => {
   }, 30_000);
 
   it('does not treat an unrelated failed check as a continuation workflow source', async () => {
+    const clock = fixture.observeIdleTimers();
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
-    const state = (fixture.manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
-    idleTimer._onTimeout();
-    await waitFor(record.id, () => !(fixture.manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    expect(clock.pending).toBe(1);
+    clock.fire(clock.captured - 1);
+    await waitFor(record.id, () => !fixture.manager.isActive(record.id));
     const workflow: WorkflowDef = {
       name: 'failed-check', source: 'file',
       steps: [
@@ -1499,14 +1512,13 @@ describe('RunManager check retry recovery', () => {
   }, 30_000);
 
   it('restart reruns an interrupted check instead of completing it as a continuation source', async () => {
+    const clock = fixture.observeIdleTimers();
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
-    const state = (fixture.manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
-    idleTimer._onTimeout();
-    await waitFor(record.id, () => !(fixture.manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    expect(clock.pending).toBe(1);
+    clock.fire(clock.captured - 1);
+    await waitFor(record.id, () => !fixture.manager.isActive(record.id));
     fixture.manager.dispose();
     const workflow: WorkflowDef = { name: 'interrupted-check', source: 'file', steps: [
       SINGLE_STEP.steps[0]!,
@@ -1656,17 +1668,19 @@ describe('cezar_ask parks as waiting and emits ask.requested (#473)', () => {
 describe('AttachmentWriter.persistAttachment without a session (#472)', () => {
   let repoRoot: string;
   let store: RunStore;
-  let manager: RunManager;
+  let attachments: AttachmentWriter;
   const PNG = Buffer.from('fake-png-bytes').toString('base64');
 
   const persist = (id: string, prefix?: string) =>
-    runInternals(manager).attachments.persistAttachment(id, 'image/png', PNG, prefix);
+    attachments.persistAttachment(id, 'image/png', PNG, prefix);
   const imagesDir = (id: string) => join(repoRoot, '.ai/cezar', 'runs', `${id}-images`);
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-persist-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot);
+    attachments = new AttachmentWriter({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+      work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => false,
+    }, unused('AttachmentWriter.host'));
   });
 
   afterEach(async () => {
@@ -1704,7 +1718,7 @@ describe('AttachmentWriter.persistAttachment without a session (#472)', () => {
     mkdirSync(imagesDir('run-d'), { recursive: true });
     // Force a stale counter: the map says 0, but pasted-1 already exists.
     writeFileSync(join(imagesDir('run-d'), 'pasted-1.png'), 'original');
-    runInternals(manager).attachments.queuedImageSeq.set('run-d', 0);
+    attachments.queuedImageSeq.set('run-d', 0);
 
     const saved = persist('run-d', 'pasted');
     expect(saved?.name).toBe('pasted-2.png');
@@ -1716,6 +1730,8 @@ describe('RunManager queued-stack mutators (#472)', () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
+  let semaphore: WorkspaceSemaphore;
+  let capacity = 0;
   const PNG = Buffer.from('png').toString('base64');
 
   const WORKFLOW: WorkflowDef = {
@@ -1732,22 +1748,27 @@ describe('RunManager queued-stack mutators (#472)', () => {
 
   /** Seed a run that the engine still holds as queued. */
   const seedQueued = (task = 'ship it') => {
-    const record = store.createRun({ title: 't', workflow: 'w', task, steps: [] });
-    runInternals(manager).line.pendingJobs.set(record.id, { workflow: WORKFLOW, input: { task } });
-    return record;
+    const record = manager.startRun(WORKFLOW, { task, worktree: false });
+    store.updateRun(record.id, { title: 't' });
+    return store.getRun(record.id)!;
   };
-  const dequeue = (id: string) =>
-    runInternals(manager).line.pendingJobs.delete(id);
   const imagesDir = (id: string) => join(repoRoot, '.ai/cezar', 'runs', `${id}-images`);
 
-  beforeEach(() => {
+  beforeEach(async () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-stack-'));
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    writeFileSync(join(repoRoot, 'base.txt'), 'base');
+    await run('git', ['add', 'base.txt'], { cwd: repoRoot });
+    await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
+    capacity = 0;
+    semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: capacity, memoryLimitMb: null }) });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot, { semaphore });
   });
 
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
+    runnerHook.runner = undefined;
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
@@ -1791,93 +1812,72 @@ describe('RunManager queued-stack mutators (#472)', () => {
   });
 
   it('hydrates edits and stacked messages into a queued restart continuation', async () => {
-    const r = store.createRun({
-      title: 'interrupted task',
-      workflow: 'quick-task',
-      task: 'original recovery goal',
-      steps: [],
-    });
-    setRunStatus(store, r.id, RUN_STATUS.queued);
-
-    const internals = manager as unknown as {
-      runContinuation(
-        runId: string,
-        stepId: string,
-        sessionId: string | undefined,
-        backend: 'claude',
-        prompt: string,
-        images: ContentBlock[],
-        persistedImages: ContentBlock[],
-        persistedAttachments: Array<{ name: string; url: string; path: string }>,
-      ): Promise<void>;
-    };
-    runInternals(manager).line.pendingContinuations.set(r.id, {
-      stepId: 'continue-1',
-      sessionId: 'session-interrupted',
-      backend: 'claude',
-      prompt: 'restart recovery',
-      images: [],
-      lineJoinedAt: Date.parse(r.createdAt),
-    });
-    runInternals(manager).line.queue.push(r.id);
+    const r = store.createRun({ title: 'interrupted task', workflow: 'quick-task', task: 'original recovery goal',
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
+    setRunStatus(store, r.id, RUN_STATUS.done, { worktree: false });
+    store.updateStep(r.id, 'task', { sessionId: 'session-interrupted', backend: 'claude' });
+    expect(manager.continueRun(r.id, { text: 'restart recovery' }, true)).toEqual({ ok: true });
 
     expect(manager.editTask(r.id, 'amended recovery goal')).toBe(true);
     expect(
       manager.enqueueMessage(r.id, [image(), { type: 'file', mediaType: 'text/markdown', data: Buffer.from('# queued brief').toString('base64') }, { type: 'text', text: 'also verify the queue' }]),
     ).not.toBeNull();
 
-    let delivered:
-      | {
-          prompt: string;
-          images: ContentBlock[];
-          persistedImages: ContentBlock[];
-          persistedAttachments: Array<{ name: string; url: string; path: string }>;
-        }
-      | undefined;
-    internals.runContinuation = async (
-      _runId,
-      _stepId,
-      _sessionId,
-      _backend,
-      prompt,
-      images,
-      persistedImages,
-      persistedAttachments,
-    ) => {
-      delivered = { prompt, images, persistedImages, persistedAttachments };
+    let delivered: AgentRunSpec | undefined;
+    runnerHook.runner = {
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
+      run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => undefined,
+      startSession: spec => {
+        delivered = spec;
+        return { result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
+          sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => undefined,
+          holdsHumanInput: () => false, end: () => undefined, interrupt: () => undefined, open: false };
+      },
     };
-    await runInternals(manager).line.pump();
-
-    expect(delivered?.prompt).toBe(
+    capacity = 1;
+    await semaphore.refresh();
+    await semaphore.release();
+    await waitForProduct(manager, store, () => !!delivered);
+    expect(delivered?.userPrompt).toContain(
       'restart recovery\n\nCurrent task and queued updates:\n\n' +
         'amended recovery goal\n\nalso verify the queue',
     );
-    expect(delivered?.images).toEqual([]);
-    expect(delivered?.persistedImages).toEqual([image()]);
-    expect(delivered?.persistedAttachments).toEqual([
-      {
-        name: 'pasted-1.png',
-        url: `/api/v1/runs/${r.id}/images/pasted-1.png`,
-        path: join(imagesDir(r.id), 'pasted-1.png'),
-      },
-      { name: 'pasted-2.md', url: `/api/v1/runs/${r.id}/images/pasted-2.md`, path: join(imagesDir(r.id), 'pasted-2.md') },
-    ]);
+    expect(delivered?.images).toEqual([image()]);
+    expect(delivered?.userPrompt).toContain(join(imagesDir(r.id), 'pasted-1.png'));
+    expect(delivered?.userPrompt).toContain(join(imagesDir(r.id), 'pasted-2.md'));
     expect(readdirSync(imagesDir(r.id)).sort()).toEqual(['pasted-1.png', 'pasted-2.md']);
-    expect(runInternals(manager).line.pendingContinuations.has(r.id)).toBe(false);
     expect(manager.editTask(r.id, 'too late')).toBe(false);
   });
 
-  it('refuses every mutation once the run has been dequeued', () => {
+  it('refuses every mutation once the run has been dequeued', async () => {
     const r = seedQueued();
     const msg = manager.enqueueMessage(r.id, text('while queued'))!;
-    dequeue(r.id);
+    await waitForProduct(manager, store, () => ![...fixtureWork(manager).pending.values()].includes('pump'));
+    let observed: { status: RunRecord['status']; results: unknown[]; messages: string[] } | undefined;
+    const pin = store.pin.bind(store);
+    vi.spyOn(store, 'pin').mockImplementation((id, reason) => {
+      const result = pin(id, reason);
+      if (id !== r.id || reason !== 'active') return result;
+      // Admission removed the job, but execution has not changed the queued row yet.
+      const status = store.getRun(id)!.status;
+      const results = [
+        manager.enqueueMessage(id, text('too late')),
+        manager.editQueuedMessage(id, msg.id, { text: 'too late' }),
+        manager.removeQueuedMessage(id, msg.id),
+        manager.editTask(id, 'too late'),
+      ];
+      observed = { status, results, messages: store.getRun(id)?.queuedMessages?.map(message => message.text) ?? [] };
+      manager.cancel(id);
+      return result;
+    });
+    capacity = 1;
+    await semaphore.refresh();
+    await semaphore.release();
+    await waitForProduct(manager, store, () => observed !== undefined && !manager.isActive(r.id));
 
-    expect(manager.enqueueMessage(r.id, text('too late'))).toBeNull();
-    expect(manager.editQueuedMessage(r.id, msg.id, { text: 'too late' })).toBeNull();
-    expect(manager.removeQueuedMessage(r.id, msg.id)).toBe(false);
-    expect(manager.editTask(r.id, 'too late')).toBe(false);
-    // …and the stack is untouched by the refused calls.
-    expect(store.getRun(r.id)?.queuedMessages?.map((m) => m.text)).toEqual(['while queued']);
+    expect(observed?.status).toBe(RUN_STATUS.queued);
+    expect(observed?.results).toEqual([null, null, false, false]);
+    expect(observed?.messages).toEqual(['while queued']);
   });
 
   it('edits a message in place, keeping its id and createdAt', () => {
@@ -1962,71 +1962,80 @@ describe('RunManager queued-stack mutators (#472)', () => {
     expect(store.getRun(r.id)?.title).toBe('t');
   });
 
-  it('defers a message only while the run is starting up', () => {
-    const r = seedQueued();
-    const starting = runInternals(manager).line.starting;
+  async function launchDeferred(record: RunRecord, beforeSession: () => void = () => undefined) {
+    const delivered: ContentBlock[][] = [];
+    let session!: AgentSession;
+    runnerHook.runner = {
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
+      run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => undefined,
+      startSession: () => {
+        beforeSession();
+        let finish!: (result: AgentRunResult) => void;
+        let open = true;
+        const result = new Promise<AgentRunResult>(resolve => { finish = resolve; });
+        const close = () => { open = false; finish({ text: '', toolCalls: [], tokensUsed: 0 }); };
+        session = { result, sendMessage: content => { delivered.push(content); return true; },
+          sendAgentMessage: async content => { delivered.push(content); },
+          discardQueuedMessages: () => undefined, holdsHumanInput: () => false,
+          end: close, interrupt: close, get open() { return open; } };
+        return session;
+      },
+    };
+    capacity = 1;
+    await semaphore.refresh();
+    await semaphore.release();
+    await waitForProduct(manager, store, () => !!session && delivered.length === 1);
+    expect(store.readEvents(record.id).some(event => event.type === 'user-message')).toBe(true);
+    return { delivered, session };
+  }
 
-    // Not starting yet → the ladder falls through to 409.
+  it('defers a message only while the run is starting up', async () => {
+    const r = seedQueued();
     expect(manager.deferMessage(r.id, text('nope'))).toBe(false);
-
-    starting.add(r.id);
-    expect(manager.deferMessage(r.id, text('buffer me'))).toBe(true);
-    expect(
-      runInternals(manager).queuedInput.deferredMessages.get(
-        r.id,
-      ),
-    ).toHaveLength(1);
+    const pin = store.pin.bind(store);
+    vi.spyOn(store, 'pin').mockImplementation((id, reason) => {
+      pin(id, reason);
+      if (id === r.id && reason === 'active') expect(manager.deferMessage(id, text('buffer me'))).toBe(true);
+    });
+    const { delivered } = await launchDeferred(r);
+    expect(delivered).toEqual([text('buffer me')]);
   });
 
-  /**
-   * The sub-window that `starting` alone misses: `execute()` drops the run from
-   * `starting` as soon as it builds the ActiveRun, seconds before the backend is
-   * spawned. A message arriving there must still buffer, not 409.
-   */
-  it('still defers after `starting` is cleared but before the session opens', () => {
+  it('still defers after starting is cleared but before the session opens', async () => {
     const r = seedQueued();
-    (manager as unknown as { active: Map<string, unknown> }).active.set(r.id,
-      createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false }));
-    expect(manager.deferMessage(r.id, text('mid-spawn'))).toBe(true);
+    const { delivered } = await launchDeferred(r, () => {
+      expect(manager.deferMessage(r.id, text('mid-spawn'))).toBe(true);
+    });
+    expect(delivered).toEqual([text('mid-spawn')]);
   });
 
-  /**
-   * Review fix: `flushDeferred` used to drop its buffer before sending, so a message the
-   * session refused was silently lost — precisely the failure `deferMessage` exists to
-   * prevent. Anything unsent must stay buffered for the next session that opens.
-   */
   it('re-buffers a deferred message the session refuses, instead of dropping it', () => {
     const r = seedQueued();
-    const starting = runInternals(manager).line.starting;
-    const buffer = runInternals(manager).queuedInput.deferredMessages;
-
-    starting.add(r.id);
-    manager.deferMessage(r.id, text('buffer me'));
-    expect(buffer.get(r.id)).toHaveLength(1);
-
-    // Flush with no open session — `sendMessage` refuses.
-    ;runInternals(manager).queuedInput.flushDeferred(r.id);
-    expect(buffer.get(r.id)).toHaveLength(1);
-
-    // Now a session that accepts it: the buffer drains.
-    const delivered: ContentBlock[][] = [];
-    (manager as unknown as { sendMessage(id: string, c: ContentBlock[]): boolean }).sendMessage = (
-      _id,
-      content,
-    ) => {
-      delivered.push(content);
-      return true;
-    };
-    ;runInternals(manager).queuedInput.flushDeferred(r.id);
+    let accepts = false;
+    const delivered: Array<Parameters<RunManager['sendMessage']>[1]> = [];
+    const queuedInput = new QueuedInput({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+      work: new TrackedWork(), semaphore, disposed: () => false,
+    }, unused<ConstructorParameters<typeof QueuedInput>[1]>('QueuedInput.host', {
+      startingHas: () => true, activeGet: () => undefined,
+      canProceedWithRun: (_id, run): run is RunRecord => run !== undefined,
+      sendMessage: (_id, content) => { if (accepts) delivered.push(content); return accepts; },
+    }));
+    expect(queuedInput.deferMessage(r.id, text('buffer me'))).toBe(true);
+    queuedInput.flushDeferred(r.id);
+    expect(delivered).toEqual([]);
+    accepts = true;
+    queuedInput.flushDeferred(r.id);
+    expect(delivered).toEqual([text('buffer me')]);
+    queuedInput.flushDeferred(r.id);
     expect(delivered).toHaveLength(1);
-    expect(buffer.has(r.id)).toBe(false);
   });
 
-  it('stops deferring once a session has opened (a closed session is a real 409)', () => {
+  it('stops deferring once a session has opened (a closed session is a real 409)', async () => {
     const r = seedQueued();
-    const state = createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false });
-    state.liveSession.markSessionOpened();
-    (manager as unknown as { active: Map<string, unknown> }).active.set(r.id, state);
+    const { session } = await launchDeferred(r, () => {
+      expect(manager.deferMessage(r.id, text('opening message'))).toBe(true);
+    });
+    session.end();
     expect(manager.deferMessage(r.id, text('too late'))).toBe(false);
   });
 });
@@ -2034,10 +2043,10 @@ describe('RunManager queued-stack mutators (#472)', () => {
 describe('QueuedInput.hydrateQueuedInput (#472)', () => {
   let repoRoot: string;
   let store: RunStore;
-  let manager: RunManager;
+  let queuedInput: QueuedInput;
 
   const hydrate = (id: string, task: string) =>
-    runInternals(manager).queuedInput.hydrateQueuedInput(id, { task });
+    queuedInput.hydrateQueuedInput(id, { task });
 
   const stack = (id: string, ...messages: Array<{ text: string; images?: string[] }>) =>
     store.updateRun(id, {
@@ -2052,7 +2061,9 @@ describe('QueuedInput.hydrateQueuedInput (#472)', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-hydrate-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot);
+    queuedInput = new QueuedInput({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+      work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => false,
+    }, unused('QueuedInput.host'));
   });
 
   afterEach(async () => {
@@ -2250,11 +2261,9 @@ describe('queued stacking reaches the backend (#472)', () => {
     const second = manager.startRun(WORKFLOW, { task: 'mock:cezar-done original prompt', worktree: false });
 
     // Wait for the scheduler's owned capacity check, not only startRun's initial queued record.
-    await waitForProduct(manager, store, () => ![...runInternals(manager).context.work.pending.values()].includes('pump') &&
-      !runInternals(manager).line.hasStarting(second.id));
+    await waitForProduct(manager, store, () => ![...fixtureWork(manager).pending.values()].includes('pump'));
 
     // The second run is holding in the queue — amend it there.
-    expect(runInternals(manager).line.hasQueued(second.id)).toBe(true);
     expect(store.getRun(second.id)?.status).toBe('queued');
     const typo = manager.enqueueMessage(second.id, [{ type: 'text', text: 'STACKEDONE with a typo' }]);
     expect(typo).not.toBeNull();
@@ -2294,36 +2303,59 @@ describe('recover() carries the queued stack exactly once (#472)', () => {
     steps: [{ id: 'task', name: 'Do the task', prompt: '{{task}}' }],
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-recover-'));
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    writeFileSync(join(repoRoot, 'base.txt'), 'base');
+    await run('git', ['add', 'base.txt'], { cwd: repoRoot });
+    await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
   });
 
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
+    runnerHook.runner = undefined;
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
   it('folds once across repeated recoveries', async () => {
     const r = store.createRun({ title: 't', workflow: '(planned)', task: 'the original task', steps: [] });
-    setRunStatus(store, r.id, RUN_STATUS.queued, { workflowDef: WORKFLOW, queuedMessages: [
+    setRunStatus(store, r.id, RUN_STATUS.queued, { workflowDef: WORKFLOW, worktree: false, queuedMessages: [
         { id: 'm1', text: 'the stacked bit', createdAt: '2026-07-21T10:00:00.000Z' },
       ] });
 
     const expected = 'the original task\n\nthe stacked bit';
-    const jobsOf = (m: RunManager) =>
-      runInternals(m).line.pendingJobs;
-
+    let capacity = 0;
+    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: capacity, memoryLimitMb: null }) });
+    let delivered: AgentRunSpec | undefined;
+    runnerHook.runner = {
+      backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
+      run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => undefined,
+      startSession: spec => {
+        delivered = spec;
+        return { result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
+          sendMessage: () => false, sendAgentMessage: () => false, discardQueuedMessages: () => undefined,
+          holdsHumanInput: () => false, end: () => undefined, interrupt: () => undefined, open: false };
+      },
+    };
+    let manager!: RunManager;
     // Two successive restarts, each re-adopting the same record.
     for (let restart = 0; restart < 2; restart += 1) {
-      const manager = createFixtureManager(store, repoRoot);
-      // Keep the run parked in the queue: recover() pushes and pumps, but with the
-      // job still pending we can read exactly what it rebuilt.
+      manager = createFixtureManager(store, repoRoot, { semaphore });
+      // Keep each recovered task queued until both restarts have rebuilt its input.
       await manager.recover();
-      expect(jobsOf(manager).get(r.id)?.input.task).toBe(expected);
+      expect(store.getRun(r.id)?.status).toBe(RUN_STATUS.queued);
       // The record is never rewritten — that is what stops the compounding.
       expect(store.getRun(r.id)?.task).toBe('the original task');
+      if (restart === 0) manager.dispose();
     }
+    capacity = 1;
+    await semaphore.refresh();
+    await semaphore.release();
+    await waitForProduct(manager, store, () => !!delivered);
+    expect(delivered?.userPrompt).toContain(expected);
+    expect(delivered?.userPrompt?.split('the stacked bit')).toHaveLength(2);
+    expect(store.getRun(r.id)?.task).toBe('the original task');
   });
 });
 
