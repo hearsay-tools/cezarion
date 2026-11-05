@@ -8,9 +8,6 @@ export const CI_QUERY_TIMEOUT_MS = 10_000;
 /** `gh pr checks --watch --interval`, in seconds. Not the query timeout. */
 export const CI_WATCH_INTERVAL_SECONDS = 30;
 export const CI_QUERY_LIMIT = 4;
-/** The free query permits an activity progress read needs before it starts, so it never takes the
- *  last one an outcome query could need. */
-export const CI_PROGRESS_FREE_PERMITS = 2;
 export const CI_OUTPUT_LIMIT = 64 * 1024;
 export const CI_TERMINATE_MS = 2_000;
 
@@ -33,13 +30,6 @@ export class CiSemaphore {
     else this.active++;
     // A slot is transferred to the oldest waiter, not released and raced for.
     if (signal.aborted) { this.release(); signal.throwIfAborted(); }
-    let released = false;
-    return () => { if (!released) { released = true; this.release(); } };
-  }
-  /** A permit now, only while at least `free` permits are free and nobody queues; never waits. */
-  tryAcquire(free: number): (() => void) | undefined {
-    if (this.queue.length || this.limit - this.active < free) return undefined;
-    this.active++;
     let released = false;
     return () => { if (!released) { released = true; this.release(); } };
   }
@@ -175,12 +165,15 @@ export class GithubCiClient {
     this.command = options.command ?? (this.env.CEZ_DRY_RUN === '1' ? { file: process.execPath, args: ['-e', dryRunCommand] } : { file: 'gh', args: [] });
     this.cwd = options.cwd;
   }
-  /** One bounded gh query. It waits for a query permit unless the caller already holds `permit`. */
-  private async query(args: string[], signal: AbortSignal, permit?: () => void): Promise<CiCommandResult> {
+  /**
+   * One bounded gh query. An outcome query waits for one of the shared query permits; a progress
+   * query (`permit: false`) takes none, and its caller bounds how many run.
+   */
+  private async query(args: string[], signal: AbortSignal, permit = true): Promise<CiCommandResult> {
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(CI_QUERY_TIMEOUT_MS)]);
-    let release = permit;
+    let release: (() => void) | undefined;
     try {
-      release ??= await this.queries.acquire(bounded);
+      if (permit) release = await this.queries.acquire(bounded);
       return await this.runCommand(args, bounded); }
     catch (error) { if (!signal.aborted && bounded.aborted) throw new CiGithubError('query_timeout', 'GitHub query exceeded ten seconds; check connectivity and retry.', true); throw error; }
     finally { release?.(); }
@@ -254,16 +247,14 @@ export class GithubCiClient {
     return this.readChecks(pr, signal);
   }
   /**
-   * A checks read for the activity view's progress (spec 2026-11-05-live-activity-view). It never
-   * waits for a query permit and starts only while `CI_PROGRESS_FREE_PERMITS` are free, so it never
-   * delays an outcome query. `undefined`: no permit now; the caller skips this read.
+   * A checks read for the activity view's progress (spec 2026-11-05-live-activity-view). It takes
+   * no shared query permit, so outcome queries always have all of them; it keeps its own ten-second
+   * bound. The caller runs at most one at a time.
    */
-  tryChecks(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubCheck[]> | undefined {
-    if (signal.aborted) return undefined;
-    const permit = this.queries.tryAcquire(CI_PROGRESS_FREE_PERMITS);
-    return permit && this.readChecks(pr, signal, permit);
+  progressChecks(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubCheck[]> {
+    return this.readChecks(pr, signal, false);
   }
-  private async readChecks(pr: CiPrIdentity, signal: AbortSignal, permit?: () => void): Promise<GithubCheck[]> {
+  private async readChecks(pr: CiPrIdentity, signal: AbortSignal, permit = true): Promise<GithubCheck[]> {
     const result = await this.query(['pr', 'checks', String(pr.prNumber), '--repo', `github.com/${pr.repository}`, '--json', 'name,state,link,bucket'], signal, permit);
     // gh documents 1 for failed checks and 8 for pending. Only validated JSON decides CI outcome.
     if (![0, 1, 8].includes(result.code) || !result.stdout.trim()) {

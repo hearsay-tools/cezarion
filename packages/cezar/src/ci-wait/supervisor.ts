@@ -140,17 +140,16 @@ export class CiWatcherSupervisor {
    * The `--watch` phase's extra checks read (spec 2026-11-05-live-activity-view), only while someone
    * watches the wait's project. It updates the progress and nothing else: its rows never reach
    * `observe`, and a failed read keeps the last progress and is not an error. The loop never awaits
-   * it, so a slow read delays neither a --watch completion nor the next head probe. It never takes a
-   * query permit an outcome query could need: one read runs across the supervisor, and it starts
-   * only when `tryChecks` finds two permits free, else this probe skips it. The end of the watch
+   * it, so a slow read delays neither a --watch completion nor the next head probe. It takes none of
+   * the client's query permits (`progressChecks`), which stay with the outcome queries; one read runs
+   * across the supervisor, so a probe that finds one in flight skips its own. The end of the watch
    * aborts it, and an aborted read publishes nothing.
    */
   private startProgressRead(wait: CiWait, signal: AbortSignal): void {
     if (this.progressRead || !this.progress.wanted(wait.id)) return;
     const own = new AbortController();
     const readSignal = AbortSignal.any([signal, own.signal]);
-    const read = this.github.tryChecks(wait, readSignal);
-    if (!read) return;
+    const read = this.github.progressChecks(wait, readSignal);
     const entry = { waitId: wait.id, abort: own };
     this.progressRead = entry;
     void read.then(rows => {

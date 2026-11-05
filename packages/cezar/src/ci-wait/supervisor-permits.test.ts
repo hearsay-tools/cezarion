@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CiPrIdentity, CiWait } from '@open-mercato/cezar-contract';
-import { CI_QUERY_LIMIT, CiSemaphore, GithubCiClient, type CiCommandResult, type GithubCheck } from './github.ts';
+import { CI_QUERY_LIMIT, GithubCiClient, type CiCommandResult, type GithubCheck } from './github.ts';
 import { CiProgressRegistry } from './progress.ts';
 import { CI_PROBE_MS, CiWatcherSupervisor } from './supervisor.ts';
 
 /**
- * The activity view's progress reads share the GitHub client's query permits with the reads that
- * decide a wait's outcome (spec 2026-11-05-live-activity-view, CI check progress). They never wait
- * for a permit, never take one while fewer than two are free, and one runs at a time, so no
- * progress read delays an outcome query. These tests drive the client's real semaphore and query
- * path; only the gh process is replaced.
+ * The activity view's progress reads never touch the GitHub client's query permits, which belong
+ * to the reads that decide a wait's outcome (spec 2026-11-05-live-activity-view, CI check
+ * progress). One progress read runs at a time across the supervisor, so outcome queries keep all
+ * four permits, as before S3. These tests drive the client's real semaphore and query path; only
+ * the gh process is replaced.
  */
 
 // Vitest does not virtualize node:timers/promises; keep AbortSignal semantics on the fake clock.
@@ -32,19 +32,29 @@ const rows = (bucket: GithubCheck['bucket']): GithubCheck[] => [{name: 'build', 
 
 /**
  * gh, answered in process. A checks read while the PR's --watch still runs (a progress read) is
- * held until `releaseHeld`, and rejects on abort as the real process does. The first checks read
- * of a PR is pending; one after its --watch exits passes.
+ * held, and rejects on abort as the real process does. The first checks read of a PR is pending;
+ * one after its --watch exits passes. The next `holdViews` metadata reads are held too.
  */
 class FakeGh extends GithubCiClient {
   readonly held: Array<{ prNumber: number; release: () => void }> = [];
   private readonly checksReads = new Map<number, number>();
   private readonly watches = new Map<number, () => void>();
   private readonly finished = new Set<number>();
+  /** The PR of each metadata read that reached gh, in order. */
+  readonly views: number[] = [];
+  holdViews = 0;
+  readonly heldViews: Array<{ prNumber: number; release: () => void }> = [];
   protected override runCommand(args: string[], signal: AbortSignal): Promise<CiCommandResult> {
     if (args[0] === 'api') return Promise.resolve(answer({total_count: 0, workflow_runs: []}));
     if (args[1] === 'view') {
       const prNumber = Number(args[2]!.split('/').pop());
-      return Promise.resolve(answer({url: identity(prNumber).prUrl, number: prNumber, headRefOid: head, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN'}));
+      this.views.push(prNumber);
+      const metadata = answer({url: identity(prNumber).prUrl, number: prNumber, headRefOid: head, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN'});
+      if (this.holdViews > 0) {
+        this.holdViews--;
+        return new Promise(resolve => this.heldViews.push({prNumber, release: () => resolve(metadata)}));
+      }
+      return Promise.resolve(metadata);
     }
     const prNumber = Number(args[2]);
     // PR 99 belongs to no wait: `occupy` holds query permits with it.
@@ -72,11 +82,11 @@ class FakeGh extends GithubCiClient {
   /** `gh pr checks --watch` of this PR exits. */
   finishWatch(prNumber: number): void { this.watches.get(prNumber)!(); }
   progressReads(): number { return this.held.filter(entry => entry.prNumber !== OCCUPIER).length; }
-  /** Occupy `count` query permits with held checks reads that belong to no wait. */
+  occupied(): number { return this.held.filter(entry => entry.prNumber === OCCUPIER).length; }
+  /** Ask for `count` outcome checks reads that belong to no wait; each holds a query permit. */
   occupy(count: number): void {
     for (let index = 0; index < count; index++) void this.checks(identity(OCCUPIER), new AbortController().signal).catch(() => {});
   }
-  releaseOccupied(): void { for (const entry of this.held.filter(held => held.prNumber === OCCUPIER)) entry.release(); }
 }
 
 const services: CiWatcherSupervisor[] = [];
@@ -124,48 +134,44 @@ describe('progress reads and the query permits', () => {
     expect(github.held.map(entry => entry.prNumber)).toEqual([1]);
   });
 
-  it('skips a progress read while fewer than two permits are free, and starts it once two are', async () => {
+  it('a progress read holds no query permit: four outcome reads still start at once beside it', async () => {
     vi.useFakeTimers();
     const github = new FakeGh();
     const {progress, start} = supervisor(github);
     const watched = start(1);
     await tick();
     progress.read(watched.request.id, 'shop');
-    github.occupy(CI_QUERY_LIMIT - 1);
-    await tick();
-    await vi.advanceTimersByTimeAsync(CI_PROBE_MS);
-    // The head probe took the last permit and returned it; one permit stays free: no read.
-    expect(github.progressReads()).toBe(0);
-    expect(watched.state.settled).toBe(false);
-    github.releaseOccupied();
-    await tick();
     await vi.advanceTimersByTimeAsync(CI_PROBE_MS);
     expect(github.progressReads()).toBe(1);
-    expect(watched.state.settled).toBe(false);
+    github.occupy(CI_QUERY_LIMIT);
+    await tick();
+    expect(github.occupied()).toBe(CI_QUERY_LIMIT);
   });
-});
 
-describe('a non-blocking query permit', () => {
-  it('is taken only while enough permits are free and nobody queues, and never waits', async () => {
-    const semaphore = new CiSemaphore(4);
-    const signal = new AbortController().signal;
-    const first = await semaphore.acquire(signal);
-    const second = await semaphore.acquire(signal);
-    const tried = semaphore.tryAcquire(2);
-    expect(tried).toBeDefined();
-    // Three taken, one free.
-    expect(semaphore.tryAcquire(2)).toBeUndefined();
-    const fourth = await semaphore.acquire(signal);
-    expect(semaphore.tryAcquire(1)).toBeUndefined();
-    const queued = semaphore.acquire(signal);
-    // A released permit goes to the queued request, never to a later try.
-    first();
-    const fifth = await queued;
-    expect(semaphore.tryAcquire(1)).toBeUndefined();
-    second();
-    tried!();
-    const sixth = semaphore.tryAcquire(2);
-    expect(sixth).toBeDefined();
-    for (const release of [fourth, fifth, sixth!]) release();
+  // Review round 3 of S3: a progress read admitted while permits were free still held one of them
+  // when every watch finished at once.
+  it('all four watches finish while a progress read and three metadata reads are held: the fourth wait still reads at once and settles', async () => {
+    vi.useFakeTimers();
+    const github = new FakeGh();
+    const {progress, start} = supervisor(github);
+    const deadline = new AbortController();
+    const waits = [1, 2, 3].map(prNumber => start(prNumber));
+    const last = start(4, deadline.signal);
+    await tick();
+    for (const watched of [...waits, last]) progress.read(watched.request.id, 'shop');
+    await vi.advanceTimersByTimeAsync(CI_PROBE_MS);
+    expect(github.progressReads()).toBe(1);
+    // Each final snapshot opens with a metadata read; the first three of them do not answer.
+    github.holdViews = 3;
+    const before = github.views.length;
+    for (const prNumber of [1, 2, 3, 4]) github.finishWatch(prNumber);
+    await tick();
+    // The opening metadata read of each snapshot reached gh, PR 4's at once.
+    expect(github.views.slice(before, before + 4)).toEqual([1, 2, 3, 4]);
+    expect(last.state.settled).toBe(true);
+    deadline.abort();
+    expect(await last.result).toMatchObject({outcome: 'passed', totalChecks: 1});
+    expect(github.progressReads()).toBe(1);
+    for (const held of github.heldViews) held.release();
   });
 });
