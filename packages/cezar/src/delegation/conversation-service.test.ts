@@ -413,7 +413,7 @@ describe('durable conversations', () => {
     const request = { id: randomUUID(), recipientRunId: w.id, kind: 'progress' as const, text: 'update', timeoutSeconds: 600 };
     const notify = vi.spyOn(f.manager, 'deliverConversationInput');
     vi.spyOn(f.store, 'appendEvent').mockImplementationOnce(() => { throw Error('projection unavailable'); });
-    await expect(f.service.send(f.caller, request)).rejects.toThrow('projection unavailable');
+    await expect(f.service.send(f.caller, request)).resolves.toMatchObject({ effect: 'applied', delivery: 'queued', message: { id: request.id, state: 'accepted' } });
     expect(f.store.getRun(w.id)?.agentInputs).toHaveLength(1); expect(notify).not.toHaveBeenCalled();
     expect(await f.service.send(f.caller, request)).toMatchObject({ delivery: 'queued' });
     expect(notify).toHaveBeenCalledWith(w.id);

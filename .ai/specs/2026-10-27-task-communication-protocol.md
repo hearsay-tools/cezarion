@@ -761,3 +761,18 @@ With the same tests and the three fixed source files: 29 passed. Guards cover
 precommit failure, predispatch rejection, valid service rejection and unrelated
 transport errors. Additional cases pin a delivery acknowledgement written before
 a callback throws and a committed reply outcome during failed repair.
+
+
+The existing `conversation-service.test.ts` case named `repairs projection
+failure on accepted send retry and notifies delivery without another input`
+now expects the fresh committed `applied`, `queued` receipt. Its original
+rejection assertion also pinned that the first failed projection skips delivery
+while retaining one input; those checks and all later retry, notification and
+no-duplicate checks remain. Only the thrown-error expectation changes.
+Focused proof (`npm test -- --passWithNoTests=false
+packages/cezar/src/delegation/conversation-service.test.ts -t
+'repairs projection failure on accepted send retry and notifies delivery without another input'`,
+one command): the old assertion fails against `f00387dca`; the updated assertion
+passes against that source (1 passed, 35 skipped), fails with `projection
+unavailable` against `proof_base` (1 failed, 35 skipped), and passes in the task
+worktree (1 passed, 35 skipped).
