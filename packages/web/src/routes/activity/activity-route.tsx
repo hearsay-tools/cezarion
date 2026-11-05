@@ -8,7 +8,7 @@ import { useNow } from '@/lib/use-now'
 import { ActivityBoard } from './activity-board'
 import { ActivityHeader, ScopeSwitch, SummaryChips } from './activity-header'
 import { ActivityLoading } from './activity-loading'
-import { summarize } from './activity-model'
+import { projectNotice, summarize } from './activity-model'
 
 /**
  * `/p/:projectId/activity` (spec 2026-11-05-live-activity-view, "Project view"), static: slice S5
@@ -31,6 +31,7 @@ export function ProjectActivityRoute() {
   const project = activity.data?.projects[0]
 
   if (activity.isPending) return <ActivityLoading />
+  const notice = project ? projectNotice(project) : undefined
   if (!project) {
     return (
       <div data-route="activity" className="min-h-full w-full px-[18px] py-6 md:px-7">
@@ -48,7 +49,11 @@ export function ProjectActivityRoute() {
         <ScopeSwitch scope="project" projectId={projectId ?? project.projectId} />
       </ActivityHeader>
       <SummaryChips summary={summarize([project])} tasksTo="/" />
-      <ActivityBoard project={project} now={now} watchingSince={watchingSince} />
+      {notice ? (
+        <p data-slot="activity-project-notice" role="status" className="py-6 text-[13px] text-muted-foreground">{notice}</p>
+      ) : (
+        <ActivityBoard project={project} now={now} watchingSince={watchingSince} />
+      )}
     </div>
   )
 }

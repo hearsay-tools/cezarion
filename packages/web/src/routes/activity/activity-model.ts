@@ -8,6 +8,16 @@ import { isLiveStatus } from './now-box'
  * Pure (spec 2026-11-05-live-activity-view, "What the user sees" and "Size, motion and access").
  */
 
+/**
+ * Why a project's lists are empty although it may have work: the project is not loaded in this
+ * cockpit, or its run store cannot open. Undefined when the lists are the truth.
+ */
+export function projectNotice(project: Pick<ActivityProject, 'loaded' | 'unavailable'>): string | undefined {
+  if (project.unavailable) return project.unavailable.error
+  if (!project.loaded) return 'Not loaded in this cockpit'
+  return undefined
+}
+
 /** The name a line shows for a task the snapshot cannot name (its record could not be read). */
 export const UNREADABLE_TASK = 'Unreadable task'
 

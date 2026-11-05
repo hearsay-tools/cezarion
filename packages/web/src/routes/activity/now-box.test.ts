@@ -29,7 +29,7 @@ const STATE_TABLE: Row[] = [
     { verb: 'Needs you', main: 'Your turn', action: 'open' }],
   ['needs you with no wait entry', run({ status: RUN_STATUS.waiting, rung: 'needs-you' }), { verb: 'Needs you', main: 'Your turn', action: 'open' }],
   ['needs you: the wake budget is spent', waiting('needs-you', { kind: ACTIVITY_WAIT_KIND.human, since: iso(-60_000), detail: { reason: 'budget', queuedMessages: 2 } }),
-    { verb: 'Needs you', main: 'Automatic wakes used up · 2 queued messages', action: 'open' }],
+    { verb: 'Needs you', main: 'Automatic wakes used up · 2 messages queued', action: 'open' }],
   ['needs permission', run({ rung: 'needs-permission', tool: { title: 'Bash rm -rf dist', toolKind: 'execute', status: TOOL_STATUS.pending, startedAt: iso(-2_000) } }),
     { verb: 'Needs you', main: 'Permission', action: 'open' }],
   ['waiting on workers, outcomes only, one entry', waiting('waiting-on-workers', { kind: ACTIVITY_WAIT_KIND.workers, since: iso(-640_000), deadline: iso(1_080_000), detail: { owed: 2, total: 3, settled: 1, mode: 'any', recipientRunIds: [] } }),
@@ -73,6 +73,31 @@ describe('rootNow: the state table', () => {
 
   it('names no mode when several worker waits are open', () => {
     expect(rootNow(STATE_TABLE.find(([name]) => name === 'waiting on workers, several entries')![1], ctx).main).not.toMatch(/of/)
+  })
+})
+
+describe('rootNow: a truncated check list', () => {
+  const ci = (checks: { name: string; bucket: 'pass' | 'fail' | 'pending' }[], counts: { pass: number; fail: number; pending: number }) => waiting('waiting-for-ci', {
+    kind: ACTIVITY_WAIT_KIND.pr, since: iso(-1_000), deadline: iso(900_000),
+    detail: { number: 9, target: 'checks', checks, counts: { ...counts, skipping: 0, cancel: 0 }, truncated: true },
+  })
+
+  it('renders 100 segments and a "+1" segment in the pending tone for 101 checks with the last one pending', () => {
+    const listed = Array.from({ length: 100 }, (_, i) => ({ name: `check-${String(i).padStart(3, '0')}`, bucket: 'pass' as const }))
+    const box = rootNow(ci(listed, { pass: 100, fail: 0, pending: 1 }), ctx)
+    expect(box.main).toBe('PR 9 checks · 100 of 101 passed')
+    expect(box.checks).toHaveLength(100)
+    expect(box.overflow).toEqual({ count: 1, bucket: 'pending' })
+  })
+
+  it('gives the overflow the worst unlisted bucket', () => {
+    const listed = [{ name: 'a', bucket: 'fail' as const }, { name: 'b', bucket: 'pass' as const }]
+    expect(rootNow(ci(listed, { pass: 3, fail: 2, pending: 0 }), ctx).overflow).toEqual({ count: 3, bucket: 'fail' })
+    expect(rootNow(ci(listed, { pass: 4, fail: 1, pending: 0 }), ctx).overflow).toEqual({ count: 3, bucket: 'pass' })
+  })
+
+  it('adds no overflow to a list that holds every check', () => {
+    expect(rootNow(STATE_TABLE.find(([name]) => name === 'waiting for CI')![1], ctx).overflow).toBeUndefined()
   })
 })
 

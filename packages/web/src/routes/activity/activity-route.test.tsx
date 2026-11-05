@@ -77,6 +77,16 @@ describe('ProjectActivityRoute', () => {
     expect(alert.textContent).toContain('unexpected body')
   })
 
+  it.each([
+    ['a store that cannot open', project({ unavailable: { status: 503, error: 'The run store is locked by another process.' } }), 'The run store is locked by another process.'],
+    ['a project this cockpit has not loaded', project({ loaded: false }), 'Not loaded in this cockpit'],
+  ])('never shows %s as idle', async (_name, value, notice) => {
+    fetchMock.mockImplementation(async () => jsonResponse(snapshot(value)))
+    renderRoute()
+    expect((await screen.findByText(notice)).getAttribute('data-slot')).toBe('activity-project-notice')
+    expect(screen.queryByText('No active work in this project.')).toBeNull()
+  })
+
   it('shows an empty project with its review chip and no cards', async () => {
     fetchMock.mockImplementation(async () => jsonResponse(snapshot(project({ inReview: 2 }))))
     renderRoute()

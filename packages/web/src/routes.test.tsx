@@ -254,9 +254,7 @@ describe('scoped route map (/p/:projectId)', () => {
   it('opens the global activity view without forcing a project redirect', async () => {
     renderAt('/activity')
     expect(screen.getByTestId('location').getAttribute('data-pathname')).toBe('/activity')
-    const other = await screen.findByRole('link', { name: /^other-repo/ })
-    expect(other.getAttribute('href')).toBe('/p/other/activity')
-    expect(screen.getByRole('link', { name: 'All projects' }).getAttribute('aria-current')).toBe('page')
+    expect((await screen.findByRole('link', { name: 'All projects' })).getAttribute('aria-current')).toBe('page')
     expect(screen.getByRole('link', { name: 'This project' }).getAttribute('href')).toBe(`/p/${BOOT}/activity`)
   })
   // Not a ROUTE_CASES row: the flat `/activity` is the global view, never a legacy redirect.

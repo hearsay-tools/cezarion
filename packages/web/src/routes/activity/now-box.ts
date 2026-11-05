@@ -1,4 +1,4 @@
-import type { ActivityPrProgress, ActivityRun, ActivityWait, ActivityWorker } from '@open-mercato/cezar-api-client/contract/activity'
+import type { ActivityCheckBucket, ActivityPrProgress, ActivityRun, ActivityWait, ActivityWorker } from '@open-mercato/cezar-api-client/contract/activity'
 
 import { attentionOfRung, type AttentionTone } from '@/lib/attention'
 
@@ -28,6 +28,8 @@ export interface NowBox {
   bar?: number
   /** One segment for each check, in name order. */
   checks?: ActivityPrProgress['checks']
+  /** A truncated check list: the checks outside it, as one more segment in the worst tone. */
+  overflow?: CheckOverflow
   /** The button under the box: Answer opens the question, Open the task. */
   action?: 'answer' | 'open'
 }
@@ -74,7 +76,7 @@ function needsYou(run: ActivityRun, wait: Extract<ActivityWait, { kind: 'human' 
   }
   if (wait?.detail.reason === 'budget') {
     const queued = wait.detail.queuedMessages
-    return { ...base, main: queued ? `Automatic wakes used up · ${plural(queued, 'queued message')}` : 'Automatic wakes used up', action: 'open' }
+    return { ...base, main: queued ? `Automatic wakes used up · ${plural(queued, 'message')} queued` : 'Automatic wakes used up', action: 'open' }
   }
   return { ...base, main: 'Your turn', action: 'open' }
 }
@@ -105,11 +107,29 @@ function checksLine(wait: Extract<ActivityWait, { kind: 'pr' }>): string {
   return `PR ${wait.detail.number} checks · ${counts.pass} of ${counted} passed`
 }
 
+export interface CheckOverflow {
+  count: number
+  /** The worst bucket among the unlisted checks: fail, then pending, then pass, then skipped. */
+  bucket: ActivityCheckBucket
+}
+
+const WORST_FIRST: readonly ActivityCheckBucket[] = ['fail', 'pending', 'pass', 'skipping', 'cancel']
+
+/** The "+N" segment of a truncated list: N from `counts` minus the listed checks. */
+export function checkOverflow(wait: Extract<ActivityWait, { kind: 'pr' }>): CheckOverflow | undefined {
+  const { counts, checks = [], truncated } = wait.detail
+  if (!truncated || counts === undefined) return undefined
+  const unlisted = (bucket: ActivityCheckBucket) => Math.max(0, counts[bucket] - checks.filter((check) => check.bucket === bucket).length)
+  const count = WORST_FIRST.reduce((sum, bucket) => sum + unlisted(bucket), 0)
+  const bucket = WORST_FIRST.find((candidate) => unlisted(candidate) > 0)
+  return count > 0 && bucket ? { count, bucket } : undefined
+}
+
 function pullRequest(run: ActivityRun, wait: Extract<ActivityWait, { kind: 'pr' }>): NowBox {
   const base = { tone: toneOf(run), since: wait.since, ...defined('detail', deadlineDetail(wait.deadline)) }
   if (wait.detail.target !== 'checks') return { ...base, verb: 'Waiting for merge', icon: 'merge', main: `PR ${wait.detail.number}` }
   const checks = wait.detail.checks ? [...wait.detail.checks].sort((a, b) => a.name.localeCompare(b.name)) : undefined
-  return { ...base, verb: 'Waiting for CI', icon: 'ci', main: checksLine(wait), ...defined('checks', checks) }
+  return { ...base, verb: 'Waiting for CI', icon: 'ci', main: checksLine(wait), ...defined('checks', checks), ...defined('overflow', checkOverflow(wait)) }
 }
 
 function defined<K extends string, V>(key: K, value: V | undefined): { [P in K]?: V } {

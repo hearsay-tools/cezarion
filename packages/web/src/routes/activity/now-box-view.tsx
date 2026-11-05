@@ -15,12 +15,18 @@ const BUCKET_FILL: Record<ActivityCheckBucket, string> = {
   cancel: 'border border-soft-foreground',
 }
 
-function CheckSegments({ checks }: { checks: NonNullable<NowBox['checks']> }) {
+/** One segment for each check; a long list narrows the gaps so every segment still fits. */
+function CheckSegments({ checks, overflow }: { checks: NonNullable<NowBox['checks']>; overflow: NowBox['overflow'] }) {
   return (
-    <span data-slot="activity-checks" aria-hidden="true" className="col-start-2 mt-[5px] flex gap-[3px]">
+    <span data-slot="activity-checks" aria-hidden="true" className={cn('col-start-2 mt-[5px] flex items-center', checks.length > 40 ? 'gap-px' : 'gap-[3px]')}>
       {checks.map((check) => (
-        <i key={check.name} data-bucket={check.bucket} title={check.name} className={cn('h-[5px] min-w-[3px] flex-1 rounded-[2px]', BUCKET_FILL[check.bucket])} />
+        <i key={check.name} data-bucket={check.bucket} title={check.name} className={cn('h-[5px] min-w-px flex-1 rounded-[2px]', BUCKET_FILL[check.bucket])} />
       ))}
+      {overflow ? (
+        <span data-slot="activity-checks-overflow" data-bucket={overflow.bucket} className="ml-1 flex shrink-0 items-center gap-1 text-[10px] leading-none text-muted-foreground tabular-nums">
+          <i className={cn('h-[5px] w-2 rounded-[2px]', BUCKET_FILL[overflow.bucket])} />+{overflow.count}
+        </span>
+      ) : null}
     </span>
   )
 }
@@ -51,7 +57,7 @@ export function NowBoxView({ box, now, dense }: { box: NowBox; now: number; dens
       <span data-slot="activity-main" className={cn('col-start-2 truncate text-[12.5px] text-foreground', box.mono && 'font-mono text-[12px]')}>
         {box.main}
       </span>
-      {box.checks ? <CheckSegments checks={box.checks} /> : null}
+      {box.checks ? <CheckSegments checks={box.checks} overflow={box.overflow} /> : null}
       {box.bar !== undefined ? <Bar value={box.bar} ink={ink} /> : null}
       {box.detail && !dense ? (
         <span data-slot="activity-detail" className="col-start-2 text-[11.5px] text-muted-foreground tabular-nums">
