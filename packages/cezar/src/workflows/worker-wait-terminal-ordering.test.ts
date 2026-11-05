@@ -1,13 +1,31 @@
-import { handleRunnerUiEvent, makeUiSink } from './run/session-events.ts';
-import { runInternals } from './run-internals.testkit.ts';
+import type { AgentEvent } from '../core/agent-runner.ts';
+import type { UiEvent } from '../core/ui-events.ts';
 import { randomUUID } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { RunStore } from '../runs/store.ts';
-import { captureState, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, store, timeline, until, useWorkerWaitFixture, waitOf, workerEntryOf, worker } from './worker-wait.testkit.ts';
+import { captureState, controlledWire, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, store, timeline, until, useWorkerWaitFixture, waitOf, workerEntryOf, worker } from './worker-wait.testkit.ts';
 import { setRunStatus, blockRunWrites } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+
+const runnerEvents = vi.hoisted(() => new Map<string, (event: UiEvent) => void>());
+const runnerTurnEvents = vi.hoisted(() => new Map<string, (event: AgentEvent) => void>());
+vi.mock('../core/runner-factory.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('../core/runner-factory.ts')>();
+  return { ...actual, createRunner: (...args: Parameters<typeof actual.createRunner>) => {
+    const runner = actual.createRunner(...args);
+    const start = runner.startSession.bind(runner);
+    runner.startSession = (spec, ...rest) => {
+      if (rest[0]) runnerTurnEvents.set(spec.cwd, rest[0]);
+      const onUiEvent = rest[1]?.onUiEvent;
+      if (onUiEvent) runnerEvents.set(spec.cwd, onUiEvent);
+      return start(spec, ...rest);
+    };
+    return runner;
+  } };
+});
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -67,36 +85,37 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent(); const w = await worker(p.id);
     const wait = register(p.id, [w.id]);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    const engine = runInternals(manager);
-    handleRunnerUiEvent(engine.context, engine.sessionHelperHost, p.id, engine.active.get(p.id)!, makeUiSink(engine.context, engine.sessionHelperHost, p.id, 'task'), {
-      type: 'turn.started', turnId: randomUUID(),
-    });
+    const emit = runnerEvents.get(store.getRun(p.id)!.worktreePath!);
+    if (!emit) throw Error('parent runner channel missing');
+    emit({ type: 'turn.started', turnId: randomUUID() });
     expect(store.getRun(p.id)?.status).toBe('running');
     expect(semaphore.busy()).toBe(1);
     expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id);
   });
 
   it('does not release capacity before the parked intent reaches disk', async () => {
-    const p = await parent('mock:slow'); const w = await worker(p.id);
+    const gate = join(root, 'park-turn-boundary');
+    const wire = controlledWire({ firstResultGate: gate });
+    const p = await parent(); const w = await worker(p.id);
+    await until(wire.initialReceived);
     register(p.id, [w.id]); store.flush();
+    const emit = runnerTurnEvents.get(store.getRun(p.id)!.worktreePath!);
+    if (!emit) throw Error('parent runner turn channel missing');
     const release = blockRunWrites(join(root, '.ai/cezar'));
-    // hearsay-tools/cezarion#1235: an agent worker wait parks through the wait list (`parkOnWaits`).
-    const engine = runInternals(manager);
     try {
-      expect(() => engine.wakeAdmission.parkOnWaits(p.id, engine.active.get(p.id)!)).toThrow();
+      expect(() => emit({ type: 'turn-end' })).toThrow();
+      // Check after the entire turn handler unwinds: a caller must not catch the
+      // refused checkpoint and release the parent's slot anyway.
       expect(waitOf(store.getRun(p.id))?.phase).toBe('registered');
       expect(semaphore.busy()).toBe(1);
-    } finally {
-      release();
-    }
+    } finally { release(); writeFileSync(gate, 'end'); }
+
   });
 
   it('recovery admits an older queued child before an expired parent wake', async () => {
     const p = await parent(); const w = await worker(p.id, 'mock:slow');
     const explain = (stage: string) => {
-      const engine = runInternals(manager);
-      return `${stage}\n${JSON.stringify({ ...captureState(), queue: runInternals(manager).line.queue, starting: [...runInternals(manager).line.starting],
-        active: [...engine.active.keys()], executions: [...engine.workerExecutions.executions.keys()], workerExecution: store.readWorkerExecution(w.id) })}\n${timeline(p.id)}\n${timeline(w.id)}`;
+      return `${stage}\n${JSON.stringify({ ...captureState(), workerExecution: store.readWorkerExecution(w.id) })}\n${timeline(p.id)}\n${timeline(w.id)}`;
     };
     // Expire the deadline only after the parent parks; mock startup must not race a 1 s budget.
     register(p.id, [w.id]);

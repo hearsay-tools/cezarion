@@ -1,15 +1,31 @@
-import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { manager, store, useWorkerWaitFixture, waitOf, lastWaitOf } from './worker-wait.testkit.ts';
+import { manager, semaphore, store, useWorkerWaitFixture, waitOf, lastWaitOf } from './worker-wait.testkit.ts';
 import { conversationPair } from './worker-wait-conversations.testkit.ts';
+
+const runnerSessions = vi.hoisted(() => new Map<string, import('../core/agent-runner.ts').AgentSession>());
+vi.mock('../core/runner-factory.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('../core/runner-factory.ts')>();
+  return { ...actual, createRunner: (...args: Parameters<typeof actual.createRunner>) => {
+    const runner = actual.createRunner(...args);
+    const start = runner.startSession.bind(runner);
+    runner.startSession = (spec, ...rest) => {
+      const session = start(spec, ...rest);
+      runnerSessions.set(spec.cwd, session);
+      return session;
+    };
+    return runner;
+  } };
+});
 
 describe('parent and worker conversation waits through RunManager', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   it('conversation: a full queue of 32 replies can admit an all-request wake without losing a message', async () => {
     const f = await conversationPair();
-    const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();
-    const submissions = vi.spyOn(runInternals(manager).inputDelivery, 'submitAgentInput');
+    const capacity = vi.spyOn(semaphore, 'maxParallel').mockReturnValue(0);
+    const session = runnerSessions.get(store.getRun(f.p.id)!.worktreePath!);
+    if (!session) throw Error('parent runner session missing');
+    const submissions = vi.spyOn(session, 'sendAgentMessage');
     try {
       const requestIds = Array.from({ length: 32 }, () => randomUUID());
       for (const id of requestIds) await f.service.send(f.parentCaller, { id, recipientRunId: f.w.id, kind: 'request', text: 'Batch question mock:hold', timeoutSeconds: 600 });
@@ -25,20 +41,24 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       expect(queued.filter(input => !input.deliveredAt)).toHaveLength(33);
       expect(queued.map(input => input.id)).toEqual([...replyIds, wait.id]);
       expect(waitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: 'wake-pending', reason: 'outcome' });
-      expect(pump).toHaveBeenCalled(); pump.mockRestore();
-      await runInternals(manager).line.pump();
+      expect(store.getRun(f.p.id)?.status).toBe('waiting');
+      capacity.mockRestore();
+      await semaphore.release();
       await vi.waitFor(() => {
         expect(store.getRun(f.p.id)?.agentInputs?.filter(input => input.deliveredAt).map(input => input.id)).toEqual([...replyIds, wait.id]);
         expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
       }, { timeout: 60_000, interval: 20 }); // bound: 33 real deliveries on a loaded host, as before
       expect(lastWaitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, reason: 'outcome', requestOutcomes: expect.arrayContaining(requestIds.map(requestId => expect.objectContaining({ requestId, status: 'replied' }))) });
       // One submission: the result, then every reply, each once.
-      const delivered = submissions.mock.calls.filter((call, index) => call[0] === f.p.id && submissions.mock.results[index]?.value === true);
+      const delivered = submissions.mock.calls.filter((_call, index) => {
+        const result = submissions.mock.results[index];
+        return result?.type === 'return' && result.value !== false;
+      });
       expect(delivered).toHaveLength(1);
-      expect(delivered.flatMap(call => call[3])).toEqual([wait.id, ...replyIds]);
-      expect((delivered.at(-1)?.[2][0] as { text: string })?.text).toContain(`Request wait ${wait.id} (outcome). Request outcomes:`);
-      expect((delivered.at(-1)?.[2][0] as { text: string })?.text.match(/Batch answer mock:hold/g)).toHaveLength(32);
-    } finally { pump.mockRestore(); submissions.mockRestore(); f.close(); }
+      expect(delivered.flatMap(call => call[1])).toEqual([wait.id, ...replyIds]);
+      expect((delivered.at(-1)?.[0][0] as { text: string })?.text).toContain(`Request wait ${wait.id} (outcome). Request outcomes:`);
+      expect((delivered.at(-1)?.[0][0] as { text: string })?.text.match(/Batch answer mock:hold/g)).toHaveLength(32);
+    } finally { capacity.mockRestore(); submissions.mockRestore(); f.close(); }
   }, 90_000);
 
 });

@@ -5,6 +5,7 @@ import {
   WAIT_KIND,
   WAIT_PHASE,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { TrackedWork } from './run/tracked-work.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -19,7 +20,7 @@ import { RunStore } from '../runs/store.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
-import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, RunManager } from './run.ts';
+import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, QUEUE_WATCHDOG_MS, RunManager } from './run.ts';
 import { cleanupCheckpoint, seedSettledFamily } from './delegation-reconcile.testkit.ts';
 
 describe('terminal delegation checkpoint reconciliation (#661)', () => {
@@ -30,13 +31,14 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
   let b: ReturnType<typeof seedSettledFamily>;
   beforeEach(() => {
     vi.stubEnv('CEZ_DELEGATION', '1');
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     root = mkdtempSync(join(tmpdir(), 'cez-reconcile-'));
     store = RunStore.open(join(root, '.ai/cezar'));
     a = seedSettledFamily(store, root); b = seedSettledFamily(store, root);
     manager = new RunManager(store, root);
   });
   afterEach(() => {
-    manager.dispose(); store.flush(); vi.restoreAllMocks(); vi.unstubAllEnvs();
+    manager.dispose(); store.flush(); vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.useRealTimers();
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -64,10 +66,10 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     expect(store.getRun(a.workerId)?.delegation).toHaveProperty('destroy.phase', 'terminating');
   });
 
-  it('retains global reconciliation for recovery and explicit callers', () => {
+  it('retains global reconciliation for recovery and explicit callers', async () => {
     // The full pass recovery runs (#779): settled families are no longer in memory, and the
     // pass over live families would skip them.
-    runInternals(manager).familyReconciler.reconcileAllWorkerFamilies();
+    await manager.recover();
     for (const family of [a, b]) expect(store.readEvents(family.parentId).some(e => e.type === 'conversation-message')).toBe(true);
   });
 
@@ -90,6 +92,10 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
   });
 
   it('does not let the queue watchdog revive a family awaiting recovery facts', async () => {
+    manager.dispose();
+    const work = new TrackedWork();
+    manager = new RunManager(store, root, { work });
+    const tracked = vi.spyOn(work, 'track');
     setRunStatus(store, a.parentId, RUN_STATUS.queued);
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -100,7 +106,10 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     const before = store.readEvents(a.parentId);
     const recovery = manager.recover(a.parentId);
     try {
-      await runInternals(manager).line.rescueStalledQueue();
+      await vi.advanceTimersByTimeAsync(QUEUE_WATCHDOG_MS);
+      const rescues = tracked.mock.calls.filter(([label]) => label === 'rescueStalledQueue');
+      expect(rescues).toHaveLength(1);
+      await rescues[0]![1];
       expect(store.readEvents(a.parentId)).toEqual(before);
       expect(store.getRun(a.parentId)?.status).toBe('queued');
     } finally {
@@ -147,7 +156,10 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     writeFileSync(join(dataDir, 'runs', `${a.workerId}.processes.json`), JSON.stringify({
       generation, controller: { pid: 2147483001, startToken: 'old-boot:100' }, processes: [],
     }));
-    store = RunStore.open(dataDir, { keepLive: true }); manager = new RunManager(store, root);
+    store = RunStore.open(dataDir, { keepLive: true });
+    const work = new TrackedWork();
+    manager = new RunManager(store, root, { work });
+    const tracked = vi.spyOn(work, 'track');
     let entered!: () => void; let release!: () => void;
     const ready = new Promise<void>(resolve => { entered = resolve; });
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -165,7 +177,10 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     const recovery = manager.recover();
     const rejection = outcome === 'failure' ? expect(recovery).rejects.toThrow('selected facts failed') : undefined;
     await ready;
-    manager.reconcileWorkerWaits(); await runInternals(manager).line.rescueStalledQueue();
+    manager.reconcileWorkerWaits(); await vi.advanceTimersByTimeAsync(QUEUE_WATCHDOG_MS);
+    const rescues = tracked.mock.calls.filter(([label]) => label === 'rescueStalledQueue');
+    expect(rescues).toHaveLength(1);
+    await rescues[0]![1];
     expect(settlement).not.toHaveBeenCalled();
     expect(store.readWorkerExecution(a.workerId)).toMatchObject({ phase: 'starting', generation });
     if (outcome === 'dispose') manager.dispose();
@@ -178,7 +193,6 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     expect(settlement).not.toHaveBeenCalled();
     expect(store.readWorkerExecution(a.workerId)?.phase).toBe(outcome === 'completed' ? 'complete' : 'starting');
     expect(store.readEvents(a.workerId).some(e => e.type === 'lifecycle' && /execution was finalized/.test(String(e.message)))).toBe(false);
-    expect(runInternals(manager).familyReconciler.recoveryFactsPending).toBe(false);
     store.close();
   });
 

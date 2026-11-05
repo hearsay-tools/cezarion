@@ -1,6 +1,5 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
 import { requirePidText } from '../pid-file.testkit.ts';
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -150,7 +149,6 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin
     });
 
     const service = (projectStore: RunStore, projectManager: RunManager) => {
-      runInternals(projectManager).orphans.orphanTermGraceMs = 500;
       const delegation = new DelegationService(); delegation.registerProject({ id: 'p', root, store: projectStore, manager: projectManager });
       return delegation;
     };

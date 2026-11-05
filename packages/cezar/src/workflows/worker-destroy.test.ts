@@ -1,7 +1,7 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
-import { createFixtureManager } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, fixtureWork } from './fixture-cleanup.testkit.ts';
 
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
@@ -14,6 +14,8 @@ import { removeOwnedWorkspace } from '../delegation/workspace.ts';
 import { isReclaimable, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import * as config from '../config.ts';
+import * as worktrees from '../git-worktree.ts';
+import * as profiles from '../workspace/agent-profiles.ts';
 
 import * as runners from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
@@ -151,11 +153,13 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it('parked stop waits for process result AND pending turn bookkeeping before allowing destruction', async () => {
     const w = await worker(); const hold = gate(); releases.push(hold.release);
-    const real = runInternals(manager).turnBookkeeper.recordTurnEnd.bind(runInternals(manager).turnBookkeeper);
-    const record = vi.spyOn(runInternals(manager).turnBookkeeper, 'recordTurnEnd').mockImplementation(async (...args) => { await hold.promise; return real(...args); });
+    const real = worktrees.worktreeShortstat;
+    const record = vi.spyOn(worktrees, 'worktreeShortstat').mockImplementation(async (...args) => { await hold.promise; return real(...args); });
     manager.enqueueOwnedRun(w.id); await until(() => store.getRun(w.id)?.status === 'waiting');
     expect(record).toHaveBeenCalled();
     destroy(w); expect(manager.requestWorkerStop(w.id).state).toBe('stopping');
+    await until(() => [...fixtureWork(root).pending.values()].includes('finishWorkerExecution')
+      || store.readWorkerExecution(w.id)?.phase === 'complete');
     expect(await manager.awaitRunTermination(w.id, 30)).toBe(false);
     expect(existsSync(workspace(w).path)).toBe(true);
     hold.release(); expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
@@ -315,11 +319,11 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it('startup cancellation survives an asynchronous environment preflight in fresh and continued sessions', async () => {
     const w = await worker();
-    const engine = manager as unknown as { agentEnvForStep(...args: unknown[]): Promise<unknown> };
-    const real = engine.agentEnvForStep.bind(manager);
+    const real = profiles.resolveProfileEnvForRoot;
+    const environment = vi.spyOn(profiles, 'resolveProfileEnvForRoot');
     for (const continuation of [false, true]) {
       const hold = gate(); releases.push(hold.release); let entered = false;
-      engine.agentEnvForStep = async (...args) => { entered = true; await hold.promise; return real(...args); };
+      environment.mockImplementation(async (...args) => { entered = true; await hold.promise; return real(...args); });
       if (continuation) {
         store.updateStep(w.id, 'task', { sessionId: 'mock-prior', backend: 'claude' });
         expect(manager.continueRun(w.id, { text: 'mock:hold' }).ok).toBe(true);
@@ -381,7 +385,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     manager.enqueueOwnedRun(w.id); await until(() => !!monitoringWakeOf(store.getRun(w.id)));
     const deadline = monitoringWakeOf(store.getRun(w.id))!;
     destroy(w); await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
-    expect(runInternals(manager).wakeAdmission.automaticWakes(w.id)).toBe(0);
+    // An automatic wake must neither advance the durable deadline nor publish a wake event.
     expect(monitoringWakeOf(store.getRun(w.id))).toBe(deadline);
     expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
     vi.useRealTimers();

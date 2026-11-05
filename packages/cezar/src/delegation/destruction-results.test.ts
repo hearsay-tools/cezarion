@@ -1,6 +1,5 @@
 import { workerCollectedResultSchema } from '@open-mercato/cezar-contract/delegation';
 import { setRunStatus, runPersistence } from '../runs/run-store.testkit.ts';
-import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
@@ -21,6 +20,7 @@ import {
 } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { ensureOwnedWorkspace, planOwnedWorkspace } from './workspace.ts';
 import { RunStore } from '../runs/store.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import { readPersistedRuns, seedRuns, runIds } from '../runs/run-store.testkit.ts';
@@ -323,11 +323,11 @@ describe('verified destruction retains results through explicit history deletion
   it.each(['queued', 'running'] as const)('does not revive a %s parent with interrupted deletion on restart', async status => {
     interruptedParentDeletion(); setRunStatus(f.store, f.parent.id, status); f.store.close();
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
-    const manager = createFixtureManager(reopened, f.root);
-    const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();
+    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
+    const manager = createFixtureManager(reopened, f.root, { semaphore });
     try {
       await manager.recover();
-      expect(pump).toHaveBeenCalled();
+      await semaphore.release();
       expect(manager.isActive(f.parent.id)).toBe(false);
       expect(reopened.getRun(f.parent.id)?.delegation).toMatchObject({ historyDeletion: 'pending' });
       expect(reopened.deleteRun(f.parent.id)).toBe(true);

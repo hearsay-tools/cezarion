@@ -1,8 +1,8 @@
-import { runInternals } from './run-internals.testkit.ts';
+import * as gitWorktree from '../git-worktree.ts';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { bookkeeping, collect, manager, parent, restart, root, store, until, worker } from './worker-wait.testkit.ts';
+import { describe, expect, it, vi } from 'vitest';
+import { bookkeeping, collect, manager, parent, restart, root, store, until, worker, work } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { useWorkerCapacityFixture } from './worker-wait-capacity.testkit.ts';
 
@@ -18,20 +18,26 @@ for (const review of [false, true]) {
       await restart();
       process.env.CEZ_REVIEW_GATE = review ? '1' : '0';
       writeFileSync(join(store.getRun(p.id)!.worktreePath!, 'review-change.txt'), 'review me');
-      const real = runInternals(manager).runSettlement.settleSuccess.bind(runInternals(manager).runSettlement);
+      const diff = gitWorktree.worktreeDiff;
       let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
-      let completion: Promise<void> | undefined;
-      runInternals(manager).runSettlement.settleSuccess = (id, durable) => completion = gate.then(() => real(id, durable));
-      expect(manager.finish(p.id)).toBe(true);
-      expect(completion).toBeInstanceOf(Promise);
-      expect(store.getRun(p.id)?.delegation).toHaveProperty('finishRequestedAt');
-      expect(manager.continueRun(p.id, { text: 'too late' }).ok).toBe(false);
-      store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar'));
-      manager.dispose(); release(); await completion;
-      expect(store.getRun(p.id)?.status).toBe(review ? 'review' : 'done');
-      await restart(false, checkpoint);
-      expect(store.getRun(p.id)?.status).toBe(review ? 'review' : 'done');
-      expect(store.getRun(w.id)?.status).toBe('cancelled');
+      const delayedDiff = vi.spyOn(gitWorktree, 'worktreeDiff').mockImplementation(async (...args) => {
+        await gate;
+        return diff(...args);
+      });
+      let completion: Promise<unknown> | undefined;
+      try {
+        expect(manager.finish(p.id)).toBe(true);
+        expect(delayedDiff).toHaveBeenCalled();
+        completion = Promise.all([...work.pending.keys()]);
+        expect(store.getRun(p.id)?.delegation).toHaveProperty('finishRequestedAt');
+        expect(manager.continueRun(p.id, { text: 'too late' }).ok).toBe(false);
+        store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar'));
+        manager.dispose(); release(); await completion; delayedDiff.mockRestore();
+        expect(store.getRun(p.id)?.status).toBe(review ? 'review' : 'done');
+        await restart(false, checkpoint);
+        expect(store.getRun(p.id)?.status).toBe(review ? 'review' : 'done');
+        expect(store.getRun(w.id)?.status).toBe('cancelled');
+      } finally { release(); await completion; delayedDiff.mockRestore(); }
     });
   }
 

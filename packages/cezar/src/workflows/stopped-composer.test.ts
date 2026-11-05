@@ -10,7 +10,7 @@ import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { RunManager } from './run.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
+import { randomUUID } from 'node:crypto';
 
 const captured = vi.hoisted(() => ({ specs: [] as AgentRunSpec[], release: undefined as (() => void) | undefined }));
 vi.mock('../core/runner-factory.ts', () => ({ createRunner: () => ({
@@ -73,11 +73,17 @@ describe('stopped composer engine', { timeout: 15_000 }, () => {
     expect(reopened.getRun(run.id)?.queuedMessages?.[0]?.images).toHaveLength(1);
   });
   it('refuses an untouched Continue when its execution checkpoint fails without requeueing it', () => {
-    const { manager, store, data } = fixture();
-    const run = manager.startRun(workflow, { task: 'original' });
+    const { manager, store, data, root } = fixture();
+    const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'original', steps: [] });
+    store.commitDelegation([{ id: parent.id, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } }]);
+    const id = randomUUID();
+    const run = store.createOwnedRun({ title: 'worker', task: 'original', workflow: 'original', workflowDef: workflow,
+      steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] }, parent.id, randomUUID(), {
+      role: 'worker', permissions: [], parentRunId: parent.id, workspace: { ownerRunId: id, resourceId: randomUUID(),
+        kind: 'owned-isolated', path: join(root, 'worker'), branch: 'worker', baselineSha: 'a'.repeat(40) },
+    }, 'a'.repeat(64));
     manager.cancel(run.id);
-    const executions = runInternals(manager).workerExecutions;
-    vi.spyOn(executions, 'beginWorkerExecution').mockImplementationOnce(() => { throw new Error('checkpoint failed'); });
+    vi.spyOn(store, 'commitWorkerExecutionStart').mockImplementationOnce(() => { throw new Error('checkpoint failed'); });
     expect(manager.continueRun(run.id, { text: 'must remain draft' })).toEqual({
       ok: false, error: 'original execution checkpoint unavailable',
     });

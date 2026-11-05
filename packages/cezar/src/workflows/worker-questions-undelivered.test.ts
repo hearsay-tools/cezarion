@@ -1,5 +1,5 @@
-import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
+import { uuidFrom } from '../delegation/questions.ts';
 import { describe, expect, it, vi } from 'vitest';
 import { WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION } from './run.ts';
 import { manager, spendWorkerBudget, store, until, worker } from './worker-wait.testkit.ts';
@@ -20,7 +20,7 @@ it('answers the worker for the parent when the parent cannot take another messag
     // The answer carries its automatic-wake charge, so asking again cannot loop past the budget.
     expect(store.getRun(w.id)?.automaticWakes).toBeGreaterThanOrEqual(1);
     // Routing again finds the queued answer: no second answer and no second event.
-    runInternals(manager).workerQuestions.routeWorkerQuestion(w.id);
+    await manager.recover(p.id);
     expect(store.getRun(w.id)?.agentInputs?.filter(input => input.purpose === 'undelivered-question')).toHaveLength(1);
     expect(eventsOf(w.id, 'worker-question-undelivered')).toEqual([expect.objectContaining({ askSeq })]);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
@@ -33,21 +33,27 @@ it('answers the worker for the parent when the parent cannot take another messag
   it("closes a stopped worker's question when Cezar's answer is still queued", async () => {
     const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     fillInbox(p.id);
-    const routing = runInternals(manager).workerQuestions;
-    const route = vi.spyOn(routing, 'routeWorkerQuestion').mockImplementation(() => {});
-    const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
+    const w = await worker(p.id, 'mock:cezar-ask');
+    const facts = store.transcriptFacts.bind(store);
+    const route = vi.spyOn(store, 'transcriptFacts').mockImplementation(id => {
+      const value = facts(id);
+      const { pendingAsk: _pendingAsk, ...withoutAsk } = value;
+      return id === w.id ? withoutAsk : value;
+    });
+    manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'ask.requested').length === 1 && store.getRun(w.id)?.status === 'waiting');
     const askSeq = eventsOf(w.id, 'ask.requested')[0]!.seq;
-    route.mockRestore();
-    // Cezar's answer is queued, and the worker stops before it is delivered.
-    const deliver = vi.spyOn(manager, 'deliverConversationInput').mockImplementation(() => {});
-    routing.answerUndelivered(w.id, askSeq, 'the parent conversation is at capacity');
-    deliver.mockRestore();
-    const answer = routing.undeliveredAnswerId(w.id, askSeq);
+    const answer = uuidFrom(`undelivered-question:${w.id}:${askSeq}`);
+    // A crash checkpoint after Cezar queued its answer, before it reached the provider.
+    store.commitOutcome(w.id, { kind: 'charged', automaticWakes: 1 }, { enqueue: [{
+      id: answer, source: 'lifecycle', purpose: 'undelivered-question', parentRunId: w.id,
+      text: 'Choice: parent conversation at capacity', createdAt: new Date().toISOString(),
+    }] });
     expect(store.getRun(w.id)?.agentInputs?.some(input => input.id === answer)).toBe(true);
     manager.cancel(w.id);
     await until(() => store.getRun(w.id)?.status === 'cancelled' && !manager.isActive(w.id));
-    routing.routeWorkerQuestion(w.id);
+    route.mockRestore();
+    await manager.recover(p.id);
     expect(closedAs(w.id)).toContain('worker-stopped');
     expect(hasPendingAsk(store, w.id)).toBe(false);
     expect(store.getRun(w.id)?.agentInputs?.some(input => input.id === answer && !input.deliveredAt) ?? false).toBe(false);
@@ -69,14 +75,18 @@ it('closes the question without an answer when the worker spent its automatic-wa
   it('answers the worker when its question is not a valid request', async () => {
     const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:cezar-ask');
-    const routing = runInternals(manager).workerQuestions;
-    const route = vi.spyOn(routing, 'routeWorkerQuestion').mockImplementation(() => {});
+    const facts = store.transcriptFacts.bind(store);
+    const route = vi.spyOn(store, 'transcriptFacts').mockImplementation(id => {
+      const value = facts(id);
+      const { pendingAsk: _pendingAsk, ...withoutAsk } = value;
+      return id === w.id ? withoutAsk : value;
+    });
     manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'ask.requested').length === 1 && store.getRun(w.id)?.status === 'waiting');
     const asked = eventsOf(w.id, 'ask.requested')[0]!;
     store.appendEvent(w.id, { type: 'ask.requested', requestId: randomUUID(), questions: asked.questions, context: 'x'.repeat(20_001) });
     route.mockRestore();
-    routing.routeWorkerQuestion(w.id);
+    await manager.recover(p.id);
     expect(eventsOf(w.id, 'worker-question-undelivered')).toEqual([expect.objectContaining({ reason: 'the question is not a valid request' })]);
     await until(() => cezarAnswered(w.id).length === 1);
     noHumanCard(w.id);

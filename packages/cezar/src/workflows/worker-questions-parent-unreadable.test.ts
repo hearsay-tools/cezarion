@@ -1,5 +1,5 @@
-import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
+import { uuidFrom } from '../delegation/questions.ts';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { eventCheckpoint, manager, restart, root, store, until } from './worker-wait.testkit.ts';
@@ -55,27 +55,28 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
   it('does not answer for an unreadable parent while a claimed parent reply stays queued', async () => {
     const f = await askedPair();
     try {
+      const deliver = vi.spyOn(manager, 'deliverConversationInput').mockImplementation(() => {});
       const reply = await f.reply('mock:hold');
-      const routing = runInternals(manager).workerQuestions;
+      store.claimInboxInputs(f.w.id, [reply.message.id], { receiptId: randomUUID(), generation: randomUUID(), expiresAt: new Date(Date.now() + 120_000).toISOString() });
+      deliver.mockRestore();
       vi.spyOn(store, 'isUnreadable').mockImplementation(id => id === f.p.id);
-      // The claim keeps the reply where it is, as `retireUnreadParentQuestion` leaves a claimed input.
-      const retire = vi.spyOn(routing, 'retireUnreadParentQuestion').mockImplementation(() => {});
-      runInternals(manager).workerQuestions.routeWorkerQuestion(f.w.id);
-      expect(retire).toHaveBeenCalledWith(f.w.id, reply.message.id);
+      await manager.recover(f.p.id);
+      expect(store.getRun(f.w.id)?.agentInputs?.find(input => input.id === reply.message.id)?.inboxClaim).toBeDefined();
       expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.purpose === 'undelivered-question') ?? false).toBe(false);
       expect(eventsOf(f.w.id, 'worker-question-undelivered')).toEqual([]);
     } finally { vi.restoreAllMocks(); f.close(); }
   });
 
-it('refuses human input on a routed question whose parent record cannot be read', () => {
-    const routing = runInternals(manager).workerQuestions;
-    const ask = { seq: 3, requestId: 'r', questions: [], routedMessageId: randomUUID() };
-    const worker = { id: randomUUID(), delegation: { role: 'worker' as const } };
-    vi.spyOn(store, 'getRun').mockImplementation(id => { return (id === worker.id ? worker : undefined) as never; });
-    vi.spyOn(store, 'transcriptFacts').mockReturnValue({ pendingAsk: ask } as never);
-    // routedAsk cannot load the parent's message, yet the question stays the parent's.
-    expect(routing.routedAsk(worker.id)).toBeUndefined();
-    expect(routing.answeredElsewhere(worker.id)).toBe(true);
+it('refuses human input on a routed question whose parent record cannot be read', async () => {
+    const f = await askedPair();
+    try {
+      const getRun = store.getRun.bind(store);
+      vi.spyOn(store, 'getRun').mockImplementation(id => id === f.p.id ? undefined : getRun(id));
+      vi.spyOn(store, 'isUnreadable').mockImplementation(id => id === f.p.id);
+      expect(manager.sendMessage(f.w.id, [{ type: 'text', text: 'human answer' }])).toBe(false);
+      expect(eventsOf(f.w.id, 'human-input-delivered')).toEqual([]);
+      expect(eventsOf(f.w.id, 'note')).toContainEqual(expect.objectContaining({ message: expect.stringContaining('parent') }));
+    } finally { vi.restoreAllMocks(); f.close(); }
   });
 
 // Cezar's answer queued for a routed question still answers it once the parent's ledger reads
@@ -84,7 +85,13 @@ it('refuses human input on a routed question whose parent record cannot be read'
     const f = await askedPair();
     try {
       const askSeq = eventsOf(f.w.id, 'ask.requested')[0]!.seq;
-      runInternals(manager).workerQuestions.answerUndelivered(f.w.id, askSeq, 'the parent record cannot be read');
+      // The lifecycle answer was committed before the parent became readable again.
+      store.commitOutcome(f.w.id, { kind: 'charged', automaticWakes: 1 }, { enqueue: [{
+        id: uuidFrom(`undelivered-question:${f.w.id}:${askSeq}`), source: 'lifecycle', purpose: 'undelivered-question',
+        parentRunId: f.w.id, text: 'Choice: mock:hold', createdAt: new Date().toISOString(),
+      }] });
+      expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.purpose === 'undelivered-question' && !input.deliveredAt)).toBe(true);
+      manager.deliverConversationInput(f.w.id);
       await until(() => cezarAnswered(f.w.id).length === 1);
       expect(cezarAnswered(f.w.id)[0]).toMatchObject({ askSeq });
       noHumanCard(f.w.id);

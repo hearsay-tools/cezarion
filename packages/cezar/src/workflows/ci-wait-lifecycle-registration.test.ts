@@ -1,7 +1,6 @@
 // Register the external CI mock before loading RunManager.
-import { pr, identity, success, ciWaitOf, lastCiWaitOf, parked, github, register } from './ci-wait-fixture.testkit.ts';
+import { pr, identity, externalResource, success, ciWaitOf, lastCiWaitOf, parked, github, register } from './ci-wait-fixture.testkit.ts';
 import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -39,7 +38,7 @@ describe('CI wait registration', { timeout: 30_000 }, () => {
     await until(() => parked(run.id));
     expect(store.getRun(run.id)?.waits?.some(entry => entry.kind === 'timer')).toBeFalsy();
     expect(semaphore.busy()).toBe(0); // its slot is a monitoring slot
-    expect(runInternals(manager).line.monitoring.has(run.id)).toBe(true);
+    expect(store.getRun(run.id)?.waits).toEqual([expect.objectContaining({ id: receipt.id, kind: WAIT_KIND.pr, phase: WAIT_PHASE.open })]);
     expect(external.aborted()).toBe(false);
   });
 
@@ -85,7 +84,7 @@ describe('CI wait registration', { timeout: 30_000 }, () => {
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     let resolve!: (value: typeof identity) => void;
     const deferred = new Promise<typeof identity>(done => { resolve = done; });
-    Object.assign(manager, { ciSupervisor: { resolve: () => deferred, watch: () => new Promise(() => {}), close() {} } });
+    vi.spyOn(externalResource.supervisor as { resolve: () => Promise<typeof identity> }, 'resolve').mockReturnValue(deferred);
     const registration = register(run.id);
     expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:hold new instruction' }])).toBe(true);
     resolve(identity);
