@@ -90,24 +90,35 @@ export function createProjectTopicPublisher(initial: LoadedProject, deps: Projec
       current.stopBound?.();
       const next = bindTo(project);
       bound = next;
-      current.stopBound = next.start((data) => current.publish(remember(data)));
+      const stillBound = () => live() && bound === next;
+      current.stopBound = next.start((data) => { if (stillBound()) current.publish(remember(data)); });
       const snapshot = await next.snapshot();
-      if (live()) current.publish(remember(snapshot));
+      // A removal while the first snapshot was read has sent its frame: this snapshot is stale.
+      if (stillBound()) current.publish(remember(snapshot));
     }).catch(() => undefined); // still unknown: the removal frame stands
   };
 
   return {
+    /** A new subscriber's frame. A removal or re-add while it is read makes it stale: read the
+     *  binding that is current then instead. */
     async snapshot() {
-      return bound ? remember(await bound.snapshot()) : removedSnapshot();
+      for (;;) {
+        const binding = bound;
+        if (!binding) return removedSnapshot();
+        const snapshot = await binding.snapshot();
+        if (bound === binding) return remember(snapshot);
+      }
     },
     start(publish) {
-      const current: Session = { publish, stopBound: bound?.start((data) => publish(remember(data))), generation: 0, offEvents: () => undefined };
+      const first = bound;
+      const current: Session = { publish, stopBound: undefined, generation: 0, offEvents: () => undefined };
+      session = current;
+      current.stopBound = first?.start((data) => { if (session === current && bound === first) publish(remember(data)); });
       current.offEvents = deps.onProjectEvent((event, id) => {
         if (session !== current || id !== projectId) return;
         if (event === 'removed') onRemoved(current);
         else onAdded(current);
       });
-      session = current;
       return () => {
         if (session === current) session = undefined;
         current.offEvents();

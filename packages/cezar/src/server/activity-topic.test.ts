@@ -18,8 +18,15 @@ function wire() {
   const boot = project('boot', 'Boot task');
   const loaded = new Map<string, LoadedProject>();
   const registry = [{ id: 'boot', name: 'Boot' }, { id: 'docs', name: 'Docs' }];
+  // While held, every source read waits: a test can land a registry event in the middle of one.
+  let gate: Promise<void> | undefined;
+  const hold = () => {
+    let release!: () => void;
+    gate = new Promise<void>((resolve) => { release = resolve; });
+    return () => { gate = undefined; release(); };
+  };
   const workspaceProjects = {
-    listVisibleProjects: async () => registry as never,
+    listVisibleProjects: async () => { await gate; return registry as never; },
     resolveBootProject: async () => 'boot',
     projectFailure: (error: unknown) => error instanceof ProjectContextError && error.reason === 'unknown-project'
       ? { error: error.message, status: 404 as const }
@@ -51,7 +58,7 @@ function wire() {
     onProjectEvent: (listener) => { projectListeners.add(listener); return () => projectListeners.delete(listener); },
   });
   const emit = (event: ProjectEvent, projectId: string) => { for (const listener of [...projectListeners]) listener(event, projectId); };
-  return { topics, families, demand, loaded, scopeListeners, projectListeners, emit };
+  return { topics, families, demand, loaded, scopeListeners, projectListeners, emit, hold };
 }
 
 describe('the activity topics', () => {
@@ -135,5 +142,50 @@ describe('the activity topics', () => {
     expect(projectEventOf('project-added', { project: { id: 'docs', name: 'Docs' } })).toEqual({ event: 'added', projectId: 'docs' });
     expect(projectEventOf('project-ready', { project: 'docs' })).toBeUndefined();
     expect(projectEventOf('project-removed', {})).toBeUndefined();
+  });
+
+  it('never lets a snapshot read before a removal answer after it', async () => {
+    const { families, loaded, emit, hold } = wire();
+    loaded.set('docs', project('docs', 'Old task'));
+    const publisher = (await families.get(ACTIVITY_PROJECT_TOPIC_PREFIX)!.resolve('docs'))!;
+    const frames: ActivitySnapshot[] = [];
+    const stop = publisher.start((data) => frames.push(data as ActivitySnapshot));
+    await publisher.snapshot();
+
+    // A second subscriber's snapshot is still reading when the registry removes the project.
+    const release = hold();
+    const reading = publisher.snapshot() as Promise<ActivitySnapshot>;
+    loaded.delete('docs');
+    emit('removed', 'docs');
+    release();
+    expect((await reading).projects[0]).toMatchObject({ unavailable: { status: 404 }, tasks: [] });
+    expect(frames.map((frame) => frame.projects[0]!.unavailable?.status)).toEqual([404]);
+    stop();
+  });
+
+  it('drops a re-add whose first snapshot is still reading when the project is removed again', async () => {
+    const { families, demand, loaded, emit, hold } = wire();
+    loaded.set('docs', project('docs', 'Old task'));
+    const publisher = (await families.get(ACTIVITY_PROJECT_TOPIC_PREFIX)!.resolve('docs'))!;
+    const frames: ActivitySnapshot[] = [];
+    const stop = publisher.start((data) => frames.push(data as ActivitySnapshot));
+    await publisher.snapshot();
+    loaded.delete('docs');
+    emit('removed', 'docs');
+
+    const again = project('docs', 'New task');
+    loaded.set('docs', again);
+    const release = hold();
+    emit('added', 'docs');
+    await new Promise<void>((resolve) => setImmediate(resolve)); // the re-add resolves and starts its first read
+    loaded.delete('docs');
+    emit('removed', 'docs');
+    release();
+    await new Promise<void>((resolve) => setImmediate(resolve)); // the stale read finishes
+    expect(frames.map((frame) => frame.projects[0]!.unavailable?.status)).toEqual([404, 404]);
+    expect(await publisher.snapshot()).toMatchObject({ projects: [{ unavailable: { status: 404 } }] });
+    expect((again.store as unknown as EventEmitter).listenerCount('run')).toBe(0);
+    expect(demand.has('docs')).toBe(false);
+    stop();
   });
 });
