@@ -181,6 +181,19 @@ for (const type of [InputGroup, InputFlight]) {
 export function createInputGroup(): InputGroup { return new InputGroup(); }
 
 type HumanAnswerBudget = { spent: number };
+
+/** Charging results cancelled by this flush, before a human answer resets its budget. */
+export function cappedTimersBeforeFlush(run: RunRecord, beforeHumanReset: HumanAnswerBudget | undefined, reads: {
+  countAutomaticWakes(before?: HumanAnswerBudget): number;
+  isAdmitted(): boolean;
+  atTurnBoundary(): boolean;
+}, maxAutoContinues: number): Wait[] {
+  if (reads.countAutomaticWakes(beforeHumanReset) >= maxAutoContinues && reads.isAdmitted() && reads.atTurnBoundary()) {
+    return resolvedWaits(run).filter(chargesBudget);
+  }
+  return [];
+}
+
 type RoutedAnswer = { askSeq: number; source: QuestionAnswerSource; reply: AgentInput; text: string; state: ActiveRun | undefined; fallback: boolean };
 export const HELD_HUMAN_INPUT_RECHECK_MS = 250;
 interface InputDeliveryHost {
@@ -619,14 +632,16 @@ export class InputDelivery {
   private cancelCappedTimersBeforeFlush(runId: string, state: ActiveRun, run: RunRecord, beforeHumanReset?: HumanAnswerBudget): RunRecord {
     // A timer result still owed when the budget is spent is cancelled before its batch is sent; the
     // CI results beside it are delivered.
-    if (this.host.countAutomaticWakes(runId, beforeHumanReset) >= this.maxAutoContinues && this.host.line.isAdmitted(runId) && state.boundary.atTurnBoundary === state.liveSession.session) {
-      const owedTimers = resolvedWaits(run).filter(chargesBudget);
-      if (owedTimers.length) {
-        this.host.cancelAutomaticAtCap(runId, owedTimers);
-        run = this.context.store.getRun(runId)!;
-        // Nothing left to wake for: the admission ends here, and a parked run becomes a plain park.
-        if (!resolvedWaits(run).length) { this.host.line.retireAdmission(runId); this.host.reparkWithoutWaits(runId, state); }
-      }
+    const owedTimers = cappedTimersBeforeFlush(run, beforeHumanReset, {
+      countAutomaticWakes: before => this.host.countAutomaticWakes(runId, before),
+      isAdmitted: () => this.host.line.isAdmitted(runId),
+      atTurnBoundary: () => state.boundary.atTurnBoundary === state.liveSession.session,
+    }, this.maxAutoContinues);
+    if (owedTimers.length) {
+      this.host.cancelAutomaticAtCap(runId, owedTimers);
+      run = this.context.store.getRun(runId)!;
+      // Nothing left to wake for: the admission ends here, and a parked run becomes a plain park.
+      if (!resolvedWaits(run).length) { this.host.line.retireAdmission(runId); this.host.reparkWithoutWaits(runId, state); }
     }
     return run;
   }

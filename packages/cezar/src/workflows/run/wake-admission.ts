@@ -43,6 +43,11 @@ interface WakeAdmissionHost {
   workerExecutionStopped(id: string): boolean; executionBlockedByRootFinish(run: RunRecord): boolean;
 }
 
+/** A cancelled last wait reparks only a run already parked at its session boundary. */
+export function shouldReparkWithoutWaits(run: RunRecord | undefined, isParked: () => boolean, state: ActiveRun): boolean {
+  return !!run && run.status === 'waiting' && isParked() && state.boundary.atTurnBoundary === state.liveSession.session && !run.waits?.length;
+}
+
 export class WakeAdmission {
   constructor(private readonly context: RunModuleContext, private readonly host: WakeAdmissionHost,
     private readonly maxAutoContinues: number, private readonly maxWakeDeliveryAttempts: number) {}
@@ -67,7 +72,7 @@ export class WakeAdmission {
    *  turn end. */
   reparkWithoutWaits(runId: string, state: ActiveRun): void {
     const run = this.context.store.getRun(runId);
-    if (!run || run.status !== 'waiting' || !this.host.line.isParked(runId) || state.boundary.atTurnBoundary !== state.liveSession.session || run.waits?.length) return;
+    if (!shouldReparkWithoutWaits(run, () => this.host.line.isParked(runId), state)) return;
     this.host.humanWaits.surfaceHumanWait(runId, state, this.host.humanWaits.openHumanAlias(runId, state, 'budget'));
     this.leaveMonitoringPool(runId);
     this.host.armIdleTimer(runId, state);
