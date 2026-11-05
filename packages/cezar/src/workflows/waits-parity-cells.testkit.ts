@@ -28,7 +28,6 @@ import { handoffPath } from '../handoff.ts';
 import { claudeScheduleWakeupDelay, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, REFUSAL_DISCARDED_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
 import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
 import { expectNoWaitNudgeKinds } from './turn-end.testkit.ts';
-import { watchTurnOutcomes, type TurnOutcomes } from './turn-outcomes.testkit.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
 import { setRunStatus, blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { recordCommits } from '../runs/outcome-crash.testkit.ts';
@@ -43,8 +42,6 @@ import { ciNativeMessages, ciNativeSteers, gate, gatedProviderFailure, MESSAGE_W
 const it = registerTest;
 
 const pr = 'https://github.com/acme/repo/pull/12';
-/** Each settled turn's outcome in the current cell (hearsay-tools/cezarion#1809). */
-let turns: TurnOutcomes;
 const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
 const passed = (): CiWaitResult => ({ outcome: 'passed', headSha: identity.headSha, observedAt: new Date().toISOString(), checks: [], totalChecks: 1, truncated: false });
 
@@ -666,7 +663,6 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
   describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', { timeout: 45_000 }, () => {
     useWorkerWaitFixture();
     beforeEach(() => {
-      turns = watchTurnOutcomes();
       doneOffsets.clear();
       runnerBoundary.sessions.clear(); runnerBoundary.beforeReturn = undefined; accelerateRetries = false; retryClock = observeBackoffs();
       idleClock = observationClock(delay => delay === IDLE_TIMEOUT_MS && /\bat TurnSettler\.armIdleTimer \(/.test(new Error().stack ?? ''));
@@ -2484,27 +2480,33 @@ function refusalCells(runners: RunnerId[], it: typeof registerTest = registerTes
         const wakes = 0;
         // The run as the nudge note is written: the note follows the submission and the charge.
         let atNudge: { status?: string; waits?: Wait[]; automaticWakes?: number | undefined; delegation?: unknown } | undefined;
+        const publicationFailures: unknown[] = [];
         const append = store.appendEvent.bind(store);
         vi.spyOn(store, 'appendEvent').mockImplementation((id, event) => {
           if (id === p.id && event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE) && !atNudge) {
             const run = store.getRun(p.id)!;
-            atNudge = { status: run.status, waits: run.waits ?? [], automaticWakes: run.automaticWakes, delegation: run.delegation };
+            try {
+              expect(run).toMatchObject({ status: RUN_STATUS.running, automaticWakes: wakes + 1 });
+              expect(run.waits ?? []).toEqual([]);
+            } catch (error) { publicationFailures.push(error); }
+            atNudge = structuredClone({ status: run.status, waits: run.waits ?? [], automaticWakes: run.automaticWakes, delegation: run.delegation });
           }
           return append(id, event);
         });
+        const turns = turnEnds(p.id);
         const w = await blockedDone(p.id, () => blockingWorker(p.id, { uncollected: settledWorker }));
         const refusal = settledWorker ? uncollectedRefusal(w) : liveRefusal(w);
-        await until(() => prompted(runner, refusal).length > 0 && atNudge !== undefined);
+        await until(() => turnEnds(p.id) > turns + 1 && store.getRun(p.id)?.status === RUN_STATUS.waiting);
         const [nudge, ...more] = prompted(runner, refusal);
         expect(more).toEqual([]);
         if (settledWorker) expect(nudge).not.toContain(COMPLETION_WILL_WAIT);
         else expect(nudge).toContain(COMPLETION_WILL_WAIT);
         expect(atNudge).toMatchObject({ status: RUN_STATUS.running, waits: [], automaticWakes: wakes + 1 });
+        expect(publicationFailures).toEqual([]);
         expect(atNudge!.delegation).not.toHaveProperty('wait');
         expect(atNudge!.delegation).not.toHaveProperty('completion');
         expect(store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE)))
           .toEqual([expect.objectContaining({ message: `${COMPLETION_NUDGE_NOTE} (${wakes + 1}/${MAX_AUTO_CONTINUES}): ${settledWorker ? 'workers_uncollected' : 'workers_outstanding'}` })]);
-        expect(turns.words(p.id)).toContain('running (completion nudge)');
         // The turn end writes nothing to the handoff file (hearsay-tools/cezarion#1809).
         expect(readFileSync(handoffPath(join(root, '.ai/cezar'), p.id), 'utf8')).not.toMatch(/turn complete|status=/);
         // The nudge turn's own end follows the ordinary rule; the run still finishes nothing.
@@ -3212,13 +3214,72 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
   }
 }
 
+/** Assert at publication, before a later nudge can hide a wait that opened too early. */
+function observeWaitPublication(id: string, via: Wait['via'], assertNudge: () => void): () => void {
+  const seen = new Set((store.getRun(id)?.waits ?? []).map(wait => wait.id));
+  const failures: unknown[] = [];
+  let publications = 0;
+  const onRun = (run: RunRecord) => {
+    if (run.id !== id) return;
+    for (const wait of run.waits ?? []) {
+      if (wait.phase !== WAIT_PHASE.open || wait.via !== via || seen.has(wait.id)) continue;
+      seen.add(wait.id);
+      publications++;
+      try { assertNudge(); } catch (error) { failures.push(error); }
+    }
+  };
+  store.on('run', onRun);
+  onTestFinished(() => { store.off('run', onRun); });
+  return () => {
+    store.off('run', onRun);
+    expect(publications).toBe(1);
+    expect(failures).toEqual([]);
+  };
+}
+
+function expectReleasedCapacity(): void {
+  const limit = vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(0);
+  try { expect(semaphore.busy()).toBe(0); }
+  finally { limit.mockRestore(); }
+}
+
+/** The transport ACK completes even when its deferred turn settlement is broken. */
+function observeNudgeAcknowledgement(id: string, text: string): () => Promise<void> {
+  let acknowledgement: Promise<void> | undefined;
+  const observe = (runId: string) => {
+    if (runId !== id) return;
+    runnerBoundary.beforeReturn = undefined;
+    const session = sessionOf(id);
+    const send = session.sendAgentMessage.bind(session);
+    const spy = vi.spyOn(session, 'sendAgentMessage').mockImplementation((content, inputIds) => {
+      const ack = send(content, inputIds);
+      if (ack && content.some(block => block.type === 'text' && block.text.includes(text))) acknowledgement = ack;
+      return ack;
+    });
+    onTestFinished(() => { spy.mockRestore(); });
+  };
+  if (sessionOf(id)) observe(id);
+  else runnerBoundary.beforeReturn = observe;
+  return async () => {
+    await until(() => acknowledgement !== undefined);
+    await acknowledgement;
+    // The product attaches its checkpoint and settlement reactions to this same ACK.
+    await flushMicrotasks();
+  };
+}
+
 function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
   for (const runner of runners) {
-    /** The settled outcomes' words, oldest first. */
-    const words = (id: string) => turns.words(id);
-    /** The words that settle something. A nudged turn can end before its acknowledgement on its own
-     *  (OpenCode HTTP/SSE), which settles a plain `running` before the acknowledgement settles it. */
-    const settledWords = (id: string) => words(id).filter(word => word !== 'running');
+    const noWaitNudges = (id: string) => store.readEvents(id).filter(event =>
+      event.type === 'note' && String(event.message).startsWith(NO_WAIT_NUDGE_NOTE));
+    const noWaitOrder = (id: string, count: number) => observeWaitPublication(id, WAIT_VIA['no-wait'], () => {
+      expect(prompted(runner, NO_WAIT_NUDGE)).toHaveLength(count);
+      expect(noWaitNudges(id)).toHaveLength(count);
+    });
+    const completionOrder = (id: string) => observeWaitPublication(id, WAIT_VIA.completion, () => {
+      expect(nudgeNotes(id)).toHaveLength(1);
+      expect(prompted(runner, 'Workers are still live:')).toHaveLength(1);
+    });
     const idleClose = async (id: string) => {
       idleClock.fire(idleClock.captured - 1);
       await until(() => !manager.isActive(id) && store.getRun(id)?.status === 'waiting');
@@ -3242,21 +3303,30 @@ function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTes
     it(`${runner} U27 U5 a fresh step's no-wait turn end gets the nudge, then the no-wait human wait`, async () => {
       nativeWire(runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      const firstOrder = noWaitOrder(run.id, 1);
       await until(() => gated(run.id));
       expect(humanOpen(run.id)).toEqual([expect.objectContaining({ via: WAIT_VIA['no-wait'], source: WAIT_SOURCE.cezar })]);
-      expect(settledWords(run.id)).toEqual(['running (no-wait nudge)', 'waiting']);
+      firstOrder();
+      expect(store.getRun(run.id)?.status).toBe(RUN_STATUS.waiting);
+      expectReleasedCapacity();
     });
 
     it(`${runner} U27 U5 a Continue's no-wait turn end gets the nudge, then the no-wait human wait`, async () => {
       nativeWire(runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      const firstOrder = noWaitOrder(run.id, 1);
       await until(() => gated(run.id));
+      firstOrder();
+      expectReleasedCapacity();
       await idleClose(run.id);
+      const secondOrder = noWaitOrder(run.id, 2);
       expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
       await until(() => prompted(runner, NO_WAIT_NUDGE).length === 2 && gated(run.id));
       expect(store.getRun(run.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
       expect(humanOpen(run.id)).toEqual([expect.objectContaining({ via: WAIT_VIA['no-wait'], source: WAIT_SOURCE.cezar })]);
-      expect(settledWords(run.id)).toEqual(['running (no-wait nudge)', 'waiting', 'running (no-wait nudge)', 'waiting']);
+      secondOrder();
+      expect(store.getRun(run.id)?.status).toBe(RUN_STATUS.waiting);
+      expectReleasedCapacity();
     });
 
     it(`${runner} U27 U5 a no-wait turn end an acknowledgement settles late opens the no-wait human wait and settles waiting`, async () => {
@@ -3264,13 +3334,18 @@ function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTes
       await lateAck(async release => {
         nativeWire(runner);
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+        const published = noWaitOrder(run.id, 1);
+        const acknowledged = observeNudgeAcknowledgement(run.id, NO_WAIT_NUDGE);
         await until(() => prompted(runner, NO_WAIT_NUDGE).length === 1 && turnEnds(run.id) >= 1);
         await heldAfterTurnEnd(run.id, 1, () => humanOpen(run.id).length === 0 && store.getRun(run.id)?.status === 'running');
-        expect(words(run.id)).toEqual(['running (no-wait nudge)', 'running']);
+        expect(noWaitNudges(run.id)).toHaveLength(1);
+        expect(semaphore.busy()).toBe(1);
         release();
-        await until(() => gated(run.id));
+        await acknowledged();
         expect(humanOpen(run.id)).toEqual([expect.objectContaining({ via: WAIT_VIA['no-wait'], source: WAIT_SOURCE.cezar })]);
-        expect(words(run.id)).toEqual(['running (no-wait nudge)', 'running', 'waiting']);
+        published();
+        expect(store.getRun(run.id)?.status).toBe(RUN_STATUS.waiting);
+        expectReleasedCapacity();
       }, 'Your turn ended without a wait or done.');
     });
 
@@ -3278,20 +3353,26 @@ function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTes
     it(`${runner} U27 U6 a fresh step's second refused done with live workers parks on the completion wait and settles waiting`, async () => {
       const reply = repliesDoneAgain();
       const p = await workerParent(runner);
+      const published = completionOrder(p.id);
       const { second } = await ignoreRefusal(runner, p.id, reply, () => workerWaits(p.id)[0]?.phase === 'open');
       expect(workerWaits(p.id)).toEqual([expect.objectContaining({ source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, workerIds: [second.id] })]);
-      expect(settledWords(p.id).slice(-2)).toEqual(['running (completion nudge)', 'waiting']);
+      published();
+      expect(store.getRun(p.id)?.status).toBe(RUN_STATUS.waiting);
+      expectReleasedCapacity();
     });
 
     it(`${runner} U27 U6 a Continue's second refused done with live workers parks on the completion wait and settles waiting`, async () => {
       const reply = repliesDoneAgain();
       const p = await workerParent(runner);
       await idleClose(p.id);
+      const published = completionOrder(p.id);
       const { second, refusal } = await ignoreRefusal(runner, p.id, reply, () => workerWaits(p.id)[0]?.phase === 'open', { send: continued(p.id) });
       expect(prompted(runner, refusal)).toHaveLength(1);
       expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
       expect(workerWaits(p.id)).toEqual([expect.objectContaining({ source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, workerIds: [second.id] })]);
-      expect(settledWords(p.id).slice(-2)).toEqual(['running (completion nudge)', 'waiting']);
+      published();
+      expect(store.getRun(p.id)?.status).toBe(RUN_STATUS.waiting);
+      expectReleasedCapacity();
     });
 
     it(`${runner} U27 U6 a second refused done an acknowledgement settles late parks on the completion wait and settles waiting`, async () => {
@@ -3299,17 +3380,23 @@ function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTes
       await lateAck(async release => {
         const reply = repliesDoneAgain();
         const p = await workerParent(runner);
+        const published = completionOrder(p.id);
+        const acknowledged = observeNudgeAcknowledgement(p.id, 'Workers are still live');
         const turns = turnEnds(p.id);
         const w = await blockedDone(p.id, () => blockingWorker(p.id));
         const refusal = liveRefusal(w);
         await until(() => prompted(runner, refusal).length === 1 && turnEnds(p.id) > turns);
-        await replyBlockedAgain(p.id, reply, w, () => blockingWorker(p.id));
+        const second = await replyBlockedAgain(p.id, reply, w, () => blockingWorker(p.id));
         await heldAfterTurnEnd(p.id, turns + 1, () => workerWaits(p.id).length === 0 && store.getRun(p.id)?.status === 'running');
+        expect(semaphore.busy()).toBe(1);
         release();
-        await until(() => workerWaits(p.id)[0]?.phase === 'open' && store.getRun(p.id)?.status === 'waiting');
+        await acknowledged();
+        expect(workerWaits(p.id)).toEqual([expect.objectContaining({ source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, workerIds: [second.id] })]);
+        expect(store.getRun(p.id)?.status).toBe(RUN_STATUS.waiting);
         expect(prompted(runner, refusal)).toHaveLength(1);
-        expect(words(p.id).slice(-1)).toEqual(['waiting']);
-        expect(words(p.id)).toContain('running (completion nudge)');
+        published();
+        expect(nudgeNotes(p.id)).toHaveLength(1);
+        expectReleasedCapacity();
       }, 'Workers are still live');
     });
 
@@ -3326,7 +3413,7 @@ function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTes
       expect(nudgeNotes(id)).toEqual([]);
       expect(prompted(runner, refusal)).toEqual([]);
       await expectPoolCapacity(runner, id, true);
-      expect(words(id).slice(-1)).toEqual(['monitoring']);
+      expect(store.getRun(id)?.status).toBe(RUN_STATUS.waiting);
     };
 
     it(`${runner} U27 U11 a fresh step's refused done beside an open timer parks on it and settles monitoring`, async () => {
@@ -3361,7 +3448,7 @@ function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTes
         // The open timer settles the turn end at once: the held acknowledgement defers nothing here.
         await until(() => turnEnds(p.id) > turns, () => timeline(p.id));
         release();
-        await until(() => parkedOn(p.id, viaOf(p.id, WAIT_VIA.cezar_wait)) && refusalNoted(p.id, refusal) && words(p.id).at(-1) === 'monitoring');
+        await until(() => parkedOn(p.id, viaOf(p.id, WAIT_VIA.cezar_wait)) && refusalNoted(p.id, refusal) && store.getRun(p.id)?.status === RUN_STATUS.waiting);
         await expectTimerPark(p.id, timer, refusal);
       }, 'delay-human-ack');
     });
@@ -3418,13 +3505,14 @@ function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTes
         else expect(nudge).toContain(COMPLETION_WILL_WAIT);
         expect(nudgeNotes(id)).toHaveLength(1);
         expect(workerWaits(id)).toEqual([]);
-        expect(words(id)).toContain('running (completion nudge)');
+        expect(store.getRun(id)?.status).toBe(RUN_STATUS.waiting);
       };
 
       it(`${runner} U27 ${row} a fresh step's refused done gets one refusal nudge`, async () => {
         const p = await workerParent(runner);
+        const turns = turnEnds(p.id);
         const refusal = refusalFor(await blockedDone(p.id, blocker(p.id)));
-        await until(() => prompted(runner, refusal).length > 0 && nudgeNotes(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting');
+        await until(() => turnEnds(p.id) > turns + 1 && store.getRun(p.id)?.status === 'waiting');
         expectOneNudge(p.id, refusal);
       });
 
@@ -3438,7 +3526,7 @@ function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTes
           const refusal = refusalFor(await blockedDone(p.id, blocker(p.id), undefined, ' delay-human-ack'));
           await until(() => turnEnds(p.id) > before, () => timeline(p.id));
           release();
-          await until(() => prompted(runner, refusal).length > 0 && nudgeNotes(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting', () => timeline(p.id));
+          await until(() => turnEnds(p.id) > before + 1 && store.getRun(p.id)?.status === 'waiting', () => timeline(p.id));
           expectOneNudge(p.id, refusal);
         }, 'delay-human-ack');
       });
@@ -3446,8 +3534,9 @@ function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTes
       it(`${runner} U27 ${row} a Continue's refused done gets one refusal nudge`, async () => {
         const p = await workerParent(runner);
         await idleClose(p.id);
+        const turns = turnEnds(p.id);
         const refusal = refusalFor(await blockedDone(p.id, blocker(p.id), continued(p.id)));
-        await until(() => prompted(runner, refusal).length > 0 && nudgeNotes(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting' &&
+        await until(() => turnEnds(p.id) > turns + 1 && store.getRun(p.id)?.status === 'waiting' &&
           store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true);
         expectOneNudge(p.id, refusal);
       });

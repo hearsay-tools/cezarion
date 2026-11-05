@@ -1521,9 +1521,9 @@ Phase 2b (hearsay-tools/cezarion#1234) adds the turn-end rule. `decideTurnEnd`
 `TurnSettler` method, `settleTurn` (hearsay-tools/cezarion#1525): the fresh step's and the
 Continue's turn-end handlers, the boundary an acknowledgement settles late, and input readiness for
 a refused autonomous nudge. Since then it also decides a done the completion gate refused, so both
-nudge causes (no wait and completion) have one table test, and the parity cells read each settled
-`TurnEndOutcome` through the private seam `settledTurnOutcome` (`workflows/turn-outcomes.testkit.ts`;
-hearsay-tools/cezarion#1809 removed the handoff heartbeat line that recorded it). Input already
+nudge causes (no wait and completion) have one table test, and the parity cells assert durable
+outcomes: notes, runner input, wait rows and slot bounds. They no longer read `settledTurnOutcome`
+(hearsay-tools/cezarion#1809 removed the handoff heartbeat line). Input already
 owed defers the decision;
 then done finishes; any open wait or question parks; a workflow step that is not the last
 completes; a spent budget opens a `budget` human wait; an autonomous run gets the autonomous nudge;
