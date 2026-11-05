@@ -126,11 +126,6 @@ vi.mock('../core/runner-factory.ts', async importOriginal => {
     return runner;
   } };
 });
-function engine() {
-  return manager as unknown as {
-    active: Map<string, { liveSession: { session: AgentSession & { end(): void }; ciGeneration: string; };  }>;
-  };
-}
 const sessionOf = (id: string) => runnerBoundary.sessions.get(id)!;
 let idleClock: ReturnType<typeof observationClock>;
 let retryClock: ReturnType<typeof observationClock>;
@@ -1985,7 +1980,7 @@ function answersCells(runners: RunnerId[], it: typeof registerTest = registerTes
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
       await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === 'waiting');
       const [human] = humanOpen(run.id);
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
+      const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
       const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note: 'answer cap guard' }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered) || registered.wait.kind !== 'timer') throw Error('registration refused');
       // A result already resolved below the cap may still be owed when the budget reaches it.
@@ -3199,20 +3194,23 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
       await until(() => routed() !== undefined && store.getRun(w.id)?.status === 'waiting');
       const askSeq = asks(w.id)[0]!.seq;
       const requestId = String(routed()!.messageId);
-      const unanswered = () => {
-        return runInternals(manager).workerQuestions.unansweredQuestions(p.id);
+      const conversation = () => {
+        const delegation = store.getRun(p.id)!.delegation!;
+        if (delegation.role !== 'root') throw Error('root fixture');
+        return delegation.conversation;
       };
-      expect(unanswered()).toEqual([expect.objectContaining({ workerId: w.id })]);
+      expect(conversation()?.messages.find(message => message.id === requestId)).toMatchObject({ kind: 'request', senderRunId: w.id });
+      expect(conversation()?.outcomes.filter(outcome => outcome.requestId === requestId)).toEqual([]);
       const text = 'automatic steer U25';
-      expect(runInternals(manager).inputDelivery.deliverMessage(w.id, [{ type: 'text', text }], false)).toBe(true);
+      const input = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: p.id, text, createdAt: new Date().toISOString() };
+      expect(manager.steerWorker(w.id, input)).toBe('queued');
       await until(() => prompted(runner, text).length > 0);
       expect(store.readEvents(w.id).filter(event => event.type === 'human-ask-closed'))
         .toEqual([expect.objectContaining({ askSeq, reason: 'superseded' })]);
-      const conversation = (store.getRun(p.id)!.delegation as { conversation?: { outcomes: Array<{ requestId: string }> } }).conversation;
-      expect(conversation?.outcomes.filter(outcome => outcome.requestId === requestId)).toHaveLength(1);
+      expect(conversation()?.outcomes.filter(outcome => outcome.requestId === requestId)).toHaveLength(1);
+      expect(store.getRun(w.id)?.agentInputs?.find(entry => entry.id === input.id)).toMatchObject(input);
       // The steer's own turn may end without a wait and route a fresh fallback question before
       // these reads: only the superseded question is checked (hearsay-tools/cezarion#1301).
-      expect(unanswered().filter(question => question.messageId === requestId)).toEqual([]);
       expect(humanOpen(w.id).filter(wait => wait.askSeq === askSeq)).toEqual([]);
     });
   }
@@ -3683,12 +3681,12 @@ function singleRunnerCells(): void {
     const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
     let closing = true;
     const closeAtTurnEnd = ({ runId, event }: { runId: string; event: { type: string } }) => {
-      if (runId === p.id && event.type === 'turn-end' && closing && refusals().some(input => !input.deliveredAt)) engine().active.get(p.id)?.liveSession.session.end();
+      if (runId === p.id && event.type === 'turn-end' && closing && refusals().some(input => !input.deliveredAt)) sessionOf(p.id).end();
     };
     store.on('event', closeAtTurnEnd);
     try {
-      engine().active.get(p.id)!.liveSession.session.end();
-      await until(() => store.getRun(p.id)?.waitDeliveryFailures === 1 && !manager.isActive(p.id) && runInternals(manager).retries.wakeBackoffs.has(p.id));
+      sessionOf(p.id).end();
+      await until(() => store.getRun(p.id)?.waitDeliveryFailures === 1 && !manager.isActive(p.id) && retryClock.pending > 0);
       closing = false;
       const wakes = store.getRun(p.id)?.automaticWakes;
       expect(runInternals(manager).runFinish.deferParentCompletion(p.id)).toBe(true);

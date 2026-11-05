@@ -1,5 +1,9 @@
 import { fixture as ownedFixture } from '../delegation/service.testkit.ts';
-import { runInternals } from './run-internals.testkit.ts';
+import { createActiveRun } from './active-run.ts';
+import { sessionResultWithReceipts, type InputReceiptsHost, type InputReceiptSteps } from './run/input-receipts.ts';
+import type { RunModuleContext } from './run/types.ts';
+import { TrackedWork } from './run/tracked-work.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
@@ -13,7 +17,7 @@ import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import * as processes from '../core/process-usage.ts';
 import { RunStore } from '../runs/store.ts';
 import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { createFixtureManager, drainFixtureManagers, fixtureWork, fixtureWorkSettled } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWork, fixtureWorkSettled, unused } from './fixture-cleanup.testkit.ts';
 import type { RunManager } from './run.ts';
 
 const hook = vi.hoisted(() => ({ runner: undefined as AgentRunner | undefined }));
@@ -56,7 +60,7 @@ function controlledRunner(beforeReturn: (opts: SessionOptions) => void = () => u
   const result = signal<AgentRunResult>();
   let open = true;
   const close = () => { open = false; result.resolve({ text: '', toolCalls: [], tokensUsed: 0 }); };
-  const session: AgentSession = { result: result.promise, get open() { return open; },
+  const session: AgentSession = { get result() { return result.promise; }, get open() { return open; },
     sendMessage: () => true, sendAgentMessage: () => false, discardQueuedMessages() {}, holdsHumanInput: () => false,
     end: close, interrupt: vi.fn() };
   const runner: AgentRunner = { backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
@@ -114,7 +118,6 @@ function throwSetupAt(failure: string, session?: AgentSession) {
   switch (failure) {
     case 'inputs': return vi.spyOn(session!, 'open', 'get').mockImplementationOnce(error);
     case 'register': return vi.spyOn(processes, 'registerRunProcess').mockImplementation(error);
-    case 'record': return vi.spyOn(runInternals(manager).workerExecutions, 'recordWorkerProcess').mockImplementation(error);
   }
 }
 
@@ -139,12 +142,11 @@ for (const mode of ['fresh', 'continuation'] as const) {
       if (event.type === 'session.error') boundary.resolve('error');
       return append(id, event);
     });
-    if (failure === 'register' || failure === 'record') setupFailure = throwSetupAt(failure);
+    if (failure === 'register') setupFailure = throwSetupAt(failure);
     id = launch(mode); await runner.started.promise;
     expect(await boundary.promise).toBe('termination');
     expect(setupFailure).toHaveBeenCalled();
     expect(tracked).toHaveBeenCalledOnce();
-    if (failure === 'record') expect(setupFailure).toHaveBeenCalledWith(id, 12345);
     expect(runner.session.interrupt).toHaveBeenCalledOnce();
     expect(manager.isActive(id)).toBe(true);
     expect(saved(id).status).toBe('running');
@@ -154,43 +156,63 @@ for (const mode of ['fresh', 'continuation'] as const) {
   });
 }
 
-for (const mode of ['fresh', 'continuation'] as const) {
-  it.each(['record'])(`${mode} interrupts and waits for termination after %s setup fails`, async failure => {
-    const runner = controlledRunner();
-    Object.defineProperty(runner.session, 'pid', { value: 12345 });
-    vi.spyOn(processes, 'registerRunProcess').mockImplementation(() => undefined);
-    const executions = runInternals(manager).workerExecutions;
-    const track = executions.trackWorkerSessionResult.bind(executions);
-    const resultSpies: ReturnType<typeof vi.spyOn>[] = [];
-    const boundary = signal<'termination' | 'error'>();
-    const append = store.appendEvent.bind(store);
-    vi.spyOn(store, 'appendEvent').mockImplementation((id, event) => {
-      if (event.type === 'session.error') boundary.resolve('error');
-      return append(id, event);
-    });
-    vi.spyOn(runInternals(manager).workerExecutions, 'trackWorkerSessionResult').mockImplementation((id, session) => {
-      resultSpies.push(vi.spyOn(session.result, 'finally'));
-      const closed = track(id, session);
-      // Observe when the caller waits for process termination.
-      // oxlint-disable-next-line unicorn/no-thenable -- This test thenable observes when the caller awaits process termination.
-      return { then: (...args: Parameters<typeof closed.then>) => {
-        boundary.resolve('termination'); return closed.then(...args);
-      } } as Promise<void>;
-    });
-    const setupFailure = throwSetupAt(failure);
-    const id = launch(mode); await runner.started.promise;
-    expect(await boundary.promise).toBe('termination');
-    expect(setupFailure).toHaveBeenCalled();
-    expect(resultSpies).toHaveLength(1);
-    if (failure === 'record') expect(setupFailure).toHaveBeenCalledWith(id, 12345);
-    expect(runner.session.interrupt).toHaveBeenCalledOnce();
-    expect(manager.isActive(id)).toBe(true);
-    expect(saved(id).status).toBe('running');
-    runner.close(); await fixtureWorkSettled(root);
-    expect(saved(id)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining(`setup refused: ${failure}`) });
-    expect(resultSpies[0]).not.toHaveBeenCalled();
+it('the receipt setup contract propagates recordProcess failure before marking prepared or reading the result', () => {
+  const runner = controlledRunner();
+  Object.defineProperty(runner.session, 'pid', { value: 12345 });
+  const context: RunModuleContext = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
+    semaphore: new WorkspaceSemaphore(), work: new TrackedWork(), disposed: () => false };
+  const state = createActiveRun({ cwd: root, autonomous: false, pendingHumanAsk: false });
+  const calls: string[] = [];
+  const host = unused<InputReceiptsHost>('receipts', { flushAgentInputs: () => { calls.push('inputs'); } });
+  const steps = unused<InputReceiptSteps>('steps', {
+    flushDeferred: () => { calls.push('deferred'); },
+    recordProcess: (id, pid) => { calls.push('record'); expect([id, pid]).toEqual(['run', 12345]); throw Error('record refused'); },
   });
-}
+  vi.spyOn(processes, 'registerRunProcess').mockImplementation(() => { calls.push('register'); });
+  const prepared = vi.fn();
+  const result = vi.spyOn(runner.session, 'result', 'get');
+  expect(() => sessionResultWithReceipts(context, host, steps, 'run', state, runner.session, prepared)).toThrow('record refused');
+  expect(calls).toEqual(['deferred', 'inputs', 'register', 'record']);
+  expect(prepared).not.toHaveBeenCalled();
+  expect(result).not.toHaveBeenCalled();
+});
+
+it.each(['fresh', 'continuation'] as const)('%s keeps a worker session live when its process record write fails', async mode => {
+  vi.stubEnv('CEZ_DELEGATION', '1');
+  const owned = ownedFixture();
+  let runner = controlledRunner();
+  Object.defineProperty(runner.session, 'pid', { value: 12345 });
+  vi.spyOn(processes, 'registerRunProcess').mockImplementation(() => undefined);
+  const { workerId } = await owned.service.spawn(owned.caller, { task: 'receipts', baseline: 'parent-head', requestId: randomUUID() });
+  try {
+    if (mode === 'continuation') {
+      const firstSetup = observePrepared(runner.session);
+      await owned.releaseAdmission();
+      await firstSetup;
+      runner.close();
+      // bound: the first owned execution must terminate before Continue starts a new one.
+      expect(await owned.manager.awaitRunTermination(workerId, 15_000)).toBe(true);
+      runner = controlledRunner();
+      Object.defineProperty(runner.session, 'pid', { value: 12345 });
+    }
+    const recorded = signal();
+    const write = vi.spyOn(owned.store, 'appendWorkerProcess').mockImplementation(() => {
+      recorded.resolve();
+      throw Error('injected process record write failure');
+    });
+    if (mode === 'fresh') await owned.releaseAdmission();
+    else expect(owned.manager.continueRun(workerId, { text: 'continue receipts' })).toMatchObject({ ok: true });
+    await recorded.promise;
+    expect(write).toHaveBeenCalledWith(workerId, expect.any(String), 12345, undefined);
+    expect(runner.session.interrupt).not.toHaveBeenCalled();
+    expect(runner.session.open).toBe(true);
+    expect(owned.manager.isActive(workerId)).toBe(true);
+    expect(owned.store.getRun(workerId)?.status).toBe(RUN_STATUS.running);
+  } finally {
+    runner.close();
+    await owned.close();
+  }
+});
 
 it.each(['fresh', 'continuation'] as const)('%s replaces a changed PID before recording the worker process', async mode => {
   vi.stubEnv('CEZ_DELEGATION', '1');
