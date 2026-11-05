@@ -1,3 +1,4 @@
+import { idleClose, observeIdleClose } from './worker-wait-readiness.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
@@ -17,16 +18,11 @@ describe('RunManager workflow restart', () => {
         { id: 'later', name: 'Later', command: 'node -e "process.exit(0)"' },
       ],
     };
+    const clock = observeIdleClose(fixture.store);
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:cezar-ask choose', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
-    const state = (fixture.manager as unknown as {
-      active: Map<string, { idleTimer?: NodeJS.Timeout }>;
-    }).active.get(record.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
-    idleTimer._onTimeout();
-    await waitFor(record.id, () => !(fixture.manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    await idleClose(clock, record.id, fixture.manager, fixture.store, predicate => waitFor(record.id, predicate));
     fixture.manager.dispose();
     fixture.store.addStep(record.id, { id: 'continue-1', name: 'Real numeric step', kind: STEP_KIND.check });
     fixture.store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.check });
@@ -53,16 +49,11 @@ describe('RunManager workflow restart', () => {
         { id: 'later', name: 'Later', command: 'node -e "process.exit(0)"' },
       ],
     };
+    const clock = observeIdleClose(fixture.store);
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'just do the thing', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
-    const state = (fixture.manager as unknown as {
-      active: Map<string, { idleTimer?: NodeJS.Timeout }>;
-    }).active.get(record.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
-    idleTimer._onTimeout();
-    await waitFor(record.id, () => !(fixture.manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    await idleClose(clock, record.id, fixture.manager, fixture.store, predicate => waitFor(record.id, predicate));
     fixture.manager.dispose();
     fixture.store.addStep(record.id, { id: 'previously-failed', name: 'Previously failed', kind: STEP_KIND.check });
     fixture.store.updateStep(record.id, 'previously-failed', { status: STEP_STATUS.failed, finishedAt: new Date().toISOString() });
@@ -84,14 +75,11 @@ describe('RunManager workflow restart', () => {
   }, 30_000);
 
   it('does not mistake a legacy workflow step named continue-1 for a synthetic continuation', async () => {
+    const clock = observeIdleClose(fixture.store);
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:cezar-ask choose', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
-    const state = (fixture.manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
-    idleTimer._onTimeout();
-    await waitFor(record.id, () => !(fixture.manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    await idleClose(clock, record.id, fixture.manager, fixture.store, predicate => waitFor(record.id, predicate));
     const persisted = fixture.store.getRun(record.id)!;
     persisted.steps[0]!.id = 'continue-1';
     fixture.store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.check });

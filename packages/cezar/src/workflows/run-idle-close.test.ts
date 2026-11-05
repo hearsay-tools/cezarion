@@ -1,9 +1,9 @@
+import { idleClose, observeIdleClose, sessionOf } from './worker-wait-readiness.testkit.ts';
 import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { AgentSession } from '../core/agent-runner.ts';
 import { resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
 describe('RunManager idle close', () => {
   const fixture = setupMonitoringFixture();
@@ -12,6 +12,7 @@ describe('RunManager idle close', () => {
     { mode, delegation, name: 'markerless wait', task: 'just do the thing' },
     { mode, delegation, name: 'cezar_ask wait', task: 'mock:cezar-ask choose' },
   ])))('idle-closes a $mode $delegation $name without completing it, matching restart recovery (#280)', async ({ mode, delegation, task }) => {
+    const clock = observeIdleClose(fixture.store);
     const record = fixture.manager.startRun(SINGLE_STEP, {
       task: mode === 'fresh' ? task : 'just do the thing',
       worktree: false,
@@ -31,20 +32,13 @@ describe('RunManager idle close', () => {
       await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
     }
 
-    const internals = fixture.manager as unknown as {
-      active: Map<string, { liveSession: { session?: AgentSession; }; idleTimer?: NodeJS.Timeout; }>;
-    };
-    const state = internals.active.get(record.id);
-    const session = state?.liveSession.session;
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!session?.open || !idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
+    const session = sessionOf(record.id);
 
     // Resolved, not hand-built: a deep sandbox checkout falls back to the short
     // OS-temp location (#387), and idle-close must preserve THAT directory.
     const scratch = resolveAgentTmpDir(join(fixture.repoRoot, '.ai/cezar'), record.id);
     expect(existsSync(scratch)).toBe(true);
-    idleTimer._onTimeout();
-    await waitFor(record.id, () => !internals.active.has(record.id));
+    await idleClose(clock, record.id, fixture.manager, fixture.store, predicate => waitFor(record.id, predicate));
 
     const idleClosed = structuredClone(fixture.store.getRun(record.id));
     expect(session.open).toBe(false); // the runner CLI is still terminated

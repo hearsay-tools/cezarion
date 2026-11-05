@@ -1,3 +1,4 @@
+import { idleClose, observeIdleClose } from './worker-wait-readiness.testkit.ts';
 import { describe, expect, it } from 'vitest';
 import { RUN_TRIGGERS, stateOf } from './run-states.ts';
 import { manager, parent, spendWorkerBudget, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
@@ -13,14 +14,11 @@ describe('run states of an owned worker', { timeout: 45_000 }, () => {
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id);
     spendWorkerBudget(w.id);
+    const clock = observeIdleClose();
     manager.enqueueOwnedRun(w.id);
     await until(() => store.readEvents(w.id).some((event) => event.type === 'turn-end') && store.getRun(w.id)?.status === 'waiting');
     expect(stateOf(store.getRun(w.id)!)).toBe('waiting:plain');
-    const timer = manager['active'].get(w.id)?.idleTimer as (NodeJS.Timeout & { _onTimeout(): void }) | undefined;
-    expect(timer).toBeDefined();
-    const expire = timer!._onTimeout;
-    clearTimeout(timer);
-    expire();
+    await idleClose(clock, w.id, manager, store, until);
     await until(() => store.getRun(w.id)?.status === 'done');
     expect(RUN_TRIGGERS.find((row) => row.id === 'plain.worker-idle')?.to).toEqual(['done']);
   });

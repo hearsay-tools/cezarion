@@ -1,3 +1,4 @@
+import { idleClose, observeIdleClose } from './worker-wait-readiness.testkit.ts';
 import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 import { describe, expect, it, vi } from 'vitest';
@@ -10,6 +11,7 @@ describe('RunManager workflow remainder resume', () => {
   it.each(['workflow definition', 'legacy persisted steps'].flatMap(shape =>
     ['zero-config', 'delegated root'].map(delegation => ({ shape, delegation }))))(
   'does not let an inactive $delegation skip later workflow steps using $shape', async ({ shape, delegation }) => {
+    const clock = observeIdleClose(fixture.store);
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:cezar-ask choose', worktree: false });
     if (delegation === 'delegated root') {
       fixture.store.commitDelegation([{
@@ -29,13 +31,7 @@ describe('RunManager workflow remainder resume', () => {
     } else {
       fixture.store.updateRun(record.id, { workflowDef: undefined });
     }
-    const state = (fixture.manager as unknown as {
-      active: Map<string, { idleTimer?: NodeJS.Timeout }>;
-    }).active.get(record.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
-    idleTimer._onTimeout();
-    await waitFor(record.id, () => !(fixture.manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    await idleClose(clock, record.id, fixture.manager, fixture.store, predicate => waitFor(record.id, predicate));
 
     fixture.manager.dispose();
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);
@@ -73,6 +69,7 @@ describe('RunManager workflow remainder resume', () => {
         { id: 'later', name: 'Later', prompt: 'mock:cezar-done later' },
       ],
     };
+    const clock = observeIdleClose(fixture.store);
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:cezar-ask choose', worktree: false });
     fixture.store.commitDelegation([{
       id: record.id,
@@ -82,13 +79,7 @@ describe('RunManager workflow remainder resume', () => {
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
     fixture.store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.agent });
     fixture.store.updateRun(record.id, { workflowDef: workflow });
-    const state = (fixture.manager as unknown as {
-      active: Map<string, { idleTimer?: NodeJS.Timeout }>;
-    }).active.get(record.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
-    idleTimer._onTimeout();
-    await waitFor(record.id, () => !(fixture.manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    await idleClose(clock, record.id, fixture.manager, fixture.store, predicate => waitFor(record.id, predicate));
 
     fixture.manager.dispose();
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);
@@ -128,16 +119,13 @@ describe('RunManager workflow remainder resume', () => {
       { id: 'task', name: 'Task', prompt: '{{task}}' },
       { id: 'later', name: 'Later', command: 'true' },
     ] };
+    const clock = observeIdleClose(fixture.store);
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
     fixture.store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.check });
     fixture.store.updateRun(record.id, { workflowDef: workflow });
-    const state = (fixture.manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
-    const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
-    if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
-    idleTimer._onTimeout();
-    await waitFor(record.id, () => !(fixture.manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
+    await idleClose(clock, record.id, fixture.manager, fixture.store, predicate => waitFor(record.id, predicate));
 
     let cancelled = false;
     let cancelAttempted = false;
