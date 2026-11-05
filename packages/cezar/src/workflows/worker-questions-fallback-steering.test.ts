@@ -1,3 +1,4 @@
+import { captureSessions } from './runner-session-capture.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -70,12 +71,15 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
   });
 
 it("a worker's own question still holds a parent's steer", async () => {
+    const sessionOf = captureSessions();
     const f = await askedPair();
     try {
+      const send = vi.spyOn(sessionOf(f.w.id), 'sendAgentMessage');
       const sent = steer(f.w.id, f.p.id, 'mock:agent-echo Also lint');
       expect(sent.result).toBe('queued');
       // Nothing was submitted: the steer waits for the answer, and the question stands.
-      expect((manager as unknown as { active: Map<string, { inputState: { agentInputFlight?: unknown } }> }).active.get(f.w.id)?.inputState.agentInputFlight).toBeUndefined();
+      expect(send).not.toHaveBeenCalled();
+      expect(store.getRun(f.w.id)?.agentInputs?.find(input => input.id === sent.id)?.deliveredAt).toBeUndefined();
       expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([]);
       expect(hasPendingAsk(store, f.w.id)).toBe(true);
     } finally { f.close(); }
