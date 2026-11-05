@@ -15,8 +15,8 @@ bounded recovery and capped spend. The installed external CodeRabbit App replace
 execution. A shared deterministic reader replaces admission and current-head checks.
 A bounded trusted reconciler replaces manual rejudge/recount. The owner explicitly
 removed the spend cap because CodeRabbit is free for this open-source repository.
-Automatic review now starts on push, before preflight. Heavy verification still waits
-for preflight and the native protected review job. No model commands or PAT fallback.
+Automatic review now starts on push, before preflight. Heavy verification waits
+for preflight only and runs beside the native protected review job; `verify` requires both. No model commands or PAT fallback.
 
 ## Implementation
 
@@ -26,7 +26,7 @@ for preflight and the native protected review job. No model commands or PAT fall
    threads of any author. Re-read provider and PR before admission. Empty vendor
    `pull_requests` is supported; formal reviews are never execution evidence.
 2. Keep protected check names and native CI provenance. Replace the reusable model
-   workflow with a read-only native `review-result`. Keep heavy dependencies and queue,
+   workflow with a read-only native `review-result`. Keep queue,
    push reuse, snapshot publication and verified bot skip guarantees.
 3. Reconcile genuine provider creation/completion, native CI completion and review
    events. Select at most four validated event-associated PRs. Only an empty provider
@@ -65,7 +65,7 @@ for preflight and the native protected review job. No model commands or PAT fall
 | Fork PR | Reader/queue can verify it; reconciler ignores it; maintainer reruns native review job in Actions; readiness preserves author control |
 | Disabled CI, old run or 50 attempts | Stop; report manual recovery, never whole-CI dispatch fallback |
 
-GitHub may rerun blocked dependent heavy jobs when a targeted review retry passes.
+A targeted review retry reruns only the review job and its dependents (`verify` and later); no heavy job depends on it.
 Already-running review jobs are not retried. Successful and ambiguous rerun responses share a bounded observation barrier; unresolved acceptance requires inspection. There is no durable cross-execution reservation or exactly-once claim. Readiness independently
 reads fresh admission, so a historical green check cannot hide a new pending review.
 

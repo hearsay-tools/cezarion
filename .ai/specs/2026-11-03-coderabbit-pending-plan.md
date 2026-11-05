@@ -6,8 +6,9 @@ native review gate after preflight, and `verify` requires both (hearsay-tools/ce
 The native review gate currently marks a running CodeRabbit review as failed.
 Reconciliation later retries it. The owner asked to fix this and open a PR.
 
-Preserve exact-head trusted newest provider evidence, resolved threads, review-first
-heavy verification, native required checks, cancellation and bounded API reads.
+Preserve exact-head trusted newest provider evidence, resolved threads, heavy
+verification after preflight beside the native review gate, native required checks,
+cancellation and bounded API reads.
 Keep the shared admission reader immediate for readiness, reconciliation and queue
 admission. Preserve the no-files policy in hearsay-tools/cezarion#2584.
 
@@ -26,13 +27,13 @@ The current marker remains the marker for the admission policy on main.
 
 | Case | Result |
 | --- | --- |
-| Missing, queued or running provider | Keep native job active; heavy jobs remain blocked |
+| Missing, queued or running provider | Keep native job active; `verify` remains blocked; heavy jobs run beside it |
 | Running provider with open findings | Wait for provider completion before settled admission |
 | Newest successful or accepted no-files check; all threads resolved | Pass in the same native job |
 | Older success, newer pending execution | Wait for newest execution |
 | Completed unsuccessful provider or completed review with open threads | Block immediately; keep existing recovery |
 | Provider changes during snapshot | Discard snapshot; bounded fresh read |
-| Changed head, invalid target, API/schema/incomplete evidence | Error; never release heavy work |
+| Changed head, invalid target, API/schema/incomplete evidence | Error; never grant admission, so `verify` stays blocked |
 | Missing or pending beyond deadline/read cap | Fail visibly; later reconciliation can recover |
 | Cancelled or superseded workflow | Existing cancellation and concurrency prevent admission |
 | Verified provider exception | Return immediately; still require resolved threads |
