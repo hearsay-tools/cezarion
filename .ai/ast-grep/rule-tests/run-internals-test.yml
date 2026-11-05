@@ -8,6 +8,8 @@ valid:
   - 'const kit = await import("./other.testkit.ts", { with: { note: "x" } });'
   - 'const name = `run-${part}.ts`;'
   - '// runInternals(manager) and run-internals.testkit.ts'
+  - 'type RunInternalsView = unknown;'
+  - 'const text = "call runInternals later";'
 invalid:
   - 'runInternals(manager);'
   - 'runInternals();'
@@ -37,3 +39,9 @@ invalid:
   - 'const kit = await import(selectModule("./run-internals.testkit.ts"));'
   - 'const kit = await import(`${root}/run-internals.testkit.ts`);'
   - 'const label = "run-internals.testkit.ts";'
+  - 'type runInternals = unknown;'
+  - 'interface Kit { runInternals(): void }'
+  - 'kit["runInternals"](manager);'
+  - 'class Kit { #runInternals() {} }'
+  - 'vi.spyOn(kit, "runInternals");'
+  - 'runInternals: for (;;) { break runInternals; }'
