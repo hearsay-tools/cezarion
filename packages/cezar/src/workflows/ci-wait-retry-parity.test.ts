@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { CiGithubError, GithubCiClient } from '../ci-wait/github.ts';
-import { manager, store, root, restart, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, store, root, restart, toolGenerationOf, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { ciNativeMessages } from './waits-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
@@ -53,8 +53,7 @@ describe('CI query retries across native harnesses', {timeout:30_000},()=>{
    try {
     const run=manager.startRun(QUICK_TASK_WORKFLOW,{task:HARNESS_ADAPTERS[runner].scenarios.baseline!,runner});
     await until(()=>store.getRun(run.id)?.status==='waiting');
-    const engine=manager as unknown as {active:Map<string,{ liveSession: { ciGeneration:string; };  }>};
-    await manager.registerWait(run.id,{kind: WAIT_KIND.pr,pr:'https://github.com/org/repo/pull/12',timeout_seconds:120},'cezar_wait',engine.active.get(run.id)!.liveSession.ciGeneration);
+    await manager.registerWait(run.id,{kind: WAIT_KIND.pr,pr:'https://github.com/org/repo/pull/12',timeout_seconds:120},'cezar_wait',toolGenerationOf(run.id));
     await until(()=>probes.size===1 || !!lastWaitOf(run.id)?.deliveredAt);
     expect(lastWaitOf(run.id)).toBeUndefined();
     await until(()=>ciWaitOf(run.id)?.phase==='open' && store.getRun(run.id)?.status==='waiting');

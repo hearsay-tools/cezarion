@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { agentEnv, agentEnvForStep } from './run/launch-context.ts';
+import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
@@ -37,15 +40,10 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
   let store: RunStore;
   let manager: RunManager;
 
-  type Seam = {
-    agentEnvForStep(
-      runId: string,
-      backend: 'claude' | 'codex' | 'opencode',
-      options?: { generateFollowups?: boolean; recordedProfileId?: string },
-    ): Promise<{ env: Record<string, string>; profileId: string }>;
-    dropActive(runId: string): void;
+  const resolveStepEnv = (runId: string, backend: Parameters<typeof agentEnvForStep>[3], options?: Parameters<typeof agentEnvForStep>[4]) => {
+    const context = { store, repoRoot, dataDir };
+    return agentEnvForStep(context, { agentEnv: id => agentEnv(context, undefined, id), workerStep: () => undefined }, runId, backend, options);
   };
-  const seam = () => manager as unknown as Seam;
 
   beforeEach(async () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-agent-tmpdir-home-'));
@@ -60,6 +58,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
     manager.dispose();
+    vi.unstubAllEnvs();
     for (const run of store.listRuns()) removeAgentTmpDir(dataDir, run.id);
     store.flush();
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
@@ -77,7 +76,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
 
   it('hands the spawn the resolved per-run TMPDIR, already created', async () => {
     const run = newRun();
-    const { env } = await seam().agentEnvForStep(run.id, 'claude');
+    const { env } = await resolveStepEnv(run.id, 'claude');
     // The exact location is `resolveAgentTmpDir`'s call — repo-local when the
     // checkout is shallow enough for unix-socket paths (#387), a short
     // OS-temp directory when it is not. The spawn seam pins the resolution.
@@ -91,27 +90,40 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
 
   it('gives two runs on the same machine separate directories', async () => {
     const [a, b] = [newRun(), newRun()];
-    const envA = (await seam().agentEnvForStep(a.id, 'claude')).env;
-    const envB = (await seam().agentEnvForStep(b.id, 'claude')).env;
+    const envA = (await resolveStepEnv(a.id, 'claude')).env;
+    const envB = (await resolveStepEnv(b.id, 'claude')).env;
     expect(envA.TMPDIR).not.toBe(envB.TMPDIR);
   });
 
   it.each(['done', 'review', 'failed', 'cancelled'] as const)('reaps the directory when a %s run leaves the active registry', async status => {
-    const run = newRun();
-    const { env } = await seam().agentEnvForStep(run.id, 'claude');
-    writeFileSync(join(env.TMPDIR as string, 'scratch'), 'x', 'utf8');
-    setRunStatus(store, run.id, status);
-    seam().dropActive(run.id);
-    expect(existsSync(env.TMPDIR as string)).toBe(false);
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: repoRoot });
+    vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0'); vi.stubEnv('CEZ_MOCK_NOTES', '0');
+    vi.stubEnv('CEZ_REVIEW_GATE', status === 'review' ? '1' : '0');
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:cezar-ask' });
+    // bound: the native tool's pending question is the safe input boundary.
+    await vi.waitFor(() => expect(store.getRun(run.id)?.status).toBe('waiting'), { timeout: HANG_GUARD_MS });
+    const scratch = resolveAgentTmpDir(dataDir, run.id);
+    writeFileSync(join(scratch, 'scratch'), 'x', 'utf8');
+    if (status === 'review') writeFileSync(join(store.getRun(run.id)!.worktreePath!, 'change.txt'), 'review this');
+    if (status === 'cancelled') manager.cancel(run.id);
+    else if (status === 'failed') expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:auth-error' }])).toBe(true);
+    else expect(manager.finish(run.id)).toBe(true);
+    // bound: status and registry release follow the owned runner's exit.
+    await vi.waitFor(() => {
+      expect(store.getRun(run.id)?.status).toBe(status);
+      expect(manager.isActive(run.id)).toBe(false);
+      expect(existsSync(scratch)).toBe(false);
+    }, { timeout: HANG_GUARD_MS });
   });
 
   it.each(['queued', 'running', 'waiting'] as const)('preserves %s scratch when a session drops and the next spawn reuses it', async status => {
     const run = newRun();
-    const { env } = await seam().agentEnvForStep(run.id, 'claude');
+    const { env } = await resolveStepEnv(run.id, 'claude');
     setRunStatus(store, run.id, status);
     writeFileSync(join(env.TMPDIR!, 'scratch'), 'keep my notes');
-    seam().dropActive(run.id);
-    const again = await seam().agentEnvForStep(run.id, 'claude');
+    (manager as unknown as { dropActive(id: string): void }).dropActive(run.id);
+    const again = await resolveStepEnv(run.id, 'claude');
     expect(again.env.TMPDIR).toBe(env.TMPDIR);
     expect(readFileSync(join(again.env.TMPDIR!, 'scratch'), 'utf8')).toBe('keep my notes');
   });
@@ -119,7 +131,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
   it('preserves waiting scratch through a fresh store and manager recovery', async () => {
     const run = newRun();
     setRunStatus(store, run.id, RUN_STATUS.waiting);
-    const { env } = await seam().agentEnvForStep(run.id, 'claude');
+    const { env } = await resolveStepEnv(run.id, 'claude');
     const dirs = new Set([env.TMPDIR!, agentTmpDir(dataDir, run.id)]);
     for (const dir of dirs) {
       mkdirSync(dir, { recursive: true });
@@ -136,7 +148,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
 
   it('reaps scratch immediately when an inactive task history is deleted', async () => {
     const run = newRun();
-    const { env } = await seam().agentEnvForStep(run.id, 'claude');
+    const { env } = await resolveStepEnv(run.id, 'claude');
     setRunStatus(store, run.id, RUN_STATUS.waiting);
     const local = agentTmpDir(dataDir, run.id);
     mkdirSync(local, { recursive: true });
@@ -147,7 +159,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
 
   it('reaps scratch when an idle-closed task is finished without another session', async () => {
     const run = newRun();
-    const { env } = await seam().agentEnvForStep(run.id, 'claude');
+    const { env } = await resolveStepEnv(run.id, 'claude');
     store.updateStep(run.id, 's', { status: STEP_STATUS.waiting });
     setRunStatus(store, run.id, RUN_STATUS.waiting, { currentStepId: 's' });
     expect(manager.finish(run.id)).toBe(true);
@@ -164,19 +176,19 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     const resolved = resolveAgentTmpDir(dataDir, run.id);
     mkdirSync(dirname(resolved), { recursive: true });
     writeFileSync(resolved, 'not a directory', 'utf8');
-    await expect(seam().agentEnvForStep(run.id, 'claude')).rejects.toBeInstanceOf(AgentTempDirError);
+    await expect(resolveStepEnv(run.id, 'claude')).rejects.toBeInstanceOf(AgentTempDirError);
   });
 
   // A crash never reaches the terminal-transition reap, so without the startup
   // sweep the directories would accumulate exactly the way `/tmp` did.
   it('sweeps orphaned directories at startup', async () => {
     const dead = newRun();
-    const { env } = await seam().agentEnvForStep(dead.id, 'claude');
+    const { env } = await resolveStepEnv(dead.id, 'claude');
     setRunStatus(store, dead.id, RUN_STATUS.done, { finishedAt: new Date().toISOString() });
     // Seed leftovers from a crash that missed terminal cleanup.
     mkdirSync(env.TMPDIR!, { recursive: true });
     // The resolved fallback needs its owner marker for the sweep to claim it.
-    await seam().agentEnvForStep(dead.id, 'claude');
+    await resolveStepEnv(dead.id, 'claude');
     expect(existsSync(env.TMPDIR as string)).toBe(true);
 
     await manager.recover();
@@ -190,7 +202,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     writeFileSync(resolved, 'not a directory', 'utf8');
     let err: Error | undefined;
     try {
-      await seam().agentEnvForStep(run.id, 'claude');
+      await resolveStepEnv(run.id, 'claude');
     } catch (e) {
       err = e as Error;
     }
@@ -213,7 +225,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
 
     it('restores the pre-#785 environment: no override, no directory', async () => {
       const run = newRun();
-      const { env } = await seam().agentEnvForStep(run.id, 'claude');
+      const { env } = await resolveStepEnv(run.id, 'claude');
       expect(env.TMPDIR).toBeUndefined();
       // Nothing minted at either location the resolver may choose.
       expect(existsSync(resolveAgentTmpDir(dataDir, run.id))).toBe(false);
@@ -228,7 +240,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
       const resolved = resolveAgentTmpDir(dataDir, run.id);
       mkdirSync(dirname(resolved), { recursive: true });
       writeFileSync(resolved, 'not a directory', 'utf8');
-      await expect(seam().agentEnvForStep(run.id, 'claude')).resolves.toMatchObject({
+      await expect(resolveStepEnv(run.id, 'claude')).resolves.toMatchObject({
         env: { CEZ_TASK_ID: run.id },
       });
     });
@@ -263,15 +275,10 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
   let store: RunStore;
   let manager: RunManager;
 
-  type Seam = {
-    agentEnvForStep(
-      runId: string,
-      backend: 'claude' | 'codex' | 'opencode',
-      options?: { generateFollowups?: boolean; recordedProfileId?: string },
-    ): Promise<{ env: Record<string, string>; profileId: string }>;
-    dropActive(runId: string): void;
+  const resolveStepEnv = (runId: string, backend: Parameters<typeof agentEnvForStep>[3], options?: Parameters<typeof agentEnvForStep>[4]) => {
+    const context = { store, repoRoot, dataDir };
+    return agentEnvForStep(context, { agentEnv: id => agentEnv(context, undefined, id), workerStep: () => undefined }, runId, backend, options);
   };
-  const seam = () => manager as unknown as Seam;
 
   beforeEach(async () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-deep-tmp-home-'));
@@ -288,6 +295,7 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
     manager.dispose();
+    vi.unstubAllEnvs();
     for (const run of store.listRuns()) removeAgentTmpDir(dataDir, run.id);
     store.flush();
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
@@ -305,7 +313,7 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
 
   it('hands the spawn a short TMPDIR outside the checkout and reaps the fallback', async () => {
     const run = newRun();
-    const { env } = await seam().agentEnvForStep(run.id, 'claude');
+    const { env } = await resolveStepEnv(run.id, 'claude');
     expect(env.TMPDIR).toBeTruthy();
     expect(env.TMPDIR!.length).toBeLessThanOrEqual(MAX_SOCKET_SAFE_DIR_LENGTH);
     expect(env.TMPDIR).not.toBe(agentTmpDir(dataDir, run.id));
@@ -313,8 +321,11 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
     expect(env.TEMP).toBe(env.TMPDIR);
     expect(env.TMP).toBe(env.TMPDIR);
     writeFileSync(join(env.TMPDIR as string, 'scratch'), 'x', 'utf8');
-    setRunStatus(store, run.id, RUN_STATUS.done);
-    seam().dropActive(run.id);
+    store.updateStep(run.id, 's', { status: STEP_STATUS.waiting });
+    setRunStatus(store, run.id, RUN_STATUS.waiting, { currentStepId: 's' });
+    expect(manager.finish(run.id)).toBe(true);
+    // bound: public Finish owns terminal cleanup, including the socket-safe fallback.
+    await vi.waitFor(() => expect(store.getRun(run.id)?.status).toBe('done'), { timeout: HANG_GUARD_MS });
     expect(existsSync(env.TMPDIR as string)).toBe(false);
   });
 });

@@ -157,8 +157,7 @@ describe('Continue after a Cursor bootstrap crash', () => {
     store.updateStep(id, 'work', { sessionTransport: 'cursor-print' });
     store.addStep(id, { id: 'continue-1', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation' });
     setRunStatus(store, id, RUN_STATUS.queued, { finishedAt: undefined });
-    await (manager as unknown as { reviveQueuedRun(run: NonNullable<ReturnType<RunStore['getRun']>>, reason: string): Promise<void> })
-      .reviveQueuedRun(store.getRun(id)!, 'cezar restarted');
+    await manager!.recover(id);
     expect(store.getRun(id)?.status).toBe('failed');
     expect(captured.specs).toHaveLength(0);
   });

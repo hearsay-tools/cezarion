@@ -1,3 +1,4 @@
+import { captureSessions } from './runner-session-capture.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { describe, expect, it, vi } from 'vitest';
@@ -17,9 +18,12 @@ const parked = (id: string) => ciWaitOf(id)?.phase === 'open' && store.getRun(id
 // Only the external CI completion time is controlled; metadata uses the dry-run gh process.
 export const GROUPS = { fresh: RUNNER_IDS, continued: RUNNER_IDS, recovered: RUNNER_IDS };
 export function registerGroup(mode: keyof typeof GROUPS) {
+
+
 describe('CI tool registration and scheduled delivery across harnesses', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   it.each(GROUPS[mode])(`%s ${mode} parks from a real tool call and resumes with one observation`, async runner => {
+    const sessionOf = captureSessions();
     let settle!: (result: CiWaitResult) => void;
     const observation = new Promise<CiWaitResult>(resolve => { settle = resolve; });
     const provision = vi.spyOn(CiToolController.prototype, 'provision');
@@ -29,8 +33,7 @@ describe('CI tool registration and scheduled delivery across harnesses', { timeo
       await until(() => parked(run.id));
       const firstWait = ciWaitOf(run.id)!;
       if (mode === 'continued') {
-        const state = (manager as unknown as { active: Map<string, { liveSession: { session: { end(): void }; };  }> }).active.get(run.id)!;
-        state.liveSession.session.end();
+        sessionOf(run.id).end();
         await until(() => !manager.isActive(run.id));
         const boundaries = store.readEvents(run.id).filter(event => event.type === 'turn-end').length;
         expect(manager.continueRun(run.id, { text: 'mock:ci-wait https://github.com/acme/repo/pull/12' }).ok).toBe(true);

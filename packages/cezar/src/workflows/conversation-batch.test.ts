@@ -1,19 +1,20 @@
+import { captureSessions } from './runner-session-capture.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentSession } from '../core/agent-runner.ts';
 import { controlledWire, fixtureUpdateRun, manager, parent, root, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
 describe('conversation backlog delivery (#475)', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   it('delivers updates from multiple completed senders together at the next safe boundary', async () => {
+    const sessionOf = captureSessions();
     const release = join(root, 'release-turn'); const wire = controlledWire({ firstResultGate: release });
     const p = await parent(); await until(wire.initialReceived);
     const a = await worker(p.id); const b = await worker(p.id);
-    const session = (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; };  }> }).active.get(p.id)!.liveSession.session;
+    const session = sessionOf(p.id);
     const send = vi.spyOn(session, 'sendAgentMessage');
     const createdAt = new Date().toISOString();
     const messages = [a, b, a].map((sender, i) => ({ id: randomUUID(), senderRunId: sender.id, recipientRunId: p.id,

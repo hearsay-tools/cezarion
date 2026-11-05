@@ -6,14 +6,14 @@ import {
 } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerWaitRequestSchema } from '@open-mercato/cezar-contract/delegation';
-import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
+import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { createDeliveryControl } from '../../scripts/mock-delivery-control.mjs';
 import { DelegationService } from '../delegation/service.ts';
 import { CiToolController } from '../ci-wait/controller.ts';
 import { callCezarWait } from '../ci-wait/client.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
-import { manager, store, root, worker, fixtureUpdateRun, lastWaitOf, until, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, store, root, worker, fixtureUpdateRun, lastWaitOf, toolGenerationOf, until, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 // Hold only native turn content: the mock admits the hold scenario (ACK and turn start where the
@@ -49,8 +49,7 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
     store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
     try {
       await until(wire.received);
-      const state = (manager as unknown as { active: Map<string, { liveSession: { ciGeneration: string; session: AgentSession; };  }> }).active.get(run.id)!;
-      const tools = controller.provision(manager.cezarToolHandlers(run.id, state.liveSession.ciGeneration));
+      const tools = controller.provision(manager.cezarToolHandlers(run.id, toolGenerationOf(run.id)));
       const child = await worker(run.id);
       const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
       await expect(callCezarWait({ kind: WAIT_KIND.pr, pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: WAIT_KIND.pr });
@@ -81,8 +80,7 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
       store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
       try {
         await until(wire.received);
-        const state = (manager as unknown as { active: Map<string, { liveSession: { ciGeneration: string; };  }> }).active.get(run.id)!;
-        const tools = controller.provision(manager.cezarToolHandlers(run.id, state.liveSession.ciGeneration));
+          const tools = controller.provision(manager.cezarToolHandlers(run.id, toolGenerationOf(run.id)));
         const child = await worker(run.id);
         const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
         fixtureUpdateRun(child.id, { status: RUN_STATUS.done });
