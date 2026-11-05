@@ -1,3 +1,4 @@
+import { registrationToolHandler } from './wait-registration-tool.ts';
 import { randomUUID } from 'node:crypto';
 import type { acquireCiResources } from '../../ci-wait/resources.ts';
 import { previewCdpSession, previewRunContext, type PreviewHostLike } from '../../preview/registration.ts';
@@ -6,9 +7,9 @@ import type { ActiveRun } from '../active-run.ts';
 import type { AutomationToolService, RunModuleContext } from './types.ts';
 import type { CezarToolHandlers } from '../../ci-wait/controller.ts';
 import { askErrorMessage, waitErrorMessage, scheduleRefusal } from '../../ci-wait/errors.ts';
-import { askErrorCodeSchema, waitErrorCodeSchema, type CezarAskAnswer, type CezarCancelWaitAnswer, type CezarWaitRequestInput, type CezarAskRequest, type CezarDoneRequest, type CezarDoneAnswer, type WaitVia, type HumanWaitEntry, type PrWaitEntry, type TimerWaitEntry, type WorkerWaitEntry, type ProcessWaitEntry, type PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { askErrorCodeSchema,  type CezarAskAnswer, type CezarCancelWaitAnswer, type CezarWaitRequestInput, type CezarAskRequest, type CezarDoneRequest, type CezarDoneAnswer, type WaitVia, type HumanWaitEntry, type PrWaitEntry, type TimerWaitEntry, type WorkerWaitEntry, type ProcessWaitEntry, type PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import type { PreviewServeRequest, PreviewServeResult, PreviewStopRequest, PreviewStopResult } from '@open-mercato/cezar-contract/preview';
-import { CANCEL_MESSAGES, openWaitList, waitAnswerKind } from '../waits.ts';
+import { CANCEL_MESSAGES, openWaitList } from '../waits.ts';
 
 /** How long a schedule tool call waits for the service after recovery (hearsay-tools/cezarion#1465). */
 const AUTOMATION_TOOLS_READY_MS = 30_000;
@@ -47,18 +48,7 @@ export function cezarToolHandlers(runId: string, generation: string, host: ToolH
   const listOpen = () => openWaitList(host.store.getRun(runId)?.waits ?? []);
   const thrownCode = (error: unknown) => error && typeof error === 'object' && 'code' in error ? error.code : undefined;
   return {
-    registerWait: async (request, via, signal) => {
-      try {
-        const wait = await host.registerWait(runId, request, via, generation, signal);
-        // The tools only open agent waits, which always carry a deadline.
-        if (wait.deadline === undefined) throw new Error('registered wait has no deadline');
-        return { answer: { ok: true, wait_id: wait.id, kind: waitAnswerKind(wait), deadline: wait.deadline, open_waits: listOpen() }, wait };
-      } catch (error) {
-        const code = waitErrorCodeSchema.safeParse(thrownCode(error));
-        if (!code.success) throw error;
-        return { answer: { ok: false, code: code.data, message: waitErrorMessage(code.data), open_waits: listOpen() } };
-      }
-    },
+    registerWait: registrationToolHandler(runId, generation, host),
     ask: async (request, signal): Promise<CezarAskAnswer> => {
       try {
         const wait = await host.registerAsk(runId, request, generation, signal);

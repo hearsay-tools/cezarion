@@ -50,6 +50,9 @@ export function toolsUnavailableMessage(detail: string, directory: string | unde
 
 // hearsay-tools/cezarion#1233: `cezar_wait` refusals. Each names what the agent can do next.
 const waitMessages: Partial<Record<WaitErrorCode, string>> = {
+  duplicate_deadline: 'Deadline change refused. The retained wait is still active with its original deadline. Do not cancel it to remove a duplicate.',
+  operation_conflict: 'This operation_id belongs to different arguments. Retry the original arguments or use a new operation_id.',
+  outcome_unknown: 'Registration outcome is unknown. Retry the same operation_id and arguments to recover its receipt; do not assume nothing was created or add a fallback wait.',
   timers_disabled: 'Automatic re-checks are turned off for this workspace (Park until resumed). Do not register a timer; end your turn and the user resumes the task.',
   wake_budget_spent: 'This run spent its automatic wakes. Do not register another timer; call cezar_ask if you need the user, or end your turn.',
   capacity: 'Cezar cannot open another wait now: this run has the maximum open waits, or the CI watcher is full. Cancel a wait you no longer need with cezar_cancel_wait, or retry later.',

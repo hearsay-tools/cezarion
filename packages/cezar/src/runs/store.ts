@@ -1,3 +1,4 @@
+import { registeredWaitRecord, registeredReceiptRecord } from './wait-registration-write.ts';
 import { reportsIndex, type ReportsIndex } from '../artifacts/reports-index.ts';
 import { stageCommit, stageLoaded, stageDurableUpdate, stageDebouncedUpdate, stageConversation, stageArchiveFields, stagePullRequests, stageStepUpdate, redactPatch, redactText, clearPin, type RecordPatch } from './record-write-rules.ts';
 import { workerDeletionProof } from './worker-deletion-proof.ts';
@@ -38,10 +39,10 @@ import { previewServerSchema } from '@open-mercato/cezar-contract/preview';
 import {
   isUsageLimitHold,
   waitSchema,
+  type WaitRegistrationReceipt,
   LAST_WAITS_LIMIT,
   TIMER_MAX_SECONDS,
   TIMER_MIN_SECONDS,
-  WAIT_LIMIT,
 } from '@open-mercato/cezar-contract/waits';
 import { isSweepable, UNREAD_RUN_RULE, SWEEPABLE_RUN_RULE, RETENTION_RUN_RULE, REFERENCED_RUN_RULE } from '@open-mercato/cezar-contract/run-predicates';
 import type { ArchiveFinishedScope, ArchivedRunsResponse, ArchivePullRequestIdentity, CiWait, PrWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, MergedPullRequest, RunPullRequest, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry, WorkerWait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
@@ -2237,20 +2238,17 @@ export class RunStore extends EventEmitter {
    * here: settling is an outcome (`commitOutcome`). A new open wait
    * past `WAIT_LIMIT` open ones is refused, so the list stays bounded whatever the caller checked.
    */
-  commitWait(id: string, wait: Wait, input?: AgentInput): void {
+  commitWait(id: string, wait: Wait, input?: AgentInput, registration?: WaitRegistrationReceipt): void {
     const run = this.peek(id);
     if (!run) throw new Error('missing wait target');
-    const entry = waitSchema.parse(wait);
-    if (entry.phase !== 'open' && entry.phase !== 'resolved') throw new Error('a settled wait is committed through its delivery or cancellation');
-    const waits = run.waits ?? [];
-    const known = waits.some((row) => row.id === entry.id);
-    if (!known && entry.phase === 'open' && waits.filter((row) => row.phase === 'open').length >= WAIT_LIMIT) {
-      throw new Error(`open wait limit reached (${WAIT_LIMIT})`);
-    }
-    const agentInput = input ? agentInputSchema.parse(input) : undefined;
-    this.commitIndex(new Map([[id, { ...run, waits: known ? waits.map((row) => row.id === entry.id ? entry : row) : [...waits, entry], lastWaitsError: undefined,
-      ...(agentInput ? { agentInputs: run.agentInputs?.some((row) => row.id === agentInput.id)
-        ? run.agentInputs : [...(run.agentInputs ?? []), agentInput] } : {}) }]]));
+    this.commitIndex(new Map([[id, registeredWaitRecord(run, wait, input, registration)]]));
+  }
+
+  /** Record a deduplicated registration without mutating its wait. */
+  commitWaitRegistration(id: string, receipt: WaitRegistrationReceipt): void {
+    const run = this.peek(id);
+    if (!run) throw new Error('missing wait target');
+    this.commitIndex(new Map([[id, registeredReceiptRecord(run, receipt)]]));
   }
 
   /** A usage-limit appointment withdrawn, committed at once instead of on the debounced save

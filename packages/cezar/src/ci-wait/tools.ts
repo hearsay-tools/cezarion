@@ -1,4 +1,4 @@
-import { cezarAskRequestSchema, cezarCancelWaitRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type CezarAskAnswer } from '@open-mercato/cezar-contract/waits';
+import { cezarAskRequestSchema, cezarCancelWaitRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type CezarAskAnswer, type CezarWaitAnswer } from '@open-mercato/cezar-contract/waits';
 import { ASK_LIMITS } from '@open-mercato/cezar-contract/ask-schema';
 import { previewStopRequestSchema, previewServeRequestSchema } from '@open-mercato/cezar-contract/preview';
 import { scheduleTaskRequestSchema, scheduledTasksRequestSchema, type ScheduleTaskAnswer, type ScheduledTasksAnswer } from '@open-mercato/cezar-contract/scheduled-tasks';
@@ -46,6 +46,7 @@ function flatWaitInputSchema() {
     type: 'object' as const,
     properties: {
       kind: { type: 'string', enum: cezarWaitRequestSchema.options.map(option => option.shape.kind.value), description: '"pr" waits for a GitHub pull request: its checks or its merge (see `until`); "worker" waits for workers you own; "request" waits for replies to requests you sent; "peer" waits for named peer tasks to message you or settle; "timer" wakes you after `seconds`; "process" wakes you when a background command ends.' },
+      operation_id: field('operation_id', 'Optional retry identity. Reuse it with exactly the same arguments after an unknown outcome; never use it for a different registration.'),
       pr: field('pr', 'kind "pr": the HTTPS GitHub pull request URL.'),
       until: field('until', 'kind "pr": "checks" (default) wakes you when the checks finish; "merge" wakes you only when GitHub reports the PR merged or closed without merge, so green checks keep it open.'),
       wake_on_conflict: field('wake_on_conflict', 'kind "pr": Default true. Set false when you watch a PR you do not own, such as another agent\'s PR your work depends on: you cannot resolve its conflicts. With until "checks", GitHub often runs no workflows on a conflicting PR, so the wait usually ends as no_checks or deadline.'),
@@ -76,7 +77,8 @@ export const waitToolDefinition = {
     'For a command that is already running, or that writes its own status file somewhere else, pass only its `pid` and leave `exit_file` out. ' +
     'The wake then reports `exited` without a code: read the command\'s own log or status file after it. ' +
     'Never start a watcher or helper process to copy a file into $TMPDIR. ' +
-    'The job outlives this session and Cezar does not stop it.',
+    'The job outlives this session and Cezar does not stop it. ' +
+    'An unchanged repeat names the retained wait. A changed timeout is refused and keeps that wait active; do not cancel it as a duplicate. On an unknown outcome retry the same operation_id and arguments, without a fallback timer.',
   inputSchema: flatWaitInputSchema(),
 };
 /**
@@ -111,9 +113,18 @@ export const cancelWaitToolDefinition = {
 };
 
 /** JSON first, then one hint sentence, as `invokePreviewTool` answers. */
+export function waitAnswerHint(answer: CezarWaitAnswer): string {
+  if (!answer.ok) return answer.effect === 'unknown' ? 'Outcome unknown. Retry the same operation_id and arguments; do not add a fallback wait.'
+    : answer.code === 'duplicate_deadline' ? 'Deadline change refused. The retained wait remains active; do not cancel it as a duplicate.'
+      : 'Not registered by this call. Follow the message; previously registered waits remain unchanged.';
+  if (answer.wait_phase === 'unavailable') return 'Registration receipt recovered; current wait state is unavailable. Inspect task history before arranging another wait.';
+  if (answer.wait_phase && answer.wait_phase !== 'open') return 'Registration receipt recovered. This wait has already settled; inspect its result before arranging another wait.';
+  return answer.replayed || answer.deduplicated ? 'Existing wait retained. This is its real ID and deadline; do not cancel it as a duplicate. End your turn to wait.'
+    : 'Registered. End your turn to wait; any open wait wakes you when it resolves.';
+}
 export async function invokeWaitTool(input: unknown) {
   const answer = await callCezarWait(input);
-  const hint = answer.ok ? 'Registered. End your turn to wait; any open wait wakes you when it resolves.' : 'Not registered. Fix the call from the message, or continue without this wait.';
+  const hint = waitAnswerHint(answer);
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${hint}` }], isError: !answer.ok, details: answer };
 }
 export async function invokeCancelWaitTool(input: unknown) {

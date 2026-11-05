@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { request } from 'node:http';
 import { previewStopResult } from '../preview/registration.ts';
 import { previewRefusal } from './errors.ts';
@@ -21,8 +22,17 @@ export function callPreviewStop(input: unknown, env: NodeJS.ProcessEnv = process
 }
 
 /** hearsay-tools/cezarion#1233: unparsed like preview, so the server names the failing field. */
-export function callCezarWait(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<CezarWaitAnswer> {
-  return callTool(input, env, 'wait', cezarWaitAnswerSchema, { ok: false, code: 'unavailable', message: UNAVAILABLE });
+export async function callCezarWait(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<CezarWaitAnswer> {
+  if (!env.CEZ_TOOL_SOCKET || !env.CEZ_TOOL_TOKEN) return { ok: false, effect: 'refused', code: 'unavailable', message: 'No local tool capability is configured. Nothing was created.' };
+  const identified = input && typeof input === 'object' && !Array.isArray(input)
+    ? { ...input, operation_id: 'operation_id' in input ? input.operation_id : randomUUID() } : input;
+  const operationId = identified && typeof identified === 'object' && 'operation_id' in identified && typeof identified.operation_id === 'string' ? identified.operation_id : undefined;
+  const unknown: CezarWaitAnswer = { ok: false, effect: 'unknown', code: 'outcome_unknown', ...(operationId ? { operation_id: operationId } : {}),
+    message: 'Registration outcome is unknown. Retry the same operation_id and arguments to recover its receipt. Do not assume nothing was created, cancel a retained wait, or add a fallback timer.' };
+  const deadline = Date.now() + 15_000;
+  const first = await callTool(identified, env, 'wait', cezarWaitAnswerSchema, unknown, 32_768, 7_500, true);
+  if (first.ok || first.code !== 'outcome_unknown' || !operationId || Date.now() >= deadline) return first;
+  return callTool(identified, env, 'wait', cezarWaitAnswerSchema, unknown, 32_768, Math.max(1, deadline - Date.now()), true);
 }
 
 export function callCezarCancelWait(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<CezarCancelWaitAnswer> {
@@ -51,25 +61,28 @@ export function callScheduledTasks(input: unknown, env: NodeJS.ProcessEnv = proc
   return callTool(input, env, 'scheduled-tasks', scheduledTasksAnswerSchema, { ok: false, code: 'unavailable', message: SCHEDULE_UNAVAILABLE }, SCHEDULED_TASK_LIMITS.wireBytes);
 }
 
-function callTool<T>(input: unknown, env: NodeJS.ProcessEnv, route: string, schema: { safeParse(input: unknown): { success: true; data: T } | { success: false } }, unavailable: T, maxAnswerBytes = 32_768): Promise<T> {
+function callTool<T>(input: unknown, env: NodeJS.ProcessEnv, route: string, schema: { safeParse(input: unknown): { success: true; data: T } | { success: false } }, unavailable: T, maxAnswerBytes = 32_768, timeoutMs = 15_000, typedErrors = false): Promise<T> {
   const socketPath = env.CEZ_TOOL_SOCKET; const token = env.CEZ_TOOL_TOKEN;
   if (!socketPath || !token) return Promise.resolve(unavailable);
   return new Promise(resolve => {
+    let done = false;
+    const finish = (answer: T) => { if (done) return; done = true; clearTimeout(timer); resolve(answer); };
     // One connection per call (hearsay-tools/cezarion#1465): Node 24.15 raised an uncaught EPIPE
     // from a pooled keep-alive socket after a large schedule call when the controller closed.
     const req = request({ socketPath, agent: false, path: `/api/v1/tools/${route}`, method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } }, response => {
       const chunks: Buffer[] = []; let bytes = 0;
       response.on('data', (chunk: Buffer) => { bytes += chunk.length; if (bytes > maxAnswerBytes) req.destroy(); else chunks.push(chunk); });
-      response.on('error', () => resolve(unavailable));
+      response.on('error', () => finish(unavailable));
       response.on('end', () => {
         try {
           const result = schema.safeParse(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-          resolve(response.statusCode === 200 && result.success ? result.data : unavailable);
-        } catch { resolve(unavailable); }
+          finish((response.statusCode === 200 || typedErrors) && result.success ? result.data : unavailable);
+        } catch { finish(unavailable); }
       });
     });
-    req.setTimeout(15000, () => req.destroy());
-    req.on('error', () => resolve(unavailable));
+    // bound: total request duration, including a peer that keeps a socket active without an answer.
+    const timer = setTimeout(() => { req.destroy(); finish(unavailable); }, timeoutMs);
+    req.on('error', () => finish(unavailable));
     req.end(JSON.stringify(input ?? null));
   });
 }

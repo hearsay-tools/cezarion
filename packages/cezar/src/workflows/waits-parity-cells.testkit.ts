@@ -754,10 +754,14 @@ function registrationCells(runners: RunnerId[], it: typeof registerTest = regist
     it(`${runner} U1 ci and timer register through cezar_wait on the native wire, park, and wake with their result`, async () => {
       const external = github();
       nativeWire(runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr }), runner });
+      const initial = toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr, timeout_seconds: 30 });
+      const changed = toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr, timeout_seconds: 60 });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: `${initial} ${initial} ${changed}`, runner });
       await until(() => parkedOn(run.id, waitOfKind(run.id, 'pr')));
       const ci = waitOfKind(run.id, 'pr')!;
-      expect(ci).toMatchObject({ via: WAIT_VIA.cezar_wait, source: WAIT_SOURCE.agent, prUrl: pr });
+      expect(ci).toMatchObject({ via: WAIT_VIA.cezar_wait, source: WAIT_SOURCE.agent, prUrl: pr, timeoutSeconds: 30 });
+      expect(store.getRun(run.id)?.waitRegistrations).toMatchObject([{ wait: { id: ci.id }, deduplicated: false }, { wait: { id: ci.id }, deduplicated: true }]);
+      expect(agentWaits(run.id)).toHaveLength(1);
       expect(manager.isActive(run.id)).toBe(true);
       external.settle();
       await until(() => settled(run.id, ci.id)?.phase === 'delivered');

@@ -54,7 +54,7 @@ describe('private CI controller', () => {
     expect(answer).not.toHaveProperty('generation');
     expect(answer).not.toHaveProperty('turnId');
     await owner.close();
-    await expect(callCezarWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env)).resolves.toMatchObject({ ok: false, code: 'unavailable' });
+    await expect(callCezarWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env)).resolves.toMatchObject({ ok: false, code: 'outcome_unknown' });
     if (process.platform !== 'win32') await expect(access(dirname(session.env.CEZ_TOOL_SOCKET!))).rejects.toThrow();
   });
   it('rejects unknown/invalid/oversized bodies and unknown capabilities before registration', async () => {
@@ -73,8 +73,8 @@ describe('private CI controller', () => {
     const pending = callCezarWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env);
     await vi.waitFor(() => expect(complete).toBeDefined(), { timeout: HANG_GUARD_MS });
     session.revoke(); expect(signal.aborted).toBe(true); complete();
-    await expect(pending).resolves.toMatchObject({ ok: false, code: 'unavailable' });
-    await expect(callCezarWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env)).resolves.toMatchObject({ ok: false, code: 'unavailable' });
+    await expect(pending).resolves.toMatchObject({ ok: false, code: 'outcome_unknown' });
+    await expect(callCezarWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env)).resolves.toMatchObject({ ok: false, code: 'outcome_unknown' });
   });
   it('keeps Unix socket paths short even when the inherited temporary directory is long', async () => {
     if (process.platform === 'win32') return;
@@ -92,14 +92,14 @@ describe('private CI controller', () => {
   it('preserves actionable contract error codes without forwarding thrown messages', async () => {
     const session = (await controller()).provision(handlers({ registerWait: coded('wait_conflict') }));
     const response = await raw(session.env, JSON.stringify({kind: WAIT_KIND.pr,pr:wait.prUrl}));
-    expect(JSON.parse(response.body)).toEqual({ok:false,code:'wait_conflict',message:'A different CI wait is already active for this run.'});
+    expect(JSON.parse(response.body)).toEqual({ok:false,effect:'refused',code:'wait_conflict',message:'A different CI wait is already active for this run.'});
     await expect(callCezarWait({kind: WAIT_KIND.pr,pr:wait.prUrl},session.env)).resolves.toMatchObject({ok:false,code:'wait_conflict'});
   });
 
   it('bounds registration errors and never returns exception secrets', async () => {
     const session = (await controller()).provision(handlers({ registerWait: async () => { throw new Error('secret-token-sensitive'); } }));
     const response = await raw(session.env, JSON.stringify({ kind: WAIT_KIND.pr, pr: wait.prUrl }));
-    expect(JSON.parse(response.body)).toMatchObject({ ok: false, code: 'unavailable' }); expect(response.body).not.toContain('secret-token-sensitive');
+    expect(JSON.parse(response.body)).toMatchObject({ ok: false, effect: 'unknown', code: 'outcome_unknown' }); expect(response.body).not.toContain('secret-token-sensitive');
   });
   it('adapter exits on harness stdin EOF while its controller remains alive', async () => {
     const session = (await controller()).provision(handlers());
@@ -148,7 +148,7 @@ describe('private CI controller', () => {
       const [json, hint] = text!.split('\n');
       expect(cezarWaitAnswerSchema.parse(JSON.parse(json!))).toEqual(registered.answer);
       expect(hint).toBe('Registered. End your turn to wait; any open wait wakes you when it resolves.');
-      expect(register).toHaveBeenLastCalledWith({ kind: WAIT_KIND.pr, pr: wait.prUrl, until: 'checks', wake_on_conflict: true, timeout_seconds: 1800 }, 'cezar_wait', expect.any(AbortSignal));
+      expect(register).toHaveBeenLastCalledWith({ kind: WAIT_KIND.pr, pr: wait.prUrl, until: 'checks', wake_on_conflict: true, timeout_seconds: 1800, operation_id: expect.any(String) }, 'cezar_wait', expect.any(AbortSignal));
       const closed = await client.callTool({ name: 'cezar_cancel_wait', arguments: { wait_id: wait.id } });
       expect(closed.isError).not.toBe(true);
       expect(cezarCancelWaitAnswerSchema.parse(JSON.parse((closed.content as Array<{ text: string }>)[0]!.text.split('\n')[0]!))).toEqual(cancelled);
@@ -175,7 +175,7 @@ describe('private wait routes', () => {
     expect(cezarWaitAnswerSchema.parse(JSON.parse(opened.body))).toEqual(registered.answer);
     expect(register).toHaveBeenLastCalledWith({ kind: WAIT_KIND.pr, pr: wait.prUrl, until: 'checks', wake_on_conflict: true, timeout_seconds: 1800 }, 'cezar_wait', expect.any(AbortSignal));
     await expect(callCezarWait({ kind: WAIT_KIND.timer, seconds: 600, note: 'deploy' }, session.env)).resolves.toEqual(registered.answer);
-    expect(register).toHaveBeenLastCalledWith({ kind: WAIT_KIND.timer, seconds: 600, note: 'deploy' }, 'cezar_wait', expect.any(AbortSignal));
+    expect(register).toHaveBeenLastCalledWith({ kind: WAIT_KIND.timer, seconds: 600, note: 'deploy', operation_id: expect.any(String) }, 'cezar_wait', expect.any(AbortSignal));
     const closed = await raw(session.env, JSON.stringify({ wait_id: wait.id }), undefined, 'cancel-wait');
     expect(closed.status).toBe(200);
     expect(cezarCancelWaitAnswerSchema.parse(JSON.parse(closed.body))).toEqual(cancelled);
@@ -217,12 +217,12 @@ describe('private wait routes', () => {
     const session = (await controller()).provision(handlers({ registerWait: coded('capacity'), cancelWait: async () => { throw new Error('secret-sensitive'); } }));
     const refused = await raw(session.env, JSON.stringify({ kind: WAIT_KIND.pr, pr: wait.prUrl }), undefined, 'wait');
     expect(refused.status).toBe(200);
-    expect(JSON.parse(refused.body)).toEqual({ ok: false, code: 'capacity', message: 'CI wait registration capacity is exhausted; retry later.' });
+    expect(JSON.parse(refused.body)).toEqual({ ok: false, effect: 'refused', code: 'capacity', message: 'CI wait registration capacity is exhausted; retry later.' });
     const failed = await raw(session.env, JSON.stringify({ wait_id: wait.id }), undefined, 'cancel-wait');
     expect(JSON.parse(failed.body)).toMatchObject({ cancelled: false, code: 'unavailable' });
     expect(refused.body + failed.body).not.toContain('secret-sensitive');
     session.revoke();
-    expect(await callCezarWait({ kind: WAIT_KIND.timer, seconds: 600 }, session.env)).toMatchObject({ ok: false, code: 'unavailable' });
+    expect(await callCezarWait({ kind: WAIT_KIND.timer, seconds: 600 }, session.env)).toMatchObject({ ok: false, code: 'outcome_unknown' });
     expect(await callCezarCancelWait({ wait_id: wait.id }, session.env)).toMatchObject({ cancelled: false, code: 'unavailable' });
   });
 
@@ -298,7 +298,7 @@ describe('private wait routes', () => {
     expect(await callCezarAsk({ kind: OBSOLETE_HUMAN_WAIT_KIND, ...card }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `Unknown field "kind". ${askTail}` });
     expect(JSON.parse((await raw(session.env, '{', undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
     expect(JSON.parse((await raw(session.env, ' '.repeat(262_145), undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
-    expect(await callCezarWait({ kind: OBSOLETE_HUMAN_WAIT_KIND, ...card }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: '`kind` must be "pr", "worker", "request", "peer", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.' });
+    expect(await callCezarWait({ kind: OBSOLETE_HUMAN_WAIT_KIND, ...card }, session.env)).toEqual({ ok: false, effect: 'refused', code: 'invalid_request', message: '`kind` must be "pr", "worker", "request", "peer", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.' });
     expect(ask).not.toHaveBeenCalled();
     expect(register).not.toHaveBeenCalled();
     expect((await raw(session.env, JSON.stringify(card), 'invalid', 'ask')).status).toBe(401);
@@ -380,4 +380,37 @@ it.each([
   expect(body.message).toMatch(message);
   expect(body.message).not.toContain('secret-sensitive');
   expect(body.message).not.toContain('authority expired');
+});
+
+it('recovers the same operation after a committed registration loses its response', async () => {
+  const server = await controller();
+  let committedId: string | undefined;
+  let attempts = 0;
+  const session = server.provision(handlers({ registerWait: async request => {
+    const operationId = request.operation_id;
+    expect(operationId).toBeDefined();
+    if (!committedId) committedId = operationId;
+    expect(operationId).toBe(committedId);
+    if (++attempts === 1) throw new Error('response lost after commit');
+    return { ...registered, answer: { ...registered.answer, effect: 'unchanged', operation_id: committedId, replayed: true } };
+  } }));
+  const answer = await callCezarWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env);
+  expect(attempts).toBe(2);
+  expect(answer).toMatchObject({ ok: true, effect: 'unchanged', operation_id: committedId, wait_id: wait.id });
+});
+
+it('reports unknown after both registration responses are lost, with a stable retry ID', async () => {
+  const server = await controller();
+  const ids: Array<string | undefined> = [];
+  const session = server.provision(handlers({ registerWait: async request => {
+    ids.push(request.operation_id); throw new Error('no response evidence');
+  } }));
+  const answer = await callCezarWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env);
+  expect(ids).toHaveLength(2);
+  expect(ids[0]).toBe(ids[1]);
+  expect(answer).toMatchObject({ ok: false, effect: 'unknown', code: 'outcome_unknown', operation_id: ids[0] });
+});
+
+it('says nothing was created when no local tool capability exists before dispatch', async () => {
+  expect(await callCezarWait({ kind: WAIT_KIND.timer, seconds: 60 }, {})).toMatchObject({ ok: false, effect: 'refused', message: expect.stringContaining('Nothing was created') });
 });
