@@ -120,7 +120,7 @@ export async function provisionCiSession(context: RunModuleContext, host: CiSess
   state.liveSession.revokeCiTools?.();
   state.liveSession.clearCiRevoker();
   state.liveSession.beginCiGeneration(randomUUID());
-  state.ciTurnId = randomUUID();
+  state.waitIdentity.rotateCiTurn(randomUUID());
   const generation = state.liveSession.ciGeneration!;
   // hearsay-tools/cezarion#2397: a controller that cannot start throws `ToolsUnavailableError`,
   // which fails this launch; no session runs without the lifecycle tools.

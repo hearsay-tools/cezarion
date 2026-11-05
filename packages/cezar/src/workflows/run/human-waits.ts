@@ -64,7 +64,7 @@ export class HumanWaits {
     const open = openWaits(this.context.store.getRun(runId) ?? run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
     if (open || openWaits(this.context.store.getRun(runId) ?? run).length >= WAIT_LIMIT) return open;
     const wait: HumanWaitEntry = { id: randomUUID(), kind: 'human', source, via,
-      registeredAt: new Date().toISOString(), phase: 'open', turnId: state?.ciTurnId ?? via, ...(card ? askCardFields(card) : {}) };
+      registeredAt: new Date().toISOString(), phase: 'open', turnId: state?.waitIdentity.ciTurnId ?? via, ...(card ? askCardFields(card) : {}) };
     try { this.context.store.commitWait(runId, wait); }
     catch (error) { console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return undefined; }
     return wait;

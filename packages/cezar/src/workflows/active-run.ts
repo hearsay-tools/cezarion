@@ -17,7 +17,6 @@ export interface ActiveRun {
   readonly inputState: InputGroup;
   readonly usage: UsageGroup;
   readonly liveSession: SessionGroup;
-  ciTurnId?: string;
   waitWakeTurn?: AgentSession | undefined;
   pendingHumanAsk: boolean;
   /** Liveness bound for a no-wait nudge that was acknowledged without a turn (#544,
@@ -45,7 +44,6 @@ export interface ActiveRun {
   idleClosed?: boolean;
   /** The monitoring-timer cap note was written for this session. */
   monitoringCapNoted?: boolean | undefined;
-  autosaveTimer?: NodeJS.Timeout | undefined;
   /* The screenshot counter lives on `RunManager.queuedImageSeq` (#472), keyed by
    * run id — a queued run persists attachments with no `ActiveRun` at all. */
   /** Autonomous mode (#autonomous): nudge eligible turn ends until done or the cap.

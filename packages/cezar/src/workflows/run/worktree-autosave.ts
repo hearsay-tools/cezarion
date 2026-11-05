@@ -155,12 +155,11 @@ export class WorktreeAutosave {
    *  Opt-in via CEZ_AUTOSAVE=1 (open-mercato/cezar#471) — see periodicAutosaveEnabled. */
   armAutosave(runId: string, state: ActiveRun): void {
     if (!periodicAutosaveEnabled()) return;
-    if (state.liveSession.cwd === this.context.repoRoot || state.autosaveTimer) return;
-    state.autosaveTimer = setInterval(() => {
+    if (state.liveSession.cwd === this.context.repoRoot || state.autosave.autosaveTimer) return;
+    state.autosave.armAutosave(() => {
       const task = this.host.saveWorktree(runId, state, 'periodic');
       this.host.trackTurn(runId, task);
-    }, AUTOSAVE_INTERVAL_MS);
-    state.autosaveTimer.unref?.();
+    });
   }
 
   dispose(): void { this.autosaveTasks.clear(); }

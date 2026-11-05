@@ -105,7 +105,7 @@ export class WaitRegistry {
     const target = workerWaitTarget(request, getRun);
     const entry: DeadlinedWorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'agent', via, registeredAt: new Date(now).toISOString(),
       deadline: new Date(now + request.timeoutSeconds * 1000).toISOString(), timeoutSeconds: request.timeoutSeconds,
-      turnId: state.ciTurnId ??= randomUUID(), phase: 'open', ...(request.mode === undefined ? {} : { mode: request.mode }), ...target };
+      turnId: state.waitIdentity.ensureCiTurn(), phase: 'open', ...(request.mode === undefined ? {} : { mode: request.mode }), ...target };
     this.host.withdrawCezarHumanWaits(runId);
     this.context.store.commitWait(runId, entry);
     // Outcomes already in resolve it now (or, with every worker destroyed, cancel it); the rest arm it.
@@ -128,7 +128,7 @@ export class WaitRegistry {
     const state = this.host.active(runId)!;
     const ids = workerIds.filter(id => { const worker = this.context.store.getRun(id)?.delegation; return worker?.role === 'worker' && worker.parentRunId === runId; });
     const entry: WorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'cezar', via: 'completion', registeredAt: new Date().toISOString(),
-      turnId: state.ciTurnId ??= randomUUID(), phase: 'open', mode: 'all',
+      turnId: state.waitIdentity.ensureCiTurn(), phase: 'open', mode: 'all',
       ...workerWaitTarget(requestIds?.length ? { requestIds } : { workerIds: ids }, id => this.context.store.getRun(id)) };
     this.context.store.commitWait(runId, entry);
     this.host.reconcileWorkerWaits(familyOf(this.context.store.getRun(runId)!));
@@ -162,7 +162,7 @@ export class WaitRegistry {
   registerPeerWait(runId: string, request: { peerIds: string[]; timeoutSeconds: number }, via: 'cezar_wait' | 'cez-message-wait'): PeerWaitEntry {
     this.assertCanRegisterWorkerWait(runId);
     const state = this.host.active(runId)!;
-    const entry = peerWaitEntry(this.context.store.getRun(runId)!, request, via, () => state.ciTurnId ??= randomUUID(), id => this.context.store.getRun(id));
+    const entry = peerWaitEntry(this.context.store.getRun(runId)!, request, via, () => state.waitIdentity.ensureCiTurn(), id => this.context.store.getRun(id));
     return this.context.store.getRun(runId)?.waits?.some(wait => wait.id === entry.id) ? entry : this.openWait(runId, state, entry);
   }
 
@@ -223,7 +223,7 @@ export class WaitRegistry {
     const card = askCardFields(cezarAskRequestSchema.parse(request));
     const { refuse, assertCanRegister } = this.registrationGate(runId, generation, capabilitySignal);
     const { state: active, run } = assertCanRegister();
-    const turnId = active.ciTurnId ??= randomUUID();
+    const turnId = active.waitIdentity.ensureCiTurn();
     if (active.autonomous && this.host.countAutomaticWakes(runId) < this.maxAutoContinues) refuse('autonomous_run');
     // The question this turn's opening answers stays open only until the turn end settles it, so
     // a question asked in that turn is a new one, never the answered one returned
@@ -257,7 +257,7 @@ export class WaitRegistry {
           : this.registerWorkerListWait(runId, workerListTarget(parsed), 'cezar_wait');
       } catch (error) { return refuse(delegationWaitRefusal(error, () => this.host.executionBlockedByRootFinish(run))); }
     }
-    const turnId = active.ciTurnId ??= randomUUID();
+    const turnId = active.waitIdentity.ensureCiTurn();
     if (parsed.kind === 'process') return this.registerProcessWait(runId, active, run, parsed, via, turnId);
     const existing = identicalWait(run.waits ?? [], parsed, turnId);
     if (existing) return existing;
@@ -279,7 +279,7 @@ export class WaitRegistry {
       const assertLookupCurrent = () => {
         assertCanRegister();
         if (signal.aborted) refuse('registration_aborted');
-        if (active.ciTurnId !== turnId) refuse('turn_changed');
+        if (active.waitIdentity.ciTurnId !== turnId) refuse('turn_changed');
       };
       const identity = await this.host.ciSupervisor().resolve(parsed.pr, signal).catch(error => {
         assertLookupCurrent();
