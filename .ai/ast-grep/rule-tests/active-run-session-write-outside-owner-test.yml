@@ -1,0 +1,51 @@
+id: active-run-session-write-outside-owner
+valid:
+  - const session = state.liveSession.session; session?.interrupt();
+  - const view = state.liveSession.pendingPermissions; view.has('request');
+  - const settings = state.liveSession.delegationSettings; structuredClone(settings);
+  - state.liveSession.cancel(); state.liveSession.installInterrupt(stop);
+  - 'const unrelated = {}; Object.assign(unrelated, { cwd: "/other" });'
+  - 'event.session = session; runner.cwd = "/other";'
+  - 'class SessionGroup { #session; get session() { return this.#session; } }'
+  - 'function createActiveRun() { Object.defineProperty(container, "liveSession", { writable: false, configurable: false }); }'
+invalid:
+  - 'function f(state: ActiveRun) { state.liveSession = other.liveSession; }'
+  - 'function f(state: ActiveRun) { state["liveSession"] = other.liveSession; }'
+  - 'function f(state: ActiveRun) { delete state.liveSession; }'
+  - 'function f(state: ActiveRun) { state.liveSession ??= other.liveSession; }'
+  - state.liveSession.cancelled = true;
+  - state.liveSession.session = session;
+  - state.liveSession.ciGeneration++;
+  - state.liveSession.pendingPermissions.add('forged');
+  - state.liveSession.pendingPermissions['delete']('request');
+  - state.liveSession.delegationSettings.allowedTools.push('forged');
+  - state.liveSession.delegationSettings.accountBinding.claudeLayout.kind = 'relocated';
+  - 'const view = state.liveSession.pendingPermissions; view.clear();'
+  - 'const { pendingPermissions: grants } = state.liveSession; grants.clear();'
+  - 'const { delegationSettings: settings } = state.liveSession; settings.allowedTools.push("forged");'
+  - 'function f(view: SessionGroup) { view.cwd = "/other"; }'
+  - 'function f(view: SessionGroup) { view.pendingPermissions.clear(); }'
+  - 'import type { SessionGroup as SessionView } from "./live-session-state.ts"; function f(view: SessionView) { Object.assign(view, { cwd: "/other" }); }'
+  - state.liveSession as any
+  - state.liveSession as unknown
+  - state.liveSession as unknown as MutableSession
+  - state.liveSession.pendingPermissions as Set<string>
+  - <Set<string>>state.liveSession.pendingPermissions
+  - const view = state.liveSession; view as any;
+  - 'function f(state: ActiveRun) { const { liveSession: view } = state; view as unknown as MutableSession; }'
+  - '({ ...state.liveSession }) as SessionGroup'
+  - 'Object.assign(state.liveSession, { cancelled: true });'
+  - 'Object.defineProperty(state.liveSession, "session", { value: other });'
+  - 'Object.defineProperties(state.liveSession, { session: { value: other } });'
+  - 'Reflect.defineProperty(state.liveSession, "cwd", { value: "/other" });'
+  - 'Reflect.set(state.liveSession, "session", other);'
+  - Object.setPrototypeOf(state.liveSession, other);
+  - Reflect.setPrototypeOf(state.liveSession, other);
+  - 'Reflect.deleteProperty(state.liveSession, "cwd");'
+  - Object.assign(state.liveSession, { ...other });
+  - 'function f(state: ActiveRun) { Object.assign(state, { liveSession: other.liveSession }); }'
+  - 'const state = createActiveRun(init); Object.assign(state, { liveSession: other.liveSession });'
+  - 'function f(state: ActiveRun) { const alias = state; alias.liveSession = other.liveSession; }'
+  - 'function f(target: ActiveRun, key: string, replacement: SessionGroup) { Reflect.set(target, key, replacement); }'
+  - 'class SessionGroup { readonly backing = new Set(); }'
+  - 'const view = createSessionGroup("."); Object.assign(view, { cwd: "/other" });'

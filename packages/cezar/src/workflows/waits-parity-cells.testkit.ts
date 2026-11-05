@@ -90,7 +90,7 @@ const listed = (id: string, waitId: string) => store.getRun(id)?.waits?.find(wai
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
 function engine() {
   return manager as unknown as {
-    active: Map<string, { session: AgentSession & { end(): void }; ciGeneration: string }>;
+    active: Map<string, { liveSession: { session: AgentSession & { end(): void }; ciGeneration: string; };  }>;
   };
 }
 // The delivery bound, not the backoff, is what these cells pin: retries start at once.
@@ -129,7 +129,7 @@ async function timerBesideQuestion(runner: RunnerId, note: string) {
   await until(() => store.getRun(run.id)?.status === 'waiting');
   expect(manager.sendMessage(run.id, [{ type: 'text', text: askPrompt() }])).toBe(true);
   await until(() => pendingQuestion(run.id) && asks(run.id).length === 1);
-  const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+  const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
   const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note }, 'cezar_wait', new AbortController().signal);
   if (!('wait' in registered)) throw Error('registration refused');
   return { run, timer: registered.wait, askSeq: asks(run.id)[0]!.seq };
@@ -414,7 +414,7 @@ const expectNoWakeFor = (id: string) => {
   expect(runInternals(manager).retries.wakeBackoffs.has(id)).toBe(false);
 };
 async function timerWaits(id: string) {
-  const tools = manager.cezarToolHandlers(id, engine().active.get(id)!.ciGeneration);
+  const tools = manager.cezarToolHandlers(id, engine().active.get(id)!.liveSession.ciGeneration);
   const timerWait = async (seconds: number, note: string) => {
     const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds, note }, 'cezar_wait', new AbortController().signal);
     if (!('wait' in registered)) throw Error('registration refused');
@@ -612,16 +612,16 @@ function registrationCells(runners: RunnerId[], it: typeof registerTest = regist
       expect(semaphore.maxParallel()).toBe(1);
       const other = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: `${HARNESS_ADAPTERS[runner].scenarios.baseline!} u26-other` });
       await until(() => prompted(runner, 'u26-other').length > 0 && store.getRun(other.id)?.status === 'waiting');
-      engine().active.get(other.id)!.session.end();
+      engine().active.get(other.id)!.liveSession.session.end();
       await until(() => !manager.isActive(other.id));
       // The repair: Continue starts the tools and the session learns them.
       expect(manager.continueRun(run.id, { text: 'u26-continue' }).ok).toBe(true);
       await until(() => prompted(runner, 'u26-continue').length > 0 && store.getRun(run.id)?.status === 'waiting');
       // A wake with no live session: the failed launch keeps the result, and the retry delivers it.
-      const handlers = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const handlers = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
       const registered = await handlers.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note: 'u26-wake' }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered)) throw Error('registration refused');
-      engine().active.get(run.id)!.session.end();
+      engine().active.get(run.id)!.liveSession.session.end();
       await until(() => !manager.isActive(run.id));
       broken();
       fireTimer(registered.wait.id);
@@ -686,7 +686,7 @@ function registrationCells(runners: RunnerId[], it: typeof registerTest = regist
       process.env.CEZ_MOCK_RELEASE_FILE = release;
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-gated']!, runner });
       await until(() => store.readEvents(run.id).some(event => event.type === 'turn.started'));
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
       const open = async (seconds: number, note: string) => {
         const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds, note }, 'cezar_wait', new AbortController().signal);
         if (!('wait' in registered)) throw Error('registration refused');
@@ -732,7 +732,7 @@ function registrationCells(runners: RunnerId[], it: typeof registerTest = regist
       nativeWire(runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
       await until(() => store.getRun(run.id)?.status === 'waiting');
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
       const open = async (request: Parameters<typeof tools.registerWait>[0]) => {
         const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
         if (!('wait' in registered)) throw Error('registration refused');
@@ -746,8 +746,8 @@ function registrationCells(runners: RunnerId[], it: typeof registerTest = regist
       // The first wake reaches the native wire; its provider acknowledgement is held.
       let release!: () => void;
       const gate = new Promise<void>(resolve => { release = resolve; });
-      const send = state.session.sendAgentMessage.bind(state.session);
-      vi.spyOn(state.session, 'sendAgentMessage').mockImplementation((content, ids) => {
+      const send = state.liveSession.session.sendAgentMessage.bind(state.liveSession.session);
+      vi.spyOn(state.liveSession.session, 'sendAgentMessage').mockImplementation((content, ids) => {
         const ack = send(content, ids);
         return ack && ack.then(() => gate);
       });
@@ -778,7 +778,7 @@ function registrationCells(runners: RunnerId[], it: typeof registerTest = regist
       await until(() => store.getRun(run.id)?.status === 'waiting');
       const { timer } = await timerWaits(run.id);
       store.updateRun(run.id, { automaticWakes: 39 });
-      engine().active.get(run.id)!.session.end();
+      engine().active.get(run.id)!.liveSession.session.end();
       await until(() => !manager.isActive(run.id));
       fireTimer(timer.id);
       await until(() => settled(run.id, timer.id)?.phase === 'delivered');
@@ -786,10 +786,10 @@ function registrationCells(runners: RunnerId[], it: typeof registerTest = regist
       expect(store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up ('))
         .map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
       await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
       const refused = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60 }, 'cezar_wait', new AbortController().signal);
       expect(refused.answer).toMatchObject({ ok: false, code: 'wake_budget_spent' });
-      engine().active.get(run.id)!.session.end();
+      engine().active.get(run.id)!.liveSession.session.end();
       await until(() => !manager.isActive(run.id));
       expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
       expect(store.getRun(run.id)?.automaticWakes).toBe(0);
@@ -806,7 +806,7 @@ function registrationCells(runners: RunnerId[], it: typeof registerTest = regist
       await until(() => store.getRun(run.id)?.status === 'waiting');
       const { timer, later } = await timerWaits(run.id);
       store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES });
-      engine().active.get(run.id)!.session.end();
+      engine().active.get(run.id)!.liveSession.session.end();
       await until(() => !manager.isActive(run.id));
       fireTimer(timer.id);
       await until(() => settled(run.id, timer.id)?.phase === 'cancelled');
@@ -958,7 +958,7 @@ function inputCells(runners: RunnerId[], it: typeof registerTest = registerTest)
       await until(() => parkedOn(parked.id, waitOfKind(parked.id, 'timer')));
       const wait = waitOfKind(parked.id, 'timer')!;
       // A closed session: its wake is a scheduler continuation, which needs a regular slot.
-      engine().active.get(parked.id)!.session.end();
+      engine().active.get(parked.id)!.liveSession.session.end();
       await until(() => !manager.isActive(parked.id) && store.getRun(parked.id)?.status === 'waiting');
       const release = join(root, 'u8l-release');
       process.env.CEZ_MOCK_RELEASE_FILE = release;
@@ -1138,7 +1138,7 @@ function deliveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
       const { timer, later } = await timerWaits(run.id);
-      engine().active.get(run.id)!.session.end();
+      engine().active.get(run.id)!.liveSession.session.end();
       await until(() => !manager.isActive(run.id));
       fireTimer(timer.id);
       await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id));
@@ -1166,7 +1166,7 @@ function deliveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
       const closeAtTurnEnd = ({ runId, event }: { runId: string; event: { type: string } }) => {
         if (runId !== run.id || event.type !== 'turn-end' || !closing) return;
         if (resolving) { resolving = false; fireTimer(timer.id); }
-        if (store.getRun(run.id)?.waits?.find(wait => wait.id === timer.id)?.phase === 'resolved') engine().active.get(run.id)?.session.end();
+        if (store.getRun(run.id)?.waits?.find(wait => wait.id === timer.id)?.phase === 'resolved') engine().active.get(run.id)?.liveSession.session.end();
       };
       store.on('event', closeAtTurnEnd);
       try {
@@ -1194,7 +1194,7 @@ function deliveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
       const { timer, later } = await timerWaits(run.id);
-      engine().active.get(run.id)!.session.end();
+      engine().active.get(run.id)!.liveSession.session.end();
       await until(() => !manager.isActive(run.id));
       fireTimer(timer.id);
       await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id));
@@ -1261,7 +1261,7 @@ function deliveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
         const wire = gatedProviderFailure(root, runner);
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
         await until(wire.held);
-        const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+        const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
         const request = kind === 'pr' ? { kind, pr, timeout_seconds: 30 } as const : { kind, seconds: 60, note: 'u9' } as const;
         const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
         expect(registered.answer).toMatchObject({ ok: true, kind });
@@ -1286,12 +1286,12 @@ function deliveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
         nativeWire(runner);
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
         await until(() => store.getRun(run.id)?.status === 'waiting');
-        const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+        const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
         const request = kind === 'pr' ? { kind, pr, timeout_seconds: 30 } as const : { kind, seconds: 60, note: 'u9' } as const;
         const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
         if (!('wait' in registered)) throw Error('registration refused');
         const wait = registered.wait;
-        engine().active.get(run.id)!.session.end();
+        engine().active.get(run.id)!.liveSession.session.end();
         await until(() => !manager.isActive(run.id));
         // A clean close is not a failure: the park and its wait survive it.
         expect(store.getRun(run.id)?.status).toBe('waiting');
@@ -1361,7 +1361,7 @@ function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest):
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
       await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
       const [first] = humanOpen(run.id);
-      engine().active.get(run.id)!.session.end();
+      engine().active.get(run.id)!.liveSession.session.end();
       await until(() => !manager.isActive(run.id));
       const next = [{ header: 'Runner', question: 'Which runner next?', options: [{ label: 'Codex' }, { label: 'Pi' }] }];
       expect(manager.continueRun(run.id, { text: toolCall('cezar_ask', { context: ASK_CONTEXT, questions: next }) }).ok).toBe(true);
@@ -1379,7 +1379,7 @@ function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest):
       const wire = gatedProviderFailure(root, runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
       await until(wire.held);
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
       const registered = await tools.ask({ context: ASK_CONTEXT, questions }, new AbortController().signal);
       if (!registered.ok) throw Error('registration refused');
       // Registered mid-turn, so nothing is shown before the turn ends.
@@ -1399,12 +1399,12 @@ function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest):
       nativeWire(runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
       const registered = await tools.ask({ context: ASK_CONTEXT, questions }, new AbortController().signal);
       if (!registered.ok) throw Error('registration refused');
       // Registered at a boundary: the card is shown at once.
       await until(() => pendingQuestion(run.id) && asks(run.id).length === 1);
-      engine().active.get(run.id)!.session.end();
+      engine().active.get(run.id)!.liveSession.session.end();
       await until(() => !manager.isActive(run.id));
       expect(store.getRun(run.id)).toMatchObject({ status: RUN_STATUS.waiting });
       expect(hasPendingAsk(store, run.id)).toBe(true);
@@ -1465,7 +1465,7 @@ function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest):
       expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
       expect(hasPendingAsk(store, run.id)).toBeFalsy();
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
       const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note: 'u5d' }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered)) throw Error('registration refused');
       expect(store.getRun(run.id)?.lastWaits?.find(wait => wait.id === noWait.id)?.phase).toBe('cancelled');
@@ -1484,7 +1484,7 @@ function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest):
         await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
         const askSeq = store.transcriptFacts(run.id).pendingAsk!.seq;
         if (closeFirst) {
-          engine().active.get(run.id)!.session.end();
+          engine().active.get(run.id)!.liveSession.session.end();
           await until(() => !manager.isActive(run.id));
           expect(pendingQuestion(run.id)).toBe(true);
         }
@@ -1626,7 +1626,7 @@ function doneCells(runners: RunnerId[], it: typeof registerTest = registerTest):
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
       await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
       const [wait] = humanOpen(run.id);
-      engine().active.get(run.id)!.session.end();
+      engine().active.get(run.id)!.liveSession.session.end();
       await until(() => !manager.isActive(run.id));
       rmSync(answers, { force: true });
       store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES, waitDeliveryFailures: 2 });
@@ -1745,7 +1745,7 @@ function answersCells(runners: RunnerId[], it: typeof registerTest = registerTes
         (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'a retried answer and its failure clear');
       if (retained) manager.cancel(run.id);
       else {
-        expect(engine().active.get(run.id)?.session.open).toBe(true);
+        expect(engine().active.get(run.id)?.liveSession.session.open).toBe(true);
         await until(() => answered(run.id, human!.askSeq!));
         expect(store.getRun(run.id)?.error).toBeUndefined();
         await until(() => prompted(runner, message.text).length > 0);
@@ -1791,7 +1791,7 @@ function answersCells(runners: RunnerId[], it: typeof registerTest = registerTes
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
       await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === 'waiting');
       const [human] = humanOpen(run.id);
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
       const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note: 'answer cap guard' }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered) || registered.wait.kind !== 'timer') throw Error('registration refused');
       // A result already resolved below the cap may still be owed when the budget reaches it.
@@ -2016,7 +2016,7 @@ function recoveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
       store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
       await until(wire.held);
       const w = await worker(run.id);
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
       const registered = await tools.registerWait({ kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
       expect(registered.answer).toMatchObject({ ok: true, kind: WAIT_KIND.worker });
       if (!('wait' in registered)) throw Error('registration refused');
@@ -2035,11 +2035,11 @@ function recoveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
 
     it(`${runner} U9w clean close with a worker wait open leaves the run recoverable and the next resolution delivers`, async () => {
       const { p, w } = await parentWithWorker(runner);
-      const tools = manager.cezarToolHandlers(p.id, engine().active.get(p.id)!.ciGeneration);
+      const tools = manager.cezarToolHandlers(p.id, engine().active.get(p.id)!.liveSession.ciGeneration);
       const registered = await tools.registerWait({ kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered)) throw Error('registration refused');
       const wait = registered.wait;
-      engine().active.get(p.id)!.session.end();
+      engine().active.get(p.id)!.liveSession.session.end();
       await until(() => !manager.isActive(p.id));
       // A clean close is not a failure: the park and its wait survive it (it was an error before 3a).
       expect(store.getRun(p.id)?.status).toBe('waiting');
@@ -2058,7 +2058,7 @@ function recoveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
       const f = await conversingParent(runner);
       const failure = persistentWakeFailure(root, runner, { opening: MESSAGE_WAKE_OPENING, unread: true });
       await parentTurn(f.p.id, toolCall('cezar_wait', { kind: WAIT_KIND.worker, worker_ids: [f.w.id], timeout_seconds: 600 }), () => parkedOn(f.p.id, workerWaits(f.p.id)[0]));
-      engine().active.get(f.p.id)!.session.end();
+      engine().active.get(f.p.id)!.liveSession.session.end();
       await until(() => !manager.isActive(f.p.id));
       return { ...f, failure };
     }
@@ -2370,7 +2370,7 @@ function refusalCells(runners: RunnerId[], it: typeof registerTest = registerTes
       await until(wire.held);
       const request = seedCompletionRequest(run.id, peer.id);
       // Hold graceful shutdown until the queued native provider error wins.
-      const close = vi.spyOn(engine().active.get(run.id)!.session, 'end').mockImplementationOnce(() => {});
+      const close = vi.spyOn(engine().active.get(run.id)!.liveSession.session, 'end').mockImplementationOnce(() => {});
       expect(manager.finish(run.id)).toBe(true);
       close.mockRestore();
       wire.release();
@@ -2632,7 +2632,7 @@ function completionRepliesCells(runners: RunnerId[], it: typeof registerTest = r
       const { p, w } = await parentWithWorker(runner);
       const wakes = store.getRun(p.id)?.automaticWakes ?? 0;
       const commits = recordCommits(join(root, '.ai/cezar'));
-      engine().active.get(p.id)!.session.end();
+      engine().active.get(p.id)!.liveSession.session.end();
       const refusal = liveRefusal(w);
       await until(() => prompted(runner, refusal).length > 0, () => timeline(p.id));
       const next = await replyBlockedAgain(p.id, reply, w, () => blockingWorker(p.id));
@@ -2663,7 +2663,7 @@ function completionRepliesCells(runners: RunnerId[], it: typeof registerTest = r
       silenceRefusals();
       const { p, w } = await parentWithWorker(runner);
       const refusal = `Workers are still live: ${w.id}.`;
-      engine().active.get(p.id)!.session.end();
+      engine().active.get(p.id)!.liveSession.session.end();
       await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
       expect(prompted(runner, refusal)).toHaveLength(1);
       expect(store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)))
@@ -2699,12 +2699,12 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
         const closeAtTurnEnd = ({ runId, event }: { runId: string; event: { type: string } }) => {
           if (runId === p.id && event.type === 'turn-end' && closing && refusals().some(input => !input.deliveredAt)) {
             closed++;
-            engine().active.get(p.id)?.session.end();
+            engine().active.get(p.id)?.liveSession.session.end();
           }
         };
         store.on('event', closeAtTurnEnd);
         try {
-          engine().active.get(p.id)!.session.end();
+          engine().active.get(p.id)!.liveSession.session.end();
           await refusalDeliveryBound(runner, p.id, 'U22c', () => closed);
           // Each attempt is a scheduler continuation that closed before the refusal reached it.
           expect(prompted(runner, MESSAGE_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
@@ -2742,7 +2742,7 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
       const closeOnce = ({ runId, event }: { runId: string; event: { type: string } }) => {
         if (runId !== p.id || event.type !== 'turn-end' || !closes || !refusals().some(input => !input.deliveredAt)) return;
         closes--;
-        engine().active.get(p.id)?.session.end();
+        engine().active.get(p.id)?.liveSession.session.end();
       };
       // With no backoff the retry delivers at once and clears the count, so a poll can miss it: the
       // store's own writes record that it was counted.
@@ -2751,7 +2751,7 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
       store.on('event', closeOnce);
       store.on('run', countOnce);
       try {
-        engine().active.get(p.id)!.session.end();
+        engine().active.get(p.id)!.liveSession.session.end();
         await until(() => counted);
         await until(() => prompted(runner, refusal).length > 0 && parkedOnWorkersTimer(p.id));
         expect(refusals()).toEqual([expect.objectContaining({ deliveredAt: expect.any(String) })]);
@@ -2785,11 +2785,11 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
         const closeAtTurnEnd = ({ runId, event }: { runId: string; event: { type: string } }) => {
           if (runId !== p.id || event.type !== 'turn-end' || !closes || !refusals().some(input => !input.deliveredAt)) return;
           closes--;
-          engine().active.get(p.id)?.session.end();
+          engine().active.get(p.id)?.liveSession.session.end();
         };
         store.on('event', closeAtTurnEnd);
         onTestFinished(() => { store.off('event', closeAtTurnEnd); });
-        engine().active.get(p.id)!.session.end();
+        engine().active.get(p.id)!.liveSession.session.end();
         await refusalDeliveryBound(runner, p.id, 'U22k', () => MAX_WAKE_DELIVERY_ATTEMPTS - closes);
         expect(prompted(runner, MESSAGE_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
         expect(refusals()).toHaveLength(1);
@@ -2840,14 +2840,14 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
             disk = readPersistedRuns(join(root, '.ai/cezar'));
           };
           store.on('event', capture);
-          engine().active.get(p.id)!.session.end();
+          engine().active.get(p.id)!.liveSession.session.end();
           await until(() => disk !== undefined);
           store.off('event', capture);
           let closes = variant === 'closing' ? 1 : 0;
           const closeOnce = ({ runId, event }: { runId: string; event: { type: string } }) => {
             if (runId !== p.id || event.type !== 'turn-end' || !closes || !refusals().some(input => !input.deliveredAt)) return;
             closes--;
-            engine().active.get(p.id)?.session.end();
+            engine().active.get(p.id)?.liveSession.session.end();
           };
           await restart(false, disk, events);
           // The old manager may have reached a mock before it stopped: count from here.
@@ -2896,11 +2896,11 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
       const closeAtTurnEnd = ({ runId, event }: { runId: string; event: { type: string } }) => {
         if (runId !== p.id || event.type !== 'turn-end' || !closes || !refusals().some(input => !input.deliveredAt)) return;
         closes--;
-        engine().active.get(p.id)?.session.end();
+        engine().active.get(p.id)?.liveSession.session.end();
       };
       store.on('event', closeAtTurnEnd);
       onTestFinished(() => { store.off('event', closeAtTurnEnd); });
-      engine().active.get(p.id)!.session.end();
+      engine().active.get(p.id)!.liveSession.session.end();
       await refusalDeliveryBound(runner, p.id, 'U22x', () => MAX_WAKE_DELIVERY_ATTEMPTS - closes);
       expect(refusals()).toEqual([expect.objectContaining({ purpose: 'completion-refusal' })]);
       expect(refusals()[0]!.deliveredAt).toBeUndefined();
@@ -2967,7 +2967,7 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
       const routed = () => store.readEvents(w.id).find(event => event.type === 'worker-question-routed');
       await until(() => routed() !== undefined && humanOpen(w.id)[0]?.askSeq !== undefined && store.getRun(w.id)?.status === 'waiting');
       const [question] = humanOpen(w.id);
-      engine().active.get(w.id)!.session.end();
+      engine().active.get(w.id)!.liveSession.session.end();
       await until(() => !manager.isActive(w.id) && store.getRun(w.id)?.status === 'waiting');
       expect(humanOpen(w.id).map(wait => wait.id)).toEqual([question!.id]);
       const commits = recordCommits(join(root, '.ai/cezar'));
@@ -3147,7 +3147,7 @@ function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTes
     it(`${runner} U27 U11 a Continue's refused done beside an open timer parks on it and settles monitoring`, async () => {
       const p = await workerParent(runner);
       const timer = await timerPark(p.id);
-      engine().active.get(p.id)!.session.end();
+      engine().active.get(p.id)!.liveSession.session.end();
       await until(() => !manager.isActive(p.id));
       const refusal = liveRefusal(await blockedDone(p.id, () => blockingWorker(p.id), continued(p.id)));
       await until(() => store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true &&
@@ -3332,7 +3332,7 @@ function processCells(runners: RunnerId[], it: typeof registerTest = registerTes
       const wire = gatedProviderFailure(root, runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
       await until(wire.held);
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
       const registered = await tools.registerWait({ kind: WAIT_KIND.process, pid: sleeper(), timeout_seconds: 60 }, 'cezar_wait', new AbortController().signal);
       expect(registered.answer).toMatchObject({ ok: true, kind: WAIT_KIND.process });
       if (!('wait' in registered)) throw Error('registration refused');
@@ -3354,11 +3354,11 @@ function processCells(runners: RunnerId[], it: typeof registerTest = registerTes
       nativeWire(runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.liveSession.ciGeneration);
       const registered = await tools.registerWait({ kind: WAIT_KIND.process, pid: sleeper(), timeout_seconds: 60 }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered)) throw Error('registration refused');
       const wait = registered.wait;
-      engine().active.get(run.id)!.session.end();
+      engine().active.get(run.id)!.liveSession.session.end();
       await until(() => !manager.isActive(run.id));
       expect(store.getRun(run.id)?.status).toBe('waiting');
       expect(store.getRun(run.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe('open');
@@ -3397,11 +3397,11 @@ function singleRunnerCells(): void {
     const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
     let closing = true;
     const closeAtTurnEnd = ({ runId, event }: { runId: string; event: { type: string } }) => {
-      if (runId === p.id && event.type === 'turn-end' && closing && refusals().some(input => !input.deliveredAt)) engine().active.get(p.id)?.session.end();
+      if (runId === p.id && event.type === 'turn-end' && closing && refusals().some(input => !input.deliveredAt)) engine().active.get(p.id)?.liveSession.session.end();
     };
     store.on('event', closeAtTurnEnd);
     try {
-      engine().active.get(p.id)!.session.end();
+      engine().active.get(p.id)!.liveSession.session.end();
       await until(() => store.getRun(p.id)?.waitDeliveryFailures === 1 && !manager.isActive(p.id) && runInternals(manager).retries.wakeBackoffs.has(p.id));
       closing = false;
       const wakes = store.getRun(p.id)?.automaticWakes;

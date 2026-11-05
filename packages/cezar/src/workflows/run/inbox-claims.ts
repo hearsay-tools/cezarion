@@ -68,7 +68,7 @@ export class InboxClaims {
     // A done the turn end kept behind this claim settles now that the input is read: the inbox
     // acknowledgement is the boundary's last owed input (hearsay-tools/cezarion#1620).
     const state = this.host.activeGet(runId);
-    if (state?.session?.open) this.host.settleIdleBoundary(runId, state, state.session);
+    if (state?.liveSession.session?.open) this.host.settleIdleBoundary(runId, state, state.liveSession.session);
     this.host.releaseSlot();
     return result;
   }

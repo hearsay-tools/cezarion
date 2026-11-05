@@ -23,7 +23,7 @@ for (const mode of ['fresh', 'continuation'] as const) {
       }
       // hearsay-tools/cezarion#1235: the list's admission, not `workerWakeAdmitted`.
       const engine = runInternals(manager);
-      const session = engine.active.get(p.id)!.session!;
+      const session = engine.active.get(p.id)!.liveSession.session!;
       const accept = session.sendAgentMessage.bind(session);
       // A backend opening/ack window legitimately refuses non-human input.
       session.sendAgentMessage = () => false;
@@ -62,7 +62,7 @@ for (const role of ['root', 'worker'] as const) {
         manager.enqueueOwnedRun(w.id);
         await until(() => store.getRun(w.id)?.status === 'waiting' && store.transcriptFacts(w.id).pendingAsk?.routedMessageId !== undefined);
       }
-      (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(target.id)!.session.end();
+      (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; };  }> }).active.get(target.id)!.liveSession.session.end();
       await until(() => !manager.isActive(target.id));
       // Only an explicit answer may answer the ask: the human's Continue on the root, the parent's
       // reply on the worker, which reopens it through the same human-origin continuation.
@@ -74,7 +74,7 @@ for (const role of ['root', 'worker'] as const) {
       // question as it stops (hearsay-tools/cezarion#2410), which a crash never writes.
       store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar')); const events = eventCheckpoint();
       expect(store.getRun(target.id)?.continuationMessage?.origin).toBe('human');
-      await until(() => { return (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(target.id)?.sessionEverOpened === true; });
+      await until(() => { return (manager as unknown as { active: Map<string, { liveSession: { sessionEverOpened?: boolean; };  }> }).active.get(target.id)?.liveSession.sessionEverOpened === true; });
       // The real wire received the accepted input but cannot reply until released.
       await until(() => wire.received() === 1);
       manager.cancel(target.id);

@@ -36,7 +36,7 @@ function github() {
 }
 
 function active(id: string) {
-  return (manager as unknown as { active: Map<string, { session: AgentSession; ciGeneration: string }> }).active.get(id);
+  return (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; ciGeneration: string; };  }> }).active.get(id);
 }
 // An earlier step completes only on its done (hearsay-tools/cezarion#1620): a turn that signals
 // it replaces the plain session close these cells once used to run the tail.
@@ -44,7 +44,7 @@ function signalDone(id: string, runner: RunnerId): void {
   expect(manager.sendMessage(id, [{ type: 'text', text: HARNESS_ADAPTERS[runner].scenarios['cezar-done']! }])).toBe(true);
 }
 function register(id: string): Promise<Wait> {
-  return manager.registerWait(id, { kind: WAIT_KIND.pr, pr: identity.prUrl, timeout_seconds: 30 }, 'cezar_wait', active(id)!.ciGeneration);
+  return manager.registerWait(id, { kind: WAIT_KIND.pr, pr: identity.prUrl, timeout_seconds: 30 }, 'cezar_wait', active(id)!.liveSession.ciGeneration);
 }
 
 async function ownedChain(runner: RunnerId, workflow: WorkflowDef) {
@@ -112,7 +112,7 @@ export function registerCiFailureGroup(group: CiFailureGroup): void {
       } else {
         await until(() => store.getRun(run.id)?.status === 'waiting');
         wait = await register(run.id);
-        active(run.id)!.session.end();
+        active(run.id)!.liveSession.session.end();
         await until(() => !manager.isActive(run.id));
         // Clean CI parking must survive a close, without fabricating failure.
         expect(store.getRun(run.id)).toMatchObject({ status: RUN_STATUS.waiting });
@@ -186,7 +186,7 @@ export function registerCiFailureGroup(group: CiFailureGroup): void {
       if (outcome === 'source-retry') {
         // The check retries the source step, whose new iteration also completes only on its done.
         await until(() => store.getRun(run.id)?.steps.find(step => step.id === 'first')?.iterations === 2 &&
-          store.getRun(run.id)?.status === 'waiting' && !!active(run.id)?.session.open);
+          store.getRun(run.id)?.status === 'waiting' && !!active(run.id)?.liveSession.session.open);
         signalDone(run.id, runner);
       }
       await until(() => ['done', 'failed'].includes(store.getRun(run.id)?.status ?? '') && !manager.isActive(run.id));
@@ -242,7 +242,7 @@ export function registerCiFailureGroup(group: CiFailureGroup): void {
         expect(pump).toHaveBeenCalled(); pump.mockRestore();
       }
       await restart(false, undefined, eventCheckpoint());
-      await until(() => ['done', 'failed'].includes(store.getRun(run.id)?.status ?? '') || store.getRun(run.id)?.status === 'waiting' && !!active(run.id)?.session.open);
+      await until(() => ['done', 'failed'].includes(store.getRun(run.id)?.status ?? '') || store.getRun(run.id)?.status === 'waiting' && !!active(run.id)?.liveSession.session.open);
       if (manager.isActive(run.id) && store.getRun(run.id)?.status === 'waiting') signalDone(run.id, runner);
       await until(() => store.getRun(run.id)?.status === 'done' && !manager.isActive(run.id));
       expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')).toMatchObject({

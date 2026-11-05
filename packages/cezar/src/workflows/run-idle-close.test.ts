@@ -32,10 +32,10 @@ describe('RunManager idle close', () => {
     }
 
     const internals = fixture.manager as unknown as {
-      active: Map<string, { idleTimer?: NodeJS.Timeout; session?: AgentSession }>;
+      active: Map<string, { liveSession: { session?: AgentSession; }; idleTimer?: NodeJS.Timeout; }>;
     };
     const state = internals.active.get(record.id);
-    const session = state?.session;
+    const session = state?.liveSession.session;
     const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
     if (!session?.open || !idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
 

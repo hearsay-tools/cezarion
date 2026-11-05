@@ -37,7 +37,7 @@ export class FamilyReconciler {
     if (source === 'live-release') return;
     if (!this.context.disposed() && source === undefined) this.host.reapTerminalScratch(run.id);
     if (!this.context.disposed() && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.host.cancelOpenWaits(run.id);
-    if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.host.active(run.id)?.revokeDelegation?.();
+    if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.host.active(run.id)?.liveSession.revokeDelegation?.();
     // Cleanup checkpoints emit terminal records too. With delegation disabled,
     // these observations must not replay the project's conversation histories.
     if (this.context.disposed() || this.host.recoveringRun(run) || (source === 'delegation-checkpoint' && process.env.CEZ_DELEGATION !== '1')) return;
@@ -66,7 +66,7 @@ export class FamilyReconciler {
   /** A turn of this run is executing now: a recovered run's is not, whatever it last recorded. */
   private isExecutingWorkerWaitTurn(runId: string): boolean {
     const state = this.host.active(runId);
-    return !!state?.session?.open && !state.cancelled && !this.host.recoveringRun(runId) && state.atTurnBoundary !== state.session;
+    return !!state?.liveSession.session?.open && !state.liveSession.cancelled && !this.host.recoveringRun(runId) && state.atTurnBoundary !== state.liveSession.session;
   }
 
   /** Request deadlines share the existing reconciliation timer registry, never a polling loop. */

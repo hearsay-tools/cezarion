@@ -275,7 +275,7 @@ describe('RunManager reported cost accounting', () => {
           onEvent?.({ type: 'text', text: 'Finished.' });
           // The turn finishes through cezar_done, as an agent's does (hearsay-tools/cezarion#2397).
           const state = runInternals(manager).active.get(record.id)!;
-          await manager.cezarToolHandlers(record.id, state.ciGeneration!).finishTurn({}, new AbortController().signal);
+          await manager.cezarToolHandlers(record.id, state.liveSession.ciGeneration!).finishTurn({}, new AbortController().signal);
           onEvent?.({ type: 'turn-end' });
         })());
         const close = () => {
@@ -1150,7 +1150,7 @@ describe('RunManager waiting recovery', () => {
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', runner: 'codex', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
-    const surviving = (fixture.manager as unknown as { active: Map<string, { session?: AgentSession }> }).active.get(record.id)?.session;
+    const surviving = (fixture.manager as unknown as { active: Map<string, { liveSession: { session?: AgentSession; };  }> }).active.get(record.id)?.liveSession.session;
     fixture.manager.dispose();
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);
     await fixture.manager.recover();
@@ -1174,7 +1174,7 @@ describe('RunManager waiting recovery', () => {
         options: [{ label: 'First' }, { label: 'Second' }],
       }],
     });
-    const surviving = (fixture.manager as unknown as { active: Map<string, { session?: AgentSession }> }).active.get(record.id)?.session;
+    const surviving = (fixture.manager as unknown as { active: Map<string, { liveSession: { session?: AgentSession; };  }> }).active.get(record.id)?.liveSession.session;
     fixture.manager.dispose();
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);
     await fixture.manager.recover();
@@ -1985,10 +1985,8 @@ describe('RunManager queued-stack mutators (#472)', () => {
    */
   it('still defers after `starting` is cleared but before the session opens', () => {
     const r = seedQueued();
-    (manager as unknown as { active: Map<string, unknown> }).active.set(r.id, {
-      cancelled: false,
-      sessionEverOpened: undefined,
-    });
+    (manager as unknown as { active: Map<string, unknown> }).active.set(r.id,
+      createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false }));
     expect(manager.deferMessage(r.id, text('mid-spawn'))).toBe(true);
   });
 
@@ -2026,10 +2024,9 @@ describe('RunManager queued-stack mutators (#472)', () => {
 
   it('stops deferring once a session has opened (a closed session is a real 409)', () => {
     const r = seedQueued();
-    (manager as unknown as { active: Map<string, unknown> }).active.set(r.id, {
-      cancelled: false,
-      sessionEverOpened: true,
-    });
+    const state = createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false });
+    state.liveSession.markSessionOpened();
+    (manager as unknown as { active: Map<string, unknown> }).active.set(r.id, state);
     expect(manager.deferMessage(r.id, text('too late'))).toBe(false);
   });
 });

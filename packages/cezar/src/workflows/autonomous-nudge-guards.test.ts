@@ -61,7 +61,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   const readySubmit = vi.fn(() => true);
   function fakeState() {
     const value = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: true });
-    value.session = session;
+    value.liveSession.attachSession(session);
     return value;
   }
   function readiness() {
@@ -114,14 +114,14 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     canContinue.mockReturnValue(false);
     switch (guard) {
       case 'disabled': state.autonomous = false; break; // includes the memory-limit pause
-      case 'cancelled': state.cancelled = true; break;
-      case 'finish': state.finishRequested = true; break;
+      case 'cancelled': state.liveSession.cancel(); break;
+      case 'finish': state.liveSession.requestFinish(); break;
       case 'disposed': disposed = true; break;
       case 'stopping': store.updateRun(id, { stopping: true }); break;
       case 'input-error': state.agentInputError = 'transport failed'; break;
       case 'native-ask': state.pendingHumanAsk = true; break;
       case 'persisted-ask': store.appendEvent(id, { type: 'ask.requested', requestId: randomUUID(), ...ask }); break;
-      case 'closed': state.session = { ...session, open: false }; break;
+      case 'closed': state.liveSession.attachSession({ ...session, open: false }); break;
       case 'queued-input': queued.mockReturnValue(true); store.commitAgentInputs(id, [{ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: randomUUID(), text: 'Read this first', createdAt: new Date().toISOString() }]); break;
       case 'unread-input': state.unreadInputIds = new Set([randomUUID()]); break;
       case 'input-flight': state.agentInputFlight = { session, inputIds: [randomUUID()] }; break;
@@ -161,7 +161,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   });
 
   function pendingBoundary(): void {
-    state.currentStepId = 'task';
+    state.liveSession.selectStep('task');
     state.atTurnBoundary = session;
     state.autonomousNudgePending = session;
     active.set(id, state);
@@ -184,12 +184,12 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       pendingBoundary();
       switch (guard) {
         case 'replaced-state': active.set(id, fakeState()); break;
-        case 'replaced-session': state.session = { ...session }; break;
+        case 'replaced-session': state.liveSession.attachSession({ ...session }); break;
         case 'new-boundary': state.atTurnBoundary = undefined; break;
         case 'done': state.doneAtBoundary = session; break;
         case 'no-pending': state.autonomousNudgePending = undefined; break;
         case 'closed-by-idle': state.idleClosed = true; break;
-        case 'session-error': state.agentSessionError = 'provider failed'; break;
+        case 'session-error': state.liveSession.recordSessionError('provider failed'); break;
       }
       readiness().handleAgentInputReady(id, state, session);
       expect(settle.mock.calls.some(call => call[2] === 'ready')).toBe(false);

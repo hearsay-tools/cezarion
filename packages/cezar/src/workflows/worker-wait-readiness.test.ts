@@ -28,8 +28,8 @@ describe('worker waits: readiness', { timeout: 30_000 }, () => {
 
 it('readiness closed session reopens to refuse a successful done with outstanding workers', async () => {
     const p = await parent(); const w = await worker(p.id);
-    const state = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!;
-    state.session.end();
+    const state = (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; };  }> }).active.get(p.id)!;
+    state.liveSession.session.end();
     const refusal = (run: RunRecord | undefined) => run?.agentInputs?.find(input => input.source === 'lifecycle' && input.text.includes(`Workers are still live: ${w.id}.`));
     await until(() => !!refusal(store.getRun(p.id))?.deliveredAt && store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true);
     expect(refusal(store.getRun(p.id))?.text).toContain(COMPLETION_WILL_WAIT);

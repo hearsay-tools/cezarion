@@ -26,7 +26,7 @@ export class RepoRootLease {
   async acquireRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
     // `cancel()` can land between the run going `running` and reaching here,
     // while `interrupt` is still the default no-op — never enter the chain.
-    if (state.cancelled) return false;
+    if (state.liveSession.cancelled) return false;
     const previous = this.repoRootTail;
     let release: () => void = () => undefined;
     this.repoRootTail = new Promise<void>((resolve) => {
@@ -35,28 +35,28 @@ export class RepoRootLease {
     // Until `previous` resolves this run does not own the tree yet, so a drop
     // during the wait must not hand the tree to the next waiter — chain our
     // release behind `previous` instead of resolving the tail early.
-    state.releaseRepoRoot = () => {
+    state.liveSession.retainRepoRootRelease(() => {
       void previous.then(release);
-    };
+    });
     let abort: () => void = () => undefined;
     const cancelled = new Promise<void>((resolve) => {
       abort = resolve;
     });
-    const parked = state.interrupt;
-    state.interrupt = () => {
+    const parked = state.liveSession.interrupt;
+    state.liveSession.installInterrupt(() => {
       parked();
       abort();
-    };
+    });
     this.host.park(runId);
     this.host.releaseSlot();
     try {
       await Promise.race([previous, cancelled]);
     } finally {
-      state.interrupt = parked;
+      state.liveSession.installInterrupt(parked);
       this.host.unpark(runId);
     }
-    if (state.cancelled) return false;
-    state.releaseRepoRoot = release;
+    if (state.liveSession.cancelled) return false;
+    state.liveSession.retainRepoRootRelease(release);
     return true;
   }
 }

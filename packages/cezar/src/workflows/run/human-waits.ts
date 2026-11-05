@@ -33,7 +33,7 @@ export class HumanWaits {
    * `PROSE_HUMAN_GATE` names it in the transcript. Keep the checkpoint through idle closure/restart
    * and hold worker input until a successful human delivery, just as for a structured ask. */
   raiseHumanGate(runId: string, state: ActiveRun): void {
-    this.context.store.appendEvent(runId, { type: 'note', stepId: state.currentStepId,
+    this.context.store.appendEvent(runId, { type: 'note', stepId: state.liveSession.currentStepId,
       code: PROSE_HUMAN_GATE, message: 'waiting for a human response to the assistant’s request' });
     this.prepareHumanAsk(state);
     clearUnreadInputTimer(state);
@@ -94,7 +94,7 @@ export class HumanWaits {
     if (wait.source === 'cezar') { this.showCezarHumanWait(runId, state, wait); return; }
     if (pendingHumanAskSeq(this.context.store, runId) === undefined) {
       const run = this.context.store.getRun(runId);
-      const stepId = state?.currentStepId ?? run?.currentStepId ?? run?.steps.at(-1)?.id;
+      const stepId = state?.liveSession.currentStepId ?? run?.currentStepId ?? run?.steps.at(-1)?.id;
       if (wait.questions) {
         this.context.store.appendEvent(runId, { type: 'ask.requested', requestId: randomUUID(), ...askCardFields({ questions: wait.questions, context: wait.context }), ...(stepId ? { stepId } : {}) });
         if (state) this.prepareHumanAsk(state);
@@ -116,7 +116,7 @@ export class HumanWaits {
    */
   showCezarHumanWait(runId: string, state: ActiveRun | undefined, wait: HumanWaitEntry, note?: string): void {
     const run = this.context.store.getRun(runId);
-    const stepId = state?.currentStepId ?? run?.currentStepId ?? run?.steps.at(-1)?.id;
+    const stepId = state?.liveSession.currentStepId ?? run?.currentStepId ?? run?.steps.at(-1)?.id;
     const shown = this.context.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}),
       message: note ?? (wait.via === 'no-wait' ? NO_WAIT_NOTE : wait.via === 'completion' ? 'completion blocked; waiting for you'
         : `automatic-wake budget spent (${this.maxAutoContinues}); waiting for you`) });

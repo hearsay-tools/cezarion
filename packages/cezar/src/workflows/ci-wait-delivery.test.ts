@@ -31,7 +31,7 @@ describe('CI wait delivery', { timeout: 30_000 }, () => {
     capacity.mockRestore();
     await runInternals(manager).line.pump();
     expect.soft(runInternals(manager).line.queue).toContain(run.id);
-    state.atTurnBoundary = state.session;
+    state.atTurnBoundary = state.liveSession.session;
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
   });
 
@@ -40,7 +40,7 @@ describe('CI wait delivery', { timeout: 30_000 }, () => {
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     await register(run.id);
     const engine = runInternals(manager);
-    const session = engine.active.get(run.id)!.session!;
+    const session = engine.active.get(run.id)!.liveSession.session!;
     const original = session.sendAgentMessage.bind(session);
     let acknowledge!: () => void;
     const ack = new Promise<void>(resolve => { acknowledge = resolve; });
@@ -71,7 +71,7 @@ describe('CI wait delivery', { timeout: 30_000 }, () => {
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     const wait = await register(run.id);
     const engine = runInternals(manager);
-    const send = vi.spyOn(engine.active.get(run.id)!.session!, 'sendAgentMessage').mockReturnValue(false);
+    const send = vi.spyOn(engine.active.get(run.id)!.liveSession.session!, 'sendAgentMessage').mockReturnValue(false);
     external.settle(success());
     await until(() => send.mock.calls.length >= 2);
     expect(manager.cancel(run.id)).toBe(true);

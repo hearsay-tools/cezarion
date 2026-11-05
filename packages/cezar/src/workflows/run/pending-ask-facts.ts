@@ -7,7 +7,7 @@ import type { ActiveRun } from '../active-run.ts';
 export function hasUnansweredHumanAsk(runId: string, active: Pick<Map<string, ActiveRun>, 'get'>, pendingHumanAskSeq: (runId: string) => number | undefined): boolean {
   const seq = pendingHumanAskSeq(runId);
   const state = active.get(runId);
-  return seq !== undefined && !(state?.session?.open && !state.cancelled && state.openingAnswerAskSeq === seq);
+  return seq !== undefined && !(state?.liveSession.session?.open && !state.liveSession.cancelled && state.openingAnswerAskSeq === seq);
 }
 
 /** Transcript bubbles include refused sends. Only a successful delivery

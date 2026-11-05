@@ -44,7 +44,7 @@ vi.mock('../ci-wait/resources.ts', async importOriginal => {
 const pr = 'https://github.com/acme/repo/pull/12';
 const open = (id: string) => store.getRun(id)?.waits?.find(wait => wait.kind === 'pr');
 const last = (id: string) => store.getRun(id)?.lastWaits?.find(wait => wait.kind === 'pr');
-const active = (id: string) => (manager as unknown as { active: Map<string, { session: AgentSession; ciGeneration: string }> }).active.get(id);
+const active = (id: string) => (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; ciGeneration: string; };  }> }).active.get(id);
 const disk = (id: string) => readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === id);
 const mergeReads = (log: string) => existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(line => line.includes('state,mergedAt')).length : 0;
 
@@ -68,12 +68,12 @@ describe('native PR merge wait parity', { timeout: 35_000 }, () => {
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
       if (mode === 'continued') {
-        active(run.id)!.session.end();
+        active(run.id)!.liveSession.session.end();
         await until(() => !manager.isActive(run.id));
         expect(manager.continueRun(run.id, { text: HARNESS_ADAPTERS[runner].scenarios.baseline! }).ok).toBe(true);
-        await until(() => store.getRun(run.id)?.status === 'waiting' && !!active(run.id)?.session.open);
+        await until(() => store.getRun(run.id)?.status === 'waiting' && !!active(run.id)?.liveSession.session.open);
       }
-      const wait = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, until: 'merge', timeout_seconds: 120 }, 'cezar_wait', active(run.id)!.ciGeneration);
+      const wait = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, until: 'merge', timeout_seconds: 120 }, 'cezar_wait', active(run.id)!.liveSession.ciGeneration);
       if (mode === 'recovered') {
         await restart();
         expect(manager.isActive(run.id)).toBe(false);

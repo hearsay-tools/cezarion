@@ -47,7 +47,7 @@ function opening() {
 
 it('publishes a committed opening receipt once without a live session and retains the replay checkpoint', () => {
   const f = opening();
-  expect(f.state.session).toBeUndefined();
+  expect(f.state.liveSession.session).toBeUndefined();
   recordOpeningAccepted(f.context, f.host, f.recipient.id, f.state);
   recordOpeningAccepted(f.context, f.host, f.recipient.id, f.state);
   const saved = f.saved();
@@ -73,7 +73,7 @@ it('does not publish a receipt when its durable commit fails', () => {
 
 it.each(['cancelled', 'stale'] as const)('does not accept an opening receipt from a %s state', mode => {
   const f = opening();
-  if (mode === 'cancelled') f.state.cancelled = true;
+  if (mode === 'cancelled') f.state.liveSession.cancel();
   else f.host.isCurrentState.mockReturnValue(false);
   recordOpeningAccepted(f.context, f.host, f.recipient.id, f.state);
   expect(f.saved().agentInputs?.[0]?.deliveredAt).toBeUndefined();
@@ -85,7 +85,7 @@ function receiptFixture() {
   const session: AgentSession = { result: Promise.resolve({ exitCode: 0, text: '', toolCalls: [], tokensUsed: 0 }), open: true,
     sendMessage: () => true, sendAgentMessage: () => Promise.resolve(), discardQueuedMessages() {},
     holdsHumanInput: () => false, end() {}, interrupt: vi.fn() };
-  f.state.session = session;
+  f.state.liveSession.attachSession(session);
   f.state.unreadInputIds = new Set([f.state.openingAgentInputId!]);
   const calls: string[] = [];
   const turn: SessionTurn = { text: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
@@ -104,7 +104,7 @@ it.each(['absent', 'stale', 'different'] as const)('rejects consumption and clos
   const f = receiptFixture(); f.accept();
   const session = mode === 'absent' ? undefined : f.session;
   if (mode === 'stale') f.host.isCurrentState.mockReturnValue(false);
-  if (mode === 'different') f.state.session = { ...f.session };
+  if (mode === 'different') f.state.liveSession.attachSession({ ...f.session });
   // Fake time only checks that close cancels both timers; no real-time wait.
   vi.useFakeTimers();
   try {
@@ -122,7 +122,7 @@ it.each(['absent', 'stale', 'different'] as const)('rejects consumption and clos
 
 it.each(['cancelled', 'stale', 'empty'] as const)('rejects unread retirement for %s state', mode => {
   const f = receiptFixture(); f.accept();
-  if (mode === 'cancelled') f.state.cancelled = true;
+  if (mode === 'cancelled') f.state.liveSession.cancel();
   if (mode === 'stale') f.host.isCurrentState.mockReturnValue(false);
   receipts.retireUnreadInputs(f.context, f.host, f.recipient.id, f.state, mode === 'empty' ? [] : [f.id], true);
   expect(f.saved().agentInputs?.[0]?.deliveredAt).toBeDefined();
@@ -233,7 +233,7 @@ it('finishes setup in order and waits for ACK before close requeues committed un
   f.state.agentInputFlight = { session: f.session, inputIds: [f.id], settled: ack };
   const register = vi.spyOn(processes, 'registerRunProcess').mockImplementation(() => { f.calls.push('register'); });
   f.host.flushAgentInputs.mockImplementation(() => { f.calls.push('inputs'); });
-  const session = { ...f.session, pid: 12345 }; f.state.session = session;
+  const session = { ...f.session, pid: 12345 }; f.state.liveSession.attachSession(session);
   const result = receipts.sessionResultWithReceipts(f.context, f.host, f.steps, f.recipient.id, f.state, session, () => { f.calls.push('prepared'); });
   expect(f.calls).toEqual(['deferred', 'inputs', 'register', 'record', 'prepared']);
   expect(register).toHaveBeenCalledWith(f.recipient.id, 12345);
@@ -267,7 +267,7 @@ function observeTurnWrites(turn: SessionTurn, calls: string[]) {
 it.each(['cancelled', 'empty'] as const)('takes bundled IDs without a commit for %s input', mode => {
   const f = receiptFixture(); f.accept();
   f.state.bundledInputIds = mode === 'empty' ? [] : [f.id];
-  f.state.cancelled = mode === 'cancelled';
+  if (mode === 'cancelled') f.state.liveSession.cancel();
   const commit = vi.spyOn(store, 'commitOutcome');
   receipts.readBundledInputs(f.context, f.host, f.recipient.id, f.state);
   expect(f.state.bundledInputIds).toBeUndefined();

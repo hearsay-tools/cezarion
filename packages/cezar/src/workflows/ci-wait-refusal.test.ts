@@ -49,8 +49,8 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
     store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
     try {
       await until(wire.received);
-      const state = (manager as unknown as { active: Map<string, { ciGeneration: string; session: AgentSession }> }).active.get(run.id)!;
-      const tools = controller.provision(manager.cezarToolHandlers(run.id, state.ciGeneration));
+      const state = (manager as unknown as { active: Map<string, { liveSession: { ciGeneration: string; session: AgentSession; };  }> }).active.get(run.id)!;
+      const tools = controller.provision(manager.cezarToolHandlers(run.id, state.liveSession.ciGeneration));
       const child = await worker(run.id);
       const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
       await expect(callCezarWait({ kind: WAIT_KIND.pr, pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: WAIT_KIND.pr });
@@ -81,8 +81,8 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
       store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
       try {
         await until(wire.received);
-        const state = (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(run.id)!;
-        const tools = controller.provision(manager.cezarToolHandlers(run.id, state.ciGeneration));
+        const state = (manager as unknown as { active: Map<string, { liveSession: { ciGeneration: string; };  }> }).active.get(run.id)!;
+        const tools = controller.provision(manager.cezarToolHandlers(run.id, state.liveSession.ciGeneration));
         const child = await worker(run.id);
         const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
         fixtureUpdateRun(child.id, { status: RUN_STATUS.done });

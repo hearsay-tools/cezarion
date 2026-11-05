@@ -99,10 +99,10 @@ export function toolSessionRefusal(run: RunRecord | undefined, state: ActiveRun 
   if (!['running', 'waiting'].includes(run.status)) return 'run_not_running' as const;
   if (run.stopping) return 'run_stopping' as const;
   if (!state || active !== state) return 'session_replaced' as const;
-  if (!state.session?.open) return 'session_closed' as const;
-  if (state.cancelled) return 'run_cancelled' as const;
-  if (state.finishRequested) return 'finish_requested' as const;
-  if (state.ciGeneration !== generation) return 'generation_mismatch' as const;
+  if (!state.liveSession.session?.open) return 'session_closed' as const;
+  if (state.liveSession.cancelled) return 'run_cancelled' as const;
+  if (state.liveSession.finishRequested) return 'finish_requested' as const;
+  if (state.liveSession.ciGeneration !== generation) return 'generation_mismatch' as const;
   return undefined;
 }
 
@@ -117,16 +117,16 @@ export interface CiSessionHost {
 
 /** Provision the same capability and descriptor on every start, Continue and recovered launch. */
 export async function provisionCiSession(context: RunModuleContext, host: CiSessionHost, runId: string, state: ActiveRun) {
-  state.revokeCiTools?.();
-  state.revokeCiTools = undefined;
-  state.ciGeneration = randomUUID();
+  state.liveSession.revokeCiTools?.();
+  state.liveSession.clearCiRevoker();
+  state.liveSession.beginCiGeneration(randomUUID());
   state.ciTurnId = randomUUID();
-  const generation = state.ciGeneration;
+  const generation = state.liveSession.ciGeneration!;
   // hearsay-tools/cezarion#2397: a controller that cannot start throws `ToolsUnavailableError`,
   // which fails this launch; no session runs without the lifecycle tools.
   const controller = await host.ciResources().controller();
-  if (context.disposed() || state.cancelled || host.active.get(runId) !== state) return;
+  if (context.disposed() || state.liveSession.cancelled || host.active.get(runId) !== state) return;
   const provisioned = previewCdpSession(controller.provision(host.cezarToolHandlers(runId, generation)), { host: host.preview(), cockpitOrigin: host.cockpit()?.origin, runId, worktree: !!context.store.getRun(runId)?.worktreePath, context: () => previewRunContext(context.store, context.dataDir, runId) });
-  state.revokeCiTools = provisioned.revoke;
+  state.liveSession.installCiRevoker(provisioned.revoke);
   return provisioned;
 }

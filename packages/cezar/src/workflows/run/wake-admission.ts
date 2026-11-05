@@ -66,7 +66,7 @@ export class WakeAdmission {
    *  turn end. */
   reparkWithoutWaits(runId: string, state: ActiveRun): void {
     const run = this.context.store.getRun(runId);
-    if (!run || run.status !== 'waiting' || !this.host.line.isParked(runId) || state.atTurnBoundary !== state.session || run.waits?.length) return;
+    if (!run || run.status !== 'waiting' || !this.host.line.isParked(runId) || state.atTurnBoundary !== state.liveSession.session || run.waits?.length) return;
     this.host.humanWaits.surfaceHumanWait(runId, state, this.host.humanWaits.openHumanAlias(runId, state, 'budget'));
     this.leaveMonitoringPool(runId);
     this.host.armIdleTimer(runId, state);
@@ -162,19 +162,19 @@ export class WakeAdmission {
    */
   parkOnWaits(runId: string, state: ActiveRun): boolean {
     const run = this.context.store.getRun(runId);
-    if (!run?.waits?.length || !state.session?.open || state.cancelled || state.pendingHumanAsk) return false;
+    if (!run?.waits?.length || !state.liveSession.session?.open || state.liveSession.cancelled || state.pendingHumanAsk) return false;
     const human = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
     if (human) {
       this.host.humanWaits.surfaceHumanWait(runId, state, human);
-      this.host.parkForUser(runId, state, state.currentStepId);
+      this.host.parkForUser(runId, state, state.liveSession.currentStepId);
       return true;
     }
     clearIdleTimer(state);
     const top = computeWaitingOn(run)?.kind;
     const { holdsSubagents, keepsSlot } = parkHold(run, state, top);
     // A park that frees its slot publishes the intent first: a refused write throws and keeps it.
-    if (keepsSlot) this.host.move(runId, 'park', {}, { stepId: state.currentStepId });
-    else this.context.store.move(runId, 'park-release', {}, { stepId: state.currentStepId });
+    if (keepsSlot) this.host.move(runId, 'park', {}, { stepId: state.liveSession.currentStepId });
+    else this.context.store.move(runId, 'park-release', {}, { stepId: state.liveSession.currentStepId });
     this.host.line.park(runId);
     if (keepsSlot) this.host.line.joinPool(runId); else this.leaveMonitoringPool(runId);
     if (!holdsSubagents && (top === 'workers' || top === 'peers')) this.host.armIdleTimer(runId, state);
@@ -211,7 +211,7 @@ export class WakeAdmission {
     if (!this.canQueueWaitWake(runId, run)) return;
     const state = this.host.active.get(runId);
     this.restoreWorkerWaitInputs(runId);
-    if (state && (!state.session?.open || !this.takesWake(runId, state))) return;
+    if (state && (!state.liveSession.session?.open || !this.takesWake(runId, state))) return;
     // Settlement ends the watcher. Keep a bounded-rate wake source until ACK,
     // cancellation or termination, including refusals with no runner-ready callback.
     this.host.retryWaitAdmission(runId);
@@ -272,7 +272,7 @@ export class WakeAdmission {
    *  settings, a queued continuation's account, else its latest session step. Both sides of a hold
    *  read it, so a mixed-runner step is held by the account it ran on (hearsay-tools/cezarion#1236). */
   withExecutionAccount<T extends RunRecord>(run: T): T {
-    const live = this.host.active.get(run.id)?.delegationSettings;
+    const live = this.host.active.get(run.id)?.liveSession.delegationSettings;
     return { ...run, ...executionAccount(run, this.host.line.continuation(run.id), live) };
   }
 
@@ -301,7 +301,7 @@ export class WakeAdmission {
     if (!run || this.host.countAutomaticWakes(runId) < this.maxAutoContinues ||
       !run.agentInputs?.some(input => !input.deliveredAt && !hasLiveInboxClaim(input) && chargesBudgetMessage(input))) return;
     const state = this.host.active.get(runId);
-    if (state?.session?.open && state.atTurnBoundary !== state.session) { if (!this.host.recoveringRun(runId)) this.host.flushAgentInputs(runId); return; }
+    if (state?.liveSession.session?.open && state.atTurnBoundary !== state.liveSession.session) { if (!this.host.recoveringRun(runId)) this.host.flushAgentInputs(runId); return; }
     if (run.status === 'waiting') this.host.humanWaits.surfaceHumanWait(runId, state, this.host.humanWaits.openHumanAlias(runId, state, 'budget'));
   }
 
@@ -322,7 +322,7 @@ export class WakeAdmission {
    *  else as one submission. */
   deliverAdmittedWake(runId: string): void {
     const state = this.host.active.get(runId);
-    const midTurn = !!state && state.atTurnBoundary !== state.session;
+    const midTurn = !!state && state.atTurnBoundary !== state.liveSession.session;
     if ((midTurn || !resolvedWaits(this.context.store.getRun(runId) ?? {}).length) && this.routedAnswer(runId)) this.host.answerRoutedQuestion(runId, true);
     else this.host.flushAgentInputs(runId);
   }
@@ -334,7 +334,7 @@ export class WakeAdmission {
     const state = this.host.active.get(runId);
     if (!run || this.owesWake(run) || state?.agentInputFlight) return;
     this.host.line.removeWake(runId);
-    if (this.host.line.retireAdmission(runId) && state && run.status === 'waiting' && state.atTurnBoundary === state.session) this.host.line.park(runId);
+    if (this.host.line.retireAdmission(runId) && state && run.status === 'waiting' && state.atTurnBoundary === state.liveSession.session) this.host.line.park(runId);
     this.host.retries.stopRetry(runId);
   }
 

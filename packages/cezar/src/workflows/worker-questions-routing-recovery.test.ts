@@ -1,7 +1,7 @@
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
@@ -17,8 +17,9 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
   // the parent is stopping, not when its status settles.
   it('closes a routed question while its parent is stopping', async () => {
     const f = await askedPair();
-    const state = (manager as unknown as { active: Map<string, { interrupt(): void }> }).active.get(f.p.id)!;
-    const interrupt = vi.spyOn(state, 'interrupt').mockImplementation(() => {});
+    const state = (manager as unknown as { active: Map<string, { liveSession: { interrupt(): void; installInterrupt(interrupt: () => void): void; };  }> }).active.get(f.p.id)!;
+    const interrupt = state.liveSession.interrupt;
+    state.liveSession.installInterrupt(() => {});
     try {
       expect(manager.cancel(f.p.id)).toBe(true);
       expect(store.getRun(f.p.id)).toMatchObject({ stopping: true, status: expect.stringMatching(/^(running|waiting)$/) });
@@ -29,8 +30,8 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
       expect(store.getRun(f.p.id)?.stopping).toBe(true);
       noHumanCard(f.w.id);
     } finally {
-      interrupt.mockRestore();
-      state.interrupt();
+      state.liveSession.installInterrupt(interrupt);
+      state.liveSession.interrupt();
       f.close();
     }
   });

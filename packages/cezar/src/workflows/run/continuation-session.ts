@@ -140,7 +140,7 @@ export class ContinuationSession {
   /** The repository-root lease of a Continue that runs in the repository root. Returns undefined
    *  when no lease is needed, so that path does not yield, else whether the lease was granted. */
   private continuationRepoRootLease(runId: string, state: ActiveRun): Promise<boolean> | undefined {
-    if (state.cwd !== this.context.repoRoot) return undefined;
+    if (state.liveSession.cwd !== this.context.repoRoot) return undefined;
     if (this.host.repositoryRootLockDisabled()) {
       this.context.store.appendEvent(runId, {
         type: 'note',
@@ -226,8 +226,8 @@ export class ContinuationSession {
    * Returns false when the opening input's checkpoint failed, and the turn end stops there.
    */
   private acknowledgeOpeningTurn(runId: string, state: ActiveRun, answer: OpeningAnswer): boolean {
-    if (state.cancelled) return true;
-    const session = state.session?.open ? state.session : undefined;
+    if (state.liveSession.cancelled) return true;
+    const session = state.liveSession.session?.open ? state.liveSession.session : undefined;
     const opening = session ? state.openingAgentInputId : undefined;
     const askSeq = session ? answer.askSeq : undefined;
     // One commit (hearsay-tools/cezarion#1805): a store reopened after a crash never reads the
@@ -328,9 +328,9 @@ export class ContinuationSession {
     settings: ContinuationSettings,
   ): void {
     this.context.store.updateStep(runId, stepId, { profileId: settings.profile.profileId });
-    state.delegationSettings = { cwd: state.cwd, runner: backend, model: settings.backendModel,
+    state.liveSession.captureDelegationSettings({ cwd: state.liveSession.cwd, runner: backend, model: settings.backendModel,
       effort: settings.effort, agentProfile: settings.profile.profileId, accountBinding: settings.profile.accountBinding,
-      systemPrompt: settings.extraSystemPrompt, ...toolGrantLists(settings.toolGrant) };
+      systemPrompt: settings.extraSystemPrompt, ...toolGrantLists(settings.toolGrant) });
   }
 
   /** The continued step's skill files and playbook, when the step names a skill or the prompt
@@ -427,8 +427,8 @@ export class ContinuationSession {
     held: Omit<PendingContinuation, 'lineJoinedAt'>,
   ): void {
     if (this.sharedHost.active.get(runId) !== state) return;
-    if (state.cancelled || this.sharedHost.workerExecutionStopped(runId)) {
-      state.cancelled = true;
+    if (state.liveSession.cancelled || this.sharedHost.workerExecutionStopped(runId)) {
+      state.liveSession.cancel();
       this.settleContinuationPrelaunchCancel(runId, stepId, state);
     } else {
       this.host.holdContinuationForRootFinish(runId, { ...held, lineJoinedAt: Date.now() }, state);
@@ -478,7 +478,7 @@ export class ContinuationSession {
 
     const settings = await this.continuationLaunchSettings(runId, stepId, state, record, sessionId, backend, sink);
     if (!settings) return;
-    if (state.cancelled) { this.settleContinuationPrelaunchCancel(runId, stepId, state); return; }
+    if (state.liveSession.cancelled) { this.settleContinuationPrelaunchCancel(runId, stepId, state); return; }
     if (this.host.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() }, state)) return;
     this.applyContinuationSettings(runId, stepId, state, backend, settings);
     const { runner, skipSkillOnResume } = continuationRunner(backend, sessionId, settings.owningStep);
@@ -495,14 +495,14 @@ export class ContinuationSession {
     const skills = pendingSkills
       ? await pendingSkills
       : { skillPrompt: undefined, fallbackSkillPrompt: undefined, files: new Map<string, string>() };
-    state.currentStepId = stepId;
+    state.liveSession.selectStep(stepId);
     this.host.beginUsageInvocation(runId, state, stepId);
     // A continuation's opening message becomes the session's `userPrompt` and never passes
     // through `deliverMessage`, so it needs the SAME delivery-only `/skill` rewrite the
     // live path applies (#811). Delivery-only: the `user-message` event above already
     // persisted the user's original text, and the transcript must keep showing that.
-    state.agentSessionError = undefined;
-    if (this.sharedHost.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
+    state.liveSession.recordSessionError(undefined);
+    if (this.sharedHost.workerExecutionStopped(runId)) { state.liveSession.cancel(); throw new Error('Worker stopped before launch'); }
     const launch = await launchPreamble(this.launchPreambleHost, runId, state);
     const { delegation, webhooksPart, ciTools } = launch;
     // Stop/Finish can arrive while the local tool controller is starting.
@@ -548,7 +548,7 @@ export class ContinuationSession {
       });
       const continuationTail = sessionEvents.launchSystemTail(this.context, this.sharedHost, {
         extraSystemPrompt: settings.extraSystemPrompt, delegation, webhooksPart: launch.webhooksPart,
-        env: settings.profile.env, ciTools, handoffInjected: resumed.handoffInjected, runner: state.delegationSettings?.runner,
+        env: settings.profile.env, ciTools, handoffInjected: resumed.handoffInjected, runner: state.liveSession.delegationSettings?.runner,
       });
       session = startManagedSession(runner,
         {
@@ -565,7 +565,7 @@ export class ContinuationSession {
             ? `${resumed.userPrompt}\n\n${pastedAttachmentsText(opening.attachments)}`
             : resumed.userPrompt,
           ...(opening.openingImages.length ? { images: opening.openingImages } : {}),
-          cwd: state.cwd,
+          cwd: state.liveSession.cwd,
           toolGrant: settings.toolGrant,
           additionalDirectories: agentDirectories(join(this.context.dataDir, 'runs'), settings.profile.env),
           env: { ...settings.profile.env, ...delegation?.env, ...ciTools?.env },
@@ -580,7 +580,7 @@ export class ContinuationSession {
         onEvent,
         inputReceipts.inputReceiptCallbacks(this.context, this.inputReceiptHost, this.inputReceiptSteps, runId, state, () => session, turn, sink, true),
       );
-    } catch (error) { ciTools?.revoke(); state.revokeCiTools = undefined; delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
+    } catch (error) { ciTools?.revoke(); state.liveSession.clearCiRevoker(); delegation?.revoke(); state.liveSession.clearDelegationRevoker(); throw error; }
     return session;
   }
 
@@ -596,12 +596,12 @@ export class ContinuationSession {
   }): Promise<void> {
     const { stepId, sink, turn } = launch;
     const sessionClosed = this.host.trackWorkerSessionResult(runId, session);
-    state.session = session;
+    state.liveSession.attachSession(session);
     const resumedNext = continuationNextStep(this.context.store, runId, record => waitingWorkflowStepIndex(record,
       (run, step) => this.host.isSyntheticContinuation(run, step), ciWorkflowResumeStepIndex));
     state.nextStep = stepScope(session, resumedNext);
-    state.sessionEverOpened = true;
-    state.interrupt = () => session.interrupt();
+    state.liveSession.markSessionOpened();
+    state.liveSession.installInterrupt(() => session.interrupt());
     let setupComplete = false;
     const close: ContinuationClose = {};
     try {
@@ -634,8 +634,8 @@ export class ContinuationSession {
     ciTools: LaunchCiTools,
     close: ContinuationClose,
   ): Promise<void> {
-    ciTools?.revoke(); state.revokeCiTools = undefined;
-    delegation?.revoke(); state.revokeDelegation = undefined;
+    ciTools?.revoke(); state.liveSession.clearCiRevoker();
+    delegation?.revoke(); state.liveSession.clearDelegationRevoker();
     this.host.recordUsagePeaks(runId);
     clearIdleTimer(state);
     clearAutosaveTimer(state);
@@ -644,7 +644,7 @@ export class ContinuationSession {
     // after success was recorded. Retire any durable queue intent before
     // dropping the active state, otherwise pump can launch the tail with a
     // fresh `cancelled:false` state.
-    if (state.cancelled) {
+    if (state.liveSession.cancelled) {
       close.resumeWorkflow = undefined;
       if (this.context.store.getRun(runId)?.status !== 'cancelled') {
         this.host.move(runId, 'cancel-late');

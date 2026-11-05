@@ -100,7 +100,7 @@ export async function launchPreamble(host: LaunchPreambleHost, runId: string, st
   const stale = host.launchStale(runId, state, delegation, ciTools);
   if (stale || toolsError === undefined) return { delegation, webhooksPart, ciTools, stale };
   delegation?.revoke();
-  if (state.revokeDelegation === delegation?.revoke) state.revokeDelegation = undefined;
+  if (state.liveSession.revokeDelegation === delegation?.revoke) state.liveSession.clearDelegationRevoker();
   return { delegation: undefined, webhooksPart, ciTools: undefined, stale: false, toolsError };
 }
 
@@ -132,7 +132,7 @@ export interface SessionHelperHost {
  *  error still interrupts the session. */
 export function disposedSessionEvent(context: RunModuleContext, host: SessionHelperHost, runId: string, state: ActiveRun, event: AgentEvent): boolean {
   if (!isDisposedDelegatedRun(context.store, context.disposed, runId)) return false;
-  if (event.type === 'error') state.session?.interrupt();
+  if (event.type === 'error') state.liveSession.session?.interrupt();
   return true;
 }
 
@@ -141,8 +141,8 @@ export function disposedSessionEvent(context: RunModuleContext, host: SessionHel
 export function recordSessionFault(context: RunModuleContext, host: SessionHelperHost, state: ActiveRun, turn: SessionTurn, message: string): void {
   // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
   turn.sessionError ??= state.agentInputError ?? message;
-  state.agentSessionError = turn.sessionError;
-  state.session?.interrupt();
+  state.liveSession.recordSessionError(turn.sessionError);
+  state.liveSession.session?.interrupt();
 }
 
 /** The session reached a turn end: retire the inputs it left unread, read the bundled inputs, and
@@ -151,7 +151,7 @@ export function markTurnBoundary(context: RunModuleContext, host: SessionHelperH
   inputReceipts.retireUnreadInputs(context, host.inputReceiptHost, runId, state, event.unconsumedInputIds ?? [], false);
   inputReceipts.readBundledInputs(context, host.inputReceiptHost, runId, state);
   state.waitWakeTurn = undefined;
-  state.atTurnBoundary = state.session;
+  state.atTurnBoundary = state.liveSession.session;
   state.ciTurnId = randomUUID();
 }
 
@@ -182,12 +182,12 @@ export async function stepProfileFor(context: RunModuleContext, host: SessionHel
  */
 export function launchStale(context: RunModuleContext, host: SessionHelperHost, runId: string, state: ActiveRun, delegation: LaunchDelegation, ciTools: LaunchCiTools): boolean {
   const launchRun = context.store.getRun(runId);
-  if (!(state.cancelled || host.workerExecutionStopped(runId) || host.active.get(runId) !== state ||
+  if (!(state.liveSession.cancelled || host.workerExecutionStopped(runId) || host.active.get(runId) !== state ||
     (launchRun && host.executionBlockedByRootFinish(launchRun)))) return false;
   ciTools?.revoke();
-  if (state.revokeCiTools === ciTools?.revoke) state.revokeCiTools = undefined;
+  if (state.liveSession.revokeCiTools === ciTools?.revoke) state.liveSession.clearCiRevoker();
   delegation?.revoke();
-  if (state.revokeDelegation === delegation?.revoke) state.revokeDelegation = undefined;
+  if (state.liveSession.revokeDelegation === delegation?.revoke) state.liveSession.clearDelegationRevoker();
   return true;
 }
 
@@ -265,7 +265,7 @@ export function handleRunnerUiEvent(context: RunModuleContext, host: SessionHelp
   if (isDisposedDelegatedRun(context.store, context.disposed, runId)) return;
   recordUsageUiEvent(context.store, runId, state, event);
   sink.handle(event);
-  if (state.cancelled) return;
+  if (state.liveSession.cancelled) return;
   host.trackSubagentEvent(runId, state, event);
   host.noteNoWaitNudgeContent(runId, state, event);
   if (isRunnerActivity(event)) {
@@ -277,8 +277,8 @@ export function handleRunnerUiEvent(context: RunModuleContext, host: SessionHelp
     handlePermissionRequested(context, host, runId, state, event.requestId);
     return;
   }
-  if (event.type === 'permission.resolved' && state.pendingPermissions?.delete(event.requestId)) {
-    handlePermissionResolved(context, host, runId, state, state.pendingPermissions);
+  if (event.type === 'permission.resolved' && state.liveSession.resolvePermission(event.requestId)) {
+    handlePermissionResolved(context, host, runId, state, state.liveSession.pendingPermissions);
     return;
   }
   const ask = askPayloadOf(event);
@@ -299,15 +299,15 @@ export function handleRunnerUiEvent(context: RunModuleContext, host: SessionHelp
 }
 
 export function handlePermissionRequested(context: RunModuleContext, host: SessionHelperHost, runId: string, state: ActiveRun, requestId: string): void {
-  (state.pendingPermissions ??= new Set()).add(requestId);
+  state.liveSession.requestPermission(requestId);
   host.humanWaits.prepareHumanAsk(state);
-  state.session?.discardQueuedMessages();
+  state.liveSession.session?.discardQueuedMessages();
   clearIdleTimer(state);
   clearUnreadInputTimer(state);
   clearHeldHumanInputTimer(state);
   host.line.leavePool(runId); // released below; its waits stay open
   host.line.park(runId);
-  host.move(runId, 'park', { hasPendingPermission: true }, { stepId: state.currentStepId });
+  host.move(runId, 'park', { hasPendingPermission: true }, { stepId: state.liveSession.currentStepId });
   host.releaseSlot();
   // Authorization is the human's, even when this run is an owned worker.
 }
@@ -316,7 +316,7 @@ export function handlePermissionResolved(context: RunModuleContext, host: Sessio
   if (!pendingPermissions.size) {
     context.store.updateRun(runId, { hasPendingPermission: false });
     state.pendingHumanAsk = hasPendingHumanAsk(runId, id => pendingHumanAskSeq(context.store, id));
-    if (!state.pendingHumanAsk && state.session?.open && !context.store.getRun(runId)?.stopping) {
+    if (!state.pendingHumanAsk && state.liveSession.session?.open && !context.store.getRun(runId)?.stopping) {
       host.resumeParkedRun(runId, state);
       host.flushAgentInputs(runId);
     }
@@ -332,7 +332,7 @@ export function handleNativeAskRequested(context: RunModuleContext, host: Sessio
   clearIdleTimer(state);
   host.line.leavePool(runId); // released below; its waits stay open
   host.line.park(runId);
-  host.move(runId, 'park', {}, { stepId: state.currentStepId });
+  host.move(runId, 'park', {}, { stepId: state.liveSession.currentStepId });
   host.releaseSlot();
   host.routeWorkerQuestion(runId);
 }

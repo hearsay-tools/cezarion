@@ -34,8 +34,8 @@ describe('worker inbox holds nonfinal agent completion', { timeout: 30_000 }, ()
     const generation = randomUUID();
     const receipt = manager.reserveInboxInputs(run.id, generation, [input.id])!;
     expect(receipt).toBeDefined();
-    const engine = manager as unknown as { active: Map<string, { session?: AgentSession }> };
-    const session = engine.active.get(run.id)!.session!;
+    const engine = manager as unknown as { active: Map<string, { liveSession: { session?: AgentSession; };  }> };
+    const session = engine.active.get(run.id)!.liveSession.session!;
     writeFileSync(gate, 'release');
     await until(() => store.readEvents(run.id).some(event => event.type === 'turn-end'));
     await vi.advanceTimersByTimeAsync(400); // Beyond the runner's actual auto-end window.

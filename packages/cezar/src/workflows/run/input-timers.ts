@@ -21,7 +21,7 @@ export function harnessOwesInput(state: ActiveRun | undefined): boolean {
 
 /** #486: a human follow-up is still queued in the live session and will still be delivered. */
 export function harnessHoldsHumanInput(state: ActiveRun): boolean {
-  return !state.heldHumanInputExpired && !!state.session?.open && state.session.holdsHumanInput();
+  return !state.heldHumanInputExpired && !!state.liveSession.session?.open && state.liveSession.session.holdsHumanInput();
 }
 
 export function clearNoWaitNudgeReplyTimer(state: ActiveRun): void {

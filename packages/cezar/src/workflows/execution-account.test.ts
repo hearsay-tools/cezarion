@@ -81,11 +81,11 @@ describe('account holds read the execution account', () => {
     const live = store.createRun({ title: 'live', workflow: 'w', task: 't', runner: 'codex', steps: [{ id: 'x', name: 'x', kind: STEP_KIND.agent }] });
     const engine = runInternals(manager);
     const state = createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false });
-    state.delegationSettings = { cwd: repoRoot, runner: 'claude', agentProfile: 'default' };
+    state.liveSession.captureDelegationSettings({ cwd: repoRoot, runner: 'claude', agentProfile: 'default' });
     engine.active.set(live.id, state);
     try {
       expect(runInternals(manager).wakeAdmission.wakeHeld(store.getRun(live.id)!)).toBe(true);
-      state.delegationSettings = { cwd: repoRoot, runner: 'codex', agentProfile: 'default' };
+      state.liveSession.captureDelegationSettings({ cwd: repoRoot, runner: 'codex', agentProfile: 'default' });
       engine.active.set(live.id, state);
       expect(runInternals(manager).wakeAdmission.wakeHeld(store.getRun(live.id)!)).toBe(false);
     } finally {

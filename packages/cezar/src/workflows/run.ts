@@ -266,12 +266,12 @@ export class RunManager {
     clearInterval(this.queueWatchdog);
     clearInterval(this.repoRediscovery);
     for (const state of this.active.values()) {
-      state.revokeCiTools?.(); state.revokeCiTools = undefined;
-      state.revokeDelegation?.(); state.revokeDelegation = undefined;
+      state.liveSession.revokeCiTools?.(); state.liveSession.clearCiRevoker();
+      state.liveSession.revokeDelegation?.(); state.liveSession.clearDelegationRevoker();
       clearIdleTimer(state);
       clearAutosaveTimer(state);
-      state.releaseRepoRoot?.();
-      state.releaseRepoRoot = undefined;
+      state.liveSession.releaseRepoRoot?.();
+      state.liveSession.clearRepoRootRelease();
     }
     this.modules.autoResumeScheduler.dispose();
     this.active.clear();
@@ -403,7 +403,7 @@ export class RunManager {
    * that set `active` directly would execute a run the store could evict mid-turn (the open-mercato/cezar#811 shape).
    */
   private activate(runId: string, state: ActiveRun): void {
-    state.pendingPermissions = new Set();
+    state.liveSession.resetPermissions();
     if (this.store.getRun(runId)?.hasPendingPermission) this.store.updateRun(runId, { hasPendingPermission: false });
     this.active.set(runId, state);
     this.store.pin(runId, 'active');
@@ -647,7 +647,7 @@ export class RunManager {
     if (!launch) return;
     if (!(await this.modules.stepLoop.prepareExecutionWorktree(execution, launch))) return;
 
-    if (state.cwd === this.repoRoot) {
+    if (state.liveSession.cwd === this.repoRoot) {
       if (repositoryRootLockDisabled()) {
         emit({
           type: 'note',

@@ -47,7 +47,7 @@ const child = (id: string, status: ToolStatus, background = true): UiToolItem =>
 /** One UI event, through the handler every runner's `onUiEvent` reaches. */
 function emitUi(runId: string, event: UiEvent): void {
   const engine = internals();
-  const stepId = engine.active.get(runId)!.currentStepId;
+  const stepId = engine.active.get(runId)!.liveSession.currentStepId;
   const sink = new UiEventSink({ persist: next => store.appendEvent(runId, { ...next, ...(stepId ? { stepId } : {}) }), emitLive: () => undefined });
   handleRunnerUiEvent(engine.context, engine.sessionHelperHost, runId, engine.active.get(runId)!, sink, event);
 }
@@ -97,7 +97,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
       // The other wait ranks first for display; the native child still needs this session.
       expect(internals().line.inPool(id)).toBe(true);
       expect(internals().active.get(id)?.idleTimer).toBeUndefined();
-      expect(internals().active.get(id)?.session?.open).toBe(true);
+      expect(internals().active.get(id)?.liveSession.session?.open).toBe(true);
     });
   }
 
@@ -190,7 +190,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });
     expect(internals().line.inPool(id)).toBe(true);
     expect(internals().active.get(id)?.idleTimer).toBeUndefined();
-    expect(internals().active.get(id)?.session?.open).toBe(true);
+    expect(internals().active.get(id)?.liveSession.session?.open).toBe(true);
   });
 
   it('a first turn that asks with children running opens the wait beside the question and keeps the session and slot', async () => {
@@ -251,7 +251,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
   it('a parent turn the runner starts closes the subagent wait and every timer, and takes no wake', async () => {
     let timerId = '';
     const { id, wait } = await parkedOnSubagents(['toolu_bg_01'], async runId => {
-      const handlers = manager.cezarToolHandlers(runId, internals().active.get(runId)!.ciGeneration!);
+      const handlers = manager.cezarToolHandlers(runId, internals().active.get(runId)!.liveSession.ciGeneration!);
       const registered = await handlers.registerWait({ kind: WAIT_KIND.timer, seconds: 600, note: 'beside the subagents' }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered)) throw new Error('timer not registered');
       timerId = registered.wait.id;
@@ -274,7 +274,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
   it('a human message keeps the subagent wait and its timers open, and the turn end parks on it again', async () => {
     let timerId = '';
     const { id, wait } = await parkedOnSubagents(['toolu_bg_01'], async runId => {
-      const handlers = manager.cezarToolHandlers(runId, internals().active.get(runId)!.ciGeneration!);
+      const handlers = manager.cezarToolHandlers(runId, internals().active.get(runId)!.liveSession.ciGeneration!);
       const registered = await handlers.registerWait({ kind: WAIT_KIND.timer, seconds: 600, note: 'beside the subagents' }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered)) throw new Error('timer not registered');
       timerId = registered.wait.id;

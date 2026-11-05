@@ -56,14 +56,14 @@ export class TurnSettler {
   /** The `cezar_done` this session accepted since its last turn end, taken by this turn end: a
    *  later turn must call it again. */
   private takeDoneRequest(state: ActiveRun) {
-    const request = state.doneRequested?.session === state.session ? state.doneRequested : undefined;
+    const request = state.doneRequested?.session === state.liveSession.session ? state.doneRequested : undefined;
     state.doneRequested = undefined;
     return request;
   }
 
   /** The DONE boundary and close metadata; a refused DONE may retain metadata for readiness. */
   private recordDoneAtBoundary(state: ActiveRun, done: boolean, request: ActiveRun['doneRequested'], keepClose = done): void {
-    state.doneAtBoundary = done ? state.session : undefined;
+    state.doneAtBoundary = done ? state.liveSession.session : undefined;
     state.doneClose = keepClose ? { via: 'cezar_done', ...(request?.summary === undefined ? {} : { summary: request.summary }) } : undefined;
   }
 
@@ -74,7 +74,7 @@ export class TurnSettler {
     const close = state.doneClose;
     // A workflow step that is not the last completes, and the next step starts (hearsay-tools/cezarion#1620).
     const step = !!session && state.nextStep?.session === session;
-    state.completedStepId = state.currentStepId;
+    state.completedStepId = state.liveSession.currentStepId;
     if (close?.summary) this.context.store.appendEvent(runId, { type: 'note', message: close.summary });
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: step ? 'step complete — session closed' : 'goal achieved — session closed', via: close?.via ?? 'cezar_done' });
     this.host.cancelOpenWaits(runId);
@@ -90,7 +90,7 @@ export class TurnSettler {
   endTurn(runId: string, state: ActiveRun, sink: UiEventSink, turn: {
     stepId: string; scheduleWakeup: number | null | undefined;
   }): void {
-    const sessionOpen = !state.cancelled && !!state.session?.open;
+    const sessionOpen = !state.liveSession.cancelled && !!state.liveSession.session?.open;
     const humanWait = this.host.humanWaits.turnEndHumanWait(runId);
     const doneRequest = this.takeDoneRequest(state);
     const read = classifyTurnEnd({
@@ -100,18 +100,18 @@ export class TurnSettler {
       humanWait, doneRequested: !!doneRequest,
     });
     const { monitoring, humanGate, ask } = read;
-    discardQueuedMessagesOnAsk(state.session, read);
+    discardQueuedMessagesOnAsk(state.liveSession.session, read);
     // The turn that just ended answered a nudge: one flag per cause (hearsay-tools/cezarion#1234,
     // hearsay-tools/cezarion#1301).
-    const nudgedLastTurn = state.noWaitNudged === state.session;
+    const nudgedLastTurn = state.noWaitNudged === state.liveSession.session;
     state.noWaitNudged = undefined;
-    state.completionNudgeAnswered = state.completionNudged === state.session ? state.session : undefined;
+    state.completionNudgeAnswered = state.completionNudged === state.liveSession.session ? state.liveSession.session : undefined;
     state.completionNudged = undefined;
     this.prepareTurnAsk(runId, state, humanWait, read);
     // Native subagents still running: Cezar waits on them, instead of a timer (hearsay-tools/cezarion#2431).
     this.host.subagentWaits.atTurnEnd(runId, state, { sessionOpen, done: read.done, asks: !!ask || humanGate });
-    state.parkAfterAck = sessionOpen && state.session
-      ? { session: state.session, monitoring, humanGate, nudgedLastTurn, scheduleWakeup: turn.scheduleWakeup } : undefined;
+    state.parkAfterAck = sessionOpen && state.liveSession.session
+      ? { session: state.liveSession.session, monitoring, humanGate, nudgedLastTurn, scheduleWakeup: turn.scheduleWakeup } : undefined;
     const settled = this.settleTurn(runId, state, 'turn-end', {
       stepId: turn.stepId, monitoring, humanGate, ask, humanWait, sink,
       done: read.done, doneRequest, nudgedLastTurn, scheduleWakeup: turn.scheduleWakeup,
@@ -140,7 +140,7 @@ export class TurnSettler {
   boundaryTurn(runId: string, state: ActiveRun, session: AgentSession, done: boolean): SettledTurn {
     const ack = state.parkAfterAck?.session === session ? state.parkAfterAck : undefined;
     return {
-      stepId: state.currentStepId, humanGate: !!ack?.humanGate, ask: null, done,
+      stepId: state.liveSession.currentStepId, humanGate: !!ack?.humanGate, ask: null, done,
       // A done names no monitoring, as the turn end's own reading of it does (`classifyTurnEnd`).
       monitoring: !done && !!ack && (ack.monitoring || (!ack.humanGate && monitorsLiveWorkers(this.context, this.host.completionGateHost, runId))),
       nudgedLastTurn: !!ack?.nudgedLastTurn, scheduleWakeup: ack?.scheduleWakeup,
@@ -158,7 +158,7 @@ export class TurnSettler {
    */
   settleTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn,
     refusal?: CompletionRefusal): boolean {
-    const session = state.session;
+    const session = state.liveSession.session;
     const stepId = turn.stepId;
     // A done goes to the completion gate first (hearsay-tools/cezarion#1301). A refused done is not a done.
     const gate = refusal ?? (turn.done && session?.open ? this.host.completionGate(runId) : 'accept');
@@ -217,7 +217,7 @@ export class TurnSettler {
     refused: CompletionRefusal | undefined, inputTaken: boolean | undefined): TurnEndFacts {
     const run = this.context.store.getRun(runId);
     return {
-      sessionOpen: !state.cancelled && !!session?.open,
+      sessionOpen: !state.liveSession.cancelled && !!session?.open,
       done: turn.done,
       ...(refused ? { doneRefused: { liveWorkers: refused.liveWorkerIds.length > 0 || !!refused.requestIds?.length } } : {}),
       inputInFlight: !!state.agentInputFlight,
@@ -282,7 +282,7 @@ export class TurnSettler {
    *  decision follows is noted first; then the decision kind's own method runs (`turnEndCarriers`). */
   private carryOutTurnEnd(runId: string, state: ActiveRun, stepId: string | undefined, decision: TurnEndDecision,
     refused: CompletionRefusal | undefined, noteRefusal: () => void): TurnEndOutcome {
-    const session = state.session;
+    const session = state.liveSession.session;
     const decisionRefused = 'refused' in decision && !!decision.refused;
     if (decisionRefused) noteRefusal();
     // A refusal that settles the turn end replaces Cezar's own human wait, as the agent's own wait would.
@@ -407,13 +407,13 @@ export class TurnSettler {
     clearIdleTimer(state);
     state.idleClosed = false;
     state.idleTimer = setTimeout(() => {
-      if (state.session?.open && !state.cancelled) {
+      if (state.liveSession.session?.open && !state.liveSession.cancelled) {
         state.idleClosed = true;
         this.context.store.appendEvent(runId, {
           type: 'lifecycle',
           message: `session closed after ${Math.round(this.idleTimeoutMs / 60_000)}m of inactivity`,
         });
-        state.session.end();
+        state.liveSession.session.end();
       }
     }, this.idleTimeoutMs);
     state.idleTimer.unref?.();

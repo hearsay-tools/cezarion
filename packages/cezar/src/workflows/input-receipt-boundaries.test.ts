@@ -102,7 +102,7 @@ it.each(['fresh', 'continuation'] as const)('%s reads the session at callback ti
   const state = engine.active.get(id)!;
   expect(ready.mock.calls[0]).toEqual([id, state, undefined]);
   opts.onAgentInputReady?.(); opts.onAgentInputConsumed?.([inputId]);
-  expect(ready.mock.calls.at(-1)).toEqual([id, state, state.session]);
+  expect(ready.mock.calls.at(-1)).toEqual([id, state, state.liveSession.session]);
   expect(saved(id).agentInputs?.[0]?.consumedAt).toBeDefined();
   runner.close(); await fixtureWorkSettled(root);
 });

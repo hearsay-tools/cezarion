@@ -127,12 +127,12 @@ export class RunSkills {
     const first = blocks.find((block) => block.type === 'text');
     const name = first?.type === 'text' ? leadingSlashSkillName(first.text) : undefined;
     if (!name) return;
-    const session = state.session;
+    const session = state.liveSession.session;
     skillsWrites.provisioning(state.skills, (async () => {
       const { filesDir, installed } = await this.provisionRunSkills(runId, state, { slash: name });
       const dir = filesDir.get(name);
       if (installed.length === 0 && !dir) return;
-      if (state.cancelled || !this.host.isCurrentState(runId, state) || state.session !== session) return;
+      if (state.liveSession.cancelled || !this.host.isCurrentState(runId, state) || state.liveSession.session !== session) return;
       const text = [
         ...(installed.length ? [`Skills installed for /${name}: ${installed.join(', ')}.`] : []),
         ...(dir ? [`Skill files for /${name} are at ${dir}.`] : []),
@@ -180,7 +180,7 @@ export class RunSkills {
     const wantedNames = [...new Set([wanted.stepSkill, wanted.slash].filter((name): name is string => Boolean(name)))];
     // Stop can land during an earlier await (Continue's team-cache wait): a stopped run writes
     // nothing, here or between the pass's own steps.
-    const stopped = () => Boolean(state.cancelled) || this.host.workerExecutionStopped(runId);
+    const stopped = () => Boolean(state.liveSession.cancelled) || this.host.workerExecutionStopped(runId);
     // The off-list as it is now, applied to every input: the saved registry predates a switch
     // made during the run, so it is filtered as well as the fresh team list.
     const disabled = readDisabledTeamSkills(await readProjectUiState(this.context.repoRoot));
@@ -198,13 +198,13 @@ export class RunSkills {
       notes.push(`team skill "${skill.name}" materialized to ${dir}`);
       filesDir.set(skill.name, dir);
     };
-    if (!this.isOwnTaskWorktree(runId, state.cwd)) {
+    if (!this.isOwnTaskWorktree(runId, state.liveSession.cwd)) {
       for (const skill of teamRoots) await cacheCopy(skill);
       return { notes, filesDir, installed: [] };
     }
     const team = filterDisabledTeamSources(getTeamSkillsCached(this.context.repoRoot), readDisabledSkillsReposSync(this.context.repoRoot));
     const catalog = [...registry, ...filterDisabledTeamSkills(team, disabled)];
-    const result = await provisionSkills(state.cwd, roots, catalog, { cancelled: stopped });
+    const result = await provisionSkills(state.liveSession.cwd, roots, catalog, { cancelled: stopped });
     if (stopped()) return { notes, filesDir, installed: [] };
     for (const skill of teamRoots) {
       const written = result.teamCopies[skill.name] ?? [];
@@ -212,7 +212,7 @@ export class RunSkills {
         notes.push(`team skill "${skill.name}" materialized to .claude/skills/${skill.name}/ ` +
           `.agents/skills/${skill.name}/, and .cursor/skills/${skill.name}/`);
       } else if (written.length > 0) {
-        notes.push(`team skill "${skill.name}" materialized to ${written.map((dir) => `${relative(state.cwd, dir)}/`).join(' and ')}`);
+        notes.push(`team skill "${skill.name}" materialized to ${written.map((dir) => `${relative(state.liveSession.cwd, dir)}/`).join(' and ')}`);
         filesDir.set(skill.name, written[0]!);
       } else {
         await cacheCopy(skill);

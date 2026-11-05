@@ -97,18 +97,18 @@ export class StepSession {
     const stepProfile = await sessionEvents.stepProfileFor(this.context, this.sharedHost, runId, stepBackend, { stepId: step.id });
     if (typeof stepProfile === 'string') return stepProfile;
     const beforeSpawn = this.context.store.getRun(runId);
-    if (state.cancelled || (beforeSpawn && this.host.executionBlockedByRootFinish(beforeSpawn))) return null;
+    if (state.liveSession.cancelled || (beforeSpawn && this.host.executionBlockedByRootFinish(beforeSpawn))) return null;
     this.context.store.updateStep(runId, step.id, { profileId: stepProfile.profileId });
 
     const toolGrant = stepToolGrant(stepIdentity?.grants, step, stepBackend);
     // Workers inherit only the extra prompt, never the parent's selected skill (#778).
-    state.delegationSettings = { cwd: state.cwd, runner: stepBackend, model: model.backendModel,
+    state.liveSession.captureDelegationSettings({ cwd: state.liveSession.cwd, runner: stepBackend, model: model.backendModel,
       effort: model.effectiveEffort,
       agentProfile: stepProfile.profileId, accountBinding: stepProfile.accountBinding, systemPrompt: extraSystemPrompt,
-      ...toolGrantLists(toolGrant) };
+      ...toolGrantLists(toolGrant) });
     const runner = createRunner(stepBackend);
-    state.agentSessionError = undefined;
-    state.currentStepId = step.id;
+    state.liveSession.recordSessionError(undefined);
+    state.liveSession.selectStep(step.id);
     state.completedStepId = undefined;
     this.host.beginUsageInvocation(runId, state, step.id);
     const launch = await sessionEvents.launchPreamble(this.launchPreambleHost, runId, state);
@@ -116,8 +116,8 @@ export class StepSession {
     // Revalidate after provisioning, then let execute settle cancellation or
     // requeue a Finish-held step through its existing no-session paths.
     if (launch.stale) {
-      if (this.host.workerExecutionStopped(runId)) state.cancelled = true;
-      state.currentStepId = undefined;
+      if (this.host.workerExecutionStopped(runId)) state.liveSession.cancel();
+      state.liveSession.clearStep();
       return null;
     }
     // The step fails before anything spawns, like a refused model (hearsay-tools/cezarion#2397).
@@ -219,11 +219,11 @@ export class StepSession {
           // default), then the handoff contract — every agent step.
           systemPrompt: composeSystemPrompt(launch.skillPrompt, sessionEvents.launchSystemTail(this.context, this.sharedHost, {
             extraSystemPrompt: launch.extraSystemPrompt, delegation, webhooksPart: launch.webhooksPart,
-            env: profile.env, ciTools, handoffInjected: launch.opening.handoffInjected, runner: state.delegationSettings?.runner,
+            env: profile.env, ciTools, handoffInjected: launch.opening.handoffInjected, runner: state.liveSession.delegationSettings?.runner,
           })),
           userPrompt: launch.opening.userPrompt,
           images: launch.images,
-          cwd: state.cwd,
+          cwd: state.liveSession.cwd,
           toolGrant: launch.toolGrant,
           // The handoff file lives outside the worktree — grant access.
           additionalDirectories: agentDirectories(join(this.context.dataDir, 'runs'), profile.env),
@@ -241,9 +241,9 @@ export class StepSession {
         inputReceipts.inputReceiptCallbacks(this.context, this.inputReceiptHost, this.inputReceiptSteps, runId, state, () => session, turn, sink, false),
       );
     } catch (err) {
-      ciTools?.revoke(); state.revokeCiTools = undefined;
-      delegation?.revoke(); state.revokeDelegation = undefined;
-      state.currentStepId = undefined;
+      ciTools?.revoke(); state.liveSession.clearCiRevoker();
+      delegation?.revoke(); state.liveSession.clearDelegationRevoker();
+      state.liveSession.clearStep();
       return err instanceof Error ? err.message : String(err);
     }
     return session;
@@ -262,11 +262,11 @@ export class StepSession {
   }): Promise<string | null> {
     const { stepId, sink, turn } = launch;
     const sessionClosed = this.host.trackWorkerSessionResult(runId, session);
-    state.session = session;
+    state.liveSession.attachSession(session);
     state.nextStep = stepScope(session, launch.nextStep);
-    state.sessionEverOpened = true;
-    state.currentStepId = stepId;
-    state.interrupt = () => session.interrupt();
+    state.liveSession.markSessionOpened();
+    state.liveSession.selectStep(stepId);
+    state.liveSession.installInterrupt(() => session.interrupt());
     let setupComplete = false;
     try {
       const result = await inputReceipts.sessionResultWithReceipts(this.context, this.inputReceiptHost, this.inputReceiptSteps, runId, state, session, () => { setupComplete = true; });
@@ -279,7 +279,7 @@ export class StepSession {
       }
       // v2 counterpart of v1's `done` (spec: the mappers leave session-close
       // events to the RunManager — only it knows how the session settled).
-      sink.sessionEnded(state.cancelled ? 'cancelled' : 'end_turn');
+      sink.sessionEnded(state.liveSession.cancelled ? 'cancelled' : 'end_turn');
       this.context.store.updateStep(runId, stepId, { tokensUsed: launch.startTokens + result.tokensUsed });
       return null;
     } catch (err) {
@@ -301,8 +301,8 @@ export class StepSession {
    *  what its turns left on the run state: the idle timer, the monitoring and waiting marks, the
    *  turn boundary, the park intents and the session itself. */
   private releaseStepSession(runId: string, state: ActiveRun, delegation: LaunchDelegation, ciTools: LaunchCiTools): void {
-    ciTools?.revoke(); state.revokeCiTools = undefined;
-    delegation?.revoke(); state.revokeDelegation = undefined;
+    ciTools?.revoke(); state.liveSession.clearCiRevoker();
+    delegation?.revoke(); state.liveSession.clearDelegationRevoker();
     this.host.recordUsagePeaks(runId);
     clearIdleTimer(state);
     this.line.leavePool(runId);
@@ -312,8 +312,8 @@ export class StepSession {
     state.atTurnBoundary = undefined;
     state.doneAtBoundary = undefined;
     state.parkAfterAck = undefined;
-    state.session = undefined;
-    state.currentStepId = undefined;
-    state.interrupt = () => undefined;
+    state.liveSession.retireSession();
+    state.liveSession.clearStep();
+    state.liveSession.installInterrupt(() => undefined);
   }
 }

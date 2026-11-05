@@ -18,7 +18,9 @@ export type { FileBlock, PastedContent, PersistedAttachment } from '../pasted-co
 
 export type TurnTail = 'none' | 'visible' | 'silent';
 
-export type DelegationExecutionSettings = { cwd: string; runner: RunnerId; model?: string | undefined; modelIdentity?: string | undefined; effort?: string | undefined; agentProfile: string; accountBinding?: WorkerAccountBinding | undefined; systemPrompt?: string | undefined; allowedTools?: string[] | undefined; bashAllowlist?: string[] | undefined };
+type ReadonlyValue<T> = T extends object ? { readonly [K in keyof T]: ReadonlyValue<T[K]> } : T;
+
+export type DelegationExecutionSettings = ReadonlyValue<{ cwd: string; runner: RunnerId; model?: string | undefined; modelIdentity?: string | undefined; effort?: string | undefined; agentProfile: string; accountBinding?: WorkerAccountBinding | undefined; systemPrompt?: string | undefined; allowedTools?: string[] | undefined; bashAllowlist?: string[] | undefined }>;
 
 export interface StartRunInput {
   task: string;

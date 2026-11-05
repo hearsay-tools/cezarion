@@ -61,8 +61,8 @@ describe('the completion gate outside a turn end', () => {
     .filter(([id]) => id === runId).flatMap(([, , outcome]) => outcomeWord(outcome) ?? []) });
   function fakeState() {
     const value = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false });
-    value.session = session;
-    value.currentStepId = 'task';
+    value.liveSession.attachSession(session);
+    value.liveSession.selectStep('task');
     return value;
   }
   const settleBoundary = vi.fn(() => true);

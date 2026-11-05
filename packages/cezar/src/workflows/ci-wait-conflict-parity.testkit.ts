@@ -28,7 +28,7 @@ vi.mock('../ci-wait/resources.ts', async importOriginal => {
 const pr = 'https://github.com/acme/repo/pull/12';
 const open = (id: string) => store.getRun(id)?.waits?.find(wait => wait.kind === 'pr');
 const last = (id: string) => store.getRun(id)?.lastWaits?.find(wait => wait.kind === 'pr');
-const active = (id: string) => (manager as unknown as { active: Map<string, { session: AgentSession; ciGeneration: string }> }).active.get(id);
+const active = (id: string) => (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; ciGeneration: string; };  }> }).active.get(id);
 const disk = (id: string) => readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === id);
 
 // R81–R83 deliberately use the real metadata parser/supervisor. A synthetic
@@ -53,12 +53,12 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
       if (mode === 'continued') {
-        active(run.id)!.session.end();
+        active(run.id)!.liveSession.session.end();
         await until(() => !manager.isActive(run.id));
         expect(manager.continueRun(run.id, { text: HARNESS_ADAPTERS[runner].scenarios.baseline! }).ok).toBe(true);
-        await until(() => store.getRun(run.id)?.status === 'waiting' && !!active(run.id)?.session.open);
+        await until(() => store.getRun(run.id)?.status === 'waiting' && !!active(run.id)?.liveSession.session.open);
       }
-      const wait = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 120 }, 'cezar_wait', active(run.id)!.ciGeneration);
+      const wait = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 120 }, 'cezar_wait', active(run.id)!.liveSession.ciGeneration);
       if (mode === 'recovered') {
         await restart();
         expect(manager.isActive(run.id)).toBe(false);
@@ -95,7 +95,7 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       expect(committed.agentInputs.find((input: { id: string }) => input.id === wait.id).text).toContain('conflicting');
       expect(store.getRun(run.id)?.waits?.some(entry => entry.kind === 'timer')).toBe(false);
       expect(store.getRun(run.id)?.delegation).toBeUndefined();
-      if (mode !== 'recovered') expect(manager.cancelWait(run.id, wait.id, active(run.id)!.ciGeneration)).toEqual({ cancelled: false, code: 'already_resolved' });
+      if (mode !== 'recovered') expect(manager.cancelWait(run.id, wait.id, active(run.id)!.liveSession.ciGeneration)).toEqual({ cancelled: false, code: 'already_resolved' });
       const result = open(run.id)!.result;
       runInternals(manager).waitRegistry.resolveWait(run.id, wait.id, result); // Duplicate callback cannot enqueue another input.
       expect(disk(run.id).agentInputs.filter((input: { id: string }) => input.id === wait.id)).toHaveLength(1);
@@ -132,7 +132,7 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       Object.assign(manager, { ciSupervisor: supervisor });
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
-      const generation = active(run.id)!.ciGeneration;
+      const generation = active(run.id)!.liveSession.ciGeneration;
       const wait = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 120 }, 'cezar_wait', generation);
       if (wait.kind !== 'pr') throw new Error('Expected a CI wait');
       await until(() => existsSync(log) && readFileSync(log, 'utf8').includes('name,state,link,bucket'));

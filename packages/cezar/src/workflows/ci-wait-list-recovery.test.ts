@@ -96,7 +96,7 @@ describe('Wait list recovery and cancellation', { timeout: 30_000 }, () => {
     else if (action === 'finish') expect(manager.finish(run.id)).toBe(true);
     else {
       // Deletion takes an inactive run: a closed session keeps its waits (R72).
-      runInternals(manager).active.get(run.id)!.session!.end();
+      runInternals(manager).active.get(run.id)!.liveSession.session!.end();
       await until(() => !manager.isActive(run.id));
       expect(store.deleteRun(run.id)).toBe(true);
     }
@@ -130,7 +130,7 @@ describe('Wait list recovery and cancellation', { timeout: 30_000 }, () => {
     await resolve(first.id, () => external.settle(12));
     await resolve(timer.id, () => fireTimer(timer.id));
     await resolve(second.id, () => external.settle(13));
-    const session = runInternals(manager).active.get(run.id)!.session!;
+    const session = runInternals(manager).active.get(run.id)!.liveSession.session!;
     const send = vi.spyOn(session, 'sendAgentMessage');
     writeFileSync(gate, 'end');
     const ids = [first.id, timer.id, second.id];

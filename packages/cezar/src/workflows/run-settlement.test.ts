@@ -215,8 +215,8 @@ describe('successful run settlement (#473)', () => {
 
   function fakeState(finishRequested = false, cancelled = false) {
     const state = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false });
-    state.finishRequested = finishRequested;
-    state.cancelled = cancelled;
+    if (finishRequested) state.liveSession.requestFinish();
+    if (cancelled) state.liveSession.cancel();
     return state;
   }
 

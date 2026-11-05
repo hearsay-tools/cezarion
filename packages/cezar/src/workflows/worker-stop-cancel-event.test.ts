@@ -11,7 +11,7 @@ import { manager, parent, store, until, useWorkerWaitFixture, worker } from './w
 
 /** Whether run `id`'s session opened: its slot is taken. */
 function sessionOpened(id: string): boolean {
-  return (runInternals(manager).active.get(id) as { sessionEverOpened?: boolean } | undefined)?.sessionEverOpened === true;
+  return (runInternals(manager).active.get(id) as { liveSession: { sessionEverOpened?: boolean } } | undefined)?.liveSession.sessionEverOpened === true;
 }
 
 const cancellations = (id: string) => store.readEvents(id)

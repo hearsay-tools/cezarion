@@ -82,7 +82,7 @@ describe('intermediate workflow ASK parity — #427', () => {
             { stepId: 'implement', questions: [{ question: CEZAR_ASK_QUESTION }] },
           ]);
           expect(checks()).toEqual([]);
-          const session = manager['active'].get(runId)!.session!;
+          const session = manager['active'].get(runId)!.liveSession.session!;
           // The ask is durable before the native turn ends. Reach that boundary first.
           await waitFor(() => manager['active'].get(runId)?.atTurnBoundary === session);
           expect(clock!.captured).toBe(0);
@@ -138,7 +138,7 @@ describe('intermediate workflow ASK parity — #427', () => {
               if (row.id === 'Q10') {
                 // The continuation turn-end path must preserve a second ask
                 // if that reopened process also closes before its answer.
-                manager['active'].get(runId)!.session!.end();
+                manager['active'].get(runId)!.liveSession.session!.end();
                 await waitFor(() => !manager.isActive(runId));
                 expect(run().status).toBe('waiting');
                 expect(run().steps.map(s => s.status)).toEqual(['waiting', 'pending', 'waiting']);
@@ -152,7 +152,7 @@ describe('intermediate workflow ASK parity — #427', () => {
               await waitFor(() => !manager.isActive(runId));
               expect(run().status).toBe('done');
             } else {
-              if (row.id === 'Q1') expect(manager['active'].get(runId)?.session).toBe(session);
+              if (row.id === 'Q1') expect(manager['active'].get(runId)?.liveSession.session).toBe(session);
               expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest. mock:cezar-done' }])).toBe(true);
               if (row.id === 'Q3') {
                 await waitFor(() => !manager.isActive(runId));

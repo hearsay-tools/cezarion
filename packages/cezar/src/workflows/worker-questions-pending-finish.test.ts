@@ -23,8 +23,8 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
     const { p, close } = await delegatingParent({ task: 'mock:hold', permissions: ['spawn', 'wait', 'steer'] });
     try {
       await until(() => store.getRun(p.id)?.status === 'waiting');
-      const engine = manager as unknown as { active: Map<string, { session: AgentSession; doneRequested?: unknown }> };
-      const session = engine.active.get(p.id)!.session;
+      const engine = manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; }; doneRequested?: unknown }> };
+      const session = engine.active.get(p.id)!.liveSession.session;
       const sent: string[] = [];
       const real = session.sendAgentMessage.bind(session);
       session.sendAgentMessage = ((content, ...rest) => {

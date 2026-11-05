@@ -1,7 +1,7 @@
+import { createSessionGroup, type SessionGroup } from './run/live-session-state.ts';
 import { createChildrenGroup, type ChildrenGroup } from './run/subagent-waits.ts';
 import type { AgentSession, InputDelivery } from '../core/agent-runner.ts';
 import { createSkillsGroup, type SkillsGroup } from './run/run-skills.ts';
-import type { DelegationExecutionSettings } from './run/types.ts';
 import { createUsageGroup, type UsageGroup } from './run/usage-accounting.ts';
 
 /**
@@ -10,23 +10,10 @@ import { createUsageGroup, type UsageGroup } from './run/usage-accounting.ts';
  */
 export interface ActiveRun {
   readonly usage: UsageGroup;
-  delegationSettings?: DelegationExecutionSettings | undefined;
-  revokeDelegation?: (() => void) | undefined;
-  revokeCiTools?: (() => void) | undefined;
-  ciGeneration?: string;
+  readonly liveSession: SessionGroup;
   ciTurnId?: string;
   waitWakeTurn?: AgentSession | undefined;
-  cancelled: boolean;
-  /** Explicit human Finish survives disposal; shutdown-only result callbacks do not settle. */
-  finishRequested?: boolean;
-  interrupt: () => void;
-  /** Where this run's steps execute: the task worktree, or the repo root. */
-  cwd: string;
-  /** Live claude session of the currently running agent step, if any. */
-  session?: AgentSession | undefined;
   pendingHumanAsk: boolean;
-  /** Native grants belong only to this live session generation. */
-  pendingPermissions?: Set<string>;
   agentInputError?: string;
   agentInputFlight?: { session: AgentSession; inputIds: readonly string[]; settled?: Promise<void>;
     /** This batch carries timer results: it holds one unit of the automatic-wake budget, which
@@ -63,7 +50,6 @@ export interface ActiveRun {
   /** Only this older ask is being answered by the current continuation's opening turn. */
   openingAnswerAskSeq?: number | undefined;
   openingAgentInputId?: string | undefined;
-  agentSessionError?: string | undefined;
   doneAtBoundary?: AgentSession | undefined;
   /** `cezar_done` accepted in this session since its last turn end (hearsay-tools/cezarion#1234). */
   doneRequested?: { session: AgentSession; summary?: string } | undefined;
@@ -77,7 +63,6 @@ export interface ActiveRun {
   parkAfterAck?: { session: AgentSession; monitoring: boolean; humanGate?: boolean; nudgedLastTurn?: boolean; scheduleWakeup?: number | null | undefined } | undefined;
   /** Last completed boundary belongs to exactly this still-open session. */
   atTurnBoundary?: AgentSession | undefined;
-  currentStepId?: string | undefined;
   idleTimer?: NodeJS.Timeout | undefined;
   /** The inactivity timer closed the wire; resource teardown must not imply task success. */
   idleClosed?: boolean;
@@ -86,11 +71,6 @@ export interface ActiveRun {
   autosaveTimer?: NodeJS.Timeout | undefined;
   /* The screenshot counter lives on `RunManager.queuedImageSeq` (#472), keyed by
    * run id — a queued run persists attachments with no `ActiveRun` at all. */
-  /** Has a session EVER opened on this run (#472)? `session` alone cannot answer
-   *  it — teardown sets it back to `undefined`, so a closed session and one that
-   *  never opened look identical. This distinguishes "still starting up, buffer
-   *  the message" from "genuinely closed, 409". */
-  sessionEverOpened?: boolean;
   /** Autonomous mode (#autonomous): nudge eligible turn ends until done or the cap.
    *  Pending input, native asks and lifecycle waits retain priority. */
   autonomous?: boolean;
@@ -110,10 +90,6 @@ export interface ActiveRun {
    *  blocked done at this turn end takes the second step. Every turn end sets or clears it. */
   completionNudgeAnswered?: AgentSession | undefined;
   readonly skills: SkillsGroup;
-  /** Release for exclusive execution in the user's repository working tree.
-   *  Worktree-backed runs never need it; root runs ordinarily do unless the
-   *  explicit unsafe bypass is active. */
-  releaseRepoRoot?: (() => void) | undefined;
   readonly children: ChildrenGroup;
   /** Cezar is writing input into the session now: a parent turn that starts during the write is
    *  Cezar's, not one the runner started itself (hearsay-tools/cezarion#2431). */
@@ -156,14 +132,13 @@ export interface ActiveRunInit {
 export function createActiveRun(init: ActiveRunInit): ActiveRun {
   const state = {
     usage: createUsageGroup(),
-    delegationSettings: undefined, revokeDelegation: undefined,
-    cancelled: false, interrupt: () => undefined, cwd: init.cwd,
+    liveSession: createSessionGroup(init.cwd),
     pendingHumanAsk: init.pendingHumanAsk,
-    pendingPermissions: new Set<string>(),
     children: createChildrenGroup(),
     skills: createSkillsGroup(),
     autonomous: init.autonomous,
   };
+  Object.defineProperty(state, 'liveSession', { writable: false, configurable: false });
   Object.defineProperty(state, 'usage', { writable: false, configurable: false });
   Object.defineProperty(state, 'children', { writable: false, configurable: false });
   Object.defineProperty(state, 'skills', { writable: false, configurable: false });

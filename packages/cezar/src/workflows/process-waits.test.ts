@@ -30,7 +30,7 @@ function processes() {
   };
 }
 
-const generationOf = (id: string) => (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(id)!.ciGeneration;
+const generationOf = (id: string) => (manager as unknown as { active: Map<string, { liveSession: { ciGeneration: string; };  }> }).active.get(id)!.liveSession.ciGeneration;
 const register = async (id: string, request: { pid: number; exit_file?: string; note?: string; timeout_seconds?: number }) =>
   await manager.registerWait(id, { kind: WAIT_KIND.process, timeout_seconds: 1800, ...request }, 'cezar_wait', generationOf(id)) as ProcessWaitEntry;
 const waitById = (id: string, waitId: string) => store.getRun(id)?.waits?.find(entry => entry.id === waitId);
@@ -118,7 +118,7 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     const external = processes();
     const run = await waitingParent();
     const wait = await register(run.id, { pid: sleeper() });
-    (manager as unknown as { active: Map<string, { session: { end(): void } }> }).active.get(run.id)!.session.end();
+    (manager as unknown as { active: Map<string, { liveSession: { session: { end(): void }; };  }> }).active.get(run.id)!.liveSession.session.end();
     await until(() => !manager.isActive(run.id));
     store.updateRun(run.id, { automaticWakes: 40 });
     external.settle({ outcome: 'exited' });

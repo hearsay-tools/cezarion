@@ -1,4 +1,4 @@
-id: active-run-__SLOT__-write-outside-owner
+id: active-run-__GROUP__-write-outside-owner
 language: typescript
 severity: warning
 message: Change ActiveRun __SLOT__ only through __OWNER__. Groups and their live views expose no writable storage
@@ -313,14 +313,14 @@ utils:
                       - kind: pair_pattern
                       - has:
                           field: key
-                          regex: ^(__SLOT__|__GETTERS__)$
+                          regex: ^(__SLOT__|__BINDINGS__)$
                       - has:
                           field: value
                           pattern: $DESTRUCTURED_REF
                   - all:
                       - kind: shorthand_property_identifier_pattern
                       - pattern: $DESTRUCTURED_REF
-                      - regex: ^(__SLOT__|__GETTERS__)$
+                      - regex: ^(__SLOT__|__BINDINGS__)$
             all:
               - has:
                   field: value

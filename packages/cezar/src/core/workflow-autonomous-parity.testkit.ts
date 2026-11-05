@@ -202,8 +202,8 @@ describe('autonomous turn-end parity — #426', () => {
                 return !!current?.idleTimer && (retainedAck ? !!current.autonomousNudgePending : store.getRun(runId)?.status === 'waiting');
               });
               const state = manager['active'].get(runId)!;
-              const session = state.session!;
-              const stepId = state.currentStepId!;
+              const session = state.liveSession.session!;
+              const stepId = state.liveSession.currentStepId!;
               const sent = vi.spyOn(session, 'sendAgentMessage');
               expect(!!state.autonomousNudgePending).toBe(retainedAck);
               if (retainedAck) {

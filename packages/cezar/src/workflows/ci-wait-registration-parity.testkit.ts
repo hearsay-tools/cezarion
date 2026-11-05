@@ -29,8 +29,8 @@ describe('CI tool registration and scheduled delivery across harnesses', { timeo
       await until(() => parked(run.id));
       const firstWait = ciWaitOf(run.id)!;
       if (mode === 'continued') {
-        const state = (manager as unknown as { active: Map<string, { session: { end(): void } }> }).active.get(run.id)!;
-        state.session.end();
+        const state = (manager as unknown as { active: Map<string, { liveSession: { session: { end(): void }; };  }> }).active.get(run.id)!;
+        state.liveSession.session.end();
         await until(() => !manager.isActive(run.id));
         const boundaries = store.readEvents(run.id).filter(event => event.type === 'turn-end').length;
         expect(manager.continueRun(run.id, { text: 'mock:ci-wait https://github.com/acme/repo/pull/12' }).ok).toBe(true);

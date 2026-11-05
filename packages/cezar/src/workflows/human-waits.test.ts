@@ -37,15 +37,15 @@ async function heldTurn(options: { autonomous?: boolean } = {}) {
   const gate = join(root, 'release');
   process.env.CEZ_MOCK_RELEASE_FILE = gate;
   const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios['hold-gated']!, runner: 'claude', ...options });
-  await until(() => engine().active.get(run.id)?.session?.open === true && turnStarted(run.id));
+  await until(() => engine().active.get(run.id)?.liveSession.session?.open === true && turnStarted(run.id));
   return { run, release: () => writeFileSync(gate, '') };
 }
 
 const engine = () => manager as unknown as {
-  active: Map<string, { session?: AgentSession & { end(): void }; ciGeneration: string }>;
+  active: Map<string, { liveSession: { session?: AgentSession & { end(): void }; ciGeneration: string; };  }>;
 
 };
-const tools = (id: string) => manager.cezarToolHandlers(id, engine().active.get(id)!.ciGeneration);
+const tools = (id: string) => manager.cezarToolHandlers(id, engine().active.get(id)!.liveSession.ciGeneration);
 const ask = (id: string, questions: AskQuestion[], context = '## Draft\n\nThe plan.') => tools(id).ask({ context, questions }, new AbortController().signal);
 const turnStarted = (id: string) => store.readEvents(id).some(event => event.type === 'turn.started');
 const asks = (id: string) => store.readEvents(id).filter(event => event.type === 'ask.requested');
@@ -155,7 +155,7 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     process.env.CEZ_MOCK_RELEASE_FILE = gate;
     const w = await worker(p.id, HARNESS_ADAPTERS.claude.scenarios['hold-gated']!);
     manager.enqueueOwnedRun(w.id);
-    await until(() => engine().active.get(w.id)?.session?.open === true && turnStarted(w.id));
+    await until(() => engine().active.get(w.id)?.liveSession.session?.open === true && turnStarted(w.id));
     const registered = await ask(w.id, card('Which module?'));
     if (!registered.ok) throw Error('registration refused');
     writeFileSync(gate, '');
@@ -247,7 +247,7 @@ describe('the lifecycle prompt teaches the cezar tools', { timeout: 45_000 }, ()
   it('a session is taught the tools when it opens and when it continues', async () => {
     wire();
     const run = await opened();
-    engine().active.get(run.id)!.session!.end();
+    engine().active.get(run.id)!.liveSession.session!.end();
     // The run waits on the card the mock answered the no-wait nudge with; Continue answers it.
     await until(() => !manager.isActive(run.id) && store.getRun(run.id)?.status === 'waiting');
     expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);

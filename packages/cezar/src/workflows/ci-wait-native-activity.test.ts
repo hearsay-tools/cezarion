@@ -29,7 +29,7 @@ describe('CI wait native activity', { timeout: 30_000 }, () => {
     // Resume the backend itself, bypassing the manager's human-input path.
     // Native frames resume the run; it works in the monitoring slot its park kept
     // (hearsay-tools/cezarion#1233), so no regular slot is charged.
-    expect(engine.active.get(run.id)!.session!.sendMessage([{ type: 'text', text: adapter.scenarios.hold! }])).toBe(true);
+    expect(engine.active.get(run.id)!.liveSession.session!.sendMessage([{ type: 'text', text: adapter.scenarios.hold! }])).toBe(true);
     await until(() => started() > before);
     expect(store.getRun(run.id)?.status).toBe('running');
     expect(semaphore.busy()).toBe(0);

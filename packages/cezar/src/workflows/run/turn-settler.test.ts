@@ -22,8 +22,8 @@ function fixture() {
     return Reflect.set(target, key, value);
   } });
   const session = { open: true, holdsHumanInput: call('holds', false), discardQueuedMessages: call('discard', undefined), end: call('end', undefined) } as unknown as AgentSession;
-  state.session = session;
-  state.currentStepId = 'step';
+  state.liveSession.attachSession(session);
+  state.liveSession.selectStep('step');
   const run = makeRunRecord({ id: 'run', status: RUN_STATUS.running, waits: [], autoResumeAttempts: 2 });
   const store = {
     getRun: () => run,

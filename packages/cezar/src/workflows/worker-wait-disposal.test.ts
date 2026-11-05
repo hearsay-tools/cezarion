@@ -21,13 +21,13 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         const w = await worker(p.id); const wait = register(p.id, [w.id]);
         await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
         await Promise.all(bookkeeping.splice(0));
-        const state = (manager as unknown as { active: Map<string, { session: { end(): void; sendMessage(content: unknown[]): boolean } }> }).active.get(p.id)!;
+        const state = (manager as unknown as { active: Map<string, { liveSession: { session: { end(): void; sendMessage(content: unknown[]): boolean }; };  }> }).active.get(p.id)!;
         await until(() => currentUsage(p.id) !== undefined);
         manager.dispose();
         const snapshot = JSON.stringify(store.getRun(p.id));
         await runInternals(manager).turnBookkeeper.recordTurnEnd(p.id, 'CEZ:TITLE=late disposed callback');
-        if (completion === 'error') state.session.sendMessage([{ type: 'text', text: 'mock:auth-error' }]);
-        else state.session.end();
+        if (completion === 'error') state.liveSession.session.sendMessage([{ type: 'text', text: 'mock:auth-error' }]);
+        else state.liveSession.session.end();
         await Promise.all(executions.splice(0));
         expect(store.getRun(p.id)?.status).toBe('waiting');
         expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id);
@@ -62,8 +62,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent(); const w = await worker(p.id); const wait = register(p.id, [w.id]);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     // Stop fixture processes only AFTER disposal; disposal itself must not mutate records.
-    const active = (manager as unknown as { active: Map<string, { session?: { interrupt(): void } }> }).active;
-    const sessions = [...active.values()].map(s => s.session);
+    const active = (manager as unknown as { active: Map<string, { liveSession: { session?: { interrupt(): void }; };  }> }).active;
+    const sessions = [...active.values()].map(s => s.liveSession.session);
     manager.dispose();
     expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id); expect(store.getRun(w.id)?.status).toBe('queued');
     for (const session of sessions) session?.interrupt();
