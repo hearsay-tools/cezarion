@@ -1,0 +1,136 @@
+# Live activity view: plan
+
+Spec: [2026-11-05-live-activity-view.md](2026-11-05-live-activity-view.md). Read it
+first. Decisions are cited as D1–D9.
+
+## Slices and order
+
+```
+S1 contract + read model + HTTP route
+ ├─ S2 tool activity tracker        ┐
+ ├─ S3 CI check progress            ├─ parallel after S1
+ ├─ S4 activity topic               ┘
+ └─ S5 nav + project view (static) ── S6 motion ── S7 global view ── S8 e2e + docs
+```
+
+S5 needs only S1's contract and route. S6 needs S4 for live frames; until S4 lands it
+can drive the view from the HTTP snapshot. One PR for each slice.
+
+### S1: contract, read model and HTTP route
+
+- `packages/contract/src/activity.ts`: the schemas in the spec's Data section, with
+  inferred types. Export from the contract index.
+- `packages/cezar/src/activity/read-model.ts`: `buildActivitySnapshot(store, deps,
+  { projectId | all })`. It applies D8, reads workers, top waits and open requests,
+  and asks two optional providers for tool activity and check progress
+  (`ToolActivitySource`, `CiProgressSource`). In S1 both providers return nothing.
+- `packages/cezar/src/activity/requests.ts`: open and recently closed requests from
+  the root ledgers, joining the peer sender and recipient ledgers.
+- Route `GET /api/v1/workspace/activity`, chained into the workspace family, with a
+  `queryZodValidator` for `project`. Contract parity and `typed-bodies` tests.
+- Tests:
+  - every row of the spec's request case table;
+  - D8: each root status in and out of the active set, a review root with a live
+    worker in it;
+  - the top wait matches `computeWaitingOn` for each wait kind;
+  - `rung` matches `deriveAttention` for each rung.
+
+### S2: tool activity tracker
+
+- `packages/cezar/src/activity/tool-activity.ts`: the tracker in the spec. It owns
+  its clock (injected) and its 30-bucket ring.
+- Feed it from `UiEventSink` for every run. Drop a run when it leaves the active set
+  (on the run change, not on a timer).
+- Wire it as the read model's `ToolActivitySource`.
+- Tests: start, complete, failed and declined tools; a second tool before the first
+  ends; ring shift across idle seconds and across more than 30 s; a run dropped on
+  settle; title clamp. One test for each runner's mapper fixture to prove its tool
+  items reach the tracker.
+
+### S3: CI check progress
+
+- `packages/cezar/src/ci-wait/progress.ts`: `CiProgressRegistry` (in memory, keyed by
+  wait id) and the bucket count.
+- `supervisor.ts`: record the first snapshot's buckets. In the 30 s probe, when the
+  registry reports demand for the wait's project, read the checks once and update.
+  The read's result never reaches `observe`.
+- Wire it as the read model's `CiProgressSource`. Demand comes from S4. Until S4
+  lands, demand is false and only the first snapshot is recorded.
+- Tests: every row of the spec's probe case table. Prove the "result only updates
+  progress" row red against a version that lets a failed read resolve the wait. Read
+  `.ai/skills/load-bearing-change/SKILL.md` first: this slice touches a working
+  watcher.
+
+### S4: activity topic
+
+- Register topic `activity` on the socket hub (`loopbackReadable` default false).
+  Subscription parameter: project id or `*`.
+- Publisher: subscribe on 0→1, stop on 1→0. Triggers: the store's run changes, the
+  tracker's changes, the progress registry's changes. Coalesce to at most one
+  snapshot every 500 ms, only on change. While any watched run is running, tick
+  once a second for the rate buckets.
+- Report demand per project to `CiProgressRegistry`.
+- Cockpit: `packages/web/src/api/activity.ts`: `useActivity(scope)` reads the HTTP
+  snapshot, then subscribes in local mode, or re-reads every 5 s in remote mode while
+  visible. It follows `docs/areas/realtime-events.md`: subscribe in the view, return
+  the unsubscribe, release on hide.
+- Tests: demand start and stop; coalescing; no frame without change; an untrusted
+  connection is refused; the hook's local and remote paths.
+
+### S5: navigation and the project view (static)
+
+- `nav-items.ts`: Activity after Tasks (lucide `Activity`), Git into More.
+  `sidebar-view-tabs.tsx` More list, mobile `TAB_BAR_PATHS` and `MORE_SHEET_PATHS`,
+  `more-sheet.tsx` rows.
+- `routes.tsx`: the project child route, the top-level `/activity` and the
+  `PAGE_TITLE_ROUTES` row.
+- `packages/web/src/routes/activity/`: the project view without motion: header,
+  chips, stable column layout (D9), cards, now box per the spec's state table,
+  workers, the rail, the legend, dense mode, the narrow layout, and access text.
+  Lines are drawn static.
+- **Reader sweep** for the Git move (read `.ai/skills/reader-sweep/SKILL.md`). Known
+  readers:
+  - `nav-items.test.ts` (label order);
+  - `app-shell.test.tsx` (primary row, link counts with and without a forge, More
+    items, Git lit on `/git`, drawer);
+  - `nav-selection.test.tsx` (Git pill, arrow-key order);
+  - `app-shell-container.test.tsx` (Git click and href);
+  - `command-palette.test.tsx` (Views counts and order);
+  - `mobile-tab-bar.test.tsx`;
+  - `e2e/smoke.e2e.ts` (`expectedNavLabels`, mobile bar), `e2e/project-sidebar.e2e.ts`,
+    `e2e/github-sidebar.e2e.ts` (`fit.tabs`), `e2e/selection-states.e2e.ts`;
+  - `README.md` view list and "the Git tab" mention. The README line about Inbox in
+    More views is already wrong; fix it in the same edit.
+- Tests: render each state-table row; D9 placement across snapshot changes; dense
+  mode at 13 cards; access text for both line directions.
+
+### S6: motion
+
+- The heartbeat, pulse, breath and sweep; marching lines with labels; comets; card
+  flash; worker enter, settle and fold; card enter and leave with FLIP; chip bumps;
+  the Just now feed. All from snapshot differences (spec, Live transport).
+- Reduced motion and hidden-tab behavior as in the spec.
+- Tests: the snapshot-difference function (every animation trigger is a pure
+  function of two snapshots); reduced motion turns every trigger into an immediate
+  change; the comet loop stops when no comet is in flight.
+
+### S7: global view
+
+- `/activity`: project panels, pills, arcs, the empty-project line, the scope switch.
+- Tests: grouping, rail order, arcs only inside a panel.
+
+### S8: e2e and docs
+
+- E2E: open the project view on a seeded store with a running task, a CI wait, a
+  worker question and a peer request. Assert the cards, the lines and the rail. Then
+  settle the peer request and assert that the line and the rail entry leave. One
+  global-view assertion.
+- Docs: `docs/areas/web-ui.md` (the view and its motion rules),
+  `docs/areas/realtime-events.md` (the `activity` topic), README view list.
+
+## Verification for every slice
+
+- Unit tests through Squeal or `npm test -- <files>`.
+- `npm run lint` before the first push of a `packages/**` change.
+- `npm run typecheck` for S1 and S4 (contract and api-client types).
+- The pre-PR review loop and the auto-merge skill, as AGENTS.md says.

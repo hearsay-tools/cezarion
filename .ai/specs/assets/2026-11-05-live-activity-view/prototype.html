@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cezar · Activity (live prototype)</title>
+<style>
+:root {
+  --surface-base: oklch(0.215 0.004 260);
+  --surface-raised: oklch(0.25 0.005 260);
+  --surface-muted: oklch(0.30 0.006 260);
+  --border-subtle: oklch(0.32 0.006 260);
+  --text-primary: oklch(0.90 0.004 260);
+  --text-secondary: oklch(0.73 0.008 260);
+  --text-muted: oklch(0.67 0.012 260);
+  --accent-text: oklch(0.80 0.095 182);
+  --action: oklch(0.843 0.151 88.3);
+  --status-running: oklch(0.709 0.159 293.5);
+  --info: oklch(0.778 0.115 254.6);
+  --success: oklch(0.799 0.119 158.7);
+  --danger: oklch(0.68 0.19 25);
+  --peer: oklch(0.80 0.13 150);
+  --family: oklch(0.783 0.129 299.3);
+  --sans: 'Inter', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--surface-base); color: var(--text-primary); font: 13px/1.45 var(--sans); }
+.frame { width: 1600px; margin: 0 auto; padding: 22px 28px 28px; }
+.mono { font-family: var(--mono); font-size: 12px; }
+
+.top { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+.crumb { font-size: 18px; font-weight: 600; }
+.crumb span { color: var(--text-muted); font-weight: 400; }
+.live { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--success); font-variant-numeric: tabular-nums; }
+.live i { width: 7px; height: 7px; border-radius: 50%; background: var(--success); animation: beat 1s ease-out infinite; }
+@keyframes beat { 0% { box-shadow: 0 0 0 0 oklch(0.8 0.12 158 / .6); } 100% { box-shadow: 0 0 0 7px oklch(0.8 0.12 158 / 0); } }
+.proto { font: 600 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text); border: 1px solid color-mix(in oklch, var(--accent-text) 40%, transparent); padding: 2px 8px; border-radius: 6px; }
+.seg { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden; margin-left: auto; }
+.seg button { all: unset; cursor: pointer; padding: 5px 12px; font-weight: 500; font-size: 12px; color: var(--text-secondary); }
+.seg button.on { background: var(--surface-muted); color: var(--text-primary); }
+.summary { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px; background: var(--surface-raised); border: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-secondary); transition: border-color .4s; }
+.chip strong { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; display: inline-block; }
+.chip strong.bump { animation: bump .5s ease-out; }
+@keyframes bump { 0% { transform: scale(1.5); color: var(--c, var(--accent-text)); } 100% { transform: scale(1); } }
+
+/* tones and shapes */
+.t-run { --c: var(--status-running); } .t-you { --c: var(--action); } .t-ci { --c: var(--info); }
+.t-peer { --c: var(--peer); } .t-fam { --c: var(--family); } .t-idle { --c: var(--text-muted); }
+.t-done { --c: var(--success); } .t-fail { --c: var(--danger); }
+.dot { flex: none; width: 10px; height: 10px; border-radius: 50%; display: inline-block; transition: background .4s, border-color .4s; }
+.dot.filled { background: var(--c); }
+.dot.ring { border: 2px solid var(--c); }
+.dot.pulse { animation: pulse 1.6s ease-out infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--c) 70%, transparent); } 100% { box-shadow: 0 0 0 8px color-mix(in oklch, var(--c) 0%, transparent); } }
+.dot.ring.breathe { animation: breathe 3s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: .45; } }
+.bot { flex: none; width: 14px; height: 14px; color: var(--c); }
+.bot.breathe { animation: breathe 3s ease-in-out infinite; }
+
+/* board */
+.board { display: grid; grid-template-columns: 1fr 300px; gap: 26px; align-items: start; }
+.graph { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 96px; align-items: start; min-height: 760px; }
+.col { display: grid; gap: 30px; align-content: start; }
+.board > *, .col, .task, .now { min-width: 0; }
+.frame { max-width: 100%; }
+svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 3; }
+.march { animation: march .9s linear infinite; }
+@keyframes march { to { stroke-dashoffset: -22; } }
+
+.task { position: relative; z-index: 1; background: var(--surface-raised); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 12px 14px; transition: border-color .5s, box-shadow .5s; }
+.task.s-you { border-color: color-mix(in oklch, var(--action) 60%, var(--border-subtle)); animation: glow 2.6s ease-in-out infinite; }
+@keyframes glow { 50% { box-shadow: 0 0 0 4px color-mix(in oklch, var(--action) 14%, transparent), 0 0 24px color-mix(in oklch, var(--action) 12%, transparent); } }
+.task.changed { animation: changed 1.3s ease-out; }
+@keyframes changed { 0% { box-shadow: 0 0 0 3px color-mix(in oklch, var(--c) 70%, transparent); border-color: var(--c); } 100% { box-shadow: 0 0 0 14px transparent; } }
+.task.enter { animation: cardIn .7s ease-out; }
+@keyframes cardIn { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+.task header { display: flex; align-items: center; gap: 8px; }
+.task h3 { margin: 0; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.spark { flex: none; width: 62px; height: 16px; display: block; }
+.task .meta { margin: 2px 0 9px 18px; font-size: 11.5px; color: var(--text-muted); }
+.now { display: grid; grid-template-columns: 16px 1fr; gap: 1px 8px; padding: 8px 10px; border-radius: 8px; background: var(--surface-muted); position: relative; overflow: hidden; }
+.now.scan::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--c) 10%, transparent), transparent); transform: translateX(-100%); animation: scan 2.4s ease-in-out infinite; }
+@keyframes scan { to { transform: translateX(100%); } }
+.now svg { width: 15px; height: 15px; color: var(--c); margin-top: 1px; }
+.now .verb { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--c); display: flex; gap: 8px; }
+.now .verb .age { margin-left: auto; color: var(--text-muted); font-weight: 500; letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
+.now .what, .now .detail { grid-column: 2; }
+.now .detail { font-size: 11.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.what.tick { animation: tick .45s ease-out; }
+@keyframes tick { from { opacity: 0; transform: translateY(4px); } }
+.checks { grid-column: 2; display: flex; gap: 3px; margin-top: 5px; }
+.checks i { flex: 1; height: 5px; border-radius: 2px; background: oklch(0.38 0.006 260); transition: background .5s; }
+.checks i.ok { background: var(--success); }
+.checks i.run { background: var(--info); animation: breathe 1.2s ease-in-out infinite; }
+.checks i.ok.just { animation: okFlash .8s ease-out; }
+@keyframes okFlash { 0% { transform: scaleY(2.4); background: white; } }
+.bar { grid-column: 2; height: 4px; border-radius: 2px; background: oklch(0.38 0.006 260); overflow: hidden; margin-top: 5px; }
+.bar i { display: block; height: 100%; background: var(--c); transition: width .8s; }
+.act { margin-top: 8px; display: flex; gap: 6px; }
+.btn { font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 6px; background: var(--action); color: oklch(0.17 0.018 264); }
+.btn.ghost { background: transparent; border: 1px solid var(--border-subtle); color: var(--text-secondary); font-weight: 500; }
+
+.workers { list-style: none; margin: 8px 0 0 4px; padding: 0 0 0 14px; border-left: 1px solid var(--border-subtle); }
+.workers li { position: relative; display: grid; grid-template-columns: 14px 1fr; gap: 0 8px; padding: 5px 0; align-items: start; max-height: 80px; transition: background .4s; border-radius: 8px; }
+.workers li::before { content: ''; position: absolute; left: -14px; top: 13px; width: 10px; border-top: 1px solid var(--border-subtle); }
+.workers li .dot, .workers li .bot { margin-top: 3px; }
+.wn { font-size: 12.5px; font-weight: 500; }
+.wr { font-size: 11px; color: var(--text-muted); font-weight: 400; margin-left: 6px; }
+.wl { grid-column: 2; font-size: 11.5px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.wl b { color: var(--c); font-weight: 600; }
+.workers li.ask { background: color-mix(in oklch, var(--family) 11%, transparent); margin: 0 -6px; padding: 5px 6px; }
+.workers li.ask::before { left: -8px; }
+.workers li.enter { animation: rowIn .7s ease-out; }
+@keyframes rowIn { from { max-height: 0; opacity: 0; padding: 0; } 60% { opacity: 1; background: color-mix(in oklch, var(--status-running) 22%, transparent); } }
+.workers li.flash { animation: rowDone 1.6s ease-out; }
+@keyframes rowDone { 0% { background: color-mix(in oklch, var(--success) 35%, transparent); } }
+.workers li.leave { animation: rowOut .7s ease-in forwards; }
+@keyframes rowOut { to { max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; } }
+.finished { margin: 6px 0 0 18px; font-size: 11px; color: var(--text-muted); }
+.finished b { color: var(--success); font-weight: 600; }
+
+/* edge labels */
+.elabel { position: absolute; z-index: 4; transform: translate(-50%, -50%); background: var(--surface-base); border: 1px solid var(--peer); border-radius: 8px; padding: 3px 8px; font-size: 10.5px; line-height: 1.3; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; transition: opacity .6s; }
+.elabel em { display: block; font-style: normal; color: var(--peer); font-weight: 600; }
+.elabel .due { display: block; height: 3px; border-radius: 2px; background: oklch(0.36 0.006 260); margin-top: 3px; overflow: hidden; }
+.elabel .due i { display: block; height: 100%; background: var(--peer); }
+.elabel.closing { border-color: var(--success); }
+.elabel.closing em { color: var(--success); }
+
+/* rail */
+.rail { display: grid; gap: 16px; }
+.panel { background: var(--surface-raised); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 13px 14px; }
+.panel h4 { margin: 0 0 8px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); display: flex; gap: 8px; }
+.panel h4 b { color: var(--text-primary); }
+.req { padding: 9px 0; border-top: 1px solid var(--border-subtle); }
+.req:first-of-type { border-top: 0; }
+.req.enter { animation: rowIn .7s ease-out; }
+.req.leave { animation: rowOut .7s ease-in forwards; overflow: hidden; }
+.req .who { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; }
+.req .who svg { width: 12px; height: 12px; color: var(--text-muted); flex: none; }
+.req .kind { margin-left: auto; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.req p { margin: 3px 0; color: var(--text-secondary); font-size: 12px; }
+.req .st { font-size: 11px; color: var(--text-muted); display: flex; gap: 6px; font-variant-numeric: tabular-nums; }
+.req .st .due { margin-left: auto; }
+.req .meter { height: 3px; border-radius: 2px; background: oklch(0.36 0.006 260); overflow: hidden; margin-top: 5px; }
+.req .meter i { display: block; height: 100%; background: var(--c); }
+.empty { color: var(--text-muted); font-size: 12px; padding: 6px 0; }
+.feed { list-style: none; margin: 0; padding: 0; }
+.feed li { display: grid; grid-template-columns: 10px 1fr auto; gap: 8px; align-items: baseline; padding: 4px 0; font-size: 12px; color: var(--text-secondary); transition: opacity 1s; }
+.feed li .dot { width: 7px; height: 7px; transform: translateY(-1px); }
+.feed li .ago { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.feed li.enter { animation: feedIn .6s ease-out; }
+@keyframes feedIn { from { opacity: 0; transform: translateX(10px); background: color-mix(in oklch, var(--accent-text) 15%, transparent); } }
+.legend { display: grid; gap: 6px; font-size: 11.5px; color: var(--text-secondary); }
+.legend div { display: flex; align-items: center; gap: 8px; }
+.legend svg.l { width: 34px; height: 10px; flex: none; }
+
+/* global */
+#global .proj { background: var(--surface-raised); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 14px 16px 16px; margin-bottom: 14px; }
+#global .proj > header { display: flex; align-items: center; gap: 12px; margin-bottom: 34px; }
+#global .proj h3 { margin: 0; font-size: 14px; font-weight: 600; }
+#global .proj .sec { color: var(--text-secondary); }
+#global .open { margin-left: auto; font-size: 12px; color: var(--accent-text); cursor: pointer; }
+.strip { position: relative; display: flex; gap: 14px; flex-wrap: wrap; }
+.pill { position: relative; z-index: 1; width: 200px; background: var(--surface-muted); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 8px 10px; transition: border-color .5s; }
+.pill.s-you { border-color: color-mix(in oklch, var(--action) 60%, var(--border-subtle)); animation: glow 2.6s ease-in-out infinite; }
+.pill.changed { animation: changed 1.3s ease-out; }
+.pill .pt { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; }
+.pill .pt span.n { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.pill .spark { width: 40px; height: 12px; }
+.pill .pl { margin: 3px 0 0 17px; font-size: 11.5px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.pill .pl b { color: var(--c); font-weight: 600; }
+.pill .pw { margin: 6px 0 0 17px; display: flex; gap: 4px; align-items: center; font-size: 11px; color: var(--text-muted); }
+.pill .pw .dot { width: 8px; height: 8px; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-bot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M9 13v2M15 13v2M2 14h2M20 14h2"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+    <symbol id="i-pr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4m2-2-2 2 2 2"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="i-msg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/></symbol>
+    <symbol id="i-slot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 22h14M5 2h14M17 22v-4.2a2 2 0 0 0-.6-1.4L12 12l-4.4 4.4a2 2 0 0 0-.6 1.4V22M7 2v4.2a2 2 0 0 0 .6 1.4L12 12l4.4-4.4a2 2 0 0 0 .6-1.4V2"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-term" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-6-6-6M12 19h8"/></symbol>
+    <marker id="a-peer" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="oklch(0.80 0.13 150)"/></marker>
+    <marker id="a-fam" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="oklch(0.783 0.129 299.3)"/></marker>
+    <filter id="glowf" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3"/></filter>
+  </defs>
+</svg>
+
+<section class="frame">
+  <div class="top">
+    <div class="crumb" id="crumb">Activity <span>· cezarion</span></div>
+    <div class="live"><i></i><span>Live · <span id="clock">15:32:00</span> Europe/Warsaw</span></div>
+    <span class="proto">Prototype · scripted 50 s loop</span>
+    <div class="seg"><button id="b-project" class="on">This project</button><button id="b-global">All projects</button></div>
+  </div>
+  <div class="summary" id="summary"></div>
+
+  <div id="project" class="board">
+    <div class="graph" id="graph">
+      <svg class="edges" id="edges"></svg>
+      <div class="col" id="c1"></div>
+      <div class="col" id="c2"></div>
+      <div class="col" id="c3"></div>
+    </div>
+    <aside class="rail">
+      <div class="panel"><h4>Open requests <b id="reqn">0</b></h4><div id="reqs"></div></div>
+      <div class="panel"><h4>Just now</h4><ul class="feed" id="feed"></ul></div>
+      <div class="panel legend">
+        <div><span class="dot filled pulse t-run"></span>Pulsing: working now</div>
+        <div><span class="dot ring t-ci"></span>Ring: waiting for something outside</div>
+        <div><svg class="bot t-run"><use href="#i-bot"/></svg>Robot: waiting for its own workers</div>
+        <div><svg class="l" viewBox="0 0 62 16"><path d="M0 14h62" stroke="oklch(0.4 0.01 260)"/><rect x="2" y="8" width="3" height="6" fill="oklch(0.709 0.159 293.5)"/><rect x="8" y="4" width="3" height="10" fill="oklch(0.709 0.159 293.5)"/><rect x="14" y="10" width="3" height="4" fill="oklch(0.709 0.159 293.5)"/></svg>Heartbeat: tool calls, last 30 s</div>
+        <div><svg class="l"><path d="M2 5h30" stroke="oklch(0.80 0.13 150)" stroke-width="2" stroke-dasharray="6 5"/></svg>Open request, task to task</div>
+        <div><svg class="l"><path d="M2 5h30" stroke="oklch(0.783 0.129 299.3)" stroke-width="2" stroke-dasharray="6 5"/></svg>Open question, worker to parent</div>
+        <div><svg class="l"><circle cx="17" cy="5" r="4" fill="white"/></svg>Comet: a message is travelling</div>
+      </div>
+    </aside>
+  </div>
+
+  <div id="global" class="hidden">
+    <div class="proj"><header><h3>cezarion</h3><span class="sec" id="g-cz-sub"></span><span class="open" data-go="project">Open project activity →</span></header>
+      <div class="strip" id="s-cz"><svg class="edges" id="g-edges"></svg></div></div>
+    <div class="proj"><header><h3>squeal</h3><span class="sec">2 active tasks · 2 workers</span><span class="open">Open project activity →</span></header>
+      <div class="strip" id="s-sq"></div></div>
+    <div class="proj"><header><h3>mega-course</h3><span class="sec">1 active task</span><span class="open">Open project activity →</span></header>
+      <div class="strip" id="s-mg"></div></div>
+    <div class="empty">2 more projects have no active work: notes, hearsay-site</div>
+  </div>
+</section>
+
+<script>
+const LOOP = 50;
+const $ = (s) => document.querySelector(s);
+const NS = 'http://www.w3.org/2000/svg';
+const pad = (n) => String(n).padStart(2, '0');
+const mmss = (s) => { s = Math.max(0, Math.floor(s)); return s >= 3600 ? `${Math.floor(s / 3600)} h ${pad(Math.floor(s / 60) % 60)} min` : `${Math.floor(s / 60)}:${pad(s % 60)}`; };
+let rnd = 7; const rand = () => (rnd = (rnd * 16807) % 2147483647) / 2147483647;
+
+const TONE = { run: 't-run', you: 't-you', ci: 't-ci', peer: 't-peer', workers: 't-run', timer: 't-idle', queued: 't-idle', cmd: 't-ci', fam: 't-fam', done: 't-done' };
+const ICON = { run: 'i-edit', you: 'i-user', ci: 'i-pr', peer: 'i-msg', workers: 'i-bot', timer: 'i-clock', queued: 'i-slot', cmd: 'i-term' };
+function shape(state, cls = '') {
+  if (state === 'workers') return `<svg class="bot breathe ${TONE[state]} ${cls}"><use href="#i-bot"/></svg>`;
+  const filled = state === 'run' || state === 'you' || state === 'done';
+  return `<span class="dot ${filled ? 'filled' : 'ring breathe'} ${state === 'run' ? 'pulse' : ''} ${TONE[state]} ${cls}"></span>`;
+}
+
+let S, T, sim = 0, t0 = performance.now(), fired = 0, later = [];
+
+function init() {
+  rnd = 7; sim = 0; fired = 0; later = [];
+  S = { edges: [], comets: [], feed: [], since: {} };
+  T = {
+    t1: { col: 1, title: 'Implementing worker spawn fast path', meta: 'claude · opus-5.5 · step implement · 42 min', state: 'run', age: 2520,
+      tools: ['Edit workers/spawn.ts', 'Read workers/lease.ts', 'Bash npm test -- spawn', 'Edit workers/spawn.ts', 'Grep "leaseFile"', 'Read core/worktree.ts'],
+      workers: [
+        { id: 'w11', name: 'Review branch against main', runner: 'codex · gpt-6.1-sol', state: 'run', tools: ['Read workflows/run.ts', 'Read workers/spawn.ts', 'git diff main...HEAD', 'Read core/lease.test.ts'] },
+        { id: 'w12', name: 'Refresh parser fixtures', runner: 'claude · sonnet', state: 'run', tools: ['Bash npm run fixtures', 'Edit parser.fixture.json', 'Bash npm test -- parser'] },
+      ], finished: 0 },
+    t2: { col: 1, title: 'Coordinating friction digest', meta: 'claude · opus-5.5 · step coordinate · 1 h 10 min', state: 'workers', age: 640,
+      now: { what: 'Any of 3 · 1 settled', detail: 'Deadline 15:50', bar: 33 },
+      workers: [
+        { id: 'w21', name: 'Dedupe inbox findings', runner: 'claude · sonnet', state: 'run', tools: ['gh issue list --label friction', 'Read friction-inbox.json', 'gh issue view 2715'] },
+        { id: 'w22', name: 'Draft top-5 HTML report', runner: 'codex · gpt-6.1', state: 'fam', line: '“Keep 5 cards or show 7?”', age: 130 },
+      ], finished: 1 },
+    t4: { col: 2, title: 'Porting upstream SSE changes', meta: 'codex · gpt-6.1-sol · step implement · 25 min', state: 'peer', age: 250,
+      now: { what: 'From Implementing worker spawn…', detail: 'Reply due 15:42' },
+      tools: ['Read api/sse-reader.ts', 'Edit api/sse-reader.ts', 'Bash npm test -- sse', 'Read server/events.ts'], workers: [], finished: 0 },
+    t3: { col: 2, title: 'Fixing flaky e2e shard 3', meta: 'claude · opus-5.5 · step pr-checks · 55 min', state: 'ci', age: 410,
+      now: { what: 'PR 2724 checks', detail: '', checks: 6 },
+      tools: ['gh pr checks 2724', 'Read e2e/shard-3.log', 'Edit e2e/github-sidebar.e2e.ts'],
+      workers: [{ id: 'w31', name: 'Repro shard 3 under load', runner: 'claude · sonnet', state: 'cmd', line: 'npm run test:e2e', age: 420 }], finished: 0 },
+    t5: { col: 3, title: 'Designing activity view', meta: 'claude · opus-5.5 · step plan · 18 min', state: 'you', age: 60,
+      now: { what: '“Accept the live activity prototype?”', detail: '3 questions' }, workers: [], finished: 0 },
+    t6: { col: 3, title: 'Nightly dependency audit', meta: 'pi · scheduled · 3 h 02 min', state: 'timer', age: 1500,
+      now: { what: 'Re-check npm advisories', detail: '', wake: 1680 }, workers: [], finished: 0 },
+    t7: { col: 3, title: 'Update waits docs', meta: 'quick-task · queued 3 min ago', state: 'queued', age: 180,
+      now: { what: 'Waiting for a free slot · 1st in line', detail: '' },
+      tools: ['Read docs/areas/workflows.md', 'Edit docs/areas/workflows.md', 'Read packages/contract/src/waits.ts'], workers: [], finished: 0 },
+  };
+  for (const [id, t] of Object.entries(T)) { t.id = id; t.since = -t.age; t.spark = Array.from({ length: 30 }, () => t.state === 'run' ? 2 + Math.floor(rand() * 8) : 0); t.ti = 0;
+    for (const w of t.workers) { w.since = -(w.age ?? 200); w.ti = 0; } }
+  S.edges = [
+    { id: 'e1', kind: 'peer', from: 't4', to: 't1', q: 'Does spawn.ts still own the lease file, or did it move to the worker store?', since: -250, due: 600, short: 'lease owner?' },
+    { id: 'f1', kind: 'fam', from: 'w22', to: 't2', task: 't2', q: 'Keep 5 cards or show 7? Two findings tie on score.', since: -130, due: 600 },
+  ];
+  pushFeed('t-run', 'Refresh parser fixtures started', -40);
+  pushFeed('t-fam', 'Draft top-5 report asked its parent', -130);
+  pushFeed('t-peer', 'Porting SSE asked Implementing spawn', -250);
+  for (const c of ['c1', 'c2', 'c3']) $('#' + c).innerHTML = '';
+  $('#edges').innerHTML = ''; document.querySelectorAll('#graph .elabel').forEach(e => e.remove());
+  $('#reqs').innerHTML = '';
+  for (const t of Object.values(T)) { const el = document.createElement('article'); el.className = 'task'; el.id = t.id; $('#c' + t.col).appendChild(el); renderTask(t); }
+  renderRail(); renderSummary(true); buildGlobal();
+}
+
+/* ---------- task rendering ---------- */
+function nowBox(t) {
+  const st = t.state, n = t.now || {};
+  const verb = { run: 'Doing', you: 'Needs you', ci: 'Waiting for CI', peer: 'Waiting for reply', workers: 'Waiting for workers', timer: 'Waiting for timer', queued: 'Queued' }[st];
+  let body = '';
+  if (st === 'run') body = `<span class="what mono">${t.tools[t.ti % t.tools.length]}</span><span class="detail">${n.detail || 'Turn running'}</span>`;
+  else if (st === 'ci') { const c = n.checks; body = `<span class="what">${n.what} · <b class="ck">${c}</b> of 9 passed</span><span class="checks">${Array.from({ length: 9 }, (_, i) => `<i class="${i < c ? 'ok' : i < c + 3 ? 'run' : ''}"></i>`).join('')}</span>`; }
+  else if (st === 'workers') body = `<span class="what">${n.what}</span><span class="bar"><i style="width:${n.bar}%"></i></span><span class="detail">${n.detail}</span>`;
+  else if (st === 'timer') body = `<span class="what">${n.what}</span><span class="detail">Wakes 16:00 · in <span data-count="${n.wake}">…</span></span>`;
+  else body = `<span class="what">${n.what}</span>${n.detail ? `<span class="detail">${n.detail}</span>` : ''}`;
+  return `<div class="now ${TONE[st]} ${st === 'run' ? 'scan' : ''}"><svg><use href="#${ICON[st]}"/></svg><span class="verb">${verb}<span class="age" data-since="${t.since}"></span></span>${body}</div>`;
+}
+function workerRow(w) {
+  const cls = [TONE[w.state], w.state === 'fam' ? 'ask' : '', w.enter ? 'enter' : '', w.flash ? 'flash' : '', w.leave ? 'leave' : ''].join(' ');
+  let line;
+  if (w.state === 'run') line = `<b>Doing</b> · <span class="mono wt">${w.tools[w.ti % w.tools.length]}</span>`;
+  else if (w.state === 'fam') line = `<b>Asks parent</b> ${w.line} · <span data-since="${w.since}"></span>`;
+  else if (w.state === 'cmd') line = `<b>Waiting for command</b> · <span class="mono">${w.line}</span> · <span data-since="${w.since}"></span>`;
+  else if (w.state === 'done') line = `<b>Done</b> · ${w.line || 'ready to collect'}`;
+  return `<li class="${cls}" id="${w.id}">${shape(w.state)}<span class="wn">${w.name}<span class="wr">${w.runner}</span></span><span class="wl">${line}</span></li>`;
+}
+function renderTask(t, changed) {
+  const el = document.getElementById(t.id);
+  el.className = `task s-${t.state} ${TONE[t.state]}`;
+  if (changed) { void el.offsetWidth; el.classList.add('changed'); }
+  el.innerHTML = `<header>${shape(t.state)}<h3>${t.title}</h3><svg class="spark" viewBox="0 0 62 16"></svg></header>
+    <div class="meta">${t.meta}</div>${nowBox(t)}
+    ${t.state === 'you' ? '<div class="act"><span class="btn">Answer</span><span class="btn ghost">Open task</span></div>' : ''}
+    ${t.workers.length ? `<ul class="workers">${t.workers.map(workerRow).join('')}</ul>` : ''}
+    ${t.finished ? `<div class="finished"><b>✓ ${t.finished}</b> worker${t.finished > 1 ? 's' : ''} finished</div>` : ''}`;
+  for (const w of t.workers) { w.enter = w.flash = false; }
+  drawSpark(t);
+}
+function drawSpark(t) {
+  const el = document.querySelector(`#${t.id} .spark`); if (!el) return;
+  const c = getComputedStyle(document.getElementById(t.id)).getPropertyValue('--c') || 'gray';
+  el.innerHTML = `<path d="M0 15.5h62" stroke="oklch(0.38 0.006 260)"/>` + t.spark.map((v, i) => v ? `<rect x="${i * 2.07}" y="${15 - v * 1.4}" width="1.4" height="${v * 1.4}" fill="var(--status-running)" opacity="${0.35 + i / 46}"/>` : '').join('');
+}
+function patchLive() {
+  const now = sim;
+  document.querySelectorAll('[data-since]').forEach(e => { e.textContent = mmss(now - +e.dataset.since); });
+  document.querySelectorAll('[data-count]').forEach(e => { e.textContent = mmss(+e.dataset.count - now); });
+  const d = new Date(Date.UTC(2026, 10, 5, 14, 32, 0) + now * 1000);
+  $('#clock').textContent = d.toLocaleTimeString('en-GB', { timeZone: 'Europe/Warsaw' });
+  document.querySelectorAll('.elabel[data-edge]').forEach(l => { const e = S.edges.find(x => x.id === l.dataset.edge); if (!e) return; l.querySelector('.a').textContent = mmss(now - e.since); l.querySelector('.due i').style.width = Math.min(100, (now - e.since) / e.due * 100) + '%'; });
+  document.querySelectorAll('.req[data-edge]').forEach(r => { const e = S.edges.find(x => x.id === r.dataset.edge); if (!e) return; r.querySelector('.a').textContent = mmss(now - e.since); r.querySelector('.d').textContent = mmss(e.due - (now - e.since)); r.querySelector('.meter i').style.width = Math.min(100, (now - e.since) / e.due * 100) + '%'; });
+  document.querySelectorAll('#feed li').forEach(li => { const a = now - +li.dataset.at; li.querySelector('.ago').textContent = a < 5 ? 'now' : a < 60 ? `${Math.floor(a)} s` : `${Math.floor(a / 60)} min`; });
+}
+
+/* ---------- tool heartbeat ---------- */
+function heartbeat() {
+  for (const t of Object.values(T)) {
+    t.spark.shift(); t.spark.push(t.state === 'run' ? (rand() < .25 ? 0 : 2 + Math.floor(rand() * 8)) : 0);
+    drawSpark(t);
+    if (t.state === 'run' && rand() < .42) { t.ti++; const w = document.querySelector(`#${t.id} .now .what`); if (w) { w.textContent = t.tools[t.ti % t.tools.length]; w.classList.remove('tick'); void w.offsetWidth; w.classList.add('tick'); } }
+    for (const w of t.workers) if (w.state === 'run' && rand() < .3) { w.ti++; const el = document.querySelector(`#${w.id} .wt`); if (el) { el.textContent = w.tools[w.ti % w.tools.length]; el.classList.remove('tick'); void el.offsetWidth; el.classList.add('tick', 'what'); } }
+  }
+  gHeartbeat();
+}
+
+/* ---------- edges ---------- */
+const rel = (el, host) => { const a = el.getBoundingClientRect(), b = host.getBoundingClientRect(); return { x: a.left - b.left, y: a.top - b.top, w: a.width, h: a.height }; };
+function geom(e) {
+  const host = $('#graph');
+  if (e.kind === 'fam') {
+    const wEl = document.getElementById(e.from), card = document.getElementById(e.task); if (!wEl || !card) return null;
+    const W = rel(wEl, host), C = rel(card, host);
+    const wx = W.x + 6, wy = W.y + 13, hx = C.x + 19, hy = C.y + 19, gx = C.x - 26;
+    return { d: `M${wx} ${wy} C ${gx} ${wy}, ${gx} ${hy}, ${hx - 6} ${hy}`, lx: gx + 8, ly: (wy + hy) / 2, fam: true };
+  }
+  const A = rel(document.getElementById(e.from), host), B = rel(document.getElementById(e.to), host);
+  const ay = A.y + (e.ay ?? 34), by = B.y + (e.by ?? 34);
+  if (Math.abs(A.x - B.x) < 40) { const x = A.x + A.w, k = 70; return { d: `M${x} ${ay} C ${x + k} ${ay}, ${x + k} ${by}, ${x + 2} ${by}`, lx: x + k * 0.75, ly: (ay + by) / 2 }; }
+  const right = B.x > A.x; const ax = right ? A.x + A.w : A.x, bx = right ? B.x : B.x + B.w, k = Math.max(40, Math.abs(bx - ax) * .5) * (right ? 1 : -1);
+  return { d: `M${ax} ${ay} C ${ax + k} ${ay}, ${bx - k} ${by}, ${bx - (right ? 2 : -2)} ${by}`, lx: (ax + bx) / 2, ly: (ay + by) / 2 };
+}
+function drawEdges() {
+  const svg = $('#edges'), host = $('#graph');
+  for (const e of S.edges) {
+    const g = geom(e); if (!g) continue;
+    let p = svg.querySelector(`[data-edge="${e.id}"]`);
+    if (!p) {
+      p = document.createElementNS(NS, 'path'); p.dataset.edge = e.id; p.setAttribute('fill', 'none');
+      const col = e.kind === 'fam' ? 'oklch(0.783 0.129 299.3)' : 'oklch(0.80 0.13 150)';
+      p.setAttribute('stroke', col); p.setAttribute('stroke-width', e.kind === 'fam' ? 1.8 : 2.2); p.setAttribute('stroke-dasharray', '6 5'); p.setAttribute('class', 'march');
+      p.setAttribute('marker-end', `url(#${e.kind === 'fam' ? 'a-fam' : 'a-peer'})`); p.style.transition = 'opacity .8s, stroke .4s'; svg.appendChild(p);
+      if (e.born) { p.style.opacity = 0; requestAnimationFrame(() => (p.style.opacity = 1)); }
+      if (e.kind === 'peer') {
+        const l = document.createElement('div'); l.className = 'elabel'; l.dataset.edge = e.id;
+        l.innerHTML = `<em>Request · <span class="a"></span></em>${e.short}<span class="due"><i></i></span>`; host.appendChild(l);
+      }
+    }
+    p.setAttribute('d', g.d);
+    if (e.closing) { p.setAttribute('stroke', 'oklch(0.799 0.119 158.7)'); p.removeAttribute('stroke-dasharray'); p.style.opacity = e.fade ? 0 : 1; }
+    const l = host.querySelector(`.elabel[data-edge="${e.id}"]`);
+    if (l) { l.style.left = g.lx + 'px'; l.style.top = g.ly + 'px'; if (e.closing) { l.classList.add('closing'); l.querySelector('em').firstChild.textContent = 'Replied · '; } if (e.fade) l.style.opacity = 0; }
+  }
+  // comets
+  svg.querySelectorAll('.comet').forEach(c => c.remove());
+  S.comets = S.comets.filter(c => sim < c.at + c.dur);
+  for (const c of S.comets) {
+    const p = svg.querySelector(`[data-edge="${c.edge}"]`); if (!p || sim < c.at) continue;
+    const L = p.getTotalLength(); let f = (sim - c.at) / c.dur; f = f < .5 ? 2 * f * f : 1 - (-2 * f + 2) ** 2 / 2;
+    for (let k = 0; k < 6; k++) {
+      const ff = Math.max(0, f - k * 0.03); const pt = p.getPointAtLength((c.reverse ? 1 - ff : ff) * L);
+      const dot = document.createElementNS(NS, 'circle'); dot.setAttribute('class', 'comet'); dot.setAttribute('cx', pt.x); dot.setAttribute('cy', pt.y);
+      dot.setAttribute('r', k === 0 ? 5 : 4 - k * .5); dot.setAttribute('fill', k === 0 ? 'white' : c.color); dot.setAttribute('opacity', 1 - k * .15);
+      if (k === 0) dot.setAttribute('filter', ''); svg.appendChild(dot);
+      if (k === 0) { const h = dot.cloneNode(); h.setAttribute('r', 10); h.setAttribute('fill', c.color); h.setAttribute('opacity', .5); h.setAttribute('filter', 'url(#glowf)'); svg.insertBefore(h, dot); }
+    }
+  }
+}
+function removeEdge(id) {
+  S.edges = S.edges.filter(e => e.id !== id);
+  document.querySelectorAll(`[data-edge="${id}"]`).forEach(n => { if (n.classList.contains('req')) { n.classList.add('leave'); setTimeout(() => n.remove(), 700); } else n.remove(); });
+  renderSummary();
+}
+
+/* ---------- rail ---------- */
+const NAME = (id) => { for (const t of Object.values(T)) { if (t.id === id) return t.title; const w = t.workers.find(w => w.id === id); if (w) return w.name; } return id; };
+function renderRail() {
+  const box = $('#reqs');
+  const open = S.edges.filter(e => !e.closing);
+  $('#reqn').textContent = open.length;
+  for (const e of open) {
+    if (box.querySelector(`[data-edge="${e.id}"]`)) continue;
+    const d = document.createElement('div'); d.className = `req ${e.kind === 'fam' ? 't-fam' : 't-peer'} ${e.born ? 'enter' : ''}`; d.dataset.edge = e.id;
+    d.innerHTML = `<div class="who">${short(NAME(e.from))} <svg><use href="#i-arrow"/></svg> ${short(NAME(e.to))}<span class="kind" style="color:var(--c)">${e.kind === 'fam' ? 'Question' : 'Request'}</span></div>
+      <p>“${e.q}”</p><div class="st"><span>${e.kind === 'fam' ? 'Worker → parent' : 'Peer'} · open <span class="a"></span></span><span class="due">reply due in <span class="d"></span></span></div><div class="meter"><i></i></div>`;
+    box.appendChild(d);
+  }
+  if (!open.length && !box.querySelector('.empty')) box.insertAdjacentHTML('beforeend', '<div class="empty">No task waits for a reply.</div>');
+  if (open.length) box.querySelector('.empty')?.remove();
+}
+const short = (s) => s.length > 22 ? s.slice(0, 21) + '…' : s;
+function pushFeed(tone, text, at = sim) {
+  S.feed.unshift({ tone, text, at }); S.feed = S.feed.slice(0, 6);
+  const ul = $('#feed'); if (!ul) return;
+  ul.innerHTML = S.feed.map((f, i) => `<li class="${i === 0 && at === sim ? 'enter' : ''}" data-at="${f.at}"><span class="dot filled ${f.tone}"></span><span>${f.text}</span><span class="ago"></span></li>`).join('');
+}
+
+/* ---------- summary ---------- */
+let lastSum = {};
+function renderSummary(first) {
+  const ts = Object.values(T), ws = ts.flatMap(t => t.workers);
+  const G = !$('#global').classList.contains('hidden') ? 1 : 0;
+  const v = { you: G + ts.filter(t => t.state === 'you').length, run: G + ts.filter(t => t.state === 'run').length, wait: G + ts.filter(t => !['run', 'you', 'queued'].includes(t.state)).length, q: ts.filter(t => t.state === 'queued').length, w: 2 * G + ws.filter(w => w.state !== 'done').length, r: S.edges.filter(e => !e.closing).length };
+  const chips = [['you', 't-you', '<span class="dot filled"></span>', 'needs you'], ['run', 't-run', '<span class="dot filled pulse"></span>', 'working'], ['wait', 't-ci', '<span class="dot ring"></span>', 'waiting'], ['q', 't-idle', '<span class="dot ring"></span>', 'queued'], ['w', '', '<svg class="bot" style="color:var(--text-secondary)"><use href="#i-bot"/></svg>', 'active workers'], ['r', 't-peer', '<svg class="bot"><use href="#i-msg"/></svg>', 'open requests']];
+  $('#summary').innerHTML = chips.map(([k, tone, ic, label]) => `<span class="chip ${tone}">${ic}<strong class="${!first && lastSum[k] !== v[k] ? 'bump' : ''}">${v[k]}</strong> ${label}</span>`).join('');
+  lastSum = v;
+}
+
+/* ---------- state helpers ---------- */
+function setState(id, state, now, tone) {
+  const t = T[id]; t.state = state; if (now) t.now = now; t.since = sim; renderTask(t, true); renderSummary(); gRender(id, true);
+}
+function worker(tid, wid) { return T[tid].workers.find(w => w.id === wid); }
+function finishWorker(tid, wid, line) {
+  const w = worker(tid, wid); w.state = 'done'; w.line = line; w.flash = true; renderTask(T[tid]); renderSummary(); gRender(tid);
+  at(sim + 3.2, () => { w.leave = true; renderTask(T[tid]); });
+  at(sim + 3.9, () => { T[tid].workers = T[tid].workers.filter(x => x !== w); T[tid].finished++; renderTask(T[tid]); gRender(tid); });
+}
+function at(time, fn) { later.push({ time, fn }); }
+function send(id, kind, from, to, q, shortQ, extra = {}) {
+  const e = { id, kind, from, to, q, short: shortQ, since: sim, due: 600, born: true, ...extra }; S.edges.push(e);
+  drawEdges(); S.comets.push({ edge: id, at: sim, dur: 1.1, color: kind === 'fam' ? 'oklch(0.783 0.129 299.3)' : 'oklch(0.80 0.13 150)' });
+  renderRail(); renderSummary(); gRender();
+}
+function reply(id) {
+  const e = S.edges.find(x => x.id === id); if (!e) return;
+  S.comets.push({ edge: id, at: sim, dur: 1.1, reverse: true, color: 'oklch(0.799 0.119 158.7)' });
+  at(sim + 1.0, () => { e.closing = true; const r = document.querySelector(`.req[data-edge="${id}"]`); if (r) { r.classList.add('leave'); setTimeout(() => r.remove(), 700); } renderRail(); renderSummary(); gRender(); });
+  at(sim + 2.0, () => { e.fade = true; });
+  at(sim + 2.9, () => removeEdge(id));
+}
+
+/* ---------- the script ---------- */
+const SCRIPT = [
+  [3.5, () => { T.t3.now.checks = 7; renderTask(T.t3); document.querySelectorAll('#t3 .checks i.ok')[6]?.classList.add('just'); pushFeed('t-done', 'PR 2724: check “lint” passed'); }],
+  [6.5, () => { reply('e1'); pushFeed('t-done', 'Implementing spawn replied to Porting SSE'); }],
+  [8.0, () => setState('t4', 'run', { detail: 'Reading the reply from Implementing spawn' })],
+  [11.0, () => { T.t2.tools = ['Read report-draft.html', 'Read friction-digest.md', 'cez message reply']; T.t2.ti = 0; setState('t2', 'run', { detail: 'Answering a question from Draft top-5 report' }); pushFeed('t-run', 'Coordinating digest woke up: a worker asked'); }],
+  [13.0, () => reply('f1')],
+  [14.1, () => { const w = worker('t2', 'w22'); w.state = 'run'; w.tools = ['Edit report.html', 'Bash render screenshot', 'Read report.html']; renderTask(T.t2); }],
+  [15.0, () => { setState('t2', 'workers', { what: 'Any of 3 · 1 settled', detail: 'Deadline 15:50', bar: 33 }); pushFeed('t-run', 'Coordinating digest went back to waiting'); }],
+  [17.5, () => { finishWorker('t1', 'w11', '2 findings · sent to parent'); pushFeed('t-done', 'Review branch against main finished'); }],
+  [20.0, () => { T.t3.now.checks = 8; renderTask(T.t3); document.querySelectorAll('#t3 .checks i.ok')[7]?.classList.add('just'); pushFeed('t-done', 'PR 2724: check “test (3/4)” passed'); }],
+  [23.0, () => { send('e2', 'peer', 't4', 't3', 'Does your shard 3 fix touch the SSE reader? I am changing its reconnect path.', 'touch SSE reader?', { ay: 70, by: 30 }); setState('t4', 'peer', { what: 'From Fixing flaky e2e shard 3', detail: 'Reply due 15:52' }); pushFeed('t-peer', 'Porting SSE asked Fixing flaky shard 3'); }],
+  [26.5, () => { finishWorker('t3', 'w31', 'reproduced 3 of 20 runs'); pushFeed('t-done', 'Repro shard 3 under load finished'); }],
+  [29.0, () => { setState('t7', 'run', { detail: 'Started: a slot became free' }); T.t7.meta = 'quick-task · claude · sonnet · step implement'; renderTask(T.t7, true); pushFeed('t-run', 'Update waits docs started'); }],
+  [32.0, () => { finishWorker('t2', 'w21', '4 duplicates closed'); T.t2.now = { what: 'Any of 3 · 2 settled', detail: 'Deadline 15:50', bar: 66 }; renderTask(T.t2); pushFeed('t-done', 'Dedupe inbox findings finished'); }],
+  [35.0, () => { T.t3.now.checks = 9; renderTask(T.t3); document.querySelectorAll('#t3 .checks i.ok')[8]?.classList.add('just'); }],
+  [36.0, () => { setState('t3', 'run', { detail: 'All 9 checks passed · reading the question' }); pushFeed('t-done', 'PR 2724: all checks passed'); }],
+  [39.0, () => { reply('e2'); pushFeed('t-done', 'Fixing flaky shard 3 replied to Porting SSE'); }],
+  [40.6, () => setState('t4', 'run', { detail: 'Reconnect path is safe to change' })],
+  [42.5, () => { T.t1.workers.push({ id: 'w13', name: 'Benchmark spawn on 4 GB worktree', runner: 'codex · gpt-6.1-sol', state: 'run', enter: true, since: sim, ti: 0, tools: ['Bash hyperfine "cez worker spawn"', 'Read bench.json'] }); renderTask(T.t1); renderSummary(); gRender('t1'); pushFeed('t-run', 'Implementing spawn started a worker'); }],
+];
+
+/* ---------- global view ---------- */
+const OTHERS = {
+  'sq': [{ id: 'q1', title: 'Fixing node:test leaked child', state: 'you', line: '<b>Needs you</b> · allow kill of pgid?' }, { id: 'q2', title: 'Adding verdict JSON schema', state: 'run', line: '<b>Doing</b> · npm test -- schema', w: ['run', 'cmd'] }],
+  'mg': [{ id: 'm1', title: 'Publishing lesson 14 assets', state: 'ci', line: '<b>Merge</b> · PR 88 in queue' }],
+};
+function pillLine(t) {
+  const n = t.now || {};
+  switch (t.state) {
+    case 'run': return `<b>Doing</b> · <span class="mono">${t.tools[t.ti % t.tools.length]}</span>`;
+    case 'you': return '<b>Needs you</b> · accept prototype?';
+    case 'ci': return `<b>CI</b> · PR 2724 · ${n.checks} of 9`;
+    case 'peer': return `<b>Reply</b> · ${n.what.replace('From ', 'from ')}`;
+    case 'workers': return `<b>Workers</b> · ${n.what.replace('Any of 3 · ', '')}`;
+    case 'timer': return '<b>Timer</b> · wakes 16:00';
+    case 'queued': return '<b>Queued</b> · 1st in line';
+  }
+}
+function pillHTML(t) {
+  const ws = (t.workers || []).filter(w => !w.leave);
+  return `<div class="pt">${shape(t.state)}<span class="n">${t.title}</span>${t.spark ? '<svg class="spark" viewBox="0 0 62 16"></svg>' : ''}</div><div class="pl">${t.line || pillLine(t)}</div>
+    ${ws.length ? `<div class="pw">${ws.map(w => shape(w.state)).join('')} ${ws.length} worker${ws.length > 1 ? 's' : ''}${ws.some(w => w.state === 'fam') ? ' · 1 asks parent' : ''}</div>` : (t.w ? `<div class="pw">${t.w.map(s => shape(s)).join('')} ${t.w.length} workers</div>` : '')}`;
+}
+function buildGlobal() {
+  const strip = $('#s-cz'); strip.querySelectorAll('.pill, .elabel').forEach(p => p.remove()); $('#g-edges').innerHTML = '';
+  const order = ['t5', 't1', 't4', 't2', 't3', 't6', 't7'];
+  for (const id of order) { const d = document.createElement('div'); d.id = 'g-' + id; strip.appendChild(d); gRender(id); }
+  for (const [k, list] of Object.entries(OTHERS)) $('#s-' + k).innerHTML = list.map(t => `<div class="pill s-${t.state} ${TONE[t.state]}" id="g-${t.id}">${pillHTML(t)}</div>`).join('');
+  $('#g-cz-sub').textContent = '7 active tasks';
+}
+function gRender(id, changed) {
+  if (!id) { return; }
+  const el = document.getElementById('g-' + id); if (!el) return; const t = T[id];
+  el.className = `pill s-${t.state} ${TONE[t.state]}`; if (changed) { void el.offsetWidth; el.classList.add('changed'); }
+  el.innerHTML = pillHTML(t);
+  const sp = el.querySelector('.spark'); if (sp) sp.innerHTML = t.spark.map((v, i) => v ? `<rect x="${i * 2.07}" y="${15 - v * 1.4}" width="1.4" height="${v * 1.4}" fill="var(--status-running)"/>` : '').join('');
+}
+function gHeartbeat() { if ($('#global').classList.contains('hidden')) return; for (const id of Object.keys(T)) { const t = T[id]; const el = document.querySelector(`#g-${id} .spark`); if (el) el.innerHTML = t.spark.map((v, i) => v ? `<rect x="${i * 2.07}" y="${15 - v * 1.4}" width="1.4" height="${v * 1.4}" fill="var(--status-running)"/>` : '').join(''); const pl = document.querySelector(`#g-${id} .pl`); if (pl && t.state === 'run') pl.innerHTML = pillLine(t); } }
+function gEdges() {
+  if ($('#global').classList.contains('hidden')) return;
+  const host = $('#s-cz'), svg = $('#g-edges');
+  for (const e of S.edges.filter(e => e.kind === 'peer')) {
+    const A = document.getElementById('g-' + e.from), B = document.getElementById('g-' + e.to); if (!A || !B) continue;
+    const a = rel(A, host), b = rel(B, host), ax = a.x + a.w / 2, bx = b.x + b.w / 2, y = a.y - 1, lift = 24 + Math.abs(bx - ax) * .05;
+    const d = `M${ax} ${y} C ${ax} ${y - lift}, ${bx} ${y - lift}, ${bx} ${y - 3}`;
+    let p = svg.querySelector(`[data-edge="${e.id}"]`);
+    if (!p) { p = document.createElementNS(NS, 'path'); p.dataset.edge = e.id; p.setAttribute('fill', 'none'); p.setAttribute('stroke', 'oklch(0.80 0.13 150)'); p.setAttribute('stroke-width', 2); p.setAttribute('stroke-dasharray', '6 5'); p.setAttribute('class', 'march'); p.setAttribute('marker-end', 'url(#a-peer)'); p.style.transition = 'opacity .8s';
+      svg.appendChild(p); const l = document.createElement('div'); l.className = 'elabel'; l.dataset.gedge = e.id; l.innerHTML = `<em style="display:inline">Request</em> · <span class="ga"></span>`; host.appendChild(l); }
+    p.setAttribute('d', d);
+    if (e.closing) { p.setAttribute('stroke', 'oklch(0.799 0.119 158.7)'); p.removeAttribute('stroke-dasharray'); }
+    if (e.fade) p.style.opacity = 0;
+    const l = host.querySelector(`[data-gedge="${e.id}"]`); l.style.left = (ax + bx) / 2 + 'px'; l.style.top = (y - lift * .75) + 'px'; l.querySelector('.ga').textContent = mmss(sim - e.since); if (e.fade) l.style.opacity = 0;
+  }
+  svg.querySelectorAll('path').forEach(p => { if (!S.edges.some(e => e.id === p.dataset.edge)) { p.remove(); host.querySelector(`[data-gedge="${p.dataset.edge}"]`)?.remove(); } });
+}
+
+/* ---------- scope switch ---------- */
+function scope(which) {
+  const g = which === 'global';
+  $('#project').classList.toggle('hidden', g); $('#global').classList.toggle('hidden', !g);
+  $('#b-project').classList.toggle('on', !g); $('#b-global').classList.toggle('on', g);
+  $('#crumb').innerHTML = g ? 'Activity <span>· all projects</span>' : 'Activity <span>· cezarion</span>';
+  if (g) for (const id of Object.keys(T)) gRender(id);
+  renderSummary(true);
+}
+$('#b-project').onclick = () => scope('project'); $('#b-global').onclick = () => scope('global');
+document.querySelector('[data-go="project"]').onclick = () => scope('project');
+
+/* ---------- loop ---------- */
+let lastBeat = 0, lastLive = -1;
+function frame(ts) {
+  sim = (ts - t0) / 1000;
+  if (sim >= LOOP) { t0 = ts; init(); sim = 0; lastBeat = 0; }
+  while (fired < SCRIPT.length && SCRIPT[fired][0] <= sim) SCRIPT[fired++][1]();
+  later.sort((a, b) => a.time - b.time); while (later.length && later[0].time <= sim) later.shift().fn();
+  if (sim - lastBeat >= 1) { lastBeat = Math.floor(sim); heartbeat(); }
+  if (Math.floor(sim * 4) !== lastLive) { lastLive = Math.floor(sim * 4); patchLive(); }
+  drawEdges(); gEdges();
+  requestAnimationFrame(frame);
+}
+document.fonts.ready.then(() => { init(); if (location.hash === '#global') scope('global'); t0 = performance.now(); requestAnimationFrame(frame); });
+</script>
+</body>
+</html>
