@@ -11,7 +11,19 @@ const hoistedResource = vi.hoisted(() => ({ supervisor: {} }));
 export const externalResource = hoistedResource;
 vi.mock('../ci-wait/resources.ts', async importOriginal => {
   const original = await importOriginal<typeof import('../ci-wait/resources.ts')>();
-  return { acquireCiResources: (workspace: object) => ({ ...original.acquireCiResources(workspace), supervisor: hoistedResource.supervisor }) };
+  return { acquireCiResources: (workspace: object) => {
+    const resources = original.acquireCiResources(workspace);
+    const current = () => 'resolve' in hoistedResource.supervisor
+      ? hoistedResource.supervisor as Pick<typeof resources.supervisor, 'resolve' | 'watch' | 'close'>
+      : resources.supervisor;
+    return { ...resources, supervisor: {
+      resolve: (...args: Parameters<typeof resources.supervisor.resolve>) =>
+        current().resolve(...args),
+      watch: (...args: Parameters<typeof resources.supervisor.watch>) =>
+        current().watch(...args),
+      close: () => current().close(),
+    } };
+  } };
 });
 
 export const pr = 'https://github.com/acme/repo/pull/12';
@@ -31,7 +43,6 @@ export function github() {
   const result = new Promise<CiWaitResult>(resolve => { settle = resolve; });
   const supervisor = { resolve: async () => identity, watch: async (_wait: CiWait, abort: AbortSignal) => { signal = abort; return result; }, close() {} };
   externalResource.supervisor = supervisor;
-  Object.assign(manager, { ciSupervisor: supervisor });
   return { settle, aborted: () => signal?.aborted };
 }
 
@@ -64,7 +75,6 @@ export function githubByPr(lookupGate?: Promise<void>) {
     close() {},
   };
   externalResource.supervisor = supervisor;
-  Object.assign(manager, { ciSupervisor: supervisor });
   return { settle: (n: number) => watches.get(n)!.settle(success()), aborted: (n: number) => watches.get(n)?.signal.aborted };
 }
 
