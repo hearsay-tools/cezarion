@@ -1,6 +1,6 @@
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,7 +10,7 @@ import type { ContentBlock } from '../core/agent-runner.ts';
 import { shellQuote } from '../core/shell-env.ts';
 import { handoffInstructions } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
-import { setRunStatus, crashStore } from '../runs/run-store.testkit.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import type { WorkflowDef } from './types.ts';
 import {
   RunManager,
@@ -57,6 +57,39 @@ function slotHolder(root: string, name: string): { workflow: WorkflowDef; releas
     },
     release,
   };
+}
+
+/** Exit in the same turn that accepts Continue, before its first asynchronous launch. */
+async function crashAfterContinue(repoRoot: string, dataDir: string, runId: string, mode: string, images: PastedContent[]): Promise<void> {
+  const script = `
+    import { RunStore } from ${JSON.stringify(new URL('../runs/store.ts', import.meta.url).href)};
+    import { RunManager } from ${JSON.stringify(new URL('./run.ts', import.meta.url).href)};
+    import { WorkspaceSemaphore } from ${JSON.stringify(new URL('../workspace/semaphore.ts', import.meta.url).href)};
+    const input = JSON.parse(process.argv[1]);
+    const store = RunStore.open(input.dataDir, { keepLive: true });
+    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 } });
+    const manager = new RunManager(store, input.repoRoot, { semaphore });
+    const accepted = manager.continueRun(input.runId, { text: 'read my durable continuation brief', images: input.images }, input.mode === 'capacity');
+    if (!accepted.ok) throw new Error(accepted.error);
+    process.exit(0);
+  `;
+  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script,
+    JSON.stringify({ repoRoot, dataDir, runId, mode, images })], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let stderr = '';
+  child.stderr.on('data', chunk => { stderr += String(chunk); });
+  const exit = new Promise<number | null>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', resolve);
+  });
+  let guard: ReturnType<typeof setTimeout> | undefined;
+  // bound: only the owned child's exit event completes this wait; 15 s detects a stuck startup.
+  const hung = new Promise<never>((_resolve, reject) => { guard = setTimeout(() => reject(new Error('Continue crash child did not exit')), 15_000); });
+  try {
+    expect(await Promise.race([exit, hung]), stderr).toBe(0);
+  } finally {
+    clearTimeout(guard);
+    if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exit; }
+  }
 }
 
 // 1x1 transparent PNG — small enough to inline, real enough to round-trip through base64.
@@ -597,20 +630,16 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
       store.addStep(record.id, { id: 'work', name: 'work', kind: STEP_KIND.agent });
       store.updateStep(record.id, 'work', { status: STEP_STATUS.done, sessionId: 'previous-session', backend: 'claude' });
       setRunStatus(store, record.id, RUN_STATUS.done, { worktree: false });
-      const launcher = createFixtureManager(store, repoRoot);
-      // Stop at the boundary before any asynchronous startup or runner invocation.
-      (launcher as unknown as { runContinuation(): Promise<void> }).runContinuation = async () => {};
-      expect(launcher.continueRun(record.id, {
-        text: 'read my durable continuation brief',
-        images: [
-          { type: 'file', mediaType: 'application/pdf', data: TINY_PDF_B64 },
-          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 } },
-        ],
-      }, mode === 'capacity').ok).toBe(true);
-      // No shutdown/flush: accepting Continue must itself make the message durable. A crash.
-      launcher.dispose(); crashStore(store);
+      await drainFixtureManagers(repoRoot);
+      store.close();
+      await crashAfterContinue(repoRoot, dataDir, record.id, mode, [
+        { type: 'file', mediaType: 'application/pdf', data: TINY_PDF_B64 },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 } },
+      ]);
       store = RunStore.open(dataDir, { keepLive: true });
       expect(store.getRun(record.id)?.status).toBe(mode === 'capacity' ? 'queued' : 'running');
+      expect(store.getRun(record.id)?.continuationMessage?.text).toBe('read my durable continuation brief');
+      expect(readStdinLines().some(line => line.userText.includes('read my durable continuation brief'))).toBe(false);
       const directory = join(dataDir, 'runs', `${record.id}-images`);
       expect(readdirSync(directory).sort()).toEqual(['pasted-1.pdf', 'pasted-2.png']);
       if (mode === 'missing') rmSync(join(directory, 'pasted-1.pdf'));

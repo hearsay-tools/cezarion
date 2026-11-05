@@ -1,3 +1,4 @@
+import { workerExecutionStopped } from '../workflows/run/run-guards.ts';
 import { workerCollectedResultSchema } from '@open-mercato/cezar-contract/delegation';
 import { setRunStatus, runPersistence } from '../runs/run-store.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
@@ -333,13 +334,12 @@ describe('verified destruction retains results through explicit history deletion
       expect(reopened.deleteRun(f.parent.id)).toBe(true);
     } finally { manager.dispose(); reopened.flush(); }
   });
-  it.each(['execute', 'runContinuation'] as const)('refuses %s construction from a deleting parent without recreating its resources', async kind => {
+  it('refuses construction from a deleting parent without recreating its resources', () => {
     interruptedParentDeletion();
     const before = f.store.readEvents(f.parent.id);
-    const engine = f.manager as unknown as { execute(id: string, workflow: typeof QUICK_TASK_WORKFLOW, input: { task: string }): Promise<void>;
-      runContinuation(id: string, step: string, session: string | undefined, backend: 'claude', prompt: string): Promise<void> };
-    if (kind === 'execute') await engine.execute(f.parent.id, QUICK_TASK_WORKFLOW, { task: 'mock:cezar-done' });
-    else await engine.runContinuation(f.parent.id, 'task', 'mock-prior', 'claude', 'mock:cezar-done');
+    const stopped = vi.fn(() => false);
+    expect(workerExecutionStopped(f.store, f.parent.id, stopped)).toBe(true);
+    expect(stopped).not.toHaveBeenCalled();
     expect(f.store.readEvents(f.parent.id)).toEqual(before);
     expect(existsSync(join(f.root, '.ai/cezar/worktrees', f.parent.id))).toBe(false);
     expect(f.manager.isActive(f.parent.id)).toBe(false);

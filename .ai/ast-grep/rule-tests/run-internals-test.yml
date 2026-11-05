@@ -1,0 +1,10 @@
+id: run-internals
+valid:
+  - 'const runInternalsCount = 1;'
+  - 'otherInternals(manager);'
+  - 'import { helper } from "./other.testkit.ts"; helper(manager);'
+invalid:
+  - 'runInternals(manager);'
+  - 'runInternals();'
+  - 'import { runInternals as inspect } from "./run-internals.testkit.ts"; inspect(manager);'
+  - 'import { runInternals } from "../workflows/run-internals.testkit.ts";'

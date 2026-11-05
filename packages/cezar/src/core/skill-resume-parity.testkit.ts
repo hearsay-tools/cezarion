@@ -12,6 +12,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect } from 'vitest';
+import { observationClock } from './observation-clock.testkit.ts';
+import { IDLE_TIMEOUT_MS } from '../workflows/run/constants.ts';
 import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { createRunner } from './runner-factory.ts';
 import {
@@ -24,7 +26,7 @@ import {
 } from './harness-parity.testkit.ts';
 import { setRunStatus, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
-import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWork } from '../workflows/fixture-cleanup.testkit.ts';
 import { RunManager, skillSystemPrompt } from '../workflows/run.ts';
 import { plannedWorkflow, skillTaskSteps } from '../workflows/types.ts';
 
@@ -211,15 +213,37 @@ function skillInPrompt(prompt: string, repoRoot: string): boolean {
     && prompt.indexOf(skill) < prompt.indexOf(EXTRA_PROMPT);
 }
 
-async function idleClose(manager: RunManager, runId: string): Promise<void> {
-  await waitFor(() => {
-    const state = (manager as unknown as { active: Map<string, { boundary: { readonly idleTimer?: NodeJS.Timeout & { _onTimeout(): void } } }> }).active.get(runId);
-    return typeof state?.boundary.idleTimer?._onTimeout === 'function';
+const idleOwners = new WeakMap<RunManager, {
+  store: RunStore;
+  clock: ReturnType<typeof observationClock>;
+  timers: Map<string, number>;
+}>();
+
+function observeIdle(manager: RunManager, store: RunStore): () => void {
+  let published: string | undefined;
+  const timers = new Map<string, number>();
+  const onRun = (run: { id: string; status: string }) => { published = run.status === 'waiting' ? run.id : undefined; };
+  store.on('run', onRun);
+  const clock = observationClock(delay => {
+    if (delay !== IDLE_TIMEOUT_MS || !/\bat (?:[^ (\n]+\.)?armIdleTimer \(/.test(new Error().stack ?? '')) return false;
+    if (!published) throw new Error('idle timer armed before publishing a waiting run');
+    timers.set(published, clock.captured);
+    return true;
   });
-  const state = (manager as unknown as { active: Map<string, { boundary: { readonly idleTimer?: NodeJS.Timeout & { _onTimeout(): void } } }> }).active.get(runId);
-  const timer = state!.boundary.idleTimer!;
-  timer._onTimeout();
+  idleOwners.set(manager, { store, clock, timers });
+  return () => { store.off('run', onRun); clock.restore(); idleOwners.delete(manager); };
+}
+
+async function idleClose(manager: RunManager, runId: string): Promise<void> {
+  const owner = idleOwners.get(manager)!;
+  expect(owner.timers.has(runId), 'the parked run armed its shipped idle timer').toBe(true);
+  const message = `session closed after ${Math.round(IDLE_TIMEOUT_MS / 60_000)}m of inactivity`;
+  const closed = () => owner.store.readEvents(runId).filter(event => event.type === 'lifecycle' && event.message === message);
+  const before = closed().length;
+  await owner.clock.advance(IDLE_TIMEOUT_MS);
   await waitFor(() => !manager.isActive(runId));
+  await Promise.all([...fixtureWork(manager).pending.keys()]);
+  expect(closed()).toHaveLength(before + 1);
 }
 
 /** Idle-close leaves the run `waiting`, so a second wait-for-waiting is a race. */
@@ -277,6 +301,7 @@ async function withSkillResumeRun(
   delete process.env.CEZ_DRY_RUN;
   let store: RunStore | undefined;
   let manager: RunManager | undefined;
+  let releaseIdle: (() => void) | undefined;
   try {
     await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
     await execFileAsync('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
@@ -288,6 +313,7 @@ async function withSkillResumeRun(
     writeFileSync(join(repoRoot, '.ai/cezar/skills', SKILL_NAME, 'SKILL.md'), skillMarkdown());
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot);
+    releaseIdle = observeIdle(manager, store);
     const started = manager.startRun(plannedWorkflow(skillTaskSteps(SKILL_NAME)), {
       task: promptFor(backend, 'baseline'),
       runner: backend,
@@ -304,9 +330,11 @@ async function withSkillResumeRun(
       const checkpoint = readPersistedRuns(dataDir);
       await drainFixtureManagers(repoRoot);
       store!.close();
+      releaseIdle!();
       seedRuns(dataDir, checkpoint);
       store = RunStore.open(dataDir, { keepLive: true });
       manager = createFixtureManager(store, repoRoot);
+      releaseIdle = observeIdle(manager, store);
       await manager.recover();
     };
     await body({
@@ -323,6 +351,7 @@ async function withSkillResumeRun(
     });
   } finally {
     await drainFixtureManagers(repoRoot);
+    releaseIdle?.();
     store?.close();
     for (const [name, value] of saved) {
       if (value === undefined) delete process.env[name];

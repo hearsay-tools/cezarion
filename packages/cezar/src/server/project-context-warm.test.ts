@@ -200,9 +200,10 @@ describe('ProjectContexts.warmAll', () => {
     await vi.waitFor(() => expect(recover).toHaveBeenCalled(), { timeout: HANG_GUARD_MS });
     const manager = recover.mock.contexts[0] as RunManager;
 
+    const dispose = vi.spyOn(manager, 'dispose');
     contexts.disposeAll();
 
-    expect((manager as unknown as { disposed: boolean }).disposed).toBe(true);
+    expect(dispose).toHaveBeenCalledTimes(1);
     releaseRecover();
     await expect(building).rejects.toBeInstanceOf(ProjectContextsClosedError);
     recover.mockRestore();

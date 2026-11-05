@@ -1,0 +1,15 @@
+id: run-internals
+language: typescript
+severity: error
+message: >-
+  Use public methods, fixture-owned dependencies and durable records instead of runInternals
+  (hearsay-tools/cezarion#2522). RunManager private access is refused by ES #private members,
+  hearsay-tools/cezarion#2700.
+rule:
+  any:
+    - pattern: runInternals($$$)
+    - all:
+        - kind: import_statement
+        - has:
+            field: source
+            regex: '(^|/)run-internals\.testkit(\.ts)?["\x27]$'
