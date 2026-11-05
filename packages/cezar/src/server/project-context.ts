@@ -17,6 +17,7 @@ import { RunStore } from '../runs/store.ts';
 import { RunDatabase, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY } from '../runs/run-database.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from '../workflows/run.ts';
+import type { ToolActivityTracker } from '../activity/tool-activity.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { getRepoInfo } from './git.ts';
 import { ownedByAnotherCockpit, CockpitOwnership } from './cockpit-ownership.ts';
@@ -87,6 +88,8 @@ export interface ProjectContextDeps {
   preview?: PreviewHost | undefined;
   /** The cockpit's listening port, for the preview tool's `cezar_port` refusal. */
   cezarPort?: (() => number | undefined) | undefined;
+  /** The ONE tool activity tracker of the process: every project's manager feeds it. */
+  toolActivity?: ToolActivityTracker | undefined;
 }
 
 /** Data dirs this process has swept: the sweep cleans up after a crashed cezar, never this one. */
@@ -439,7 +442,7 @@ export class ProjectContexts {
     this.notifyStoreCreated(store);
     armPreview(store, dataDir, this.deps.preview);
     const manager: RunManager = new RunManager(store, project.root, {
-      semaphore: this.semaphore, preview: this.deps.preview, cezarPort: this.deps.cezarPort,
+      semaphore: this.semaphore, preview: this.deps.preview, cezarPort: this.deps.cezarPort, toolActivity: this.deps.toolActivity,
       sweepBranches: (keep) => void sweepMergedBranches({ root: project.root, store, manager }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
     });
     this.buildingManagers.set(projectId, manager);

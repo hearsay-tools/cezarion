@@ -20,6 +20,7 @@ import { loadConfig } from './config.ts';
 import { SWEEP_MIN_INTERVAL_MS, sweepMergedBranches } from './server/repo-branch-sweep.ts';
 import { previewToolEnabled } from './ci-wait/tools.ts';
 import { PreviewHost } from './preview/host.ts';
+import { ToolActivityTracker } from './activity/tool-activity.ts';
 import { armRepoHandle } from './runs/arm-repo-handle.ts';
 import { RunStore } from './runs/store.ts';
 import { RunStoreOpenError } from './runs/store-open-error.ts';
@@ -272,8 +273,11 @@ async function serveCommand(
   const cockpit = listenerAddress && typeof listenerAddress === 'object'
     ? { origin: cockpitOriginFor(bindHost, listenerAddress.port), projectId: bootProjectId ?? 'default' }
     : undefined;
+  // ONE tool activity tracker for the whole process (live activity view): run ids are unique
+  // across projects, and the activity route reads every project's runs from it.
+  const toolActivity = new ToolActivityTracker();
   const manager: RunManager = new RunManager(store, repoRoot, {
-    semaphore, preview: previewHost, cezarPort, cockpit,
+    semaphore, preview: previewHost, cezarPort, cockpit, toolActivity,
     sweepBranches: (keep) => void sweepMergedBranches({ root: repoRoot, store, manager }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
   });
   const delegation = await DelegationController.start();
@@ -329,6 +333,7 @@ async function serveCommand(
     taskWebhooks,
     previewHost,
     cezarPort,
+    toolActivity,
   }, port, listener);
   if (!server.listening) await once(server, 'listening');
   const address = server.address();

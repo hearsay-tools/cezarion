@@ -225,6 +225,30 @@ describe('snapshot persistence policy', () => {
       sink.sessionEnded('end_turn');
     }).not.toThrow();
   });
+
+  it('hands every event to the observer as it arrives, deltas included, and none after the session ends', () => {
+    const observed: UiEvent[] = [];
+    const persisted: Wire[] = [];
+    const sink = new UiEventSink({ persist: (e) => persisted.push(e as Wire), emitLive: () => undefined, observe: (e) => observed.push(e) });
+    const events: UiEvent[] = [
+      { type: 'item.started', item: toolItem() },
+      delta('tool_1', 'out', 'output'),
+      { type: 'item.updated', item: toolItem() },
+      { type: 'item.completed', item: toolItem({ status: TOOL_STATUS.completed }) },
+    ];
+    for (const event of events) sink.handle(event);
+    sink.sessionEnded('end_turn');
+    sink.handle({ type: 'item.started', item: toolItem({ id: 'tool_2' }) });
+    expect(observed).toEqual(events);
+    expect(persisted.map((e) => e.type)).toEqual(['item.started', 'item.completed', 'session.ended']);
+  });
+
+  it('an observer that throws never disturbs persistence', () => {
+    const persisted: Wire[] = [];
+    const sink = new UiEventSink({ persist: (e) => persisted.push(e as Wire), emitLive: () => undefined, observe: () => { throw new Error('tracker bug'); } });
+    expect(() => sink.handle({ type: 'item.started', item: toolItem() })).not.toThrow();
+    expect(persisted.map((e) => e.type)).toEqual(['item.started']);
+  });
 });
 
 describe('golden-fixture replay through a real RunStore', () => {

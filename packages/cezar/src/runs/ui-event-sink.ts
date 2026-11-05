@@ -28,6 +28,8 @@ export interface UiEventSinkOutput {
   persist(event: WireEvent): void;
   /** Fan out live only — never written to disk (coalesced deltas). */
   emitLive(event: WireEvent): void;
+  /** Every event the sink handles, before coalescing: the tool activity tracker's feed. */
+  observe?(event: UiEvent): void;
 }
 
 export class UiEventSink {
@@ -49,6 +51,7 @@ export class UiEventSink {
   /** Fold one runner-emitted v2 event into the persist/live outputs. */
   handle(event: UiEvent): void {
     if (this.ended) return;
+    this.observe(event);
     switch (event.type) {
       case 'item.delta':
         this.bufferDelta(event);
@@ -176,6 +179,14 @@ export class UiEventSink {
       this.out.persist(event as WireEvent);
     } catch {
       // best effort — v2 must never disturb the v1 stream
+    }
+  }
+
+  private observe(event: UiEvent): void {
+    try {
+      this.out.observe?.(event);
+    } catch {
+      // best effort — an observer must never disturb the stream
     }
   }
 

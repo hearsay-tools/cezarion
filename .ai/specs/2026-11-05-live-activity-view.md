@@ -382,16 +382,54 @@ An in-memory `ToolActivityTracker` keyed by run id, fed by the UI event sink
   example `packages/cezar/src/core/opencode-ui-mapper.ts`); that item counts once, with
   `startedAt` and `endedAt` both at its event time.
 - A later `item.updated` of the latest tool that is not terminal replaces its `title`
-  (mappers replace placeholder titles) and does not count again.
+  (mappers replace placeholder titles) and its `status` (pending to running), and does
+  not count again. A tool item stays known until its `item.completed`, so an
+  `item.updated` to a terminal status followed by the completion counts once and keeps
+  the first `endedAt`.
 - `item.completed`, or `item.updated` to a terminal status, of the latest tool: set
   `status` and `endedAt`, and take its `title` when the event carries one (the omp
   mapper sets the final title of some edits only at completion:
   `toolEnded()` in `packages/cezar/src/core/omp-ui-mapper.ts`).
+- A mapper can complete one item twice: opencode completes a task tool item at its
+  child session's idle and again when the task result arrives. Each entry remembers
+  the ids of its last 64 completed tool items. A later event of a remembered id never
+  counts and never changes the latest tool, except that it may replace the title of
+  the latest tool; its status and times stay as they ended.
 - Buckets: a ring of 30 one-second counters. A read shifts the ring to the read time.
-- A run that leaves the active set is dropped from the tracker. A restart starts the
-  tracker empty (D6).
+- A run that leaves the active set (a run change to a status that is not live) is
+  dropped from the tracker: its entry is replaced by an empty one marked stopped. A
+  deleted run's entry is removed. A restart starts the tracker empty (D6). A disposed
+  run manager drops the entries it made and feeds nothing more.
+- A run change into a live status clears an entry marked stopped, so a resumed run
+  never shows a tool from before it stopped; it shows a tool again from its next tool
+  event. A live run change of a run that never stopped keeps its entry.
+- An event that would create a new entry reads the run's current record from its
+  store once (the held record for a live run). When the run is not live, the entry is
+  created marked stopped. So a late event that arrives after the stop marker idled out
+  is still cleared by the next live transition, and a resumed run never shows it.
+- The read model shows `tool` and `rate` only for a run whose status is live
+  (`queued`, `running` or `waiting`: `isLiveStatus`). A `review`, `done`, `failed` or
+  `cancelled` run never shows tool activity, whatever the tracker holds. A session can
+  still emit a tool event after its run stopped (a worker cancelled before its session
+  shuts down), and that event never makes the run look busy.
+- The tracker prunes an entry that has had no tool event for 60 s and whose latest tool
+  has ended (or that has no latest tool). A tool that is still pending or running keeps
+  its entry however long it runs. The check runs on a read of that run and on every
+  event (a sweep of all entries, at most once a second); there is no timer. A stop
+  marker is pruned by the same rule, 60 s after the stop.
+- Known limit: a late tool start after a stop that never completes stays in memory,
+  hidden, until the run changes again, is deleted, or its manager is disposed.
+- The sink sees each event before the run store redacts it. The tracker redacts a
+  title with that run store's own redactor (the transcript's policy) and clamps it
+  after, so no part of a secret survives at the clamp boundary.
 - Every runner emits tool items (AGENT_PROTOCOL.md §6 matrix). Hook telemetry and
-  background subagents are not tool calls and do not count.
+  background subagents are not tool calls and do not count. An event whose item carries
+  `background: true` never counts and never becomes the latest tool. Claude marks the
+  spawn call background only after the call returns, so that call has counted once at
+  its start; when it is still the latest tool, the flag ends it (`completed`, `endedAt`
+  at the flag's event). Codex marks the item background from its first event, so it
+  never counts. Child items of a subagent (`parentItemId`) are tool calls of the run
+  and count.
 - The title is the one the task thread already shows, clamped to 160 characters. The
   tracker stores no tool input or output.
 

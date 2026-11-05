@@ -4,13 +4,21 @@ import type { ActivitySnapshot } from '@open-mercato/cezar-contract';
 import { activityQuerySchema } from '@open-mercato/cezar-contract/activity';
 import { ActivityDemand } from '../activity/demand.ts';
 import { buildActivitySnapshot, unreadableLogger, type ActivityDeps, type ActivityProjectSource } from '../activity/read-model.ts';
+import type { ToolActivityTracker } from '../activity/tool-activity.ts';
 import type { ProjectContext } from './project-context.ts';
 import { queryZodValidator } from './validators.ts';
 import type { WorkspaceProjects } from './workspace-projects.ts';
 
 type LoadedProject = Pick<ProjectContext, 'id' | 'root' | 'store' | 'manager'>;
 
-export interface ActivityRouteDeps {
+/** What the server process owns for the activity view (`ServerDeps` extends it). */
+export interface ActivityServerDeps {
+  /** The process's tool activity tracker: `serve` builds one and gives it to every run manager.
+   *  Absent (an app built without boot's wiring), no run reports a tool. */
+  toolActivity?: ToolActivityTracker | undefined;
+}
+
+export interface ActivityRouteDeps extends ActivityServerDeps {
   bootContext: LoadedProject;
   contexts: { peek(projectId: string): LoadedProject | undefined };
   workspaceProjects: Pick<WorkspaceProjects, 'listVisibleProjects' | 'resolveBootProject' | 'resolveLiveProject' | 'projectFailure'>;
@@ -27,8 +35,9 @@ export interface ActivityRouteDeps {
  * `loaded: false` with empty lists. A loaded project whose store cannot open carries the failure
  * its project routes answer in `unavailable`.
  */
-export function createActivityRoutes({ bootContext, contexts, workspaceProjects, demand = new ActivityDemand(), activity = {} }: ActivityRouteDeps) {
-  const deps: ActivityDeps = { ...activity, onUnreadable: unreadableLogger() };
+export function createActivityRoutes({ bootContext, contexts, workspaceProjects, demand = new ActivityDemand(), activity = {}, toolActivity }: ActivityRouteDeps) {
+  const tools = activity.tools ?? toolActivity;
+  const deps: ActivityDeps = { ...activity, ...(tools ? { tools } : {}), onUnreadable: unreadableLogger() };
   /** A store that cannot open never reads as empty (docs/areas/runs-store.md): it carries the failure. */
   const loadedSource = (project: LoadedProject, name: string): ActivityProjectSource => ({
     projectId: project.id,

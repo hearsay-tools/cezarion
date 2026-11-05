@@ -58,6 +58,7 @@ import {
 import { type PastedContent, type PersistedAttachment } from './pasted-content.ts';
 export { contentBlocksOf, highestImageSeq, mediaTypeFor, pastedAttachmentsNote, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
 import type { ContentBlock } from '../core/agent-runner.ts';
+import type { ToolActivityFeed, ToolActivityTracker } from '../activity/tool-activity.ts';
 import { type Skill } from '../skills.ts';
 import * as queuedRevival from './run/queued-revival.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
@@ -132,6 +133,9 @@ export class RunManager {
    *  by dispose() so a torn-down manager stops receiving sampler ticks. */
   private readonly offUsage: () => void;
 
+  /** This manager's feed into the process's tool activity tracker; dispose detaches it. */
+  private readonly toolActivity: ToolActivityFeed | undefined;
+
   /** The stalled-queue watchdog (see `rescueStalledQueue`). */
   private readonly queueWatchdog: ReturnType<typeof setInterval>;
   /** The missing-repository re-probe (see `RunLine.rediscoverRepo`). */
@@ -149,7 +153,7 @@ export class RunManager {
   constructor(
     private readonly store: RunStore,
     private readonly repoRoot: string,
-    options: { work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined } = {},
+    options: { work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined; toolActivity?: ToolActivityTracker | undefined } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
     this.preview = options.preview;
@@ -157,7 +161,8 @@ export class RunManager {
     /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
     const unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
-    this.context = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed, work: options.work ?? new TrackedWork(), sweepBranches: options.sweepBranches };
+    this.toolActivity = options.toolActivity?.attach(store);
+    this.context = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed, work: options.work ?? new TrackedWork(), sweepBranches: options.sweepBranches, toolActivity: this.toolActivity };
     const facade = this;
     this.modules = composeRunModules(this.context, {
       unreadInputGraceMs: () => unreadInputGraceMs,
@@ -257,6 +262,7 @@ export class RunManager {
     this.modules.workerExecutions.dispose();
     this.store.off('run', this.onDelegationRun);
     this.store.off('deleted', this.modules.wakeAdmission.onRunDeleted);
+    this.toolActivity?.detach();
     this.modules.familyReconciler.dispose();
     this.modules.inboxClaims.dispose();
     this.offUsage();

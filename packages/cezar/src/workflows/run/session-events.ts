@@ -260,6 +260,8 @@ export function makeUiSink(context: RunModuleContext, host: SessionHelperHost, r
   return new UiEventSink({
     persist: (event) => context.store.appendEvent(runId, { ...event, stepId }),
     emitLive: (event) => context.store.emitEphemeral(runId, { ...event, stepId }),
+    // The feed sees the event before the store redacts it: it redacts titles with the store's redactor.
+    ...(context.toolActivity ? { observe: (event: UiEvent) => context.toolActivity?.observe(runId, event) } : {}),
   });
 }
 

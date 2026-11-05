@@ -2,8 +2,9 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { activitySnapshotSchema } from '@open-mercato/cezar-contract/activity';
+import { activitySnapshotSchema, activityToolSchema } from '@open-mercato/cezar-contract/activity';
 import { ActivityDemand } from '../activity/demand.ts';
+import { ToolActivityTracker } from '../activity/tool-activity.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RunStore } from '../runs/store.ts';
@@ -14,6 +15,8 @@ import { apiRequest } from './loopback-request.testkit.ts';
 import { ProjectContexts } from './project-context.ts';
 import { createApp } from './server.ts';
 import type { WorkspaceProjects } from './workspace-projects.ts';
+
+const TOOL_STATUS = activityToolSchema.shape.status.enum;
 
 /** `GET /api/v1/workspace/activity`: the live activity view's snapshot over HTTP. */
 describe('workspace activity API', () => {
@@ -72,6 +75,19 @@ describe('workspace activity API', () => {
       const body = activitySnapshotSchema.parse(await res.json());
       expect(body.projects.map((project) => [project.projectId, project.loaded, project.tasks.map((task) => task.runId)])).toEqual([[boot.id, true, [run.id]]]);
     }
+  });
+
+  it('reads each run’s latest tool and rate from the process’s tool activity tracker', async () => {
+    await registerProject(repoRoot);
+    const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
+    const toolActivity = new ToolActivityTracker();
+    toolActivity.observe(run.id, { type: 'item.started', item: { kind: 'tool', id: 'a', name: 'Bash', toolKind: 'execute', title: 'Ran npm test', status: TOOL_STATUS.running } }, (text) => text);
+
+    const res = await apiRequest(createApp({ repoRoot, store, manager, version: '0.0.0-test', toolActivity }), '/api/v1/workspace/activity?project=default');
+
+    const task = activitySnapshotSchema.parse(await res.json()).projects[0]!.tasks[0]!;
+    expect(task.tool).toMatchObject({ title: 'Ran npm test', toolKind: 'execute', status: TOOL_STATUS.running });
+    expect(task.rate.reduce((sum, count) => sum + count, 0)).toBe(1);
   });
 
   it('refuses a malformed project id in the query, and answers 404 for an unknown one', async () => {

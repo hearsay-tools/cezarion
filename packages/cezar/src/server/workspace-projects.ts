@@ -9,7 +9,7 @@ import { CockpitAlreadyRunningError } from './cockpit-ownership.ts';
 import type { ServerDeps } from './server.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContext, type ProjectContextDeps } from './project-context.ts';
 
-type ContextServices = Pick<ServerDeps, 'contexts' | 'semaphore' | 'previewHost' | 'forgeFactory'> & {
+type ContextServices = Pick<ServerDeps, 'contexts' | 'semaphore' | 'previewHost' | 'forgeFactory' | 'toolActivity'> & {
   delegation?: Pick<NonNullable<ServerDeps['delegation']>, 'attachProject'> & {
     service: Pick<NonNullable<ServerDeps['delegation']>['service'], 'armDestroyRetries'>;
   };
@@ -29,6 +29,7 @@ export function createWorkspaceProjectContexts(
     ...options,
     semaphore: deps.semaphore,
     preview: deps.previewHost,
+    toolActivity: deps.toolActivity,
     prepareManager: (project) => {
       taskWebhooks.attach(project);
       options.addressManager?.(project);
