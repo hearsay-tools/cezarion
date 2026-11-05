@@ -1,3 +1,5 @@
+import { observationClock } from '../core/observation-clock.testkit.ts';
+import { noJitter, retryDelayMs, WAKE_RETRY_BACKOFF } from '../delegation/retry-backoff.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
@@ -121,7 +123,10 @@ export function registerCiFailureGroup(group: CiFailureGroup): void {
       }
       const failedStepId = store.getRun(run.id)!.currentStepId!;
       const failedGeneration = toolGenerationOf(run.id);
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const retryDelay = retryDelayMs(0, WAKE_RETRY_BACKOFF, noJitter);
+      // Keep native process drains on real time when the wake backoff advances.
+      const retryClock = observationClock(delay => delay === retryDelay &&
+        /\bat (?:[^ (\n]+\.)?backoff \(/.test(new Error().stack ?? ''));
       wire.release();
       await until(() => store.readEvents(run.id).some(event => event.type === 'error' && event.stepId === failedStepId));
       await until(() => !manager.isActive(run.id) || toolGenerationOf(run.id) !== failedGeneration);
@@ -136,9 +141,9 @@ export function registerCiFailureGroup(group: CiFailureGroup): void {
       expect(ciWaitOf(run.id)?.id).toBe(wait.id);
       expect(store.getRun(run.id)?.agentInputs?.find(input => input.id === wait.id)?.deliveredAt).toBeUndefined();
       if (mode === 'fresh') settle();
-      await vi.advanceTimersByTimeAsync(15_000);
+      await retryClock.advance(retryDelay);
       await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
-      vi.useRealTimers();
+      retryClock.restore();
       await until(() => store.getRun(run.id)?.status === 'waiting');
       expect(manager.finish(run.id)).toBe(true);
       await until(() => !manager.isActive(run.id));
