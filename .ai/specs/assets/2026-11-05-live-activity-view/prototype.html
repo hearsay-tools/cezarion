@@ -399,9 +399,11 @@ function drawEdges() {
     const l = host.querySelector(`.elabel[data-edge="${e.id}"]`);
     if (l) { l.style.left = g.lx + 'px'; l.style.top = g.ly + 'px'; if (e.closing) { l.classList.add('closing'); l.querySelector('em').firstChild.textContent = 'Replied · '; } if (e.fade) l.style.opacity = 0; }
   }
-  // comets
+  drawComets(svg);
+}
+/* comets: one helper for the project lines and the global arcs */
+function drawComets(svg) {
   svg.querySelectorAll('.comet').forEach(c => c.remove());
-  S.comets = S.comets.filter(c => sim < c.at + c.dur);
   for (const c of S.comets) {
     const p = svg.querySelector(`[data-edge="${c.edge}"]`); if (!p || sim < c.at) continue;
     const L = p.getTotalLength(); let f = (sim - c.at) / c.dur; f = f < .5 ? 2 * f * f : 1 - (-2 * f + 2) ** 2 / 2;
@@ -553,6 +555,7 @@ function gEdges() {
     const l = host.querySelector(`[data-gedge="${e.id}"]`); l.style.left = (ax + bx) / 2 + 'px'; l.style.top = (y - lift * .75) + 'px'; l.querySelector('.ga').textContent = mmss(sim - e.since); if (e.fade) l.style.opacity = 0;
   }
   svg.querySelectorAll('path').forEach(p => { if (!S.edges.some(e => e.id === p.dataset.edge)) { p.remove(); host.querySelector(`[data-gedge="${p.dataset.edge}"]`)?.remove(); } });
+  drawComets(svg);
 }
 
 /* ---------- scope switch ---------- */
@@ -576,6 +579,7 @@ function frame(ts) {
   later.sort((a, b) => a.time - b.time); while (later.length && later[0].time <= sim) later.shift().fn();
   if (sim - lastBeat >= 1) { lastBeat = Math.floor(sim); heartbeat(); }
   if (Math.floor(sim * 4) !== lastLive) { lastLive = Math.floor(sim * 4); patchLive(); }
+  S.comets = S.comets.filter(c => sim < c.at + c.dur);
   drawEdges(); gEdges();
   requestAnimationFrame(frame);
 }

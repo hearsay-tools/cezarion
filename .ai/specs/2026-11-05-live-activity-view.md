@@ -147,8 +147,10 @@ the project view. The summary chips count every project.
   lines become a small "→ <task>" link on the sender card.
 - **Dense mode**: with more than 12 cards, cards drop the detail line and fold workers
   into a row of dots with a count. The heartbeat and the line stay.
-- **Many lines**: a line is drawn only when both ends are on screen. A line to a card
-  off screen ends at the viewport edge with the card's name.
+- **Many lines**: a request between two cards that are both on screen is a full
+  line. A request whose other end is a card off screen is a short stub that ends at
+  the viewport edge with that card's name; the stub follows the same tones, marching
+  and comets. No line is drawn when neither end is on screen.
 - **Reduced motion** (`prefers-reduced-motion: reduce`): no pulse, breath, sweep,
   march, comet, slide or FLIP. Lines are static dashes; changes apply at once; the
   ages still tick.
