@@ -198,3 +198,23 @@ for (const change of ['head', 'api', 'pages']) {
     assert.equal(polls, 1);
   });
 }
+
+
+test('missing-check recovery also names unresolved threads', async () => {
+  const h = fixture(); h.s.checks = []; h.s.threads = [{ id: 'open', isResolved: false }];
+  const result = await wait(h);
+  assert.equal(result.reason, 'provider-missing-timeout');
+  assert.match(result.action, /Resolve every open review thread/);
+  assert.match(result.action, /@coderabbitai full review/);
+});
+
+test('clock crossing the missing deadline cannot fall through to the twenty-minute timeout', async () => {
+  const h = fixture(), start = h.now(); h.s.checks = []; let pulls = 0;
+  h.s.onRead = route => {
+    if (route.endsWith('/pulls/{pull_number}') && ++pulls === 4) h.s.clock = start + 180000 - 2;
+  };
+  const result = await wait(h, { now: () => h.s.clock++,
+    sleep: async ms => { h.s.clock = Math.max(h.s.clock + ms, start + 150000); } });
+  assert.equal(result.reason, 'provider-missing-timeout');
+  assert.match(result.action, /@coderabbitai full review/);
+});

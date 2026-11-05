@@ -20,11 +20,12 @@ async function waitForCodeRabbitAdmission({ now = Date.now, sleep = delay, log =
       log('CodeRabbit evidence changed during the read; checking fresh evidence.');
     }
     if (admission && !['missing', 'pending'].includes(admission.providerState)) return admission;
-    if (admission?.providerState === 'missing' && now() >= missingDeadline) {
+    const observedAt = now();
+    if (admission?.providerState === 'missing' && observedAt >= missingDeadline) {
       return { ...admission, reason: 'provider-missing-timeout',
-        action: 'No trusted current-head CodeRabbit check appeared within 3 minutes. Post @coderabbitai full review on the PR; after provider completion, let reconciliation retry the native gate. If needed, dispatch Reconcile CodeRabbit admission with pr_number. Fork PRs require a maintainer native gate rerun.' };
+        action: 'Resolve every open review thread. No trusted current-head CodeRabbit check appeared within 3 minutes. Post @coderabbitai full review on the PR; after provider completion, let reconciliation retry the native gate. If needed, dispatch Reconcile CodeRabbit admission with pr_number. Fork PRs require a maintainer native gate rerun.' };
     }
-    const remaining = (admission?.providerState === 'missing' ? missingDeadline : deadline) - now();
+    const remaining = (admission?.providerState === 'missing' ? missingDeadline : deadline) - observedAt;
     if (remaining <= 0) break;
     log('Waiting for the current CodeRabbit execution; heavy verification remains blocked.');
     await sleep(Math.min(POLL_MS, remaining));
