@@ -130,7 +130,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     expect(launches.mock.calls.length).toBe(0);
 
     const queued = b.manager.startRun({ name: 'next', source: 'built-in', steps: [{ id: 'check', command: 'true' }] }, { task: 'next project', worktree: false });
-    await semaphore.release();
+    await Promise.all([...fixtureWork(b.manager).pending].filter(([, label]) => label === 'pump').map(([promise]) => promise));
     expect(b.store.getRun(queued.id)?.status).toBe('queued');
     expect(semaphore.busy()).toBe(1);
 
@@ -308,7 +308,12 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     // Held in the queue for the Finish, with no live session or active slot left behind.
     expect(fixtureWork(p.manager).liveSessions.size).toBe(0);
     expect(p.semaphore.busy()).toBe(0);
-    expect(p.store.getRun(id)?.status).toBe('queued');
+    // Removing the hold must launch this same queued job without a new start/Continue.
+    const parked = runStatus(p.store, id, 'waiting');
+    p.store.commitDelegation([{ id, delegation: { role: 'root', permissions: [], receipts: [] } }]);
+    await p.semaphore.release();
+    await parked;
+    expect(launches).toHaveBeenCalledTimes(1);
   });
 
   // hearsay-tools/cezarion#1632: a run whose execution stops during setup (here an invalid

@@ -1,3 +1,4 @@
+import { unused } from './fixture-cleanup.testkit.ts';
 import { createActiveRun } from './active-run.ts';
 import { WorktreeAutosave } from './run/worktree-autosave.ts';
 import { TrackedWork } from './run/tracked-work.ts';
@@ -69,12 +70,8 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     dataDir = join(repoRoot, '.ai/cezar');
     store = RunStore.open(dataDir);
-    const unused = (): never => { throw new Error('unexpected autosave timer callback'); };
     manager = new WorktreeAutosave({ store, repoRoot, dataDir, work: new TrackedWork(),
-      semaphore: new WorkspaceSemaphore(), disposed: () => false }, {
-      holdForMaintenance: () => () => {}, reapTerminalScratch: () => {}, releaseSlot: () => {},
-      saveWorktree: unused, trackTurn: unused,
-    });
+      semaphore: new WorkspaceSemaphore(), disposed: () => false }, unused<ConstructorParameters<typeof WorktreeAutosave>[1]>('autosave host'));
     runId = store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] }).id;
     const wt = await createWorktree(repoRoot, runId, 'main');
     worktreePath = wt.path;
