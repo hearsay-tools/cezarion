@@ -5,6 +5,7 @@ import {
   WAIT_KIND,
   WAIT_PHASE,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { TrackedWork } from './run/tracked-work.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -91,6 +92,10 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
   });
 
   it('does not let the queue watchdog revive a family awaiting recovery facts', async () => {
+    manager.dispose();
+    const work = new TrackedWork();
+    manager = new RunManager(store, root, { work });
+    const tracked = vi.spyOn(work, 'track');
     setRunStatus(store, a.parentId, RUN_STATUS.queued);
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -102,6 +107,9 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     const recovery = manager.recover(a.parentId);
     try {
       await vi.advanceTimersByTimeAsync(QUEUE_WATCHDOG_MS);
+      const rescues = tracked.mock.calls.filter(([label]) => label === 'rescueStalledQueue');
+      expect(rescues).toHaveLength(1);
+      await rescues[0]![1];
       expect(store.readEvents(a.parentId)).toEqual(before);
       expect(store.getRun(a.parentId)?.status).toBe('queued');
     } finally {
@@ -148,7 +156,10 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     writeFileSync(join(dataDir, 'runs', `${a.workerId}.processes.json`), JSON.stringify({
       generation, controller: { pid: 2147483001, startToken: 'old-boot:100' }, processes: [],
     }));
-    store = RunStore.open(dataDir, { keepLive: true }); manager = new RunManager(store, root);
+    store = RunStore.open(dataDir, { keepLive: true });
+    const work = new TrackedWork();
+    manager = new RunManager(store, root, { work });
+    const tracked = vi.spyOn(work, 'track');
     let entered!: () => void; let release!: () => void;
     const ready = new Promise<void>(resolve => { entered = resolve; });
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -167,6 +178,9 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     const rejection = outcome === 'failure' ? expect(recovery).rejects.toThrow('selected facts failed') : undefined;
     await ready;
     manager.reconcileWorkerWaits(); await vi.advanceTimersByTimeAsync(QUEUE_WATCHDOG_MS);
+    const rescues = tracked.mock.calls.filter(([label]) => label === 'rescueStalledQueue');
+    expect(rescues).toHaveLength(1);
+    await rescues[0]![1];
     expect(settlement).not.toHaveBeenCalled();
     expect(store.readWorkerExecution(a.workerId)).toMatchObject({ phase: 'starting', generation });
     if (outcome === 'dispose') manager.dispose();
