@@ -156,6 +156,7 @@ describe('every mutating route carries a typed body into AppType', () => {
     Assert<HasTypedInput<'/api/v1/github/prs/:number/changes', '$get', 'param'>>,
     Assert<HasTypedInput<'/api/v1/repo/commit/:sha', '$get', 'query'>>,
     Assert<HasTypedInput<'/api/v1/automation-log', '$get', 'query'>>,
+    Assert<HasTypedInput<'/api/v1/workspace/activity', '$get', 'query'>>,
   ];
 
   it('is enforced by tsc, not at runtime', () => {

@@ -24,6 +24,9 @@ export const PROJECT_WEBHOOK_TOKEN_MAX_LENGTH = 1024;
  */
 export const PROJECT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 
+/** A project's registry id: a slug. It never contains a colon, so a topic name can carry it. */
+export const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
 /** Bounds for the project webhook list (hearsay-tools/cezarion#1576): the create and edit bodies,
  *  the registry schema and the settings form share them. */
 export const PROJECT_WEBHOOKS_MAX = 16;
