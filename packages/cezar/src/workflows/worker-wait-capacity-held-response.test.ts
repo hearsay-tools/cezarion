@@ -1,3 +1,4 @@
+import { captureSessions } from './runner-session-capture.testkit.ts';
 import { autoEndObservationClock } from '../core/observation-clock.testkit.ts';
 import { AUTO_END_DELAY_MS } from '../core/runner-runtime.ts';
 import { describe, expect, it } from 'vitest';
@@ -13,6 +14,7 @@ it.each(['agent', 'check'].flatMap(next => ['early', 'late'].map(timing => ({ ne
     // response while checking admission; after release, the next step still needs an explicit done.
     await withHeldResponse('claude', async (release, held) => {
       const clock = autoEndObservationClock();
+      const sessionOf = captureSessions();
       try {
         const run = manager.startRun({ name: 'multi-step wait', source: 'built-in', steps: [
           { id: 'first', prompt: 'mock:hold' },
@@ -20,32 +22,31 @@ it.each(['agent', 'check'].flatMap(next => ['early', 'late'].map(timing => ({ ne
         ] }, { task: 'parent', runner: 'claude' });
         store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
         // hearsay-tools/cezarion#1235: an agent worker wait parks through the wait list, not `workerWaiting`.
-        const engine = manager as unknown as { active: Map<string, { liveSession: { sessionEverOpened?: boolean; session?: { open: boolean }; };  }> };
-        await until(() => !!engine.active.get(run.id)?.liveSession.sessionEverOpened);
-        const first = engine.active.get(run.id)!.liveSession.session;
+        await until(() => sessionOf(run.id).open);
+        const first = sessionOf(run.id);
         const w = await worker(run.id, 'mock:slow');
         if (timing === 'late') await until(() => store.readEvents(run.id).some(event => event.type === 'turn-end'));
         register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
-        await until(() => parkedOnWorkers(run.id) && !!engine.active.get(w.id)?.liveSession.sessionEverOpened);
+        await until(() => parkedOnWorkers(run.id) && sessionOf(w.id).open);
         await until(() => store.readEvents(run.id).some(event => event.type === 'turn-end'));
         expect(clock.captured).toBe(0);
         await clock.advance(AUTO_END_DELAY_MS + 150);
         expect(clock.captured).toBe(0);
-        expect.soft(engine.active.get(run.id)?.liveSession.session).toBe(first);
+        expect.soft(sessionOf(run.id)).toBe(first);
         expect.soft(first?.open).toBe(true);
         expect.soft(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
         expect.soft(semaphore.busy()).toBe(1);
         manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
         await until(() => held() && !!store.getRun(run.id)?.agentInputs?.some(input => input.source === 'lifecycle' && input.deliveredAt));
         expect(parkedOnWorkers(run.id)).toBe(false); expect(semaphore.busy()).toBe(1);
-        expect(engine.active.get(run.id)?.liveSession.session).toBe(first);
+        expect(sessionOf(run.id)).toBe(first);
         expect(first?.open).toBe(true);
         expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
         const boundaries = store.readEvents(run.id).filter(event => event.type === 'turn-end').length;
         release();
         await until(() => store.getRun(run.id)?.status === 'waiting'
           && store.readEvents(run.id).filter(event => event.type === 'turn-end').length > boundaries);
-        expect(engine.active.get(run.id)?.liveSession.session).toBe(first);
+        expect(sessionOf(run.id)).toBe(first);
         expect(first?.open).toBe(true);
         expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
         // The wake turn signals nothing; the earlier step completes only on a done (hearsay-tools/cezarion#1620),
