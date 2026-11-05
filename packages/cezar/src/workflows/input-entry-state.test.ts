@@ -50,6 +50,7 @@ let sendAck: Promise<void>;
 let holdsInput: boolean;
 let closeWire: () => void;
 let emitAgentEvent: (event: AgentEvent) => void;
+let reportConsumed: (ids: readonly string[]) => void;
 beforeEach(() => {
   vi.mocked(createActiveRun).mockClear();
   openedGroups = [];
@@ -59,7 +60,7 @@ beforeEach(() => {
   runnerHook.runner = {
     backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', inputDelivery: policy,
     run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => {},
-    startSession(_spec, onEvent) {
+    startSession(_spec, onEvent, options) {
       const calls = vi.mocked(createActiveRun).mock.results;
       const last = calls.at(-1);
       if (!last || last.type !== 'return') throw new Error('runner opened without the ActiveRun factory');
@@ -82,6 +83,7 @@ beforeEach(() => {
       const close = () => { open = false; result.resolve({ text: '', toolCalls: [], tokensUsed: 0 }); };
       closeWire = close;
       emitAgentEvent = event => onEvent?.(event);
+      reportConsumed = ids => options?.onAgentInputConsumed?.(ids);
       queueMicrotask(() => { onEvent?.({ type: 'session', sessionId: 'input-entry-session' }); opened.resolve(); });
       return { get open() { return open; }, result: result.promise, sendMessage: () => true,
         sendAgentMessage: () => sendAck, discardQueuedMessages: () => {}, holdsHumanInput: () => holdsInput,
@@ -172,11 +174,12 @@ it('keeps accepted unread input delivered until the closing session flight settl
   const flight = group.agentInputFlight!;
   expect(flight.settled).toBeInstanceOf(Promise);
   const requeued = deferred<void>();
+  let flightAtRequeue: InputGroup['agentInputFlight'];
   const commit = f.store.commitOutcome.bind(f.store);
   const checkpoint = vi.spyOn(f.store, 'commitOutcome').mockImplementation((...args) => {
     const outcomes = Array.isArray(args[1]) ? args[1] : [args[1]];
     if (outcomes.some(outcome => outcome.kind === 'requeued' && outcome.inputIds.includes(accepted.id))) {
-      expect(group.agentInputFlight).toBeUndefined();
+      flightAtRequeue = group.agentInputFlight;
       requeued.resolve();
     }
     return commit(...args);
@@ -186,6 +189,7 @@ it('keeps accepted unread input delivered until the closing session flight settl
   expect(group.agentInputFlight).toBe(flight);
   ack.resolve();
   await requeued.promise;
+  expect(flightAtRequeue).toBeUndefined();
   expect(f.store.getRun(record.id)?.agentInputs?.find(entry => entry.id === accepted.id)?.deliveredAt).toBeUndefined();
   checkpoint.mockRestore();
 });
@@ -218,4 +222,95 @@ it('arms the held-input timer at turn end and clears it before publishing conten
     expect(f.store.readEvents(record.id).some(event => event.type === 'text' && event.text === 'Real activity')).toBe(true);
     spy.mockRestore();
   } finally { vi.restoreAllMocks(); vi.useRealTimers(); }
+});
+
+for (const readAt of ['before-ACK', 'after-ACK'] as const) {
+  it(`keeps receipt views live when consumption arrives ${readAt}`, async () => {
+    const { record, group, input } = await openInputRun();
+    const message = input('read this message');
+    const ack = deferred<void>();
+    sendAck = ack.promise;
+    const unread = group.unreadInputIds!;
+    const early = group.consumedBeforeAck!;
+    f.store.commitAgentInputs(record.id, [message]);
+    f.manager.deliverConversationInput(record.id);
+    const flight = group.agentInputFlight!;
+    if (readAt === 'before-ACK') {
+      reportConsumed([message.id]);
+      expect(early.has(message.id)).toBe(true);
+      expect(f.store.getRun(record.id)?.agentInputs?.[0]?.consumedAt).toBeUndefined();
+    }
+    ack.resolve(); await flight.settled;
+    if (readAt === 'after-ACK') {
+      expect(unread.has(message.id)).toBe(true);
+      expect(f.store.getRun(record.id)?.agentInputs?.[0]?.awaitingRead).toBe(true);
+      reportConsumed([message.id]);
+    }
+    expect(group.unreadInputIds).toBe(unread);
+    expect(group.consumedBeforeAck).toBe(early);
+    expect(unread.has(message.id)).toBe(false);
+    expect(early.has(message.id)).toBe(false);
+    expect(f.store.getRun(record.id)?.agentInputs?.[0]?.consumedAt).toBeDefined();
+  });
+}
+
+it('keeps unread receipt views unchanged when the requeue checkpoint fails', async () => {
+  const { record, group, input } = await openInputRun();
+  const message = input('still awaiting a read');
+  f.store.commitAgentInputs(record.id, [message]);
+  f.manager.deliverConversationInput(record.id);
+  await group.agentInputFlight?.settled;
+  const unread = group.unreadInputIds!;
+  expect(unread.has(message.id)).toBe(true);
+  const checkpoint = vi.spyOn(f.store, 'commitOutcome').mockImplementationOnce(() => { throw new Error('requeue disk fault'); });
+  emitAgentEvent({ type: 'input-unconsumed', inputIds: [message.id] });
+  expect(checkpoint).toHaveBeenCalled();
+  expect(group.agentInputError).toBe('agent input requeue checkpoint failed: requeue disk fault');
+  expect(unread.has(message.id)).toBe(true);
+  expect(f.store.getRun(record.id)?.agentInputs?.[0]?.deliveredAt).toBeDefined();
+  checkpoint.mockRestore();
+});
+
+
+it('retries accepted unread input once before leaving its receipt unconfirmed', async () => {
+  const { record, group, input } = await openInputRun();
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const message = input('accepted but never read');
+    const unread = group.unreadInputIds!;
+    f.store.commitAgentInputs(record.id, [message]);
+    f.manager.deliverConversationInput(record.id);
+    await group.agentInputFlight?.settled;
+    emitAgentEvent({ type: 'turn-end' });
+    expect(group.unreadInputTimer).toBeDefined();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(group.unreadRetried?.has(message.id)).toBe(true);
+    expect(unread.has(message.id)).toBe(true);
+    expect(group.unreadInputTimer).toBeDefined();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(group.unreadInputIds).toBe(unread);
+    expect(unread.has(message.id)).toBe(false);
+    const receipt = f.store.getRun(record.id)?.agentInputs?.find(entry => entry.id === message.id);
+    expect(receipt?.deliveredAt).toBeDefined();
+    expect(receipt?.awaitingRead).toBeUndefined();
+    expect(receipt?.consumedAt).toBeUndefined();
+    expect(f.store.readEvents(record.id).some(event => event.type === 'note' && String(event.message).includes('did not confirm'))).toBe(true);
+  } finally { vi.useRealTimers(); }
+});
+
+it('acknowledges claimed inbox input without leaving a provider delivery or an owed wake', async () => {
+  const { record, group, input } = await openInputRun();
+  const message = { ...input('read through the inbox'), source: 'agent' as const,
+    conversation: { senderRunId: randomUUID(), recipientRunId: record.id, kind: 'progress' as const } };
+  f.store.commitAgentInputs(record.id, [message]);
+  const generation = randomUUID();
+  const claim = f.manager.reserveInboxInputs(record.id, generation, [message.id]);
+  expect(claim).toBeDefined();
+  expect(f.manager.acknowledgeInbox(record.id, generation, claim!.receiptId)).toBe('acknowledged');
+  const receipt = f.store.getRun(record.id)?.agentInputs?.find(entry => entry.id === message.id);
+  expect(receipt?.deliveredAt).toBeDefined();
+  expect(receipt?.inboxClaim?.acknowledgedAt).toBe(receipt?.deliveredAt);
+  expect(group.agentInputFlight).toBeUndefined();
+  expect(group.unreadInputIds?.size).toBe(0);
+  expect(f.manager.canClaimInboxInput(record.id, message.id)).toBe(false);
 });
