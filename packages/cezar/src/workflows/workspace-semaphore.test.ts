@@ -423,6 +423,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
       await held;
       return controller;
     });
+    let recoveryManager = firstManager;
     try {
 
       await firstManager.recover();
@@ -452,6 +453,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
       // slot. They must reconstruct those same Continue jobs, not revive the
       // original quick-task workflow or append duplicate continuation steps.
       const secondManager = createFixtureManager(store, root, { semaphore });
+      recoveryManager = secondManager;
       managers.push(secondManager);
       await secondManager.recover();
       await waitFor(() => controllers.length === 2, 'second recovered continuation to reach prelaunch');
@@ -477,12 +479,12 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
       expect(store.listRuns().filter((run) => run.status === 'queued')).toHaveLength(2);
       expect(semaphore.busy()).toBe(1);
 
-      // Stop through the manager: changing only the records leaves executable
+    } finally {
+      // Stop on assertion failures too. Changing only the records leaves executable
       // continuations in its queue, which a released slot can still admit.
       for (const run of store.listRuns()) {
-        expect(secondManager.cancel(run.id)).toBe(true);
+        recoveryManager.cancel(run.id);
       }
-    } finally {
       releaseContinuation();
       await fixtureWorkSettled(root);
       setup.mockRestore();
