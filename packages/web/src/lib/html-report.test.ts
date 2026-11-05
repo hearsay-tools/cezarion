@@ -59,6 +59,15 @@ describe('prepareReport', () => {
     expect(blocked.scripts).toBe(2)
   })
 
+  it('reads src only on an HTML script and href only on an SVG script', () => {
+    const { srcdoc, blocked } = prepareReport(`<script href="https://x.test/a.js">window.inline = 1</script>
+      <svg><script id="svg" src="data:text/javascript,1" href="https://x.test/b.js"></script></svg>`)
+    const doc = parse(srcdoc)
+    expect([...doc.querySelectorAll('script')].map(script => script.textContent)).toEqual(['window.inline = 1'])
+    expect(doc.getElementById('svg')).toBeNull()
+    expect(blocked.scripts).toBe(1)
+  })
+
   it('keeps inline scripts, module scripts and event attributes', () => {
     const { srcdoc, blocked } = prepareReport(`<head><script>window.tabs = 1</script></head><body onload="init()">
       <button onclick="navigator.clipboard.writeText('x')">Copy</button><script type="module">document.body.dataset.ready = '1'</script></body>`)

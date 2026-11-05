@@ -65,9 +65,12 @@ function tailwindCompat(doc: Document, sheet: string): HTMLStyleElement {
   return style
 }
 
-/** Where a script loads its code from: `src`, or `href` / `xlink:href` on an SVG script; null when inline. */
+const SVG = 'http://www.w3.org/2000/svg'
+
+/** Where a script loads its code from: `src` on an HTML script, `href` or `xlink:href` on an SVG script; null when inline. */
 function scriptSource(script: Element): string | null {
-  return script.getAttribute('src') ?? script.getAttribute('href') ?? script.getAttributeNS(XLINK, 'href')
+  if (script.namespaceURI === SVG) return script.getAttribute('href') ?? script.getAttributeNS(XLINK, 'href')
+  return script.getAttribute('src')
 }
 
 /**
