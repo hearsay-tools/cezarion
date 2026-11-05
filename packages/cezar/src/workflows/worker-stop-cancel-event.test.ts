@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { manager, parent, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
@@ -11,7 +10,7 @@ import { manager, parent, store, until, useWorkerWaitFixture, worker } from './w
 
 /** Whether run `id`'s session opened: its slot is taken. */
 function sessionOpened(id: string): boolean {
-  return (runInternals(manager).active.get(id) as { liveSession: { sessionEverOpened?: boolean } } | undefined)?.liveSession.sessionEverOpened === true;
+  return store.getRun(id)?.steps.some(step => !!step.sessionId) === true;
 }
 
 const cancellations = (id: string) => store.readEvents(id)

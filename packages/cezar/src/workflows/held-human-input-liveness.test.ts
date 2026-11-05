@@ -13,7 +13,6 @@ import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunStore } from '../runs/store.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { RunManager } from './run.ts';
-import { runInternals } from './run-internals.testkit.ts';
 import type { WorkflowDef } from './types.ts';
 
 const run = promisify(execFile);
@@ -33,10 +32,11 @@ const SINGLE_STEP: WorkflowDef = {
   steps: [{ id: 'task', name: 'Task', prompt: '{{task}}' }],
 };
 
+const launchedTools = new WeakMap<RunManager, ReturnType<RunManager['cezarToolHandlers']>>();
+
 /** The turn calls cezar_done, then ends (hearsay-tools/cezarion#2397). */
 async function doneTurn(manager: RunManager, onEvent: ((event: AgentEvent) => void) | undefined): Promise<void> {
-  const [runId, state] = [...runInternals(manager).active][0]!;
-  const answer = await manager.cezarToolHandlers(runId, state.liveSession.ciGeneration!).finishTurn({}, new AbortController().signal);
+  const answer = await launchedTools.get(manager)!.finishTurn({}, new AbortController().signal);
   if (!answer.ok) throw new Error(`cezar_done refused: ${answer.code}`);
   onEvent?.({ type: 'turn-end' });
 }
@@ -65,6 +65,12 @@ describe('held human input liveness bound (#486)', () => {
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot, { unreadInputGraceMs: 300 });
+    const handlers = manager.cezarToolHandlers.bind(manager);
+    vi.spyOn(manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
+      const tools = handlers(id, generation);
+      launchedTools.set(manager, tools);
+      return tools;
+    });
   });
 
   afterEach(async () => {
