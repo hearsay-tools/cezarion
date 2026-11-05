@@ -143,6 +143,35 @@ describe('ToolActivityTracker', () => {
     });
   });
 
+  it('ignores a later event of a completed tool, but takes a new title of the latest one', () => {
+    const { clock, tracked, read } = tracker();
+    see(tracked, RUN, started(tool('a')));
+    clock.now += 1_000;
+    see(tracked, RUN, completed(tool('a', { status: TOOL_STATUS.completed })));
+    clock.now += 1_000;
+    see(tracked, RUN, completed(tool('a', { status: TOOL_STATUS.failed, title: 'Ran a, final' })));
+    see(tracked, RUN, started(tool('a', { title: 'Ran a, final' })));
+    expect(read()).toEqual({
+      tool: { title: 'Ran a, final', toolKind: 'execute', status: TOOL_STATUS.completed, startedAt: iso(T0), endedAt: iso(T0 + 1_000) },
+      rate: rateWith({ 27: 1 }),
+    });
+  });
+
+  it('remembers the last 64 completed tool ids, and forgets the oldest', () => {
+    const { tracked, read } = tracker();
+    const ids = Array.from({ length: 65 }, (_, index) => `t${index}`);
+    for (const id of ids) see(tracked, RUN, completed(tool(id, { status: TOOL_STATUS.completed })));
+    const calls = () => read()!.rate.reduce((sum, count) => sum + count, 0);
+    expect(calls()).toBe(65);
+    // t1 is still remembered: its repeat changes nothing.
+    see(tracked, RUN, completed(tool('t1', { status: TOOL_STATUS.completed })));
+    expect(calls()).toBe(65);
+    expect(read()!.tool!.title).toBe('Ran t64');
+    // t0 fell out of the memory: its repeat reads as a new call.
+    see(tracked, RUN, completed(tool('t0', { status: TOOL_STATUS.completed })));
+    expect(calls()).toBe(66);
+  });
+
   it('clamps the title to 160 characters, never inside a surrogate pair', () => {
     const { tracked, read } = tracker();
     see(tracked, RUN, started(tool('a', { title: `${'x'.repeat(159)}😀 and more` })));

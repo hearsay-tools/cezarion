@@ -7,6 +7,8 @@ import type { ToolActivitySource } from './read-model.ts';
 import { clampText } from './text.ts';
 
 const TERMINAL: ReadonlySet<ToolStatus> = new Set(['completed', 'failed', 'declined']);
+/** How many completed tool item ids an entry remembers. */
+export const TOOL_ACTIVITY_COMPLETED_IDS = 64;
 /** An entry with no event for this long, and no tool in flight, is pruned. */
 export const TOOL_ACTIVITY_IDLE_MS = 60_000;
 
@@ -31,6 +33,12 @@ interface RunActivity {
   latest?: { itemId: string; tool: ActivityTool };
   /** Tool items seen and not ended yet: a later event of one of them is not a new call. */
   open: Set<string>;
+  /**
+   * The last `TOOL_ACTIVITY_COMPLETED_IDS` tool items that completed, oldest first. A mapper can
+   * complete one item twice (opencode completes a task at its child's idle and again with the task
+   * result): a later event of a completed item is not a new call.
+   */
+  completed: string[];
   /** Tool calls started per second, oldest first; the last bucket is `second`. */
   buckets: number[];
   /** The epoch second of the newest bucket. */
@@ -83,11 +91,19 @@ export class ToolActivityTracker implements ToolActivitySource {
       this.backgrounded(runId, item, at);
       return;
     }
+    if (run?.completed.includes(item.id)) {
+      // Only a new title of the latest tool counts; its status and times stay as they ended.
+      if (run.latest?.itemId === item.id && item.title) run.latest.tool = { ...run.latest.tool, title: toolTitle(item, redact) };
+      return;
+    }
     if (!run?.open.has(item.id)) {
       this.started(runId, item, at, { terminal, closes, owner, title: toolTitle(item, redact) });
       return;
     }
-    if (closes) run.open.delete(item.id);
+    if (closes) {
+      run.open.delete(item.id);
+      remember(run, item.id);
+    }
     const latest = run.latest;
     if (latest?.itemId !== item.id) return;
     // A mapper replaces a placeholder title, or sets the final one only at completion.
@@ -159,7 +175,7 @@ export class ToolActivityTracker implements ToolActivitySource {
   private stop(runId: string, owner: object): void {
     const at = this.now();
     this.sweep(at);
-    this.runs.set(runId, { open: new Set(), buckets: zeros(), second: secondOf(at), lastEventAt: at, stopped: true, owner });
+    this.runs.set(runId, { open: new Set(), completed: [], buckets: zeros(), second: secondOf(at), lastEventAt: at, stopped: true, owner });
   }
 
   /** Prune every idle entry, at most once a second. Reads prune the run they read. */
@@ -174,7 +190,7 @@ export class ToolActivityTracker implements ToolActivitySource {
   private started(runId: string, item: UiToolItem, at: number, { terminal, closes, owner, title }: { terminal: boolean; closes: boolean; owner: object | undefined; title: string }): void {
     let run = this.runs.get(runId);
     if (!run) {
-      run = { open: new Set(), buckets: zeros(), second: secondOf(at), lastEventAt: at, ...(owner ? { owner } : {}) };
+      run = { open: new Set(), completed: [], buckets: zeros(), second: secondOf(at), lastEventAt: at, ...(owner ? { owner } : {}) };
       this.runs.set(runId, run);
     }
     shift(run, secondOf(at));
@@ -184,7 +200,8 @@ export class ToolActivityTracker implements ToolActivitySource {
       itemId: item.id,
       tool: { title, toolKind: item.toolKind, status: item.status, startedAt: iso(at), ...(terminal ? { endedAt: iso(at) } : {}) },
     };
-    if (!closes) run.open.add(item.id);
+    if (closes) remember(run, item.id);
+    else run.open.add(item.id);
   }
 
   /**
@@ -201,6 +218,12 @@ export class ToolActivityTracker implements ToolActivitySource {
       latest.tool = { ...latest.tool, status: 'completed', endedAt: iso(at) };
     }
   }
+}
+
+/** Remember a completed tool item, forgetting the oldest beyond the bound. */
+function remember(run: RunActivity, itemId: string): void {
+  run.completed.push(itemId);
+  if (run.completed.length > TOOL_ACTIVITY_COMPLETED_IDS) run.completed.shift();
 }
 
 /** Move the ring forward to `second`: one empty bucket for each second that passed. */

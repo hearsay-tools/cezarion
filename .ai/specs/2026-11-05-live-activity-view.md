@@ -390,6 +390,11 @@ An in-memory `ToolActivityTracker` keyed by run id, fed by the UI event sink
   `status` and `endedAt`, and take its `title` when the event carries one (the omp
   mapper sets the final title of some edits only at completion:
   `toolEnded()` in `packages/cezar/src/core/omp-ui-mapper.ts`).
+- A mapper can complete one item twice: opencode completes a task tool item at its
+  child session's idle and again when the task result arrives. Each entry remembers
+  the ids of its last 64 completed tool items. A later event of a remembered id never
+  counts and never changes the latest tool, except that it may replace the title of
+  the latest tool; its status and times stay as they ended.
 - Buckets: a ring of 30 one-second counters. A read shifts the ring to the read time.
 - A run that leaves the active set (a run change to a status that is not live) is
   dropped from the tracker: its entry is replaced by an empty one marked stopped. A
