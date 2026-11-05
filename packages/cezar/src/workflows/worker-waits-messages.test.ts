@@ -1,15 +1,14 @@
-import { runInternals } from './run-internals.testkit.ts';
 import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
-import type { AgentSession } from '../core/agent-runner.ts';
+import * as processes from '../core/process-usage.ts';
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { COMPLETION_NUDGE_NOTE } from './run.ts';
 import { gate, thenSay, toolCall } from './waits-parity.testkit.ts';
-import { delegatingParent, manager, restart, root, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { delegatingParent, manager, restart, root, store, until, useWorkerWaitFixture, waitOf, worker, work } from './worker-wait.testkit.ts';
 
 import { entryOf, inputOf } from './worker-waits-shared.testkit.ts';
 
@@ -17,7 +16,19 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
   useWorkerWaitFixture();
   afterEach(() => vi.restoreAllMocks());
 
-  const sessionOf = (runId: string) => (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; };  }> }).active.get(runId)!.liveSession.session;
+  const pids = new Map<string, number>();
+  beforeEach(() => {
+    pids.clear();
+    const register = processes.registerRunProcess;
+    vi.spyOn(processes, 'registerRunProcess').mockImplementation((id, pid) => { pids.set(id, pid); register(id, pid); });
+    const replace = processes.replaceRunProcess;
+    vi.spyOn(processes, 'replaceRunProcess').mockImplementation((id, pid) => { pids.set(id, pid); replace(id, pid); });
+  });
+  const sessionOf = (runId: string) => {
+    const session = [...work.liveSessions].find(session => session.pid === pids.get(runId));
+    if (!session) throw new Error(`No owned session for ${runId}`);
+    return session;
+  };
   const eventsOf = (runId: string, type: string) => store.readEvents(runId).filter(event => event.type === type);
   const answered = (runId: string) => eventsOf(runId, 'human-input-delivered').filter(event => event.source === 'parent');
   const delivered = (runId: string, id: string) => !!inputOf(runId, id)?.deliveredAt;
@@ -168,8 +179,9 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
     const { p, service, callerFor } = await delegatingParent({ task: 'mock:hold', permissions: ['spawn', 'wait', 'steer'] });
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const opened = join(root, `gate-${randomUUID()}`);
+    const done = vi.spyOn(manager, 'acceptDone');
     expect(manager.sendMessage(p.id, [{ type: 'text', text: `${toolCall('cezar_done', {})} ${gate(opened)} ${thenSay('All done.')}` }])).toBe(true);
-    await until(() => !!(runInternals(manager).active.get(p.id) as { doneRequested?: unknown } | undefined)?.doneRequested);
+    await until(() => done.mock.calls.some(([id], index) => id === p.id && done.mock.results[index]?.value?.ok === true));
     const w = await worker(p.id);
     writeFileSync(opened, '');
     const f = { p, w, service, parentCaller: callerFor(p.id), workerCaller: callerFor(w.id) };
