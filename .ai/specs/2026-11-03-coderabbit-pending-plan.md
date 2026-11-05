@@ -17,7 +17,8 @@ intervals, within a fixed 20-minute deadline. Each read keeps its 60-second tota
 and 10-second request caps, clipped to the wait deadline. Set the native job limit
 to 25 minutes for checkout and reporting. This deliberately holds one Actions
 runner while review is pending; it avoids failure/retry churn without changing
-protected-check provenance or the heavy-job graph. No model requests or new flags.
+protected-check provenance. Heavy jobs start after preflight with no review
+dependency (hearsay-tools/cezarion#2727). No model requests or new flags.
 
 Only missing and pending provider states wait. Retry the narrow changing-snapshot
 error with fresh evidence; never grant admission from an inconsistent snapshot.
