@@ -30,7 +30,7 @@ type IdleExpiredEvent =
   | { kind: 'idle-expired'; phase: 'armed'; timer: NodeJS.Timeout };
 
 /** Each phase stays at the write's old position. The captured generation is data, not a new gate. */
-export type BoundaryFactEvent = Generation & (
+type BoundaryMutationEvent = Generation & (
   | SessionOpenEvent | TurnEndEvent | InputSubmittedEvent | ReplyExpiredEvent | IdleExpiredEvent
   | { kind: 'turn-started'; phase: 'clear-nudge' | 'clear-boundary' }
   | { kind: 'done-request'; summary?: string }
@@ -56,12 +56,14 @@ export type BoundaryCarry = {
   refused: CompletionRefusal | undefined; noteRefusal: () => void; settlesRefusal: boolean;
 };
 type CarryEvent = Generation & { kind: 'turn-end'; phase: 'carry'; carry: BoundaryCarry; decision: TurnEndDecision };
-export type TurnBoundaryEvent = BoundaryFactEvent | CarryEvent;
+export type FactOnlyBoundaryEvent = Exclude<BoundaryMutationEvent, { kind: 'input-error' | 'held-input-expired' }>;
+export type EffectBoundaryEvent = Exclude<BoundaryMutationEvent, FactOnlyBoundaryEvent> | CarryEvent;
+export type TurnBoundaryEvent = BoundaryMutationEvent | CarryEvent;
 export interface BoundaryCarrierEffects {
   defer(carry: BoundaryCarry, decision: Extract<TurnEndDecision, { kind: 'defer' }>): TurnEndOutcome;
   done(carry: BoundaryCarry): TurnEndOutcome;
   park(carry: BoundaryCarry): TurnEndOutcome;
-  completionWait(carry: BoundaryCarry): TurnEndOutcome;
+  parkForCompletionWait(carry: BoundaryCarry): TurnEndOutcome;
   completionHumanWait(carry: BoundaryCarry): TurnEndOutcome;
   humanWait(carry: BoundaryCarry, via: 'no-wait' | 'budget'): TurnEndOutcome;
   completionNudge(carry: BoundaryCarry): TurnEndOutcome;
@@ -72,7 +74,9 @@ export type TurnBoundaryEffects = Partial<BoundaryCarrierEffects> & {
   expireHeldInput?(): void;
 };
 
-let applyBoundaryFact: (group: BoundaryGroup, event: BoundaryFactEvent, effects: TurnBoundaryEffects) => void;
+type SetupEvent = Extract<BoundaryMutationEvent, { kind: 'session-open' | 'input-submitted' | 'reply-expired' | 'idle-expired' | 'completion-refusal' | 'session-retired' }>;
+
+let applyBoundaryEvent: (group: BoundaryGroup, event: TurnBoundaryEvent, effects: TurnBoundaryEffects) => TurnEndOutcome | undefined;
 
 /** Only this module can change boundary facts. Overlapping facts retain independent lifetimes. */
 export class BoundaryGroup {
@@ -186,12 +190,7 @@ export class BoundaryGroup {
       case 'fired': this.#noWaitNudgeReplyTimer = undefined; return;
       case 'park': this.#noWaitNudgeParked = event.session; return;
       case 'armed': this.#noWaitNudgeReplyTimer = event.timer; return;
-      case 'cancel':
-        if (this.#noWaitNudgeReplyTimer) {
-          clearTimeout(this.#noWaitNudgeReplyTimer);
-          this.#noWaitNudgeReplyTimer = undefined;
-        }
-        return;
+      case 'cancel': this.#noWaitNudgeReplyTimer = undefined; return;
     }
   }
   #idleExpired(event: Generation & IdleExpiredEvent): void {
@@ -199,13 +198,10 @@ export class BoundaryGroup {
       case 'reset': this.#idleClosed = false; return;
       case 'close': this.#idleClosed = true; return;
       case 'armed': this.#idleTimer = event.timer; return;
-      case 'cancel':
-        if (this.#idleTimer) { clearTimeout(this.#idleTimer); this.#idleTimer = undefined; }
-        this.#replyExpired({ kind: 'reply-expired', phase: 'cancel', session: event.session });
-        return;
+      case 'cancel': this.#idleTimer = undefined; return;
     }
   }
-  #completionRefusal(event: Extract<BoundaryFactEvent, { kind: 'completion-refusal' }>): void {
+  #completionRefusal(event: Extract<BoundaryMutationEvent, { kind: 'completion-refusal' }>): void {
     switch (event.phase) {
       case 'delivered': this.#completionNudged = event.session; return;
       case 'reset-content': this.#noWaitNudgeSawContent = false; return;
@@ -217,17 +213,45 @@ export class BoundaryGroup {
         return;
     }
   }
-  #apply(event: BoundaryFactEvent, effects: TurnBoundaryEffects): void {
+  #applySetup(event: SetupEvent): void {
     switch (event.kind) {
       case 'session-open': this.#sessionOpen(event); return;
+      case 'input-submitted': this.#inputSubmitted(event); return;
+      case 'reply-expired': this.#replyExpired(event); return;
+      case 'idle-expired': this.#idleExpired(event); return;
+      case 'completion-refusal': this.#completionRefusal(event); return;
+      case 'session-retired': this.#nextStep = undefined; this.#waitWakeTurn = undefined; this.#clearBoundary(); return;
+    }
+  }
+  #apply(event: BoundaryMutationEvent, effects: TurnBoundaryEffects): void {
+    switch (event.kind) {
+      case 'session-open': case 'input-submitted': case 'reply-expired':
+      case 'idle-expired': case 'completion-refusal': case 'session-retired':
+        this.#applySetup(event); return;
+      default: this.#applyTurn(event, effects);
+    }
+  }
+  #transition(event: TurnBoundaryEvent, effects: TurnBoundaryEffects): TurnEndOutcome | undefined {
+    if (event.kind === 'turn-end' && event.phase === 'carry') return carryBoundary(event, effects);
+    this.#apply(event, effects);
+    return undefined;
+  }
+  #requestDone(event: Extract<BoundaryMutationEvent, { kind: 'done-request' }>): void {
+    this.#doneRequested = Object.freeze({ session: event.session!, ...(event.summary === undefined ? {} : { summary: event.summary }) });
+  }
+  #humanWaitOpened(event: Extract<BoundaryMutationEvent, { kind: 'human-wait-opened' }>): void {
+    if (event.phase === 'prepare') { this.#autonomousNudgePending = undefined; this.#pendingHumanAsk = true; }
+    else this.#pendingHumanAsk = event.pending;
+  }
+  #applyTurn(event: Exclude<BoundaryMutationEvent, SetupEvent>, effects: TurnBoundaryEffects): void {
+    switch (event.kind) {
       case 'turn-started':
         if (event.phase === 'clear-nudge') this.#autonomousNudgePending = undefined;
         else this.#clearBoundary();
         return;
       case 'turn-end': this.#turnEnd(event); return;
-      case 'done-request': this.#doneRequested = Object.freeze({ session: event.session!, ...(event.summary === undefined ? {} : { summary: event.summary }) }); return;
+      case 'done-request': this.#requestDone(event); return;
       case 'done-step-consumed': this.#completedStepId = event.phase === 'completed' ? event.stepId : undefined; return;
-      case 'input-submitted': this.#inputSubmitted(event); return;
       case 'input-ack': this.#waitWakeTurn = event.session; return;
       case 'input-ready': this.#autonomousNudgePending = event.phase === 'retain-nudge' ? event.session : undefined; return;
       case 'input-error': effects.interruptSession!(event.session!); return;
@@ -240,24 +264,13 @@ export class BoundaryGroup {
         if (event.phase === 'received') this.#noWaitNudgeSawContent = true;
         else this.#noWaitNudgeParked = undefined;
         return;
-      case 'reply-expired': this.#replyExpired(event); return;
-      case 'completion-refusal': this.#completionRefusal(event); return;
-      case 'human-wait-opened':
-        if (event.phase === 'prepare') { this.#autonomousNudgePending = undefined; this.#pendingHumanAsk = true; }
-        else this.#pendingHumanAsk = event.pending;
-        return;
+      case 'human-wait-opened': this.#humanWaitOpened(event); return;
       case 'wait-wake-admitted': this.#heldForSubagents = event.held; return;
       case 'subagents-changed': this.#heldForSubagents = undefined; return;
       case 'mode-disabled': this.#autonomous = false; return;
-      case 'idle-expired': this.#idleExpired(event); return;
-      case 'session-retired':
-        this.#nextStep = undefined;
-        this.#waitWakeTurn = undefined;
-        this.#clearBoundary();
-        return;
     }
   }
-  static { applyBoundaryFact = (group, event, effects) => group.#apply(event, effects); }
+  static { applyBoundaryEvent = (group, event, effects) => group.#transition(event, effects); }
 }
 
 Object.freeze(BoundaryGroup.prototype);
@@ -273,16 +286,25 @@ function carryBoundary(event: CarryEvent, effects: TurnBoundaryEffects): TurnEnd
     case 'defer': return effects.defer!(carry, decision);
     case 'done': return effects.done!(carry);
     case 'park': return effects.park!(carry);
-    case 'completion-wait': return effects.completionWait!(carry);
+    case 'completion-wait': return effects.parkForCompletionWait!(carry);
     case 'human-wait': return decision.via === 'completion' ? effects.completionHumanWait!(carry) : effects.humanWait!(carry, decision.via);
     case 'nudge': return decision.cause === 'completion' ? effects.completionNudge!(carry) : effects.noWaitNudge!(carry, decision.text!);
   }
 }
 
+/** Fact-only phases need no run identifier or effects. Both overloads use the same private owner. */
+export function transitionTurnBoundary(state: ActiveRun, event: FactOnlyBoundaryEvent): void;
 export function transitionTurnBoundary(runId: string, state: ActiveRun, event: CarryEvent, effects: BoundaryCarrierEffects): TurnEndOutcome;
-export function transitionTurnBoundary(runId: string, state: ActiveRun, event: BoundaryFactEvent, effects: TurnBoundaryEffects): undefined;
-export function transitionTurnBoundary(_runId: string, state: ActiveRun, event: TurnBoundaryEvent, effects: TurnBoundaryEffects): TurnEndOutcome | undefined {
-  if (event.kind === 'turn-end' && event.phase === 'carry') return carryBoundary(event, effects);
-  applyBoundaryFact(state.boundary, event, effects);
-  return undefined;
+export function transitionTurnBoundary(runId: string, state: ActiveRun, event: Extract<EffectBoundaryEvent, { kind: 'input-error' }>, effects: Required<Pick<TurnBoundaryEffects, 'interruptSession'>>): undefined;
+export function transitionTurnBoundary(runId: string, state: ActiveRun, event: Extract<EffectBoundaryEvent, { kind: 'held-input-expired' }>, effects: Required<Pick<TurnBoundaryEffects, 'expireHeldInput'>>): undefined;
+export function transitionTurnBoundary(...args:
+  | [state: ActiveRun, event: FactOnlyBoundaryEvent]
+  | [runId: string, state: ActiveRun, event: EffectBoundaryEvent, effects: TurnBoundaryEffects]
+): TurnEndOutcome | undefined {
+  if (args.length === 2) {
+    const [state, event] = args;
+    return applyBoundaryEvent(state.boundary, event, {});
+  }
+  const [, state, event, effects] = args;
+  return applyBoundaryEvent(state.boundary, event, effects);
 }

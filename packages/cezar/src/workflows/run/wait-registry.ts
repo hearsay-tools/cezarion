@@ -113,7 +113,7 @@ export class WaitRegistry {
     // A worker that parked before this wait opened tells the parent now (hearsay-tools/cezarion#1327).
     this.host.noticeParkedWorkers(familyOf(run));
     const current = this.context.store.getRun(runId);
-    if (current?.waits?.some(wait => wait.id === entry.id) && (state.atTurnBoundary === state.liveSession.session || this.host.isParked(runId))) this.host.parkOnWaits(runId, state);
+    if (current?.waits?.some(wait => wait.id === entry.id) && (state.boundary.atTurnBoundary === state.liveSession.session || this.host.isParked(runId))) this.host.parkOnWaits(runId, state);
     return this.recordedWorkerWait(runId, entry.id) ?? entry;
   }
 
@@ -224,7 +224,7 @@ export class WaitRegistry {
     const { refuse, assertCanRegister } = this.registrationGate(runId, generation, capabilitySignal);
     const { state: active, run } = assertCanRegister();
     const turnId = active.waitIdentity.ensureCiTurn();
-    if (active.autonomous && this.host.countAutomaticWakes(runId) < this.maxAutoContinues) refuse('autonomous_run');
+    if (active.boundary.autonomous && this.host.countAutomaticWakes(runId) < this.maxAutoContinues) refuse('autonomous_run');
     // The question this turn's opening answers stays open only until the turn end settles it, so
     // a question asked in that turn is a new one, never the answered one returned
     // (hearsay-tools/cezarion#2397).
@@ -341,7 +341,7 @@ export class WaitRegistry {
     try { this.context.store.commitWait(runId, wait); }
     catch { throw Object.assign(new Error(waitErrorMessage('persistence')), { code: 'persistence' }); }
     this.host.armWait(runId, wait);
-    if (state.atTurnBoundary === state.liveSession.session || this.host.isParked(runId)) this.host.parkOnWaits(runId, state);
+    if (state.boundary.atTurnBoundary === state.liveSession.session || this.host.isParked(runId)) this.host.parkOnWaits(runId, state);
     // The store keeps the entry it was given; only its phase can have moved since.
     return (this.context.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id) as W | undefined) ?? wait;
   }

@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import { ReadonlyMapView } from './readonly-collections.ts';
 import { randomUUID } from 'node:crypto';
 import {
@@ -146,8 +147,8 @@ export class SubagentWaits {
   /** The last child of a park for the user that held its slot for them ended, with no subagent wait
    *  to wake the parent: the park gives the slot back and arms its idle close, as it would have. */
   private releaseHeldPark(runId: string, state: ActiveRun): void {
-    if (!state.heldForSubagents || !this.host.isParked(runId)) return;
-    state.heldForSubagents = undefined;
+    if (!state.boundary.heldForSubagents || !this.host.isParked(runId)) return;
+    transitionTurnBoundary(state, { kind: 'subagents-changed', phase: 'release', session: state.liveSession.session });
     this.host.releaseHeldPark(runId, state);
   }
 

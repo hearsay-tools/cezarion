@@ -89,5 +89,5 @@ export function owesWake(run: RunRecord, reads: WakeReads, beforeHumanReset?: { 
 /** A live session takes a wake at its turn boundary. A native question is mid-turn and takes one
  *  input there: the parent's answer to it, through the answer seam (hearsay-tools/cezarion#505). */
 export function takesWake(runId: string, state: ActiveRun, routedAnswer: (runId: string) => AgentInput | undefined): boolean {
-  return state.atTurnBoundary === state.liveSession.session || (!!state.pendingHumanAsk && routedAnswer(runId) !== undefined);
+  return state.boundary.atTurnBoundary === state.liveSession.session || (!!state.boundary.pendingHumanAsk && routedAnswer(runId) !== undefined);
 }

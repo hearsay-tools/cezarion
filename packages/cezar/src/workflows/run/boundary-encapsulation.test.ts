@@ -24,7 +24,7 @@ it('locks the boundary slot, getter surface and prototype without freezing the r
   expect(() => replace(group, 'doneAtBoundary', wire)).toThrow(TypeError);
   expect(define(group, 'pendingHumanAsk', true)).toBe(false);
   expect(set(group, 'autonomous', false)).toBe(false);
-  transitionTurnBoundary('run', state, { kind: 'done-request', session: wire, summary: 'done' }, {});
+  transitionTurnBoundary(state, { kind: 'done-request', session: wire, summary: 'done' });
   expect(group.doneRequested).toEqual({ session: wire, summary: 'done' });
   expect(Object.isFrozen(group.doneRequested)).toBe(true);
   expect(Object.isFrozen(wire)).toBe(false);
@@ -36,9 +36,9 @@ it('retains independent immutable records and their session identities across la
   const wire = session();
   const next = { session: wire, label: 'next' };
   const ack = { session: wire, monitoring: true };
-  transitionTurnBoundary('run', state, { kind: 'session-open', phase: 'scope-step', session: wire, next }, {});
-  transitionTurnBoundary('run', state, { kind: 'turn-end', phase: 'save-ack', session: wire, boundary: ack }, {});
-  transitionTurnBoundary('run', state, { kind: 'turn-end', phase: 'record-done', session: wire, done: true, request: { session: wire, summary: 'kept' }, keepClose: true }, {});
+  transitionTurnBoundary(state, { kind: 'session-open', phase: 'scope-step', session: wire, next });
+  transitionTurnBoundary(state, { kind: 'turn-end', phase: 'save-ack', session: wire, boundary: ack });
+  transitionTurnBoundary(state, { kind: 'turn-end', phase: 'record-done', session: wire, done: true, request: { session: wire, summary: 'kept' }, keepClose: true });
   const group = state.boundary;
   const oldNext = group.nextStep;
   const oldAck = group.parkAfterAck;
@@ -51,7 +51,7 @@ it('retains independent immutable records and their session identities across la
   expect(() => replace(oldNext!, 'label', 'forged')).toThrow(TypeError);
   expect(() => replace(oldAck!, 'monitoring', false)).toThrow(TypeError);
   expect(() => replace(group.doneClose!, 'summary', 'forged')).toThrow(TypeError);
-  transitionTurnBoundary('run', state, { kind: 'session-retired', phase: 'reset', session: wire }, {});
+  transitionTurnBoundary(state, { kind: 'session-retired', phase: 'reset', session: wire });
   expect(group.nextStep).toBeUndefined(); expect(group.parkAfterAck).toBeUndefined();
   expect(oldNext?.session).toBe(wire); expect(oldAck?.monitoring).toBe(true);
 });
@@ -67,6 +67,6 @@ it('keeps absent optional defaults and independent factory generations', () => {
     a.boundary.idleTimer, a.boundary.idleClosed, a.boundary.monitoringCapNoted, a.boundary.autonomousNudgePending,
     a.boundary.noWaitNudged, a.boundary.incomingRequestRefused, a.boundary.sentRequestRefused,
     a.boundary.completionNudged, a.boundary.completionNudgeAnswered, a.boundary.heldForSubagents]) expect(value).toBeUndefined();
-  transitionTurnBoundary('run', a, { kind: 'mode-disabled', phase: 'disable', session: undefined }, {});
+  transitionTurnBoundary(a, { kind: 'mode-disabled', phase: 'disable', session: undefined });
   expect(a.boundary.autonomous).toBe(false); expect(b.boundary.autonomous).toBe(false);
 });

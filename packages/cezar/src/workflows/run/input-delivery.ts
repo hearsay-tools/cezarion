@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import type { Wait } from '@open-mercato/cezar-contract/waits';
 import type { InputDelivery as InputDeliveryPolicy } from '../../core/agent-runner.ts';
@@ -231,7 +232,7 @@ export class InputDelivery {
     const delivered = this.deliverMessage(runId, content, true, messageId);
     if (delivered) {
       const state = this.host.active.get(runId);
-      if (state) state.monitoringCapNoted = undefined;
+      if (state) transitionTurnBoundary(state, { kind: 'input-submitted', phase: 'monitoring-reset', session: state.liveSession.session });
     }
     return delivered;
   }
@@ -247,7 +248,7 @@ export class InputDelivery {
   /** Latch an agent input error, then interrupt: a transport failure the interrupt causes is secondary. */
   latchAgentInputError(runId: string, state: ActiveRun, session: AgentSession, message: string): void {
     state.inputState.recordInputError(message);
-    try { session.interrupt(); } finally {
+    try { transitionTurnBoundary(runId, state, { kind: 'input-error', phase: 'interrupt', session }, { interruptSession: wire => wire.interrupt() }); } finally {
       try { this.context.store.appendEvent(runId, { type: 'error', message }); }
       catch { console.error(`[cez] ${message}`); }
     }
@@ -269,7 +270,7 @@ export class InputDelivery {
     const current = this.context.store.getRun(runId);
     if (!current || !this.host.pendingConversationWakes(current).length) { this.host.holdPeerWakesAtCap(runId); return; }
     const state = this.host.active.get(runId);
-    if (current.status === 'waiting' && (!state || state.atTurnBoundary === state.liveSession.session)) this.host.queueWaitWake(runId);
+    if (current.status === 'waiting' && (!state || state.boundary.atTurnBoundary === state.liveSession.session)) this.host.queueWaitWake(runId);
     else if (!this.host.recoveringRun(runId)) this.flushAgentInputs(runId);
   }
 
@@ -318,15 +319,15 @@ export class InputDelivery {
       this.host.queueWaitWake(runId);
       return;
     }
-    const bundle = state.atTurnBoundary === state.liveSession.session ? pendingConversationBatch(this.context.store.getRun(runId), state, input => formatAgentInput(input, id => this.context.store.getRun(id)), reply.id) : undefined;
+    const bundle = state.boundary.atTurnBoundary === state.liveSession.session ? pendingConversationBatch(this.context.store.getRun(runId), state, input => formatAgentInput(input, id => this.context.store.getRun(id)), reply.id) : undefined;
     const session = state.liveSession.session;
     if (!writeInput(state, () => session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])]))) return;
     this.context.store.appendEvent(runId, { type: 'human-input-delivered', askSeq, source });
     inputReceipts.commitRoutedAnswer(this.context, runId, state, [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])], fallback, this.maxAutoContinues);
     // Spend the answer's admission now so later messages can steer before its turn ends.
-    if (this.host.line.retireAdmission(runId)) state.waitWakeTurn = state.liveSession.session;
-    state.pendingHumanAsk = hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id));
-    if (!state.pendingHumanAsk) this.flushAgentInputs(runId);
+    if (this.host.line.retireAdmission(runId)) transitionTurnBoundary(state, { kind: 'input-ack', phase: 'wake-turn', session: state.liveSession.session });
+    transitionTurnBoundary(state, { kind: 'input-submitted', phase: 'refresh-question', session: state.liveSession.session, pending: hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id)) });
+    if (!state.boundary.pendingHumanAsk) this.flushAgentInputs(runId);
     this.resumeParkedRun(runId, state);
   }
 
@@ -346,17 +347,17 @@ export class InputDelivery {
   settleIdleBoundary(runId: string, state: ActiveRun, session: AgentSession): void {
     // An in-flight acknowledgement still owns this boundary; its .then re-settles.
     if (harnessHoldsHumanInput(state) || state.inputState.agentInputFlight) return;
-    const proseGate = state.parkAfterAck?.session === session && state.parkAfterAck.humanGate;
+    const proseGate = state.boundary.parkAfterAck?.session === session && state.boundary.parkAfterAck.humanGate;
     if (this.reparkPendingQuestion(runId, state, session, proseGate)) return;
-    if (state.atTurnBoundary !== session || (state.pendingHumanAsk && !proseGate) || (!proseGate && this.hasQueuedAgentInputs(runId))) return;
+    if (state.boundary.atTurnBoundary !== session || (state.boundary.pendingHumanAsk && !proseGate) || (!proseGate && this.hasQueuedAgentInputs(runId))) return;
     // The turn end deferred to this acknowledgement (OpenCode HTTP/SSE): the turn that answered an
     // input finished before the input's acknowledgement. Its done, the waits still owed (a wake
     // acknowledged after its turn ended) or the turn end it kept (`parkAfterAck`) settle now, with
     // queued and accepted input still taking priority above (hearsay-tools/cezarion#1234, #1525).
     // Cezar's own human wait is not owed: the rule decides, and the agent's wait replaces it.
-    const done = state.doneAtBoundary === session;
+    const done = state.boundary.doneAtBoundary === session;
     if (!done && (this.host.line.isParked(runId) ||
-      (state.parkAfterAck?.session !== session && (proseGate || !this.host.humanWaits.holdsAgentWaits(runId))))) return;
+      (state.boundary.parkAfterAck?.session !== session && (proseGate || !this.host.humanWaits.holdsAgentWaits(runId))))) return;
     this.host.settleTurn(runId, state, 'ack', this.host.boundaryTurn(runId, state, session, done));
   }
 
@@ -364,7 +365,7 @@ export class InputDelivery {
     // A wake beside a pending question can be acknowledged after its turn ended, and its
     // checkpoint takes the run out of the question's park: park for the question again
     // (hearsay-tools/cezarion#1233).
-    if (state.pendingHumanAsk && !proseGate && state.atTurnBoundary === session && session.open &&
+    if (state.boundary.pendingHumanAsk && !proseGate && state.boundary.atTurnBoundary === session && session.open &&
       !this.host.line.isParked(runId) && state.liveSession.currentStepId) {
       this.host.parkForUser(runId, state, state.liveSession.currentStepId);
       return true;
@@ -378,11 +379,11 @@ export class InputDelivery {
   armUnreadInputTimer(runId: string, state: ActiveRun): void {
     clearUnreadInputTimer(state);
     const session = state.liveSession.session;
-    if (!session?.open || state.pendingHumanAsk || !harnessOwesInput(state) || state.inputState.agentInputFlight) return;
+    if (!session?.open || state.boundary.pendingHumanAsk || !harnessOwesInput(state) || state.inputState.agentInputFlight) return;
     const timer = setTimeout(() => {
       state.inputState.unreadTimerFired();
       if (this.context.disposed() || this.host.active.get(runId) !== state || state.liveSession.session !== session || !session.open || state.liveSession.cancelled ||
-        state.pendingHumanAsk || state.inputState.agentInputFlight || !harnessOwesInput(state)) return;
+        state.boundary.pendingHumanAsk || state.inputState.agentInputFlight || !harnessOwesInput(state)) return;
       const ids = [...state.inputState.unreadInputIds!];
       const retried = ids.filter(id => state.inputState.unreadRetried?.has(id));
       const fresh = ids.filter(id => !state.inputState.unreadRetried?.has(id));
@@ -398,8 +399,8 @@ export class InputDelivery {
       }
       // No content since the last turn ended: the harness is idle, whatever turn it announced.
       if (!harnessOwesInput(state) && !state.inputState.agentInputFlight) {
-        state.atTurnBoundary = session;
-        if (state.parkAfterAck?.session !== session) state.parkAfterAck = { session, monitoring: false };
+        transitionTurnBoundary(state, { kind: 'unread-expired', phase: 'restore-boundary', session });
+        if (state.boundary.parkAfterAck?.session !== session) transitionTurnBoundary(state, { kind: 'unread-expired', phase: 'restore-ack', session });
         this.settleIdleBoundary(runId, state, session);
       }
     }, this.host.unreadInputGraceMs());
@@ -419,7 +420,7 @@ export class InputDelivery {
     const timer = setTimeout(() => {
       state.inputState.heldTimerFired();
       if (this.context.disposed() || this.host.active.get(runId) !== state || state.liveSession.session !== session || !session.open ||
-        state.liveSession.cancelled || state.idleClosed || state.atTurnBoundary !== session) return;
+        state.liveSession.cancelled || state.boundary.idleClosed || state.boundary.atTurnBoundary !== session) return;
       if (harnessHoldsHumanInput(state)) {
         // An in-flight ACK still owns this boundary; its .then re-settles.
         if (state.inputState.agentInputFlight) {
@@ -434,7 +435,7 @@ export class InputDelivery {
               ? unreadInputUnconfirmedNote(held)
               : 'delivered held messages; the agent did not confirm reading them',
           });
-          state.inputState.expireHeldInput();
+          transitionTurnBoundary(runId, state, { kind: 'held-input-expired', phase: 'expire', session }, { expireHeldInput: () => state.inputState.expireHeldInput() });
           this.settleIdleBoundary(runId, state, session);
           return;
         }
@@ -449,7 +450,7 @@ export class InputDelivery {
 
   private inputReadyAuthorized(runId: string, state: ActiveRun, session: AgentSession | undefined): session is AgentSession {
     return !(!session || this.context.disposed() || this.host.active.get(runId) !== state || state.liveSession.session !== session ||
-      !session.open || state.idleClosed || state.liveSession.cancelled || state.liveSession.finishRequested || state.inputState.agentInputError || state.liveSession.agentSessionError);
+      !session.open || state.boundary.idleClosed || state.liveSession.cancelled || state.liveSession.finishRequested || state.inputState.agentInputError || state.liveSession.agentSessionError);
   }
 
   /** A callback from an old/replaced/disposed session carries no authority. */
@@ -461,14 +462,14 @@ export class InputDelivery {
     // #486: held human input drained at this still-current boundary with no new turn.
     // Runners fire onAgentInputReady from the transport ACK finally/callback while
     // agentInputFlight is still set; settling here parks before the ACK .then can nudge.
-    const idle = state.atTurnBoundary === session && !harnessHoldsHumanInput(state) &&
+    const idle = state.boundary.atTurnBoundary === session && !harnessHoldsHumanInput(state) &&
       !state.inputState.agentInputFlight && !harnessOwesInput(state);
     // The refused autonomous nudge retries at the boundary it waited at: the turn-end rule decides it
     // again (hearsay-tools/cezarion#1525).
     // It keeps tryAutonomousNudge's own guards: a run that may not continue on its own keeps the
     // retry pending, bounded by the idle timer.
-    if (idle && state.autonomousNudgePending === session && state.doneAtBoundary !== session && state.liveSession.currentStepId &&
-      state.autonomous && this.host.canAutoContinue(runId, state)) {
+    if (idle && state.boundary.autonomousNudgePending === session && state.boundary.doneAtBoundary !== session && state.liveSession.currentStepId &&
+      state.boundary.autonomous && this.host.canAutoContinue(runId, state)) {
       this.host.settleTurn(runId, state, 'ready', { ...this.host.boundaryTurn(runId, state, session, false), monitoring: false });
       return;
     }
@@ -486,7 +487,7 @@ export class InputDelivery {
     // A refusal queued for a closed session (hearsay-tools/cezarion#1301): this turn is the nudge's.
     const refusal = !!this.context.store.getRun(runId)?.agentInputs?.some(input => input.purpose === 'completion-refusal' && inputIds.includes(input.id));
     const flight = new InputFlight(session, inputIds,
-      this.host.line.isAdmitted(runId) && state.atTurnBoundary === session ? true : undefined);
+      this.host.line.isAdmitted(runId) && state.boundary.atTurnBoundary === session ? true : undefined);
     // A batch with timer results is an automatic wake: it reserves one unit of the budget now, so a timer that comes due before this acknowledgement counts it, and gives it back if the batch is refused or its acknowledgement rejects (hearsay-tools/cezarion#1233).
     if (reservesAutomaticWake(this.context.store.getRun(runId), flight, inputIds, () => this.host.countAutomaticWakes(runId, beforeHumanReset), this.maxAutoContinues)) flightWrites.reserve(flight, true);
     state.inputState.attachFlight(flight);
@@ -500,7 +501,7 @@ export class InputDelivery {
 
   private recordAgentInputTurn(runId: string, state: ActiveRun, flight: NonNullable<ActiveRun['inputState']['agentInputFlight']>, refusal: boolean): void {
     const { session, inputIds } = flight;
-    if (flight.admittedWake || resolvedWaits(this.context.store.getRun(runId) ?? {}).some(wait => inputIds.includes(waitInputId(wait)))) state.waitWakeTurn = session;
+    if (flight.admittedWake || resolvedWaits(this.context.store.getRun(runId) ?? {}).some(wait => inputIds.includes(waitInputId(wait)))) transitionTurnBoundary(state, { kind: 'input-ack', phase: 'wake-turn', session });
     // A refusal queued while the session was gone makes this the nudge's turn; any other input is a wake, which starts a fresh cycle (hearsay-tools/cezarion#1301). A live nudge carries no input.
     if (refusal) this.host.awaitCompletionNudgeReply(runId, state, session);
     else if (inputIds.length) startCompletionCycle(state);
@@ -508,10 +509,10 @@ export class InputDelivery {
 
   private admitsAgentInput(runId: string, state: ActiveRun, session: NonNullable<ActiveRun['liveSession']['session']>, inputIds: readonly string[], beforeHumanReset?: HumanAnswerBudget): boolean {
     // A pending question admits only a wake made of resolved-wait results and messages, at a turn boundary: it stays answerable, and nothing else is delivered until it is answered (hearsay-tools/cezarion#1233, #1235).
-    if (state.pendingHumanAsk) {
+    if (state.boundary.pendingHumanAsk) {
       const run = this.context.store.getRun(runId);
       const owed = new Set(run ? [...resolvedWaits(run).map(waitInputId), ...this.host.pendingConversationWakes(run, beforeHumanReset).map(input => input.id)] : []);
-      if (state.atTurnBoundary !== session || !inputIds.length || !inputIds.every(id => owed.has(id))) return false;
+      if (state.boundary.atTurnBoundary !== session || !inputIds.length || !inputIds.every(id => owed.has(id))) return false;
     }
     return true;
   }
@@ -552,7 +553,7 @@ export class InputDelivery {
       state.inputState.clearFlight();
       if (!authorized || !session.open || state.liveSession.agentSessionError || state.inputState.agentInputError) return;
       // A liveness resubmission gets its own quiet window, and so does input acknowledged after its turn already ended: no later turn-end would arm one (#505 review).
-      if (inputIds.some(id => state.inputState.unreadRetried?.has(id)) || state.atTurnBoundary === session) this.armUnreadInputTimer(runId, state);
+      if (inputIds.some(id => state.inputState.unreadRetried?.has(id)) || state.boundary.atTurnBoundary === session) this.armUnreadInputTimer(runId, state);
       if (this.flushAgentInputs(runId)) return;
       this.settleIdleBoundary(runId, state, session);
     }).catch(error => {
@@ -577,7 +578,7 @@ export class InputDelivery {
       this.host.spendWakeAdmission(runId, state, resolvedIds.length ? resolvedWaits(this.context.store.getRun(runId) ?? {}).length > 0 : owedBefore);
     }
     // Rearm the refusal turn's bound after the wake checkpoint cleared the park's timers.
-    if (refusal && state.completionNudged === session) this.host.armNoWaitNudgeReplyTimer(runId, state);
+    if (refusal && state.boundary.completionNudged === session) this.host.armNoWaitNudgeReplyTimer(runId, state);
     // Until observed read, a failed steering session requeues the input and counts a failure.
     for (const id of observable ? accepted : []) { if (early.includes(id)) state.inputState.forgetEarlyConsumption(id); else state.inputState.recordUnreadInput(id); }
     this.host.reconcileWorkerWaits();
@@ -595,8 +596,8 @@ export class InputDelivery {
     run = this.supersedeFallbackBeforeFlush(runId, state, run, beforeHumanReset);
     // A question pending at a turn boundary still takes an admitted wake of resolved-wait results
     // and messages; one pending mid-turn (a native ask) takes nothing until its turn ends.
-    const askPending = state.pendingHumanAsk || this.host.hasUnansweredHumanAsk(runId);
-    if (askPending && state.atTurnBoundary !== state.liveSession.session) return false;
+    const askPending = state.boundary.pendingHumanAsk || this.host.hasUnansweredHumanAsk(runId);
+    if (askPending && state.boundary.atTurnBoundary !== state.liveSession.session) return false;
     run = this.cancelCappedTimersBeforeFlush(runId, state, run, beforeHumanReset);
     return this.flushAgentInputBatch(runId, state, run, askPending, beforeHumanReset);
   }
@@ -618,7 +619,7 @@ export class InputDelivery {
   private cancelCappedTimersBeforeFlush(runId: string, state: ActiveRun, run: RunRecord, beforeHumanReset?: HumanAnswerBudget): RunRecord {
     // A timer result still owed when the budget is spent is cancelled before its batch is sent; the
     // CI results beside it are delivered.
-    if (this.host.countAutomaticWakes(runId, beforeHumanReset) >= this.maxAutoContinues && this.host.line.isAdmitted(runId) && state.atTurnBoundary === state.liveSession.session) {
+    if (this.host.countAutomaticWakes(runId, beforeHumanReset) >= this.maxAutoContinues && this.host.line.isAdmitted(runId) && state.boundary.atTurnBoundary === state.liveSession.session) {
       const owedTimers = resolvedWaits(run).filter(chargesBudget);
       if (owedTimers.length) {
         this.host.cancelAutomaticAtCap(runId, owedTimers);
@@ -640,10 +641,10 @@ export class InputDelivery {
     const beside = new Set(this.host.pendingConversationWakes(run, beforeHumanReset).map(input => input.id));
     // A refusal queued for a closed session waits for the reopened session's turn boundary: the
     // turn that answers it is the nudge's (hearsay-tools/cezarion#1301), not the opening turn.
-    const boundary = state.atTurnBoundary === state.liveSession.session;
+    const boundary = state.boundary.atTurnBoundary === state.liveSession.session;
     const queue = (run.agentInputs ?? []).filter(input => input.id !== state.inputState.openingAgentInputId && !owed.has(input.id) &&
       (!askPending || beside.has(input.id)) && (boundary || input.purpose !== 'completion-refusal'));
-    const admitted = this.host.line.isAdmitted(runId) && state.atTurnBoundary === state.liveSession.session;
+    const admitted = this.host.line.isAdmitted(runId) && state.boundary.atTurnBoundary === state.liveSession.session;
     if (resolved.length && admitted) {
       const batch = resolvedWaitInputBatch(run, resolved, queue, input => formatAgentInput(input, id => this.context.store.getRun(id)), { workerStatus: this.host.waitRegistry.workerStatus });
       if (!batch) return false;
@@ -664,10 +665,7 @@ export class InputDelivery {
    * resumes work in a parked session. */
   resumeParkedRun(runId: string, state: ActiveRun, beforeHumanReset?: HumanAnswerBudget): void {
     clearHeldHumanInputTimer(state);
-    state.autonomousNudgePending = undefined;
-    state.atTurnBoundary = undefined;
-    state.doneAtBoundary = undefined;
-    state.parkAfterAck = undefined;
+    transitionTurnBoundary(state, { kind: 'input-submitted', phase: 'resume', session: state.liveSession.session });
     clearIdleTimer(state);
     // A wake command can emit activity before its transport ACK. Keep its park
     // until the durable delivery checkpoint; admission already reserves capacity.
@@ -737,7 +735,7 @@ export class InputDelivery {
       : expanded.length ? expanded : [{ type: 'text', text: 'The user attached a document, but it could not be saved. Ask them to attach it again before discussing its contents.' }];
     const answeringAskSeq = userAuthored ? pendingHumanAskSeq(this.context.store, runId) : undefined;
     // An answer opening a turn carries held conversation messages after the answer.
-    const bundle = userAuthored && answeringAskSeq !== undefined && state.atTurnBoundary === state.liveSession.session
+    const bundle = userAuthored && answeringAskSeq !== undefined && state.boundary.atTurnBoundary === state.liveSession.session
       ? pendingConversationBatch(this.context.store.getRun(runId), state, input => formatAgentInput(input, id => this.context.store.getRun(id))) : undefined;
     // Human input answers all human waits. Agent input gets its footer in submitAgentInput.
     const footer = userAuthored ? openWaitsFooter((this.context.store.getRun(runId)?.waits ?? []).filter(wait => wait.kind !== 'human')) : undefined;
@@ -750,19 +748,16 @@ export class InputDelivery {
     const { answeringAskSeq, bundle } = prepared;
     const beforeHumanReset = { spent: this.context.store.getRun(runId)?.automaticWakes ?? 0 };
     // The turn that would have finished now answers the user (hearsay-tools/cezarion#1234).
-    state.doneRequested = undefined;
-    state.noWaitNudged = undefined;
-    state.noWaitNudgeParked = undefined;
-    state.noWaitNudgeSawContent = undefined;
+    transitionTurnBoundary(state, { kind: 'input-submitted', phase: 'human-delivered', session: state.liveSession.session });
     // A human message starts a fresh completion cycle (hearsay-tools/cezarion#1301).
     startCompletionCycle(state);
     if (answeringAskSeq !== undefined) {
       this.context.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: answeringAskSeq });
     }
     inputReceipts.commitAnswer(this.context, runId, state, bundle, messageId);
-    state.pendingHumanAsk = hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id));
+    transitionTurnBoundary(state, { kind: 'input-submitted', phase: 'refresh-question', session: state.liveSession.session, pending: hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id)) });
     // A native answer or a full bundle leaves remaining messages to steer behind the answer.
-    if (answeringAskSeq !== undefined && !state.pendingHumanAsk) this.flushAgentInputs(runId, beforeHumanReset);
+    if (answeringAskSeq !== undefined && !state.boundary.pendingHumanAsk) this.flushAgentInputs(runId, beforeHumanReset);
     this.resumeParkedRun(runId, state, beforeHumanReset);
   }
 }

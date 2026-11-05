@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import { cezarDoneRequestSchema, type CezarDoneRequest, type CezarDoneAnswer, type DoneErrorCode } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import { doneErrorMessage } from '../../ci-wait/errors.ts';
@@ -53,14 +54,14 @@ export class RunFinish {
     // The answer a continuation opened with is not a pending question while its turn runs.
     // A cezar_ask this turn registered is pending too, before its turn end shows it
     // (hearsay-tools/cezarion#2442).
-    if (state.pendingHumanAsk || this.host.hasUnansweredHumanAsk(runId) || askedThisTurn(run)) return refuse('human_question_pending', doneErrorMessage('human_question_pending'));
+    if (state.boundary.pendingHumanAsk || this.host.hasUnansweredHumanAsk(runId) || askedThisTurn(run)) return refuse('human_question_pending', doneErrorMessage('human_question_pending'));
     const refusal = this.completionRefusal(runId);
     if (refusal) {
       recordRequestRefusal(state, refusal, true);
       return refuse(refusal.code, refusal.message, refusal.workers);
     }
-    state.doneRequested = { session: state.liveSession.session, ...(parsed.summary === undefined ? {} : { summary: parsed.summary }) };
-    const next = state.nextStep?.session === state.liveSession.session ? state.nextStep.label : undefined;
+    transitionTurnBoundary(state, { kind: 'done-request', session: state.liveSession.session, ...(parsed.summary === undefined ? {} : { summary: parsed.summary }) });
+    const next = state.boundary.nextStep?.session === state.liveSession.session ? state.boundary.nextStep.label : undefined;
     return { ok: true, finishes: 'at_turn_end', ...(next === undefined ? { completes: 'task' as const } : { completes: 'step' as const, next_step: next }), open_waits };
   }
 
@@ -76,7 +77,7 @@ export class RunFinish {
     if (gate === 'accept') return false;
     const state = this.completionGateHost.active.get(runId);
     // Mid-turn, the live turn end takes its done to the gate itself, behind owed input and waits.
-    if (typeof gate === 'object' && state?.liveSession.session && state.atTurnBoundary === state.liveSession.session) {
+    if (typeof gate === 'object' && state?.liveSession.session && state.boundary.atTurnBoundary === state.liveSession.session) {
       this.turnSettler.settleTurn(runId, state, 'gate', this.turnSettler.boundaryTurn(runId, state, state.liveSession.session, true), gate);
     }
     return true;
@@ -91,7 +92,7 @@ export class RunFinish {
     // A late success callback has no authority to reopen a stopped/reviewing root.
     if (['done', 'review', 'failed', 'cancelled'].includes(parent.status)) return 'held';
     const state = this.completionGateHost.active.get(runId);
-    const pendingAsk = hasPendingHumanAsk(runId, id => this.completionGateHost.pendingHumanAskSeq(id)) || state?.pendingHumanAsk;
+    const pendingAsk = hasPendingHumanAsk(runId, id => this.completionGateHost.pendingHumanAskSeq(id)) || state?.boundary.pendingHumanAsk;
     if (!pendingAsk && this.completionMayPass(runId)) return 'accept';
     if (parent.delegation.finishRequestedAt) {
       // Legacy accepted Finish cannot strand the new gate behind an execution ban.

@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { ActiveRun } from '../active-run.ts';
 
 export function clearUnreadInputTimer(state: ActiveRun): void {
@@ -19,16 +20,16 @@ export function harnessHoldsHumanInput(state: ActiveRun): boolean {
 }
 
 export function clearNoWaitNudgeReplyTimer(state: ActiveRun): void {
-  if (state.noWaitNudgeReplyTimer) {
-    clearTimeout(state.noWaitNudgeReplyTimer);
-    state.noWaitNudgeReplyTimer = undefined;
+  if (state.boundary.noWaitNudgeReplyTimer) {
+    clearTimeout(state.boundary.noWaitNudgeReplyTimer);
+    transitionTurnBoundary(state, { kind: 'reply-expired', phase: 'cancel', session: state.liveSession.session });
   }
 }
 
 export function clearIdleTimer(state: ActiveRun): void {
-  if (state.idleTimer) {
-    clearTimeout(state.idleTimer);
-    state.idleTimer = undefined;
+  if (state.boundary.idleTimer) {
+    clearTimeout(state.boundary.idleTimer);
+    transitionTurnBoundary(state, { kind: 'idle-expired', phase: 'cancel', session: state.liveSession.session });
   }
   clearNoWaitNudgeReplyTimer(state);
 }

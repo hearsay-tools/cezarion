@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import type { ContentBlock } from '../../core/agent-runner.ts';
@@ -42,10 +43,10 @@ export class TurnNudges {
    *  the nudge's, and its reply is bounded by the no-wait nudge's reply timer, so a harness that
    *  reads the refusal and says nothing parks on Cezar's human wait instead of holding the slot. */
   awaitCompletionNudgeReply(runId: string, state: ActiveRun, session: AgentSession): void {
-    state.completionNudged = session;
+    transitionTurnBoundary(state, { kind: 'completion-refusal', phase: 'delivered', session });
     const refusal = completionGateReads.completionRefusal(this.context, this.completionGateHost, runId);
     if (refusal) recordRequestRefusal(state, refusal);
-    state.noWaitNudgeSawContent = false;
+    transitionTurnBoundary(state, { kind: 'completion-refusal', phase: 'reset-content', session: state.liveSession.session });
     clearIdleTimer(state);
     this.armNoWaitNudgeReplyTimer(runId, state);
   }
@@ -110,7 +111,7 @@ export class TurnNudges {
   canAutoContinue(runId: string, state: ActiveRun): boolean {
     const run = this.context.store.getRun(runId);
     return !!run && !this.context.disposed() && !run.stopping && !state.liveSession.cancelled && !state.liveSession.finishRequested &&
-      !state.inputState.agentInputError && !state.pendingHumanAsk && !hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id)) && !!state.liveSession.session?.open &&
+      !state.inputState.agentInputError && !state.boundary.pendingHumanAsk && !hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id)) && !!state.liveSession.session?.open &&
       !this.host.workerExecutionStopped(runId) && !this.host.executionBlockedByRootFinish(run) && !run.waits?.length &&
       !state.inputState.agentInputFlight && !harnessOwesInput(state) && !this.host.hasQueuedAgentInputs(runId);
   }
@@ -127,10 +128,10 @@ export class TurnNudges {
    * `text` is the turn-end rule's nudge, scoped to the step by default (hearsay-tools/cezarion#1620).
    */
   tryAutonomousNudge(runId: string, state: ActiveRun, stepId: string,
-    text = stepScopedNudge(AUTONOMOUS_NUDGE, !!state.liveSession.session && state.nextStep?.session === state.liveSession.session)): boolean {
+    text = stepScopedNudge(AUTONOMOUS_NUDGE, !!state.liveSession.session && state.boundary.nextStep?.session === state.liveSession.session)): boolean {
     const session = state.liveSession.session;
-    if (!state.autonomous || !session || !this.canAutoContinue(runId, state)) return false;
-    state.autonomousNudgePending = undefined;
+    if (!state.boundary.autonomous || !session || !this.canAutoContinue(runId, state)) return false;
+    transitionTurnBoundary(state, { kind: 'input-ready', phase: 'clear-nudge', session });
     clearIdleTimer(state);
     // One budget with the timer wakes (hearsay-tools/cezarion#1234).
     if (this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) {
@@ -143,7 +144,7 @@ export class TurnNudges {
       // Keep this exact boundary running until onAgentInputReady retries, without charging
       // the cap or claiming delivery. Missing readiness closes via the idle bound.
       if (session.open && !state.inputState.agentInputError && !state.liveSession.agentSessionError) {
-        state.autonomousNudgePending = session;
+        transitionTurnBoundary(state, { kind: 'input-ready', phase: 'retain-nudge', session });
         this.host.armIdleTimer(runId, state);
       }
       return false;
@@ -160,11 +161,11 @@ export class TurnNudges {
    *  automatic-wake budget. The autonomous wording repeats; the no-wait one is sent once and is
    *  bounded by its reply timer (#544's liveness). */
   sendTurnEndNudge(runId: string, state: ActiveRun, stepId: string | undefined, text: string): boolean {
-    if (state.autonomous) return !!stepId && this.tryAutonomousNudge(runId, state, stepId, text);
+    if (state.boundary.autonomous) return !!stepId && this.tryAutonomousNudge(runId, state, stepId, text);
     if (!this.canAutoContinue(runId, state)) return false;
-    state.noWaitNudgeSawContent = false;
+    transitionTurnBoundary(state, { kind: 'turn-end', phase: 'reset-content', session: state.liveSession.session });
     if (!this.host.submitAgentInput(runId, state, [{ type: 'text', text }])) return false;
-    state.noWaitNudged = state.liveSession.session;
+    transitionTurnBoundary(state, { kind: 'input-submitted', phase: 'nudge-delivered', session: state.liveSession.session });
     clearIdleTimer(state);
     this.armNoWaitNudgeReplyTimer(runId, state);
     const spent = this.host.chargeAutomaticWake(runId);
@@ -176,7 +177,7 @@ export class TurnNudges {
    *  reply timer runs or after it expired on this session: OpenCode and Cursor emit a synthetic one
    *  inside `sendAgentMessage`, and a later send goes through `submitAgentInput`, which resumes. */
   isNoWaitNudgeReply(state: ActiveRun, event: { type: string; item?: { parentItemId?: string } }): boolean {
-    if (event.type === 'turn.started') return state.noWaitNudgeReplyTimer !== undefined || state.noWaitNudgeParked === state.liveSession.session;
+    if (event.type === 'turn.started') return state.boundary.noWaitNudgeReplyTimer !== undefined || state.boundary.noWaitNudgeParked === state.liveSession.session;
     if (event.type === 'text' || event.type === 'tool-call' || event.type === 'tool-result') return true;
     if (event.type === 'item.delta' || !event.type.startsWith('item.')) return false;
     return event.item?.parentItemId === undefined;
@@ -187,12 +188,12 @@ export class TurnNudges {
    *  Cezar's no-wait wait parks on it again. */
   noteNoWaitNudgeContent(runId: string, state: ActiveRun, event: { type: string; item?: { parentItemId?: string } }): void {
     if (!this.isNoWaitNudgeReply(state, event)) return;
-    state.noWaitNudgeSawContent = true;
+    transitionTurnBoundary(state, { kind: 'reply-content', phase: 'received', session: state.liveSession.session });
     clearNoWaitNudgeReplyTimer(state);
-    if (state.noWaitNudgeParked !== state.liveSession.session || !this.line.isParked(runId)) return;
-    if (state.pendingHumanAsk || hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id))) return;
+    if (state.boundary.noWaitNudgeParked !== state.liveSession.session || !this.line.isParked(runId)) return;
+    if (state.boundary.pendingHumanAsk || hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id))) return;
     this.host.resumeParkedRun(runId, state);
-    state.noWaitNudgeParked = undefined;
+    transitionTurnBoundary(state, { kind: 'reply-content', phase: 'resumed', session: state.liveSession.session });
   }
 
   /** A no-wait nudge the harness acknowledged but never answered (an OpenCode heartbeat keeps the
@@ -200,19 +201,19 @@ export class TurnNudges {
    *  waits for the user. A reply that arrives after it runs, and the run stays on that question. */
   armNoWaitNudgeReplyTimer(runId: string, state: ActiveRun): void {
     clearNoWaitNudgeReplyTimer(state);
-    if (state.noWaitNudgeSawContent) return;
+    if (state.boundary.noWaitNudgeSawContent) return;
     const session = state.liveSession.session;
     if (!session?.open) return;
     const timer = setTimeout(() => {
-      state.noWaitNudgeReplyTimer = undefined;
+      transitionTurnBoundary(state, { kind: 'reply-expired', phase: 'fired', session });
       if (this.context.disposed() || this.host.active.get(runId) !== state || state.liveSession.session !== session || !session.open ||
         state.liveSession.cancelled || state.liveSession.finishRequested || this.line.isParked(runId)) return;
-      state.noWaitNudgeParked = session;
+      transitionTurnBoundary(state, { kind: 'reply-expired', phase: 'park', session });
       // The note names the nudge left unanswered (hearsay-tools/cezarion#1301).
-      this.host.openTurnEndHumanWait(runId, state, state.liveSession.currentStepId, 'no-wait', state.completionNudged === session ? COMPLETION_NO_REPLY_NOTE : NO_WAIT_NO_REPLY_NOTE);
+      this.host.openTurnEndHumanWait(runId, state, state.liveSession.currentStepId, 'no-wait', state.boundary.completionNudged === session ? COMPLETION_NO_REPLY_NOTE : NO_WAIT_NO_REPLY_NOTE);
       this.host.settledTurnOutcome(runId, 'reply-timer', { kind: 'park', keepsSlot: false });
     }, this.noWaitNudgeReplyMs);
     timer.unref?.();
-    state.noWaitNudgeReplyTimer = timer;
+    transitionTurnBoundary(state, { kind: 'reply-expired', phase: 'armed', session, timer });
   }
 }
