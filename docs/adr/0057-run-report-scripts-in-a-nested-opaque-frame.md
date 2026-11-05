@@ -63,6 +63,6 @@ translucent background.
 ## Consequences
 
 A report script can still change its own document, run timers and use the CPU. Apart from WebRTC,
-it cannot reach the network. It cannot reach the cockpit or another window. A library outside the table needs a change to this record
-and to `report-libraries.ts`. The published package grows by about 3.8 MB for the two libraries.
+it cannot reach the network. It cannot reach the cockpit or another window. A library outside the
+table needs a change to this record and to `report-libraries.ts`. The published package grows by about 3.8 MB for the two libraries.
 The specs in `packages/web/e2e/html-report-reader.e2e.ts` prove each layer on its own.
