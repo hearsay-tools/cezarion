@@ -1,11 +1,9 @@
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import type { AgentSession } from '../core/agent-runner.ts';
+import { describe, expect, it, vi } from 'vitest';
 import { answerAsParent } from '../core/harness-parity.testkit.ts';
-import { grantSteer, eventCheckpoint, controlledWire, fixtureUpdateRun, manager, parent, register, restart, root, store, until, waitOf, worker } from './worker-wait.testkit.ts';
+import { grantSteer, eventCheckpoint, controlledWire, fixtureUpdateRun, manager, parent, register, restart, root, store, until, waitOf, worker, work } from './worker-wait.testkit.ts';
 import { setRunStatus, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { useWorkerCapacityFixture } from './worker-wait-capacity.testkit.ts';
 
@@ -22,17 +20,18 @@ for (const mode of ['fresh', 'continuation'] as const) {
         await until(() => store.getRun(p.id)?.status === 'waiting');
       }
       // hearsay-tools/cezarion#1235: the list's admission, not `workerWakeAdmitted`.
-      const engine = runInternals(manager);
-      const session = engine.active.get(p.id)!.liveSession.session!;
-      const accept = session.sendAgentMessage.bind(session);
+      expect(work.liveSessions.size).toBe(1);
+      const [session] = work.liveSessions;
+      const send = vi.spyOn(session!, 'sendAgentMessage').mockReturnValue(false);
       // A backend opening/ack window legitimately refuses non-human input.
-      session.sendAgentMessage = () => false;
+
       const w = await worker(p.id); const wait = register(p.id, [w.id]);
       await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
       fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
-      await until(() => runInternals(manager).line.waitWakeAdmitted.has(p.id));
+      await until(() => send.mock.calls.length > 0);
+      expect(store.getRun(p.id)?.agentInputs?.find(input => input.id === wait.id)?.deliveredAt).toBeUndefined();
       const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
-      session.sendMessage([{ type: 'text', text: 'mock:cezar-ask' }]);
+      session!.sendMessage([{ type: 'text', text: 'mock:cezar-ask' }]);
       await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
       expect(store.readEvents(p.id).some(event => event.type === 'ask.requested')).toBe(true);
       expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id);
@@ -41,7 +40,7 @@ for (const mode of ['fresh', 'continuation'] as const) {
       // hearsay-tools/cezarion#1235 ("Messages beside a pending question"): the question no longer
       // holds the wake back. Once the backend takes input, the result is delivered beside the card,
       // which stays pending and answerable; it used to release the admission and wait for the answer.
-      session.sendAgentMessage = accept;
+      send.mockRestore();
       await until(() => !!store.getRun(p.id)?.agentInputs?.[0]?.deliveredAt);
       expect(hasPendingAsk(store, p.id)).toBe(true);
       expect(waitOf(store.getRun(p.id))).toBeUndefined();
@@ -62,7 +61,10 @@ for (const role of ['root', 'worker'] as const) {
         manager.enqueueOwnedRun(w.id);
         await until(() => store.getRun(w.id)?.status === 'waiting' && store.transcriptFacts(w.id).pendingAsk?.routedMessageId !== undefined);
       }
-      (manager as unknown as { active: Map<string, { liveSession: { session: AgentSession; };  }> }).active.get(target.id)!.liveSession.session.end();
+      const sessions = [...work.liveSessions];
+      const session = role === 'root' ? sessions[0] : sessions[1];
+      expect(session).toBeDefined();
+      session!.end();
       await until(() => !manager.isActive(target.id));
       // Only an explicit answer may answer the ask: the human's Continue on the root, the parent's
       // reply on the worker, which reopens it through the same human-origin continuation.
@@ -74,7 +76,7 @@ for (const role of ['root', 'worker'] as const) {
       // question as it stops (hearsay-tools/cezarion#2410), which a crash never writes.
       store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar')); const events = eventCheckpoint();
       expect(store.getRun(target.id)?.continuationMessage?.origin).toBe('human');
-      await until(() => { return (manager as unknown as { active: Map<string, { liveSession: { sessionEverOpened?: boolean; };  }> }).active.get(target.id)?.liveSession.sessionEverOpened === true; });
+      await until(() => manager.isActive(target.id) && store.getRun(target.id)?.steps.some(step => !!step.sessionId) === true);
       // The real wire received the accepted input but cannot reply until released.
       await until(() => wire.received() === 1);
       manager.cancel(target.id);

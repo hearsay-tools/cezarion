@@ -1,3 +1,4 @@
+import { observationClock } from '../core/observation-clock.testkit.ts';
 // Register the external CI mock before loading RunManager.
 import { success, ciWaitOf, lastCiWaitOf, github, register } from './ci-wait-fixture.testkit.ts';
 import { runInternals } from './run-internals.testkit.ts';
@@ -6,7 +7,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { controlledWire, manager, parent, root, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { controlledWire, manager, parent, root, semaphore, store, until, useWorkerWaitFixture, work } from './worker-wait.testkit.ts';
 
 
 
@@ -39,12 +40,12 @@ describe('CI wait delivery', { timeout: 30_000 }, () => {
     const external = github();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     await register(run.id);
-    const engine = runInternals(manager);
-    const session = engine.active.get(run.id)!.liveSession.session!;
-    const original = session.sendAgentMessage.bind(session);
+    expect(work.liveSessions.size).toBe(1);
+    const [session] = work.liveSessions;
+    const original = session!.sendAgentMessage.bind(session);
     let acknowledge!: () => void;
     const ack = new Promise<void>(resolve => { acknowledge = resolve; });
-    const send = vi.spyOn(session, 'sendAgentMessage').mockImplementation((...args) => {
+    const send = vi.spyOn(session!, 'sendAgentMessage').mockImplementation((...args) => {
       const accepted = original(...args);
       return accepted && accepted.then(() => ack);
     });
@@ -55,14 +56,16 @@ describe('CI wait delivery', { timeout: 30_000 }, () => {
       await until(() => send.mock.calls.length === 1);
       // Native activity and turn-end happen before the held transport ACK.
       await until(() => turnEnds() === before + 1);
-      expect(runInternals(manager).line.monitoring.has(run.id)).toBe(true);
+      expect(work.liveSessions.has(session!)).toBe(true);
+      expect(store.getRun(run.id)?.agentInputs?.find(input => input.id === ciWaitOf(run.id)?.id)?.deliveredAt).toBeUndefined();
       expect(store.getRun(run.id)?.status).toBe('waiting');
       expect(semaphore.busy()).toBe(0);
       expect(ciWaitOf(run.id)?.phase).toBe('resolved');
       acknowledge();
       await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
       // Nothing left open: the boundary parks for the user and gives the pool slot back.
-      await until(() => !runInternals(manager).line.monitoring.has(run.id) && store.getRun(run.id)?.status === 'waiting');
+      await until(() => store.getRun(run.id)?.waits?.some(wait => wait.kind === 'human') === true && store.getRun(run.id)?.status === 'waiting');
+      expect(semaphore.busy()).toBe(0);
     } finally { acknowledge(); }
   });
 
@@ -70,12 +73,18 @@ describe('CI wait delivery', { timeout: 30_000 }, () => {
     const external = github();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     const wait = await register(run.id);
-    const engine = runInternals(manager);
-    const send = vi.spyOn(engine.active.get(run.id)!.liveSession.session!, 'sendAgentMessage').mockReturnValue(false);
+    expect(work.liveSessions.size).toBe(1);
+    const [session] = work.liveSessions;
+    const send = vi.spyOn(session!, 'sendAgentMessage').mockReturnValue(false);
+    const clock = observationClock(delay => delay === 1000 && /\bat WakeRetries\.retryWaitAdmission \(/.test(new Error().stack ?? ''));
     external.settle(success());
+    await until(() => send.mock.calls.length >= 1 && clock.pending > 0);
+    await clock.advance(1000);
     await until(() => send.mock.calls.length >= 2);
     expect(manager.cancel(run.id)).toBe(true);
-    expect(runInternals(manager).retries.wakeRetries.has(run.id)).toBe(false);
+    const attempts = send.mock.calls.length;
+    await clock.advance(2000);
+    expect(send).toHaveBeenCalledTimes(attempts);
     expect(ciWaitOf(run.id)).toBeUndefined();
     expect(store.getRun(run.id)?.agentInputs?.some(input => input.id === wait.id)).toBe(false);
   });
@@ -88,11 +97,24 @@ describe('CI wait delivery', { timeout: 30_000 }, () => {
     const second = await parent(); await until(() => store.getRun(second.id)?.status === 'waiting');
     await register(second.id);
     expect(semaphore.busy()).toBe(1); // one pool slot, one regular slot
-    const queue = vi.spyOn(runInternals(manager).line.queue, 'push');
-    external.settle(success());
+    let acknowledge!: () => void;
+    const ack = new Promise<void>(resolve => { acknowledge = resolve; });
+    const sends = [...work.liveSessions].map(session => {
+      const original = session.sendAgentMessage.bind(session);
+      return vi.spyOn(session, 'sendAgentMessage').mockImplementation((...args) => {
+        const accepted = original(...args);
+        return accepted && accepted.then(() => ack);
+      });
+    });
+    expect(sends).toHaveLength(2);
+    try {
+      external.settle(success());
+      await until(() => sends.every(send => send.mock.calls.length === 1));
+      expect(semaphore.busy()).toBe(1);
+    } finally { acknowledge(); }
     await until(() => !!lastCiWaitOf(first.id)?.deliveredAt && !!lastCiWaitOf(second.id)?.deliveredAt);
-    expect(queue.mock.calls.flat()).not.toContain(first.id);
-    expect(queue.mock.calls.flat()).not.toContain(second.id);
+    expect(store.getRun(first.id)?.agentInputs?.filter(input => input.id === lastCiWaitOf(first.id)?.id)).toHaveLength(1);
+    expect(store.getRun(second.id)?.agentInputs?.filter(input => input.id === lastCiWaitOf(second.id)?.id)).toHaveLength(1);
   });
 
   it('delivers a completed wait while another run holds the only regular slot', async () => {

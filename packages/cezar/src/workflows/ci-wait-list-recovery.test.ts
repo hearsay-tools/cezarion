@@ -1,7 +1,6 @@
 // Register the external CI mock before loading RunManager.
 import { success, registerPr, registerTimer, waitById, settledById, inputsFor, fireTimer, flushMicrotasks, githubByPr, waitingParent, expectNoWaitHumanWait } from './ci-wait-fixture.testkit.ts';
 import { WAIT_PHASE, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runInternals } from './run-internals.testkit.ts';
 
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -10,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { type Wait } from '@open-mercato/cezar-contract/waits';
 
-import { controlledWire, manager, parent, root, restart, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { controlledWire, manager, parent, root, restart, store, until, useWorkerWaitFixture, work } from './worker-wait.testkit.ts';
 
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { ciWatchRequest, waitResultText } from './waits.ts';
@@ -27,7 +26,7 @@ describe('Wait list recovery and cancellation', { timeout: 30_000 }, () => {
     expect(manager.isActive(run.id)).toBe(false);
     expect(store.getRun(run.id)?.status).toBe('waiting');
     expect(waitById(run.id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open, deadline: wait.deadline });
-    expect(runInternals(manager).waitWatches.waitTimers.has(wait.id)).toBe(true);
+    expect(inputsFor(run.id, wait.id)).toEqual([]);
     fireTimer(wait.id);
     await until(() => settledById(run.id, wait.id)?.phase === 'delivered');
     expect(inputsFor(run.id, wait.id)).toHaveLength(1);
@@ -80,7 +79,10 @@ describe('Wait list recovery and cancellation', { timeout: 30_000 }, () => {
       return (store.getRun(run.id)?.waits ?? []).length === 0;
     });
     expect([settledById(run.id, ci.id)?.phase, settledById(run.id, timer.id)?.phase]).toEqual(['cancelled', 'cancelled']);
-    expect([runInternals(manager).waitWatches.waitTimers.size, runInternals(manager).waitWatches.ciWatches.size]).toEqual([0, 0]);
+    const settled = structuredClone(store.getRun(run.id));
+    fireTimer(timer.id);
+    await flushMicrotasks();
+    expect(store.getRun(run.id)).toEqual(settled);
     expect(store.getRun(run.id)?.agentInputs ?? []).toEqual([]);
   });
 
@@ -96,12 +98,17 @@ describe('Wait list recovery and cancellation', { timeout: 30_000 }, () => {
     else if (action === 'finish') expect(manager.finish(run.id)).toBe(true);
     else {
       // Deletion takes an inactive run: a closed session keeps its waits (R72).
-      runInternals(manager).active.get(run.id)!.liveSession.session!.end();
+      expect(work.liveSessions.size).toBe(1);
+      const [session] = work.liveSessions;
+      session!.end();
       await until(() => !manager.isActive(run.id));
       expect(store.deleteRun(run.id)).toBe(true);
     }
     expect(external.aborted(12)).toBe(true);
-    expect([runInternals(manager).waitWatches.waitTimers.size, runInternals(manager).waitWatches.ciWatches.size]).toEqual([0, 0]);
+    const settled = structuredClone(store.getRun(run.id));
+    fireTimer(timer.id);
+    await flushMicrotasks();
+    expect(store.getRun(run.id)).toEqual(settled);
     if (action !== 'delete') {
       expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
       expect([settledById(run.id, ci.id)?.phase, settledById(run.id, timer.id)?.phase]).toEqual(['cancelled', 'cancelled']);
@@ -130,8 +137,9 @@ describe('Wait list recovery and cancellation', { timeout: 30_000 }, () => {
     await resolve(first.id, () => external.settle(12));
     await resolve(timer.id, () => fireTimer(timer.id));
     await resolve(second.id, () => external.settle(13));
-    const session = runInternals(manager).active.get(run.id)!.liveSession.session!;
-    const send = vi.spyOn(session, 'sendAgentMessage');
+    expect(work.liveSessions.size).toBe(1);
+    const [session] = work.liveSessions;
+    const send = vi.spyOn(session!, 'sendAgentMessage');
     writeFileSync(gate, 'end');
     const ids = [first.id, timer.id, second.id];
     await until(() => ids.every(id => settledById(run.id, id)?.phase === 'delivered'));
