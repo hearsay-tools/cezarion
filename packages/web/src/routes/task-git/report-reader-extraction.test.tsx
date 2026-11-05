@@ -11,7 +11,7 @@ import { ReportReader, TaskReportRoute, type ReportSourceLookup } from './report
 const ID = '4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
 const result = {
   type: 'file', source: 'artifact', path: 'report.html', size: 40, binary: false, tooLarge: false,
-  content: '<h1>Shared reader</h1><script>unsafe()</script>',
+  content: '<h1>Shared reader</h1><script src="https://cdn.test/unsafe.js"></script>',
   artifact: { id: ID, runId: 'r1', name: 'report.html', size: 40, sourcePath: '/tmp/report.html', createdAt: '2026-11-01T09:00:00.000Z', sha256: 'a'.repeat(64) },
 }
 
@@ -105,7 +105,8 @@ describe('the extracted report reader', () => {
     await waitFor(() => expect(frame()).not.toBeNull())
     const srcdoc = frame()!.getAttribute('srcdoc')
     expect(frame()!.getAttribute('sandbox')).toBe(REPORT_SANDBOX)
-    expect(srcdoc).not.toContain('<script>')
+    expect(srcdoc).toContain('Shared reader')
+    expect(srcdoc).not.toContain('cdn.test')
     const heading = screen.getByRole('heading', { level: 1 }).textContent
     cleanup()
     mount(false)
