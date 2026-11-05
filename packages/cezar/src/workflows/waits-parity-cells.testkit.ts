@@ -125,6 +125,11 @@ function engine() {
 const sessionOf = (id: string) => runnerBoundary.sessions.get(id)!;
 let idleClock: ReturnType<typeof observationClock>;
 let retryClock: ReturnType<typeof observationClock>;
+let admissionClock: ReturnType<typeof observationClock>;
+// No exported admission interval exists; match its one-second timer and exact owner.
+function observeAdmissionRetries() {
+  admissionClock = observationClock(delay => delay === 1000 && /\bat WakeRetries\.retryWaitAdmission \(/.test(new Error().stack ?? ''));
+}
 let accelerateRetries = false;
 // Only retry backoffs use fake time; child-process and drain timers stay native.
 function retryAtOnce() { accelerateRetries = true; }
@@ -467,12 +472,25 @@ async function completionParkOnMessenger(runner: RunnerId) {
 const timerText = (wait: Wait, note: string) => `Timer ${wait.id} fired: ${note}. Continue toward the task goal; register another wait if you are still waiting.`;
 
 // A failed run cannot wake itself. Its absence shows at once, and no admission retry or backoff is left to start one later.
-const expectNoWakeFor = async (id: string) => {
+const expectNoWakeFor = async (runner: RunnerId, id: string) => {
   await semaphore.release();
   expect(store.getRun(id)?.status).toBe('failed');
   expect(manager.isActive(id)).toBe(false);
   expect(retryClock.pending).toBe(0);
+  await expectAdmissionRetryCleared(runner, id);
 };
+
+/** Cleanup cancels the admission timer, and crossing its deadline produces no wake effects. */
+async function expectAdmissionRetryCleared(runner: RunnerId, id: string) {
+  expect(admissionClock.captured).toBeGreaterThan(0);
+  expect(admissionClock.pending).toBe(0);
+  const before = structuredClone({ inputs: store.getRun(id)?.agentInputs, events: store.readEvents(id),
+    failures: store.getRun(id)?.waitDeliveryFailures, attempts: ciNativeMessages(runner, root) });
+  await admissionClock.advance(1001);
+  await semaphore.release();
+  expect({ inputs: store.getRun(id)?.agentInputs, events: store.readEvents(id),
+    failures: store.getRun(id)?.waitDeliveryFailures, attempts: ciNativeMessages(runner, root) }).toEqual(before);
+}
 async function timerWaits(id: string) {
   const tools = manager.cezarToolHandlers(id, toolGenerationOf(id));
   const timerWait = async (seconds: number, note: string) => {
@@ -1200,6 +1218,7 @@ function deliveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
     });
 
     it(`${runner} U14 a wait-wake continuation that fails persistently stops at the delivery bound, the run fails keeping its result, and Continue delivers it once`, async () => {
+      observeAdmissionRetries();
       nativeWire(runner);
       const failure = persistentWakeFailure(root, runner);
       retryAtOnce();
@@ -1216,12 +1235,13 @@ function deliveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
       // A wait that resolves on the failed run stays resolved and wakes nothing.
       fireTimer(later.id);
       expect(store.getRun(run.id)?.waits?.find(wait => wait.id === later.id)?.phase).toBe('resolved');
-      await expectNoWakeFor(run.id);
+      await expectNoWakeFor(runner, run.id);
       failure.lift();
       await continueDelivers(runner, run.id, timer, later);
     });
 
     it(`${runner} U14 a session that keeps closing cleanly before its wait result is delivered stops at the delivery bound, the run fails keeping its result, and Continue delivers it once`, async () => {
+      observeAdmissionRetries();
       nativeWire(runner);
       retryAtOnce();
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
@@ -1247,7 +1267,7 @@ function deliveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
         expect(store.getRun(run.id)?.steps.at(-1)).toMatchObject({ status: STEP_STATUS.failed, error: WAKE_SESSION_CLOSED_ERROR });
         fireTimer(later.id);
         expect(store.getRun(run.id)?.waits?.find(wait => wait.id === later.id)?.phase).toBe('resolved');
-        await expectNoWakeFor(run.id);
+        await expectNoWakeFor(runner, run.id);
         closing = false;
         await continueDelivers(runner, run.id, timer, later);
       } finally {
@@ -1256,6 +1276,7 @@ function deliveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
     });
 
     it(`${runner} U14 Stop on a failed run holding wait results at the delivery bound discards every wait, starts nothing, leaves the run failed, and a later Continue delivers none of them`, async () => {
+      observeAdmissionRetries();
       nativeWire(runner);
       const failure = persistentWakeFailure(root, runner);
       retryAtOnce();
@@ -1278,7 +1299,7 @@ function deliveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
       await flushMicrotasks();
       expect(inputsFor(run.id, later.id)).toEqual([]);
       expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
-      await expectNoWakeFor(run.id);
+      await expectNoWakeFor(runner, run.id);
       expect(store.readEvents(run.id).filter(event => event.type === 'note' && event.message === WAITS_DISCARDED_NOTE)).toHaveLength(1);
       expect(prompted(runner, TIMER_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
       // Continue is a plain continuation: nothing from the discarded waits reaches the agent.
@@ -2180,6 +2201,7 @@ function recoveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
     }
 
     it(`${runner} U14m a message-only wake beside a worker wait whose sessions persistently fail stops at the delivery bound, the run fails keeping the message, and Continue delivers it once`, async () => {
+      observeAdmissionRetries();
       retryAtOnce();
       const f = await messageWakeWithoutSession();
       const id = await f.progress('Worker progress u14m');
@@ -2195,6 +2217,7 @@ function recoveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
       expect(delivered(f.p.id, id)).toBe(false);
       expect(store.readEvents(f.p.id).filter(event => event.type === 'note' && event.message === WAKE_DELIVERY_CAP_NOTE)).toHaveLength(1);
       expect(retryClock.pending).toBe(0);
+      await expectAdmissionRetryCleared(runner, f.p.id);
 
       // A steering wire took the message into each failed opening turn; none of them read it.
       const attempts = prompted(runner, 'Worker progress u14m').length;
