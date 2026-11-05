@@ -262,7 +262,7 @@ it('keeps legacy unavailable wait hints uncertain without an effect receipt', ()
 });
 
 describe('wait result guidance', () => {
-  const receipt = { ok: true as const, wait_id: '4a6b6bf4-798c-4dc7-aede-e583428f667a', kind: 'timer' as const,
+  const receipt = { ok: true as const, wait_id: '4a6b6bf4-798c-4dc7-aede-e583428f667a', kind: WAIT_KIND.timer,
     deadline: '2026-11-05T14:00:00.000Z', open_waits: [] };
   const cases: Array<[string, CezarWaitAnswer, string]> = [
     ['unknown transport outcome', { ok: false, effect: 'unknown', code: 'outcome_unknown', message: 'lost response' }, 'Outcome unknown. Retry the same operation_id'],
