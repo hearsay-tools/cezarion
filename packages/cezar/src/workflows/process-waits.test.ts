@@ -85,7 +85,8 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     const pid = sleeper();
     const wait = await register(run.id, { pid, exit_file: 'build.exit', note: 'build' });
     expect(wait).toMatchObject({ kind: WAIT_KIND.process, pid, note: 'build', startToken: expect.any(String), exitFile: join(store.getRun(run.id)!.worktreePath!, 'build.exit') });
-    expect((await register(run.id, { pid, exit_file: 'build.exit', timeout_seconds: 60 })).id).toBe(wait.id);
+    expect((await register(run.id, { pid, exit_file: 'build.exit' })).id).toBe(wait.id);
+    await expect(register(run.id, { pid, exit_file: 'build.exit', timeout_seconds: 60 })).rejects.toMatchObject({ code: 'duplicate_deadline', retainedWait: { id: wait.id, deadline: wait.deadline } });
     expect(external.watches).toHaveLength(1);
     expect(external.watches[0]!.request).toMatchObject({ pid, startToken: wait.startToken, exitFile: wait.exitFile, deadline: wait.deadline });
     await until(() => store.getRun(run.id)?.status === 'waiting' && semaphore.busy() === 1);

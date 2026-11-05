@@ -27,7 +27,7 @@ describe('wait tool definitions', () => {
     for (const key of ['oneOf', 'anyOf', 'allOf']) expect(schema).not.toHaveProperty(key);
     // hearsay-tools/cezarion#1425: kind "pr" replaced kind "ci" and takes a target and a conflict switch.
     expect(schema.properties).toMatchObject({ kind: { enum: ['pr', 'worker', 'request', 'peer', 'timer', 'process'] }, until: { enum: ['checks', 'merge'], default: 'checks' }, wake_on_conflict: { type: 'boolean', default: true } });
-    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['exit_file', 'kind', 'mode', 'note', 'peer_ids', 'pid', 'pr', 'request_ids', 'seconds', 'timeout_seconds', 'until', 'wake_on_conflict', 'worker_ids']);
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['exit_file', 'kind', 'mode', 'note', 'operation_id', 'peer_ids', 'pid', 'pr', 'request_ids', 'seconds', 'timeout_seconds', 'until', 'wake_on_conflict', 'worker_ids']);
     expect(JSON.stringify(schema)).not.toContain('"ci"');
     expect((schema.properties as Record<string, { description: string }>).wake_on_conflict!.description).toContain('a PR you do not own');
     expect((schema.properties as Record<string, { description: string }>).until!.description).toContain('"merge"');
@@ -297,7 +297,7 @@ describe('U0 wait tools on every native wire', () => {
           expect(JSON.parse(json)).toEqual({ ok: true, wait_id: humanId, open_waits: humanOpen });
           expect(hint).toBe('Asked. Cezar shows the context and question card to the user. End your turn; the user\'s answer wakes you.');
         } else if (tool === 'cezar_wait') {
-          expect(calls).toEqual([['wait', { ...args, timeout_seconds: 1800, until: 'checks', wake_on_conflict: true }, 'cezar_wait']]);
+          expect(calls).toEqual([['wait', { ...args, operation_id: expect.any(String), timeout_seconds: 1800, until: 'checks', wake_on_conflict: true }, 'cezar_wait']]);
           expect(JSON.parse(json)).toEqual({ ok: true, wait_id: wait.id, kind: WAIT_KIND.pr, deadline: wait.deadline, open_waits: openWaits });
           expect(hint).toBe('Registered. End your turn to wait; any open wait wakes you when it resolves.');
         } else if (tool === 'cezar_done') {
