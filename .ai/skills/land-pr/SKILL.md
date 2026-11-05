@@ -91,7 +91,10 @@ Each item must hold at the same current head:
    owner-approved gate labels before the first push that needs them.
    Finish PR body edits before the last push and final review pass, because a
    body edit can start another CodeRabbit review. After a later body edit,
-   repeat the live review gate before reporting readiness or enqueueing.
+   return to implementation: finish the body edits, push a new head, and obtain
+   review and live admission evidence for that new head before reporting
+   readiness or enqueueing. Repeating the gate on the old head can still read
+   the previous completed check before the post-edit execution appears.
 8. **Main:** main CI passes. A failure confined to Publish npm snapshot does
    not block a code merge; other failures wait for the named repair task.
 
