@@ -75,7 +75,8 @@ can drive the view from the HTTP snapshot. One PR for each slice.
   HTTP reads create demand.
 - Tests: every row of the spec's probe case table; all five buckets; a check that
   moves `pending` → `pass` between two snapshots; 101 checks with only the last one
-  pending (counts say 100 of 101). Prove the "result only updates
+  pending (counts say 100 of 101). In S5, the same snapshot renders 100 segments plus a
+  "+1" overflow segment in the pending tone. Prove the "result only updates
   progress" row red against a version that lets a failed read resolve the wait. Read
   `.ai/skills/load-bearing-change/SKILL.md` first: this slice touches a working
   watcher.

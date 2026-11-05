@@ -59,7 +59,7 @@ changes.
 | waiting-on-workers with `replies` (every open worker-kind wait names `requestIds`) | Waiting for reply | "From <task>", or "From N tasks". | Reply deadline. |
 | waiting-on-workers, mixed (some entries name workers, some name requests) | Waiting for workers | "N owed · M settled", the count `computeWaitingOn` reports. | The earliest deadline. The request lines show which replies are owed. |
 | waiting-on-subagents | Waiting for subagents | "N native subagents". | Deadline. |
-| waiting-for-ci | Waiting for CI | "PR <n> checks · P of T passed". T counts every check except `skipping` and `cancel`. | One segment for each check, in name order, by its GitHub bucket: `pass` success tone, `fail` danger tone, `pending` info tone (breathing), `skipping` and `cancel` neutral and hollow. A segment flashes when its check moves from `pending` to `pass`. Deadline. |
+| waiting-for-ci | Waiting for CI | "PR <n> checks · P of T passed". T counts every check except `skipping` and `cancel`. | One segment for each check, in name order, by its GitHub bucket: `pass` success tone, `fail` danger tone, `pending` info tone (breathing), `skipping` and `cancel` neutral and hollow. A segment flashes when its check moves from `pending` to `pass`. When `truncated` is set, one more segment "+N" stands for the checks outside the list (N from `counts` minus the listed checks), in the tone of the worst of them: `fail`, then `pending`, then `pass`, then neutral. Deadline. |
 | waiting-for-merge | Waiting for merge | "PR <n>". The merge poller keeps its PR state local until the wait settles (`runMerge()` in `supervisor.ts`), so the view shows no live merge state. | Deadline. |
 | waiting-for-command (process wait) | Waiting for command | The wait's `note`, or "Process <pid>" without one. The wait stores no command line. | Elapsed time and deadline. |
 | monitoring (timer) | Waiting for timer | The timer note. | "Wakes 16:00 · in 27:52", counting down. |
@@ -244,7 +244,11 @@ ActivityRequest = {
                                             // still name it
   createdAt, deadline?,
 }
-ActivityClosedRequest = { requestId, senderRunId, recipientRunId, status, observedAt }
+ActivityClosedRequest = { requestId, senderRunId, recipientRunId, observedAt,
+  status,   // requestOutcomeSchema's status (packages/contract/src/conversations.ts).
+            // Only `replied` plays the reply comet; every other status fades.
+            // `replied-late` is never listed (see Closure times).
+}
 ```
 
 ### Read model (service)
