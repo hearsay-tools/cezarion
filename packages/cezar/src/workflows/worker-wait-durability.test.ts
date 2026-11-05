@@ -1,3 +1,4 @@
+import { agentEnvForStep } from './run/launch-context.ts';
 import { InputDelivery } from './run/input-delivery.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -7,6 +8,11 @@ import { RunStore } from '../runs/store.ts';
 import { controlledWire, fixtureUpdateRun, manager, parent, queuedWake, register, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, lastWaitOf, worker } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, WORKER_OUTCOME_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+
+vi.mock('./run/launch-context.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('./run/launch-context.ts')>();
+  return { ...actual, agentEnvForStep: vi.fn(actual.agentEnvForStep) };
+});
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -134,14 +140,13 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     // hearsay-tools/cezarion#1235: accepted durably beside the owed wait, which it no longer withdraws.
     it(`startup human message ${crash}: ${crash === 'checkpoint-failure' ? 'stops delivery and preserves the replay ID' : 'survives restart without double folding or lost input'}`, async () => {
       const { p, w, wait } = await queuedWake();
-      const engine = manager as unknown as { agentEnvForStep(id: string, ...args: unknown[]): Promise<unknown> };
-      const real = engine.agentEnvForStep.bind(manager);
+      const real = await vi.importActual<typeof import('./run/launch-context.ts')>('./run/launch-context.ts');
       let release!: () => void; let entered = false;
       const gate = new Promise<void>(resolve => { release = resolve; });
-      engine.agentEnvForStep = async (id, ...args) => {
-        if (id === p.id) { entered = true; await gate; }
-        return real(id, ...args);
-      };
+      vi.mocked(agentEnvForStep).mockImplementation(async (...args) => {
+        if (args[2] === p.id) { entered = true; await gate; }
+        return real.agentEnvForStep(...args);
+      });
       manager.cancel(w.id); await until(() => entered);
       let checkpoint: unknown[];
       try {
