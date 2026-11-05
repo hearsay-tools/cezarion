@@ -102,6 +102,7 @@ vi.mock('../ci-wait/resources.ts', async importOriginal => {
 const runnerBoundary = vi.hoisted(() => ({
   sessions: new Map<string, import('../core/agent-runner.ts').AgentSession>(),
   beforeReturn: undefined as ((runId: string) => void) | undefined,
+  sessionFiles: new Map<string, string>(),
 }));
 vi.mock('../core/runner-factory.ts', async importOriginal => {
   const actual = await importOriginal<typeof import('../core/runner-factory.ts')>();
@@ -109,10 +110,21 @@ vi.mock('../core/runner-factory.ts', async importOriginal => {
     const runner = actual.createRunner(...args);
     const start = runner.startSession.bind(runner);
     runner.startSession = (spec, ...rest) => {
-      const session = start(spec, ...rest);
-      runnerBoundary.sessions.set(spec.env!.CEZ_TASK_ID!, session);
-      runnerBoundary.beforeReturn?.(spec.env!.CEZ_TASK_ID!);
-      return session;
+      const runId = spec.env!.CEZ_TASK_ID!;
+      const sessionsFile = runner.backend === 'opencode' ? runnerBoundary.sessionFiles.get(runId) : undefined;
+      const previousSessionsFile = process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE;
+      try {
+        if (sessionsFile) process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = sessionsFile;
+        const session = start(spec, ...rest);
+        runnerBoundary.sessions.set(runId, session);
+        runnerBoundary.beforeReturn?.(runId);
+        return session;
+      } finally {
+        if (sessionsFile) {
+          if (previousSessionsFile === undefined) delete process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE;
+          else process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = previousSessionsFile;
+        }
+      }
     };
     return runner;
   } };
@@ -1077,14 +1089,27 @@ function inputCells(runners: RunnerId[], it: typeof registerTest = registerTest)
       await until(() => !manager.isActive(parked.id) && store.getRun(parked.id)?.status === 'waiting');
       const release = join(root, 'u8l-release');
       process.env.CEZ_MOCK_RELEASE_FILE = release;
-      if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8l-blocker-sessions.json');
-      const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-gated']!, runner });
       let task: { id: string } | undefined;
       try {
-        await until(() => store.readEvents(blocker.id).some(event => event.type === 'turn.started'));
+        const previousSessionsFile = process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE;
+        try {
+          if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8l-blocker-sessions.json');
+          const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-gated']!, runner });
+          await until(() => store.readEvents(blocker.id).some(event => event.type === 'turn.started'));
+        } finally {
+          if (runner === 'opencode') {
+            if (previousSessionsFile === undefined) delete process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE;
+            else process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = previousSessionsFile;
+          }
+        }
         // Queued before the wake joins the line.
         task = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
         expect(store.getRun(task.id)?.status).toBe('queued');
+        if (runner === 'opencode') {
+          const taskId = task.id;
+          runnerBoundary.sessionFiles.set(taskId, join(root, `u8l-task-${randomUUID()}.json`));
+          onTestFinished(() => { runnerBoundary.sessionFiles.delete(taskId); });
+        }
         fireTimer(wait.id);
         await until(() => store.getRun(parked.id)?.waits?.find(entry => entry.id === wait.id)?.phase === 'resolved');
         expect(store.readEvents(task.id).some(event => event.type === 'turn.started')).toBe(false);
@@ -1093,6 +1118,7 @@ function inputCells(runners: RunnerId[], it: typeof registerTest = registerTest)
       await until(() => settled(parked.id, wait.id)?.phase === 'delivered');
       const deliveredAt = Date.parse(settled(parked.id, wait.id)!.deliveredAt!);
       await until(() => store.readEvents(task!.id).some(event => event.type === 'turn.started'));
+      if (runner === 'opencode') expect(sessionOf(parked.id).open).toBe(true);
       const taskStarted = Date.parse(store.readEvents(task.id).find(event => event.type === 'turn.started')!.ts);
       expect(taskStarted).toBeGreaterThanOrEqual(deliveredAt);
       await until(() => terminal.includes(store.getRun(task!.id)?.status ?? '') || store.getRun(task!.id)?.status === 'waiting');
