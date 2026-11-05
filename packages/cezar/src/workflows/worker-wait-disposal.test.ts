@@ -1,10 +1,13 @@
 import { captureSessions } from './runner-session-capture.testkit.ts';
 import { isDisposedDelegatedRun } from './run/run-guards.ts';
+import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
+import { unused } from './fixture-cleanup.testkit.ts';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { makeTimerWait } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
 import { currentUsage } from '../core/process-usage.ts';
-import { bookkeeping, executions, manager, parent, register, reopenRuntime, store, until, useWorkerWaitFixture, waitOf, worker, work } from './worker-wait.testkit.ts';
+import { bookkeeping, executions, manager, parent, register, reopenRuntime, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker, work } from './worker-wait.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -44,6 +47,17 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       });
     }
   }
+
+  it('disposed turn bookkeeping leaves durable fields unchanged before applying title markers', async () => {
+    const run = store.createRun({ title: 'disposed root', task: 'task', workflow: 'quick-task', steps: [] });
+    const disposed = () => true;
+    const context = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'), semaphore, work, disposed };
+    const host = unused<ConstructorParameters<typeof TurnBookkeeper>[1]>('TurnBookkeeperHost', { isDisposedDelegatedRun: disposed });
+    const bookkeeper = new TurnBookkeeper(context, host);
+    const snapshot = structuredClone(store.getRun(run.id));
+    await bookkeeper.recordTurnEnd(run.id, 'CEZ:TITLE=late disposed callback');
+    expect(store.getRun(run.id)).toEqual(snapshot);
+  });
 
   it('recognizes disposed roots, workers and waits without treating ordinary runs as delegated', async () => {
     const p = await parent(); const w = await worker(p.id);
