@@ -1,5 +1,3 @@
-import { transitionTurnBoundary } from '../workflows/run/turn-boundary.ts';
-import type { ActiveRun } from '../workflows/active-run.ts';
 import { monitoringTurnFiles } from '../workflows/monitoring-turn-partitions.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { observationClock } from './observation-clock.testkit.ts';
@@ -2833,26 +2831,47 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
           });
       }, 60_000);
 
-      it(`${backend} R23 retains pending-question worker scratch after its process completes`, async () => {
-        await withOwnedInputRun(backend, 'ask', async ({ manager, store, runId, repoRoot }) => {
-          manager.enqueueOwnedRun(runId);
-          await waitFor(() => store.readEvents(runId).some(event => event.type === 'ask.requested'));
-          const scratch = resolveAgentTmpDir(join(repoRoot, '.ai/cezar'), runId);
-          writeFileSync(join(scratch, 'notes'), 'pending answer');
-          // Native asks can hold the turn open without an idle timer. Close the
-          // actual session through the same idle-close state, after its native ask.
-          const internal = manager as unknown as {
-            active: Map<string, ActiveRun>;
-          };
-          const state = internal.active.get(runId)!;
-          transitionTurnBoundary(state, { kind: 'idle-expired', phase: 'close', session: state.liveSession.session });
-          state.liveSession.session!.end();
-          await waitFor(() => !manager.isActive(runId));
-          expect(store.getRun(runId)?.status).toBe('waiting');
-          expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
-          expect(readFileSync(join(scratch, 'notes'), 'utf8')).toBe('pending answer');
-        });
-      }, 60_000);
+      parityRow(backend, {
+        id: 'R23', scenario: 'ask', name: 'R23 retains pending-question worker scratch after its process completes',
+        assert(observation: { active: boolean; status: string | undefined; phase: string | undefined; scratch: string }) {
+          expect(observation.active).toBe(false);
+          expect(observation.status).toBe(RUN_STATUS.waiting);
+          expect(observation.phase).toBe('complete');
+          expect(observation.scratch).toBe('pending answer');
+        },
+      }, async () => {
+        const idle = observationClock(delay => delay === IDLE_TIMEOUT_MS && /armIdleTimer/.test(new Error().stack ?? ''));
+        let observation!: { active: boolean; status: string | undefined; phase: string | undefined; scratch: string };
+        try {
+          await withOwnedInputRun(backend, 'ask', async ({ manager, store, runId, repoRoot }) => {
+            manager.enqueueOwnedRun(runId);
+            // bound: the public native or portable ask frame identifies the parked question.
+            await waitFor(() => store.readEvents(runId).some(event => event.type === 'ask.requested'));
+            const scratch = resolveAgentTmpDir(join(repoRoot, '.ai/cezar'), runId);
+            writeFileSync(join(scratch, 'notes'), 'pending answer');
+            const nativeAsk = exemptionFor('R23', backend);
+            if (nativeAsk) {
+              expect(nativeAsk.kind).toBe('capability-absent');
+              expect(idle.pending).toBe(0);
+            } else {
+              // bound: the portable ask's completed turn arms its shipped idle timer.
+              await waitFor(() => idle.pending > 0);
+            }
+            await idle.advance(IDLE_TIMEOUT_MS);
+            if (nativeAsk) {
+              expect(manager.isActive(runId)).toBe(true);
+              expect(store.getRun(runId)?.status).toBe(RUN_STATUS.waiting);
+              expect(store.readWorkerExecution(runId)?.phase).not.toBe('complete');
+            } else {
+              // bound: idle expiry closes the owned process and releases its active run.
+              await waitFor(() => !manager.isActive(runId));
+            }
+            observation = { active: manager.isActive(runId), status: store.getRun(runId)?.status,
+              phase: store.readWorkerExecution(runId)?.phase, scratch: readFileSync(join(scratch, 'notes'), 'utf8') };
+          });
+          return observation;
+        } finally { idle.restore(); }
+      });
     }
   });
 

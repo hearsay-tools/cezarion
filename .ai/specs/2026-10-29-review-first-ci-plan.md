@@ -1,6 +1,7 @@
 # Review before expensive CI verification
 
 Superseded 2026-11-02: [CodeRabbit admission replacement](2026-11-02-coderabbit-admission-plan.md) replaces custom provider execution, caps and manual rejudge. Historical design retained below.
+The review → heavy-job order was removed on 2026-11-05 by hearsay-tools/cezarion#2727: heavy jobs now start after preflight, beside the review, and `verify` still requires both. Its test file is now `.github/scripts/review-gate.workflow.test.cjs`.
 
 
 Status: implemented; local proof complete; live GitHub proof remains with parent · Date: 2026-10-29

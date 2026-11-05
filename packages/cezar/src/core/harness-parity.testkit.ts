@@ -714,6 +714,10 @@ export interface ParityExemption {
  * is the runner, not this table.
  */
 export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
+  ...(['codex', 'opencode'] as const).map(backend => ({
+    criterion: 'R23', backend, kind: 'capability-absent' as const,
+    reason: 'A native ask clears its idle timer, so its parked session never idle-closes (hearsay-tools/cezarion#2701).',
+  })),
   ...(['claude', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'P1', backend, kind: 'scenario-unconstructible' as const,
     reason: `${backend}'s native wire does not carry a native permission request that cezar answers through the cockpit permission card. This cell checks that native request/response protocol; ordinary human questions remain covered by R26.`,

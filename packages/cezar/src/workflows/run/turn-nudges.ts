@@ -33,6 +33,18 @@ interface TurnNudgesHost {
   queueWaitWake(id: string): void;
 }
 
+/** Decide a closed-session refusal without reading past the first matching guard. */
+export function completionRefusalQueueDecision(runId: string, reads: {
+  holdsAgentWaits(id: string): boolean;
+  owesCompletionRefusal(id: string): boolean;
+  countAutomaticWakes(id: string): number;
+}, maxAutoContinues: number): 'held' | 'owed' | 'budget' | 'enqueue' {
+  if (reads.holdsAgentWaits(runId)) return 'held';
+  if (reads.owesCompletionRefusal(runId)) return 'owed';
+  if (reads.countAutomaticWakes(runId) >= maxAutoContinues) return 'budget';
+  return 'enqueue';
+}
+
 export class TurnNudges {
   constructor(private readonly context: RunModuleContext, private readonly humanWaits: HumanWaits,
     private readonly line: RunLine, private readonly completionGateHost: completionGateReads.CompletionGateHost,
@@ -64,13 +76,18 @@ export class TurnNudges {
     this.context.store.appendEvent(runId, { type: 'note', tone: 'warning', message: `Completion blocked: ${refusal.message}` });
     this.host.move(runId, 'park', { finishedAt: undefined });
     this.context.store.flush();
-    if (this.humanWaits.holdsAgentWaits(runId)) return true;
+    const decision = completionRefusalQueueDecision(runId, {
+      holdsAgentWaits: id => this.humanWaits.holdsAgentWaits(id),
+      owesCompletionRefusal: id => completionGateReads.owesCompletionRefusal(this.context, this.completionGateHost, id),
+      countAutomaticWakes: id => this.host.countAutomaticWakes(id),
+    }, this.maxAutoContinues);
+    if (decision === 'held') return true;
     // One refusal owed at a time: the copy already queued reopens the run (hearsay-tools/cezarion#1301).
-    if (completionGateReads.owesCompletionRefusal(this.context, this.completionGateHost, runId)) {
+    if (decision === 'owed') {
       try { this.host.queueWaitWake(runId); } catch { this.host.retryWaitAdmission(runId); }
       return true;
     }
-    if (this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) {
+    if (decision === 'budget') {
       this.humanWaits.surfaceHumanWait(runId, state, this.humanWaits.openHumanAlias(runId, state, 'budget'));
       return true;
     }

@@ -14,7 +14,7 @@ import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
-import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested } from './run/run-guards.ts';
+import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested, workerExecutionStopped } from './run/run-guards.ts';
 import { REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
 export { AUTO_RESUME_GRACE_MS, MAX_AUTO_RESUMES, AUTO_RESUME_MISSED_WINDOW_MS } from './run/auto-resume.ts';
 import { TrackedWork } from './run/tracked-work.ts';
@@ -105,9 +105,7 @@ export class RunManager {
   }
 
   private workerExecutionStopped(runId: string): boolean {
-    const run = this.store.getRun(runId);
-    return this.historyDeletionPending(runId) || run?.delegation?.role === 'invalid' || (run?.delegation?.role === 'worker' &&
-      (!!run.delegation.destroy || this.modules.workerExecutions.isStopped(runId)));
+    return workerExecutionStopped(this.store, runId, id => this.modules.workerExecutions.isStopped(id));
   }
 
   private readonly ciResources: ReturnType<typeof acquireCiResources>;

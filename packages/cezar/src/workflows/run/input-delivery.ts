@@ -181,6 +181,19 @@ for (const type of [InputGroup, InputFlight]) {
 export function createInputGroup(): InputGroup { return new InputGroup(); }
 
 type HumanAnswerBudget = { spent: number };
+
+/** Charging results cancelled by this flush, before a human answer resets its budget. */
+export function cappedTimersBeforeFlush(run: RunRecord, beforeHumanReset: HumanAnswerBudget | undefined, reads: {
+  countAutomaticWakes(before?: HumanAnswerBudget): number;
+  isAdmitted(): boolean;
+  atTurnBoundary(): boolean;
+}, maxAutoContinues: number): Wait[] {
+  if (reads.countAutomaticWakes(beforeHumanReset) >= maxAutoContinues && reads.isAdmitted() && reads.atTurnBoundary()) {
+    return resolvedWaits(run).filter(chargesBudget);
+  }
+  return [];
+}
+
 type RoutedAnswer = { askSeq: number; source: QuestionAnswerSource; reply: AgentInput; text: string; state: ActiveRun | undefined; fallback: boolean };
 export const HELD_HUMAN_INPUT_RECHECK_MS = 250;
 interface InputDeliveryHost {
@@ -524,7 +537,7 @@ export class InputDelivery {
       state.inputState.agentInputFlight === flight && !state.liveSession.cancelled && !state.liveSession.finishRequested && !this.host.workerExecutionStopped(runId) &&
       !!this.context.store.getRun(runId) && !this.host.executionBlockedByRootFinish(this.context.store.getRun(runId)!);
     const fail = (error: unknown, checkpoint: boolean): void => {
-      if (!current() || state.liveSession.agentSessionError || state.inputState.agentInputError) return;
+      if (!latchInputFault({ current, sessionFault: () => state.liveSession.agentSessionError, inputFault: () => state.inputState.agentInputError })) return;
       this.latchAgentInputError(runId, state, session, `${checkpoint ? 'agent input delivery checkpoint failed' : 'agent input delivery failed'}: ${error instanceof Error ? error.message : String(error)}`);
     };
     let acknowledgement: false | Promise<void>;
@@ -619,14 +632,16 @@ export class InputDelivery {
   private cancelCappedTimersBeforeFlush(runId: string, state: ActiveRun, run: RunRecord, beforeHumanReset?: HumanAnswerBudget): RunRecord {
     // A timer result still owed when the budget is spent is cancelled before its batch is sent; the
     // CI results beside it are delivered.
-    if (this.host.countAutomaticWakes(runId, beforeHumanReset) >= this.maxAutoContinues && this.host.line.isAdmitted(runId) && state.boundary.atTurnBoundary === state.liveSession.session) {
-      const owedTimers = resolvedWaits(run).filter(chargesBudget);
-      if (owedTimers.length) {
-        this.host.cancelAutomaticAtCap(runId, owedTimers);
-        run = this.context.store.getRun(runId)!;
-        // Nothing left to wake for: the admission ends here, and a parked run becomes a plain park.
-        if (!resolvedWaits(run).length) { this.host.line.retireAdmission(runId); this.host.reparkWithoutWaits(runId, state); }
-      }
+    const owedTimers = cappedTimersBeforeFlush(run, beforeHumanReset, {
+      countAutomaticWakes: before => this.host.countAutomaticWakes(runId, before),
+      isAdmitted: () => this.host.line.isAdmitted(runId),
+      atTurnBoundary: () => state.boundary.atTurnBoundary === state.liveSession.session,
+    }, this.maxAutoContinues);
+    if (owedTimers.length) {
+      this.host.cancelAutomaticAtCap(runId, owedTimers);
+      run = this.context.store.getRun(runId)!;
+      // Nothing left to wake for: the admission ends here, and a parked run becomes a plain park.
+      if (!resolvedWaits(run).length) { this.host.line.retireAdmission(runId); this.host.reparkWithoutWaits(runId, state); }
     }
     return run;
   }
@@ -760,4 +775,8 @@ export class InputDelivery {
     if (answeringAskSeq !== undefined && !state.boundary.pendingHumanAsk) this.flushAgentInputs(runId, beforeHumanReset);
     this.resumeParkedRun(runId, state, beforeHumanReset);
   }
+}
+
+export function latchInputFault(reads: { current(): boolean; sessionFault(): string | undefined; inputFault(): string | undefined }): boolean {
+  return !(!reads.current() || reads.sessionFault() || reads.inputFault());
 }

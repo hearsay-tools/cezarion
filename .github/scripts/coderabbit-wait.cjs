@@ -27,7 +27,7 @@ async function waitForCodeRabbitAdmission({ now = Date.now, sleep = delay, log =
     }
     const remaining = (admission?.providerState === 'missing' ? missingDeadline : deadline) - observedAt;
     if (remaining <= 0) break;
-    log('Waiting for the current CodeRabbit execution; heavy verification remains blocked.');
+    log('Waiting for the current CodeRabbit execution; the verify aggregate stays blocked until admission.');
     await sleep(Math.min(POLL_MS, remaining));
   }
   return { admitted: false, head: args.head, reason: 'provider-wait-timeout',

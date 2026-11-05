@@ -30,7 +30,7 @@ test('typecheck uses the smallest Blacksmith runner only for PRs and dispatches'
     }
   }
   assert.equal(leaf.needs, 'queue-proof');
-  assert.notEqual(leaf.if, ci.jobs['build-and-package'].if, 'only heavy work waits for review');
+  assert.notEqual(leaf.if, ci.jobs['build-and-package'].if, 'typecheck does not share the heavy-job condition');
   assert.deepEqual(leaf.permissions, { contents: 'read', 'pull-requests': 'read' });
 });
 
@@ -47,7 +47,7 @@ test('typecheck keeps minimum Node, its bounded retry and an independent full ch
   assert.equal(build.steps.some(step => step.run === 'npm run typecheck'), false);
   const prepare = build.steps.findIndex(step => step.run === 'npm run build:server');
   assert.ok(prepare >= 0 && prepare < build.steps.findIndex(step => step.run === 'npm run test:unit'));
-  assert.deepEqual(build.needs, ['queue-proof', 'preflight', 'review-result'], 'heavy build follows preflight and review');
+  assert.deepEqual(build.needs, ['queue-proof', 'preflight'], 'heavy build follows preflight, beside review');
 });
 
 test('required typecheck cannot fail or skip behind docs, infra or release-bump exemptions', () => {

@@ -30,6 +30,31 @@ interface RunLineHost {
   reviveQueuedRun(run: RunRecord, reason: string): Promise<void>; pump(): Promise<void>; busySlots(): number;
 }
 
+/** The oldest eligible wake, with account and record reads kept lazy in line order. */
+export function oldestEligibleWakeAt(entries: Iterable<string>, reads: {
+  wakeJoinedAt(id: string): number | undefined;
+  accountHolds(): AccountHolds;
+  getRun(id: string): RunRecord | undefined;
+  canLeaveLine(id: string, holds: AccountHolds, fallback: RunnerId): boolean;
+}, configuredDefaultRunner: RunnerId | undefined): number | null {
+  let oldest: number | null = null;
+  let holds: AccountHolds | undefined;
+  for (const id of entries) {
+    const at = reads.wakeJoinedAt(id);
+    if (at === undefined || (oldest !== null && at >= oldest)) continue;
+    holds ??= reads.accountHolds();
+    // The same blockers `pump()` applies, capacity aside: a wake that cannot leave for any of
+    // them must not win the slot for its project's unstarted work. A runnerless record runs on
+    // the configured default, which only `pump()` reads (async); until it has, such a wake is
+    // not advertised while anything is held.
+    const runnerless = holds.deadline.size + holds.inFlight.size > 0 && reads.getRun(id)?.runner === undefined;
+    if (runnerless && configuredDefaultRunner === undefined) continue;
+    if (!reads.canLeaveLine(id, holds, configuredDefaultRunner ?? 'claude')) continue;
+    oldest = at;
+  }
+  return oldest;
+}
+
 /** Owns the scheduler's line and its in-memory admission state. */
 export class RunLine {
   private readonly context: RunModuleContext;
@@ -136,22 +161,12 @@ export class RunLine {
    *  project's unstarted runs. A held wake is left out, or its project would take the slot and
    *  start a new task ahead of another project's started run (hearsay-tools/cezarion#1236). */
   oldestWakeAt(): number | null {
-    let oldest: number | null = null;
-    let holds: AccountHolds | undefined;
-    for (const id of this.entries()) {
-      const at = this.wakeJoinedAt(id);
-      if (at === undefined || (oldest !== null && at >= oldest)) continue;
-      holds ??= this.context.semaphore.accountHolds();
-      // The same blockers `pump()` applies, capacity aside: a wake that cannot leave for any of
-      // them must not win the slot for its project's unstarted work. A runnerless record runs on
-      // the configured default, which only `pump()` reads (async); until it has, such a wake is
-      // not advertised while anything is held.
-      const runnerless = holds.deadline.size + holds.inFlight.size > 0 && this.context.store.getRun(id)?.runner === undefined;
-      if (runnerless && this.configuredDefaultRunner === undefined) continue;
-      if (!this.canLeaveLine(id, holds, this.configuredDefaultRunner ?? 'claude')) continue;
-      oldest = at;
-    }
-    return oldest;
+    return oldestEligibleWakeAt(this.entries(), {
+      wakeJoinedAt: id => this.wakeJoinedAt(id),
+      accountHolds: () => this.context.semaphore.accountHolds(),
+      getRun: id => this.context.store.getRun(id),
+      canLeaveLine: (id, holds, fallback) => this.canLeaveLine(id, holds, fallback),
+    }, this.configuredDefaultRunner);
   }
 
   /** Can this queued entry leave the line now, capacity aside? No worktree cleanup, no
