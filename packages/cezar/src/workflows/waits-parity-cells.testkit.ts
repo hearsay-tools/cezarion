@@ -1002,12 +1002,13 @@ function inputCells(runners: RunnerId[], it: typeof registerTest = registerTest)
         try {
           checkpoint(`u8-blocker-started:${blocker.id}`);
           await until(() => store.readEvents(blocker.id).some(event => event.type === 'turn.started'));
-          const starts = store.readEvents(parked.id).filter(event => event.type === 'turn.started').length;
+          const parkedSession = sessionOf(parked.id);
           checkpoint('u8-wake-delivered');
           if (kind === 'pr') external.settle(); else fireTimer(wait.id);
           await until(() => settled(parked.id, wait.id)?.phase === 'delivered');
           expect(store.getRun(blocker.id)?.status).toBe('running');
-          expect(store.readEvents(parked.id).filter(event => event.type === 'turn.started')).toHaveLength(starts + 1);
+          expect(sessionOf(parked.id)).toBe(parkedSession);
+          expect(inputsFor(parked.id, wait.id)).toHaveLength(1);
         } finally { writeFileSync(release, ''); }
         checkpoint('u8-blocker-waiting');
         await until(() => store.getRun(blocker.id)?.status === 'waiting');
@@ -1037,7 +1038,7 @@ function inputCells(runners: RunnerId[], it: typeof registerTest = registerTest)
         task = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
         expect(store.getRun(task.id)?.status).toBe('queued');
         fireTimer(wait.id);
-        await until(() => listed(parked.id, wait.id)?.phase === 'resolved');
+        await until(() => store.getRun(parked.id)?.waits?.find(entry => entry.id === wait.id)?.phase === 'resolved');
         expect(store.readEvents(task.id).some(event => event.type === 'turn.started')).toBe(false);
         expect(inputsFor(parked.id, wait.id).every(input => !input.deliveredAt)).toBe(true);
       } finally { writeFileSync(release, ''); }
