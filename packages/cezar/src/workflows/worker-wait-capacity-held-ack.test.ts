@@ -1,10 +1,9 @@
 import { autoEndObservationClock } from '../core/observation-clock.testkit.ts';
 import { AUTO_END_DELAY_MS } from '../core/runner-runtime.ts';
-import { runInternals } from './run-internals.testkit.ts';
 import { describe, expect, it } from 'vitest';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withHeldAck } from '../core/owned-input-delivery.testkit.ts';
-import { captureState, collect, manager, register, semaphore, setFailureState, store, until, waitOf, worker } from './worker-wait.testkit.ts';
+import { captureState, collect, manager, register, semaphore, setFailureState, store, until, waitOf, worker, work } from './worker-wait.testkit.ts';
 import { parkedOnWorkers, useWorkerCapacityFixture } from './worker-wait-capacity.testkit.ts';
 
 describe("worker waits through RunManager", { timeout: 30_000 }, () => {
@@ -22,14 +21,13 @@ it.each(['codex', 'opencode', 'pi', 'omp'].flatMap(backend => ['agent', 'check']
         ] }, { task: 'parent', runner: backend });
         store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
         // hearsay-tools/cezarion#1235: the list's park and admission, not `workerWaiting`/`workerWakeAdmitted`.
-        const engine = runInternals(manager);
-        await until(() => !!engine.active.get(run.id)?.liveSession.sessionEverOpened);
-        const session = engine.active.get(run.id)!.liveSession.session!;
+        await until(() => store.getRun(run.id)?.steps.some(step => !!step.sessionId) === true && work.liveSessions.size === 1);
+        const [session] = work.liveSessions;
         const w = await worker(run.id, 'mock:slow');
         register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
         const clock = autoEndObservationClock();
         try {
-          await until(() => parkedOnWorkers(run.id) && !!engine.active.get(w.id)?.liveSession.sessionEverOpened);
+          await until(() => parkedOnWorkers(run.id) && store.getRun(w.id)?.steps.some(step => !!step.sessionId) === true);
           expect(semaphore.busy()).toBe(1);
           const boundaries = store.readEvents(run.id).filter(event => event.type === 'turn-end').length;
           manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
@@ -43,8 +41,8 @@ it.each(['codex', 'opencode', 'pi', 'omp'].flatMap(backend => ['agent', 'check']
           expect(wake).toBeDefined(); expect(wake?.deliveredAt).toBeUndefined();
           expect(waitOf(store.getRun(run.id))?.wakeId).toBe(wake?.id);
           expect(parkedOnWorkers(run.id)).toBe(false);
-          expect(runInternals(manager).line.waitWakeAdmitted.has(run.id)).toBe(true);
-          expect(engine.active.get(run.id)?.liveSession.session).toBe(session); expect(session.open).toBe(true);
+          expect(manager.isActive(run.id)).toBe(true);
+          expect(work.liveSessions.has(session!)).toBe(true); expect(session!.open).toBe(true);
           expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
           expect(semaphore.busy()).toBe(1);
           await collect(w.id);
