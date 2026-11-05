@@ -477,15 +477,18 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
       expect(store.listRuns().filter((run) => run.status === 'queued')).toHaveLength(2);
       expect(semaphore.busy()).toBe(1);
 
-      // Terminal records prevent another admission when the held continuations settle.
+      // Stop through the manager: changing only the records leaves executable
+      // continuations in its queue, which a released slot can still admit.
       for (const run of store.listRuns()) {
-        setRunStatus(store, run.id, RUN_STATUS.cancelled, { finishedAt: new Date().toISOString() });
+        expect(secondManager.cancel(run.id)).toBe(true);
       }
     } finally {
       releaseContinuation();
+      await fixtureWorkSettled(root);
       setup.mockRestore();
       for (const controller of controllers) await controller.close();
     }
+    expect(store.listRuns().every(run => run.status === 'cancelled')).toBe(true);
   });
 
   it('restart continuation releases its starting slot after becoming active', async () => {
