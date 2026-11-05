@@ -2,7 +2,7 @@ import { setupMonitoringFixture, runnerHook } from './run-fixture.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { monitoringTimerWait, monitoringWakeOf } from './waits.testkit.ts';
@@ -63,6 +63,7 @@ describe('RunManager monitoring timers', () => {
   ])('backend $activity activity resumes a parked monitor before its wake deadline and closes its timer (#59, hearsay-tools/cezarion#2431)', async ({ trigger, eventNeedle }) => {
     // Pi has no ScheduleWakeup: its turn parks on a cezar_wait timer, which the test fires.
     const semaphore = fixture.semaphore;
+    const monitoringLimit = vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(0);
     const record = fixture.manager.startRun(SINGLE_STEP, {
       task: `mock:cezar-wait ${trigger} keep going`,
       runner: 'pi',
@@ -73,7 +74,9 @@ describe('RunManager monitoring timers', () => {
 
     const wait = openTimer(fixture.store.getRun(record.id))!;
     expect(fixture.store.getRun(record.id)?.status).toBe('waiting');
-    expect(semaphore.busy()).toBe(0);
+    // A parked pool member costs one; a parked nonmember costs zero.
+    expect(semaphore.busy()).toBe(1);
+    monitoringLimit.mockRestore();
 
     await waitFor(record.id, () => {
       const events = readFileSync(join(fixture.repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8');
@@ -102,7 +105,7 @@ describe('RunManager monitoring timers', () => {
 
   it('a passive backend diagnostic keeps a parked monitor wakeable', async () => {
     fixture.manager.dispose();
-    const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.01 } });
+    const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.01, maxMonitoringSessions: 0 } });
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { semaphore });
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:schedule-wakeup keep going', runner: 'claude', worktree: false });
     fixture.currentId = record.id;
@@ -114,7 +117,7 @@ describe('RunManager monitoring timers', () => {
     expect(fixture.store.getRun(record.id)?.status).toBe('waiting');
     expect(monitoringTimerWait(fixture.store.getRun(record.id))).toEqual(wakeTimer);
     expect(fixture.store.getRun(record.id)?.status).toBe('waiting');
-    expect(semaphore.busy()).toBe(0);
+    expect(semaphore.busy()).toBe(1);
     await waitFor(record.id, () => {
       const events = readFileSync(join(fixture.repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8');
       return events.includes('automatic monitoring wake-up (1/40)');
