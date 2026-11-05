@@ -2,27 +2,37 @@ id: run-internals
 language: typescript
 severity: error
 message: >-
-  Use public methods, fixture-owned dependencies and durable records instead of runInternals
-  (hearsay-tools/cezarion#2522). Making RunManager's private members ES #private, so that
-  no other private access compiles or reads state, is tracked in hearsay-tools/cezarion#2700.
+  runInternals and its testkit are retired: use public methods, fixture-owned dependencies and
+  durable records (hearsay-tools/cezarion#2522). Making RunManager's private members ES #private,
+  so that no other private access compiles or reads state, is tracked in hearsay-tools/cezarion#2700.
+note: >-
+  The rule refuses the retired name runInternals in every identifier position (calls in any
+  wrapping, members, optional chains, imports, destructuring, shorthand properties) and any
+  static or dynamic import whose specifier names run-internals.testkit.
 utils:
   internals-testkit:
     kind: string
     regex: '(^|/)run-internals\.testkit(\.ts)?["\x27]$'
 rule:
   any:
-    - pattern: runInternals($$$)
-    - pattern: (runInternals)($$$)
-    - pattern: runInternals?.($$$)
-    - pattern: $OBJ.runInternals($$$)
-    - pattern: $OBJ?.runInternals($$$)
+    - all:
+        - any:
+            - kind: identifier
+            - kind: property_identifier
+            - kind: shorthand_property_identifier
+            - kind: shorthand_property_identifier_pattern
+        - regex: '^runInternals$'
     - all:
         - kind: import_statement
         - has:
             field: source
             matches: internals-testkit
     - all:
-        - pattern: import($SRC)
+        - kind: call_expression
         - has:
-            stopBy: end
-            matches: internals-testkit
+            field: function
+            kind: import
+        - has:
+            field: arguments
+            has:
+              matches: internals-testkit
