@@ -1,3 +1,4 @@
+import type { RunLine } from './run-line.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,7 +37,7 @@ interface BoundaryOrderFixture {
   root: string; run: RunRecord; store: RunStore; log: string[]; state: ActiveRun; wire: AgentSession;
   active: Map<string, ActiveRun>; context: RunModuleContext; humanWaits: HumanWaits; questions: WorkerQuestions;
   questionHost: ConstructorParameters<typeof WorkerQuestions>[1]; host: ConstructorParameters<typeof TurnSettler>[1];
-  line: ConstructorParameters<typeof TurnSettler>[1]['line']; settler: TurnSettler;
+  line: RunLine; settler: TurnSettler;
 }
 export function boundaryOrderFixture(autonomous = false): BoundaryOrderFixture {
   const root = mkdtempSync(join(tmpdir(), 'cez-boundary-order-'));
@@ -68,7 +69,7 @@ export function boundaryOrderFixture(autonomous = false): BoundaryOrderFixture {
   });
   const questions = new WorkerQuestions(context, questionHost, 40);
   type Host = ConstructorParameters<typeof TurnSettler>[1];
-  const line = unused<Host['line']>('line', { park: call('line-park', undefined), isParked: () => false,
+  const line = unused<RunLine>('line', { park: call('line-park', undefined), isParked: () => false,
     inPool: () => false, joinPool: call('join', undefined) });
   const host = unused<Host>('settler', {
     humanWaits, line, workerQuestions: questions,
