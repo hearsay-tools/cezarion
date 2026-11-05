@@ -4,7 +4,6 @@ import { createAutosaveGroup, type AutosaveGroup } from './run/worktree-autosave
 import { createInputGroup, type InputGroup } from './run/input-delivery.ts';
 import { createSessionGroup, type SessionGroup } from './run/live-session-state.ts';
 import { createChildrenGroup, type ChildrenGroup } from './run/subagent-waits.ts';
-import type { AgentSession } from '../core/agent-runner.ts';
 import { createSkillsGroup, type SkillsGroup } from './run/run-skills.ts';
 import { createUsageGroup, type UsageGroup } from './run/usage-accounting.ts';
 
@@ -19,58 +18,8 @@ export interface ActiveRun {
   readonly inputState: InputGroup;
   readonly usage: UsageGroup;
   readonly liveSession: SessionGroup;
-  waitWakeTurn?: AgentSession | undefined;
-  pendingHumanAsk: boolean;
-  /** Liveness bound for a no-wait nudge that was acknowledged without a turn (#544,
-   *  hearsay-tools/cezarion#1234). */
-  noWaitNudgeReplyTimer?: NodeJS.Timeout | undefined;
-  /** Parent-level text/item/tool arrived for this nudge, possibly before the timer armed. */
-  noWaitNudgeSawContent?: boolean | undefined;
-  /** The reply bound expired on this session: a late reply from it resumes the run. */
-  noWaitNudgeParked?: AgentSession | undefined;
-  doneAtBoundary?: AgentSession | undefined;
-  /** `cezar_done` accepted in this session since its last turn end (hearsay-tools/cezarion#1234). */
-  doneRequested?: { session: AgentSession; summary?: string } | undefined;
-  /** The session's done completes a workflow step that is not the last, and this step runs next
-   *  (hearsay-tools/cezarion#1620). Undefined: the done finishes the task. */
-  nextStep?: { session: AgentSession; label: string } | undefined;
-  /** The step an accepted done closed. A workflow step that is not the last advances only on it. */
-  completedStepId?: string | undefined;
-  /** What declared the done `doneAtBoundary` closes on: the closing event names it. */
-  doneClose?: { via: 'cezar_done'; summary?: string } | undefined;
-  parkAfterAck?: { session: AgentSession; monitoring: boolean; humanGate?: boolean; nudgedLastTurn?: boolean; scheduleWakeup?: number | null | undefined } | undefined;
-  /** Last completed boundary belongs to exactly this still-open session. */
-  atTurnBoundary?: AgentSession | undefined;
-  idleTimer?: NodeJS.Timeout | undefined;
-  /** The inactivity timer closed the wire; resource teardown must not imply task success. */
-  idleClosed?: boolean;
-  /** The monitoring-timer cap note was written for this session. */
-  monitoringCapNoted?: boolean | undefined;
-  /* The screenshot counter lives on `RunManager.queuedImageSeq` (#472), keyed by
-   * run id — a queued run persists attachments with no `ActiveRun` at all. */
-  /** Autonomous mode (#autonomous): nudge eligible turn ends until done or the cap.
-   *  Pending input, native asks and lifecycle waits retain priority. */
-  autonomous?: boolean;
-  /** An eligible boundary nudge refused until the current transport becomes ready.
-   * Retains its slot, bounded by the existing idle timer; never represents a sent input. */
-  autonomousNudgePending?: AgentSession | undefined;
-  /** Session that received the no-wait nudge (hearsay-tools/cezarion#1234): its next no-wait
-   *  turn end opens a human wait instead of nudging again. */
-  noWaitNudged?: AgentSession | undefined;
-  /** Session that received a refusal nudge for a blocked done (hearsay-tools/cezarion#1301); the
-   *  next turn end on it reads and clears it. */
-  /** Request refusals already shown in this completion cycle, including tool answers. */
-  incomingRequestRefused?: boolean | undefined;
-  sentRequestRefused?: boolean | undefined;
-  completionNudged?: AgentSession | undefined;
-  /** Session whose turn that just ended answered a refusal nudge (hearsay-tools/cezarion#1301): a
-   *  blocked done at this turn end takes the second step. Every turn end sets or clears it. */
-  completionNudgeAnswered?: AgentSession | undefined;
   readonly skills: SkillsGroup;
   readonly children: ChildrenGroup;
-  /** A park for the user kept the session and its slot for running native subagents
-   *  (hearsay-tools/cezarion#2431): their last end gives both back. */
-  heldForSubagents?: boolean | undefined;
 }
 
 /** Run Cezar's own write into the session: a parent turn the runner starts during it is Cezar's
@@ -108,10 +57,8 @@ export function createActiveRun(init: ActiveRunInit): ActiveRun {
     inputState: createInputGroup(),
     usage: createUsageGroup(),
     liveSession: createSessionGroup(init.cwd),
-    pendingHumanAsk: init.pendingHumanAsk,
     children: createChildrenGroup(),
     skills: createSkillsGroup(),
-    autonomous: init.autonomous,
   };
   Object.defineProperty(state, 'boundary', { writable: false, configurable: false });
   Object.defineProperty(state, 'waitIdentity', { writable: false, configurable: false });
@@ -121,5 +68,5 @@ export function createActiveRun(init: ActiveRunInit): ActiveRun {
   Object.defineProperty(state, 'usage', { writable: false, configurable: false });
   Object.defineProperty(state, 'children', { writable: false, configurable: false });
   Object.defineProperty(state, 'skills', { writable: false, configurable: false });
-  return state;
+  return Object.freeze(state);
 }

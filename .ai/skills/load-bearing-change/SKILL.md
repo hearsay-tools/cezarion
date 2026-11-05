@@ -61,14 +61,6 @@ produce the required durable outcome and a usable next step.
 Find every construction site of a shared in-memory object by grepping its type, not its field, and give it one factory where a new required field fails to compile.
 Construction and skills access: `active-run-literal`, `active-run-map-write`, `skills-read-outside-enabled-skills` and `skills-write-outside-load-run-skills` name their owners.
 
-<!-- until: hearsay-tools/cezarion#2520 -->
-**List each handler's side effects, in order, before you merge handlers into one.** The
-merged method can lose one step of a handler's order while every test stays green. For
-each entry and each case, list what each handler does, in order: its input delivery,
-the timers or waits it opens, the gates it calls, and the heartbeat or note it writes.
-Pin each line with a test, or name the test row that already covers it, before you
-delete the handler.
-
 **A fail-open helper needs a populated-input guarantee, or it lies.**
 `expandRegistrySlashSkill` returning its input unchanged on no-match is right on its own —
 a backend's own slash commands must survive. Against an empty registry that same branch

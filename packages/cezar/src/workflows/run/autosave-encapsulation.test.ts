@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './turn-boundary.ts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createActiveRun } from '../active-run.ts';
 import { clearAutosaveTimer } from './input-timers.ts';
@@ -32,8 +33,8 @@ it('arms the same interval and clears it synchronously without clearing idle or 
   const saved = vi.fn();
   const idle = vi.fn();
   const reply = vi.fn();
-  state.idleTimer = setTimeout(idle, AUTOSAVE_INTERVAL_MS * 2);
-  state.noWaitNudgeReplyTimer = setTimeout(reply, AUTOSAVE_INTERVAL_MS * 2);
+  transitionTurnBoundary(state, { kind: 'idle-expired', phase: 'armed', session: state.liveSession.session, timer: setTimeout(idle, AUTOSAVE_INTERVAL_MS * 2) });
+  transitionTurnBoundary(state, { kind: 'reply-expired', phase: 'armed', session: state.liveSession.session, timer: setTimeout(reply, AUTOSAVE_INTERVAL_MS * 2) });
   group.armAutosave(saved);
   const handle = group.autosaveTimer!;
   expect(handle.hasRef()).toBe(false);

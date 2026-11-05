@@ -43,7 +43,7 @@ export class TurnNudges {
    *  the nudge's, and its reply is bounded by the no-wait nudge's reply timer, so a harness that
    *  reads the refusal and says nothing parks on Cezar's human wait instead of holding the slot. */
   awaitCompletionNudgeReply(runId: string, state: ActiveRun, session: AgentSession): void {
-    transitionTurnBoundary(state, { kind: 'completion-refusal', phase: 'delivered', session });
+    transitionTurnBoundary(state, { kind: 'completion-refusal', phase: 'nudge-delivered', session });
     const refusal = completionGateReads.completionRefusal(this.context, this.completionGateHost, runId);
     if (refusal) recordRequestRefusal(state, refusal);
     transitionTurnBoundary(state, { kind: 'completion-refusal', phase: 'reset-content', session: state.liveSession.session });

@@ -1,3 +1,4 @@
+import { transitionTurnBoundary } from './run/turn-boundary.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -23,7 +24,7 @@ function unused<T extends object>(name: string, values: Partial<T> = {}): T {
 
 function fakeState(root: string): ActiveRun {
   const state = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false });
-  state.completedStepId = step.id;
+  transitionTurnBoundary(state, { kind: 'done-step-consumed', phase: 'completed', session: state.liveSession.session, stepId: step.id });
   return state;
 }
 
@@ -78,19 +79,19 @@ describe('step completion mark at settlement callers', () => {
     const done = vi.spyOn(settlement, 'settleDoneContinuation').mockResolvedValue(undefined);
     const sink = new UiEventSink({ persist: vi.fn(), emitLive: vi.fn() });
     await settlement.settleClosedContinuation(runId, state, step.id, sink, next, {});
-    expect(state.completedStepId).toBe(cancelled ? step.id : undefined);
+    expect(state.boundary.completedStepId).toBe(cancelled ? step.id : undefined);
     expect(done).toHaveBeenCalledTimes(cancelled ? 0 : 1);
     if (cancelled) expect(store.getRun(runId)?.status).toBe(RUN_STATUS.cancelled);
   });
 
   it.each([step.id, 'other'])('stepLeftOpen leaves the mark intact (%s)', mark => {
-    state.completedStepId = mark;
+    transitionTurnBoundary(state, { kind: 'done-step-consumed', phase: 'completed', session: state.liveSession.session, stepId: mark });
     expect(settlement.stepLeftOpen(state, step.id, next)).toBe(mark !== step.id);
-    expect(state.completedStepId).toBe(mark);
+    expect(state.boundary.completedStepId).toBe(mark);
   });
 
   it.each([true, false])('step loop clears a consumed mark (completed=%s)', completed => {
-    state.completedStepId = completed ? step.id : 'other';
+    transitionTurnBoundary(state, { kind: 'done-step-consumed', phase: 'completed', session: state.liveSession.session, stepId: completed ? step.id : 'other' });
     active.set(runId, state);
     const execution: Execution = { runId, state, workflow: { name: 'chain', source: 'file', steps: [step, next] },
       input: { task: 'work' }, startAt: 0, emit: vi.fn() };
@@ -98,7 +99,7 @@ describe('step completion mark at settlement callers', () => {
     const loop: LoopOutcome = { checkFailure: null, runError: null, deliveryCapped: false };
     const result = stepLoop.nextAfterAgentStep(execution, launch, loop,
       { index: 0, step, nextStep: next, failure: null, startedAt: Date.now() });
-    expect(state.completedStepId).toBeUndefined();
+    expect(state.boundary.completedStepId).toBeUndefined();
     expect(result).toBe(completed ? 'next' : 'settle');
     expect(loop.incompleteStepId).toBe(completed ? undefined : step.id);
   });

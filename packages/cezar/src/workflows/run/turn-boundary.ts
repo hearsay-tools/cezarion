@@ -41,7 +41,7 @@ type BoundaryMutationEvent = Generation & (
   | { kind: 'held-input-expired'; phase: 'expire' }
   | { kind: 'unread-expired'; phase: 'restore-boundary' | 'restore-ack' }
   | { kind: 'reply-content'; phase: 'received' | 'resumed' }
-  | { kind: 'completion-refusal'; phase: 'delivered' | 'reset-content' }
+  | { kind: 'completion-refusal'; phase: 'nudge-delivered' | 'reset-content' }
   | { kind: 'completion-refusal'; phase: 'record'; code: CompletionRefusal['code']; tool: boolean }
   | { kind: 'human-wait-opened'; phase: 'prepare' }
   | { kind: 'human-wait-opened'; phase: 'refresh-question'; pending: boolean }
@@ -203,7 +203,7 @@ export class BoundaryGroup {
   }
   #completionRefusal(event: Extract<BoundaryMutationEvent, { kind: 'completion-refusal' }>): void {
     switch (event.phase) {
-      case 'delivered': this.#completionNudged = event.session; return;
+      case 'nudge-delivered': this.#completionNudged = event.session; return;
       case 'reset-content': this.#noWaitNudgeSawContent = false; return;
       case 'record':
         if (event.code === 'requests_unanswered') this.#incomingRequestRefused = true;

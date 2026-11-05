@@ -4,6 +4,7 @@ import { unused } from '../fixture-cleanup.testkit.ts';
 import { boundaryOrderFixture } from './boundary-order.testkit.ts';
 import { clearIdleTimer } from './input-timers.ts';
 import { TurnNudges } from './turn-nudges.ts';
+import * as completion from './completion-gate.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 
 function fixture(autonomous = false) {
@@ -112,4 +113,19 @@ it('child content leaves the reply bound and parked fact untouched', () => {
   expect(f.state.boundary.noWaitNudgeReplyTimer).toBe(timer);
   expect(f.time.pending).toBe(1);
   clearIdleTimer(f.state);
+});
+
+it('completion refusal records delivery before refusal and reply reset and timer arming', () => {
+  const f = fixture();
+  const gate = vi.spyOn(completion, 'completionRefusal').mockImplementation(() => {
+    f.log.push('refusal-gate'); expect(f.state.boundary.completionNudged).toBe(f.wire);
+    return { code: 'requests_unanswered', workers: [], message: 'answer request', liveWorkerIds: [] };
+  });
+  f.settler.armIdleTimer(f.run.id, f.state); f.log.length = 0;
+  f.nudges.awaitCompletionNudgeReply(f.run.id, f.state, f.wire);
+  order(f.log, ['boundary:completion-refusal/nudge-delivered', 'refusal-gate', 'boundary:completion-refusal/record',
+    'boundary:completion-refusal/reset-content', 'boundary:idle-expired/cancel', 'boundary:reply-expired/armed']);
+  expect(f.state.boundary.incomingRequestRefused).toBe(true);
+  expect(f.state.boundary.noWaitNudgeSawContent).toBe(false);
+  gate.mockRestore();
 });

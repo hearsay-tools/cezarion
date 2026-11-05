@@ -17,13 +17,14 @@ import { clearIdleTimer } from './input-timers.ts';
 import * as boundary from './turn-boundary.ts';
 
 /** Log command entry while invoking the real private owner. No private-field Proxy or prototype spy. */
-export function traceBoundary(log: string[]): void {
+export function traceBoundary(log: string[], observe?: (state: ActiveRun, event: boundary.TurnBoundaryEvent) => void): void {
   const original = boundary.transitionTurnBoundary;
   const trace = (...args:
     | [state: ActiveRun, event: boundary.FactOnlyBoundaryEvent]
     | [runId: string, state: ActiveRun, event: boundary.EffectBoundaryEvent, effects: boundary.TurnBoundaryEffects]
   ): TurnEndOutcome | undefined => {
     const event = args.length === 2 ? args[1] : args[2];
+    observe?.(args.length === 2 ? args[0] : args[1], event);
     log.push(`boundary:${event.kind}/${'phase' in event ? event.phase : 'request'}`);
     return Reflect.apply(original, undefined, args);
   };

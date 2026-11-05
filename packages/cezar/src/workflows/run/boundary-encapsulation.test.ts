@@ -1,3 +1,4 @@
+import './turn-boundary.types.testkit.ts';
 import { expect, it } from 'vitest';
 import type { AgentSession } from '../../core/agent-runner.ts';
 import { createActiveRun } from '../active-run.ts';
@@ -17,6 +18,8 @@ it('locks the boundary slot, getter surface and prototype without freezing the r
   const state = createActiveRun({ cwd: '.', pendingHumanAsk: false, autonomous: true });
   const wire = session();
   const group = state.boundary;
+  expect(Object.isFrozen(state)).toBe(true);
+  expect(set(state, 'forged', 1)).toBe(false);
   expect(Object.getOwnPropertyDescriptor(state, 'boundary')).toMatchObject({ writable: false, configurable: false });
   expect(Object.isFrozen(group)).toBe(true);
   expect(Object.isFrozen(Object.getPrototypeOf(group))).toBe(true);
