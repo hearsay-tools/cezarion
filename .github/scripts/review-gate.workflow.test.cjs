@@ -33,23 +33,38 @@ function ancestors(id, chain = []) {
   assert.ok(!chain.includes(id), `CI dependency cycle: ${[...chain, id]}`);
   return [ci.jobs[id].needs ?? []].flat().flatMap(dep => [dep, ...ancestors(dep, [...chain, id])]);
 }
-test('review-first DAG releases heavy work only after review, without waiting on heavy ancestors', () => {
+function descendants(id) {
+  return Object.keys(ci.jobs).filter(other => ancestors(other).includes(id));
+}
+test('heavy jobs start after preflight beside review, never behind it', () => {
   for (const id of Object.keys(ci.jobs)) ancestors(id);
   for (const id of heavy) {
-    assert.ok(ancestors(id).includes('review-result'), `${id} must be held by review`);
+    assert.ok(ancestors(id).includes('preflight'), `${id} must follow preflight`);
+    assert.ok(!ancestors(id).includes('review-result'), `${id} must not wait for review`);
     assert.ok(!ancestors('review-result').includes(id), `${id} must not hold review`);
+    assert.doesNotMatch(ci.jobs[id].if, /review-result/, `${id} must not read the review result`);
     assert.match(ci.jobs[id].if, /!cancelled\(\)/, 'intentional skips cannot invoke implicit success()');
   }
   assert.equal(ci.jobs['review-result'].needs, 'preflight');
+  assert.ok(ancestors('verify').includes('review-result'), 'verify must still require review');
 });
 for (const result of ['failure', 'cancelled', 'skipped', '']) {
-  test(`review ${result} prevents all heavy jobs and a green aggregate`, () => {
+  test(`review ${result} leaves heavy jobs running but keeps the aggregate red`, () => {
     const ctx = context(); ctx.needs['review-result'].result = result;
-    for (const id of heavy) assert.equal(evaluate(ci.jobs[id].if, ctx), false, id);
+    for (const id of heavy) assert.equal(evaluate(ci.jobs[id].if, ctx), true, id);
     assert.notEqual(shell('verify', { REVIEW_RESULT: result }).status, 0);
   });
 }
-test('passing review releases heavy work but never excuses missing, blocked or failed tests', () => {
+test('a targeted review rerun reaches only the aggregate and its dependents, never a suite', () => {
+  // GitHub reruns a job together with every job that depends on it.
+  const rerun = descendants('review-result');
+  assert.ok(rerun.includes('verify'));
+  for (const id of [...heavy, 'vitest-coverage-merge', 'pr-test-attestation', 'pr-test-input']) {
+    assert.ok(!rerun.includes(id), `${id} must not rerun with review`);
+  }
+  for (const id of rerun) assert.ok(id === 'verify' || ancestors(id).includes('verify'), `${id} reruns with review`);
+});
+test('passing review never excuses missing, blocked or failed tests', () => {
   for (const id of heavy) assert.equal(evaluate(ci.jobs[id].if, context()), true, id);
   for (const key of ['BUILD_AND_PACKAGE_RESULT', 'VITEST_RESULT', 'COCKPIT_BROWSER_RESULT']) {
     for (const result of ['failure', 'skipped', 'cancelled', '']) assert.notEqual(shell('verify', { [key]: result }).status, 0);
@@ -108,14 +123,12 @@ test('always aggregates reject cancellation even if all retained prerequisites s
   }
 });
 
-test('failed-test retry retains review, while a successful review-only retry releases blocked jobs', () => {
-  const ctx = context(); ctx.needs['review-result'].result = 'failure';
-  for (const id of heavy) assert.equal(evaluate(ci.jobs[id].if, ctx), false);
-  ctx.needs['review-result'].result = 'success';
-  for (const id of heavy) assert.equal(evaluate(ci.jobs[id].if, ctx), true);
-  assert.notEqual(shell('verify', { VITEST_RESULT: 'failure' }).status, 0);
-  // Failed-job selection is GitHub-owned. The graph must not make successful
-  // review depend on those failed tests, so a test retry cannot invalidate it.
+test('a failed-test retry keeps review, and a review retry keeps the suites', () => {
+  // Failed-job selection is GitHub-owned. Neither side depends on the other,
+  // so retrying one cannot invalidate or repeat the other.
   assert.ok(!ancestors('review-result').includes('vitest'));
-  assert.equal(shell('verify', { VITEST_RESULT: 'success' }).status, 0);
+  for (const id of heavy) assert.ok(!ancestors(id).includes('review-result'));
+  assert.notEqual(shell('verify', { VITEST_RESULT: 'failure' }).status, 0);
+  assert.notEqual(shell('verify', { REVIEW_RESULT: 'failure' }).status, 0);
+  assert.equal(shell('verify').status, 0);
 });

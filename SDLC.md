@@ -47,7 +47,8 @@ human draft or ready changes. CodeRabbit reviews drafts and incremental pushes
 automatically, without a label filter or auto-pause. After preflight, the native
 `Automated Code Review` gate requires the newest trusted CodeRabbit check on the
 live head to report success or skipped with exact title `No files to review`,
-and requires every review thread resolved before heavy verification. The named
+and requires every review thread resolved. Heavy verification runs beside this
+gate after preflight; the `verify` aggregate requires both. The named
 skip is a provider decision; it does not prove model execution. Readiness and
 queue admission read the same evidence. CI requests no model review. After
 manually reopening or resolving a thread, dispatch **Reconcile CodeRabbit admission** with

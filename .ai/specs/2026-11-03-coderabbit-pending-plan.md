@@ -1,5 +1,8 @@
 # Keep unfinished CodeRabbit admission pending
 
+2026-11-05: heavy verification no longer waits for review admission. It runs beside the
+native review gate after preflight, and `verify` requires both (hearsay-tools/cezarion#2727).
+
 The native review gate currently marks a running CodeRabbit review as failed.
 Reconciliation later retries it. The owner asked to fix this and open a PR.
 

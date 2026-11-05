@@ -1,5 +1,8 @@
 # CodeRabbit admission replacement
 
+2026-11-05: heavy verification no longer waits for review admission. It runs beside the
+native review gate after preflight, and `verify` requires both (hearsay-tools/cezarion#2727).
+
 2026-11-03: The strict success-only provider policy below is historical and is
 superseded by [trusted no-files admission](2026-11-03-coderabbit-skipped-recovery-plan.md).
 The current gate also accepts the exact trusted no-files skip without claiming

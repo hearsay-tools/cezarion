@@ -14,21 +14,20 @@ tag can consume its five-minute job budget before classification. Only the PR
 baseline and patch checks read history; § CI verification says what each gate fetches.
 For pull requests, the PR-shape check requires GitHub to return a patch for every file, except binary files and files with no content change, and rejects incomplete file lists.
 
-Main PRs run cheap deterministic preflight, automated review, then heavy
-verification. Findings block heavy work. Both protected checks remain required.
-Native review context is bound to the trusted caller event, workflow, run,
-attempt and live head. It reports heavy tests as pending, not successful.
-Manual review context reads only the newest current-head native run and its
-latest attempt. Missing evidence stays pending; failure/cancellation never
-falls back to an earlier success. When the current attempt proves that review
-failed and all heavy jobs were skipped, it reports heavy verification as not
-started because review blocked it. The failed aggregate remains a merge blocker;
-it does not mean tests ran and failed.
+Main PRs run cheap deterministic preflight first. After it passes, automated
+review and heavy verification (build/package, Vitest and browser shards) start
+together. Review findings no longer hold heavy work back; they block merge
+through the aggregate. `verify` (**Unit, build, E2E, and package**) requires
+successful preflight, a successful **Automated Code Review** and every heavy
+job, so a blocked review fails it even when every suite passes. Both protected
+checks remain required. hearsay-tools/cezarion#2211 put review before heavy
+work to save paid suite runs; hearsay-tools/cezarion#2727 removed that order
+once CodeRabbit and the hosted runners became free for this repository.
 
 CodeRabbit starts automatic draft and incremental reviews on PR changes without
 a label filter or custom round cap. Its external review can start before
-preflight finishes. Heavy verification still waits for successful preflight and
-current-head review admission. The owner accepted automatic review because
+preflight finishes. Heavy verification waits for successful preflight only;
+the aggregate waits for current-head review admission. The owner accepted automatic review because
 CodeRabbit is free for this open-source repository. Both required checks still
 gate merge.
 
@@ -295,7 +294,7 @@ numeric timeout option alone is ignored by github-script v9. The job has a
 Actions runner during the wait. Readiness, queue admission and reconciliation
 still use the immediate reader. See [the pending-review plan](../../.ai/specs/2026-11-03-coderabbit-pending-plan.md).
 
-Settled blocked admission or an expired provider wait logs a notice and exits unsuccessfully. Existing reconciliation can retry after a late review finishes. Broken API/schema evidence is an error. Findings must not become error annotations because the CI sweep groups identical errors across PRs. A passing gate releases the existing build/package, Vitest and browser dependencies. Docs-only and infra-only retain their suite skips but still require review admission. Cancellation never releases heavy work. Both protected checks remain required; branch protections are unchanged.
+Settled blocked admission or an expired provider wait logs a notice and exits unsuccessfully. Existing reconciliation can retry after a late review finishes. Broken API/schema evidence is an error. Findings must not become error annotations because the CI sweep groups identical errors across PRs. Heavy build/package, Vitest and browser jobs do not depend on this gate; they start after preflight and run beside it. A blocked gate fails `verify`, which reads the gate and every heavy result. Docs-only and infra-only retain their suite skips but still require review admission. Cancellation never releases heavy work. Both protected checks remain required; branch protections are unchanged.
 
 Readiness additionally proves the latest native `ci.yml` run/attempt and successful protected jobs, and reads fresh CodeRabbit admission. Trusted discovery emits PR numbers before scheduling. Every readiness trigger uses the same per-PR job lock, and every surviving job reads the live head and proof after acquiring it. Automatic CI/provider/signal discovery selects only the event's bounded PR targets, with independent jobs and budgets. An unverified new head returns to draft; a late synchronize event cannot override current green proof. Human ready/draft events request the same reevaluation; verified heads become ready and unverified heads become draft. There is no durable manual draft override. The board sync runs under the same lock even when draft state is unchanged, and Done cards remain protected. On the next readiness trigger, a new pending same-head execution or reopened thread returns a same-repository ready PR to draft. GitHub Actions has no review-thread event for manual reopening or resolution; dispatch **Reconcile CodeRabbit admission** with `pr_number` after either change, then **PR Readiness** if draft state needs refreshing. Fork PRs retain their author's draft state. Native proof requires an official matching main-target PR association; an empty association fails closed. If it appears, inspect the native run and start fresh native CI rather than substituting a dispatch or unrelated same-head run. Queue admission reads the same fresh provider/thread evidence in addition to its existing native proof, rules and membership checks. Queue-suite reuse and exact-push reuse keep their existing proof and snapshot publication rules. `fetch-ci-results.cjs` remains for snapshot consumers.
 
@@ -498,7 +497,7 @@ that leave the workflow files unchanged do not invalidate the proof.
 
 ### Re-running a review
 
-CodeRabbit owns review execution and finding discussion. CI never requests a model review or resolves findings. Push fixes or discuss a finding with its reviewer. A flaky verification failure uses **Re-run failed jobs**, which retains successful review and heavy jobs.
+CodeRabbit owns review execution and finding discussion. CI never requests a model review or resolves findings. Push fixes or discuss a finding with its reviewer. A flaky verification failure uses **Re-run failed jobs**, which retains successful review and heavy jobs. A failed review job rerun the same way reruns only the review and `verify`, never a suite.
 
 `coderabbit-reconcile.yml` uses default-branch code, no PR checkout or secrets, and only the Actions write permission needed for targeted retries. It reacts to genuine CodeRabbit check `created`/`completed`, native CI completion, and completion of **CodeRabbit review signal**. Review/comment events run that no-permission, no-checkout signal in PR merge-ref context. The trusted consumer validates official workflow identity, native event and same-repository signal association. The association selects a stable PR number; queued proof validates the exact live PR head. Signal success, artifacts and comment bodies grant no authority. Missing signal associations fail closed; use manual recovery.
 
@@ -519,7 +518,7 @@ Writes are serialized per discovered PR. The reconciler rechecks admission and n
 
 The first attempt of [fork PR 2658](https://github.com/hearsay-tools/cezarion/actions/runs/41809519155/attempts/1) failed on an API timeout. [Fork PR 2607's dispatch](https://github.com/hearsay-tools/cezarion/actions/runs/41708168109) refused its historical execution-only gate. These are distinct from a queued/running provider, which the native wait already handles.
 
-GitHub's targeted rerun can also run dependent heavy jobs when review passes. This preserves the owner-approved dependency graph. Do not use a successful review retry to rerun failed tests.
+GitHub's targeted rerun also reruns the jobs that depend on the review job: `verify` and the jobs after it. No heavy job depends on the review job, so a reconciled review keeps the existing suite results and does not run the suites again. Do not use a review retry to rerun failed tests; use **Re-run failed jobs**.
 
 **Validation limit:** native `pull_request_target` CI uses main's definition until merge. A final-head bare dispatch proves changed verification workflow files but skips admission. The parent must dispatch the final branch before merge. After rollout, use a disposable same-repository draft PR to confirm provider events, finding settlement, both completion orders, revocation, targeted reruns, and manual recovery. Record run, attempt and job IDs and close without merging. Local fixtures do not prove live postmerge provider events, GitHub rerun scheduling or queue semantics.
 
