@@ -1,12 +1,12 @@
 'use strict';
 const { setTimeout: delay } = require('node:timers/promises');
 const { readCodeRabbitAdmission } = require('./coderabbit-admission.cjs');
-const WAIT_MS = 20 * 60 * 1000, POLL_MS = 30000, MAX_READS = 40;
+const WAIT_MS = 20 * 60 * 1000, POLL_MS = 30000, MAX_READS = 40, MISSING_MS = 3 * 60 * 1000;
 
 // Only the native gate waits. Queue admission, readiness and reconciliation
 // continue to use the immediate reader and their own short deadlines.
 async function waitForCodeRabbitAdmission({ now = Date.now, sleep = delay, log = () => {}, ...args }) {
-  const deadline = now() + WAIT_MS;
+  const start = now(), deadline = start + WAIT_MS, missingDeadline = start + MISSING_MS;
   let admission;
   for (let attempt = 0; attempt < MAX_READS && now() < deadline; attempt++) {
     admission = undefined;
@@ -20,7 +20,12 @@ async function waitForCodeRabbitAdmission({ now = Date.now, sleep = delay, log =
       log('CodeRabbit evidence changed during the read; checking fresh evidence.');
     }
     if (admission && !['missing', 'pending'].includes(admission.providerState)) return admission;
-    const remaining = deadline - now();
+    const observedAt = now();
+    if (admission?.providerState === 'missing' && observedAt >= missingDeadline) {
+      return { ...admission, reason: 'provider-missing-timeout',
+        action: 'Resolve every open review thread. No trusted current-head CodeRabbit check appeared within 3 minutes. Post @coderabbitai full review on the PR; after provider completion, let reconciliation retry the native gate. If needed, dispatch Reconcile CodeRabbit admission with pr_number. Fork PRs require a maintainer native gate rerun.' };
+    }
+    const remaining = (admission?.providerState === 'missing' ? missingDeadline : deadline) - observedAt;
     if (remaining <= 0) break;
     log('Waiting for the current CodeRabbit execution; heavy verification remains blocked.');
     await sleep(Math.min(POLL_MS, remaining));
