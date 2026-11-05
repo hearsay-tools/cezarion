@@ -10,6 +10,7 @@ import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import { registerProject } from '../workspace/projects.ts';
 import type { RunManager } from './run.ts';
 import { buildChildEnv } from '../core/agent-env.ts';
+import { agentEnv, agentEnvForStep } from './run/launch-context.ts';
 import { AgentAccountUnavailableError } from '../workspace/agent-profiles.ts';
 
 /**
@@ -24,24 +25,18 @@ describe('RunManager agent-profile resolution', () => {
   let home: string;
   let repoRoot: string;
   let store: RunStore;
-  let manager: RunManager;
 
-  /** The private seam — same access pattern the auto-naming tests use. */
-  type Seam = {
-    agentEnvForStep(
-      runId: string,
-      backend: 'claude' | 'codex' | 'opencode' | 'pi' | 'omp',
-      options?: { generateFollowups?: boolean; recordedProfileId?: string },
-    ): Promise<{ env: Record<string, string>; profileId: string }>;
+  const resolveStepEnv = (runId: string, backend: Parameters<typeof agentEnvForStep>[3], options?: Parameters<typeof agentEnvForStep>[4]) => {
+    const context = { store, repoRoot, dataDir: join(repoRoot, '.ai/cezar') };
+    return agentEnvForStep(context, { agentEnv: id => agentEnv(context, undefined, id), workerStep: () => undefined }, runId, backend, options);
   };
-  const seam = () => manager as unknown as Seam;
 
   beforeEach(async () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-profile-wiring-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-profile-wiring-repo-'));
     process.env.CEZ_HOME = home;
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot);
+    createFixtureManager(store, repoRoot);
     await registerProject(repoRoot);
   });
 
@@ -80,7 +75,7 @@ describe('RunManager agent-profile resolution', () => {
 
   it('adds NOTHING for the default account — the zero-config env is untouched', async () => {
     const run = newRun();
-    const { env, profileId } = await seam().agentEnvForStep(run.id, 'claude');
+    const { env, profileId } = await resolveStepEnv(run.id, 'claude');
     expect(profileId).toBe('default');
     // The base run env only: the handoff contract (spec 007) plus the task-scoped
     // temp directory (#785). No ACCOUNT variable, which is this test's subject.
@@ -102,7 +97,7 @@ describe('RunManager agent-profile resolution', () => {
     await addAccount('work', 'claude', join(home, 'claude-klaudiusz'));
     await selectAccount('claude', 'work');
     const run = newRun();
-    const { env, profileId } = await seam().agentEnvForStep(run.id, 'claude');
+    const { env, profileId } = await resolveStepEnv(run.id, 'claude');
     expect(profileId).toBe('work');
     expect(env.CLAUDE_CONFIG_DIR).toBe(join(home, 'claude-klaudiusz'));
     // The handoff plumbing still rides along — the account is additive, not a replacement.
@@ -116,8 +111,8 @@ describe('RunManager agent-profile resolution', () => {
     await selectAccount('codex', 'cx');
     const run = newRun();
 
-    const claudeStep = await seam().agentEnvForStep(run.id, 'claude');
-    const codexStep = await seam().agentEnvForStep(run.id, 'codex');
+    const claudeStep = await resolveStepEnv(run.id, 'claude');
+    const codexStep = await resolveStepEnv(run.id, 'codex');
 
     expect(claudeStep.env).toMatchObject({ CLAUDE_CONFIG_DIR: join(home, 'claude-klaudiusz') });
     expect(claudeStep.env.CODEX_HOME).toBeUndefined();
@@ -134,10 +129,10 @@ describe('RunManager agent-profile resolution', () => {
     const run = newRun({ task: 't', runner: 'claude', agentProfile: 'client' });
 
     // The run's runner takes the override…
-    expect((await seam().agentEnvForStep(run.id, 'claude')).profileId).toBe('client');
+    expect((await resolveStepEnv(run.id, 'claude')).profileId).toBe('client');
     // …a step on a different backend does not: "use my other Claude login" says nothing about
     // which Codex account a mixed workflow should bill.
-    expect((await seam().agentEnvForStep(run.id, 'codex')).profileId).toBe('cx');
+    expect((await resolveStepEnv(run.id, 'codex')).profileId).toBe('cx');
   });
 
   it('a RECORDED step profile wins over everything — resume must not follow a changed default', async () => {
@@ -145,7 +140,7 @@ describe('RunManager agent-profile resolution', () => {
     const run = newRun();
     // The project has since been switched to the personal account, but the session this
     // continuation resumes lives in the work account's own `sessions/` folder.
-    const resolved = await seam().agentEnvForStep(run.id, 'claude', { recordedProfileId: 'work' });
+    const resolved = await resolveStepEnv(run.id, 'claude', { recordedProfileId: 'work' });
     expect(resolved.profileId).toBe('work');
     expect(resolved.env.CLAUDE_CONFIG_DIR).toBe(join(home, 'claude-klaudiusz'));
   });
@@ -157,7 +152,7 @@ describe('RunManager agent-profile resolution', () => {
       store.accounts = [];
     });
     const run = newRun();
-    const { env, profileId } = await seam().agentEnvForStep(run.id, 'claude');
+    const { env, profileId } = await resolveStepEnv(run.id, 'claude');
     expect(profileId).toBe('default');
     expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
   });
@@ -165,7 +160,7 @@ describe('RunManager agent-profile resolution', () => {
   it('degrades to the default when the accounts file is unreadable', async () => {
     writeFileSync(agentAccountsPath(), '{ not json', 'utf8');
     const run = newRun();
-    expect((await seam().agentEnvForStep(run.id, 'claude')).profileId).toBe('default');
+    expect((await resolveStepEnv(run.id, 'claude')).profileId).toBe('default');
   });
 
   /**
@@ -200,7 +195,7 @@ describe('RunManager agent-profile resolution', () => {
       ownAgentHome();
 
       it('adds NOTHING for the default account', async () => {
-        const { env, profileId } = await seam().agentEnvForStep(newRun().id, provider);
+        const { env, profileId } = await resolveStepEnv(newRun().id, provider);
         expect(profileId).toBe('default');
         expect(env[variable]).toBeUndefined();
       });
@@ -208,7 +203,7 @@ describe('RunManager agent-profile resolution', () => {
       it('spawns the project\'s account under its own variable', async () => {
         await addAccount('work', provider, folder());
         await selectAccount(provider, 'work');
-        const { env, profileId } = await seam().agentEnvForStep(newRun().id, provider);
+        const { env, profileId } = await resolveStepEnv(newRun().id, provider);
         expect(profileId).toBe('work');
         expect(env[variable]).toBe(spawnedWith());
       });
@@ -217,7 +212,7 @@ describe('RunManager agent-profile resolution', () => {
         // A session only resumes inside the home that created it (pi: "No session found"; omp:
         // "not found" from another profile), so the recorded account must win.
         await addAccount('work', provider, folder());
-        const resolved = await seam().agentEnvForStep(newRun().id, provider, { recordedProfileId: 'work' });
+        const resolved = await resolveStepEnv(newRun().id, provider, { recordedProfileId: 'work' });
         expect(resolved.profileId).toBe('work');
         expect(resolved.env[variable]).toBe(spawnedWith());
       });
@@ -228,9 +223,9 @@ describe('RunManager agent-profile resolution', () => {
         await addAccount('work', provider, folder());
         const source = { PATH: '/usr/bin', [variable]: hostValue } as NodeJS.ProcessEnv;
         const run = newRun();
-        const asDefault = await seam().agentEnvForStep(run.id, provider);
+        const asDefault = await resolveStepEnv(run.id, provider);
         expect(buildChildEnv({ backend: provider, source, extraEnv: asDefault.env })[variable]).toBe(hostValue);
-        const asNamed = await seam().agentEnvForStep(run.id, provider, { recordedProfileId: 'work' });
+        const asNamed = await resolveStepEnv(run.id, provider, { recordedProfileId: 'work' });
         expect(buildChildEnv({ backend: provider, source, extraEnv: asNamed.env })[variable]).toBe(spawnedWith());
       });
     });
@@ -246,9 +241,9 @@ describe('RunManager agent-profile resolution', () => {
       await selectAccount('omp', 'work');
       process.env.PI_CONFIG_DIR = '.omp-alt';
       const run = newRun();
-      await expect(seam().agentEnvForStep(run.id, 'omp')).rejects.toBeInstanceOf(AgentAccountUnavailableError);
+      await expect(resolveStepEnv(run.id, 'omp')).rejects.toBeInstanceOf(AgentAccountUnavailableError);
       // Continue resolves the step's recorded account and is refused the same way.
-      await expect(seam().agentEnvForStep(run.id, 'omp', { recordedProfileId: 'work' }))
+      await expect(resolveStepEnv(run.id, 'omp', { recordedProfileId: 'work' }))
         .rejects.toThrow(join(home, '.omp-alt', 'profiles'));
     });
   });

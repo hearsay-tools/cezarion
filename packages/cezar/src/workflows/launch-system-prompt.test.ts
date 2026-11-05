@@ -121,23 +121,23 @@ describe('launch system prompt at both sites (#1632)', () => {
     });
   }
 
-  /** Spies on one launch site, so a test can await the execution it starts. */
-  function watch(method: 'execute' | 'runContinuation') {
-    return vi.spyOn(manager as unknown as Record<typeof method, (...args: unknown[]) => Promise<void>>, method);
-  }
-
   /** A fresh run, then a Continue of its session: the two launch sites, in that order. */
   async function startAndContinue(): Promise<[AgentRunSpec, AgentRunSpec]> {
-    const execute = watch('execute');
-    const continuation = watch('runContinuation');
     const record = manager!.startRun(WORKFLOW, { task: 'do it', worktree: false, runner: 'claude', systemPrompt: EXTRA });
     const opening = await specAt(0);
-    // The execution's own promise ends after the run settled and left the active set.
-    await execute.mock.results[0]!.value;
+    // bound: the runner has returned; wait for public settlement before Continue.
+    await vi.waitFor(() => {
+      expect(manager!.isActive(record.id)).toBe(false);
+      expect(store.getRun(record.id)?.status).toBe('done');
+    }, { timeout: 15_000 });
     store.updateStep(record.id, 'task', { sessionId: 'sess-1', backend: 'claude' });
     expect(manager!.continueRun(record.id, { text: 'keep going' })).toEqual({ ok: true });
     const continued = await specAt(1);
-    await continuation.mock.results[0]!.value;
+    // bound: the continuation's returned result must settle and release its session.
+    await vi.waitFor(() => {
+      expect(manager!.isActive(record.id)).toBe(false);
+      expect(store.getRun(record.id)?.status).toBe('done');
+    }, { timeout: 15_000 });
     return [opening, continued];
   }
 
