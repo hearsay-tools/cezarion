@@ -52,6 +52,33 @@ Each item must hold at the same current head:
    exemption. A caller requiring actual model execution still needs that
    evidence. Zero threads remain open, and `needs-qa` has `qa-approved` when
    present. Follow the repo's CodeRabbit admission and reconciliation rules for new heads and finding replies.
+
+   Before enqueueing, read live evidence in the order used by
+   [the shared admission reader](../../../.github/scripts/coderabbit-admission.cjs):
+
+   - Read the PR and require its live head to equal the reviewed head `H`.
+   - List all CodeRabbit check runs on `H` (the commits check-runs API with
+     `filter=all`, `check_name=CodeRabbit`, `app_id=347564`). Select the newest
+     trusted execution: App ID `347564`, slug `coderabbitai`, name `CodeRabbit`,
+     and `head_sha=H`. Require `status=completed` and `conclusion=success`, or
+     the exact trusted `No files to review` skip allowed by the shared policy.
+     Preserve its verified release-stamps and upstream-ledger exceptions;
+     branch names alone do not establish an exception.
+   - After observing completion (or verifying a shared-policy exception),
+     fetch every page of the PR's review threads.
+     Require zero unresolved threads, including outdated and human threads.
+     An earlier zero-thread snapshot is not evidence for this gate.
+   - Reread the newest trusted execution for non-exempt PRs and the PR itself.
+     Require the same check
+     identity, status, conclusion, timestamps and output title, and unchanged
+     PR head, base and exception identity. Changed or incomplete evidence
+     blocks enqueueing; repeat the gate on fresh evidence.
+
+   A green commit status or historical native review job alone is insufficient.
+   A queued or in-progress check returns `awaiting-checks`: report that the
+   current CodeRabbit execution must complete. Missing, failed or unreadable
+   evidence blocks admission with its specific reason. A later same-head review
+   invalidates earlier evidence; no snapshot prevents a new review from starting.
 6. **Owner paths:** run `node .ai/skills/auto-merge/check.mjs --title '<title>'`
    against the PR's committed head in its checkout (quote the actual title with
    `shellQuote`). A "gate or test harness" result or an `AGENTS.md` edit needs
@@ -62,6 +89,9 @@ Each item must hold at the same current head:
    evidence match the diff. Use closing keywords only for fully completed
    issues; partial work references the issue without closing it. Add any
    owner-approved gate labels before the first push that needs them.
+   Finish PR body edits before the last push and final review pass, because a
+   body edit can start another CodeRabbit review. After a later body edit,
+   repeat the live review gate before reporting readiness or enqueueing.
 8. **Main:** main CI passes. A failure confined to Publish npm snapshot does
    not block a code merge; other failures wait for the named repair task.
 
