@@ -153,6 +153,14 @@ describe('ActivityBoard', () => {
       expect(rail.querySelector('[data-slot="activity-legend"]')).not.toBeNull()
     })
 
+    it('says a request is overdue once its reply deadline passes', () => {
+      const late = request({ senderRunId: 'task-a', recipientRunId: 'task-b', createdAt: iso(-700_000), deadline: iso(-100_000) })
+      renderBoard(project({ tasks: [A, B], requests: [late] }))
+      const entry = document.querySelector('[data-slot="activity-request"]')?.textContent ?? ''
+      expect(entry).toContain('reply overdue')
+      expect(entry).not.toContain('reply due in')
+    })
+
     it('lists each open request with its age and, when it has one, its reply deadline', () => {
       renderBoard(project({ tasks: [A, B, PARENT], requests: [PEER, FAMILY] }))
       const entries = Array.from(document.querySelectorAll('[data-slot="activity-request"]')) as HTMLElement[]

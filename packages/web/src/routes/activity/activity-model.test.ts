@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 
-import { project, request, run, worker } from './activity.testkit'
-import { directionOf, runIndex } from './activity-model'
+import { NOW, iso, project, request, run, worker } from './activity.testkit'
+import { directionOf, replyDueText, runIndex } from './activity-model'
 
 describe('directionOf', () => {
   const parent = run({ runId: 'parent', workers: [worker({ runId: 'w' })] })
@@ -21,3 +21,10 @@ describe('directionOf', () => {
   })
 })
 
+describe('replyDueText', () => {
+  it('counts down before the deadline and says overdue once it passes', () => {
+    expect(replyDueText(iso(348_000), NOW)).toBe('reply due in 5:48')
+    expect(replyDueText(iso(0), NOW)).toBe('reply overdue')
+    expect(replyDueText(iso(-60_000), NOW)).toBe('reply overdue')
+  })
+})

@@ -1,5 +1,6 @@
 import type { ActivityProject, ActivityRequest, ActivityRun } from '@open-mercato/cezar-api-client/contract/activity'
 
+import { counter, since } from './activity-format'
 import { isLiveStatus } from './now-box'
 
 /**
@@ -62,6 +63,12 @@ export function lineTexts(runId: string, requests: readonly ActivityRequest[], i
 /** The open question a worker asks its parent, the worker-only "Asks parent" row. */
 export function askOf(workerId: string, parentId: string, requests: readonly ActivityRequest[]): ActivityRequest | undefined {
   return requests.find((request) => request.relationship === 'family' && request.senderRunId === workerId && request.recipientRunId === parentId)
+}
+
+/** A reply deadline as the rail says it: a countdown, then "reply overdue" from the deadline on. */
+export function replyDueText(deadline: string, now: number): string {
+  const left = -since(deadline, now)
+  return left >= 1000 ? `reply due in ${counter(left)}` : 'reply overdue'
 }
 
 /** The peer requests a card sent: the narrow layout's "→ <task>" links. */

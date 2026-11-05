@@ -5,7 +5,7 @@ import { StatusDot } from '@/components/status-dot'
 import { cn } from '@/lib/utils'
 
 import { clockOf, counter, since } from './activity-format'
-import { directionOf, recipientName, senderName, type RunEntry } from './activity-model'
+import { directionOf, recipientName, replyDueText, senderName, type RunEntry } from './activity-model'
 import { windowUsed } from './activity-lines'
 import { Heartbeat } from './now-box-view'
 
@@ -32,7 +32,7 @@ function RequestEntry({ request, index, now }: { request: ActivityRequest; index
       <p className="my-1 line-clamp-3 text-[12px] text-muted-foreground">“{request.text}”</p>
       <div className="flex gap-1.5 text-[11px] text-muted-foreground tabular-nums">
         <span>{relation} · open {counter(since(request.createdAt, now))}</span>
-        {request.deadline ? <span className="ml-auto">reply due in {counter(-since(request.deadline, now))}</span> : null}
+        {request.deadline ? <span className="ml-auto">{replyDueText(request.deadline, now)}</span> : null}
       </div>
       {used === undefined ? null : (
         <div aria-hidden="true" className="mt-1.5 h-[3px] overflow-hidden rounded-sm bg-border">
