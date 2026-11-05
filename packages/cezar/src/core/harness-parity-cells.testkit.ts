@@ -2835,7 +2835,14 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
           await waitFor(() => store.readEvents(runId).some(event => event.type === 'ask.requested'));
           const scratch = resolveAgentTmpDir(join(repoRoot, '.ai/cezar'), runId);
           writeFileSync(join(scratch, 'notes'), 'pending answer');
-          [...fixtureWork(manager).liveSessions][0]!.end();
+          // Native asks can hold the turn open without an idle timer. Close the
+          // actual session through the same idle-close state, after its native ask.
+          const internal = manager as unknown as {
+            active: Map<string, { liveSession: { session: import('./agent-runner.ts').AgentSession; }; idleClosed: boolean; }>;
+          };
+          const state = internal.active.get(runId)!;
+          state.idleClosed = true;
+          state.liveSession.session.end();
           await waitFor(() => !manager.isActive(runId));
           expect(store.getRun(runId)?.status).toBe('waiting');
           expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
