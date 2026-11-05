@@ -17,8 +17,9 @@ import type { TurnEndOutcome } from '../turn-end.ts';
 import { clearIdleTimer } from './input-timers.ts';
 import * as boundary from './turn-boundary.ts';
 
-/** Log command entry while invoking the real private owner. No private-field Proxy or prototype spy. */
-export function traceBoundary(log: string[], observe?: (state: ActiveRun, event: boundary.TurnBoundaryEvent) => void): void {
+/** Fact traces mark completed writes. Effect entries are traced before their named collaborators. */
+export function traceBoundary(log: string[], observe?: (state: ActiveRun, event: boundary.TurnBoundaryEvent) => void,
+  after?: (state: ActiveRun, event: boundary.TurnBoundaryEvent) => void): void {
   const original = boundary.transitionTurnBoundary;
   const trace = (...args:
     | [state: ActiveRun, event: boundary.FactOnlyBoundaryEvent]
@@ -26,8 +27,12 @@ export function traceBoundary(log: string[], observe?: (state: ActiveRun, event:
   ): TurnEndOutcome | undefined => {
     const event = args.length === 2 ? args[1] : args[2];
     observe?.(args.length === 2 ? args[0] : args[1], event);
-    log.push(`boundary:${event.kind}/${'phase' in event ? event.phase : 'request'}`);
-    return Reflect.apply(original, undefined, args);
+    const entry = `boundary:${event.kind}/${'phase' in event ? event.phase : 'request'}`;
+    if (args.length === 4) log.push(entry);
+    const result = Reflect.apply(original, undefined, args);
+    after?.(args.length === 2 ? args[0] : args[1], event);
+    if (args.length === 2) log.push(entry);
+    return result;
   };
   const spy = vi.spyOn(boundary, 'transitionTurnBoundary').mockImplementation(trace as typeof original);
   onTestFinished(() => spy.mockRestore());

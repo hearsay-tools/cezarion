@@ -82,12 +82,18 @@ describe('turn settler entry orders', () => {
     transitionTurnBoundary(f.state, { kind: 'input-submitted', phase: 'nudge-delivered', session: f.session });
     transitionTurnBoundary(f.state, { kind: 'completion-refusal', phase: 'nudge-delivered', session: f.session });
     decide({ kind: 'park' });
+    f.host.subagentWaits.atTurnEnd.mockImplementation(() => {
+      expect(f.state.boundary.noWaitNudged).toBeUndefined();
+      expect(f.state.boundary.completionNudgeAnswered).toBe(f.session);
+      expect(f.state.boundary.completionNudged).toBeUndefined();
+      f.log.push('subagentsAtTurnEnd');
+    });
     f.host.parkOnWaits.mockImplementation(() => {
       f.log.push('parkWaits'); expect(f.state.boundary.parkAfterAck?.session).toBe(f.session); return true;
     });
     f.log.length = 0;
     f.settler.endTurn('run', f.state, { handle: () => undefined } as unknown as UiEventSink, { stepId: 'step', scheduleWakeup: undefined });
-    order(f, ['boundary:turn-end/consume-done', 'boundary:turn-end/reset-nudges', 'boundary:turn-end/save-ack', 'parkWaits', 'outcome', 'update:autoResumeAttempts']);
+    order(f, ['boundary:turn-end/consume-done', 'boundary:turn-end/reset-nudges', 'subagentsAtTurnEnd', 'boundary:turn-end/save-ack', 'parkWaits', 'outcome', 'update:autoResumeAttempts']);
   });
 
   it('turn-end discards queued input for a human wait card before preparing it and storing its boundary', () => {
