@@ -72,7 +72,10 @@ export function createActivityPublisher(scope: ActivityScope, deps: ActivityPubl
   let running: Running | undefined;
   let carryOver = new Map<string, Set<string>>();
 
-  const build = async (run: Running | undefined): Promise<ActivitySnapshot> => {
+  /** A broadcast build advances the carry-over to the ledgers open now. A subscriber's private
+   *  snapshot only adds to it: replacing it would drop a ledger the next broadcast still owes a
+   *  reply (a sender that left the held set after its reply landed). */
+  const build = async (run: Running | undefined, broadcast: boolean): Promise<ActivitySnapshot> => {
     const sources = await scope.sources();
     if (run && running === run) listen(run, sources);
     const now = (deps.now ?? Date.now)();
@@ -82,7 +85,8 @@ export function createActivityPublisher(scope: ActivityScope, deps: ActivityPubl
       next.set(source.projectId, built.openLedgers);
       return built.project;
     });
-    carryOver = next;
+    if (broadcast) carryOver = next;
+    else for (const [projectId, ledgers] of next) carryOver.set(projectId, new Set([...(carryOver.get(projectId) ?? []), ...ledgers]));
     return { generatedAt: new Date(now).toISOString(), projects };
   };
 
@@ -136,7 +140,7 @@ export function createActivityPublisher(scope: ActivityScope, deps: ActivityPubl
     run.dirty = false;
     run.building = true;
     run.lastBuildAt = Date.now();
-    void build(run)
+    void build(run, true)
       .then((snapshot) => { if (running === run) emit(run, snapshot); })
       .catch((error: unknown) => deps.onBuildError?.(error))
       .finally(() => {
@@ -167,7 +171,7 @@ export function createActivityPublisher(scope: ActivityScope, deps: ActivityPubl
   return {
     async snapshot() {
       const run = running;
-      const snapshot = await build(run);
+      const snapshot = await build(run, false);
       if (run && running === run) subscribed(run, snapshot);
       return snapshot;
     },

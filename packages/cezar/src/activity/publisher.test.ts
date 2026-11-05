@@ -229,6 +229,31 @@ describe('the activity publisher', () => {
     stop();
   });
 
+  it('keeps the carry-over when a new subscriber reads between the reply and the next broadcast', async () => {
+    const sender = makeRoot();
+    const recipient = makeRoot();
+    const request = addRequest(sender, sender, recipient, { relationship: 'peer' });
+    const held = [sender.id, recipient.id];
+    const { store } = liveStore([sender, recipient], { held });
+    const { publisher } = publisherFor(store);
+    const { frames, stop } = await subscribe(publisher);
+
+    // The reply lands and the sender leaves the held set; no store event reaches this process.
+    addOutcome(sender, { requestId: request.id, status: 'replied', observedAt: new Date(Date.now()).toISOString() });
+    sender.status = RUN_STATUS.done;
+    held.splice(0, 1);
+    // A second subscriber reads first: its own frame shows the reply.
+    const second = await publisher.snapshot() as ActivitySnapshot;
+    expect(second.projects[0]!.closed.map((closed) => closed.requestId)).toEqual([request.id]);
+
+    // The change reaches the first subscriber through the gate, with the reply still in it.
+    await vi.advanceTimersByTimeAsync(ACTIVITY_COALESCE_MS);
+    const project = frames.at(-1)!.projects[0]!;
+    expect(project.requests).toEqual([]);
+    expect(project.closed.map((closed) => [closed.requestId, closed.status])).toEqual([[request.id, 'replied']]);
+    stop();
+  });
+
   it('runs nothing without a subscriber and releases everything at the last one', async () => {
     const root = makeRoot();
     const { store } = liveStore([root], { foreign: [root.id] });
