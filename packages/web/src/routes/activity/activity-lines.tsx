@@ -6,12 +6,12 @@ import { cn } from '@/lib/utils'
 import { counter, since } from './activity-format'
 import type { RunEntry } from './activity-model'
 import { measureLines, sameLines, type LineShape } from './line-measure'
+import { useOverlayMeasure } from './use-overlay-measure'
 
 /**
  * The static lines between tasks (spec 2026-11-05-live-activity-view, "Lines between tasks"): an
- * SVG overlay over the graph (its parent element) and one HTML label per peer line. Geometry is measured from the
- * laid-out cards and measured again when the graph or a card changes size (`ResizeObserver`),
- * never on a frame loop. Slice S6 adds the march and the comets.
+ * SVG overlay over the graph (its parent element) and one HTML label per peer line. Geometry is
+ * measured from the laid-out cards (`useOverlayMeasure`). Slice S6 adds the march and the comets.
  */
 
 const SHORT_TEXT = 28
@@ -29,36 +29,6 @@ export function windowUsed(request: Pick<ActivityRequest, 'createdAt' | 'deadlin
   const end = Date.parse(request.deadline)
   if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return 1
   return Math.min(1, Math.max(0, (now - start) / (end - start)))
-}
-
-/**
- * The host is the overlay's parent element, read through the overlay's own ref: React attaches a
- * parent's ref only after its children's layout effects run, so a ref passed down from the graph
- * is still null at the first measure.
- */
-function useMeasuredLines(
-  overlayRef: React.RefObject<SVGSVGElement | null>,
-  requests: readonly ActivityRequest[],
-  index: ReadonlyMap<string, RunEntry>,
-  peers: boolean,
-  layoutKey: string,
-): LineShape[] {
-  const [lines, setLines] = React.useState<LineShape[]>([])
-  React.useLayoutEffect(() => {
-    const host = overlayRef.current?.parentElement
-    if (!host) return
-    const measure = () => {
-      const next = measureLines(host, requests, index, { peers })
-      setLines((previous) => (sameLines(previous, next) ? previous : next))
-    }
-    measure()
-    if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(measure)
-    observer.observe(host)
-    for (const card of host.querySelectorAll('[data-activity-card]')) observer.observe(card)
-    return () => observer.disconnect()
-  }, [overlayRef, requests, index, peers, layoutKey])
-  return lines
 }
 
 function PeerLabel({ line, request, now }: { line: LineShape; request: ActivityRequest; now: number }) {
@@ -98,7 +68,8 @@ export function ActivityLines({
   now: number
 }) {
   const overlayRef = React.useRef<SVGSVGElement>(null)
-  const lines = useMeasuredLines(overlayRef, requests, index, peers, layoutKey)
+  const measure = React.useCallback((host: HTMLElement) => measureLines(host, requests, index, { peers }), [requests, index, peers])
+  const lines = useOverlayMeasure(overlayRef, measure, sameLines, '[data-activity-card]', layoutKey)
   const byId = new Map(requests.map((request) => [request.requestId, request]))
   return (
     <>

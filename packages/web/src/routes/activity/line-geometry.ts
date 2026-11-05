@@ -77,6 +77,36 @@ export function familyPath(from: Box, to: Box, card: Box): LinePath {
   return { d: `M${pt(a)} C ${pt({ x: gx, y: a.y })}, ${pt({ x: gx, y: b.y })}, ${pt(b)}`, label: { x: gx, y: (a.y + b.y) / 2 } }
 }
 
+/** How high a global-view arc may rise above the pills; the strip reserves this room. */
+export const ARC_MAX_LIFT = 30
+
+/**
+ * A peer arc of the global view. Two pills in one row: from the top middle of the sender, up over
+ * the pills, down into the top middle of the recipient; a farther pill gets a higher arc, up to
+ * `ARC_MAX_LIFT`, and the label sits near the top. Pills in different rows: through the gap
+ * between the rows, from the facing edges (the sender's bottom to the recipient's top, or the
+ * other way up), so the arc never crosses either pill; the label sits in the gap.
+ */
+export function arcPath(from: Box, to: Box): LinePath {
+  const ax = from.x + from.w / 2
+  const bx = to.x + to.w / 2
+  if (to.y >= from.y + from.h || to.y + to.h <= from.y) {
+    const down = to.y > from.y
+    const ay = down ? from.y + from.h + 1 : from.y - 1
+    const by = down ? to.y - 3 : to.y + to.h + 3
+    const k = (by - ay) / 2
+    return { d: `M${pt({ x: ax, y: ay })} C ${pt({ x: ax, y: ay + k })}, ${pt({ x: bx, y: by - k })}, ${pt({ x: bx, y: by })}`, label: { x: (ax + bx) / 2, y: (ay + by) / 2 } }
+  }
+  const ay = from.y - 1
+  const by = to.y - 1
+  const top = Math.min(ay, by)
+  const lift = Math.min(ARC_MAX_LIFT, 18 + Math.abs(bx - ax) * 0.05)
+  return {
+    d: `M${pt({ x: ax, y: ay })} C ${pt({ x: ax, y: top - lift })}, ${pt({ x: bx, y: top - lift })}, ${pt({ x: bx, y: by - 3 })}`,
+    label: { x: (ax + bx) / 2, y: top - lift * 0.75 },
+  }
+}
+
 /** A box relative to the host's top-left corner. */
 export function relativeBox(rect: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>, host: Pick<DOMRect, 'left' | 'top'>): Box {
   return { x: rect.left - host.left, y: rect.top - host.top, w: rect.width, h: rect.height }

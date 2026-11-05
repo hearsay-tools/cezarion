@@ -36,7 +36,7 @@ function metaLine(run: ActivityRun | ActivityWorker, now: number): string {
 }
 
 /** Screen-reader text for the lines that touch a row; the SVG lines themselves are hidden. */
-function LineText({ texts }: { texts: string[] }) {
+export function LineText({ texts }: { texts: string[] }) {
   if (texts.length === 0) return null
   return (
     <ul data-slot="activity-line-text" className="sr-only">
