@@ -25,11 +25,15 @@ can drive the view from the HTTP snapshot. One PR for each slice.
   and asks two optional providers for tool activity and check progress
   (`ToolActivitySource`, `CiProgressSource`). In S1 both providers return nothing.
 - `packages/cezar/src/activity/requests.ts`: open and recently closed requests from
-  the root ledgers, joining the peer sender and recipient ledgers.
+  the root ledgers (one ledger for each request: the root's for family, the sender's
+  for peer). Only `accepted` requests open.
+- `packages/cezar/src/activity/demand.ts`: per-project demand. An HTTP read marks
+  the project for 15 s; S4 adds topic subscribers. S3 reads it.
 - Route `GET /api/v1/workspace/activity`, chained into the workspace family, with a
   `queryZodValidator` for `project`. Contract parity and `typed-bodies` tests.
 - Tests:
   - every row of the spec's request case table;
+  - the rows for retained terminal roots and settled workers;
   - D8: each root status in and out of the active set, a review root with a live
     worker in it;
   - the top wait matches `computeWaitingOn` for each wait kind;
@@ -42,8 +46,8 @@ can drive the view from the HTTP snapshot. One PR for each slice.
 - Feed it from `UiEventSink` for every run. Drop a run when it leaves the active set
   (on the run change, not on a timer).
 - Wire it as the read model's `ToolActivitySource`.
-- Tests: start, complete, failed and declined tools; a second tool before the first
-  ends; ring shift across idle seconds and across more than 30 s; a run dropped on
+- Tests: start, complete, failed and declined tools; a tool first seen at
+  completion; a non-terminal title update; a second tool before the first ends; ring shift across idle seconds and across more than 30 s; a run dropped on
   settle; title clamp. One test for each runner's mapper fixture to prove its tool
   items reach the tracker.
 
@@ -51,11 +55,13 @@ can drive the view from the HTTP snapshot. One PR for each slice.
 
 - `packages/cezar/src/ci-wait/progress.ts`: `CiProgressRegistry` (in memory, keyed by
   wait id) and the bucket count.
-- `supervisor.ts`: record the first snapshot's buckets. In the 30 s probe, when the
-  registry reports demand for the wait's project, read the checks once and update.
-  The read's result never reaches `observe`.
-- Wire it as the read model's `CiProgressSource`. Demand comes from S4. Until S4
-  lands, demand is false and only the first snapshot is recorded.
+- `supervisor.ts`: publish the rows of every `snapshot()` (both loops). In the
+  `--watch` phase's 30 s head probe, when the registry reports demand for the wait's
+  project, read the checks once and update. That read's result never reaches
+  `observe`. Remove the entry when the wait resolves or is cancelled.
+- Wire it as the read model's `CiProgressSource`. Demand comes from S4's topic
+  subscribers and from S1's HTTP reads (15 s after each read). Until S4 lands, only
+  HTTP reads create demand.
 - Tests: every row of the spec's probe case table. Prove the "result only updates
   progress" row red against a version that lets a failed read resolve the wait. Read
   `.ai/skills/load-bearing-change/SKILL.md` first: this slice touches a working
@@ -63,19 +69,25 @@ can drive the view from the HTTP snapshot. One PR for each slice.
 
 ### S4: activity topic
 
-- Register topic `activity` on the socket hub (`loopbackReadable` default false).
-  Subscription parameter: project id or `*`.
+- Add a topic family to the socket hub (`packages/cezar/src/server/ws.ts`): one
+  registration for a name prefix, a publisher factory for each concrete name, demand
+  per concrete name, the same trust rules. Register the family `activity:` with
+  `loopbackReadable` false. Names: `activity:<projectId>` and `activity:all`. An
+  unknown project id answers the existing unknown-topic error.
 - Publisher: subscribe on 0→1, stop on 1→0. Triggers: the store's run changes, the
   tracker's changes, the progress registry's changes. Coalesce to at most one
   snapshot every 500 ms, only on change. While any watched run is running, tick
   once a second for the rate buckets.
 - Report demand per project to `CiProgressRegistry`.
 - Cockpit: `packages/web/src/api/activity.ts`: `useActivity(scope)` reads the HTTP
-  snapshot, then subscribes in local mode, or re-reads every 5 s in remote mode while
-  visible. It follows `docs/areas/realtime-events.md`: subscribe in the view, return
-  the unsubscribe, release on hide.
-- Tests: demand start and stop; coalescing; no frame without change; an untrusted
-  connection is refused; the hook's local and remote paths.
+  snapshot, then subscribes when the live coordinator has topics, or re-reads every
+  5 s while visible when it has none (remote mode, no SharedWorker, failed
+  SharedWorker). Add the read to the coordinator's shared-read allowlist. It follows
+  `docs/areas/realtime-events.md`: subscribe in the view, return the unsubscribe,
+  release on hide.
+- Tests: family demand start and stop per name; coalescing; no frame without
+  change; an untrusted connection is refused; the hook's topic path and its three
+  no-topic paths.
 
 ### S5: navigation and the project view (static)
 
