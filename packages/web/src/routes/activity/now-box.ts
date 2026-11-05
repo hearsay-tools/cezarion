@@ -93,7 +93,9 @@ function workers(run: ActivityRun, wait: Extract<ActivityWait, { kind: 'workers'
   const bar = total > 0 ? settled / total : 0
   const base = { tone: toneOf(run), since: wait.since }
   if (replies) {
-    return { ...base, verb: 'Waiting for reply', icon: 'reply', main: namesLine('From', recipientRunIds, ctx), ...defined('detail', deadlineDetail(wait.deadline, 'Reply due')) }
+    // A reply wait whose requests name no recipient the read model could resolve says so plainly.
+    const main = recipientRunIds.length > 0 ? namesLine('From', recipientRunIds, ctx) : 'Waiting for replies'
+    return { ...base, verb: 'Waiting for reply', icon: 'reply', main, ...defined('detail', deadlineDetail(wait.deadline, 'Reply due')) }
   }
   const mixed = recipientRunIds.length > 0
   const main = mixed ? `${owed} owed · ${settled} settled` : mode ? `${MODE_WORD[mode]} of ${total} · ${settled} settled` : `${owed} owed`

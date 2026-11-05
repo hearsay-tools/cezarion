@@ -147,3 +147,10 @@ describe('rootNow: the check summary', () => {
     expect(rootNow(truncated, ctx).checkSummary).toBe('100 passed, 1 failed, 1 pending, +2 more not listed')
   })
 })
+
+describe('rootNow: a reply wait that names no recipient', () => {
+  it('says "Waiting for replies" for a reply wait that names no recipient', () => {
+    const box = rootNow(waiting('waiting-on-workers', { kind: ACTIVITY_WAIT_KIND.workers, since: iso(-1_000), detail: { owed: 2, total: 2, settled: 0, replies: true, recipientRunIds: [] } }), ctx)
+    expect(box).toMatchObject({ verb: 'Waiting for reply', main: 'Waiting for replies' })
+  })
+})
