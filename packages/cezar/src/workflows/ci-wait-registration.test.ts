@@ -56,7 +56,7 @@ function registrationFixture() {
   const state = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false });
   state.liveSession.attachSession(unused<AgentSession>({ open: true }));
   state.liveSession.beginCiGeneration('generation');
-  state.ciTurnId = 'turn';
+  state.waitIdentity.rotateCiTurn('turn');
   let current: typeof state | undefined = state;
   const resolve = vi.fn(async () => identity);
   const host = unused<ConstructorParameters<typeof WaitRegistry>[1]>({
@@ -211,7 +211,7 @@ describe('CI metadata lookup interruption', { timeout: 30_000 }, () => {
     const pending = registry.registerWait(run.id, { kind: WAIT_KIND.pr, pr }, 'cezar_wait', 'generation', capability.signal);
     const assertion = expect(pending).rejects.toMatchObject({ code });
     if (code === 'registration_aborted') registry.abortRegistrations(run.id);
-    else if (code === 'turn_changed') state.ciTurnId = 'next-turn';
+    else if (code === 'turn_changed') state.waitIdentity.rotateCiTurn('next-turn');
     else capability.abort();
     fail(new Error('lookup aborted'));
     await assertion;

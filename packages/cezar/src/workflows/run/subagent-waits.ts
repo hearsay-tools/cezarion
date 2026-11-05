@@ -169,7 +169,7 @@ export class SubagentWaits {
    *  alias it would have opened before. */
   private openSubagentWait(runId: string, state: ActiveRun): void {
     const wait: SubagentWaitEntry = { id: randomUUID(), kind: 'subagent', source: 'cezar', via: 'native-subagents', registeredAt: new Date().toISOString(),
-      phase: 'open', turnId: state.ciTurnId ?? 'subagents', deadline: this.deadline(), children: this.children(state) };
+      phase: 'open', turnId: state.waitIdentity.ciTurnId ?? 'subagents', deadline: this.deadline(), children: this.children(state) };
     try { this.context.store.commitWait(runId, wait); }
     catch (error) { console.warn(`[cez] subagent wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return; }
     this.host.armWait(runId, wait);

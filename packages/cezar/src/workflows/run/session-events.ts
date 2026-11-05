@@ -152,7 +152,7 @@ export function markTurnBoundary(context: RunModuleContext, host: SessionHelperH
   inputReceipts.readBundledInputs(context, host.inputReceiptHost, runId, state);
   state.waitWakeTurn = undefined;
   state.atTurnBoundary = state.liveSession.session;
-  state.ciTurnId = randomUUID();
+  state.waitIdentity.rotateCiTurn(randomUUID());
 }
 
 /**

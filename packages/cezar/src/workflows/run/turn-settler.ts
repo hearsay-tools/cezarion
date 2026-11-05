@@ -477,7 +477,7 @@ export class TurnSettler {
     const now = Date.now();
     // `seconds` is the record's bound; the live-workers deadline is the interval itself (tests run it sub-minute).
     const wait: TimerWaitEntry = { id: randomUUID(), kind: 'timer', source: 'agent', via, registeredAt: new Date(now).toISOString(),
-      deadline: new Date(now + (delay === undefined ? minutes * 60_000 : delay * 1000)).toISOString(), phase: 'open', turnId: state.ciTurnId ?? 'monitoring',
+      deadline: new Date(now + (delay === undefined ? minutes * 60_000 : delay * 1000)).toISOString(), phase: 'open', turnId: state.waitIdentity.ciTurnId ?? 'monitoring',
       seconds: delay ?? Math.min(TIMER_MAX_SECONDS, Math.max(TIMER_MIN_SECONDS, Math.round(minutes * 60))),
       ...(via === 'monitoring-line' ? { note: 'Opened while workers run.' } : {}) };
     this.host.humanWaits.withdrawCezarHumanWaits(runId);

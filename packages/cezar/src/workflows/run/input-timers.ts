@@ -34,8 +34,5 @@ export function clearIdleTimer(state: ActiveRun): void {
 }
 
 export function clearAutosaveTimer(state: ActiveRun): void {
-  if (state.autosaveTimer) {
-    clearInterval(state.autosaveTimer);
-    state.autosaveTimer = undefined;
-  }
+  state.autosave.clearAutosave();
 }
