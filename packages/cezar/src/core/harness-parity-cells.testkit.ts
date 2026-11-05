@@ -1277,6 +1277,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         // Mid-turn, with the session the owner opened recorded: what a restart would resume.
         await driveObservedRun(backend, 'hold', record => record?.status === 'running' && record.steps.some((step) => step.sessionId !== undefined), 30_000,
           async ({ store, manager, runId, repoRoot }) => {
+            await waitFor(() => [...fixtureWork(manager).liveSessions].some(session => session.open));
             const dataDir = join(repoRoot, '.ai/cezar');
             store.flush();
             // This cockpit was already running beside the owner, which then crashed mid-session.
@@ -1334,6 +1335,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         let stopped: RunRecord | undefined;
         await driveObservedRun(backend, 'hold', record => record?.status === 'running' && record.steps.some((step) => step.sessionId !== undefined), 30_000,
           async ({ store, manager, runId, repoRoot }) => {
+            await waitFor(() => [...fixtureWork(manager).liveSessions].some(session => session.open));
             const dataDir = join(repoRoot, '.ai/cezar');
             store.flush();
             const cockpit = RunStore.open(dataDir, { keepLive: true });
