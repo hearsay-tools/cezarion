@@ -177,7 +177,7 @@ export const RUN_TRIGGERS: readonly TriggerRow[] = [
   { id: 'continue.now', states: CONTINUABLE, trigger: 'A human message or Continue, no session; Send back from review', firedBy: 'human', behavior: 'A continuation: running at once', exit: 'continue-now', to: ['running'], via: ['continueRun', 'admitContinuation'] },
   { id: 'continue.line', states: CONTINUABLE, trigger: 'A human message or Continue, no session, or a parent\'s message to a settled owned worker', firedBy: 'human', when: 'no slot is free, or the account is held', behavior: 'queued, as a wake in the line', exit: 'continue-line', to: ['queued'], via: ['continueRun', 'admitContinuation'] },
   // waiting:pr, waiting:process, waiting:timer
-  { id: 'pr.resolves', states: ['waiting:pr'], trigger: 'Checks settle, the head changes, the PR merges, closes or conflicts, the deadline passes, or gh fails for good', firedBy: 'watcher', behavior: 'Resolves; the wake turn starts at once in the held slot: running', exit: 'resume', to: ['running'], via: ['resolveWait', 'queueWaitWake', 'deliverAdmittedWake', 'submitAgentInput'] },
+  { id: 'pr.resolves', states: ['waiting:pr'], trigger: 'Checks settle, the head changes, the PR merges, closes or conflicts, an initiated merge is blocked, the deadline passes, or gh fails for good', firedBy: 'watcher', behavior: 'Resolves; the wake turn starts at once in the held slot: running', exit: 'resume', to: ['running'], via: ['resolveWait', 'queueWaitWake', 'deliverAdmittedWake', 'submitAgentInput'] },
   { id: 'process.resolves', states: ['waiting:process'], trigger: 'The exit file appears, the process is gone, the deadline passes, or the probe fails', firedBy: 'watcher', behavior: 'As pr.resolves', exit: 'resume', to: ['running'], via: ['resolveWait', 'queueWaitWake', 'submitAgentInput'] },
   { id: 'timer.fires', states: ['waiting:timer'], trigger: 'The deadline passes', firedBy: 'timer', behavior: 'As pr.resolves; spends 1 of the 40 wakes', exit: 'resume', to: ['running'], via: ['armWait', 'resolveWait', 'queueWaitWake', 'submitAgentInput'] },
   { id: 'monitoring.budget-spent', states: ['waiting:process', 'waiting:timer'], trigger: 'A timer or process wait resolves with the budget spent', firedBy: 'timer', when: 'the wake budget is spent', behavior: 'Cancelled with the cap note; Cezar\'s budget human wait', exit: null, to: ['waiting:human'], via: ['resolveWait', 'openHumanAlias'] },
@@ -270,7 +270,7 @@ const ENDS_WAITS = ['cezar_cancel_wait', 'a done is accepted', 'Stop', 'Finish',
 
 export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindSpec } = {
   pr: { deadline: 'required', keepsSlot: true, cancels: ENDS_WAITS, resolves: [
-    { trigger: 'checks settle or the head changes; a merge wait: merged, closed or a conflict', firedBy: 'watcher' },
+    { trigger: 'checks settle or the head changes; a merge wait: merged, closed or a conflict; merge_or_blocked also resolves when no merge remains pending', firedBy: 'watcher' },
     { trigger: 'the deadline (1 to 7,200 s, default 1,800) or a fatal gh error', firedBy: 'watcher' },
   ] },
   timer: { deadline: 'required', keepsSlot: true, cancels: [...ENDS_WAITS, 'the wake budget is spent at its deadline'], resolves: [

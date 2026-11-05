@@ -619,7 +619,13 @@ segment.
 
 An agent waits on something outside its turn with `cezar_wait`. With `kind: "pr"` and
 a GitHub PR URL in `pr`, Cezarion watches the PR outside the model: its checks
-(`until: "checks"`, the default) or its merge (`until: "merge"`). The optional
+(`until: "checks"`, the default), its eventual merge (`until: "merge"`), or a merge
+the agent has requested (`until: "merge_or_blocked"`). The last target wakes when
+the PR merges, closes, conflicts, or is neither queued nor scheduled for auto-merge.
+It includes any known queue-removal or auto-merge-disable reason. A pending queue
+slot or enabled auto-merge keeps it open. The ordinary merge target ignores queue
+removal; use `wake_on_conflict: false` for a dependency wait that also ignores
+conflicts. Only `merged` confirms success. The optional
 `timeout_seconds` defaults to 1,800 and accepts 1–7,200. With `kind: "timer"`,
 `seconds` (60–7,200) and an optional `note`, Cezarion wakes the agent at that time and
 hands the note back. No authored configuration or worker delegation permission is

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { matchesGithubPullRequest, mergedPullRequestObservations } from '../merge-observations.ts';
+import { mergeProgressArgs, mergeProgressResponseSchema, mergeRequestObservation, type GithubMergeRequest } from './merge-progress.ts';
 import { ciPrIdentitySchema, ciWaitRequestSchema, type CiPrIdentity, type CiWaitErrorCode } from '@open-mercato/cezar-contract/ci-wait';
 
 export const CI_QUERY_TIMEOUT_MS = 10_000;
@@ -207,6 +208,26 @@ export class GithubCiClient {
     const [owner, repo] = repository.split('/');
     if (this.env.CEZ_DRY_RUN !== '1') mergedPullRequestObservations.observe({ owner: owner!, repo: repo!, number: prNumber }, raw);
     return { headSha, mergeable, mergeStateStatus, state, ...(mergedAt ? { mergedAt } : {}), ...(mergeCommit ? { mergeCommitSha: mergeCommit.oid.toLowerCase() } : {}) };
+  }
+  /** Opt-in merge supervision: current pending state and its last lifecycle event, one bounded read. */
+  async mergeProgress(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubPrMergeState & { mergeRequest: GithubMergeRequest }> {
+    const parsedUrl = ciWaitRequestSchema.safeParse({ pr: pr.prUrl });
+    if (!parsedUrl.success) throw new CiGithubError('invalid_request', 'Provide an HTTPS GitHub pull request URL.');
+    if (new URL(pr.prUrl).hostname !== 'github.com') throw new CiGithubError('unsupported_host', 'Merge supervision supports github.com.');
+    if (this.env.CEZ_DRY_RUN === '1') return { ...await this.mergeState(pr, signal), mergeRequest: { isInMergeQueue: false, autoMergeEnabled: false } };
+    const response = await this.query(mergeProgressArgs(pr), signal);
+    if (response.code !== 0) throw commandError(response);
+    const raw = parseJson(response.stdout, mergeProgressResponseSchema).data.repository.pullRequest;
+    const metadata = metadataSchema.safeParse(raw);
+    const merge = mergeStateSchema.safeParse(raw);
+    const [owner, repo] = pr.repository.split('/');
+    if (!metadata.success || !merge.success || !matchesGithubPullRequest({ owner: owner!, repo: repo!, number: pr.prNumber }, raw)) {
+      throw new CiGithubError('malformed_data', 'GitHub returned inconsistent merge progress; inspect the PR and retry.');
+    }
+    mergedPullRequestObservations.observe({ owner: owner!, repo: repo!, number: pr.prNumber }, raw);
+    return { headSha: metadata.data.headRefOid, mergeable: metadata.data.mergeable, mergeStateStatus: metadata.data.mergeStateStatus,
+      state: merge.data.state, ...(merge.data.mergedAt ? { mergedAt: merge.data.mergedAt } : {}),
+      ...(merge.data.mergeCommit ? { mergeCommitSha: merge.data.mergeCommit.oid.toLowerCase() } : {}), mergeRequest: mergeRequestObservation(raw) };
   }
   async head(pr: CiPrIdentity, signal: AbortSignal): Promise<string> { return (await this.metadata(pr, signal)).headSha; }
   async hasActiveRuns(pr: CiPrIdentity, signal: AbortSignal): Promise<boolean> {

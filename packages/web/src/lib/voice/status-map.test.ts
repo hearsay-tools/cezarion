@@ -29,7 +29,7 @@ const FIXTURES: Record<VoiceStatus, Partial<RunRecord>> = {
   'needs-permission': { status: RUN_STATUS.running, hasPendingPermission: true },
   failed: { status: RUN_STATUS.failed },
   running: { status: RUN_STATUS.running },
-  'waiting-for-ci': { status: RUN_STATUS.waiting, waits: [{ ...timerWait(), kind: WAIT_KIND.pr }] } as Partial<RunRecord>,
+  'waiting-for-ci': { status: RUN_STATUS.waiting, waits: [{ ...timerWait(), kind: WAIT_KIND.pr, until: 'checks' }] } as Partial<RunRecord>,
   monitoring: { status: RUN_STATUS.waiting, waits: [timerWait()] } as Partial<RunRecord>,
   'waiting-for-capacity': {
     status: RUN_STATUS.waiting,

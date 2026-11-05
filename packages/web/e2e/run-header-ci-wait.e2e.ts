@@ -134,6 +134,25 @@ describe('CI header browser accessibility', () => {
     expect(browser.count(link)).toBe(1)
     expect(browser.count('[data-slot="monitoring-schedule"]')).toBe(0)
   })
+  it('shows an initiated merge and its blocked observation in both themes at 360px', () => {
+    const initiated: CiWait = { ...wait, until: 'merge_or_blocked' }
+    const blocked: CiWait = { ...initiated, phase: WAIT_PHASE.delivered, result: {
+      outcome: 'blocked', headSha: wait.headSha, observedAt: '2026-11-05T11:00:00.000Z',
+      checks: [], totalChecks: 0, truncated: false,
+      mergeBlock: { reason: 'no_pending_merge', isInMergeQueue: false, autoMergeEnabled: false },
+    } }
+    for (const theme of ['light', 'dark']) {
+      browser.setViewport(360, 640)
+      browser.evaluate(`document.documentElement.style.zoom = '1'; document.documentElement.classList.toggle('light', ${theme === 'light'}); window.setCiRun(${JSON.stringify({ ...run, waits: [initiated] })})`)
+      browser.waitForFunction(`document.querySelector('${status}').textContent.includes('Waiting for merge or blockage')`)
+      browser.evaluate(`window.setCiRun(${JSON.stringify({ ...run, status: RUN_STATUS.done, waits: [], lastWaits: [blocked] })})`)
+      browser.waitForFunction(`document.querySelector('${status}').textContent.includes('Initiated merge blocked')`)
+      expect(browser.text(status)).toContain('not merged')
+      expect(browser.count(link)).toBe(1)
+      expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= document.documentElement.clientWidth`)).toBe(true)
+      browser.screenshot(resolve(artifacts, `merge-blocked-${theme}-360.png`), { viewport: true })
+    }
+  })
   it('keeps a settled result linked while continuation admission is queued or waiting', () => {
     for (const runStatus of ['queued', 'waiting']) {
       browser.evaluate(`window.setCiRun(${JSON.stringify({ ...run, status: runStatus,

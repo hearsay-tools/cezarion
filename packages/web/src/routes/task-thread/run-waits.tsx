@@ -101,10 +101,10 @@ export function RunWaitDetails({ run }: { run: ApiRun }) {
   )
 }
 
-function CiWaitStatus({ run, wait, settled = false }: { run: ApiRun; wait: CiWait; settled?: boolean }) {
+function ciWaitLabel(run: ApiRun, wait: CiWait, settled: boolean) {
   const result = wait.result
   // A merge wait (hearsay-tools/cezarion#1425) waits for GitHub's merge, never for checks.
-  const merge = wait.until === 'merge'
+  const merge = wait.until !== 'checks'
   const outcomes: Record<NonNullable<typeof result>['outcome'], string> = {
     passed: 'CI checks passed — observed checks only; not merge approval',
     failed: 'CI checks failed — inspect the PR checks',
@@ -117,12 +117,20 @@ function CiWaitStatus({ run, wait, settled = false }: { run: ApiRun; wait: CiWai
     head_changed: `CI head changed — ${result?.headSha.slice(0, 7)} → ${result?.observedHeadSha?.slice(0, 7) ?? 'unknown'}`,
     merged: 'PR merged',
     closed: 'PR closed without merge — inspect the PR',
+    blocked: 'Initiated merge blocked — inspect the PR; not merged',
   }
   const noun = merge ? 'Merge' : 'CI'
   const cancelled = settled && wait.phase === 'cancelled'
-  const label = !settled
-    ? wait.phase === 'resolved' ? owedLabel(`${noun} result ready`, run) : merge ? 'Waiting for merge' : 'Waiting for CI'
+  return !settled
+    ? wait.phase === 'resolved' ? owedLabel(`${noun} result ready`, run) : wait.until === 'merge_or_blocked' ? 'Waiting for merge or blockage' : merge ? 'Waiting for merge' : 'Waiting for CI'
     : cancelled ? `${noun} wait cancelled` : result ? outcomes[result.outcome] : `${noun} wait unavailable`
+}
+
+function CiWaitStatus({ run, wait, settled = false }: { run: ApiRun; wait: CiWait; settled?: boolean }) {
+  const result = wait.result
+  const noun = wait.until === 'checks' ? 'CI' : 'Merge'
+  const cancelled = settled && wait.phase === 'cancelled'
+  const label = ciWaitLabel(run, wait, settled)
   const timestamp = !settled ? wait.deadline : cancelled ? wait.cancelledAt : result?.observedAt
   const dateLabel = formatInstant(timestamp)
   const prLabel = `${wait.repository}#${wait.prNumber}`
