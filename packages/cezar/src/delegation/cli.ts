@@ -6,6 +6,7 @@ import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import {
   conversationSendRequestSchema,
+  conversationSendEffectSchema,
   conversationSendResultSchema,
   conversationInspectResultSchema,
   conversationInspectRequestSchema,
@@ -241,6 +242,12 @@ async function writeInboxOutput(text: string): Promise<void> {
   });
 }
 
+/** Only a dispatched message mutation can have uncertain acceptance. */
+function transportFailure(messageId?: string) {
+  return { code: 'unavailable_transport', error: 'Delegation transport failed or returned an invalid response',
+    ...(messageId ? { effect: conversationSendEffectSchema.enum.unknown, messageId,
+      instruction: `Message acceptance is unknown. Retry the exact same command with --id ${messageId}; keep all arguments unchanged.` } : {}) };
+}
 async function runDelegationCommand(argv: string[], env: NodeJS.ProcessEnv, help: (operation: string) => string = workerHelp): Promise<number> {
   let token: string | undefined;
   const print = (value: unknown, stderr = false) => {
@@ -261,9 +268,11 @@ async function runDelegationCommand(argv: string[], env: NodeJS.ProcessEnv, help
       endpoint = delegationEndpoint(env.CEZ_DELEGATION_URL);
       token = z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(env.CEZ_DELEGATION_TOKEN);
     } catch { throw new DelegationPolicyError('unavailable_transport', 'Delegation session is unavailable'); }
+    let dispatchedMessageId: string | undefined;
     try {
       if (operation === 'list') return await printWorkerList(endpoint, token, print);
       if (operation === 'inbox') return await printInbox(endpoint, token, print);
+      if (['send', 'progress', 'follow-up', 'reply'].includes(operation)) dispatchedMessageId = conversationSendRequestSchema.parse(body).id;
       const response = await fetch(`${endpoint.href}/${path}`, { method: body === undefined ? 'GET' : 'POST', redirect: 'error',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(45_000) });
@@ -278,7 +287,8 @@ async function runDelegationCommand(argv: string[], env: NodeJS.ProcessEnv, help
       return 'delivery' in result && result.delivery === 'not-delivered' ? 1 : 0;
     } catch (error) {
       if (error instanceof DelegationPolicyError) throw error;
-      throw new DelegationPolicyError('unavailable_transport', 'Delegation transport failed or returned an invalid response');
+      print(transportFailure(dispatchedMessageId));
+      return 1;
     }
   } catch (error) {
     print(error instanceof DelegationPolicyError ? { code: error.code, error: error.message } : { code: 'invalid_input', error: formatWorkerCliError(error, argv) });

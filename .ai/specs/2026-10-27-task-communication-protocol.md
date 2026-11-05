@@ -690,3 +690,106 @@ the change it documents.
 - Hard isolation from the same-user shell.
 - Peers across projects or across cockpits.
 - Lateral messaging between workers of one family (hearsay-tools/cezarion#114, not planned).
+
+## Message call effects (hearsay-tools/cezarion#2709)
+
+The optional `effect` on a send result describes this call. `applied` means a
+fresh send accepted an input. `unchanged` means an exact retry returned the stored
+receipt. `refused` means a fresh send recorded a refusal and queued no input.
+`unknown` is available when the effect cannot be established. Older servers omit
+the field; callers treat absence as unknown. Delivery and request outcome retain
+their existing meanings. An unchanged receipt can still report queued, delivered,
+consumed or not-delivered. Retry projection and delivery repair remain active.
+
+A reply to the sender's own request is refused with `incompatible_state` and a
+`cez message follow-up` command naming the recipient and request. The error also
+shows how to send a new request. Scope and ownership checks still run first.
+The refusal accepts no message and changes no request outcome.
+
+Scope checks precede that guidance both before queueing and at the ledger queue
+head. Ledger selection does not inspect reply direction. The locked send checks
+the current pair, selected ledger and send scope before checking direction.
+
+| Reply case | Send behavior | Settlement behavior |
+| --- | --- | --- |
+| Own outgoing request, peer has no root ledger | `denied_scope` | No change |
+| Own outgoing request, authorized peer and send scope | `incompatible_state` with follow-up and new-request commands | No change |
+| Reply with resume flag | Cannot reach send scope: the request schema refuses this combination | No change |
+| Peer loses ledger or starts history deletion before queue head | Re-read scope and refuse | No change |
+
+The lifecycle cases below still apply to queued, running, waiting,
+Finish-pending, stopping, review, done, failed, cancelled, deleted,
+history-deletion-pending, restarted, foreign-owned and unreadable recipients.
+This correction changes error precedence only; it adds no relationship or
+settlement path.
+
+| Call or recipient case | Send result at shipped defaults | Settlement behavior |
+| --- | --- | --- |
+| Fresh send to queued, running or waiting recipient | `applied`; existing delivery receipt | Existing request settlement |
+| Exact retry, including after restart | `unchanged`; current stored delivery receipt; no duplicate input | Existing outcome retained |
+| Review, done or failed owned worker, without resume | `refused`, not-delivered; existing resume command; CLI exits 1 | No new obligation |
+| Explicit parent resume of eligible owned worker | `applied`; existing atomic continuation | Existing request settlement |
+| Stopping, cancelled or destroyed worker | `refused`, not-delivered; existing new-worker guidance | No new obligation |
+| Review, done, failed, cancelled, stopping or Finish-pending peer | `refused`, not-delivered; existing human-continuation guidance | No new obligation |
+| Wrong-direction reply within an authorized pair | Actionable error; no successful result | No change |
+| Deleted, history-deletion-pending or unrelated pair | Existing scope refusal | Existing settlement unchanged |
+| Other process owns recipient, or unreadable record | Existing admission refusal | Existing settlement unchanged |
+
+Existing equality tests pinned identical stored receipts across retries. They now
+compare every receipt field while requiring `unchanged` for the second call.
+The receipt guarantee remains; only the per-call effect differs. No wait, store,
+workflow or CI-wait behavior changes in this portion.
+
+
+### Receipt recovery and transport uncertainty
+
+After a send commits, a projection, wait reconciliation or delivery error must
+not discard its receipt. Return `applied` (or `refused` if no input was queued)
+for the fresh call and `unchanged` for an exact retry. Keep the existing repair
+order and delivery conditions. A failed repair stops that repair pass; an exact
+retry can attempt it again. A receipt still reports the stored delivery and
+request outcome, never presumed provider delivery.
+
+The CLI reports `unavailable_transport`, `effect: unknown`, the `messageId` and
+same-command retry guidance if a dispatched send, progress, follow-up or reply
+has no valid response. It exits 1 and sends no automatic retry. Missing session
+settings and invalid arguments fail before dispatch and do not claim uncertain
+acceptance. Valid service rejections retain their existing error fields.
+Other CLI operations retain their existing transport errors.
+
+| Call boundary | Call result | Delivery and settlement |
+| --- | --- | --- |
+| Fresh send commits, projection/reconcile/delivery fails | Stored receipt with `applied`, or `refused` for recorded refusal | Existing input and outcome preserved; no extra wake attempt |
+| Exact retry repair fails | Stored receipt with `unchanged` | No new input or obligation; original delivery condition retained |
+| Failure before commit | Existing error | No accepted message or input |
+| Dispatched message call loses or cannot validate response | CLI error with `unknown` and original message ID | Acceptance cannot be inferred; retry only with the same payload and ID |
+| Invalid CLI input or unavailable session before dispatch | Existing error without `unknown` | No message dispatched |
+| Valid service rejection or non-message transport failure | Existing error | Existing policy unchanged |
+
+
+Regression proof for receipt recovery and CLI uncertainty uses
+`proof_base=686b758047ccaf476c4650a8a174fc38d582313f`. In a detached scratch
+worktree, run `npm test -- --passWithNoTests=false
+packages/cezar/src/delegation/conversation-effects.test.ts
+packages/cezar/src/delegation/cli-message-effects.test.ts` (one command).
+With the baseline source and the new tests: 22 failed, 7 passed. Failures show
+lost postcommit receipts, missing executable guidance and missing CLI uncertainty.
+With the same tests and the three fixed source files: 29 passed. Guards cover
+precommit failure, predispatch rejection, valid service rejection and unrelated
+transport errors. Additional cases pin a delivery acknowledgement written before
+a callback throws and a committed reply outcome during failed repair.
+
+
+The existing `conversation-service.test.ts` case named `repairs projection
+failure on accepted send retry and notifies delivery without another input`
+now expects the fresh committed `applied`, `queued` receipt. Its original
+rejection assertion also pinned that the first failed projection skips delivery
+while retaining one input; those checks and all later retry, notification and
+no-duplicate checks remain. Only the thrown-error expectation changes.
+Focused proof (`npm test -- --passWithNoTests=false
+packages/cezar/src/delegation/conversation-service.test.ts -t
+'repairs projection failure on accepted send retry and notifies delivery without another input'`,
+one command): the old assertion fails against `f00387dca`; the updated assertion
+passes against that source (1 passed, 35 skipped), fails with `projection
+unavailable` against `proof_base` (1 failed, 35 skipped), and passes in the task
+worktree (1 passed, 35 skipped).

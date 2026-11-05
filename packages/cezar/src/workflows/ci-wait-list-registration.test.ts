@@ -38,12 +38,13 @@ describe('Wait list registration and resolution', { timeout: 30_000 }, () => {
     for (const wait of [first, second, timer]) expect(inputsFor(run.id, wait.id)).toHaveLength(1);
   });
 
-  it('identical CI registration returns the existing wait id; a different timeout on the same PR is still identical', async () => {
+  it('identical CI registration returns the existing wait id; a different timeout is refused without changing it', async () => {
     githubByPr();
     const run = await waitingParent();
     const wait = await registerPr(run.id, 12, 30);
-    const again = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr: 'https://github.com/Acme/Repo/pull/12', timeout_seconds: 600 }, 'cezar_wait', generationOf(run.id));
+    const again = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr: 'https://github.com/Acme/Repo/pull/12', timeout_seconds: 30 }, 'cezar_wait', generationOf(run.id));
     expect(again).toMatchObject({ id: wait.id, deadline: wait.deadline, timeoutSeconds: 30, until: 'checks' as const, wakeOnConflict: true });
+    await expect(registerPr(run.id, 12, 600)).rejects.toMatchObject({ code: 'duplicate_deadline', retainedWait: { id: wait.id, deadline: wait.deadline } });
     const timer = await registerTimer(run.id, 120, 'deploy');
     expect((await registerTimer(run.id, 120, 'deploy')).id).toBe(timer.id);
     expect((await registerTimer(run.id, 180, 'deploy')).id).not.toBe(timer.id);

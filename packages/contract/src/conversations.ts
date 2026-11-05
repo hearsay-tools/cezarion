@@ -72,8 +72,11 @@ export const conversationSendRequestSchema = z.object({
   .refine(value => (value.kind === 'reply' || value.kind === 'follow-up') === (value.requestId !== undefined), { message: 'Replies and follow-ups require a request ID; new messages must omit it' })
   .refine(value => !value.resume || value.kind === 'request' || value.kind === 'progress', { message: '--resume requires a new request or progress instruction' });
 export type ConversationSendRequest = z.infer<typeof conversationSendRequestSchema>;
+/** Effect of this call, independent of the stored delivery receipt and request outcome.
+ * Missing on older servers; callers must treat absence as unknown. */
+export const conversationSendEffectSchema = z.enum(['applied', 'unchanged', 'refused', 'unknown']);
 /** `consumed`: the recipient's harness reported the model read it (#505). */
-export const conversationSendResultSchema = z.object({ message: conversationMessageSchema, delivery: z.enum(['queued', 'delivered', 'consumed', 'not-delivered']), outcome: requestOutcomeSchema.optional() }).strict();
+export const conversationSendResultSchema = z.object({ message: conversationMessageSchema, delivery: z.enum(['queued', 'delivered', 'consumed', 'not-delivered']), outcome: requestOutcomeSchema.optional(), effect: conversationSendEffectSchema.optional() }).strict();
 export type ConversationSendResult = z.infer<typeof conversationSendResultSchema>;
 export const conversationInspectRequestSchema = z.object({ recipientRunId: z.uuid(), before: conversationCursorSchema.optional() }).strict();
 export type ConversationInspectRequest = z.infer<typeof conversationInspectRequestSchema>;

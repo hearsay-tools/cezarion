@@ -7,6 +7,7 @@ import { RunStore } from '../runs/store.ts';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
+import { WaitDeadlineConflict } from '../ci-wait/errors.ts';
 import { createDelegationRoutes } from './routes.ts';
 import { fixture, seedWorkerWait } from './service.testkit.ts';
 import { conversationSendResultSchema, conversationInspectResultSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
@@ -31,6 +32,18 @@ describe('authenticated delegation HTTP family', () => {
     const response = await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
     expect(response.status).toBe(201); return workerSpawnResultSchema.parse(await response.json());
   }
+  it('preserves retained wait guidance for CLI deadline refusals', async () => {
+    const workerId = randomUUID();
+    const waitId = seedWorkerWait(f.store, f.parent.id, [workerId]);
+    const wait = f.store.getRun(f.parent.id)!.waits!.find(row => row.id === waitId)!;
+    if (wait.kind !== 'worker') throw new Error('expected worker wait');
+    vi.spyOn(f.service, 'wait').mockRejectedValue(new WaitDeadlineConflict(wait));
+    const response = await request('/wait', { workerIds: [workerId], timeoutSeconds: 60 });
+    expect(response.status).toBe(409);
+    expect(delegationErrorResponseSchema.parse(await response.json())).toMatchObject({
+      code: 'incompatible_state', error: expect.stringContaining(`Wait ${wait.id} remains active until ${wait.deadline}`),
+    });
+  });
   it('lists only the parent’s workers, including incomplete cleanup and destroyed resources', async () => {
     expect(await (await request('/list')).json()).toEqual({ workers: [] });
     const { workerId } = await spawn();
@@ -130,7 +143,12 @@ describe('authenticated delegation HTTP family', () => {
     }
     const response = await request('/send', input);
     expect(response.status).toBe(200);
-    expect(conversationSendResultSchema.parse(await response.json())).toMatchObject({ message: { senderRunId: f.parent.id, recipientRunId: workerId, kind: 'request' }, delivery: 'queued' });
+    expect(conversationSendResultSchema.parse(await response.json())).toMatchObject({ message: { senderRunId: f.parent.id, recipientRunId: workerId, kind: 'request' }, delivery: 'queued', effect: 'applied' });
+    const retry = await request('/send', input);
+    expect(conversationSendResultSchema.parse(await retry.json())).toMatchObject({ delivery: 'queued', effect: 'unchanged' });
+    const wrongReply = await request('/reply', { ...input, id: randomUUID(), kind: 'reply', requestId: input.id });
+    expect(wrongReply.status).toBe(409);
+    expect(await wrongReply.json()).toMatchObject({ code: 'incompatible_state', error: expect.stringContaining(`message follow-up ${workerId}`) });
     const followup = await request('/follow-up', { id: randomUUID(), recipientRunId: workerId, kind: 'follow-up', requestId: input.id, text: 'More detail' });
     expect(followup.status).toBe(200); conversationSendResultSchema.parse(await followup.json());
     const token = f.credentials.issue('project', workerId, randomUUID()); setRunStatus(f.store, workerId, RUN_STATUS.running);
@@ -140,6 +158,15 @@ describe('authenticated delegation HTTP family', () => {
     expect(conversationInspectResultSchema.parse(await inspected.json()).messages).toHaveLength(3);
     const cancelled = await request('/cancel-request', { requestId: input.id });
     expect(requestOutcomeSchema.parse(await cancelled.json()).status).toBe('replied');
+  });
+  it('refuses replying to an outgoing request with a usable follow-up command', async () => {
+    const { workerId } = await spawn();
+    const input = { id: randomUUID(), recipientRunId: workerId, kind: 'request', text: 'Which file?' };
+    await request('/send', input);
+    const response = await request('/reply', { ...input, id: randomUUID(), kind: 'reply', requestId: input.id });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'incompatible_state', error: expect.stringContaining(`message follow-up ${workerId}`) });
+    expect(f.store.getRun(workerId)?.agentInputs).toHaveLength(1);
   });
   it('validates inbox bodies and scopes receipts to the authenticated session', async () => {
     const { workerId } = await spawn(); setRunStatus(f.store, workerId, RUN_STATUS.running);

@@ -9,7 +9,7 @@ import { ARCHIVED_RUNS_PAGE_MAX } from './run-limits.ts';
 // The chain shapes belong to the workflows family; the run record embeds one, so this file
 // consumes them rather than redeclaring. One-way on purpose — see the header of `./workflows.ts`.
 import { workflowDefSchema, workflowStepDefSchema } from './workflows.ts';
-import { computeWaitingOn, hasResolvedWait, waitingOnSchema, waitSchema, withRootLedger } from './waits.ts';
+import { computeWaitingOn, hasResolvedWait, waitingOnSchema, waitSchema, waitRegistrationReceiptSchema, withRootLedger } from './waits.ts';
 import { handoffRecordsSchema } from './handoff.ts';
 
 /**
@@ -233,7 +233,7 @@ export const runRecordSchema = z.object({
   /** Durable non-human input, kept separate from human prompt/answer queues. */
   agentInputs: z.array(agentInputSchema).optional(),
   /** Open and recently resolved waits (spec 2026-10-17-unified-waits): CI, timers and the user. */
-  waits: z.array(waitSchema).optional(),
+  waits: z.array(waitSchema).optional(), waitRegistrations: z.array(waitRegistrationReceiptSchema).optional(),
   /** Settled waits, newest last, capped at `LAST_WAITS_LIMIT`. */
   lastWaits: z.array(waitSchema).optional(),
   /** Retained recovery observation when previous wait metadata cannot be trusted. */

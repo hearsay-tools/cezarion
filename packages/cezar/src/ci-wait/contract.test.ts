@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { request } from 'node:http';
 import { ciWaitRequestSchema, ciWaitSchema, ciWaitResultSchema, ciWaitReceiptSchema } from '@open-mercato/cezar-contract/ci-wait';
 import { previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
-import { cezarWaitRequestSchema } from '@open-mercato/cezar-contract/waits';
-import { cezarServerInstructions, cezarToolEnvNames, cezarTools, doneToolDefinition, waitToolDefinition } from './tools.ts';
+import { type CezarWaitAnswer, cezarWaitRequestSchema } from '@open-mercato/cezar-contract/waits';
+import { cezarServerInstructions, cezarToolEnvNames, cezarTools, doneToolDefinition, waitToolDefinition, waitAnswerHint } from './tools.ts';
 import { waitInvalidInput } from './errors.ts';
 
 const OBSOLETE_HUMAN_WAIT_KIND = 'human';
@@ -264,4 +264,30 @@ it('tells the agent when to enable a scheduled task and which ones to change', (
   const tools = cezarTools({ CEZ_AUTOMATIONS: '1' });
   expect(tools.find(tool => tool.definition.name === 'cezar_schedule_task')!.definition.description).toMatch(/enable: true only when the user/);
   expect(tools.find(tool => tool.definition.name === 'cezar_scheduled_tasks')!.definition.description).toMatch(/only the schedules the user asked you to manage/);
+});
+
+it('keeps legacy unavailable wait hints uncertain without an effect receipt', () => {
+  const hint = waitAnswerHint({ ok: false, code: 'unavailable', message: 'transport failed' });
+  expect(hint).toContain('Outcome unknown');
+  expect(hint).not.toContain('Not registered');
+  expect(hint).toContain('do not add a fallback wait');
+});
+
+describe('wait result guidance', () => {
+  const receipt = { ok: true as const, wait_id: '4a6b6bf4-798c-4dc7-aede-e583428f667a', kind: WAIT_KIND.timer,
+    deadline: '2026-11-05T14:00:00.000Z', open_waits: [] };
+  const cases: Array<[string, CezarWaitAnswer, string]> = [
+    ['unknown transport outcome', { ok: false, effect: 'unknown', code: 'outcome_unknown', message: 'lost response' }, 'Outcome unknown. Retry the same operation_id'],
+    ['retained deadline refusal', { ok: false, effect: 'refused', code: 'duplicate_deadline', message: 'retained' }, 'The retained wait remains active; do not cancel it'],
+    ['known refusal', { ok: false, effect: 'refused', code: 'capacity', message: 'full' }, 'Not registered by this call'],
+    ['receipt outside recent history', { ...receipt, replayed: true, wait_phase: 'unavailable' }, 'current wait state is unavailable. Inspect task history'],
+    ['cancelled receipt', { ...receipt, replayed: true, wait_phase: 'cancelled' }, 'already settled; inspect its result'],
+    ['resolved receipt', { ...receipt, replayed: true, wait_phase: 'resolved' }, 'already settled; inspect its result'],
+    ['open operation replay', { ...receipt, replayed: true, wait_phase: 'open' }, 'Existing wait retained. This is its real ID and deadline'],
+    ['semantic duplicate', { ...receipt, deduplicated: true, wait_phase: 'open' }, 'Existing wait retained. This is its real ID and deadline'],
+    ['new registration', { ...receipt, effect: 'applied', wait_phase: 'open' }, 'Registered. End your turn to wait'],
+  ];
+  it.each(cases)('%s gives guidance consistent with its effect and current state', (_name, answer, guidance) => {
+    expect(waitAnswerHint(answer)).toContain(guidance);
+  });
 });

@@ -65,7 +65,10 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     expect(notice).toMatchObject({ id: parkNoticeId(w.id, wait.id), recipientRunId: p.id, state: 'accepted' });
     expect(notice!.text).toMatch(/It waits on: timer [0-9a-f-]+ at \S+ \(Re-check the load run\.\)/);
     expect(notice!.text).toContain('Its last message:\n');
-    expect(notice!.text).toContain('Waiting on the load run.');
+    // The mock emits the tool envelope as assistant text before thenSay. Its additive
+    // receipt now fills the bounded excerpt; recovery must retain that last message.
+    expect(notice!.text).toContain('Registered. End your turn to wait');
+    expect(notice!.text).toContain('…');
     // The parent's input commits with the message.
     expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === notice!.id)).toEqual([
       expect.objectContaining({ conversation: { senderRunId: w.id, recipientRunId: p.id, kind: 'progress' } })]);

@@ -513,11 +513,12 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
       const body = JSON.parse(String(init?.body));
       return new Response(JSON.stringify({ message: { id: body.id, recipientRunId, senderRunId: f.parent.id,
         kind: 'request', text: body.text, createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64),
-        state: 'continuation-required', instruction: 'Worker finished; use cez worker resume' }, delivery: 'not-delivered' }));
+        state: 'continuation-required', instruction: 'Worker finished; use cez worker resume' }, delivery: 'not-delivered', effect: 'refused' }));
     });
     expect(await runWorkerCommand(['resume', recipientRunId, 'Fix the result', '--id', id], env)).toBe(1);
     expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({ resume: true });
     expect(json().message.instruction).toContain('worker resume');
+    expect(json().effect).toBe('refused');
   });
   it('routes both request wait forms through the real private wait endpoint', async () => {
     const requestId = randomUUID();

@@ -1,4 +1,4 @@
-import { sendRequestContext, sendAdmission, sendMessage, sendInput, type ConversationPair } from './conversation-send.ts';
+import { assertReplyDirection, sendRequestContext, sendAdmission, sendMessage, sendInput, type ConversationPair } from './conversation-send.ts';
 import { discoverTasks } from './task-discovery.ts';
 import { discoveredRunners, missingModelChoices, type HostDiscovery } from '../discovery/catalog.ts';
 import { assertConversationCapacity, assertFamilySender, byCreatedAtAndId, commitAccepted, familyPair, inboxEntryIn,
@@ -16,6 +16,7 @@ import {
 } from '@open-mercato/cezar-contract/discovery';
 import {
   CONVERSATION_PAGE_MESSAGES,
+  conversationSendEffectSchema,
   decodeConversationCursor,
   encodeConversationCursor,
   conversationSendRequestSchema,
@@ -246,9 +247,9 @@ export class DelegationService {
   }
   /** The ledger a new message lands in (spec § 2, Which ledger holds a message): a new request or
    *  progress message in the sender's family ledger, a follow-up or reply with the request it names. */
-  private ledgerFor(pair: ConversationPair, kind: ConversationSendRequest['kind']): RunRecord {
+  private ledgerFor(pair: ConversationPair, request: ConversationSendRequest): RunRecord {
     if (pair.relationship === 'family') return pair.root;
-    const ledger = kind === 'reply' ? pair.recipient : pair.sender;
+    const ledger = request.kind === 'reply' ? pair.recipient : pair.sender;
     // A peer that never opened a session has no ledger, so it holds no request to reply to.
     if (ledger.delegation?.role !== 'root') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
     return ledger;
@@ -272,7 +273,7 @@ export class DelegationService {
   async send(caller: Caller, value: ConversationSendRequest): Promise<ConversationSendResult> {
     const request = conversationSendRequestSchema.parse(value);
     const initial = this.conversationPair(caller, request.recipientRunId, true);
-    return this.serialized(`conversation:${initial.project.id}:${this.ledgerFor(initial, request.kind).id}`, async () => {
+    return this.serialized(`conversation:${initial.project.id}:${this.ledgerFor(initial, request).id}`, async () => {
       return this.sendLocked(caller, request);
     });
   }
@@ -280,8 +281,9 @@ export class DelegationService {
   private sendLocked(caller: Caller, request: ConversationSendRequest): ConversationSendResult {
     const pair = this.conversationPair(caller, request.recipientRunId, true);
     const { project, sender, recipient } = pair;
-    const root = this.ledgerFor(pair, request.kind);
+    const root = this.ledgerFor(pair, request);
     this.assertSendScope(pair, root, request);
+    if (pair.relationship === 'peer' && sender.delegation?.role === 'root') assertReplyDirection(sender.delegation.conversation ?? { messages: [], outcomes: [] }, request, sender, recipient);
     const requestHash = createHash('sha256').update(JSON.stringify({ senderRunId: sender.id, ...request })).digest('hex');
     const state = this.currentConversation(project, root);
     const existing = state.messages.find(message => message.id === request.id);
@@ -304,10 +306,14 @@ export class DelegationService {
     const input = sendInput(pair, root, message, requestHash, now);
     const next = { messages: [...state.messages, message], outcomes };
     this.commitSend(pair, root, next, input, resume, enqueue);
-    projectConversationEvents(project.store, project.store.getRun(root.id)!);
-    project.manager.reconcileWorkerWaits();
-    if (enqueue) project.manager.deliverConversationInput(recipient.id);
-    return this.conversationReceipt(project, root.id, message);
+    try {
+      projectConversationEvents(project.store, project.store.getRun(root.id)!);
+      project.manager.reconcileWorkerWaits();
+      if (enqueue) project.manager.deliverConversationInput(recipient.id);
+    } catch {
+      // The ledger and input already committed. Preserve their receipt; an exact retry repairs delivery.
+    }
+    return { ...this.conversationReceipt(project, root.id, message), effect: enqueue ? conversationSendEffectSchema.enum.applied : conversationSendEffectSchema.enum.refused };
   }
   private assertSendScope(pair: ConversationPair, root: RunRecord, request: ConversationSendRequest): void {
     const { project, sender, recipient, relationship } = pair;
@@ -320,10 +326,14 @@ export class DelegationService {
   private retrySend(pair: ConversationPair, root: RunRecord, existing: ConversationMessage, requestHash: string): ConversationSendResult {
     const { project, recipient } = pair;
     if (existing.requestHash !== requestHash) throw new DelegationPolicyError('invalid_input', 'Message ID payload conflict');
-    projectConversationEvents(project.store, project.store.getRun(root.id)!);
-    project.manager.reconcileWorkerWaits();
-    if (recipient.agentInputs?.some(input => input.id === existing.id && !input.deliveredAt)) project.manager.deliverConversationInput(recipient.id);
-    return this.conversationReceipt(project, root.id, existing);
+    try {
+      projectConversationEvents(project.store, project.store.getRun(root.id)!);
+      project.manager.reconcileWorkerWaits();
+      if (recipient.agentInputs?.some(input => input.id === existing.id && !input.deliveredAt)) project.manager.deliverConversationInput(recipient.id);
+    } catch {
+      // Repair cannot revoke the stored receipt or turn an exact retry into a new send.
+    }
+    return { ...this.conversationReceipt(project, root.id, existing), effect: conversationSendEffectSchema.enum.unchanged };
   }
   private commitSend(pair: ConversationPair, root: RunRecord, next: ConversationState, input: AgentInput, resume: boolean, enqueue: boolean): void {
     const { project, recipient, relationship } = pair;

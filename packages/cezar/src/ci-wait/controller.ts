@@ -199,16 +199,18 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
     })
     .use('/api/v1/tools/wait', requireCapability)
     // The agent fixes a bad call from the message, so refusals answer 200 with a typed result.
-    .post('/api/v1/tools/wait', bodyLimit({ maxSize: 16_384, onError: c => c.json({ ok: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB.' }) }), jsonZodValidator(cezarWaitRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, code: 'invalid_request' as const, message: waitInvalidInput(error) }) }), async c => {
+    .post('/api/v1/tools/wait', bodyLimit({ maxSize: 16_384, onError: c => c.json({ ok: false as const, effect: 'refused' as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB. Nothing was created.' }) }), jsonZodValidator(cezarWaitRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, effect: 'refused' as const, code: 'invalid_request' as const, message: waitInvalidInput(error) }) }), async c => {
       const capability = c.get('capability');
       try {
         const { answer } = await capability.registerWait(c.req.valid('json'), 'cezar_wait', capability.lifetime.signal);
-        capability.lifetime.signal.throwIfAborted();
+        // A registration receipt already committed remains true after capability revocation.
         return c.json(cezarWaitAnswerSchema.parse(answer));
       } catch (error) {
         return capabilityRevoked(c, capability, () => {
-          const code = ciRefusalCode(thrownCode(error)) ?? 'unavailable';
-          return c.json({ ok: false as const, code, message: ciErrorMessage(code) });
+          const code = ciRefusalCode(thrownCode(error));
+          const operation_id = c.req.valid('json').operation_id;
+          return c.json(code ? { ok: false as const, effect: 'refused' as const, code, message: ciErrorMessage(code), operation_id }
+            : { ok: false as const, effect: 'unknown' as const, code: 'outcome_unknown' as const, message: 'Registration outcome is unknown. Retry the same operation_id and arguments; do not add a fallback wait.', operation_id });
         });
       }
     })

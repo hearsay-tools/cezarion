@@ -53,8 +53,9 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     try {
       const a = await worker(p.id); const b = await worker(p.id);
       const first = manager.registerWorkerListWait(p.id, { workerIds: [a.id, b.id], timeoutSeconds: 600 }, 'cez-worker-wait');
-      const again = manager.registerWorkerListWait(p.id, { workerIds: [b.id, a.id], mode: 'any', timeoutSeconds: 30 }, 'cezar_wait');
+      const again = manager.registerWorkerListWait(p.id, { workerIds: [b.id, a.id], mode: 'any', timeoutSeconds: 600 }, 'cezar_wait');
       expect(again.id).toBe(first.id);
+      expect(() => manager.registerWorkerListWait(p.id, { workerIds: [b.id, a.id], timeoutSeconds: 30 }, 'cezar_wait')).toThrow('Deadline change refused');
       const all = manager.registerWorkerListWait(p.id, { workerIds: [a.id, b.id], mode: 'all', timeoutSeconds: 600 }, 'cezar_wait');
       expect(all.id).not.toBe(first.id);
       expect(store.getRun(p.id)?.waits?.filter(wait => wait.kind === 'worker')).toHaveLength(2);

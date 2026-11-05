@@ -1,3 +1,4 @@
+import { WaitDeadlineConflict } from '../ci-wait/errors.ts';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { ZodError } from 'zod';
@@ -13,7 +14,8 @@ import { DelegationPolicyError } from './policy.ts';
 
 type Env = { Variables: { caller: Caller } };
 export function delegationFailure(error: unknown) {
-  const known = error instanceof DelegationPolicyError ? error : error instanceof ZodError
+  const known = error instanceof DelegationPolicyError ? error : error instanceof WaitDeadlineConflict
+    ? new DelegationPolicyError('incompatible_state', error.message) : error instanceof ZodError
     ? new DelegationPolicyError('invalid_input', 'Invalid delegation input')
     : new DelegationPolicyError('incompatible_state', 'Delegation operation could not be completed');
   const status = known.code === 'unauthenticated' ? 401 : known.code === 'denied_scope' ? 403

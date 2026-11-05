@@ -281,7 +281,9 @@ describe('peer wait registration', { timeout: 45_000 }, () => {
     const { run, release } = await heldParent();
     const [b, c] = [peer(), peer()];
     const first = await waitOnPeers(run.id, [b, c]);
-    expect((await waitOnPeers(run.id, [c, b], 30)).id).toBe(first.id);
+    expect((await waitOnPeers(run.id, [c, b])).id).toBe(first.id);
+    const changed = await handlers(run.id).registerWait({ kind: WAIT_KIND.peer, peer_ids: [c, b], timeout_seconds: 30 }, 'cezar_wait', new AbortController().signal);
+    expect(changed.answer).toMatchObject({ ok: false, effect: 'refused', code: 'duplicate_deadline', retained_wait: { wait_id: first.id, deadline: first.deadline } });
     release();
   });
 

@@ -1560,6 +1560,60 @@ Every row but cancellation exits with no human action. A transient `gh` failure 
 never ends the wait before its deadline.
 
 
+## Registration effect receipts (hearsay-tools/cezarion#2709)
+
+Wait registration reports `effect`: `applied`, `unchanged`, `refused` or
+`unknown`, independently of whether the wait is currently open. Existing result
+fields stay valid. Legacy answers without effect information do not establish an
+effect. No new run state, wake budget, deadline limit or automatic resume is added.
+
+An `ok: true` answer permits only `applied` or `unchanged` when `effect` is
+present. An `ok: false` answer permits only `refused` or `unknown`. Both branches
+still accept legacy answers without `effect`.
+
+The tool adapter generates an operation UUID before dispatch, unless the caller
+supplies `operation_id`. The run store commits the operation fingerprint and wait
+snapshot atomically with registration. Reusing that operation with different
+canonical arguments refuses; the same arguments replay the receipt even after
+restart with no live session. Replay reads current wait state separately; a
+receipt whose wait is no longer in recent history says its state is unavailable.
+Receipts follow run-history retention and deletion, without user-authored state.
+
+An identical semantic wait retains its existing ID and deadline and reports
+`deduplicated: true`. A changed timeout refuses the change and names the retained
+wait. The old return-existing behavior protected one live watch per identity;
+explicit refusal preserves that guarantee and prevents cancelling the only wait
+as if it were a duplicate. PR `until` remains part of semantic identity.
+
+A committed registration remains true after a watch/park or response error.
+Bounded IPC recovery retries once with the same operation ID within the existing
+15-second total call budget. If it cannot recover evidence, it reports `unknown`
+and the ID, never “not registered” or advice to add a fallback timer. A missing
+capability before dispatch explicitly says this attempt created nothing. A receipt
+read never bypasses authentication, run scope or the gates on a new mutation.
+There is no exactly-once provider-delivery promise (ADR 0021).
+
+| Case / transition | Owner and behavior at shipped defaults |
+| --- | --- |
+| New call, running/waiting session | Atomic wait and receipt commit; existing watch resolves it |
+| Same operation and arguments, including parallel calls | Replay one receipt; no additional wait or wake charge |
+| Same operation with changed arguments | Refuse; preserve existing registration |
+| Semantic duplicate, unchanged timeout | Retain wait and deadline; report unchanged/deduplicated |
+| Semantic duplicate, changed timeout | Refuse change; retain original watch |
+| Error before commit | Refuse only with proof of no mutation; otherwise unknown |
+| Error after commit, response lost | Recover receipt; do not register twice |
+| Controller unreachable after bounded retry | Unknown, operation ID and inspection/retry guidance |
+| Restart or no session | Read receipt without creating a session; existing recovery owns watches and continuation |
+| Wait already resolved or cancelled | Identify original registration and current settled state |
+| Wait no longer in recent history | Identify original receipt; current state unavailable |
+| Stopping, finished, deleted or changed generation | Existing new-registration gates; no session resurrection |
+| Foreign writer or unreadable record | No takeover or guessed effect |
+
+Tests pin durable records and the agent-visible answer, including response loss,
+postcommit errors, cancellation/restart replay and duplicate timeout refusal.
+The existing U1 native-runner parity cell also pins duplicate identity and the
+retained timeout. No cancellation or result-delivery policy changes.
+
 ## Initiated merge supervision (2026-11-05)
 
 hearsay-tools/cezarion#2712 adds `until: 'merge_or_blocked'` under the existing

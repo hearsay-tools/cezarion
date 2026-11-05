@@ -273,32 +273,34 @@ const waitTimeoutSeconds = z.number().int().min(1).max(PEER_WAIT_MAX_SECONDS).de
  *  it replaced kind `ci` (hearsay-tools/cezarion#1425). Kind `request` took `request_ids` from kind
  *  `worker`, and kind `peer` is new (hearsay-tools/cezarion#1995); a request wait is still stored
  *  as a `worker` entry with `requestIds`. */
+const registrationFields = { operation_id: z.uuid().optional() };
+
 export const cezarWaitRequestSchema = z.discriminatedUnion('kind', [
-  ciWaitRequestSchema.extend({ kind: z.literal('pr') }).strict(),
+  ciWaitRequestSchema.extend({ kind: z.literal('pr'), ...registrationFields }).strict(),
   z.object({
-    kind: z.literal('worker'),
+    kind: z.literal('worker'), ...registrationFields,
     worker_ids: workerIdsSchema,
     mode: workerWaitModeSchema.optional(),
     timeout_seconds: waitTimeoutSeconds,
   }).strict().superRefine((request, ctx) => oneModeTakesOneId(request.worker_ids, request.mode, ctx)),
   z.object({
-    kind: z.literal('request'),
+    kind: z.literal('request'), ...registrationFields,
     request_ids: workerIdsSchema,
     mode: workerWaitModeSchema.optional(),
     timeout_seconds: waitTimeoutSeconds,
   }).strict().superRefine((request, ctx) => oneModeTakesOneId(request.request_ids, request.mode, ctx)),
   z.object({
-    kind: z.literal('peer'),
+    kind: z.literal('peer'), ...registrationFields,
     peer_ids: workerIdsSchema,
     timeout_seconds: waitTimeoutSeconds,
   }).strict(),
   z.object({
-    kind: z.literal('timer'),
+    kind: z.literal('timer'), ...registrationFields,
     seconds: z.number().int().min(TIMER_MIN_SECONDS).max(TIMER_MAX_SECONDS),
     note: z.string().max(NOTE_MAX).optional(),
   }).strict(),
   z.object({
-    kind: z.literal('process'),
+    kind: z.literal('process'), ...registrationFields,
     pid: pidSchema,
     exit_file: z.string().min(1).max(PROCESS_EXIT_FILE_MAX).optional(),
     timeout_seconds: z.number().int().min(1).max(PROCESS_TIMEOUT_MAX_SECONDS).default(PROCESS_TIMEOUT_DEFAULT_SECONDS),
@@ -322,16 +324,26 @@ export const openWaitSchema = z.discriminatedUnion('kind', [
 export type OpenWait = z.infer<typeof openWaitSchema>;
 
 export const waitErrorCodeSchema = z.enum([...ciWaitErrorCodeSchema.options, 'timers_disabled', 'wake_budget_spent', 'denied_scope',
-  'exit_file_outside', 'process_not_allowed', 'process_not_owned']);
+  'exit_file_outside', 'process_not_allowed', 'process_not_owned', 'duplicate_deadline', 'operation_conflict', 'outcome_unknown']);
 export type WaitErrorCode = z.infer<typeof waitErrorCodeSchema>;
 
 /** The bound on every wait and done refusal's `message`; the run manager fits its own to it. */
 export const WAIT_MESSAGE_MAX = 4096;
 const message = z.string().max(WAIT_MESSAGE_MAX);
 
+export const waitRegistrationReceiptSchema = z.object({
+  operationId: z.uuid(), requestHash: z.string().regex(/^[0-9a-f]{64}$/),
+  wait: waitSchema, deduplicated: z.boolean(),
+}).strict();
+export type WaitRegistrationReceipt = z.infer<typeof waitRegistrationReceiptSchema>;
+const registrationAnswerFields = {
+  operation_id: z.uuid().optional(),
+};
 export const cezarWaitAnswerSchema = z.discriminatedUnion('ok', [
   z.object({
-    ok: z.literal(true),
+    ok: z.literal(true), ...registrationAnswerFields,
+    effect: z.enum(['applied', 'unchanged']).optional(),
+    deduplicated: z.boolean().optional(), replayed: z.boolean().optional(), wait_phase: z.enum([...waitPhaseSchema.options, 'unavailable']).optional(),
     wait_id: z.uuid(),
     /** The kind the call asked for: a `request` wait is stored as a `worker` entry. */
     kind: z.enum(['pr', 'timer', 'worker', 'request', 'process', 'peer']),
@@ -339,7 +351,9 @@ export const cezarWaitAnswerSchema = z.discriminatedUnion('ok', [
     open_waits: z.array(openWaitSchema).max(WAIT_LIMIT),
   }).strict(),
   z.object({
-    ok: z.literal(false),
+    ok: z.literal(false), ...registrationAnswerFields,
+    effect: z.enum(['refused', 'unknown']).optional(),
+    retained_wait: openWaitSchema.optional(),
     code: waitErrorCodeSchema,
     message,
     open_waits: z.array(openWaitSchema).max(WAIT_LIMIT).optional(),
