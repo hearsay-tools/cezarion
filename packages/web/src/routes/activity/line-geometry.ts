@@ -79,7 +79,7 @@ export interface StubEnd {
   side: 1 | -1
   /** The card at the other end, when it is on the view but off screen. */
   other?: Box
-  /** The visible part of the graph, relative to the host. */
+  /** The visible part of the graph, relative to the host: the stub ends inside it. */
   view?: Rect
   /** The label's height: the stub ends where its label still fits on screen. */
   labelHeight: number
@@ -87,12 +87,16 @@ export interface StubEnd {
 }
 
 /** Where a stub's free end sits: at the viewport edge toward the off-screen card, or a short drop
- *  below the anchor for a task that is not on the view at all. */
+ *  below the anchor for a task that is not on the view at all. Either way the end, and the label
+ *  centred on it, stay inside the viewport. */
 function stubEndY(y: number, { other, view, labelHeight }: StubEnd): number {
-  if (!other || !view) return y + STUB_DROP
   const margin = labelHeight / 2 + 4
-  return other.y > y ? Math.max(y + STUB_DROP, view.y1 - margin) : Math.min(y - STUB_DROP, view.y0 + margin)
+  const wanted = !other || !view ? y + STUB_DROP : other.y > y ? Math.max(y + STUB_DROP, view.y1 - margin) : Math.min(y - STUB_DROP, view.y0 + margin)
+  return view ? clampInto(wanted, view.y0 + margin, view.y1 - margin) : wanted
 }
+
+/** `value` inside `[low, high]`; a range too small for it keeps `low`. */
+export const clampInto = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value))
 
 /**
  * A peer line whose other end is not on screen: a stub from the card's edge into the column gap,

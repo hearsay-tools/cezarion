@@ -2,7 +2,7 @@ import type { ActivityRequest } from '@open-mercato/cezar-api-client/contract/ac
 
 import { recipientName, senderName, type RunEntry } from './activity-model'
 import { COLUMN_GAP } from './layout'
-import { facingSide, familyPath, peerPath, relativeBox, stubPath, type Box, type Point } from './line-geometry'
+import { clampInto, facingSide, familyPath, peerPath, relativeBox, stubPath, type Box, type Point } from './line-geometry'
 import { laneOffsets, separateLabels, type Rect } from './line-route'
 import { endsOnScreen, isOnScreen } from './line-viewport'
 
@@ -44,7 +44,7 @@ function peerLine(request: ActivityRequest, cards: ReadonlyMap<string, Box>, ind
   const to = cards.get(request.recipientRunId)
   const base = { requestId: request.requestId, kind: 'peer' as const }
   const view = frame.view ?? { x0: -Infinity, y0: -Infinity, x1: Infinity, y1: Infinity }
-  const end = (card: Box, other: Box | undefined) => ({ side: facingSide(card, other, frame.width), labelHeight: PEER_LABEL.h, lane: lane ?? 0, ...(other ? { other, view } : {}) })
+  const end = (card: Box, other: Box | undefined) => ({ side: facingSide(card, other, frame.width), labelHeight: PEER_LABEL.h, lane: lane ?? 0, view, ...(other ? { other } : {}) })
   switch (endsOnScreen(from, to, view)) {
     case 'both': return from && to ? { ...base, ...peerPath(from, to, [...cards.values()], lane, facingSide(from, undefined, frame.width)) } : undefined
     case 'sender': return from ? { ...base, ...stubPath(from, 'sender', end(from, to)), away: recipientName(index, request) } : undefined
@@ -102,7 +102,15 @@ export function measureLines(
   const gaps = gapCentres(cards, frame.width)
   const peerLabels = lines.filter((line) => line.kind === 'peer').map((line) => ({ id: line.requestId, at: fitLabel(line.label, gaps) }))
   const labels = separateLabels(peerLabels, PEER_LABEL, 'y')
-  return lines.map((line) => ({ ...line, label: labels.get(line.requestId) ?? line.label }))
+  return lines.map((line) => ({ ...line, label: insideView(labels.get(line.requestId) ?? line.label, frame.view) }))
+}
+
+/** A label kept inside the visible part of the graph, so a label pushed past another never
+ *  leaves the screen. */
+function insideView(label: Point, view: Rect | undefined): Point {
+  if (!view) return label
+  const half = PEER_LABEL.h / 2
+  return { x: label.x, y: clampInto(label.y, view.y0 + half, view.y1 - half) }
 }
 
 /** Equal line sets draw the same picture; the measure skips a state update for them. */

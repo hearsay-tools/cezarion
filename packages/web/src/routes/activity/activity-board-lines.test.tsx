@@ -89,6 +89,20 @@ describe('the Many lines rule', () => {
   })
 })
 
+describe('a stub near the viewport edge', () => {
+  it.each([550, 580])('keeps its end and its label inside a 600 px viewport for a card at y %i', (top) => {
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(600)
+    const peer = request({ senderRunId: 'a', recipientRunId: 'b' })
+    renderBoard(project({ tasks: [A, B], requests: [peer] }), { a: { x: col(0), y: top, w: 300, h: 120 }, b: { x: col(1), y: 2_000, w: 300, h: 120 } })
+    const points = samplePath(path(peer.requestId) ?? '')
+    const end = points[points.length - 1]!
+    expect(end.y).toBeLessThanOrEqual(600 - PEER_LABEL.h / 2 - 4)
+    const box = labelBox(label(peer.requestId)!, PEER_LABEL)
+    expect(box.y).toBeGreaterThanOrEqual(0)
+    expect(box.y + box.h).toBeLessThanOrEqual(600)
+  })
+})
+
 describe('peer labels', () => {
   it('fit the 96 px column gap and never cover a card', () => {
     const boxes: Record<string, Box> = {
