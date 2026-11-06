@@ -1305,9 +1305,6 @@ rule:
             - kind: required_parameter
             - kind: optional_parameter
         - has:
-            field: type
-            matches: normalize-workflow-type
-        - has:
             field: pattern
             kind: object_pattern
             has:
@@ -1325,11 +1322,11 @@ rule:
                         field: left
                         regex: ^(name)$
               stopBy: end
-    - all:
-        - kind: variable_declarator
         - has:
             field: type
-            matches: normalize-source-type
+            matches: normalize-workflow-type
+    - all:
+        - kind: variable_declarator
         - has:
             field: name
             kind: object_pattern
@@ -1366,3 +1363,6 @@ rule:
                         field: left
                         regex: ^(workflow|workflowDef|input|runner|defaultRunner|systemPrompt|model|effort|agentProfile|profileId|account|grants|prompt|task|images|taskImages|stackedImages|queuedMessages|continuationMessage|sessionTransport|skill|catalog|disabledTeamSkills|worktreeSetup|steps|baseBranch|allowedTools|persistedImages|persistedAttachments|bashAllowlist)$
               stopBy: end
+        - has:
+            field: type
+            matches: normalize-source-type

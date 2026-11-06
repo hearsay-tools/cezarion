@@ -330,6 +330,42 @@ function selectorMatrix() {
   }
 }
 
+const moduleSpecifiers = {
+  single: value => `'${value}'`,
+  double: value => `"${value}"`,
+  template: value => `\`${value}\``,
+};
+function selectorSpecifierMatrix() {
+  for (const module of modules) for (const extension of ['ts', 'js']) {
+    for (const [literal, quote] of Object.entries(moduleSpecifiers)) {
+      for (const [wrapper, wrap] of Object.entries(wrappers)) {
+        for (const loader of ['import', 'require']) {
+          const axes = ['module_specifier', module, extension, literal, wrapper, loader];
+          const specifier = name => wrap(quote(`../${name}.${extension}`), 'string');
+          add('selectors', false, axes, `const owned = await ${loader}(${specifier(module)}); await owned['${moduleSelectors[module]}'](root);`);
+          add('selectors', true, [...axes, 'similar_prefix'], `const control = await ${loader}(${specifier(`display-${module}`)});`);
+        }
+      }
+      if (literal === 'template') continue; // Static declarations accept quoted strings only.
+      for (const style of ['namespace', 'default', 'star_export', 'require_alias']) {
+        const statements = {
+          namespace: name => `import * as owned from ${quote(`../${name}.${extension}`)};`,
+          default: name => `import owned from ${quote(`../${name}.${extension}`)};`,
+          star_export: name => `export * from ${quote(`../${name}.${extension}`)};`,
+          require_alias: name => `import owned = require(${quote(`../${name}.${extension}`)});`,
+        };
+        add('selectors', false, ['module_specifier', module, extension, literal, style], statements[style](module));
+        add('selectors', true, ['module_specifier', module, extension, literal, style, 'similar_prefix'], statements[style](`display-${module}`));
+      }
+    }
+  }
+  for (const [wrapper, wrap] of Object.entries(calleeWrappers)) {
+    add('selectors', false, ['module_specifier', 'require_callee', wrapper], `const owned = ${wrap('require')}(\`../../config.ts\`);`);
+    add('selectors', true, ['module_specifier', 'require_callee', wrapper, 'similar_prefix'], `const control = ${wrap('require')}(\`../display-config.ts\`);`);
+  }
+  add('selectors', true, ['module_specifier', 'template_substitution'], 'const control = import(`../${name}/config.ts`);');
+}
+
 const genericOwners = {
   function: (name, body) => `function choose<${name}>(source: ${name}) { ${body} }`,
   method: (name, body) => `class Holder { choose<${name}>(source: ${name}) { ${body} } }`,
@@ -448,7 +484,7 @@ dimensions.genericOwners = Object.keys(genericOwners);
 dimensions.thisBindings = Object.keys(thisBindings);
 dimensions.assertedHolderExpressions = ['get()', 'values[0]', 'left || right', 'holder'];
 
-fieldMatrix(); captureMatrix(); objectMemberMatrix(); selectorMatrix(); typeShadowMatrix(); typedMemberMatrix();
+fieldMatrix(); captureMatrix(); objectMemberMatrix(); selectorMatrix(); selectorSpecifierMatrix(); typeShadowMatrix(); typedMemberMatrix();
 lexicalValueFieldMatrix(); lexicalValueCaptureMatrix(); lexicalValueSelectorMatrix(); hoistedValueMatrix();
 for (const cell of documentedLimits) parse(cell.code, { sourceType: 'module', plugins: ['typescript'] });
 // TypeScript 7 exposes no stable JS parser API; use the repository's pinned TS syntax reader.
@@ -473,6 +509,9 @@ dimensions.lexicalCases = ['owned', 'unrelated', 'value_shadow', 'block_shadow',
 dimensions.copyOperations = Object.keys(copies);
 dimensions.selectors = selectors;
 dimensions.modules = modules;
+dimensions.moduleSpecifiers = Object.keys(moduleSpecifiers);
+dimensions.moduleSpecifierWrappers = Object.keys(wrappers);
+dimensions.moduleLoaders = ['import', 'require'];
 // The corpus exists only in memory. The Vitest batch scan owns its executable proof.
 module.exports = { generated, documentedLimits, dimensions };
 if (require.main === module) console.log(JSON.stringify({

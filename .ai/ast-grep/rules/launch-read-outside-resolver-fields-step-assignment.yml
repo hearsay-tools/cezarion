@@ -742,10 +742,6 @@ rule:
     - all:
         - kind: assignment_expression
         - has:
-            field: right
-            any:
-              - matches: normalize-step-receiver
-        - has:
             field: left
             kind: object_pattern
             has:
@@ -779,3 +775,7 @@ rule:
                         field: left
                         regex: ^(allowedTools|bashAllowlist)$
               stopBy: end
+        - has:
+            field: right
+            any:
+              - matches: normalize-step-receiver

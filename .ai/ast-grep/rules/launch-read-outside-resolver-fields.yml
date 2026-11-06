@@ -770,10 +770,6 @@ rule:
     - all:
         - kind: member_expression
         - has:
-            field: object
-            any:
-              - matches: normalize-raw-receiver
-        - has:
             field: property
             regex: ^(workflow|workflowDef|input|runner|defaultRunner|systemPrompt|model|effort|agentProfile|profileId|account|grants|prompt|task|images|taskImages|stackedImages|queuedMessages|continuationMessage|sessionTransport|skill|catalog|disabledTeamSkills|worktreeSetup)$
         - not:
@@ -819,12 +815,12 @@ rule:
                   - inside:
                       kind: unary_expression
                       regex: ^!
-    - all:
-        - kind: subscript_expression
         - has:
             field: object
             any:
               - matches: normalize-raw-receiver
+    - all:
+        - kind: subscript_expression
         - any:
             - has:
                 field: index
@@ -833,12 +829,12 @@ rule:
                 has:
                   field: index
                   kind: string
-    - all:
-        - kind: variable_declarator
         - has:
-            field: value
+            field: object
             any:
               - matches: normalize-raw-receiver
+    - all:
+        - kind: variable_declarator
         - has:
             field: name
             kind: object_pattern
@@ -875,12 +871,12 @@ rule:
                         field: left
                         regex: ^(workflow|workflowDef|input|runner|defaultRunner|systemPrompt|model|effort|agentProfile|profileId|account|grants|prompt|task|images|taskImages|stackedImages|queuedMessages|continuationMessage|sessionTransport|skill|catalog|disabledTeamSkills|worktreeSetup)$
               stopBy: end
-    - all:
-        - kind: assignment_expression
         - has:
-            field: right
+            field: value
             any:
               - matches: normalize-raw-receiver
+    - all:
+        - kind: assignment_expression
         - has:
             field: left
             kind: object_pattern
@@ -917,3 +913,7 @@ rule:
                         field: left
                         regex: ^(workflow|workflowDef|input|runner|defaultRunner|systemPrompt|model|effort|agentProfile|profileId|account|grants|prompt|task|images|taskImages|stackedImages|queuedMessages|continuationMessage|sessionTransport|skill|catalog|disabledTeamSkills|worktreeSetup)$
               stopBy: end
+        - has:
+            field: right
+            any:
+              - matches: normalize-raw-receiver

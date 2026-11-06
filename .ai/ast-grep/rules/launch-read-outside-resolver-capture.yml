@@ -1251,11 +1251,11 @@ rule:
     - all:
         - kind: variable_declarator
         - has:
-            field: value
-            matches: normalize-capture-expression
-        - has:
             field: name
             kind: identifier
+        - has:
+            field: value
+            matches: normalize-capture-expression
     - all:
         - kind: assignment_expression
         - has:
@@ -1264,14 +1264,14 @@ rule:
     - all:
         - kind: variable_declarator
         - has:
-            field: value
-            matches: normalize-capture-expression
-        - has:
             field: name
             kind: object_pattern
             has:
               kind: rest_pattern
               stopBy: end
+        - has:
+            field: value
+            matches: normalize-capture-expression
     - all:
         - kind: spread_element
         - has:
@@ -1280,9 +1280,6 @@ rule:
         - any:
             - kind: required_parameter
             - kind: optional_parameter
-        - has:
-            field: type
-            matches: normalize-source-type
         - has:
             field: pattern
             kind: object_pattern
@@ -1319,13 +1316,13 @@ rule:
                         field: left
                         regex: ^(workflow|workflowDef|input|runner|defaultRunner|systemPrompt|model|effort|agentProfile|profileId|account|grants|prompt|task|images|taskImages|stackedImages|queuedMessages|continuationMessage|sessionTransport|skill|catalog|disabledTeamSkills|worktreeSetup|steps|baseBranch|allowedTools|persistedImages|persistedAttachments|bashAllowlist)$
               stopBy: end
+        - has:
+            field: type
+            matches: normalize-source-type
     - all:
         - any:
             - kind: required_parameter
             - kind: optional_parameter
-        - has:
-            field: type
-            matches: normalize-input-type
         - has:
             field: pattern
             kind: object_pattern
@@ -1360,16 +1357,19 @@ rule:
                         field: left
                         regex: ^(worktree|autonomous|archiveWhenDone|autoMergePr|notify|automation|automationTrigger)$
               stopBy: end
+        - has:
+            field: type
+            matches: normalize-input-type
     - all:
         - any:
             - kind: required_parameter
             - kind: optional_parameter
-        - has:
-            field: type
-            matches: normalize-source-type
         - has:
             field: pattern
             kind: object_pattern
             has:
               kind: rest_pattern
               stopBy: end
+        - has:
+            field: type
+            matches: normalize-source-type

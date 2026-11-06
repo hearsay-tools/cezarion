@@ -742,9 +742,6 @@ rule:
     - all:
         - kind: member_expression
         - has:
-            field: object
-            matches: normalize-input-receiver
-        - has:
             field: property
             regex: ^(worktree|autonomous|archiveWhenDone|autoMergePr|notify|automation|automationTrigger)$
         - not:
@@ -790,11 +787,11 @@ rule:
                   - inside:
                       kind: unary_expression
                       regex: ^!
-    - all:
-        - kind: subscript_expression
         - has:
             field: object
             matches: normalize-input-receiver
+    - all:
+        - kind: subscript_expression
         - any:
             - has:
                 field: index
@@ -803,11 +800,11 @@ rule:
                 has:
                   field: index
                   kind: string
+        - has:
+            field: object
+            matches: normalize-input-receiver
     - all:
         - kind: variable_declarator
-        - has:
-            field: value
-            matches: normalize-input-receiver
         - has:
             field: name
             kind: object_pattern
@@ -842,11 +839,11 @@ rule:
                         field: left
                         regex: ^(worktree|autonomous|archiveWhenDone|autoMergePr|notify|automation|automationTrigger)$
               stopBy: end
+        - has:
+            field: value
+            matches: normalize-input-receiver
     - all:
         - kind: assignment_expression
-        - has:
-            field: right
-            matches: normalize-input-receiver
         - has:
             field: left
             kind: object_pattern
@@ -881,3 +878,6 @@ rule:
                         field: left
                         regex: ^(worktree|autonomous|archiveWhenDone|autoMergePr|notify|automation|automationTrigger)$
               stopBy: end
+        - has:
+            field: right
+            matches: normalize-input-receiver

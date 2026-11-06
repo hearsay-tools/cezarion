@@ -26,6 +26,7 @@ valid:
   - const display = await import('../ui-state.ts.bak');
   - import display from '../my-ui-state.js';
   - import display from '../ui-state.js.bak';
+  - const control = await import(`../display-config.ts`);
 invalid:
   - const source = await import('../model-identity.js');
   - export * as policy from '../../agent-model-policy.ts'
@@ -107,3 +108,13 @@ invalid:
   - const source = await import('../../config.ts'); await source['loadConfig'](root)
   - loadWorkflows(root)
   - await source.readAgentModelProvider(backend, root)
+  - |
+    async function run(path: string, root: string) {
+      const owned = await import(`../../config.ts`);
+      await owned['loadConfig'](root);
+      const dynamic = await import(path);
+      await dynamic['loadConfig'](root);
+      const control = await import(`../display-config.ts`);
+      const known = await import('../../config.ts');
+    }
+    type Host = import('./session-events.ts').SessionHelperHost;

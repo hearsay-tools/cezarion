@@ -1234,54 +1234,11 @@ rule:
     - all:
         - kind: member_expression
         - has:
-            field: object
-            matches: normalize-workflow-receiver
-        - has:
             field: property
             regex: ^steps$
-        - not:
-            any:
-              - all:
-                  - has:
-                      field: property
-                      regex: ^worktreeSetup$
-                  - inside:
-                      kind: member_expression
-                      has:
-                        field: property
-                        regex: ^status$
-              - all:
-                  - has:
-                      field: property
-                      regex: ^worktreeSetup$
-                  - inside:
-                      kind: binary_expression
-                      regex: === undefined$
-              - all:
-                  - has:
-                      field: property
-                      regex: ^continuationMessage$
-                  - inside:
-                      kind: member_expression
-                      has:
-                        field: property
-                        regex: ^(origin|agentInputId)$
-              - all:
-                  - has:
-                      field: property
-                      regex: ^queuedMessages$
-                  - inside:
-                      kind: member_expression
-                      has:
-                        field: property
-                        regex: ^length$
-              - all:
-                  - has:
-                      field: property
-                      regex: ^workflowDef$
-                  - inside:
-                      kind: unary_expression
-                      regex: ^!
+        - has:
+            field: object
+            matches: normalize-workflow-receiver
     - all:
         - kind: member_expression
         - has:
@@ -1293,64 +1250,17 @@ rule:
         - has:
             field: property
             regex: ^catalog$
-        - not:
-            any:
-              - all:
-                  - has:
-                      field: property
-                      regex: ^worktreeSetup$
-                  - inside:
-                      kind: member_expression
-                      has:
-                        field: property
-                        regex: ^status$
-              - all:
-                  - has:
-                      field: property
-                      regex: ^worktreeSetup$
-                  - inside:
-                      kind: binary_expression
-                      regex: === undefined$
-              - all:
-                  - has:
-                      field: property
-                      regex: ^continuationMessage$
-                  - inside:
-                      kind: member_expression
-                      has:
-                        field: property
-                        regex: ^(origin|agentInputId)$
-              - all:
-                  - has:
-                      field: property
-                      regex: ^queuedMessages$
-                  - inside:
-                      kind: member_expression
-                      has:
-                        field: property
-                        regex: ^length$
-              - all:
-                  - has:
-                      field: property
-                      regex: ^workflowDef$
-                  - inside:
-                      kind: unary_expression
-                      regex: ^!
     - all:
         - kind: member_expression
         - has:
-            field: object
-            any:
-              - matches: input-extra-receiver
-        - has:
             field: property
             regex: ^(persistedImages|persistedAttachments)$
-    - all:
-        - kind: subscript_expression
         - has:
             field: object
             any:
               - matches: input-extra-receiver
+    - all:
+        - kind: subscript_expression
         - any:
             - has:
                 field: index
@@ -1359,12 +1269,12 @@ rule:
                 has:
                   field: index
                   kind: string
-    - all:
-        - kind: variable_declarator
         - has:
-            field: value
+            field: object
             any:
               - matches: input-extra-receiver
+    - all:
+        - kind: variable_declarator
         - has:
             field: name
             kind: object_pattern
@@ -1399,3 +1309,7 @@ rule:
                         field: left
                         regex: ^(persistedImages|persistedAttachments)$
               stopBy: end
+        - has:
+            field: value
+            any:
+              - matches: input-extra-receiver

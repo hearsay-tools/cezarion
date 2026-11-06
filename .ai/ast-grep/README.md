@@ -29,6 +29,11 @@ covers every repository rule.
 `node .ai/ast-grep/generate-launch-read-normalization.cjs` after editing them.
 Each split rule includes only its used helpers. Global `utils/` entries classify syntax and have no captures.
 Semantic helpers stay local because ast-grep global utilities isolate metavariable bindings.
+Check field names and destructuring shapes before resolving a receiver's lexical bindings.
+Those checks have no captures and reject unrelated reads without searching enclosing scopes.
+The shared selector utilities also have no captures: they recognize owned module literals and
+transparent wrappers for static imports, dynamic imports and `require` calls. Template literals
+must have no substitutions; similarly named modules remain valid controls.
 
 `generate-launch-read-matrix.cjs` deterministically builds all cells in memory and parses each one.
 `packages/cezar/src/launch-read-matrix.test.ts` writes them only to a temporary directory,

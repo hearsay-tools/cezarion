@@ -631,9 +631,6 @@ rule:
     - all:
         - kind: variable_declarator
         - has:
-            field: type
-            matches: normalize-input-type
-        - has:
             field: name
             kind: object_pattern
             has:
@@ -667,22 +664,22 @@ rule:
                         field: left
                         regex: ^(worktree|autonomous|archiveWhenDone|autoMergePr|notify|automation|automationTrigger)$
               stopBy: end
-    - all:
-        - kind: variable_declarator
         - has:
             field: type
-            matches: normalize-source-type
+            matches: normalize-input-type
+    - all:
+        - kind: variable_declarator
         - has:
             field: name
             kind: object_pattern
             has:
               kind: rest_pattern
               stopBy: end
-    - all:
-        - kind: variable_declarator
         - has:
             field: type
-            matches: normalize-workflow-type
+            matches: normalize-source-type
+    - all:
+        - kind: variable_declarator
         - has:
             field: name
             kind: object_pattern
@@ -701,4 +698,7 @@ rule:
                         field: left
                         regex: ^(name)$
               stopBy: end
+        - has:
+            field: type
+            matches: normalize-workflow-type
     - matches: normalize-root-source-alias

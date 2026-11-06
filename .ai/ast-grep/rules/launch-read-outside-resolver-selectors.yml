@@ -37,13 +37,13 @@ rule:
             stopBy: end
         - has:
             field: source
-            regex: (^|/)(config|skills|skills-remote|agent-model-policy|models|agent-profiles|execution-identity|run-scheduling|execution-account|ui-state|model-identity|attachment-path|load|types)\.(ts|js)['"]$
+            matches: lr-selector-module-specifier
     - all:
         - kind: export_statement
         - regex: ^export\s+\*
         - has:
             field: source
-            regex: (^|/)(config|skills|skills-remote|agent-model-policy|models|agent-profiles|execution-identity|run-scheduling|execution-account|ui-state|model-identity|attachment-path|load|types)\.(ts|js)['"]$
+            matches: lr-selector-module-specifier
     - all:
         - kind: call_expression
         - has:
@@ -53,12 +53,11 @@ rule:
         - kind: call_expression
         - has:
             field: function
-            regex: ^import$
+            matches: lr-selector-import-target
         - has:
             field: arguments
             has:
-              kind: string
-              regex: (^|/)(config|skills|skills-remote|agent-model-policy|models|agent-profiles|execution-identity|run-scheduling|execution-account|ui-state|model-identity|attachment-path|load|types)\.(ts|js)['"]$
+              matches: lr-selector-module-specifier
     - all:
         - kind: import_statement
         - has:
@@ -67,7 +66,14 @@ rule:
               kind: identifier
         - has:
             field: source
-            regex: (^|/)(config|skills|skills-remote|agent-model-policy|models|agent-profiles|execution-identity|run-scheduling|execution-account|ui-state|model-identity|attachment-path|load|types)\.(ts|js)['"]$
+            matches: lr-selector-module-specifier
+    - all:
+        - kind: import_statement
+        - has:
+            kind: import_require_clause
+            has:
+              field: source
+              matches: lr-selector-module-specifier
 utils:
   selector-call-target:
     matches: normalize-selector-target

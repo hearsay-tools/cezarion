@@ -1232,18 +1232,14 @@ rule:
     - all:
         - kind: member_expression
         - has:
-            field: object
-            any:
-              - matches: normalize-config-receiver
-        - has:
             field: property
             regex: ^(baseBranch|worktreeSetup|defaultRunner|systemPrompt)$
-    - all:
-        - kind: subscript_expression
         - has:
             field: object
             any:
               - matches: normalize-config-receiver
+    - all:
+        - kind: subscript_expression
         - any:
             - has:
                 field: index
@@ -1252,12 +1248,12 @@ rule:
                 has:
                   field: index
                   kind: string
-    - all:
-        - kind: variable_declarator
         - has:
-            field: value
+            field: object
             any:
               - matches: normalize-config-receiver
+    - all:
+        - kind: variable_declarator
         - has:
             field: name
             kind: object_pattern
@@ -1292,12 +1288,12 @@ rule:
                         field: left
                         regex: ^(baseBranch|worktreeSetup|defaultRunner|systemPrompt)$
               stopBy: end
-    - all:
-        - kind: assignment_expression
         - has:
-            field: right
+            field: value
             any:
               - matches: normalize-config-receiver
+    - all:
+        - kind: assignment_expression
         - has:
             field: left
             kind: object_pattern
@@ -1332,21 +1328,21 @@ rule:
                         field: left
                         regex: ^(baseBranch|worktreeSetup|defaultRunner|systemPrompt)$
               stopBy: end
+        - has:
+            field: right
+            any:
+              - matches: normalize-config-receiver
     - all:
         - kind: member_expression
         - has:
-            field: object
-            any:
-              - matches: normalize-step-receiver
-        - has:
             field: property
             regex: ^(allowedTools|bashAllowlist)$
-    - all:
-        - kind: subscript_expression
         - has:
             field: object
             any:
               - matches: normalize-step-receiver
+    - all:
+        - kind: subscript_expression
         - any:
             - has:
                 field: index
@@ -1355,12 +1351,12 @@ rule:
                 has:
                   field: index
                   kind: string
-    - all:
-        - kind: variable_declarator
         - has:
-            field: value
+            field: object
             any:
               - matches: normalize-step-receiver
+    - all:
+        - kind: variable_declarator
         - has:
             field: name
             kind: object_pattern
@@ -1395,3 +1391,7 @@ rule:
                         field: left
                         regex: ^(allowedTools|bashAllowlist)$
               stopBy: end
+        - has:
+            field: value
+            any:
+              - matches: normalize-step-receiver

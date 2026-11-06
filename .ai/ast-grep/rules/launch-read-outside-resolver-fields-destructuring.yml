@@ -1236,10 +1236,6 @@ rule:
     - all:
         - kind: assignment_expression
         - has:
-            field: right
-            any:
-              - matches: input-extra-receiver
-        - has:
             field: left
             kind: object_pattern
             has:
@@ -1273,21 +1269,21 @@ rule:
                         field: left
                         regex: ^(persistedImages|persistedAttachments)$
               stopBy: end
+        - has:
+            field: right
+            any:
+              - matches: input-extra-receiver
     - all:
         - kind: member_expression
         - has:
-            field: object
-            any:
-              - matches: workflow-extra-receiver
-        - has:
             field: property
             regex: ^(steps|name)$
-    - all:
-        - kind: subscript_expression
         - has:
             field: object
             any:
               - matches: workflow-extra-receiver
+    - all:
+        - kind: subscript_expression
         - any:
             - has:
                 field: index
@@ -1296,12 +1292,12 @@ rule:
                 has:
                   field: index
                   kind: string
-    - all:
-        - kind: variable_declarator
         - has:
-            field: value
+            field: object
             any:
               - matches: workflow-extra-receiver
+    - all:
+        - kind: variable_declarator
         - has:
             field: name
             kind: object_pattern
@@ -1336,12 +1332,12 @@ rule:
                         field: left
                         regex: ^(steps|name)$
               stopBy: end
-    - all:
-        - kind: assignment_expression
         - has:
-            field: right
+            field: value
             any:
               - matches: workflow-extra-receiver
+    - all:
+        - kind: assignment_expression
         - has:
             field: left
             kind: object_pattern
@@ -1376,3 +1372,7 @@ rule:
                         field: left
                         regex: ^(steps|name)$
               stopBy: end
+        - has:
+            field: right
+            any:
+              - matches: workflow-extra-receiver
