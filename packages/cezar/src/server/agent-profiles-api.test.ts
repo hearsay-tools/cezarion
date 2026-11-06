@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -57,7 +58,7 @@ describe('agent profiles API', () => {
   });
 
   const makeApp = (over: Partial<ServerDeps> = {}) =>
-    createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', ...over });
+    createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', ...over });
 
   const list = async (): Promise<AgentProfilesResponse> => {
     const res = await apiRequest(makeApp(), '/api/v1/workspace/agent-profiles');
@@ -172,7 +173,7 @@ describe('agent profiles API', () => {
       });
       expect(status).toBe(400);
       expect(body.error).toContain('more than one account');
-      expect((await loadAgentAccounts()).accounts).toEqual([]);
+      expect((await loadAgentAccounts(testHome())).accounts).toEqual([]);
     });
 
     it('refuses a relative folder — it would resolve against a throwaway worktree', async () => {
@@ -220,7 +221,7 @@ describe('agent profiles API', () => {
         provider: 'codex',
         configDir: claudeDir('codex-klaudiusz'),
       })).status).toBe(201);
-      expect((await loadAgentAccounts()).accounts).toHaveLength(2);
+      expect((await loadAgentAccounts(testHome())).accounts).toHaveLength(2);
     });
 
     it('adds a pi account at any absolute folder, like Claude and Codex', async () => {
@@ -262,7 +263,7 @@ describe('agent profiles API', () => {
         });
         expect(status).toBe(400);
         expect(body.error).toContain(join(userHome, '.omp', 'profiles'));
-        expect((await loadAgentAccounts()).accounts).toEqual([]);
+        expect((await loadAgentAccounts(testHome())).accounts).toEqual([]);
       });
 
       it('refuses a profile name omp would refuse', async () => {
@@ -382,11 +383,11 @@ describe('agent profiles API', () => {
 
     it('404s an unknown id and rewrites nothing (read-first)', async () => {
       await create('Work', claudeDir('claude-klaudiusz'));
-      const before = readFileSync(agentAccountsPath(), 'utf8');
+      const before = readFileSync(agentAccountsPath(testHome()), 'utf8');
       const { status, body } = await send('PATCH', '/api/v1/workspace/agent-profiles/nope', { label: 'x' });
       expect(status).toBe(404);
       expect(body.error).toContain('unknown account');
-      expect(readFileSync(agentAccountsPath(), 'utf8')).toBe(before);
+      expect(readFileSync(agentAccountsPath(testHome()), 'utf8')).toBe(before);
     });
 
     it('400s an empty body', async () => {
@@ -405,36 +406,36 @@ describe('agent profiles API', () => {
       const { status, body } = await send('DELETE', `/api/v1/workspace/agent-profiles/${created.profile.id}`);
       expect(status).toBe(200);
       expect(body).toEqual({ removed: true, id: created.profile.id });
-      expect((await loadAgentAccounts()).accounts).toEqual([]);
+      expect((await loadAgentAccounts(testHome())).accounts).toEqual([]);
       expect(readFileSync(join(dir, 'settings.json'), 'utf8')).toBe('{}');
     });
 
     it('scrubs every project reference in the SAME write, so no dangling id is observable', async () => {
-      const first = await registerProject(repoRoot);
+      const first = await registerProject(repoRoot, undefined, testHome());
       const { body: created } = await send('POST', '/api/v1/workspace/agent-profiles', {
         provider: 'claude',
         configDir: claudeDir('claude-klaudiusz'),
       });
       await mergeWriteAgentAccounts((s) => {
         s.selections[first.root] = { claude: created.profile.id, codex: 'kept' };
-      });
+      }, testHome());
 
       await send('DELETE', `/api/v1/workspace/agent-profiles/${created.profile.id}`);
 
-      expect((await loadAgentAccounts()).selections[first.root]).toEqual({ codex: 'kept' });
+      expect((await loadAgentAccounts(testHome())).selections[first.root]).toEqual({ codex: 'kept' });
     });
 
     it('drops the whole selection object when the deleted account was its only key', async () => {
-      const first = await registerProject(repoRoot);
+      const first = await registerProject(repoRoot, undefined, testHome());
       const { body: created } = await send('POST', '/api/v1/workspace/agent-profiles', {
         provider: 'claude',
         configDir: claudeDir('claude-klaudiusz'),
       });
       await mergeWriteAgentAccounts((store) => {
         store.selections[first.root] = { claude: created.profile.id };
-      });
+      }, testHome());
       await send('DELETE', `/api/v1/workspace/agent-profiles/${created.profile.id}`);
-      const raw = JSON.parse(readFileSync(agentAccountsPath(), 'utf8')) as {
+      const raw = JSON.parse(readFileSync(agentAccountsPath(testHome()), 'utf8')) as {
         selections: Record<string, unknown>;
       };
       // The whole row goes when its last account does — no empty object left behind.
@@ -459,7 +460,7 @@ describe('agent profiles API', () => {
       send('PUT', '/api/v1/workspace/agent-profiles/selection', { projectId, provider, profileId });
 
     it('stores the choice keyed by the project\'s ROOT, not its slug', async () => {
-      const project = await registerProject(repoRoot);
+      const project = await registerProject(repoRoot, undefined, testHome());
       const account = await create('work');
 
       const { status, body } = await select(project.id, 'claude', account.id);
@@ -468,23 +469,23 @@ describe('agent profiles API', () => {
       expect((body as unknown as { selections: Record<string, unknown> }).selections).toEqual({
         [project.root]: { claude: account.id },
       });
-      expect((await loadAgentAccounts()).selections[project.root]).toEqual({ claude: account.id });
+      expect((await loadAgentAccounts(testHome())).selections[project.root]).toEqual({ claude: account.id });
     });
 
     it('is carried back by the listing, so one query serves every account surface', async () => {
-      const project = await registerProject(repoRoot);
+      const project = await registerProject(repoRoot, undefined, testHome());
       const account = await create('work');
       await select(project.id, 'claude', account.id);
       expect((await list()).selections).toEqual({ [project.root]: { claude: account.id } });
     });
 
     it('clears to the discovered account on null, storing absence rather than "default"', async () => {
-      const project = await registerProject(repoRoot);
+      const project = await registerProject(repoRoot, undefined, testHome());
       const account = await create('work');
       await select(project.id, 'claude', account.id);
 
       await select(project.id, 'claude', null);
-      const raw = JSON.parse(readFileSync(agentAccountsPath(), 'utf8')) as {
+      const raw = JSON.parse(readFileSync(agentAccountsPath(testHome()), 'utf8')) as {
         selections: Record<string, unknown>;
       };
       // The row goes entirely when its last provider is cleared — never `{"claude":"default"}`.
@@ -492,15 +493,15 @@ describe('agent profiles API', () => {
     });
 
     it('treats the reserved `default` id as "clear" too', async () => {
-      const project = await registerProject(repoRoot);
+      const project = await registerProject(repoRoot, undefined, testHome());
       const account = await create('work');
       await select(project.id, 'claude', account.id);
       await select(project.id, 'claude', 'default');
-      expect((await loadAgentAccounts()).selections[project.root]).toBeUndefined();
+      expect((await loadAgentAccounts(testHome())).selections[project.root]).toBeUndefined();
     });
 
     it('leaves the other providers alone — one key per write', async () => {
-      const project = await registerProject(repoRoot);
+      const project = await registerProject(repoRoot, undefined, testHome());
       const claude = await create('work');
       const { body: codex } = await send('POST', '/api/v1/workspace/agent-profiles', {
         provider: 'codex',
@@ -510,15 +511,15 @@ describe('agent profiles API', () => {
       await select(project.id, 'claude', claude.id);
       await select(project.id, 'codex', codex.profile.id);
       await select(project.id, 'claude', null);
-      expect((await loadAgentAccounts()).selections[project.root]).toEqual({ codex: codex.profile.id });
+      expect((await loadAgentAccounts(testHome())).selections[project.root]).toEqual({ codex: codex.profile.id });
     });
 
     it('accepts the reserved `default` boot alias as the project', async () => {
-      const project = await registerProject(repoRoot);
+      const project = await registerProject(repoRoot, undefined, testHome());
       const account = await create('work');
       const { status } = await select('default', 'claude', account.id);
       expect(status).toBe(200);
-      expect((await loadAgentAccounts()).selections[project.root]).toEqual({ claude: account.id });
+      expect((await loadAgentAccounts(testHome())).selections[project.root]).toEqual({ claude: account.id });
     });
 
     it('404s an unknown project rather than storing an orphan row', async () => {
@@ -526,19 +527,19 @@ describe('agent profiles API', () => {
       const { status, body } = await select('nope', 'claude', 'work');
       expect(status).toBe(404);
       expect(body.error).toContain('unknown project');
-      expect((await loadAgentAccounts()).selections).toEqual({});
+      expect((await loadAgentAccounts(testHome())).selections).toEqual({});
     });
 
     it('400s an unknown account rather than silently degrading to the default', async () => {
-      const project = await registerProject(repoRoot);
+      const project = await registerProject(repoRoot, undefined, testHome());
       const { status, body } = await select(project.id, 'claude', 'never-added');
       expect(status).toBe(400);
       expect(body.error).toContain('unknown claude account');
-      expect((await loadAgentAccounts()).selections).toEqual({});
+      expect((await loadAgentAccounts(testHome())).selections).toEqual({});
     });
 
     it('400s an account belonging to a DIFFERENT provider', async () => {
-      const project = await registerProject(repoRoot);
+      const project = await registerProject(repoRoot, undefined, testHome());
       const account = await create('work');
       expect((await select(project.id, 'codex', account.id)).status).toBe(400);
     });
@@ -849,7 +850,7 @@ describe('agent profiles API', () => {
         expect(status, `${method} ${path}`).toBe(409);
         expect(body.error).toContain('hosted mode');
       }
-      expect((await loadAgentAccounts()).accounts).toEqual([]);
+      expect((await loadAgentAccounts(testHome())).accounts).toEqual([]);
     });
   });
 
@@ -888,7 +889,7 @@ describe('agent profiles API', () => {
       await put({ projectId: null, provider: 'claude', profileId: 'claude-klaudiusz' });
       const { body } = await put({ projectId: null, provider: 'claude', profileId: null });
       expect((body as unknown as { defaults: Record<string, string> }).defaults).toEqual({});
-      expect(JSON.stringify(await loadAgentAccounts())).not.toContain('"claude":"default"');
+      expect(JSON.stringify(await loadAgentAccounts(testHome()))).not.toContain('"claude":"default"');
     });
 
     it('refuses an account that does not exist, exactly as the per-repo write does', async () => {
@@ -911,7 +912,7 @@ describe('agent profiles API', () => {
         label: 'Client',
         configDir: claudeDir('claude-client'),
       });
-      const project = await registerProject(repoRoot);
+      const project = await registerProject(repoRoot, undefined, testHome());
       await put({ projectId: project.id, provider: 'claude', profileId: other.profile.id });
       await put({ projectId: null, provider: 'claude', profileId: work.profile.id });
 

@@ -1,4 +1,4 @@
-import { resolveHome } from './home/resolve.ts';
+import type { Home } from './home/home.ts';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -98,7 +98,7 @@ function cacheKeyFor(repo: string): string {
 }
 
 /** The source's bare clone: `~/.cache/cez/skills/<owner>__<name>`. */
-export function bareDirFor(repo: string, home = resolveHome({ purpose: 'compatibility' })): string {
+export function bareDirFor(repo: string, home: Home): string {
   return join(home.skillsCache, cacheKeyFor(repo));
 }
 
@@ -106,7 +106,7 @@ export function bareDirFor(repo: string, home = resolveHome({ purpose: 'compatib
  * Per-commit copies of the source's directory skills for runs without a task
  * worktree (#1024): `~/.cache/cez/skill-files/<owner>__<name>/<commit>/<skill>/`.
  */
-export function skillFilesCacheDirFor(repo: string, home = resolveHome({ purpose: 'compatibility' })): string {
+export function skillFilesCacheDirFor(repo: string, home: Home): string {
   return join(home.skillFilesCache, cacheKeyFor(repo));
 }
 
@@ -127,7 +127,7 @@ function warnUnsafeRemoteOnce(repo: string): void {
 }
 
 /** Clone the skills repo bare (no checkout) into the global cache, once. */
-export async function ensureBareClone(repo: string): Promise<{ bareDir: string; created: boolean }> {
+export async function ensureBareClone(repo: string, home: Home): Promise<{ bareDir: string; created: boolean }> {
   // Validate before anything else, cache hit or not: "this source is refusable"
   // should never depend on whether a clone happens to exist already.
   const remote = safeRemoteFor(repo);
@@ -138,7 +138,7 @@ export async function ensureBareClone(repo: string): Promise<{ bareDir: string; 
     warnUnsafeRemoteOnce(repo);
     throw new Error(`refusing unsafe skills repo remote: ${repo}`);
   }
-  const bareDir = bareDirFor(repo);
+  const bareDir = bareDirFor(repo, home);
   if (existsSync(join(bareDir, 'HEAD'))) return { bareDir, created: false };
   await mkdir(dirname(bareDir), { recursive: true });
   // `--` separates options from the remote/dir operands: even a value that
@@ -224,9 +224,10 @@ function matchSkillPath(line: string): SkillPathHit | null {
 export async function readRemoteSkill(
   src: SkillsRepoRef,
   path: string,
-  atCommit?: string,
+  atCommit: string | undefined,
+  home: Home,
 ): Promise<string | null> {
-  const bareDir = bareDirFor(src.repo);
+  const bareDir = bareDirFor(src.repo, home);
   if (!existsSync(join(bareDir, 'HEAD'))) return null;
   const ref = atCommit ?? (await resolveRef(bareDir, src.ref));
   if (ref === null) return null;
@@ -239,16 +240,16 @@ export async function readRemoteSkill(
  * clone only — no network. Empty list when the clone doesn't exist yet or
  * the ref can't be resolved.
  */
-export async function listRemoteSkills(src: SkillsRepoRef): Promise<Skill[]> {
-  return (await listRemoteSource(src)).skills;
+export async function listRemoteSkills(src: SkillsRepoRef, home: Home): Promise<Skill[]> {
+  return (await listRemoteSource(src, home)).skills;
 }
 
 /** Why a listing came back empty: no clone on disk yet, a ref the clone cannot resolve, or a
  *  `git ls-tree` that failed on a resolved ref. */
 type ListProblem = 'no-clone' | 'ref-not-found' | 'list-failed' | null;
 
-async function listRemoteSource(src: SkillsRepoRef): Promise<{ skills: Skill[]; problem: ListProblem }> {
-  const bareDir = bareDirFor(src.repo);
+async function listRemoteSource(src: SkillsRepoRef, home: Home): Promise<{ skills: Skill[]; problem: ListProblem }> {
+  const bareDir = bareDirFor(src.repo, home);
   if (!existsSync(join(bareDir, 'HEAD'))) return { skills: [], problem: 'no-clone' };
   // An immutable SHA (#428): the tree listing and every body below are read at
   // this one commit, and it is what gets recorded on each skill.
@@ -264,7 +265,7 @@ async function listRemoteSource(src: SkillsRepoRef): Promise<{ skills: Skill[]; 
     if (!line) continue;
     const hit = matchSkillPath(line);
     if (!hit) continue;
-    const raw = await readRemoteSkill(src, line, commit);
+    const raw = await readRemoteSkill(src, line, commit, home);
     if (raw === null) continue;
     const { frontmatter, body } = parseFrontmatter(raw);
     const name =
@@ -311,9 +312,9 @@ interface SkillDirSource {
  * Locate directory skill files at the body’s recorded commit. Resolve the source ref only for a
  * legacy missing commit or a clone that no longer holds it.
  */
-async function resolveSkillDirSource(skill: Skill): Promise<SkillDirSource | null> {
+async function resolveSkillDirSource(skill: Skill, home: Home): Promise<SkillDirSource | null> {
   if (!skill.team?.dir || !skill.team.path.endsWith('SKILL.md')) return null;
-  const bareDir = bareDirFor(skill.team.repo);
+  const bareDir = bareDirFor(skill.team.repo, home);
   if (!existsSync(join(bareDir, 'HEAD'))) return null;
   const listed = skill.team.commit && isPinnedSha(skill.team.commit) ? await resolveRef(bareDir, skill.team.commit) : null;
   const commit = listed ?? (await resolveRef(bareDir, skill.team.ref));
@@ -420,8 +421,9 @@ export async function materializeSkillDir(
   skill: Skill,
   /** Keeps one written copy out of git; defaults to the shared `info/exclude`. */
   ignore: (agentDir: string) => Promise<void> = (agentDir) => excludeFromGit(repoRoot, `${agentDir}/skills/${skill.name}/`),
+  home: Home,
 ): Promise<string[]> {
-  const source = await resolveSkillDirSource(skill);
+  const source = await resolveSkillDirSource(skill, home);
   if (!source || !skill.team) return [];
   const files = await readSkillDirFiles(source);
   if (files.size === 0) return [];
@@ -458,11 +460,11 @@ const SKILL_FILES_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
  * worktree. Stage then rename complete copies, prune unused old commits and return null on
  * failure. Never write project files or info/exclude.
  */
-export async function materializeSkillToCache(skill: Skill): Promise<string | null> {
+export async function materializeSkillToCache(skill: Skill, home: Home): Promise<string | null> {
   try {
-    const source = await resolveSkillDirSource(skill);
+    const source = await resolveSkillDirSource(skill, home);
     if (!source || !skill.team) return null;
-    const root = skillFilesCacheDirFor(skill.team.repo);
+    const root = skillFilesCacheDirFor(skill.team.repo, home);
     const commitDir = join(root, source.commit);
     const dest = join(commitDir, skill.name);
     if (!existsSync(dest)) {
@@ -610,16 +612,16 @@ export function shouldRecordFetchFailure(opts: {
 }
 
 /** Test hook: simulate a process-local failed attempt for this source. */
-export function __markCloneAttemptedForTests(repo: string): void {
-  cloneAttempted.add(repo);
+export function __markCloneAttemptedForTests(repo: string, home: Home): void {
+  cloneAttempted.add(bareDirFor(repo, home));
 }
 
 /** Test hook: hold this source's clone/fetch open until `until` settles (#859). */
-export function __holdFetchForTests(repo: string, until: Promise<void>): void {
+export function __holdFetchForTests(repo: string, until: Promise<void>, home: Home): void {
   const held = until.finally(() => {
-    if (fetchInFlight.get(repo) === held) fetchInFlight.delete(repo);
+    if (fetchInFlight.get(bareDirFor(repo, home)) === held) fetchInFlight.delete(bareDirFor(repo, home));
   });
-  fetchInFlight.set(repo, held);
+  fetchInFlight.set(bareDirFor(repo, home), held);
 }
 
 const cachedListPauses = new Map<string, { reached: () => void; until: Promise<void> }>();
@@ -628,13 +630,15 @@ const cachedListPauses = new Map<string, { reached: () => void; until: Promise<v
  * Test hook: park this project's next passive load right after its list-only
  * pass until `until` settles (#859). Resolves once the load has parked there.
  */
-export function __pauseAfterCachedListForTests(repoRoot: string, until: Promise<void>): Promise<void> {
-  return new Promise((reached) => { cachedListPauses.set(repoRoot, { reached, until }); });
+export function __pauseAfterCachedListForTests(repoRoot: string, until: Promise<void>, home: Home): Promise<void> {
+  return new Promise((reached) => { cachedListPauses.set(teamCacheKey(repoRoot, home), { reached, until }); });
 }
 
 // Both maps are keyed by `repoRoot` (multi-project workspace, step 2.6): each
 // project resolves its own `.ai/cezar/config.json` → `skillsRepos`, so one
 // project's team-skill list must never be served under another project's scope.
+function teamCacheKey(repoRoot: string, home: Home): string { return JSON.stringify([repoRoot, home.skillsCache]); }
+
 const teamSkillsByRoot = new Map<string, Skill[]>();
 const firstLoadByRoot = new Map<string, Promise<Skill[]>>();
 // The first load's list-only pass over the clones already on disk (#859).
@@ -643,15 +647,15 @@ const cachedListByRoot = new Map<string, Promise<Skill[]>>();
 // late never replaces a newer list (a concurrent refresh) in `teamSkillsByRoot`.
 const postFetchListsByRoot = new Map<string, number>();
 
-function initialTeamSkillsLoad(repoRoot: string): Promise<Skill[]> {
-  const existing = firstLoadByRoot.get(repoRoot);
+function initialTeamSkillsLoad(repoRoot: string, home: Home): Promise<Skill[]> {
+  const existing = firstLoadByRoot.get(teamCacheKey(repoRoot, home));
   if (existing) return existing;
   let listed!: (skills: Skill[]) => void;
-  cachedListByRoot.set(repoRoot, new Promise((resolve) => { listed = resolve; }));
-  const load = loadTeamSkills(repoRoot, 'passive', listed).catch(() => teamSkillsByRoot.get(repoRoot) ?? []);
+  cachedListByRoot.set(teamCacheKey(repoRoot, home), new Promise((resolve) => { listed = resolve; }));
+  const load = loadTeamSkills(repoRoot, 'passive', listed, home).catch(() => teamSkillsByRoot.get(teamCacheKey(repoRoot, home)) ?? []);
   // A load that failed before its list-only pass still settles the cached wait.
   void load.then((skills) => listed(skills));
-  firstLoadByRoot.set(repoRoot, load);
+  firstLoadByRoot.set(teamCacheKey(repoRoot, home), load);
   return load;
 }
 
@@ -662,9 +666,9 @@ function initialTeamSkillsLoad(repoRoot: string): Promise<Skill[]> {
  * and returns immediately — the GUI refetches, so remote skills appear moments
  * later instead of blocking the first `GET /api/skills`.
  */
-export function getTeamSkillsCached(repoRoot: string): Skill[] {
-  void initialTeamSkillsLoad(repoRoot);
-  return teamSkillsByRoot.get(repoRoot) ?? [];
+export function getTeamSkillsCached(repoRoot: string, home: Home): Skill[] {
+  void initialTeamSkillsLoad(repoRoot, home);
+  return teamSkillsByRoot.get(teamCacheKey(repoRoot, home)) ?? [];
 }
 
 /**
@@ -672,8 +676,8 @@ export function getTeamSkillsCached(repoRoot: string): Skill[] {
  * The normal catalog read stays immediate; callers use this only for a
  * background convergence read after they have already rendered local skills.
  */
-export function waitForTeamSkills(repoRoot: string): Promise<Skill[]> {
-  return initialTeamSkillsLoad(repoRoot);
+export function waitForTeamSkills(repoRoot: string, home: Home): Promise<Skill[]> {
+  return initialTeamSkillsLoad(repoRoot, home);
 }
 
 /**
@@ -682,37 +686,37 @@ export function waitForTeamSkills(repoRoot: string): Promise<Skill[]> {
  * empty list, not a clone. When a refresh started this project's first load
  * there is no list-only pass, and this answers with the current list.
  */
-export function waitForCachedTeamSkills(repoRoot: string): Promise<Skill[]> {
-  void initialTeamSkillsLoad(repoRoot);
-  return cachedListByRoot.get(repoRoot) ?? Promise.resolve(teamSkillsByRoot.get(repoRoot) ?? []);
+export function waitForCachedTeamSkills(repoRoot: string, home: Home): Promise<Skill[]> {
+  void initialTeamSkillsLoad(repoRoot, home);
+  return cachedListByRoot.get(teamCacheKey(repoRoot, home)) ?? Promise.resolve(teamSkillsByRoot.get(teamCacheKey(repoRoot, home)) ?? []);
 }
 
 /** Refresh: clone missing sources, `git fetch` existing ones, reload the list. */
-export async function refreshTeamSkills(repoRoot: string): Promise<Skill[]> {
-  return publishLoad(repoRoot, 'all');
+export async function refreshTeamSkills(repoRoot: string, home: Home): Promise<Skill[]> {
+  return publishLoad(repoRoot, 'all', home);
 }
 
 /**
  * Fetch only the named sources, then reload the list (hearsay-tools/cezarion#279): the Skills page's Add and Retry.
  * The other sources are listed from their clones as they are, with no fetch.
  */
-export async function refreshTeamSources(repoRoot: string, sources: readonly SkillsRepoRef[]): Promise<Skill[]> {
+export async function refreshTeamSources(repoRoot: string, sources: readonly SkillsRepoRef[], home: Home): Promise<Skill[]> {
   // Loading from this call on, so the answer that started the fetch already says so.
-  for (const src of sources) setSourceStatus(repoRoot, src, { state: 'loading' });
-  return publishLoad(repoRoot, { only: new Set(sources.map(sourceKey)) });
+  for (const src of sources) setSourceStatus(repoRoot, src, { state: 'loading' }, home);
+  return publishLoad(repoRoot, { only: new Set(sources.map(sourceKey)) }, home);
 }
 
 /**
  * Reload the list from the clones on disk with no fetch (hearsay-tools/cezarion#279), after a source was removed,
  * disabled or enabled, so the change shows at once.
  */
-export async function reloadTeamSkills(repoRoot: string): Promise<Skill[]> {
-  return publishLoad(repoRoot, 'none');
+export async function reloadTeamSkills(repoRoot: string, home: Home): Promise<Skill[]> {
+  return publishLoad(repoRoot, 'none', home);
 }
 
-function publishLoad(repoRoot: string, mode: Exclude<FetchMode, 'passive'>): Promise<Skill[]> {
-  const load = loadTeamSkills(repoRoot, mode).catch(() => teamSkillsByRoot.get(repoRoot) ?? []);
-  firstLoadByRoot.set(repoRoot, load);
+function publishLoad(repoRoot: string, mode: Exclude<FetchMode, 'passive'>, home: Home): Promise<Skill[]> {
+  const load = loadTeamSkills(repoRoot, mode, undefined, home).catch(() => teamSkillsByRoot.get(teamCacheKey(repoRoot, home)) ?? []);
+  firstLoadByRoot.set(teamCacheKey(repoRoot, home), load);
   return load;
 }
 
@@ -734,24 +738,24 @@ const sourceStatusByRoot = new Map<string, Map<string, TeamSourceStatus>>();
  * Each configured source's state for this project, as the last load left it. A source no load
  * has reached yet is absent; the caller shows it as `idle`.
  */
-export function getTeamSourceStatuses(repoRoot: string): ReadonlyMap<string, TeamSourceStatus> {
-  void initialTeamSkillsLoad(repoRoot);
-  return sourceStatusByRoot.get(repoRoot) ?? new Map();
+export function getTeamSourceStatuses(repoRoot: string, home: Home): ReadonlyMap<string, TeamSourceStatus> {
+  void initialTeamSkillsLoad(repoRoot, home);
+  return sourceStatusByRoot.get(teamCacheKey(repoRoot, home)) ?? new Map();
 }
 
-function setSourceStatus(repoRoot: string, src: SkillsRepoRef, status: TeamSourceStatus): void {
-  let statuses = sourceStatusByRoot.get(repoRoot);
-  if (!statuses) sourceStatusByRoot.set(repoRoot, (statuses = new Map()));
+function setSourceStatus(repoRoot: string, src: SkillsRepoRef, status: TeamSourceStatus, home: Home): void {
+  let statuses = sourceStatusByRoot.get(teamCacheKey(repoRoot, home));
+  if (!statuses) sourceStatusByRoot.set(teamCacheKey(repoRoot, home), (statuses = new Map()));
   statuses.set(sourceKey(src), status);
 }
 
 /** The state a listed source ends a load in. Its listed skills stay usable whatever it says. */
-function settledStatus(src: SkillsRepoRef, skills: Skill[], problem: ListProblem): TeamSourceStatus {
+function settledStatus(src: SkillsRepoRef, skills: Skill[], problem: ListProblem, home: Home): TeamSourceStatus {
   const skillCount = skills.length;
   if (safeRemoteFor(src.repo) === null) {
     return { state: 'error', cause: 'refused-format', detail: `"${src.repo}" is not a source format cezar accepts.`, skillCount };
   }
-  const failure = fetchFailures.get(src.repo);
+  const failure = fetchFailures.get(bareDirFor(src.repo, home));
   if (failure !== undefined) return { state: 'error', cause: 'fetch-failed', detail: failure, skillCount };
   if (problem === 'ref-not-found') {
     return { state: 'error', cause: 'ref-not-found', detail: `The ref "${src.ref}" was not found in ${src.repo}.`, skillCount };
@@ -763,43 +767,43 @@ function settledStatus(src: SkillsRepoRef, skills: Skill[], problem: ListProblem
   return { state: 'ok', skillCount };
 }
 
-function stampIsFresh(repo: string, now: number): boolean {
+function stampIsFresh(repo: string, now: number, home: Home): boolean {
   return !shouldPassiveFetch({
-    fetchedAt: readLastFetchAt(bareDirFor(repo)),
+    fetchedAt: readLastFetchAt(bareDirFor(repo, home)),
     now,
     ttlMs: PASSIVE_FETCH_TTL_MS,
   });
 }
 
 /** Clone/fetch one source, coalesced across concurrent catalog loads. */
-function fetchBareSource(repo: string): Promise<void> {
-  const existing = fetchInFlight.get(repo);
+function fetchBareSource(repo: string, home: Home): Promise<void> {
+  const existing = fetchInFlight.get(bareDirFor(repo, home));
   if (existing) return existing;
   const work = Promise.resolve()
     .then(async () => {
-      const { bareDir, created } = await ensureBareClone(repo);
+      const { bareDir, created } = await ensureBareClone(repo, home);
       if (!created) await fetchAll(bareDir);
       await writeLastFetchAt(bareDir, Date.now());
-      cloneAttempted.delete(repo);
-      fetchFailures.delete(repo);
+      cloneAttempted.delete(bareDirFor(repo, home));
+      fetchFailures.delete(bareDirFor(repo, home));
     })
     .catch((error: unknown) => {
-      fetchFailures.set(repo, error instanceof Error ? error.message : String(error));
+      fetchFailures.set(bareDirFor(repo, home), error instanceof Error ? error.message : String(error));
       // A concurrent sibling may already have written a fresh stamp. Recording
       // that as a local failure would suppress the next TTL in this process.
       if (shouldRecordFetchFailure({
-        fetchedAt: readLastFetchAt(bareDirFor(repo)),
+        fetchedAt: readLastFetchAt(bareDirFor(repo, home)),
         now: Date.now(),
         ttlMs: PASSIVE_FETCH_TTL_MS,
       })) {
-        cloneAttempted.add(repo);
+        cloneAttempted.add(bareDirFor(repo, home));
       }
       throw error;
     })
     .finally(() => {
-      if (fetchInFlight.get(repo) === work) fetchInFlight.delete(repo);
+      if (fetchInFlight.get(bareDirFor(repo, home)) === work) fetchInFlight.delete(bareDirFor(repo, home));
     });
-  fetchInFlight.set(repo, work);
+  fetchInFlight.set(bareDirFor(repo, home), work);
   return work;
 }
 
@@ -824,11 +828,12 @@ function mergeSourceLists(lists: Array<Skill[] | undefined>): Skill[] {
 async function loadTeamSkills(
   repoRoot: string,
   mode: FetchMode,
-  onCachedList?: (skills: Skill[]) => void,
+  onCachedList: ((skills: Skill[]) => void) | undefined,
+  home: Home,
 ): Promise<Skill[]> {
   // A disabled source stays in the file and loads nothing (hearsay-tools/cezarion#279).
-  const sources = (await loadConfig(repoRoot)).skillsRepos.filter((src) => src.enabled);
-  forgetUnlistedStatuses(repoRoot, sources);
+  const sources = (await loadConfig(repoRoot, home)).skillsRepos.filter((src) => src.enabled);
+  forgetUnlistedStatuses(repoRoot, sources, home);
   // Passive loads list the clones already on disk BEFORE any fetch (#859): the
   // first restart past the TTL otherwise hides every team skill — and starves a
   // recovered Continue of its playbook — for as long as the fetch takes.
@@ -837,21 +842,21 @@ async function loadTeamSkills(
   // are shared by every project and process, so a fetch made for another
   // project never bumps this one's generation; a moved stamp is how it shows.
   let snapshotStamps: Array<number | null> = [];
-  const generation = postFetchListsByRoot.get(repoRoot) ?? 0;
+  const generation = postFetchListsByRoot.get(teamCacheKey(repoRoot, home)) ?? 0;
   // True once another load has published a post-fetch list since this one
   // started: its snapshot may predate that list, so it must not win (#859).
-  const superseded = () => (postFetchListsByRoot.get(repoRoot) ?? 0) !== generation;
+  const superseded = () => (postFetchListsByRoot.get(teamCacheKey(repoRoot, home)) ?? 0) !== generation;
   if (mode === 'passive') {
-    snapshotStamps = sources.map((src) => readLastFetchAt(bareDirFor(src.repo)));
-    cached = await Promise.all(sources.map((src) => listRemoteSkills(src).catch(() => undefined)));
-    const pause = cachedListPauses.get(repoRoot);
+    snapshotStamps = sources.map((src) => readLastFetchAt(bareDirFor(src.repo, home)));
+    cached = await Promise.all(sources.map((src) => listRemoteSkills(src, home).catch(() => undefined)));
+    const pause = cachedListPauses.get(teamCacheKey(repoRoot, home));
     if (pause) {
-      cachedListPauses.delete(repoRoot);
+      cachedListPauses.delete(teamCacheKey(repoRoot, home));
       pause.reached();
       await pause.until;
     }
     const listed = mergeSourceLists(cached);
-    if (!superseded()) teamSkillsByRoot.set(repoRoot, listed);
+    if (!superseded()) teamSkillsByRoot.set(teamCacheKey(repoRoot, home), listed);
     onCachedList?.(listed);
   }
   const lists: Array<Skill[] | undefined> = [];
@@ -859,18 +864,18 @@ async function loadTeamSkills(
     // An unfetched source has not moved since the list-only pass unless
     // another load fetched it meanwhile; reuse the snapshot only then.
     const snapshot = { skills: cached[index], stamp: snapshotStamps[index], superseded };
-    lists.push(await loadOneSource(repoRoot, src, mode, snapshot));
+    lists.push(await loadOneSource(repoRoot, src, mode, snapshot, home));
   }
   // A source removed or disabled while this load fetched leaves the list it publishes: an older
   // Retry must not bring back a source a newer change took out.
   const current = new Set(readEnabledSourceKeys(repoRoot));
   const out = mergeSourceLists(lists).filter((skill) => !skill.team || current.has(sourceKey(skill.team)));
-  forgetUnlistedStatuses(repoRoot, sources.filter((src) => current.has(sourceKey(src))));
+  forgetUnlistedStatuses(repoRoot, sources.filter((src) => current.has(sourceKey(src))), home);
   // Every load but a passive one publishes. A passive load that a newer post-fetch list
   // overtook defers to it rather than replacing it with an older view.
-  if (mode === 'passive' && superseded()) return teamSkillsByRoot.get(repoRoot) ?? out;
-  postFetchListsByRoot.set(repoRoot, (postFetchListsByRoot.get(repoRoot) ?? 0) + 1);
-  teamSkillsByRoot.set(repoRoot, out);
+  if (mode === 'passive' && superseded()) return teamSkillsByRoot.get(teamCacheKey(repoRoot, home)) ?? out;
+  postFetchListsByRoot.set(teamCacheKey(repoRoot, home), (postFetchListsByRoot.get(teamCacheKey(repoRoot, home)) ?? 0) + 1);
+  teamSkillsByRoot.set(teamCacheKey(repoRoot, home), out);
   return out;
 }
 
@@ -885,37 +890,38 @@ async function loadOneSource(
   src: SkillsRepoRef,
   mode: FetchMode,
   snapshot: { skills: Skill[] | undefined; stamp: number | null | undefined; superseded: () => boolean },
+  home: Home,
 ): Promise<Skill[] | undefined> {
   const now = Date.now();
-  if (stampIsFresh(src.repo, now)) cloneAttempted.delete(src.repo);
-  const fetched = shouldFetchSource(mode, src, now);
+  if (stampIsFresh(src.repo, now, home)) cloneAttempted.delete(bareDirFor(src.repo, home));
+  const fetched = shouldFetchSource(mode, src, now, home);
   if (fetched) {
-    setSourceStatus(repoRoot, src, { state: 'loading' });
+    setSourceStatus(repoRoot, src, { state: 'loading' }, home);
     // offline / no access — list whatever an older clone has (or nothing); the status says why
-    await fetchBareSource(src.repo).catch(() => undefined);
+    await fetchBareSource(src.repo, home).catch(() => undefined);
   }
-  const unmoved = !snapshot.superseded() && readLastFetchAt(bareDirFor(src.repo)) === snapshot.stamp;
+  const unmoved = !snapshot.superseded() && readLastFetchAt(bareDirFor(src.repo, home)) === snapshot.stamp;
   const reused = fetched || !unmoved ? undefined : snapshot.skills;
   // degrade: a source that fails to list contributes nothing. A non-empty snapshot needs no
   // second listing; an empty one is listed again only to learn why it is empty.
-  const result = reused?.length ? { skills: reused, problem: null } : await listRemoteSource(src).catch(() => undefined);
+  const result = reused?.length ? { skills: reused, problem: null } : await listRemoteSource(src, home).catch(() => undefined);
   const listed = reused ?? result?.skills;
-  setSourceStatus(repoRoot, src, settledStatus(src, listed ?? [], result?.problem ?? null));
+  setSourceStatus(repoRoot, src, settledStatus(src, listed ?? [], result?.problem ?? null, home), home);
   return listed;
 }
 
 /** Whether this load fetches `src`: always, by name, or by the passive TTL and retry budget. */
-function shouldFetchSource(mode: FetchMode, src: SkillsRepoRef, now: number): boolean {
+function shouldFetchSource(mode: FetchMode, src: SkillsRepoRef, now: number, home: Home): boolean {
   if (mode === 'all') return true;
   if (mode === 'none') return false;
   if (mode !== 'passive') return mode.only.has(sourceKey(src));
-  return shouldPassiveFetch({ fetchedAt: readLastFetchAt(bareDirFor(src.repo)), now, ttlMs: PASSIVE_FETCH_TTL_MS })
-    && !cloneAttempted.has(src.repo);
+  return shouldPassiveFetch({ fetchedAt: readLastFetchAt(bareDirFor(src.repo, home)), now, ttlMs: PASSIVE_FETCH_TTL_MS })
+    && !cloneAttempted.has(bareDirFor(src.repo, home));
 }
 
 /** Drop the state of a source that is no longer an enabled entry in `skillsRepos`. */
-function forgetUnlistedStatuses(repoRoot: string, sources: readonly SkillsRepoRef[]): void {
-  const statuses = sourceStatusByRoot.get(repoRoot);
+function forgetUnlistedStatuses(repoRoot: string, sources: readonly SkillsRepoRef[], home: Home): void {
+  const statuses = sourceStatusByRoot.get(teamCacheKey(repoRoot, home));
   if (!statuses) return;
   const keep = new Set(sources.map(sourceKey));
   for (const key of statuses.keys()) if (!keep.has(key)) statuses.delete(key);

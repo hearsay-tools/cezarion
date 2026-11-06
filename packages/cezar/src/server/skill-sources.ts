@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { Hono } from 'hono';
 import {
   addTeamSkillSourceSchema,
@@ -25,6 +26,7 @@ export const SKILL_SOURCES_HOSTED_ERROR =
   'Team skill sources are read-only on this remote cockpit. To allow remote edits, run `cez remote-settings enable` on the machine running cezar.';
 
 export interface SkillSourcesProject {
+  home: Home;
   root: string;
   dataDir: string;
 }
@@ -49,12 +51,12 @@ const sameSource = (entry: RawSource, ref: TeamSkillSourceRef) => sourceKey(refO
 
 /** The page's view: each source, with the state its last load left. */
 export async function readSkillSources(project: SkillSourcesProject, editable: boolean): Promise<TeamSkillSourcesResponse> {
-  return answerFor(project.root, await readRawConfig(project.dataDir), editable);
+  return answerFor(project.root, await readRawConfig(project.dataDir), editable, project.home);
 }
 
-function answerFor(root: string, read: RawConfigRead, editable: boolean): TeamSkillSourcesResponse {
+function answerFor(root: string, read: RawConfigRead, editable: boolean, home: Home): TeamSkillSourcesResponse {
   if (!read.ok) return { sources: [], editable, configIssue: read.issue };
-  const statuses = getTeamSourceStatuses(root);
+  const statuses = getTeamSourceStatuses(root, home);
   const sources: TeamSkillSource[] = rawSources(read.raw).map((entry) => {
     const ref = refOf(entry);
     const enabled = entry.enabled !== false;
@@ -106,7 +108,7 @@ export async function addSkillSource(project: SkillSourcesProject, editable: boo
       ? { status: 409, error: `${ref.repo} at ${ref.ref} is already listed.` }
       : { next: [...sources, body.ref === undefined ? { repo: ref.repo } : ref] });
   return settle(project, editable, outcome, () => {
-    void refreshTeamSources(project.root, [ref]);
+    void refreshTeamSources(project.root, [ref], project.home);
   });
 }
 
@@ -120,7 +122,7 @@ export async function setSkillSourceEnabled(
     if (!sources.some((entry) => sameSource(entry, body))) return notListed(body);
     return { next: sources.map((entry) => (sameSource(entry, body) ? withEnabled(entry, body.enabled) : entry)) };
   });
-  return settle(project, editable, outcome, () => reloadTeamSkills(project.root));
+  return settle(project, editable, outcome, () => reloadTeamSkills(project.root, project.home));
 }
 
 /** Enabled is the default, so an enabled entry carries no `enabled` key, as before hearsay-tools/cezarion#279. */
@@ -135,7 +137,7 @@ export async function removeSkillSource(project: SkillSourcesProject, editable: 
     sources.some((entry) => sameSource(entry, body))
       ? { next: sources.filter((entry) => !sameSource(entry, body)) }
       : notListed(body));
-  return settle(project, editable, outcome, () => reloadTeamSkills(project.root));
+  return settle(project, editable, outcome, () => reloadTeamSkills(project.root, project.home));
 }
 
 /** Fetch one enabled source again, in the background, as the page's Retry. */
@@ -144,8 +146,8 @@ export async function retrySkillSource(project: SkillSourcesProject, editable: b
   if (!read.ok) return { ok: false, status: 409, error: read.issue };
   const entry = rawSources(read.raw).find((candidate) => sameSource(candidate, body));
   if (!entry || entry.enabled === false) return { ok: false, ...notListed(body) };
-  void refreshTeamSources(project.root, [body]);
-  return { ok: true, body: answerFor(project.root, read, editable) };
+  void refreshTeamSources(project.root, [body], project.home);
+  return { ok: true, body: answerFor(project.root, read, editable, project.home) };
 }
 
 function notListed(ref: TeamSkillSourceRef): { status: 404; error: string } {

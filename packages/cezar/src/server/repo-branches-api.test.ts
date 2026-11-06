@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFile } from 'node:child_process';
@@ -62,8 +63,8 @@ describe('the repo branches API', () => {
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     forgeCalls = 0;
     // A real manager: a delete claims the owning runs through it, the claim Continue is refused by.
-    manager = new RunManager(store, repoRoot);
-    app = createApp({
+    manager = new RunManager(store, repoRoot, { home: testHome() });
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager,
@@ -259,7 +260,7 @@ describe('the repo branches API', () => {
 
   it('works under CEZ_DRY_RUN=1 with the default forge — no gh, PR state still known', async () => {
     process.env.CEZ_DRY_RUN = '1';
-    app = createApp({ repoRoot, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' });
+    app = createApp({ home: testHome(), repoRoot, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' });
     const task = await finishedTask(1);
     const body = await branches();
     expect(body.prStateKnown).toBe(true);
@@ -271,7 +272,7 @@ describe('the repo branches API', () => {
     try {
       mkdirSync(join(plain, '.ai/cezar'), { recursive: true });
       const plainStore = RunStore.open(join(plain, '.ai/cezar'));
-      app = createApp({ repoRoot: plain, store: plainStore, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' });
+      app = createApp({ home: testHome(), repoRoot: plain, store: plainStore, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' });
       expect(await branches()).toEqual({ base: '', prStateKnown: false, branches: [], counts: { notLanded: 0, cleanup: 0 } });
       plainStore.flush();
     } finally {

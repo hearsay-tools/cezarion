@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -21,7 +22,7 @@ import { fakeViewer } from './preview.testkit.ts';
 // bound: a cold Chrome start on a loaded CI runner took over 30 s (hearsay-tools/cezarion#1467);
 // every wait below still ends on its own event.
 const BUDGET_MS = 120_000;
-const bin = resolveChromium();
+const bin = resolveChromium(undefined, undefined, undefined, undefined, testHome());
 
 let servers: Server[] = [];
 let cleanups: Array<() => Promise<void> | void> = [];
@@ -77,7 +78,7 @@ describe('the agent drives the real preview browser (hearsay-tools/cezarion#784)
     const events: Array<Record<string, unknown>> = [];
     const store = { getRun: () => ({ id: 'run-1' }), appendEvent: (_runId: string, event: Record<string, unknown>) => { events.push(event); return event; } };
     const ctx: RunContext = { runId: 'run-1', title: 'Agent drives', worktreePath: dataDir, dataDir, store: store as unknown as RunContext['store'] };
-    const host = new PreviewHost({ env: { ...process.env, CEZ_PREVIEW_NO_SANDBOX: '1' } });
+    const host = new PreviewHost({ home: testHome(), env: { ...process.env, CEZ_PREVIEW_NO_SANDBOX: '1' } });
     cleanups.push(() => host.close());
     const socket = createPreviewCdpSocket({ host });
     cleanups.push(() => socket.close());

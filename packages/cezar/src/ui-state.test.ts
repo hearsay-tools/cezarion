@@ -1,3 +1,4 @@
+import { testHome } from './home/test-home.testkit.ts';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,7 +25,7 @@ it('does not merge a legacy workspace importedSkills into the project state', as
   const home = await mkdtemp(join(tmpdir(), 'ui-state-home-')); roots.push(home);
   vi.stubEnv('CEZ_HOME', home);
   try {
-    await writeFile(workspaceUiStatePath(), JSON.stringify({ importedSkills: ['a'] }));
+    await writeFile(workspaceUiStatePath(testHome()), JSON.stringify({ importedSkills: ['a'] }));
     const root = await mkdtemp(join(tmpdir(), 'sidebar-state-')); roots.push(root);
     await mkdir(join(root, '.ai/cezar'), { recursive: true });
     expect(await readUiState(root)).not.toHaveProperty('importedSkills');

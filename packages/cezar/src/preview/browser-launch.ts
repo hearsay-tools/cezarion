@@ -28,8 +28,8 @@ export async function waitForExit(browser: BrowserHandle): Promise<void> {
 }
 
 /** resolve → launch → a flat session on the page target. */
-export async function launchBrowser(profileDir: string, env: NodeJS.ProcessEnv, home?: Home): Promise<BrowserHandle> {
-  const bin = home ? resolveChromium(undefined, env, undefined, undefined, home) : resolveChromium(undefined, env);
+export async function launchBrowser(profileDir: string, env: NodeJS.ProcessEnv, home: Home): Promise<BrowserHandle> {
+  const bin = resolveChromium(undefined, env, undefined, undefined, home);
   if (!bin) throw new ChromiumMissingError('No Chromium found');
   const { proc, browser: connection } = await launchChromium(bin, profileDir, env);
   let tail = '';

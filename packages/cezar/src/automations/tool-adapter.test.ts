@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,7 +25,7 @@ function fixture(address?: { origin: string; projectId: string }) {
     store: RunStore.open(join(dir, 'runs')),
     manager: { cockpitAddress: () => address } as unknown as RunManager,
   };
-  const service = createAutomationService({
+  const service = createAutomationService({ home: testHome(),
     timeZone: () => 'Europe/Warsaw',
     // Detection only: no launcher, so nothing here starts a task.
     scheduleHandle: () => ({ projectId: 'cezar', store: project.automationStore, timeZone: 'Europe/Warsaw', now: () => NOW }),

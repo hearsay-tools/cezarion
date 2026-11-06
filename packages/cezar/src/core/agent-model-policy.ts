@@ -18,9 +18,9 @@ const modelPolicyConfigSchema = z.object({
  * preserve ordinary model selection unless another source enables the lock.
  */
 export function agentModelsLocked(
-  repoRoot?: string,
+  repoRoot: string | undefined,
   env: NodeJS.ProcessEnv = process.env,
-  home?: Home,
+  home: Home,
 ): boolean {
   if (env[AGENT_MODELS_LOCKED_ENV] === '1') return true;
   const paths = [

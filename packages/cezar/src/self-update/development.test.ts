@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -87,7 +88,7 @@ describe('development channel', () => {
       })) as typeof fetch);
 
   const service = () =>
-    new SelfUpdateService({
+    new SelfUpdateService({ home: testHome(),
       pkgName: '@wjarka/cezarion',
       version: '0.13.0',
       entry: join(home, 'versions', 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js'),
@@ -115,7 +116,7 @@ describe('development channel', () => {
   });
 
   it('lists no worktrees in hosted mode', async () => {
-    const svc = new SelfUpdateService({
+    const svc = new SelfUpdateService({ home: testHome(),
       pkgName: '@wjarka/cezarion',
       version: '0.13.0',
       entry: '/x/dist/index.js',

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
@@ -441,7 +442,7 @@ describe('POST /api/v1/projects/checkout', () => {
   });
 
   const makeApp = (over: Partial<ServerDeps> = {}) =>
-    createApp({
+    createApp({ home: testHome(),
       repoRoot,
       store,
       manager: {} as RunManager,
@@ -468,7 +469,7 @@ describe('POST /api/v1/projects/checkout', () => {
   const useCheckoutRoot = () =>
     mergeWriteWorkspaceConfig((config) => {
       config.projectsDir = checkoutRoot;
-    });
+    }, testHome());
 
   it('clones into projectsDir, registers the result as source=checkout, and streams progress', async () => {
     await useCheckoutRoot();
@@ -597,7 +598,7 @@ describe('POST /api/v1/projects/checkout', () => {
     mkdirSync(checkoutRoot, { recursive: true });
     const target = join(checkoutRoot, 'cezar');
     mkdirSync(target, { recursive: true });
-    const existing = await registerProject(target, 'local');
+    const existing = await registerProject(target, 'local', testHome());
     rmSync(target, { recursive: true, force: true });
     clearProjectProbeCache();
 

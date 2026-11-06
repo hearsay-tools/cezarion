@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { AgentSession } from '../core/agent-runner.ts';
@@ -230,7 +231,7 @@ it('records disposal and shares owned work across restart', () => {
 
 /** These are module contracts: no public manager call invokes just one owned wrapper. */
 function moduleContext(root: string, store: RunStore, manager: RunManager, work: TrackedWork): RunModuleContext {
-  return { repoRoot: root, dataDir: join(root, '.ai/cezar'), store, semaphore: new WorkspaceSemaphore(), work, disposed: () => managerDisposed(manager) };
+  return { home: testHome(), repoRoot: root, dataDir: join(root, '.ai/cezar'), store, semaphore: new WorkspaceSemaphore({ home: testHome() }), work, disposed: () => managerDisposed(manager) };
 }
 
 function settlementModule(context: RunModuleContext): RunSettlement {
@@ -271,8 +272,8 @@ it.each(ownedOperations)('records module-owned $label before returning', async (
 it('records a queued continuation at launch', async () => {
   const { root, store, manager: old } = fixture();
   old.dispose();
-  const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 1, memoryLimitMb: 0 }) });
-  const manager = createFixtureManager(store, root, { semaphore });
+  const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 1, memoryLimitMb: 0 }) });
+  const manager = createFixtureManager(store, root, { home: testHome(), semaphore });
   const work = fixtureWork(root);
   const track = vi.spyOn(work, 'track');
   const run = store.createRun({ title: 'resume', task: 'hello', workflow: 'cleanup', runner: 'claude', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });

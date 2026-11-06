@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
@@ -16,7 +17,7 @@ it('reads all owned workers including archived records through each human projec
   if (owned?.role !== 'worker') throw new Error('missing worker fixture');
   setRunStatus(f.store, workers[0]!.workerId, RUN_STATUS.cancelled, { archived: true, delegation: { ...owned, destroy: { requestedAt: '2026-09-06T00:00:00.000Z', phase: 'incomplete', remaining: ['branch'], error: 'Branch checked out' } } });
   f.store.updateRun(f.parent.id, { allowWorkers: false, allowMessaging: false });
-  const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
+  const app = createApp({ home: testHome(), repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
   let expected: unknown;
   for (const prefix of ['/api/v1', '/api/v1/p/project', '/api/v1/p/default']) {
     const res = await app.request(`http://127.0.0.1${prefix}/runs/${f.parent.id}/relationships`, { headers: { host: '127.0.0.1' } });
@@ -33,7 +34,7 @@ it('reads all owned workers including archived records through each human projec
 });
 it('retains parent identity without a parent record and distinguishes unknown runs from empty ordinary runs', async () => {
   const { workerId } = await f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
-  const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
+  const app = createApp({ home: testHome(), repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
   const read = (id: string) => app.request(`http://127.0.0.1/api/v1/runs/${id}/relationships`, { headers: { host: '127.0.0.1' } });
   const originalGet = f.store.getRun.bind(f.store);
   vi.spyOn(f.store, 'getRun').mockImplementation(id => id === f.parent.id ? undefined : originalGet(id));
@@ -52,7 +53,7 @@ it('serves a parent\'s workers off its receipts without walking the run index', 
   const spawned = await f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
   const unrelated = f.store.createRun({ title: 'unrelated', task: 'unrelated', workflow: 'quick-task', steps: [] });
   setRunStatus(f.store, unrelated.id, RUN_STATUS.done, { archived: true });
-  const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
+  const app = createApp({ home: testHome(), repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
   const scan = vi.spyOn(f.store, 'listRuns');
   const read = (id: string) => app.request(`http://127.0.0.1/api/v1/runs/${id}/relationships`, { headers: { host: '127.0.0.1' } });
   expect(await (await read(f.parent.id)).json()).toEqual({ workers: [expect.objectContaining({ workerId: spawned.workerId, parentRunId: f.parent.id })],
@@ -76,7 +77,7 @@ it('lists all 33 owned workers and the parent capacity after a verified destroy 
   for (let i = 0; i < 32; i++) workers.push(await f.service.spawn(f.caller, { task: `worker ${i}`, baseline: 'HEAD', requestId: randomUUID() }));
   expect(await f.service.destroy(f.caller, { workerId: workers[0]!.workerId })).toMatchObject({ state: 'complete' });
   workers.push(await f.service.spawn(f.caller, { task: 'worker 33', baseline: 'HEAD', requestId: randomUUID() }));
-  const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
+  const app = createApp({ home: testHome(), repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
   const read = (id: string) => app.request(`http://127.0.0.1/api/v1/runs/${id}/relationships`, { headers: { host: '127.0.0.1' } });
   const data = runRelationshipsSchema.parse(await (await read(f.parent.id)).json());
   expect(data.workers.map(worker => worker.workerId).sort()).toEqual(workers.map(worker => worker.workerId).sort());
@@ -89,7 +90,7 @@ it('carries the titles of the parent and of every worker, archived ones included
   const { workerId } = await f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
   setRunStatus(f.store, workerId, RUN_STATUS.done, { title: 'Child task', titleSummary: 'Fix the child', archived: true });
   f.store.updateRun(f.parent.id, { title: 'Parent task' });
-  const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
+  const app = createApp({ home: testHome(), repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
   const read = async (id: string) => runRelationshipsSchema.parse(await (await app.request(`http://127.0.0.1/api/v1/runs/${id}/relationships`, { headers: { host: '127.0.0.1' } })).json());
   expect((await read(f.parent.id)).titles).toEqual([{ id: workerId, title: 'Child task', titleSummary: 'Fix the child' }]);
   expect((await read(workerId)).titles).toEqual([{ id: f.parent.id, title: 'Parent task' }]);

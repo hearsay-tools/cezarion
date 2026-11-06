@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -62,7 +63,7 @@ describe('the self-update API', () => {
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     const stubFetch = (async () =>
       new Response(JSON.stringify(registryDocument), { status: 200 })) as unknown as typeof fetch;
-    const selfUpdate = new SelfUpdateService({
+    const selfUpdate = new SelfUpdateService({ home: testHome(),
       pkgName: '@wjarka/cezarion',
       version: RUNNING,
       entry: join(home, 'somewhere', 'dist', 'index.js'),
@@ -70,7 +71,7 @@ describe('the self-update API', () => {
       env: { ...process.env, CEZ_HOME: home },
       registry: new RegistryCache('@wjarka/cezarion', stubFetch),
     });
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: RUNNING, selfUpdate });
+    app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: RUNNING, selfUpdate });
   });
   afterEach(() => {
     store.flush();
@@ -107,14 +108,14 @@ describe('the self-update API', () => {
     const registry = new RegistryCache('@wjarka/cezarion', fetchRegistry);
     const restart = vi.fn();
     for (const id of [RUNNING, '0.13.0']) {
-      const entry = versionEntry(id);
+      const entry = versionEntry(id, undefined, testHome());
       mkdirSync(dirname(entry), { recursive: true }); writeFileSync(entry, '// fixture');
-      writeManifest(id, { source: 'registry', version: id, installedAt: '2026-10-01T00:00:00Z' });
+      writeManifest(id, { source: 'registry', version: id, installedAt: '2026-10-01T00:00:00Z' }, undefined, testHome());
     }
-    const selfUpdate = new SelfUpdateService({
-      pkgName: '@wjarka/cezarion', version: RUNNING, entry: versionEntry(RUNNING), restart, registry,
+    const selfUpdate = new SelfUpdateService({ home: testHome(),
+      pkgName: '@wjarka/cezarion', version: RUNNING, entry: versionEntry(RUNNING, undefined, testHome()), restart, registry,
     });
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: RUNNING, selfUpdate });
+    app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: RUNNING, selfUpdate });
     // An initial dialog read may already be stalled by an unreachable registry.
     const firstRead = registry.get();
     try {
@@ -173,9 +174,9 @@ describe('the self-update API', () => {
 
   it.each(['local', 'link'] as const)('refuses installed %s targets and hides them in hosted status', async source => {
     const id = '0.16.0+' + source;
-    const entry = versionEntry(id);
+    const entry = versionEntry(id, undefined, testHome());
     mkdirSync(dirname(entry), { recursive: true }); writeFileSync(entry, '// fixture');
-    writeManifest(id, { source, version: '0.16.0', installedAt: '2026-10-01T00:00:00Z' });
+    writeManifest(id, { source, version: '0.16.0', installedAt: '2026-10-01T00:00:00Z' }, undefined, testHome());
     const local = selfUpdateStatusSchema.parse(await (await apiRequest(app, '/api/v1/workspace/self-update')).json());
     expect(local.installed.some((row) => row.id === id)).toBe(true);
     process.env.CEZ_REMOTE = '1';

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { rmSync } from 'node:fs';
 import type { AgentSession } from '../core/agent-runner.ts';
 import type { RunStore } from '../runs/store.ts';
@@ -17,10 +18,10 @@ class FixtureManager extends RunManager {
 const fixtures = new Map<string, { work: TrackedWork; managers: Array<{ manager: RunManager; store: RunStore }> }>();
 
 /** Share ownership across managers, including simulated restart and recovery. */
-export function createFixtureManager(...args: ConstructorParameters<typeof RunManager>): RunManager {
+export function createFixtureManager(...args: [store: RunStore, root: string, options?: Omit<ConstructorParameters<typeof RunManager>[2], 'home'> & { home?: import('../home/home.ts').Home }]): RunManager {
   const [store, root, options] = args;
   const group = fixtures.get(root) ?? { work: options?.work ?? new TrackedWork(), managers: [] };
-  const manager = new FixtureManager(store, root, { ...options, work: group.work });
+  const manager = new FixtureManager(store, root, { home: testHome(), ...options, work: group.work });
   managerWork.set(manager, group.work);
   group.managers.push({ manager, store });
   fixtures.set(root, group);

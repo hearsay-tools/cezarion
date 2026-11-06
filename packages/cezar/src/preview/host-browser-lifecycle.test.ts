@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { describe, expect, it, vi } from 'vitest';
 import { ChromiumError } from './chromium.ts';
 import { ChromiumMissingError, PREVIEW_BROWSER_IDLE_MS } from './host.ts';
@@ -26,14 +27,14 @@ describe('PreviewHost browser lifecycle', () => {
     { error: new Error('spawn refused'), extra: {}, stderrTail: 'spawn refused' },
     { error: 'spawn refused', extra: {}, stderrTail: 'spawn refused' },
   ])('reports exact browser failure fields: $stderrTail', async ({ error, extra, stderrTail }) => {
-    const { host, ctx } = make(undefined, undefined, undefined, { launchBrowser: vi.fn().mockRejectedValue(error) });
+    const { host, ctx } = make(undefined, undefined, undefined, { home: testHome(), launchBrowser: vi.fn().mockRejectedValue(error) });
     const viewer = fakeViewer();
     await host.open(ctx, viewer, { url: 'http://localhost:3000/' });
     expect(viewer.messages.at(-1)).toEqual({ t: 'state', stage: 'browser-exited', reason: 'exited', stderrTail, serverUp: false, ...extra });
   });
 
   it('offers a download on a supported architecture', async () => {
-    const { host, ctx } = make(undefined, () => new ChromiumMissingError(), undefined, { arch: 'x64' });
+    const { host, ctx } = make(undefined, () => new ChromiumMissingError(), undefined, { home: testHome(), arch: 'x64' });
     const viewer = fakeViewer();
     await host.open(ctx, viewer, { url: 'http://localhost:3000/' });
     expect(viewer.messages.at(-1)).toMatchObject({ stage: 'chromium-missing', canDownload: true });

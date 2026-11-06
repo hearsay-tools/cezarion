@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { workerCollectedResultSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { setRunStatus, runPersistence } from '../runs/run-store.testkit.ts';
@@ -168,7 +169,7 @@ describe('parent-owned collected worker results', () => {
     expect(f.store.deleteRun(run.id)).toBe(true);
     f.store.close(); // a restart: the old store must not still own the parent's family
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
-    f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager: f.manager });
+    f.service.registerProject({ home: testHome(), id: 'project', root: f.root, store: reopened, manager: f.manager });
     expect(await f.service.collect(f.caller, { workerId: run.id })).toMatchObject({ summary: result.summary, outcome: 'destroyed', artifacts: { state: 'available', items: [{ state: 'deleted', id: 'result.png' }] } });
     const parent = reopened.getRun(f.parent.id)!;
     if (parent.delegation?.role !== 'root') throw Error('fixture');
@@ -189,7 +190,7 @@ describe('parent-owned collected worker results', () => {
     else receipt.deletion.generation = 'invalid-generation';
     seedRuns(dataDir, records);
     const reopened = RunStore.open(dataDir, { keepLive: true });
-    f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager: f.manager });
+    f.service.registerProject({ home: testHome(), id: 'project', root: f.root, store: reopened, manager: f.manager });
     const before = readPersistedText(dataDir);
     await expect(f.service.collect(f.caller, { workerId: run.id })).rejects.toMatchObject({ code: 'denied_scope' });
     expect(readPersistedText(dataDir)).toBe(before);

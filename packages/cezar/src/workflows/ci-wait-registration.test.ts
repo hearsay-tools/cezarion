@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { join } from 'node:path';
@@ -63,7 +64,7 @@ function registrationFixture() {
     active: () => current, workerExecutionStopped: () => false, executionBlockedByRootFinish: () => false,
     ciSupervisor: () => unused<ReturnType<ConstructorParameters<typeof WaitRegistry>[1]['ciSupervisor']>>({ resolve }),
   });
-  const context: RunModuleContext = { store, repoRoot: root, dataDir: root,
+  const context: RunModuleContext = { home: testHome(), store, repoRoot: root, dataDir: root,
     work: unused(), semaphore: unused(), disposed: () => false };
   const registry = new WaitRegistry(context, host, 10);
   return { run, state, registry, resolve, remove: () => { current = undefined; }, replace: () => { current = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false }); } };

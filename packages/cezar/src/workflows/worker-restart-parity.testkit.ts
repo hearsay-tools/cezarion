@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync, spawn } from 'node:child_process';
@@ -131,7 +132,7 @@ it.each(RUNNER_IDS)('%s R60 cold terminal starting-proof recovery repairs execut
       }) as typeof fs.readlinkSync);
       syncBuiltinESMExports();
       setRunStatus(store, w.id, RUN_STATUS.waiting); store.flush(); reopenRuntime();
-      const service = new DelegationService({ terminationTimeoutMs: 4_000 }); const detach = service.registerProject({ id: 'project', root, store, manager });
+      const service = new DelegationService({ terminationTimeoutMs: 4_000 }); const detach = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
       try {
         destroying = true;
         // Destroy waits on the readable holder through its polls, then the unreadable process is no evidence.
@@ -185,7 +186,7 @@ it.each(RUNNER_IDS)('%s settles a same-boot crash as gone once recorded processe
     setRunStatus(store, w.id, RUN_STATUS.waiting); store.flush(); reopenRuntime();
     const credentials = new CredentialRegistry();
     const caller = credentials.authenticate(credentials.issue('project', p.id, 'test'))!;
-    let service = new DelegationService(); let detach = service.registerProject({ id: 'project', root, store, manager });
+    let service = new DelegationService(); let detach = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
     try {
       const partial = await service.collect(caller, { workerId: w.id });
       expect(partial).toMatchObject({ settled: false });
@@ -196,7 +197,7 @@ it.each(RUNNER_IDS)('%s settles a same-boot crash as gone once recorded processe
       writeFileSync(join(files, `${w.id}.processes.json`), JSON.stringify({ ...ledger,
         processes: [...ledger.processes, { pid: ambient.pid, startToken: `${boot}:1` }] }));
       detach(); manager.dispose(); store.flush(); reopenRuntime(); await manager.recover();
-      service = new DelegationService(); detach = service.registerProject({ id: 'project', root, store, manager });
+      service = new DelegationService(); detach = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
       // Exit proof, not abandonment: the generation completes and nothing cancels the task.
       expect(store.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete', generation: proof.generation });
       expect(store.readWorkerExecution(w.id)?.abandoned).toBeUndefined();

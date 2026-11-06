@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { agentEnvForStep, workerStep } from '../workflows/run/launch-context.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -26,7 +27,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     if (layout === 'override') vi.stubEnv('CLAUDE_CONFIG_DIR', home);
     if (layout === 'named') {
       const discovered = join(f.root, 'other-claude'); mkdirSync(discovered); vi.stubEnv('CLAUDE_CONFIG_DIR', discovered);
-      await mergeWriteAgentAccounts(store => { store.accounts = [{ id: 'named-native-dir', provider: 'claude', configDir: home, label: '', addedAt: '' }]; });
+      await mergeWriteAgentAccounts(store => { store.accounts = [{ id: 'named-native-dir', provider: 'claude', configDir: home, label: '', addedAt: '' }]; }, testHome());
     }
     const parent = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner: 'claude', worktree: false, ...(layout === 'named' ? { agentProfile: 'named-native-dir' } : {}) });
     await until(() => sessions.length === 1);
@@ -76,7 +77,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   });
   it('checks native Claude layout against merged session env, not only the host env', async () => {
     const a = await acceptClaudeLayout('native');
-    const launchContext = { store: f.store, repoRoot: f.root, dataDir: join(f.root, '.ai/cezar') };
+    const launchContext = { home: testHome(), store: f.store, repoRoot: f.root, dataDir: join(f.root, '.ai/cezar') };
     const host = { workerStep: (id: string, stepId: string | undefined) => workerStep(launchContext, id, stepId),
       agentEnv: () => ({ CLAUDE_CONFIG_DIR: a.home }) };
     await expect(agentEnvForStep(launchContext, host, a.child.workerId, 'claude', { stepId: 'task' })).rejects.toThrow(/layout/);

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,7 +37,7 @@ describe('project webhooks API', () => {
     delete process.env.CEZ_SINGLE_PROJECT;
     clearProjectProbeCache();
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    projectId = (await registerProject(repoRoot)).id;
+    projectId = (await registerProject(repoRoot, undefined, testHome())).id;
     posted = [];
   });
 
@@ -51,7 +52,7 @@ describe('project webhooks API', () => {
 
   const manager = {} as unknown as RunManager;
   const app = (over: Partial<ServerDeps> = {}) =>
-    createApp({ repoRoot, store, manager, version: '0.0.0-test', bootProjectId: projectId, taskWebhookFetch: fakeFetch, ...over });
+    createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test', bootProjectId: projectId, taskWebhookFetch: fakeFetch, ...over });
   const send = async (path: string, method: string, body?: unknown) => {
     const res = await apiRequest(app(), path, {
       method,
@@ -65,7 +66,7 @@ describe('project webhooks API', () => {
     return project.webhooks ?? [];
   }
   async function stored() {
-    const config = await loadWorkspaceConfig();
+    const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     return config.projects.find((p) => p.id === projectId)!;
   }
 
@@ -96,7 +97,7 @@ describe('project webhooks API', () => {
       const listed = await send('/api/v1/projects', 'GET');
       expect(JSON.stringify(listed.body)).not.toContain('secret-token');
       expect(JSON.stringify(listed.body)).not.toContain('friction-token');
-      expect(readFileSync(workspaceConfigPath(), 'utf8')).toContain('friction-token');
+      expect(readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8')).toContain('friction-token');
     });
 
     it('edits one webhook without changing another, keeping the token unless named', async () => {
@@ -155,7 +156,7 @@ describe('project webhooks API', () => {
     const seedLegacy = () =>
       mergeWriteWorkspaceConfig((config) => {
         config.projects.find((p) => p.id === projectId)!.webhook = { url: 'https://bot.example/hook', token: 'legacy-token', triggers: ['done', 'failed'] };
-      });
+      }, testHome());
 
     it('reads it as one "Task webhook" with task notifications on and closed to agents', async () => {
       await seedLegacy();

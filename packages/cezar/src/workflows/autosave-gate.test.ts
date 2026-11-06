@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { clearAutosaveTimer } from './run/input-timers.ts';
 import { createActiveRun } from './active-run.ts';
 import { WorktreeAutosave } from './run/worktree-autosave.ts';
@@ -41,8 +42,8 @@ describe('periodic autosave gate (#471)', () => {
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new WorktreeAutosave({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
-      work, semaphore: new WorkspaceSemaphore(), disposed: () => false,
+    manager = new WorktreeAutosave({ home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+      work, semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false,
     }, unused<ConstructorParameters<typeof WorktreeAutosave>[1]>('WorktreeAutosave.host', {
       saveWorktree: (id, state, reason) => manager.saveWorktree(id, state, reason),
       trackTurn: (_id, task) => { saves.push(task); },

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { skillSchema } from '@open-mercato/cezar-contract/skills';
 import { execFile } from 'node:child_process';
@@ -89,8 +90,8 @@ describe('loading a run\'s skill registry', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-1806-loader-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    runSkills = new RunSkills({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
-      semaphore: new WorkspaceSemaphore(), work: new TrackedWork(), disposed: () => false }, {
+    runSkills = new RunSkills({ home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+      semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false }, {
       builtinSkills: () => [], workerExecutionStopped: unused, isCurrentState: unused, flushAgentInputs: unused,
     });
   });

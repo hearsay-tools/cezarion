@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -27,7 +28,7 @@ describe('RunManager agent-profile resolution', () => {
   let store: RunStore;
 
   const resolveStepEnv = (runId: string, backend: Parameters<typeof agentEnvForStep>[3], options?: Parameters<typeof agentEnvForStep>[4]) => {
-    const context = { store, repoRoot, dataDir: join(repoRoot, '.ai/cezar') };
+    const context = { home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar') };
     return agentEnvForStep(context, { agentEnv: id => agentEnv(context, undefined, id), workerStep: () => undefined }, runId, backend, options);
   };
 
@@ -37,7 +38,7 @@ describe('RunManager agent-profile resolution', () => {
     process.env.CEZ_HOME = home;
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     createFixtureManager(store, repoRoot);
-    await registerProject(repoRoot);
+    await registerProject(repoRoot, undefined, testHome());
   });
 
   afterEach(async () => {
@@ -53,14 +54,14 @@ describe('RunManager agent-profile resolution', () => {
     writeFileSync(join(dir, 'settings.json'), '{}', 'utf8');
     await mergeWriteAgentAccounts((store) => {
       store.accounts.push({ id, provider, configDir: dir, label: id, addedAt: '' });
-    });
+    }, testHome());
   };
 
   const selectAccount = async (provider: 'claude' | 'codex' | 'pi' | 'omp', id: string) => {
     await mergeWriteAgentAccounts((store) => {
       const root = realpathSync(repoRoot);
       store.selections[root] = { ...store.selections[root], [provider]: id };
-    });
+    }, testHome());
   };
 
   const newRun = (over: Parameters<RunManager['startRun']>[1] = { task: 't' }) =>
@@ -150,7 +151,7 @@ describe('RunManager agent-profile resolution', () => {
     await selectAccount('claude', 'work');
     await mergeWriteAgentAccounts((store) => {
       store.accounts = [];
-    });
+    }, testHome());
     const run = newRun();
     const { env, profileId } = await resolveStepEnv(run.id, 'claude');
     expect(profileId).toBe('default');
@@ -158,7 +159,7 @@ describe('RunManager agent-profile resolution', () => {
   });
 
   it('degrades to the default when the accounts file is unreadable', async () => {
-    writeFileSync(agentAccountsPath(), '{ not json', 'utf8');
+    writeFileSync(agentAccountsPath(testHome()), '{ not json', 'utf8');
     const run = newRun();
     expect((await resolveStepEnv(run.id, 'claude')).profileId).toBe('default');
   });

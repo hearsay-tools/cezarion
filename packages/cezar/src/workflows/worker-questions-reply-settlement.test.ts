@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { CredentialRegistry } from '../delegation/credentials.ts';
@@ -63,7 +64,7 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
     try {
       const parentCaller = credentials2.authenticate(credentials2.issue('project', f.p.id, randomUUID()))!;
       const service = new DelegationService();
-      service.registerProject({ id: 'project', root, store, manager });
+      service.registerProject({ home: testHome(), id: 'project', root, store, manager });
       await until(() => ['running', 'waiting'].includes(store.getRun(f.p.id)?.status ?? '') && store.getRun(f.w.id)?.status === 'waiting' && !manager.isActive(f.w.id));
       await service.send(parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'reply', requestId: f.questionId, text: 'mock:agent-echo Use the parser', timeoutSeconds: 600 });
       await until(() => answered(f.w.id).length === 1);

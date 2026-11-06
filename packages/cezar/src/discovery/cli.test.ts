@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -28,7 +29,7 @@ describe('cez discover', () => {
       { id: 'no-efforts', label: 'None', description: '', effortLevels: [] },
     ] } } });
     // createApp must wire the very same catalog into the private controller.
-    const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', modelCatalog: models, providerAuth: connectedProviderAuth(), delegation: Object.assign(new DelegationController(), { service: f.service }) });
+    const app = createApp({ home: testHome(), repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', modelCatalog: models, providerAuth: connectedProviderAuth(), delegation: Object.assign(new DelegationController(), { service: f.service }) });
     server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 0 });
     await new Promise<void>(resolve => server.once('listening', resolve));
     origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

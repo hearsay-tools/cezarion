@@ -36,7 +36,7 @@ function readJson(path: string): unknown {
 export interface InstallOptions {
   onLog?: (line: string) => void;
   env?: NodeJS.ProcessEnv;
-  home?: Home | undefined;
+  home: Home;
   /** The npm runner; tests substitute one that touches no network. */
   runNpm?: typeof runNpm;
 }
@@ -48,7 +48,7 @@ export interface InstallResult {
 }
 
 /** Install `version` from the npm registry. Returns the existing install untouched when present. */
-export async function installFromRegistry(version: string, opts: InstallOptions = {}): Promise<InstallResult> {
+export async function installFromRegistry(version: string, opts: InstallOptions): Promise<InstallResult> {
   const env = opts.env ?? process.env;
   const id = installId(version, 'registry');
   if (existsSync(versionEntry(id, env, opts.home))) {
@@ -60,7 +60,7 @@ export async function installFromRegistry(version: string, opts: InstallOptions 
 }
 
 /** Pack the package at `packageRoot` (must be built) and install the tarball as `<version>+local`. */
-export async function installFromLocal(packageRoot: string, opts: InstallOptions = {}): Promise<InstallResult> {
+export async function installFromLocal(packageRoot: string, opts: InstallOptions): Promise<InstallResult> {
   const env = opts.env ?? process.env;
   // The package.json is read back off disk, so it goes through a schema like every other
   // persisted file cezar parses — a malformed one is "not a built package", never a crash.

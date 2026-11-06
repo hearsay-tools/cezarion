@@ -7,7 +7,6 @@
 
 import type { SelfUpdateDevelopment, SelfUpdateJob, SelfUpdateStatus, UpdateChannel } from '@open-mercato/cezar-contract';
 
-import { resolveHome } from '../home/resolve.ts';
 import type { Home } from '../home/home.ts';
 import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { installFromLocal, installFromRegistry } from './installer.ts';
@@ -20,7 +19,7 @@ import { classifyVersion, isNewer } from './semver.ts';
 const LOG_CAP = 200;
 
 export interface SelfUpdateDeps {
-  home?: Home | undefined;
+  home: Home;
   pkgName: string;
   version: string;
   /** The running entry file (`process.argv[1]`). */
@@ -59,7 +58,7 @@ export class SelfUpdateService {
 
   constructor(private readonly deps: SelfUpdateDeps) {
     this.env = deps.env ?? process.env;
-    this.home = deps.home ?? resolveHome({ purpose: 'compatibility', env: this.env });
+    this.home = deps.home;
     this.installKind = detectInstallKind(deps.entry, this.env, this.home);
     this.registry = deps.registry ?? new RegistryCache(deps.pkgName);
     this.pulls = new OpenPullsCache(deps.pulls ?? (() => fetchOpenPulls(CEZAR_REPO, { env: this.env })));
@@ -67,7 +66,7 @@ export class SelfUpdateService {
 
   /** The configured channel: workspace config wins, then `CEZ_UPDATE_CHANNEL`, then stable. */
   async channel(): Promise<UpdateChannel> {
-    const config = await loadWorkspaceConfig(this.deps.home?.workspaceConfig);
+    const config = await loadWorkspaceConfig(this.deps.home.workspaceConfig);
     if (config.updateChannel) return config.updateChannel;
     const seed = this.env.CEZ_UPDATE_CHANNEL;
     return seed === 'nightly' || seed === 'development' ? seed : 'stable';

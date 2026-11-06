@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,7 +37,7 @@ describe('run open-in target dispatch and refusals', () => {
   });
 
   const post = (target: string, path?: string) => apiRequest(
-    createApp({ repoRoot: root, store, manager: {} as RunManager, version: 'test', openApp, openTerminal, openFile }),
+    createApp({ home: testHome(), repoRoot: root, store, manager: {} as RunManager, version: 'test', openApp, openTerminal, openFile }),
     `/api/v1/runs/${runId}/open-in`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ target, path }) },
   );

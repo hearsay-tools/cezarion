@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -83,13 +84,13 @@ describe('launch system prompt at both sites (#1632)', () => {
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
-    projectId = (await registerProject(repoRoot)).id;
+    projectId = (await registerProject(repoRoot, undefined, testHome())).id;
     await mergeWriteWorkspaceConfig((config) => {
       config.projects.find((project) => project.id === projectId)!.webhooks = [{
         id: 'friction', name: 'Friction reports', description: 'Friction you hit with tools.', agent: true,
         url: 'https://friction.example/hook', token: 'never-in-a-prompt', tasks: false,
       }];
-    });
+    }, testHome());
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot);
     manager.setCockpitAddress({ origin: 'http://127.0.0.1:5555', projectId });
@@ -103,7 +104,7 @@ describe('launch system prompt at both sites (#1632)', () => {
     store.flush();
     await mergeWriteWorkspaceConfig((config) => {
       config.projects = config.projects.filter((project) => project.id !== projectId);
-    });
+    }, testHome());
     rmSync(repoRoot, { recursive: true, force: true });
     vi.unstubAllEnvs();
   });
@@ -143,7 +144,7 @@ describe('launch system prompt at both sites (#1632)', () => {
 
   /** The parts after the playbook, as the spec's own environment and tools make them. */
   async function tail(spec: AgentRunSpec): Promise<string[]> {
-    const webhooks = agentWebhooksPrompt(webhookCliCommand(), agentWebhooks(await registryEntry(projectId, repoRoot)));
+    const webhooks = agentWebhooksPrompt(webhookCliCommand(), agentWebhooks(await registryEntry(projectId, repoRoot, testHome())));
     return [
       EXTRA, DELEGATION, automationsPrompt(automationCliCommand()), webhooks!,
       artifactInstructions(spec.env?.CEZ_ARTIFACTS_DIR), handoffInstructions({ handoffInjected: true, nativeSubagents: true }),

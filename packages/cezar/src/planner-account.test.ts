@@ -1,3 +1,4 @@
+import { testHome } from './home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,11 +41,11 @@ describe('planChain under an account cezar refuses to spawn (#1283)', () => {
     await mergeWriteAgentAccounts((store) => {
       store.accounts.push({ id: 'work', provider: 'omp', configDir: profile, label: 'work', addedAt: '' });
       store.selections[repoRoot] = { omp: 'work' };
-    });
+    }, testHome());
     // `OMP_PROFILE=work` would now open `~/.omp-alt/profiles/work`.
     vi.stubEnv('PI_CONFIG_DIR', '.omp-alt');
 
-    const plan = await planChain(repoRoot, 'do it');
+    const plan = await planChain(repoRoot, 'do it', undefined, testHome());
 
     expect(plan.fallback).toBe(true);
     expect(run).not.toHaveBeenCalled();
@@ -56,9 +57,9 @@ describe('planChain under an account cezar refuses to spawn (#1283)', () => {
     await mergeWriteAgentAccounts((store) => {
       store.accounts.push({ id: 'work', provider: 'omp', configDir: profile, label: 'work', addedAt: '' });
       store.selections[repoRoot] = { omp: 'work' };
-    });
+    }, testHome());
 
-    await planChain(repoRoot, 'do it');
+    await planChain(repoRoot, 'do it', undefined, testHome());
 
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ env: { OMP_PROFILE: 'work' } }));
   });

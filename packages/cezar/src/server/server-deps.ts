@@ -44,8 +44,8 @@ export function resolveServerDeps(deps: Pick<ServerDeps, HostServiceKey> & Pick<
     modelCatalog: deps.modelCatalog ?? new RunnerModelCatalog({ adapters: hostModelCatalogAdapters(bootRoot) }),
     providerAuth: deps.providerAuth ?? new ProviderAuthService(),
     workspaceConfig: deps.workspaceConfig ?? {
-      load: home ? (path = home.workspaceConfig) => loadWorkspaceConfig(path) : loadWorkspaceConfig,
-      mergeWrite: home ? (mutate, selected = home) => mergeWriteWorkspaceConfig(mutate, selected) : mergeWriteWorkspaceConfig,
+      load: (path = home.workspaceConfig) => loadWorkspaceConfig(path),
+      mergeWrite: (mutate, selected = home) => mergeWriteWorkspaceConfig(mutate, selected),
     },
     openTerminal: deps.openTerminal ?? openInTerminal,
     openFile: deps.openFile ?? openFileInDefaultApp,
@@ -101,12 +101,12 @@ export function createProviderStatus(services: Pick<HostServices, 'modelCatalog'
  * payloads name the boot project via `resolveBootProject` instead.
  */
 export function createBootContext(
-  deps: Pick<ServerDeps, 'bootProjectId' | 'store' | 'manager' | 'automationStore'>,
+  deps: Pick<ServerDeps, 'bootProjectId' | 'store' | 'manager' | 'automationStore' | 'home'>,
   bootRoot: string,
   bootDataDir: string,
 ): ProjectContext {
   return {
-    id: deps.bootProjectId ?? 'default',
+    id: deps.bootProjectId ?? 'default', home: deps.home,
     root: bootRoot,
     dataDir: bootDataDir,
     store: deps.store,

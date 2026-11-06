@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { request } from 'node:http';
 import { execFileSync } from 'node:child_process';
@@ -67,8 +68,8 @@ beforeEach(() => {
     },
   };
   store = RunStore.open(join(root, '.ai/cezar'));
-  semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
-  manager = createFixtureManager(store, root, { semaphore });
+  semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } });
+  manager = createFixtureManager(store, root, { home: testHome(), semaphore });
 });
 afterEach(async () => {
   await drainFixtureManagers(root);
@@ -432,14 +433,14 @@ async function account(id: string): Promise<void> {
   const configDir = join(root, 'accounts', id);
   mkdirSync(configDir, { recursive: true });
   writeFileSync(join(configDir, 'settings.json'), '{}');
-  await mergeWriteAgentAccounts(state => { state.accounts.push({ id, provider: 'claude', configDir, label: id, addedAt: '' }); });
+  await mergeWriteAgentAccounts(state => { state.accounts.push({ id, provider: 'claude', configDir, label: id, addedAt: '' }); }, testHome());
 }
 async function selectAccount(id: string): Promise<void> {
-  await mergeWriteAgentAccounts(state => { state.selections[root] = { ...state.selections[root], claude: id }; });
+  await mergeWriteAgentAccounts(state => { state.selections[root] = { ...state.selections[root], claude: id }; }, testHome());
 }
 
 it('P6-33 held task retains its account pin when the project account changes', async () => {
-  await registerProject(root);
+  await registerProject(root, undefined, testHome());
   await account('accepted');
   await account('changed');
   const head = await heldHead();
@@ -451,7 +452,7 @@ it('P6-33 held task retains its account pin when the project account changes', a
 });
 
 it('P6-34 later fresh step reads the current project account instead of reusing the first step account', async () => {
-  await registerProject(root);
+  await registerProject(root, undefined, testHome());
   await account('first');
   await account('later');
   await selectAccount('first');
@@ -466,7 +467,7 @@ it('P6-34 later fresh step reads the current project account instead of reusing 
 });
 
 it.each(['changed', 'deleted'] as const)('P6-35 Continue retains recorded-account policy when the account is %s', async change => {
-  await registerProject(root);
+  await registerProject(root, undefined, testHome());
   await account('recorded');
   await account('later');
   await selectAccount('recorded');
@@ -474,7 +475,7 @@ it.each(['changed', 'deleted'] as const)('P6-35 Continue retains recorded-accoun
   await waitForOpen(target.id, 1);
   await finishInitial(target.id);
   await selectAccount('later');
-  if (change === 'deleted') await mergeWriteAgentAccounts(state => { state.accounts = state.accounts.filter(account => account.id !== 'recorded'); });
+  if (change === 'deleted') await mergeWriteAgentAccounts(state => { state.accounts = state.accounts.filter(account => account.id !== 'recorded'); }, testHome());
   expect(manager.continueRun(target.id, { text: 'Continue' })).toEqual({ ok: true });
   const continued = await waitForOpen(target.id, 2);
   expect(continued.env?.CLAUDE_CONFIG_DIR).toBe(change === 'deleted' ? undefined : join(root, 'accounts/recorded'));
@@ -624,7 +625,7 @@ it('P6-13 recovery without live blocks reads current persisted bytes and reports
 });
 
 it('P6-14 P6-34 a fresh retry selects the current project account and sends no opening images again', async () => {
-  await registerProject(root);
+  await registerProject(root, undefined, testHome());
   await account('first'); await account('retry'); await selectAccount('first');
   const workflow: WorkflowDef = { name: 'retry', source: 'built-in', steps: [
     { id: 'work', prompt: '{{task}}' },
@@ -751,8 +752,8 @@ it('P6-17 P6-33 startup rechecks an account hold added after dequeue', async () 
 it('P6-17 P6-33 startup rechecks an account hold after the repository-root lease', async () => {
   initGit();
   manager.dispose();
-  semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 2 } });
-  manager = createFixtureManager(store, root, { semaphore });
+  semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 2 } });
+  manager = createFixtureManager(store, root, { home: testHome(), semaphore });
   const head = await heldHead();
   const target = manager.startRun(acceptedWorkflow, { task: 'target', runner: 'codex', worktree: false });
   // bound: the lease wait note proves dequeue and initial hold admission completed.
@@ -770,7 +771,7 @@ it('P6-17 P6-33 startup rechecks an account hold after the repository-root lease
 });
 
 it('P6-35 queued Continue checks current availability of its recorded account after acceptance', async () => {
-  await registerProject(root);
+  await registerProject(root, undefined, testHome());
   await account('recorded'); await account('later'); await selectAccount('recorded');
   const target = manager.startRun(acceptedWorkflow, { task: 'target', worktree: false });
   await waitForOpen(target.id, 1); await finishInitial(target.id);
@@ -778,7 +779,7 @@ it('P6-35 queued Continue checks current availability of its recorded account af
   await waitForOpen(blocker.id, 2);
   expect(manager.continueRun(target.id, { text: 'Continue' }, true)).toEqual({ ok: true });
   await selectAccount('later');
-  await mergeWriteAgentAccounts(state => { state.accounts = state.accounts.filter(account => account.id !== 'recorded'); });
+  await mergeWriteAgentAccounts(state => { state.accounts = state.accounts.filter(account => account.id !== 'recorded'); }, testHome());
   manager.cancel(blocker.id);
   const continued = await waitForOpen(target.id, 3);
   expect(continued.env?.CLAUDE_CONFIG_DIR).toBeUndefined();

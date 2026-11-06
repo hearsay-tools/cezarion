@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -50,10 +51,10 @@ describe('GET /api/v1/workspace/events', () => {
     }
     clearProjectProbeCache();
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-    contexts = new ProjectContexts({ listProjects });
+    contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     bus = new WorkspaceEventBus();
-    bootId = (await registerProject(repoRoot)).id;
-    app = createApp({
+    bootId = (await registerProject(repoRoot, undefined, testHome())).id;
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager: { isActive: () => false } as unknown as RunManager,
@@ -84,7 +85,7 @@ describe('GET /api/v1/workspace/events', () => {
     id: string;
     store: RunStore;
   }> => {
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     expect((await apiRequest(app, `/api/v1/p/${other.id}/runs`)).status).toBe(200);
     const otherStore = contexts.peek(other.id)?.store;
     expect(otherStore).toBeDefined();
@@ -240,7 +241,7 @@ describe('GET /api/v1/workspace/events', () => {
   });
 
   it("a late-built context's events appear after its first touch — and subscribing never force-instantiates", async () => {
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
 
     const ws = await openStream('/api/v1/workspace/events');
     await ws.readUntil('event: ping');
@@ -266,7 +267,7 @@ describe('GET /api/v1/workspace/events', () => {
   });
 
   it("announces a built context as project-ready, so cockpits refetch what its recovery changed (#667)", async () => {
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     const ws = await openStream('/api/v1/workspace/events');
     await ws.readUntil('event: ping');
 
@@ -389,7 +390,7 @@ describe('GET /api/v1/workspace/events', () => {
     // …so that the SAME slug, re-registered and rebuilt, attaches its NEW
     // store (regression: the attach guard kept the stale entry, and the
     // rebuilt context's events were silently lost until reconnect).
-    const readded = await registerProject(otherRoot);
+    const readded = await registerProject(otherRoot, undefined, testHome());
     expect(readded.id).toBe(other.id);
     expect((await apiRequest(app, `/api/v1/p/${readded.id}/runs`)).status).toBe(200);
     const rebuilt = contexts.peek(readded.id)?.store;

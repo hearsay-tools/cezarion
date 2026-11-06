@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -42,12 +43,12 @@ describe('startServer cockpit address', () => {
   });
 
   it('addresses the boot manager and every built project with the bound port and its own id', async () => {
-    const bootId = (await registerProject(bootRoot)).id;
-    const otherId = (await registerProject(otherRoot)).id;
+    const bootId = (await registerProject(bootRoot, undefined, testHome())).id;
+    const otherId = (await registerProject(otherRoot, undefined, testHome())).id;
     const store = RunStore.open(join(bootRoot, '.ai/cezar'), { keepLive: true });
-    const contexts = new ProjectContexts({ listProjects });
+    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     const setCockpitAddress = vi.fn();
-    const server = startServer({
+    const server = startServer({ home: testHome(),
       repoRoot: bootRoot,
       bootProjectId: bootId,
       store,

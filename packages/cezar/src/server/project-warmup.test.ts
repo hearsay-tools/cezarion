@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -50,11 +51,11 @@ describe('startServer project warm-up', () => {
   });
 
   const boot = async (): Promise<{ contexts: ProjectContexts; bootId: string; otherId: string; close: () => void }> => {
-    const bootId = (await registerProject(bootRoot)).id;
-    const otherId = (await registerProject(otherRoot)).id;
+    const bootId = (await registerProject(bootRoot, undefined, testHome())).id;
+    const otherId = (await registerProject(otherRoot, undefined, testHome())).id;
     const store = RunStore.open(join(bootRoot, '.ai/cezar'), { keepLive: true });
-    const contexts = new ProjectContexts({ listProjects });
-    const server = startServer({
+    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const server = startServer({ home: testHome(),
       repoRoot: bootRoot,
       bootProjectId: bootId,
       store,
@@ -116,11 +117,11 @@ describe('startServer project warm-up', () => {
 
   it('starts nothing when the server closes before the project list arrives', async () => {
     const warmAll = vi.spyOn(ProjectContexts.prototype, 'warmAll');
-    const bootId = (await registerProject(bootRoot)).id;
-    const otherId = (await registerProject(otherRoot)).id;
+    const bootId = (await registerProject(bootRoot, undefined, testHome())).id;
+    const otherId = (await registerProject(otherRoot, undefined, testHome())).id;
     const store = RunStore.open(join(bootRoot, '.ai/cezar'), { keepLive: true });
-    const contexts = new ProjectContexts({ listProjects });
-    const server = startServer({
+    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const server = startServer({ home: testHome(),
       repoRoot: bootRoot,
       bootProjectId: bootId,
       store,

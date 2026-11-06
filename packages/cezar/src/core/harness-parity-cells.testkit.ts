@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { monitoringTurnFiles } from '../workflows/monitoring-turn-partitions.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { observationClock } from './observation-clock.testkit.ts';
@@ -455,7 +456,7 @@ function driveObservedRun(
 ) {
   let repoRoot = '';
   let idle: ReturnType<typeof observationClock>;
-  const semaphore = new WorkspaceSemaphore();
+  const semaphore = new WorkspaceSemaphore({ home: testHome() });
   return driveRun(backend, scenario, settled, timeout, context => observe({ ...context, repoRoot, idle, semaphore }), {
     ...options, semaphore,
     beforeStart: context => {
@@ -937,7 +938,7 @@ async function withRelease<T>(body: (release: string) => Promise<T>): Promise<T>
 
 function answerThroughRoute(repoRoot: string, store: RunStore, manager: Parameters<typeof createApp>[0]['manager'], runId: string,
   request: StoredEvent, optionId: string): Promise<Response> {
-  return apiRequest(createApp({ repoRoot, store, manager, version: 'test' }), `/api/v1/runs/${runId}/permissions`, {
+  return apiRequest(createApp({ home: testHome(), repoRoot, store, manager, version: 'test' }), `/api/v1/runs/${runId}/permissions`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ requestId: request.requestId, optionId }),
   });
@@ -2572,7 +2573,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         const { PreviewHost } = await import('../preview/host.ts');
         const { previewCdpSession } = await import('../preview/agent-address.ts');
         const controller = await CiToolController.start();
-        const host = new PreviewHost({ launchBrowser: async () => { throw new Error('R125 starts no browser'); } });
+        const host = new PreviewHost({ home: testHome(), launchBrowser: async () => { throw new Error('R125 starts no browser'); } });
         const dir = mkdtempSync(join(tmpdir(), 'cez-preview-cdp-env-'));
         try {
           const provisioned = controller.provision({ registerWait: async () => ({ answer: { ok: false, code: 'unavailable', message: 'none' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: [] }) });
@@ -3058,7 +3059,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
               expect(choice).toBeDefined();
               expect(manager.sendMessage(runId, [{ type: 'text', text: 'accept' }])).toBe(false);
               expect(manager.respondPermission(runId, request.requestId as string, 'not-offered')).toBe(false);
-              const app = createApp({ repoRoot, store, manager, version: 'test' });
+              const app = createApp({ home: testHome(), repoRoot, store, manager, version: 'test' });
               const response = await apiRequest(app, `/api/v1/runs/${runId}/permissions`, {
                 method: 'POST', headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({ requestId: request.requestId, optionId: choice!.id }),

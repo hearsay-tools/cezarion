@@ -1,3 +1,4 @@
+import { testHome } from '../../src/home/test-home.testkit.ts';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -134,7 +135,7 @@ test('isPinnedSha recognises full sha-1 and sha-256 commit ids', () => {
 
 test('ensureBareClone throws on an unsafe remote instead of shelling out', async () => {
   await assert.rejects(
-    ensureBareClone("ext::sh -c 'touch /tmp/pwn'"),
+    ensureBareClone("ext::sh -c 'touch /tmp/pwn'", testHome()),
     /refusing unsafe skills repo remote/,
   );
 });
@@ -169,24 +170,24 @@ test('listRemoteSkills clones a local repo, pins the SHA, and refuses a bad ref'
   g(['commit', '-m', 'init']);
   const sha = g(['rev-parse', 'HEAD']);
 
-  await ensureBareClone(srcDir);
+  await ensureBareClone(srcDir, testHome());
 
   // Branch ref: skills come back and record the resolved commit.
-  const onMain = await listRemoteSkills({ repo: srcDir, ref: 'main' });
+  const onMain = await listRemoteSkills({ repo: srcDir, ref: 'main' }, testHome());
   const greeter = onMain.find((s) => s.name === 'greeter');
   assert.ok(greeter, 'expected the directory skill to be listed');
   assert.equal(greeter?.team?.commit, sha);
 
   // Pinned SHA ref: identical result, and the pin is honoured.
-  const onSha = await listRemoteSkills({ repo: srcDir, ref: sha });
+  const onSha = await listRemoteSkills({ repo: srcDir, ref: sha }, testHome());
   assert.ok(onSha.some((s) => s.name === 'greeter'));
 
   // A wrong pinned SHA resolves to nothing (no HEAD fallback).
-  const wrong = await listRemoteSkills({ repo: srcDir, ref: 'f'.repeat(40) });
+  const wrong = await listRemoteSkills({ repo: srcDir, ref: 'f'.repeat(40) }, testHome());
   assert.deepEqual(wrong, []);
 
   // An injection ref is refused outright.
-  const evil = await listRemoteSkills({ repo: srcDir, ref: '--output=/tmp/pwn' });
+  const evil = await listRemoteSkills({ repo: srcDir, ref: '--output=/tmp/pwn' }, testHome());
   assert.deepEqual(evil, []);
 });
 
@@ -224,8 +225,8 @@ test('materializeSkillDir seeds Claude, Agents, and Cursor skill dirs and exclud
   g(['add', '-A'], srcDir);
   g(['commit', '-m', 'init'], srcDir);
 
-  await ensureBareClone(srcDir);
-  const skills = await listRemoteSkills({ repo: srcDir, ref: 'main' });
+  await ensureBareClone(srcDir, testHome());
+  const skills = await listRemoteSkills({ repo: srcDir, ref: 'main' }, testHome());
   const greeter = skills.find((s) => s.name === 'greeter');
   assert.ok(greeter, 'expected the directory skill to be listed');
 
@@ -234,7 +235,7 @@ test('materializeSkillDir seeds Claude, Agents, and Cursor skill dirs and exclud
 
   // It names every directory it wrote, so a caller can tell a skipped one apart.
   assert.deepEqual(
-    await materializeSkillDir(repoRoot, greeter),
+    await materializeSkillDir(repoRoot, greeter, undefined, testHome()),
     skillDests(repoRoot),
     'materializeSkillDir should have seeded the directory skill',
   );
@@ -301,25 +302,25 @@ async function dirSkillFixture(t: { after: (fn: () => void) => void }) {
     }
     g(['add', '-A'], srcDir);
     g(['commit', '-m', 'greeter'], srcDir);
-    const bare = bareDirFor(srcDir);
+    const bare = bareDirFor(srcDir, testHome());
     if (existsSync(join(bare, 'HEAD'))) g(['fetch', '-q', 'origin', '+refs/heads/*:refs/heads/*'], bare);
     return g(['rev-parse', 'HEAD'], srcDir);
   };
   /** The skill as a fresh listing reads it now — its body and `team.commit` at the current `main`. */
   const list = async () => {
-    const skill = (await listRemoteSkills({ repo: srcDir, ref: 'main' })).find((s) => s.name === 'greeter');
+    const skill = (await listRemoteSkills({ repo: srcDir, ref: 'main' }, testHome())).find((s) => s.name === 'greeter');
     assert.ok(skill, 'expected the directory skill to be listed');
     return skill;
   };
   const v1 = publish({ 'SKILL.md': 'say hi v1\n', 'references/notes.md': 'notes v1\n', 'references/old.md': 'old\n' });
-  await ensureBareClone(srcDir);
+  await ensureBareClone(srcDir, testHome());
   const greeter = await list();
   return { srcDir, repoRoot, greeter, publish, list, v1 };
 }
 
 test('materializeSkillDir marks its worktree copies and replaces a marked copy at a newer commit', async (t) => {
   const { srcDir, repoRoot, greeter, publish, list, v1 } = await dirSkillFixture(t);
-  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter, undefined, testHome()), skillDests(repoRoot));
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
     const marker = JSON.parse(readFileSync(join(repoRoot, agentDir, 'skills', 'greeter', TEAM_SKILL_MARKER), 'utf8'));
     assert.deepEqual(marker, { repo: srcDir, ref: 'main', path: 'greeter/SKILL.md', commit: v1 });
@@ -327,7 +328,7 @@ test('materializeSkillDir marks its worktree copies and replaces a marked copy a
 
   // Upstream drops references/old.md and changes SKILL.md.
   const v2 = publish({ 'SKILL.md': 'say hi v2\n', 'references/notes.md': 'notes v1\n' });
-  assert.deepEqual(await materializeSkillDir(repoRoot, await list()), skillDests(repoRoot));
+  assert.deepEqual(await materializeSkillDir(repoRoot, await list(), undefined, testHome()), skillDests(repoRoot));
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
     const dest = join(repoRoot, agentDir, 'skills', 'greeter');
     assert.equal(readFileSync(join(dest, 'SKILL.md'), 'utf8'), 'say hi v2\n');
@@ -342,7 +343,7 @@ test('materializeSkillDir copies the commit the skill was listed at, not where t
   // Another project fetches main to v2 between listing and materializing.
   publish({ 'SKILL.md': 'say hi v2\n', 'references/notes.md': 'notes v2\n' });
 
-  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter, undefined, testHome()), skillDests(repoRoot));
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
     const dest = join(repoRoot, agentDir, 'skills', 'greeter');
     assert.equal(readFileSync(join(dest, 'SKILL.md'), 'utf8'), 'say hi v1\n', agentDir);
@@ -354,10 +355,10 @@ test('materializeSkillDir copies the commit the skill was listed at, not where t
 test('materializeSkillDir replaces a marked copy whose file became a directory upstream', async (t) => {
   const { repoRoot, publish, list } = await dirSkillFixture(t);
   publish({ 'SKILL.md': 'say hi\n', 'references/guide': 'guide as one file\n' });
-  assert.deepEqual(await materializeSkillDir(repoRoot, await list()), skillDests(repoRoot));
+  assert.deepEqual(await materializeSkillDir(repoRoot, await list(), undefined, testHome()), skillDests(repoRoot));
 
   publish({ 'SKILL.md': 'say hi\n', 'references/guide/new.md': 'guide split up\n' });
-  assert.deepEqual(await materializeSkillDir(repoRoot, await list()), skillDests(repoRoot));
+  assert.deepEqual(await materializeSkillDir(repoRoot, await list(), undefined, testHome()), skillDests(repoRoot));
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
     const dest = join(repoRoot, agentDir, 'skills', 'greeter');
     assert.equal(readFileSync(join(dest, 'references', 'guide', 'new.md'), 'utf8'), 'guide split up\n', agentDir);
@@ -367,10 +368,10 @@ test('materializeSkillDir replaces a marked copy whose file became a directory u
 test('materializeSkillDir replaces a marked copy whose directory became a file upstream', async (t) => {
   const { repoRoot, publish, list } = await dirSkillFixture(t);
   publish({ 'SKILL.md': 'say hi\n', 'references/guide/part.md': 'guide in parts\n' });
-  assert.deepEqual(await materializeSkillDir(repoRoot, await list()), skillDests(repoRoot));
+  assert.deepEqual(await materializeSkillDir(repoRoot, await list(), undefined, testHome()), skillDests(repoRoot));
 
   publish({ 'SKILL.md': 'say hi\n', 'references/guide': 'guide merged back\n' });
-  assert.deepEqual(await materializeSkillDir(repoRoot, await list()), skillDests(repoRoot));
+  assert.deepEqual(await materializeSkillDir(repoRoot, await list(), undefined, testHome()), skillDests(repoRoot));
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
     const dest = join(repoRoot, agentDir, 'skills', 'greeter');
     assert.equal(readFileSync(join(dest, 'references', 'guide'), 'utf8'), 'guide merged back\n', agentDir);
@@ -383,7 +384,7 @@ test('materializeSkillDir overlays an unmarked existing dir without deleting or 
   mkdirSync(own, { recursive: true });
   writeFileSync(join(own, 'mine.md'), 'the user wrote this\n');
 
-  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter, undefined, testHome()), skillDests(repoRoot));
   assert.equal(readFileSync(join(own, 'mine.md'), 'utf8'), 'the user wrote this\n');
   assert.equal(readFileSync(join(own, 'SKILL.md'), 'utf8'), 'say hi v1\n');
   assert.equal(existsSync(join(own, TEAM_SKILL_MARKER)), false, 'an unmarked dir must never become ours');
@@ -398,7 +399,7 @@ test('materializeSkillDir never clears a type conflict inside an unmarked dir', 
   writeFileSync(join(own, 'references', 'guide'), 'the user wrote this\n');
 
   publish({ 'SKILL.md': 'say hi\n', 'references/guide/new.md': 'guide split up\n' });
-  await materializeSkillDir(repoRoot, await list()).catch(() => []);
+  await materializeSkillDir(repoRoot, await list(), undefined, testHome()).catch(() => []);
   assert.equal(readFileSync(join(own, 'references', 'guide'), 'utf8'), 'the user wrote this\n');
 });
 
@@ -418,7 +419,7 @@ test('materializeSkillDir skips a destination whose symlinked agent dir leads ou
   symlinkSync(outside, join(repoRoot, '.claude'));
 
   publish({ 'SKILL.md': 'say hi\n', 'references/guide/part.md': 'guide in parts\n' });
-  assert.deepEqual(await materializeSkillDir(repoRoot, await list()), skillDests(repoRoot, '.agents', '.cursor'));
+  assert.deepEqual(await materializeSkillDir(repoRoot, await list(), undefined, testHome()), skillDests(repoRoot, '.agents', '.cursor'));
   assert.deepEqual(readdirSync(outside), [], 'nothing may be created through the escaping link');
   for (const agentDir of ['.agents', '.cursor']) {
     const dest = join(repoRoot, agentDir, 'skills', 'greeter');
@@ -432,7 +433,7 @@ test('materializeSkillDir skips a destination whose symlinked agent dir leads ou
   writeFileSync(join(theirs, 'references', 'guide', 'mine.md'), 'the user wrote this\n');
   writeFileSync(join(theirs, 'mine.md'), 'the user wrote this too\n');
   publish({ 'SKILL.md': 'say hi\n', 'references/guide': 'guide merged back\n' });
-  assert.deepEqual(await materializeSkillDir(repoRoot, await list()), skillDests(repoRoot, '.agents', '.cursor'));
+  assert.deepEqual(await materializeSkillDir(repoRoot, await list(), undefined, testHome()), skillDests(repoRoot, '.agents', '.cursor'));
   assert.equal(readFileSync(join(theirs, 'references', 'guide', 'mine.md'), 'utf8'), 'the user wrote this\n');
   assert.equal(readFileSync(join(theirs, 'mine.md'), 'utf8'), 'the user wrote this too\n');
   assert.equal(existsSync(join(theirs, 'SKILL.md')), false);
@@ -459,7 +460,7 @@ test('materializeSkillDir writes nothing and returns no dirs when every destinat
   mkdirSync(join(repoRoot, '.cursor', 'skills'), { recursive: true });
   symlinkSync(linkedName, join(repoRoot, '.cursor', 'skills', 'greeter'));
 
-  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), []);
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter, undefined, testHome()), []);
   for (const agentDir of ['.claude', '.agents', '.cursor']) {
     assert.deepEqual(readdirSync(join(outside, agentDir)), [], agentDir);
   }
@@ -471,14 +472,14 @@ test('materializeSkillDir follows a symlinked agent dir that stays inside the wo
   mkdirSync(join(repoRoot, '.agents'));
   symlinkSync('.agents', join(repoRoot, '.claude')); // a tracked relative link
 
-  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter, undefined, testHome()), skillDests(repoRoot));
   assert.equal(readFileSync(join(repoRoot, '.claude', 'skills', 'greeter', 'SKILL.md'), 'utf8'), 'say hi v1\n');
   assert.equal(readFileSync(join(repoRoot, '.agents', 'skills', 'greeter', 'references', 'notes.md'), 'utf8'), 'notes v1\n');
 });
 
 test('materializeSkillDir unlinks symlinks inside a marked copy instead of following them out', async (t) => {
   const { repoRoot, greeter } = await dirSkillFixture(t);
-  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter, undefined, testHome()), skillDests(repoRoot));
   const outside = outsideDir(t);
   writeFileSync(join(outside, 'kept.md'), 'outside file\n');
   mkdirSync(join(outside, 'dir'));
@@ -491,7 +492,7 @@ test('materializeSkillDir unlinks symlinks inside a marked copy instead of follo
   symlinkSync(join(outside, 'dir'), join(dest, 'references')); // where a file's parent goes
   symlinkSync(join(outside, 'dir'), join(dest, 'escape')); // nothing goes here
 
-  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter, undefined, testHome()), skillDests(repoRoot));
   assert.equal(lstatSync(join(dest, 'SKILL.md')).isFile(), true);
   assert.equal(readFileSync(join(dest, 'SKILL.md'), 'utf8'), 'say hi v1\n');
   assert.equal(lstatSync(join(dest, 'references')).isDirectory(), true);
@@ -511,7 +512,7 @@ test('materializeSkillDir never takes a dir whose marker is a symlink for its ow
   writeFileSync(join(outside, 'file.json'), 'outside file\n');
   symlinkSync(join(outside, 'file.json'), join(own, TEAM_SKILL_MARKER));
 
-  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter, undefined, testHome()), skillDests(repoRoot));
   assert.equal(readFileSync(join(outside, 'file.json'), 'utf8'), 'outside file\n');
   assert.equal(readFileSync(join(own, 'mine.md'), 'utf8'), 'the user wrote this\n', 'an unmarked dir is never pruned');
 });
@@ -523,7 +524,7 @@ test('materializeSkillDir never writes through a symlink inside an unmarked dir 
   const outside = outsideDir(t);
   symlinkSync(outside, join(own, 'references'));
 
-  assert.deepEqual(await materializeSkillDir(repoRoot, greeter), skillDests(repoRoot));
+  assert.deepEqual(await materializeSkillDir(repoRoot, greeter, undefined, testHome()), skillDests(repoRoot));
   assert.deepEqual(readdirSync(outside), []);
   assert.equal(readFileSync(join(own, 'SKILL.md'), 'utf8'), 'say hi v1\n');
   assert.equal(lstatSync(join(own, 'references')).isSymbolicLink(), true, 'the user\'s own link is kept');
@@ -572,15 +573,15 @@ test('team-skills cache is keyed by repoRoot — projects never see each other\'
   const rootA = makeProjectRoot(makeSkillsRepo('alpha-skill'));
   const rootB = makeProjectRoot(makeSkillsRepo('beta-skill'));
 
-  const loadedA = await refreshTeamSkills(rootA);
-  const loadedB = await refreshTeamSkills(rootB);
+  const loadedA = await refreshTeamSkills(rootA, testHome());
+  const loadedB = await refreshTeamSkills(rootB, testHome());
   assert.deepEqual(loadedA.map((s) => s.name), ['alpha-skill']);
   assert.deepEqual(loadedB.map((s) => s.name), ['beta-skill']);
 
   // The regression: the cache was one module-global list, so after B's load,
   // A's scope was served B's skills. Each root must keep its own entry.
-  assert.deepEqual(getTeamSkillsCached(rootA).map((s) => s.name), ['alpha-skill']);
-  assert.deepEqual(getTeamSkillsCached(rootB).map((s) => s.name), ['beta-skill']);
+  assert.deepEqual(getTeamSkillsCached(rootA, testHome()).map((s) => s.name), ['alpha-skill']);
+  assert.deepEqual(getTeamSkillsCached(rootB, testHome()).map((s) => s.name), ['beta-skill']);
 });
 
 // ---- cross-process last-fetch stamp (#367) ------------------------------------
@@ -638,7 +639,8 @@ function childTeamSkillCommit(home: string, repoRoot: string): string {
   const script = `
     process.env.HOME = ${JSON.stringify(home)};
     const { waitForTeamSkills } = await import(${JSON.stringify(SKILLS_REMOTE)});
-    const skills = await waitForTeamSkills(${JSON.stringify(repoRoot)});
+    const { resolveHome } = await import(${JSON.stringify(join(SRC_DIR, '../../src/home/resolve.ts'))});
+    const skills = await waitForTeamSkills(${JSON.stringify(repoRoot)}, resolveHome({ purpose: 'cli' }));
     const greeter = skills.find((s) => s.name === 'greeter');
     process.stdout.write(greeter?.team?.commit ?? '');
   `;
@@ -651,8 +653,8 @@ function childTeamSkillCommit(home: string, repoRoot: string): string {
 test('a new process with a fresh stamp does not git-fetch on first catalog read (#367)', async (t) => {
   const ctx = makeSkillsRepoWithHome(t);
   const sha1 = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ctx.srcDir, encoding: 'utf8' }).trim();
-  await refreshTeamSkills(ctx.makeProjectRoot());
-  const stampPath = lastFetchStampPath(bareDirFor(ctx.srcDir));
+  await refreshTeamSkills(ctx.makeProjectRoot(), testHome());
+  const stampPath = lastFetchStampPath(bareDirFor(ctx.srcDir, testHome()));
   assert.ok(existsSync(stampPath), 'refresh must persist a last-fetch stamp');
 
   const sha2 = ctx.commit('second');
@@ -664,9 +666,9 @@ test('a new process with a fresh stamp does not git-fetch on first catalog read 
 
 test('a new process with a stale stamp fetches once and rewrites the stamp (#367)', async (t) => {
   const ctx = makeSkillsRepoWithHome(t);
-  await refreshTeamSkills(ctx.makeProjectRoot());
+  await refreshTeamSkills(ctx.makeProjectRoot(), testHome());
   const sha2 = ctx.commit('second');
-  const stampPath = lastFetchStampPath(bareDirFor(ctx.srcDir));
+  const stampPath = lastFetchStampPath(bareDirFor(ctx.srcDir, testHome()));
   const before = Number(readFileSync(stampPath, 'utf8').trim());
   writeFileSync(stampPath, `${before - PASSIVE_FETCH_TTL_MS - 1}\n`);
 
@@ -678,19 +680,19 @@ test('a new process with a stale stamp fetches once and rewrites the stamp (#367
 
 test('a concurrent sibling success does not block the later TTL fetch (#367)', async (t) => {
   const ctx = makeSkillsRepoWithHome(t);
-  await Promise.all([waitForTeamSkills(ctx.makeProjectRoot()), waitForTeamSkills(ctx.makeProjectRoot())]);
+  await Promise.all([waitForTeamSkills(ctx.makeProjectRoot(), testHome()), waitForTeamSkills(ctx.makeProjectRoot(), testHome())]);
   // Reproduce the review race: a loser recorded cloneAttempted after a
   // sibling already wrote a fresh stamp. The next catalog read must drop
   // that flag so a later TTL still fetches.
-  __markCloneAttemptedForTests(ctx.srcDir);
-  await waitForTeamSkills(ctx.makeProjectRoot());
+  __markCloneAttemptedForTests(ctx.srcDir, testHome());
+  await waitForTeamSkills(ctx.makeProjectRoot(), testHome());
 
   const sha2 = ctx.commit('second');
-  const stampPath = lastFetchStampPath(bareDirFor(ctx.srcDir));
+  const stampPath = lastFetchStampPath(bareDirFor(ctx.srcDir, testHome()));
   const before = Number(readFileSync(stampPath, 'utf8').trim());
   writeFileSync(stampPath, `${before - PASSIVE_FETCH_TTL_MS - 1}\n`);
 
-  const loaded = await waitForTeamSkills(ctx.makeProjectRoot());
+  const loaded = await waitForTeamSkills(ctx.makeProjectRoot(), testHome());
   assert.equal(
     loaded.find((s) => s.name === 'greeter')?.team?.commit,
     sha2,
@@ -702,11 +704,11 @@ test('refreshTeamSkills fetches even when the stamp is still fresh (#367)', asyn
   const ctx = makeSkillsRepoWithHome(t);
   const sha1 = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ctx.srcDir, encoding: 'utf8' }).trim();
   const root = ctx.makeProjectRoot();
-  await refreshTeamSkills(root);
+  await refreshTeamSkills(root, testHome());
   const sha2 = ctx.commit('second');
   assert.notEqual(sha2, sha1);
 
-  const loaded = await refreshTeamSkills(root);
+  const loaded = await refreshTeamSkills(root, testHome());
   const greeter = loaded.find((s) => s.name === 'greeter');
   assert.equal(greeter?.team?.commit, sha2);
 });

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { runnerHook, setupMonitoringFixture, waitForProduct } from './run-fixture.testkit.ts';
 import { RunSettlement } from './run/run-settlement.ts';
@@ -141,8 +142,8 @@ describe('successful run settlement (#473)', () => {
 
   async function usageLimitFailure(late: boolean) {
     manager.dispose();
-    const semaphore = new WorkspaceSemaphore();
-    manager = createFixtureManager(store, root, { semaphore });
+    const semaphore = new WorkspaceSemaphore({ home: testHome() });
+    manager = createFixtureManager(store, root, { home: testHome(), semaphore });
     f.manager = manager;
     let fail!: (error: Error) => void;
     let finish!: (result: AgentRunResult) => void;
@@ -224,8 +225,8 @@ describe('successful run settlement (#473)', () => {
 
   function policy(active: Map<string, ActiveRun>, disposed: boolean | (() => boolean), asyncSuccess = false) {
     type Args = ConstructorParameters<typeof RunSettlement>;
-    return new RunSettlement({ store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
-      work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => typeof disposed === 'function' ? disposed() : disposed },
+    return new RunSettlement({ home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
+      work: new TrackedWork(), semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => typeof disposed === 'function' ? disposed() : disposed },
       unused<Args[1]>('humanWaits'), unused<Args[2]>('workerQuestions'), unused<Args[3]>('autosave', asyncSuccess ? { autosaveCleanupBlocker: () => undefined } : {}),
       unused<Args[4]>('bookkeeper'), unused<Args[5]>('line'), unused<Args[6]>('resume'),
       unused<Args[7]>('workers'), unused<Args[8]>('completionGate'),

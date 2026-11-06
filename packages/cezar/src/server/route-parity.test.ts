@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -73,9 +74,9 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
       task: 'parity',
       steps: [],
     }).id;
-    contexts = new ProjectContexts({ listProjects });
-    bootId = (await registerProject(repoRoot)).id;
-    app = createApp({
+    contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    bootId = (await registerProject(repoRoot, undefined, testHome())).id;
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       // Only routes that never reach the manager are exercised, plus
@@ -250,7 +251,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
     setRunStatus(store, runId, RUN_STATUS.done);
     store.flush();
     seedRuns(join(otherRoot, '.ai/cezar'), [store.getRun(runId)!]);
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     for (const path of spellings(bootId, `/runs/${runId}/pin`)) {
       const response = await apiRequest(app, path, { method: 'POST' });
       expect(response.status).toBe(200);
@@ -336,7 +337,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
   });
 
   it('a registered project whose folder is gone answers 409 {error}', async () => {
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     rmSync(otherRoot, { recursive: true, force: true });
     clearProjectProbeCache(); // drop the status-probe TTL so the loss is seen
     const res = await apiRequest(app, `/api/v1/p/${other.id}/runs`);
@@ -347,7 +348,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
   });
 
   it('a non-boot project builds lazily and answers with its own state', async () => {
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     expect(contexts.peek(other.id)).toBeUndefined(); // nothing until first touch
     const runs = await apiRequest(app, `/api/v1/p/${other.id}/runs`);
     expect(runs.status).toBe(200);
@@ -368,7 +369,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
   });
 
   it('agent config resolves repo-local files from the selected project only', async () => {
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     mkdirSync(join(repoRoot, '.claude'), { recursive: true });
     mkdirSync(join(otherRoot, '.claude'), { recursive: true });
     writeFileSync(join(repoRoot, '.claude', 'settings.json'), '{"project":"boot"}', 'utf8');

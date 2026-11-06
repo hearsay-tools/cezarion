@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,7 +24,7 @@ describe('PATCH /api/v1/runs/:id', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-patch-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager: {} as unknown as RunManager, // the PATCH route never touches it

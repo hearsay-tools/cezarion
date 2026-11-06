@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -54,7 +55,7 @@ describe('POST /api/v1/runs/:id/continue override', () => {
         return { ok: true };
       },
     } as unknown as RunManager;
-    app = createApp({ repoRoot, store, manager, version: '0.0.0-test' });
+    app = createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test' });
   });
 
   afterEach(() => {
@@ -68,7 +69,7 @@ describe('POST /api/v1/runs/:id/continue override', () => {
 
   /** One stored Claude login beside the discovered account. */
   const writeAccounts = () => {
-    const path = agentAccountsPath();
+    const path = agentAccountsPath(testHome());
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(
       path,

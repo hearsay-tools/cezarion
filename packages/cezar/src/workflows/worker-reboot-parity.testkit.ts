@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { workerCollectedResultSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -75,7 +76,7 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (hear
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const credentials = new CredentialRegistry();
     const caller = credentials.authenticate(credentials.issue('project', p.id, 'test'))!;
-    let service = new DelegationService(settleVia === 'destroy' ? { terminationTimeoutMs: 100 } : {}); let detach = service.registerProject({ id: 'project', root, store, manager });
+    let service = new DelegationService(settleVia === 'destroy' ? { terminationTimeoutMs: 100 } : {}); let detach = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
     let holderClosed = false;
     try {
       expect(await service.collect(caller, { workerId: twin.id })).toMatchObject({ settled: true, status: workerCollectedResultSchema.shape.status.enum.done });
@@ -103,7 +104,7 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (hear
       // cleanup releases every resource on its next wake while the holder still runs.
       detach(); manager.dispose(); store.flush(); reopenRuntime();
       await manager.recover();
-      service = new DelegationService(); detach = service.registerProject({ id: 'project', root, store, manager });
+      service = new DelegationService(); detach = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
       service.armDestroyRetries('project');
       await vi.advanceTimersByTimeAsync(60_000);
       expect(existsSync(scratch)).toBe(false);

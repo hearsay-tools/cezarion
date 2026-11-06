@@ -1,3 +1,4 @@
+import { testHome } from '../../home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -57,8 +58,8 @@ describe('closed-session refusal effects through public recovery', () => {
     }, 'a'.repeat(64));
     store.commitRootFinishIntent(id);
     // Recovery must reach the gate, while owned capacity prevents later continuation launches.
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 0, memoryLimitMb: null }) });
-    manager = createFixtureManager(store, root, { semaphore });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 0, memoryLimitMb: null }) });
+    manager = createFixtureManager(store, root, { home: testHome(), semaphore });
     vi.stubEnv('CEZ_AUTONAME', '0');
   });
   afterEach(async () => {

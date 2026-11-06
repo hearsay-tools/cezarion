@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,7 +47,7 @@ describe('task webhook API', () => {
     delete process.env.CEZ_SINGLE_PROJECT;
     clearProjectProbeCache();
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    projectId = (await registerProject(repoRoot)).id;
+    projectId = (await registerProject(repoRoot, undefined, testHome())).id;
     started = [];
     posted = [];
   });
@@ -68,7 +69,7 @@ describe('task webhook API', () => {
   } as unknown as RunManager;
 
   const makeApp = (over: Partial<ServerDeps> = {}) =>
-    createApp({ repoRoot, store, manager, version: '0.0.0-test', bootProjectId: projectId, taskWebhookFetch: fakeFetch, ...over });
+    createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test', bootProjectId: projectId, taskWebhookFetch: fakeFetch, ...over });
 
   const send = async (path: string, method: string, body?: unknown, over: Partial<ServerDeps> = {}) => {
     const res = await apiRequest(makeApp(over), path, {
@@ -81,7 +82,7 @@ describe('task webhook API', () => {
   const setWebhook = (webhook: unknown) => send(`/api/v1/projects/${projectId}`, 'PATCH', { webhook });
   /** The stored task webhook's URL, token and triggers, whichever key holds it (#1576). */
   const storedTaskWebhook = async () => {
-    const entry = (await loadWorkspaceConfig()).projects.find((p) => p.id === projectId);
+    const entry = (await loadWorkspaceConfig(testHome().workspaceConfig)).projects.find((p) => p.id === projectId);
     const first = taskWebhooks(entry)[0];
     if (!first) return undefined;
     return { url: first.url, ...(first.token ? { token: first.token } : {}), ...(first.triggers === undefined ? {} : { triggers: first.triggers }) };
@@ -100,7 +101,7 @@ describe('task webhook API', () => {
       expect(JSON.stringify(health.body)).not.toContain('secret-token');
 
       // The token is in the 0600 registry, where the dispatcher reads it.
-      expect(readFileSync(workspaceConfigPath(), 'utf8')).toContain('secret-token');
+      expect(readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8')).toContain('secret-token');
     });
 
     it('keeps the stored token when a PATCH changes only the URL, and clears it on an empty token', async () => {
@@ -140,7 +141,7 @@ describe('task webhook API', () => {
       await setWebhook({ url: 'https://bot.example/hook' });
       await mergeWriteWorkspaceConfig((config) => {
         (config.projects.find((p) => p.id === projectId)!.webhooks![0] as { triggers?: unknown }).triggers = ['done', 'from-a-newer-cezar', 'failed'];
-      });
+      }, testHome());
       expect((await storedTaskWebhook())?.triggers).toEqual(['done', 'failed']);
     });
 
@@ -247,11 +248,11 @@ describe('task webhook API', () => {
           id: 'live', title: 'live', task: 'live', workflow: 'quick-task', status: RUN_STATUS.running, notify: true,
           createdAt: '2026-09-25T10:00:00.000Z', tokensUsed: 0, archived: false, steps: [],
         }]);
-        const entry = await registerProject(other);
+        const entry = await registerProject(other, undefined, testHome());
         await mergeWriteWorkspaceConfig((config) => {
           config.projects.find((p) => p.id === entry.id)!.webhook = { url: 'https://bot.example/hook', token: 't' };
-        });
-        const app = makeApp({ semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+        }, testHome());
+        const app = makeApp({ semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
         const res = await apiRequest(app, `/api/v1/p/${entry.id}/runs/live`);
         const after = (await res.json()) as RunRecord;
         expect(after.status).not.toBe('running');
@@ -275,9 +276,9 @@ describe('task webhook API', () => {
       // also attach to this store and deliver with that app's empty origin.
       await mergeWriteWorkspaceConfig((config) => {
         config.projects.find((p) => p.id === projectId)!.webhook = { url: 'https://bot.example/hook', token: 't' };
-      });
-      const taskWebhooks = new TaskWebhooks({ fetch: fakeFetch });
-      const server = startServer({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', bootProjectId: projectId, taskWebhooks }, 0);
+      }, testHome());
+      const taskWebhooks = new TaskWebhooks({ home: testHome(), fetch: fakeFetch });
+      const server = startServer({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', bootProjectId: projectId, taskWebhooks }, 0);
       try {
         if (!server.listening) await once(server, 'listening');
         const port = (server.address() as AddressInfo).port;

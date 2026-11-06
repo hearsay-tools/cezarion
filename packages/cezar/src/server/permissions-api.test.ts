@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,7 +20,7 @@ describe('permission decision API (hearsay-tools/cezarion#1049)', () => {
     respondPermission.mockReset().mockReturnValue(true);
   });
   afterEach(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
-  const request = (body: unknown, runId = id, prefix = '/api/v1') => apiRequest(createApp({
+  const request = (body: unknown, runId = id, prefix = '/api/v1') => apiRequest(createApp({ home: testHome(),
     repoRoot: root, store, manager: { respondPermission } as unknown as RunManager, version: 'test',
   }), `${prefix}/runs/${runId}/permissions`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),

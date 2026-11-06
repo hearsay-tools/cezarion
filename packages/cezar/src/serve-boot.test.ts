@@ -1,3 +1,4 @@
+import { testHome } from './home/test-home.testkit.ts';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -35,7 +36,7 @@ function reconcileFixture(unavailable = false) {
 describe('reconcileServeWorktrees', () => {
   it.each(['no repo', 'unavailable store'])('skips reconciliation with %s', async (reason) => {
     const { store, manager, repo, steps } = reconcileFixture(reason === 'unavailable store');
-    await reconcileServeWorktrees('/repo', reason === 'no repo' ? null : repo, store, manager, undefined, steps);
+    await reconcileServeWorktrees('/repo', reason === 'no repo' ? null : repo, store, manager, undefined, steps, testHome());
     expect(store.listRunIds).not.toHaveBeenCalled();
     expect(steps.pruneOrphans).not.toHaveBeenCalled();
     expect(steps.resolveWorktreeRetention).not.toHaveBeenCalled();
@@ -50,7 +51,7 @@ describe('reconcileServeWorktrees', () => {
     steps.reclaimWorktrees.mockResolvedValue(['87654321-old']);
     // A sweep can remain pending without delaying boot.
     steps.sweepMergedBranches.mockReturnValue(new Promise(() => {}));
-    await reconcileServeWorktrees('/repo', repo, store, manager, undefined, steps);
+    await reconcileServeWorktrees('/repo', repo, store, manager, undefined, steps, testHome());
     expect(steps.pruneOrphans).toHaveBeenCalledWith('/repo', new Set(['live-run']));
     expect(steps.reclaimWorktrees).toHaveBeenCalledWith('/repo', store, 7, { previewHost: undefined });
     expect(steps.sweepMergedBranches).toHaveBeenCalledWith({ root: '/repo', store, manager }, { keep: 7 });
@@ -67,7 +68,7 @@ describe('reconcileServeWorktrees', () => {
     'keeps boot working when %s rejects', async (failedStep) => {
       const { store, manager, repo, steps } = reconcileFixture();
       steps[failedStep].mockRejectedValue(new Error('unavailable'));
-      await reconcileServeWorktrees('/repo', repo, store, manager, undefined, steps);
+      await reconcileServeWorktrees('/repo', repo, store, manager, undefined, steps, testHome());
       const keep = failedStep === 'resolveWorktreeRetention' ? DEFAULT_WORKTREE_RETENTION : 7;
       expect(steps.reclaimWorktrees).toHaveBeenCalledWith('/repo', store, keep, { previewHost: undefined });
       expect(steps.sweepMergedBranches).toHaveBeenCalledWith({ root: '/repo', store, manager }, { keep });
@@ -170,7 +171,7 @@ describe('printServeBanner', () => {
 describe('createServeApplicationUpdate', () => {
   it('degrades to manual update without npm metadata', () => {
     vi.stubEnv('CEZ_DRY_RUN', '0');
-    expect(createServeApplicationUpdate('/repo', {}, vi.fn(), () => undefined)).toBeUndefined();
+    expect(createServeApplicationUpdate('/repo', {}, vi.fn(), () => undefined, undefined, testHome())).toBeUndefined();
     expect(ApplicationUpdateService).not.toHaveBeenCalled();
   });
 
@@ -179,7 +180,7 @@ describe('createServeApplicationUpdate', () => {
     const update: { latest?: string } = {};
     const getServer = vi.fn();
     const readNpm = vi.fn(() => ({ prefix: '/prefix', cache: '/cache', npmBin: '/bin/npm' }));
-    createServeApplicationUpdate('/repo', update, getServer, readNpm);
+    createServeApplicationUpdate('/repo', update, getServer, readNpm, undefined, testHome());
     expect(getServer).not.toHaveBeenCalled();
     const options = vi.mocked(ApplicationUpdateService).mock.calls[0]![0];
     expect(options).toMatchObject({ npmPrefix: '/prefix', npmCache: '/cache', npmBin: '/bin/npm', dryRun: false });
@@ -202,7 +203,7 @@ describe('createServeApplicationUpdate', () => {
     { npmBin: '/npm', prefix: '/prefix', cache: '' },
   ])('requires both npm paths outside dry-run (%j)', (metadata) => {
     vi.stubEnv('CEZ_DRY_RUN', '0');
-    expect(createServeApplicationUpdate('/repo', {}, vi.fn(), () => metadata)).toBeUndefined();
+    expect(createServeApplicationUpdate('/repo', {}, vi.fn(), () => metadata, undefined, testHome())).toBeUndefined();
     expect(ApplicationUpdateService).not.toHaveBeenCalled();
   });
 
@@ -211,7 +212,7 @@ describe('createServeApplicationUpdate', () => {
     const update: { latest?: string } = {};
     const getServer = vi.fn(() => ({ address: () => ({ address: '127.0.0.1', port: 5432 }) })) as unknown as () => ReturnType<typeof startServer>;
     const service = createServeApplicationUpdate('/different-repo', update, getServer,
-      () => ({ npmBin: '/custom/npm', prefix: '/custom/prefix', cache: '/custom/cache' }));
+      () => ({ npmBin: '/custom/npm', prefix: '/custom/prefix', cache: '/custom/cache' }), undefined, testHome());
     expect(service).toBeInstanceOf(ApplicationUpdateService);
     const options = vi.mocked(ApplicationUpdateService).mock.calls[0]![0];
     expect(options).toMatchObject({ npmPrefix: '/custom/prefix', npmCache: '/custom/cache', npmBin: '/custom/npm', dryRun: true });
@@ -226,7 +227,7 @@ describe('createServeApplicationUpdate', () => {
   it('arms the restart helper with the default npm command in dry-run', async () => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
     const getServer = vi.fn(() => ({ address: () => ({ address: '127.0.0.1', port: 4321 }) })) as unknown as () => ReturnType<typeof startServer>;
-    createServeApplicationUpdate('/repo', {}, getServer, () => undefined);
+    createServeApplicationUpdate('/repo', {}, getServer, () => undefined, undefined, testHome());
     const options = vi.mocked(ApplicationUpdateService).mock.calls[0]![0];
     const plan = {} as Parameters<typeof armRestartHelper>[0];
     await options.armRestart!(plan);
@@ -235,7 +236,7 @@ describe('createServeApplicationUpdate', () => {
 
   it('uses dry-run defaults when npm is missing', () => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
-    createServeApplicationUpdate('/repo', {}, vi.fn(), () => undefined);
+    createServeApplicationUpdate('/repo', {}, vi.fn(), () => undefined, undefined, testHome());
     const options = vi.mocked(ApplicationUpdateService).mock.calls[0]![0];
     expect(options.dryRun).toBe(true);
     expect(options.npmPrefix).toMatch(/dry-prefix$/);
@@ -258,7 +259,7 @@ describe.skipIf(process.platform === 'win32')('restartServe', () => {
     };
     const restart = vi.fn(() => { order.push('restart'); });
     try {
-      await restartServe(server, restart);
+      await restartServe(server, restart, undefined, testHome());
       // bound: the stub exits within milliseconds of its SIGTERM; the bound lets `finally` reap it when none came
       const outcome = await Promise.race([exited, new Promise<string>((resolve) => setTimeout(() => resolve('still running'), 10_000))]);
       expect(outcome).toBe(0);
@@ -305,7 +306,7 @@ describe('serve boot mutation regressions', () => {
   it('passes the preview host to worktree reclamation', async () => {
     const f = reconcileFixture();
     const previewHost = {} as PreviewHost;
-    await reconcileServeWorktrees('/repo', f.repo, f.store, f.manager, previewHost, f.steps);
+    await reconcileServeWorktrees('/repo', f.repo, f.store, f.manager, previewHost, f.steps, testHome());
     expect(f.steps.reclaimWorktrees).toHaveBeenCalledWith('/repo', f.store, 7, { previewHost });
   });
 
@@ -315,7 +316,7 @@ describe('serve boot mutation regressions', () => {
     try {
       for (const args of [['node', '/custom/entry.js'], []]) {
         process.argv = args;
-        createServeApplicationUpdate('/repo', {}, vi.fn(), () => undefined);
+        createServeApplicationUpdate('/repo', {}, vi.fn(), () => undefined, undefined, testHome());
         const options = vi.mocked(ApplicationUpdateService).mock.lastCall![0];
         expect(options.packageRoot).toBe(join(dirname(fileURLToPath(import.meta.url)), '..'));
         expect(options.launchEntry).toBe(resolve(args[1] ?? ''));
@@ -328,7 +329,7 @@ describe('serve boot mutation regressions', () => {
     vi.stubEnv('CEZ_SUPERVISED', '1');
     const f = recoveryFixture();
     const getServer = vi.fn();
-    expect(createServeSelfUpdate({ pkgName: 'test-package', version: '1.2.3', store: f.store, bindHost: undefined }, getServer)).toBeInstanceOf(SelfUpdateService);
+    expect(createServeSelfUpdate({ home: testHome(), pkgName: 'test-package', version: '1.2.3', store: f.store, bindHost: undefined }, getServer)).toBeInstanceOf(SelfUpdateService);
     expect(getServer).not.toHaveBeenCalled();
     const options = vi.mocked(SelfUpdateService).mock.lastCall![0];
     expect(options).toMatchObject({ pkgName: 'test-package', version: '1.2.3', supervised: true, entry: resolve(process.argv[1] ?? '') });
@@ -342,7 +343,7 @@ describe('serve boot mutation regressions', () => {
     const argv = process.argv;
     try {
       process.argv = [];
-      createServeSelfUpdate({ pkgName: 'test', version: '1', store: recoveryFixture().store, bindHost: undefined }, vi.fn());
+      createServeSelfUpdate({ home: testHome(), pkgName: 'test', version: '1', store: recoveryFixture().store, bindHost: undefined }, vi.fn());
       expect(vi.mocked(SelfUpdateService).mock.lastCall![0].entry).toBe(process.cwd());
     } finally { process.argv = argv; }
   });
@@ -353,7 +354,7 @@ describe('serve boot mutation regressions', () => {
     const f = recoveryFixture();
     const shutdownForRestart = vi.fn().mockResolvedValue(undefined);
     const getServer = vi.fn();
-    createServeSelfUpdate({ pkgName: 'test', version: '1', store: f.store, bindHost: '127.0.0.1' }, getServer);
+    createServeSelfUpdate({ home: testHome(), pkgName: 'test', version: '1', store: f.store, bindHost: '127.0.0.1' }, getServer);
     const options = vi.mocked(SelfUpdateService).mock.lastCall![0];
     getServer.mockReturnValue({ address: () => ({ address: '127.0.0.1', port: 5432 }), shutdownForRestart });
     options.restart();
@@ -369,7 +370,7 @@ describe('serve boot mutation regressions', () => {
     const forward = vi.spyOn(sessionProcesses, 'forwardToSessionGroups').mockImplementation(() => {});
     const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
     const server = { shutdownForRestart: vi.fn().mockRejectedValue(new Error('shutdown failed')) } as unknown as ReturnType<typeof startServer>;
-    createServeApplicationUpdate('/repo', {}, () => server, () => undefined, { close });
+    createServeApplicationUpdate('/repo', {}, () => server, () => undefined, { close }, testHome());
     vi.mocked(ApplicationUpdateService).mock.lastCall![0].handoff!();
     // bound: handoff returns void; process.exit is the completion signal after cleanup.
     await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0), { timeout: 10_000 });
@@ -385,7 +386,7 @@ describe('serve boot mutation regressions', () => {
     f.store.close = close;
     const forward = vi.spyOn(sessionProcesses, 'forwardToSessionGroups').mockImplementation(() => {});
     const server = { address: () => ({ address: '127.0.0.1', port: 4321 }), shutdownForRestart: vi.fn().mockRejectedValue(new Error('shutdown failed')) } as unknown as ReturnType<typeof startServer>;
-    createServeSelfUpdate({ pkgName: 'test', version: '1', store: f.store, bindHost: undefined }, () => server);
+    createServeSelfUpdate({ home: testHome(), pkgName: 'test', version: '1', store: f.store, bindHost: undefined }, () => server);
     vi.mocked(SelfUpdateService).mock.lastCall![0].restart();
     // bound: restart returns void; the injected restart process signals completed cleanup.
     await vi.waitFor(() => expect(restartProcess).toHaveBeenCalledOnce(), { timeout: 10_000 });

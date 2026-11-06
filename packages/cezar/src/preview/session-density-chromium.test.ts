@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,7 +17,7 @@ import { PreviewSession, type Viewer } from './session.ts';
 // bound: a cold Chrome start on a loaded CI runner took over 30 s (hearsay-tools/cezarion#1467);
 // every wait below still ends on its own event.
 const BUDGET_MS = 120_000;
-const bin = resolveChromium();
+const bin = resolveChromium(undefined, undefined, undefined, undefined, testHome());
 
 let cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -43,7 +44,7 @@ describe('Ultra streams at the viewer pixel ratio in a real Chromium (hearsay-to
       // Chromium can still flush profile files after its main process exits.
       rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
-    browser = await launchBrowser(profile, process.env);
+    browser = await launchBrowser(profile, process.env, testHome(process.env));
     let quality: PreviewQuality = 'ultra';
     const session = await PreviewSession.create(browser.cdp, { quality: () => quality });
     cleanups.push(() => session.close());
@@ -111,7 +112,7 @@ describe('Ultra streams at the viewer pixel ratio in a real Chromium (hearsay-to
       // Chromium can still flush profile files after its main process exits.
       rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
-    browser = await launchBrowser(profile, process.env);
+    browser = await launchBrowser(profile, process.env, testHome(process.env));
     // As an agent does through the CDP proxy: a new target, then a flat page session on it.
     const root = browser.connection.session(undefined);
     const { targetId } = await root.send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' });

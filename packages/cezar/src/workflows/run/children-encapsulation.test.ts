@@ -1,3 +1,4 @@
+import { testHome } from '../../home/test-home.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -28,8 +29,8 @@ it('keeps a live read view, immutable child records and independent owner state'
     end: unused, interrupt: unused };
   state.liveSession.attachSession(session);
   // This observation-only case calls no wait/line policy. A read of one fails the test.
-  const owner = new SubagentWaits({ store, repoRoot: root, dataDir: root,
-    semaphore: new WorkspaceSemaphore(), work: new TrackedWork(), disposed: () => false }, {
+  const owner = new SubagentWaits({ home: testHome(), store, repoRoot: root, dataDir: root,
+    semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false }, {
     active: new Map(), isParked: unused, isAdmitted: unused, settleWait: unused,
     armWait: unused, disarmWait: unused, releaseHeldPark: unused,
   });

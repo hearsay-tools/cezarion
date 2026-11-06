@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -28,8 +29,8 @@ export async function startTestCockpit(): Promise<TestCockpit> {
   process.env.CEZ_DRY_RUN = '1';
   const repoRoot = mkdtempSync(join(tmpdir(), 'cez-task-cli-'));
   const store = RunStore.open(join(repoRoot, '.ai/cezar'));
-  const manager = new RunManager(store, repoRoot, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
-  const app = createApp({ repoRoot, store, manager, version: '0.0.0-test', providerAuth: connectedProviderAuth() });
+  const manager = new RunManager(store, repoRoot, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
+  const app = createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test', providerAuth: connectedProviderAuth() });
   const server = await new Promise<ServerType>((resolve) => {
     const started = serve({ fetch: app.fetch, port: 0, hostname: '127.0.0.1' }, () => resolve(started));
   });

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -44,7 +45,7 @@ describe('ubuntu-vps dry-run', () => {
 
   it('walks every Phase-1 step and writes a complete server.json', async () => {
     const strategy = getStrategy('ubuntu-vps')!;
-    const res = await runInstall(strategy, {
+    const res = await runInstall(strategy, { home: testHome(),
       dryRun: true,
       assumeYes: true,
       reconfigure: new Set(),
@@ -54,7 +55,7 @@ describe('ubuntu-vps dry-run', () => {
       runner: noRunner,
     });
     expect(res.status).toBe('complete');
-    const state = loadServerState();
+    const state = loadServerState(undefined, testHome());
     expect(state.platform).toBe('ubuntu-vps');
     expect(state.steps.deps?.status).toBe('done');
     expect(state.steps['nginx-proxy']?.status).toBe('done');

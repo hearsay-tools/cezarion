@@ -42,7 +42,7 @@ export interface AutomationServiceProject {
 }
 
 export interface AutomationServiceDeps {
-  home?: Home | undefined;
+  home: Home;
   /** The zone the repeating schedules run in: the server's own. */
   timeZone: () => string;
   /** Host model discovery; absent = explicit models are never refused at save. */

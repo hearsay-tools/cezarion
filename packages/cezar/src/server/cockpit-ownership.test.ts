@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -64,7 +65,7 @@ it('refuses a secondary project before its store opens or recovery runs', async 
   const { root, owner, dataDir } = fixture();
   await owner.acquire(dataDir);
   owner.publishUrl('http://127.0.0.1:4321');
-  const contexts = new ProjectContexts({
+  const contexts = new ProjectContexts({ home: testHome(),
     ownership: fixture().owner,
     listProjects: async () => [{ id: 'busy', root, status: 'ok' }],
   });
@@ -76,7 +77,7 @@ it('refuses a secondary project before its store opens or recovery runs', async 
 it('secondary ownership lasts until process exit, even after context disposal', async () => {
   const { root, owner, dataDir } = fixture();
   owner.publishUrl('http://127.0.0.1:4321');
-  const contexts = new ProjectContexts({
+  const contexts = new ProjectContexts({ home: testHome(),
     ownership: owner,
     listProjects: async () => [{ id: 'secondary', root, status: 'not-git' }],
   });
@@ -94,7 +95,7 @@ it.each([false, true])('releases a cold maintenance claim without releasing the 
   owner.publishUrl('http://127.0.0.1:4321');
   const bootClaim = readFileSync(join(boot.dataDir, 'cockpit.lock'), 'utf8');
   seedRuns(dataDir, []);
-  const contexts = new ProjectContexts({
+  const contexts = new ProjectContexts({ home: testHome(),
     ownership: owner,
     listProjects: async () => [{ id: 'cold', root, status: 'not-git' }],
   });
@@ -120,7 +121,7 @@ it('borrows a pre-existing process claim for maintenance without releasing it', 
   await owner.acquire(dataDir);
   owner.publishUrl('http://127.0.0.1:4321');
   const claim = readFileSync(join(dataDir, 'cockpit.lock'), 'utf8');
-  const contexts = new ProjectContexts({
+  const contexts = new ProjectContexts({ home: testHome(),
     ownership: owner,
     listProjects: async () => [{ id: 'cold', root, status: 'not-git' }],
   });

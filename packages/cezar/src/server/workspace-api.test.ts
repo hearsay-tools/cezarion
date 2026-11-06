@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -44,8 +45,8 @@ describe('the workspace settings API (step 2.7)', () => {
     // The REAL semaphore with its production loader (which reads the CEZ_HOME
     // config), so the PUT → refresh() → cached-limits chain is observed end to
     // end. The routes never touch the manager — an empty stub is honest.
-    semaphore = new WorkspaceSemaphore();
-    app = createApp({
+    semaphore = new WorkspaceSemaphore({ home: testHome() });
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager: {} as RunManager,
@@ -69,7 +70,7 @@ describe('the workspace settings API (step 2.7)', () => {
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
   });
 
-  const rawConfig = () => JSON.parse(readFileSync(workspaceConfigPath(), 'utf8')) as Record<string, unknown>;
+  const rawConfig = () => JSON.parse(readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8')) as Record<string, unknown>;
 
   const getConfig = () => apiRequest(app, '/api/v1/workspace/config');
   const putConfig = (body: unknown) =>
@@ -179,9 +180,9 @@ describe('the workspace settings API (step 2.7)', () => {
     });
     expect(res.status).toBe(200);
 
-    const coldSemaphore = new WorkspaceSemaphore();
+    const coldSemaphore = new WorkspaceSemaphore({ home: testHome() });
     await coldSemaphore.refresh();
-    const coldApp = createApp({
+    const coldApp = createApp({ home: testHome(),
       repoRoot,
       store,
       manager: {} as RunManager,
@@ -238,7 +239,7 @@ describe('the workspace settings API (step 2.7)', () => {
 
   it('PUT ignores a retired skillsAutoUpdate key and an old stored key survives unrelated writes', async () => {
     mkdirSync(home, { recursive: true });
-    writeFileSync(workspaceConfigPath(), JSON.stringify({ skillsAutoUpdate: true }));
+    writeFileSync(workspaceConfigPath(undefined, testHome()), JSON.stringify({ skillsAutoUpdate: true }));
     const res = await putConfig({ skillsAutoUpdate: false, archiveOnMerge: true });
     expect(res.status).toBe(200);
     expect(await res.json()).not.toHaveProperty('skillsAutoUpdate');
@@ -246,11 +247,11 @@ describe('the workspace settings API (step 2.7)', () => {
   });
 
   it('boots and answers health with a retired skillsAutoUpdate key stored and its env var set', async () => {
-    writeFileSync(workspaceConfigPath(), JSON.stringify({ skillsAutoUpdate: true }));
+    writeFileSync(workspaceConfigPath(undefined, testHome()), JSON.stringify({ skillsAutoUpdate: true }));
     vi.stubEnv('CEZ_SKILLS_AUTO_UPDATE', '1');
     vi.stubEnv('CEZ_DRY_RUN', '1');
     vi.stubEnv('CEZ_PROJECT_WARMUP', '0');
-    const server = startServer({ repoRoot, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' }, 0);
+    const server = startServer({ home: testHome(), repoRoot, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' }, 0);
     try {
       await new Promise<void>((resolve) => server.once('listening', () => resolve()));
       const { port } = server.address() as AddressInfo;
@@ -284,7 +285,7 @@ describe('the workspace settings API (step 2.7)', () => {
 
   it('rejects invalid values without writing', async () => {
     expect((await putConfig({ archiveOnMerge: 'false' })).status).toBe(400);
-    expect(() => readFileSync(workspaceConfigPath(), 'utf8')).toThrow();
+    expect(() => readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8')).toThrow();
   });
 
   it('rejects out-of-bounds resources with 400 and writes nothing', async () => {
@@ -293,13 +294,13 @@ describe('the workspace settings API (step 2.7)', () => {
       expect(res.status, JSON.stringify(resources)).toBe(400);
       expect((await res.json()) as { error: string }).toHaveProperty('error');
     }
-    expect(() => readFileSync(workspaceConfigPath(), 'utf8')).toThrow(); // never created
+    expect(() => readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8')).toThrow(); // never created
     expect(semaphore.maxParallel()).toBe(2);
   });
 
   it('a merge-written PUT never clobbers the registry or unknown keys (passthrough)', async () => {
     writeFileSync(
-      workspaceConfigPath(),
+      workspaceConfigPath(undefined, testHome()),
       JSON.stringify({
         projects: [{ id: 'cezar', root: '/tmp/projects/cezar' }],
         futureKey: true,
@@ -396,7 +397,7 @@ describe('the workspace settings API (step 2.7)', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     });
-  const rawUiState = () => JSON.parse(readFileSync(workspaceUiStatePath(), 'utf8')) as Record<string, unknown>;
+  const rawUiState = () => JSON.parse(readFileSync(workspaceUiStatePath(testHome()), 'utf8')) as Record<string, unknown>;
 
   it('GET answers {} when no file exists yet', async () => {
     const res = await getUiState();
@@ -446,7 +447,7 @@ describe('the workspace settings API (step 2.7)', () => {
 
     expect(res.status).toBe(400);
     expect((await res.json()) as { error: string }).toHaveProperty('error');
-    expect(() => readFileSync(workspaceUiStatePath(), 'utf8')).toThrow();
+    expect(() => readFileSync(workspaceUiStatePath(testHome()), 'utf8')).toThrow();
   });
 
   it('round-trips task-table choices and preserves unknown nested siblings', async () => {
@@ -484,7 +485,7 @@ describe('the workspace settings API (step 2.7)', () => {
 
     expect(res.status).toBe(400);
     expect((await res.json()) as { error: string }).toHaveProperty('error');
-    expect(() => readFileSync(workspaceUiStatePath(), 'utf8')).toThrow();
+    expect(() => readFileSync(workspaceUiStatePath(testHome()), 'utf8')).toThrow();
   });
 
   it('round-trips a bounded last project location including query and hash', async () => {
@@ -525,7 +526,7 @@ describe('the workspace settings API (step 2.7)', () => {
 
     expect(res.status).toBe(400);
     expect((await res.json()) as { error: string }).toHaveProperty('error');
-    expect(() => readFileSync(workspaceUiStatePath(), 'utf8')).toThrow();
+    expect(() => readFileSync(workspaceUiStatePath(testHome()), 'utf8')).toThrow();
   });
 
   // Every Settings → Appearance preference has to be listed in `appearanceSchema`: the top-level
@@ -548,7 +549,7 @@ describe('the workspace settings API (step 2.7)', () => {
   it('rejects an out-of-enum reading width instead of silently dropping it', async () => {
     const res = await putUiState({ appearance: { width: 'ultrawide' } });
     expect(res.status).toBe(400);
-    expect(() => readFileSync(workspaceUiStatePath(), 'utf8')).toThrow();
+    expect(() => readFileSync(workspaceUiStatePath(testHome()), 'utf8')).toThrow();
   });
 
   it('accepts bounded provider auth failure dismissals', async () => {
@@ -575,7 +576,7 @@ describe('the workspace settings API (step 2.7)', () => {
   ])('rejects provider auth failure dismissals with %s without writing state', async (_case, dismissals) => {
     const response = await putUiState({ dismissedProviderAuthFailures: dismissals });
     expect(response.status).toBe(400);
-    expect(() => readFileSync(workspaceUiStatePath(), 'utf8')).toThrow();
+    expect(() => readFileSync(workspaceUiStatePath(testHome()), 'utf8')).toThrow();
   });
 
   it('unknown keys pass through and survive later PUTs (additive, like the per-repo route)', async () => {
@@ -591,7 +592,7 @@ describe('the workspace settings API (step 2.7)', () => {
     const res = await putUiState({ sidebar: { collapsed: { cezar: 'yes' } } });
     expect(res.status).toBe(400);
     expect((await res.json()) as { error: string }).toHaveProperty('error');
-    expect(() => readFileSync(workspaceUiStatePath(), 'utf8')).toThrow(); // nothing written
+    expect(() => readFileSync(workspaceUiStatePath(testHome()), 'utf8')).toThrow(); // nothing written
   });
 
   it('caps the top-level key count at 200, same as the per-repo route', async () => {

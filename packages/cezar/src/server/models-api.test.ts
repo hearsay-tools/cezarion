@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -32,7 +33,7 @@ describe('workspace model catalog API', () => {
     piDiscover?: Discover,
     ompDiscover?: Discover,
   ) =>
-    createApp({
+    createApp({ home: testHome(),
       repoRoot: root,
       store,
       manager: {} as RunManager,
@@ -222,7 +223,7 @@ describe('workspace model catalog API', () => {
         },
       },
     });
-    const server = createApp({
+    const server = createApp({ home: testHome(),
       repoRoot: root,
       store,
       manager: {} as RunManager,
@@ -269,7 +270,7 @@ describe('workspace model catalog API', () => {
       runCommand: async () => ({ stdout: 'Logged in using ChatGPT', stderr: '', exitCode: 0 }),
     });
     const incident = providerAuth.reportRuntimeAuthFailure('codex')?.status.authFailureId;
-    const server = createApp({
+    const server = createApp({ home: testHome(),
       repoRoot: root,
       store,
       manager: {} as RunManager,
@@ -308,7 +309,7 @@ describe('workspace model catalog API', () => {
         },
       },
     });
-    const server = createApp({
+    const server = createApp({ home: testHome(),
       repoRoot: root,
       store,
       manager: {} as RunManager,
@@ -349,7 +350,7 @@ describe('workspace model catalog API', () => {
         },
       },
     });
-    const server = createApp({
+    const server = createApp({ home: testHome(),
       repoRoot: root,
       store,
       manager: {} as RunManager,
@@ -391,7 +392,7 @@ describe('workspace model catalog API', () => {
         },
       },
     });
-    const server = createApp({
+    const server = createApp({ home: testHome(),
       repoRoot: root,
       store,
       manager: {} as RunManager,
@@ -435,7 +436,7 @@ describe('workspace model catalog API', () => {
         },
       },
     });
-    const server = createApp({
+    const server = createApp({ home: testHome(),
       repoRoot: root,
       store,
       manager: {} as RunManager,
@@ -468,7 +469,7 @@ describe('workspace model catalog API', () => {
         },
       },
     });
-    const server = createApp({
+    const server = createApp({ home: testHome(),
       repoRoot: root,
       store,
       manager: {} as RunManager,

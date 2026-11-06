@@ -1,3 +1,4 @@
+import { testHome } from '../../home/test-home.testkit.ts';
 // Load compile-only fixture functions so the quality report can measure their bodies.
 import '../launch-read-resolver.types.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -23,7 +24,7 @@ beforeEach(() => {
   vi.stubEnv('CEZ_HOME', join(root, 'home'));
   vi.stubEnv('CEZ_AGENT_MODELS_LOCKED', '0');
   store = RunStore.open(root);
-  context = { store, dataDir: root, repoRoot: root, semaphore: new WorkspaceSemaphore(), work: new TrackedWork(), disposed: () => false };
+  context = { home: testHome(), store, dataDir: root, repoRoot: root, semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false };
   id = store.createRun({ title: 'Launch', workflow: 'accepted', task: 'original', steps: [{ id: 'first', name: 'First', kind: STEP_KIND.agent }] }).id;
 });
 afterEach(() => { vi.unstubAllEnvs(); store.flush(); rmSync(root, { recursive: true, force: true }); });
@@ -105,8 +106,8 @@ it('keeps Continue effort record-reference semantics after an in-place store ame
   const captured = store.getRun(id);
   store.updateRun(id, { effort: 'high' });
   expect(store.getRun(id)).toBe(captured);
-  expect(atContinue.effort(root, captured, undefined, undefined)).toEqual({ effort: 'high' });
-  expect(atContinue.effort(root, store.getRun(id), undefined, undefined)).toEqual({ effort: 'high' });
+  expect(atContinue.effort(root, captured, undefined, undefined, testHome())).toEqual({ effort: 'high' });
+  expect(atContinue.effort(root, store.getRun(id), undefined, undefined, testHome())).toEqual({ effort: 'high' });
 });
 
 it('binds accepted input without reading fields or exposing them through an alias', () => {
@@ -127,7 +128,7 @@ it.each(['step', 'continue'] as const)('P6-30 P6-31 keeps worker and authored ef
   const authored = { id: 'first', effort: 'high' };
   const select = (definition: typeof authored, identity: WorkerStepIdentity | undefined) => phase === 'step'
     ? atStepOpen.effort(store, id, definition, input, identity, false)
-    : (atContinue.effort(root, store.getRun(id), definition, identity) as { effort: string | undefined }).effort;
+    : (atContinue.effort(root, store.getRun(id), definition, identity, testHome()) as { effort: string | undefined }).effort;
   expect(select(authored, workerIdentity)).toBe('low');
   expect(select(authored, undefined)).toBe('high');
   expect(select({ id: 'first', effort: '' }, undefined)).toBeUndefined();
@@ -138,18 +139,18 @@ it('P6-30 P6-31 keeps lock and invalid authored effort errors in their original 
   const state = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false });
   const invalid = { id: 'first', effort: 'invalid' };
   expect(() => atStepOpen.effort(store, id, invalid, input, undefined, false)).toThrow('Invalid effort');
-  expect(atContinue.effort(root, store.getRun(id), invalid, undefined)).toBe('Invalid effort');
+  expect(atContinue.effort(root, store.getRun(id), invalid, undefined, testHome())).toBe('Invalid effort');
   mkdirSync(join(root, '.ai/cezar'), { recursive: true });
   writeFileSync(join(root, '.ai/cezar/config.json'), JSON.stringify({ modelsLocked: true }));
-  expect(await atStepOpen.model(store, root, id, state, invalid, input, 'claude', undefined)).toBe(AGENT_MODELS_LOCKED_ERROR);
-  expect(atContinue.effort(root, store.getRun(id), invalid, undefined)).toBe(AGENT_MODELS_LOCKED_ERROR);
-  expect(atContinue.effort(root, store.getRun(id), { id: 'first', effort: '' }, undefined)).toEqual({ effort: undefined });
+  expect(await atStepOpen.model(store, root, id, state, invalid, input, 'claude', undefined, testHome())).toBe(AGENT_MODELS_LOCKED_ERROR);
+  expect(atContinue.effort(root, store.getRun(id), invalid, undefined, testHome())).toBe(AGENT_MODELS_LOCKED_ERROR);
+  expect(atContinue.effort(root, store.getRun(id), { id: 'first', effort: '' }, undefined, testHome())).toEqual({ effort: undefined });
 });
 
 it('P6-29 task-level model metadata does not read effort before step selection', async () => {
   let reads = 0;
   const source = bindLaunchSource({ task: 'accepted', model: 'anthropic/claude-sonnet-4-6', get effort() { reads++; return 'high'; } });
-  expect(await atTaskHead.modelIdentity(root, 'claude', source)).toBe('anthropic/claude-sonnet-4-6');
+  expect(await atTaskHead.modelIdentity(root, 'claude', source, testHome())).toBe('anthropic/claude-sonnet-4-6');
   expect(reads).toBe(0);
 });
 
@@ -176,9 +177,9 @@ it('copies the selected account before hold participant callbacks run', () => {
 });
 
 it('P6-25 task metadata reads the current model lock after input acceptance', async () => {
-  const input = atTaskHead.acceptInput(root, { task: 'accepted', model: 'anthropic/claude-sonnet-4-6' });
-  expect(await atTaskHead.modelIdentity(root, 'claude', bindLaunchSource(input))).toBe('anthropic/claude-sonnet-4-6');
+  const input = atTaskHead.acceptInput(root, { task: 'accepted', model: 'anthropic/claude-sonnet-4-6' }, testHome());
+  expect(await atTaskHead.modelIdentity(root, 'claude', bindLaunchSource(input), testHome())).toBe('anthropic/claude-sonnet-4-6');
   mkdirSync(join(root, '.ai/cezar'), { recursive: true });
   writeFileSync(join(root, '.ai/cezar/config.json'), JSON.stringify({ modelsLocked: true }));
-  expect(await atTaskHead.modelIdentity(root, 'claude', bindLaunchSource(input))).toBeUndefined();
+  expect(await atTaskHead.modelIdentity(root, 'claude', bindLaunchSource(input), testHome())).toBeUndefined();
 });

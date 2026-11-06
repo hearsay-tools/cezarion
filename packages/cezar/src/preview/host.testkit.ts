@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,14 +44,14 @@ export function fakeStore(servers: PreviewServer[]) {
   };
 }
 
-export function setup(servers: PreviewServer[] = [server(5173)], launchError?: () => Error | undefined, launchGate?: () => Promise<void>, overrides: PreviewHostDeps = {}) {
+export function setup(servers: PreviewServer[] = [server(5173)], launchError?: () => Error | undefined, launchGate?: () => Promise<void>, overrides: Partial<PreviewHostDeps> = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), 'cez-preview-host-'));
   const store = fakeStore(servers);
   const answering = new Set<number>();
   const devServers: FakeDevServer[] = [];
   const probe = vi.fn(async (port: number) => answering.has(port));
   const browsers: Array<BrowserHandle & { cdpFake: ReturnType<typeof fakeCdp>; connectionFake: ReturnType<typeof fakeConnection>; exit(info: BrowserExit): void; profileDir: string }> = [];
-  const host = new PreviewHost({
+  const host = new PreviewHost({ home: testHome(),
     probe,
     createServer: opts => {
       const dev = new FakeDevServer(opts);

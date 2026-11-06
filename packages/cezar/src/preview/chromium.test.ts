@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,15 +43,15 @@ const env = (extra: Record<string, string> = {}) => ({ HOME, PATH: '/usr/bin' + 
 describe('resolveChromium (#781)', () => {
   it('prefers PATH over every cache', () => {
     const fs = fakeFs(['/opt/bin/google-chrome', `${HOME}/.cache/cez/chromium/chrome-headless-shell-linux64/chrome-headless-shell`]);
-    expect(resolveChromium(fs, env(), 'linux', 'x64')).toBe('/opt/bin/google-chrome');
+    expect(resolveChromium(fs, env(), 'linux', 'x64', testHome(env()))).toBe('/opt/bin/google-chrome');
   });
 
   it('prefers Google Chrome over a distro Chromium within one directory', () => {
     // A GitHub runner's /usr/bin/chromium never opened its DevTools port where google-chrome did
     // (PR #792), and Ubuntu's chromium and chromium-browser are snap shims.
     const fs = fakeFs(['/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser']);
-    expect(resolveChromium(fs, env(), 'linux', 'x64')).toBe('/usr/bin/google-chrome-stable');
-    expect(resolveChromium(fakeFs(['/usr/bin/chromium-browser', '/usr/bin/chromium']), env(), 'linux', 'x64')).toBe('/usr/bin/chromium');
+    expect(resolveChromium(fs, env(), 'linux', 'x64', testHome(env()))).toBe('/usr/bin/google-chrome-stable');
+    expect(resolveChromium(fakeFs(['/usr/bin/chromium-browser', '/usr/bin/chromium']), env(), 'linux', 'x64', testHome(env()))).toBe('/usr/bin/chromium');
   });
 
   it('skips a snap-confined binary, which cannot write the profile under the hidden .ai directory', () => {
@@ -60,7 +61,7 @@ describe('resolveChromium (#781)', () => {
       }),
       realpathSync: p => (p === '/usr/bin/chromium' ? '/snap/chromium/3000/usr/lib/chromium-browser/chrome' : p),
     };
-    expect(resolveChromium(fs, env(), 'linux', 'x64')).toBe(`${HOME}/.cache/cez/chromium/chrome-headless-shell-linux64/chrome-headless-shell`);
+    expect(resolveChromium(fs, env(), 'linux', 'x64', testHome(env()))).toBe(`${HOME}/.cache/cez/chromium/chrome-headless-shell-linux64/chrome-headless-shell`);
   });
 
   it('prefers the Playwright cache over the cez cache', () => {
@@ -69,7 +70,7 @@ describe('resolveChromium (#781)', () => {
       [`${pw}/chromium-1200/chrome-linux64/chrome`, `${HOME}/.cache/cez/chromium/chrome-headless-shell-linux64/chrome-headless-shell`],
       { [pw]: ['chromium-1200', 'ffmpeg-1011'] },
     );
-    expect(resolveChromium(fs, env(), 'linux', 'x64')).toBe(`${pw}/chromium-1200/chrome-linux64/chrome`);
+    expect(resolveChromium(fs, env(), 'linux', 'x64', testHome(env()))).toBe(`${pw}/chromium-1200/chrome-linux64/chrome`);
   });
 
   it('takes the newest Playwright revision numerically, and honours PLAYWRIGHT_BROWSERS_PATH', () => {
@@ -77,45 +78,45 @@ describe('resolveChromium (#781)', () => {
     const fs = fakeFs([`${pw}/chromium-999/chrome-linux64/chrome`, `${pw}/chromium-1010/chrome-linux64/chrome`], {
       [pw]: ['chromium-999', 'chromium-1010'],
     });
-    expect(resolveChromium(fs, env({ PLAYWRIGHT_BROWSERS_PATH: pw }), 'linux', 'x64')).toBe(`${pw}/chromium-1010/chrome-linux64/chrome`);
+    expect(resolveChromium(fs, env({ PLAYWRIGHT_BROWSERS_PATH: pw }), 'linux', 'x64', testHome(env({ PLAYWRIGHT_BROWSERS_PATH: pw })))).toBe(`${pw}/chromium-1010/chrome-linux64/chrome`);
   });
 
   it("finds Playwright's headless shell when no full Chromium is installed", () => {
     const pw = `${HOME}/.cache/ms-playwright`;
     const bin = `${pw}/chromium_headless_shell-1200/chrome-headless-shell-linux64/chrome-headless-shell`;
-    expect(resolveChromium(fakeFs([bin], { [pw]: ['chromium_headless_shell-1200'] }), env(), 'linux', 'x64')).toBe(bin);
+    expect(resolveChromium(fakeFs([bin], { [pw]: ['chromium_headless_shell-1200'] }), env(), 'linux', 'x64', testHome(env()))).toBe(bin);
   });
 
   it("finds agent-browser's Chrome for Testing cache (~/.agent-browser/browsers)", () => {
     const root = `${HOME}/.agent-browser/browsers`;
     const bin = `${root}/chrome-147.0.7727.0/chrome-linux64/chrome`;
     const fs = fakeFs([bin, `${HOME}/.cache/cez/chromium/chrome-headless-shell-linux64/chrome-headless-shell`], { [root]: ['chrome-147.0.7727.0'] });
-    expect(resolveChromium(fs, env(), 'linux', 'x64')).toBe(bin);
+    expect(resolveChromium(fs, env(), 'linux', 'x64', testHome(env()))).toBe(bin);
   });
 
   it("finds agent-browser's browser when the version directory holds the binary directly, newest first", () => {
     const root = `${HOME}/.agent-browser/browsers`;
     const fs = fakeFs([`${root}/chrome-9.0.0/chrome`, `${root}/chrome-10.0.0/chrome`], { [root]: ['chrome-9.0.0', 'chrome-10.0.0'] });
-    expect(resolveChromium(fs, env(), 'linux', 'x64')).toBe(`${root}/chrome-10.0.0/chrome`);
+    expect(resolveChromium(fs, env(), 'linux', 'x64', testHome(env()))).toBe(`${root}/chrome-10.0.0/chrome`);
   });
 
   it('falls back to the cez cache last', () => {
     const bin = `${HOME}/.cache/cez/chromium/chrome-headless-shell-linux64/chrome-headless-shell`;
-    expect(resolveChromium(fakeFs([bin], { [`${HOME}/.cache/cez/chromium`]: ['chrome-headless-shell-linux64', '.partial'] }), env(), 'linux', 'x64')).toBe(bin);
+    expect(resolveChromium(fakeFs([bin], { [`${HOME}/.cache/cez/chromium`]: ['chrome-headless-shell-linux64', '.partial'] }), env(), 'linux', 'x64', testHome(env()))).toBe(bin);
   });
 
   it('finds a macOS app bundle before the caches', () => {
     const app = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
     const fs = fakeFs([app, `${HOME}/Library/Caches/ms-playwright/chromium-1/chrome-mac/Chromium.app/Contents/MacOS/Chromium`]);
-    expect(resolveChromium(fs, env(), 'darwin', 'arm64')).toBe(app);
+    expect(resolveChromium(fs, env(), 'darwin', 'arm64', testHome(env()))).toBe(app);
   });
 
   it('does not look for macOS bundles on linux', () => {
-    expect(resolveChromium(fakeFs(['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']), env(), 'linux', 'x64')).toBeUndefined();
+    expect(resolveChromium(fakeFs(['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']), env(), 'linux', 'x64', testHome(env()))).toBeUndefined();
   });
 
   it('returns undefined when nothing is installed', () => {
-    expect(resolveChromium(fakeFs([]), env(), 'linux', 'x64')).toBeUndefined();
+    expect(resolveChromium(fakeFs([]), env(), 'linux', 'x64', testHome(env()))).toBeUndefined();
   });
 });
 
@@ -241,7 +242,7 @@ describe('downloadChromium (#781)', () => {
     expect(existsSync(bin)).toBe(true);
     expect(staging(join(dir, 'home', '.cache', 'cez'))).toEqual([]);
     // The cache it filled is the one resolveChromium reads last.
-    expect(resolveChromium(realFs, { HOME: join(dir, 'home'), PATH: '' }, 'linux', 'x64')).toBe(bin);
+    expect(resolveChromium(realFs, { HOME: join(dir, 'home'), PATH: '' }, 'linux', 'x64', testHome({ HOME: join(dir, 'home'), PATH: '' }))).toBe(bin);
   });
 
   it('two overlapping downloads stage apart, and the second keeps the copy the first published', async () => {
@@ -710,7 +711,7 @@ setInterval(()=>{},1000);`,
 describe('launchChromium leak-detection Chromium regression (#972)', () => {
   const LAUNCH_BUDGET_MS = 120_000;
   const PAGE_STEPS_BUDGET_MS = 120_000;
-  const bin = resolveChromium();
+  const bin = resolveChromium(undefined, undefined, undefined, undefined, testHome());
   const posix = process.platform !== 'win32';
   let dir: string;
   let server: Server | undefined;

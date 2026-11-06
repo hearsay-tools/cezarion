@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -37,7 +38,7 @@ describe('POST /api/v1/runs systemPrompt', () => {
         return store.createRun({ title: 't', workflow: '(planned)', task: input.task, steps: [] });
       },
     } as unknown as RunManager;
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager,

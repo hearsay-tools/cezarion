@@ -82,7 +82,7 @@ export class RunSkills {
 
   /** Every skill lookup in this manager goes through here, so the built-ins reach all of them. */
   discoverSkills(phase: 'task-head' | 'continue' = 'task-head'): Promise<Skill[]> {
-    return (phase === 'continue' ? atContinue : atTaskHead).registry(this.context.repoRoot, this.host.builtinSkills());
+    return (phase === 'continue' ? atContinue : atTaskHead).registry(this.context.repoRoot, this.host.builtinSkills(), this.context.home);
   }
 
   /**
@@ -199,7 +199,7 @@ export class RunSkills {
     if (roots.length === 0 || stopped()) return { notes, filesDir, installed: [] };
     const teamRoots = roots.filter((skill) => wantedNames.includes(skill.name) && skill.source === 'team' && skill.team?.dir);
     const cacheCopy = async (skill: Skill): Promise<void> => {
-      const dir = await materializeSkillToCache(skill).catch(() => null);
+      const dir = await materializeSkillToCache(skill, this.context.home).catch(() => null);
       if (!dir) return;
       notes.push(`team skill "${skill.name}" materialized to ${dir}`);
       filesDir.set(skill.name, dir);
@@ -208,9 +208,9 @@ export class RunSkills {
       for (const skill of teamRoots) await cacheCopy(skill);
       return { notes, filesDir, installed: [] };
     }
-    const team = reads.teamSkills(this.context.repoRoot);
+    const team = reads.teamSkills(this.context.repoRoot, this.context.home);
     const catalog = [...registry, ...reads.filterSkills(team, disabled)];
-    const result = await provisionSkills(state.liveSession.cwd, roots, catalog, { cancelled: stopped });
+    const result = await provisionSkills(state.liveSession.cwd, roots, catalog, { cancelled: stopped, home: this.context.home });
     if (stopped()) return { notes, filesDir, installed: [] };
     for (const skill of teamRoots) {
       const written = result.teamCopies[skill.name] ?? [];

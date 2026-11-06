@@ -7,7 +7,7 @@ import { jsonZodValidator, queryZodValidator } from './validators.ts';
 
 /** The `createApp` dependency this family adds to `ServerDeps`. */
 export interface SelfUpdateServerDeps {
-  home?: Home;
+  home: Home;
   /** The cockpit's own updater (`/api/v1/workspace/self-update`, src/self-update/). Built by
    *  the CLI, which knows the entry file, the port and how to restart; absent in tests and for
    *  bare `createApp` callers, where the family answers a read-only "not available" status. */
@@ -17,7 +17,7 @@ export interface SelfUpdateServerDeps {
 /** No injected updater (tests, embedded callers): a READ-ONLY service over the running entry.
  *  It has no way to restart the process, so it must not install either — an install that flips
  *  `current` under a process that keeps running the old code is the worst of both. */
-function readOnlySelfUpdate(version: string, localHandoff: () => boolean, home?: Home): SelfUpdateService {
+function readOnlySelfUpdate(version: string, localHandoff: () => boolean, home: Home): SelfUpdateService {
   return new SelfUpdateService({
     home,
     pkgName: '@wjarka/cezarion',

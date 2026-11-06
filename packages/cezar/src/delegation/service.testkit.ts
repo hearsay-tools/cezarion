@@ -1,3 +1,5 @@
+import type { Home } from '../home/home.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import {
   RUN_STATUS,
   WAIT_KIND,
@@ -105,14 +107,14 @@ afterAll(() => {
   if (repositoryTemplate) rmSync(repositoryTemplate.root, { recursive: true, force: true });
 });
 
-export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha: string; store: RunStore; manager: RunManager; parent: RunRecord; credentials: CredentialRegistry; caller: Caller; token: string; service: DelegationService; holdAdmission(): Promise<void>; releaseAdmission(): Promise<void>; close(): Promise<void> } {
+export function fixture(options: WorkerCleanupOptions = {}, home: Home = testHome()): { root: string; sha: string; store: RunStore; manager: RunManager; parent: RunRecord; credentials: CredentialRegistry; caller: Caller; token: string; service: DelegationService; holdAdmission(): Promise<void>; releaseAdmission(): Promise<void>; close(): Promise<void> } {
   const root = mkdtempSync(join(tmpdir(), 'cez-delegation-service-'));
   const sha = copyServiceRepository(root);
   const store = openTestRunStore(join(root, '.ai/cezar'), { keepLive: true });
   // Scheduler admission is held so acceptance is durable before execution starts.
   let admissionHeld = true;
-  const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ ...defaultWorkspaceConfig().resources, ...(admissionHeld ? { maxParallel: 0 } : {}) }) });
-  const manager = createFixtureManager(store, root, { semaphore });
+  const semaphore = new WorkspaceSemaphore({ home, initial: { maxParallel: 0 }, load: async () => ({ ...defaultWorkspaceConfig().resources, ...(admissionHeld ? { maxParallel: 0 } : {}) }) });
+  const manager = createFixtureManager(store, root, { home, semaphore });
   const admissionReads = vi.spyOn(semaphore, 'maxParallel');
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', runner: 'claude', model: 'opus', effort: 'high', steps: [] });
   setRunStatus(store, parent.id, RUN_STATUS.running, { worktreePath: root, delegation: { role: 'root', permissions: ['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'wait'], receipts: [] } });
@@ -133,7 +135,7 @@ export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha
     }
     return result;
   });
-  const unregister = service.registerProject({ id: 'project', root, store, manager });
+  const unregister = service.registerProject({ home, id: 'project', root, store, manager });
   return { root, sha, store, manager, parent, credentials, caller, token, service,
     async holdAdmission() { admissionHeld = true; await semaphore.refresh(); },
     async releaseAdmission() { admissionHeld = false; await semaphore.refresh(); await semaphore.release(); },

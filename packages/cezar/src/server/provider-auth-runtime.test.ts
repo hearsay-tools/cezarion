@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -87,8 +88,8 @@ describe('watchProviderRuntimeAuthFailures', () => {
   const watch = (resolveProfile?: RuntimeAuthProfileResolver) => {
     const onInvalidated = vi.fn();
     unwatchers.push(resolveProfile
-      ? watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated, resolveProfile)
-      : watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated));
+      ? watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated, resolveProfile, testHome())
+      : watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated, undefined, testHome()));
     return onInvalidated;
   };
 
@@ -666,7 +667,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
           label: 'Work',
           addedAt: '',
         }],
-      }));
+      }), testHome());
       const runCommand = vi.fn<RunProviderCommand>(async (_executable, _args, _timeout, env) => (
         env?.CLAUDE_CONFIG_DIR === '/work-from-store'
           ? { stdout: '{"loggedIn":true}', stderr: '', exitCode: 0 }
@@ -711,13 +712,13 @@ describe('watchProviderRuntimeAuthFailures', () => {
       await mergeWriteAgentAccounts((current) => ({
         ...current,
         accounts: current.accounts.filter((account) => account.id !== 'work'),
-      }));
+      }), testHome());
     });
   });
 
   it('unsubscribes cleanly', () => {
     const onInvalidated = vi.fn();
-    const unwatch = watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated);
+    const unwatch = watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated, undefined, testHome());
     const run = store.createRun({
       title: 'unsubscribed',
       workflow: 'quick-task',
@@ -737,7 +738,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
 
   it('deduplicates observation when startup and app construction watch the same store', () => {
     const onInvalidated = vi.fn();
-    const observer = new ProviderRuntimeAuthObserver(providerAuth, onInvalidated);
+    const observer = new ProviderRuntimeAuthObserver(providerAuth, onInvalidated, undefined, testHome());
     const run = store.createRun({
       title: 'deduplicated',
       workflow: 'quick-task',
@@ -767,7 +768,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
     // A CLI that agrees the credentials are gone, so the self-check leaves the latch standing and
     // this case stays about its own subject: observation is attached BEFORE recovery runs.
     providerAuth = loggedOutClaudeProviderAuth();
-    const observer = new ProviderRuntimeAuthObserver(providerAuth, vi.fn());
+    const observer = new ProviderRuntimeAuthObserver(providerAuth, vi.fn(), undefined, testHome());
 
     await recoverWithProviderRuntimeAuthObservation(
       store,

@@ -4,7 +4,7 @@ import { HOME_LOCATING_ENV } from '../core/agent-env.ts';
 import type { Home } from './home.ts';
 
 export interface ResolveHomeOptions {
-  purpose: 'cli' | 'server' | 'compatibility';
+  purpose: 'cli' | 'server';
   env?: NodeJS.ProcessEnv;
 }
 

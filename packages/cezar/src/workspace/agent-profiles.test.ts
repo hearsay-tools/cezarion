@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -38,7 +39,7 @@ describe('agent profile resolution', () => {
   });
 
   const env = { HOME: '/home/u' } as NodeJS.ProcessEnv;
-  const write = (value: unknown) => writeFileSync(agentAccountsPath(), JSON.stringify(value), 'utf8');
+  const write = (value: unknown) => writeFileSync(agentAccountsPath(testHome()), JSON.stringify(value), 'utf8');
   const klaudiuszProfile = {
     id: 'klaudiusz',
     provider: 'claude' as const,
@@ -75,7 +76,7 @@ describe('agent profile resolution', () => {
   describe('listing', () => {
     it('puts the discovered profile first, then the stored extras in file order', async () => {
       write({ accounts: [klaudiuszProfile, { ...klaudiuszProfile, id: 'client', configDir: '~/.claude-client' }] });
-      const store = await loadAgentAccounts();
+      const store = await loadAgentAccounts(testHome());
       expect(profilesForProvider(store, 'claude', env).map((p) => p.id)).toEqual([
         'default',
         'klaudiusz',
@@ -85,14 +86,14 @@ describe('agent profile resolution', () => {
 
     it('never mixes providers', async () => {
       write({ accounts: [klaudiuszProfile, { ...klaudiuszProfile, id: 'cx', provider: 'codex' }] });
-      const store = await loadAgentAccounts();
+      const store = await loadAgentAccounts(testHome());
       expect(profilesForProvider(store, 'codex', env).map((p) => p.id)).toEqual(['default', 'cx']);
       expect(listAgentProfiles(store, ['claude', 'codex'], env)).toHaveLength(4);
     });
 
     it('expands a stored `~` while keeping what the user typed', async () => {
       write({ accounts: [klaudiuszProfile] });
-      const [, stored] = profilesForProvider(await loadAgentAccounts(), 'claude', env);
+      const [, stored] = profilesForProvider(await loadAgentAccounts(testHome()), 'claude', env);
       expect(stored?.configDir).toBe('~/.claude-klaudiusz');
       expect(stored?.path.endsWith('/.claude-klaudiusz')).toBe(true);
       expect(stored?.path.startsWith('~')).toBe(false);
@@ -105,7 +106,7 @@ describe('agent profile resolution', () => {
         accounts: [klaudiuszProfile],
         selections: { '/tmp/projects/a': { claude: 'klaudiusz' } },
       });
-      const store = await loadAgentAccounts();
+      const store = await loadAgentAccounts(testHome());
       expect(selectProfile(store, { provider: 'claude', repoRoot: '/tmp/projects/a', env }).id).toBe('klaudiusz');
     });
 
@@ -114,7 +115,7 @@ describe('agent profile resolution', () => {
         accounts: [klaudiuszProfile],
         selections: { '/tmp/projects/a': { claude: 'klaudiusz' } },
       });
-      const store = await loadAgentAccounts();
+      const store = await loadAgentAccounts(testHome());
       expect(
         selectProfile(store, { provider: 'claude', repoRoot: '/tmp/projects/a', profileId: 'default', env }).id,
       ).toBe('default');
@@ -122,7 +123,7 @@ describe('agent profile resolution', () => {
 
     it('degrades an UNKNOWN id to the default — a dangling reference names no account', async () => {
       write({ selections: { '/tmp/projects/a': { claude: 'deleted-yesterday' } } });
-      const store = await loadAgentAccounts();
+      const store = await loadAgentAccounts(testHome());
       expect(selectProfile(store, { provider: 'claude', repoRoot: '/tmp/projects/a', env }).isDefault).toBe(true);
     });
 
@@ -131,13 +132,13 @@ describe('agent profile resolution', () => {
         accounts: [klaudiuszProfile],
         selections: { '/tmp/projects/a': { codex: 'klaudiusz' } },
       });
-      const store = await loadAgentAccounts();
+      const store = await loadAgentAccounts(testHome());
       expect(selectProfile(store, { provider: 'codex', repoRoot: '/tmp/projects/a', env }).isDefault).toBe(true);
     });
 
     it('defaults for an unregistered root — headless runs and task worktrees', async () => {
       write({ accounts: [klaudiuszProfile] });
-      const store = await loadAgentAccounts();
+      const store = await loadAgentAccounts(testHome());
       expect(selectProfile(store, { provider: 'claude', repoRoot: '/somewhere/else', env }).isDefault).toBe(true);
       expect(selectProfile(store, { provider: 'claude', env }).isDefault).toBe(true);
     });
@@ -146,7 +147,7 @@ describe('agent profile resolution', () => {
   describe('resolveProfileEnvForRoot', () => {
     it('adds NOTHING for the default profile', async () => {
       write({});
-      const resolved = await resolveProfileEnvForRoot('/tmp/projects/a', 'claude');
+      const resolved = await resolveProfileEnvForRoot('/tmp/projects/a', 'claude', undefined, undefined, testHome());
       expect(resolved.env).toEqual({});
       expect(resolved.profile.isDefault).toBe(true);
     });
@@ -156,7 +157,7 @@ describe('agent profile resolution', () => {
         accounts: [{ ...klaudiuszProfile, configDir: '/opt/claude-klaudiusz' }],
         selections: { '/tmp/projects/a': { claude: 'klaudiusz' } },
       });
-      const resolved = await resolveProfileEnvForRoot('/tmp/projects/a', 'claude');
+      const resolved = await resolveProfileEnvForRoot('/tmp/projects/a', 'claude', undefined, undefined, testHome());
       expect(resolved.env).toEqual({ CLAUDE_CONFIG_DIR: '/opt/claude-klaudiusz' });
     });
 
@@ -167,7 +168,7 @@ describe('agent profile resolution', () => {
         ],
         selections: { '/tmp/projects/a': { codex: 'cx' } },
       });
-      const resolved = await resolveProfileEnvForRoot('/tmp/projects/a', 'codex');
+      const resolved = await resolveProfileEnvForRoot('/tmp/projects/a', 'codex', undefined, undefined, testHome());
       expect(resolved.env).toEqual({ CODEX_HOME: '/opt/codex-klaudiusz' });
     });
 
@@ -179,16 +180,16 @@ describe('agent profile resolution', () => {
         ],
         selections: { '/tmp/projects/a': { pi: 'pi-work', omp: 'omp-work' } },
       });
-      expect((await resolveProfileEnvForRoot('/tmp/projects/a', 'pi')).env).toEqual({ PI_CODING_AGENT_DIR: '/opt/pi-work/agent' });
-      expect((await resolveProfileEnvForRoot('/tmp/projects/a', 'omp', undefined, env)).env).toEqual({ OMP_PROFILE: 'work' });
+      expect((await resolveProfileEnvForRoot('/tmp/projects/a', 'pi', undefined, undefined, testHome())).env).toEqual({ PI_CODING_AGENT_DIR: '/opt/pi-work/agent' });
+      expect((await resolveProfileEnvForRoot('/tmp/projects/a', 'omp', undefined, env, testHome(env))).env).toEqual({ OMP_PROFILE: 'work' });
       // The default account of either still adds nothing.
-      expect((await resolveProfileEnvForRoot('/tmp/projects/b', 'pi')).env).toEqual({});
-      expect((await resolveProfileEnvForRoot('/tmp/projects/b', 'omp')).env).toEqual({});
+      expect((await resolveProfileEnvForRoot('/tmp/projects/b', 'pi', undefined, undefined, testHome())).env).toEqual({});
+      expect((await resolveProfileEnvForRoot('/tmp/projects/b', 'omp', undefined, undefined, testHome())).env).toEqual({});
     });
 
     it('degrades to the default when the accounts file is unreadable', async () => {
-      writeFileSync(agentAccountsPath(), '{ not json', 'utf8');
-      const resolved = await resolveProfileEnvForRoot('/tmp/projects/a', 'claude');
+      writeFileSync(agentAccountsPath(testHome()), '{ not json', 'utf8');
+      const resolved = await resolveProfileEnvForRoot('/tmp/projects/a', 'claude', undefined, undefined, testHome());
       expect(resolved.env).toEqual({});
     });
 
@@ -200,11 +201,11 @@ describe('agent profile resolution', () => {
         selections: { '/tmp/projects/a': { omp: 'omp-work' } },
       });
       const moved = { ...env, PI_CONFIG_DIR: '.omp-alt' } as NodeJS.ProcessEnv;
-      const refused = resolveProfileEnvForRoot('/tmp/projects/a', 'omp', undefined, moved);
+      const refused = resolveProfileEnvForRoot('/tmp/projects/a', 'omp', undefined, moved, testHome(moved));
       await expect(refused).rejects.toBeInstanceOf(AgentAccountUnavailableError);
       await expect(refused).rejects.toThrow('/home/u/.omp-alt/profiles');
       // A recorded profile on Continue is refused the same way; the default is never substituted.
-      await expect(resolveProfileEnvForRoot('/tmp/projects/b', 'omp', 'omp-work', moved)).rejects.toThrow(AgentAccountUnavailableError);
+      await expect(resolveProfileEnvForRoot('/tmp/projects/b', 'omp', 'omp-work', moved, testHome(moved))).rejects.toThrow(AgentAccountUnavailableError);
     });
   });
 
@@ -298,7 +299,7 @@ describe('agent profile resolution', () => {
   describe('the machine-wide default account', () => {
     it('is used by a repo that has chosen nothing', async () => {
       write({ accounts: [klaudiuszProfile], defaults: { claude: 'klaudiusz' } });
-      const store = await loadAgentAccounts();
+      const store = await loadAgentAccounts(testHome());
       expect(selectProfile(store, { provider: 'claude', repoRoot: '/tmp/projects/a', env }).id)
         .toBe('klaudiusz');
     });
@@ -311,14 +312,14 @@ describe('agent profile resolution', () => {
         defaults: { claude: 'klaudiusz' },
         selections: { '/tmp/projects/a': { claude: 'client' } },
       });
-      const store = await loadAgentAccounts();
+      const store = await loadAgentAccounts(testHome());
       expect(selectProfile(store, { provider: 'claude', repoRoot: '/tmp/projects/a', env }).id)
         .toBe('client');
     });
 
     it('loses to a per-task override, which is the most specific answer there is', async () => {
       write({ accounts: [klaudiuszProfile], defaults: { claude: 'klaudiusz' } });
-      const store = await loadAgentAccounts();
+      const store = await loadAgentAccounts(testHome());
       expect(selectProfile(store, {
         provider: 'claude',
         repoRoot: '/tmp/projects/a',
@@ -329,14 +330,14 @@ describe('agent profile resolution', () => {
 
     it('is per provider — a claude default says nothing about codex', async () => {
       write({ accounts: [klaudiuszProfile], defaults: { claude: 'klaudiusz' } });
-      const store = await loadAgentAccounts();
+      const store = await loadAgentAccounts(testHome());
       expect(selectProfile(store, { provider: 'codex', repoRoot: '/tmp/projects/a', env }).isDefault)
         .toBe(true);
     });
 
     it('degrades to the discovered account when it names an account that is gone', async () => {
       write({ accounts: [], defaults: { claude: 'deleted-account' } });
-      const store = await loadAgentAccounts();
+      const store = await loadAgentAccounts(testHome());
       expect(selectProfile(store, { provider: 'claude', repoRoot: '/tmp/projects/a', env }).isDefault)
         .toBe(true);
     });

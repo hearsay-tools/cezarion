@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import * as fs from 'node:fs/promises';
 vi.mock('node:fs/promises', async importOriginal => ({ ...await importOriginal<typeof import('node:fs/promises')>() }));
@@ -30,7 +31,7 @@ describe('project reports', () => {
     const source = join(root, name); writeFileSync(source, `<title>${title}</title><p>report</p>`);
     return publishArtifact(artifactDirectory(dataDir, id), id, source);
   };
-  const get = (query = '', project = 'default') => apiRequest(createApp({ repoRoot: root, store, manager: {} as RunManager, version: 'test' }), `/api/v1/p/${project}/reports${query}`);
+  const get = (query = '', project = 'default') => apiRequest(createApp({ home: testHome(), repoRoot: root, store, manager: {} as RunManager, version: 'test' }), `/api/v1/p/${project}/reports${query}`);
   const page = async (query = '') => reportsResponseSchema.parse(await (await get(query)).json());
 
   it('serves the project state twin and marks finite watch demand', async () => {
@@ -373,7 +374,7 @@ describe('project reports', () => {
 
   it('refuses an unavailable store instead of reporting an empty project', async () => {
     const unavailable = RunStore.unavailable(dataDir, new RunStoreOpenError('corrupt', join(dataDir, 'runs.db'), 'Run history is damaged'));
-    const app = createApp({ repoRoot: root, store: unavailable, manager: {} as RunManager, version: 'test' });
+    const app = createApp({ home: testHome(), repoRoot: root, store: unavailable, manager: {} as RunManager, version: 'test' });
     const response = await apiRequest(app, '/api/v1/p/default/reports');
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ error: expect.stringContaining('Run history is damaged') });

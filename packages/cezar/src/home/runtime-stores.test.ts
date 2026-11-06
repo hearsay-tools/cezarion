@@ -1,3 +1,4 @@
+import { testHome } from './test-home.testkit.ts';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
@@ -17,8 +18,8 @@ it('loads machine defaults and retention from the selected Home', async () => {
   const { root, selected } = runtimeHomes();
   expect((await loadConfig(root, selected)).defaultRunner).toBe('codex');
   expect(await resolveWorktreeRetention(root, selected)).toBe(17);
-  expect((await loadConfig(root)).defaultRunner).toBe('claude');
-  expect(await resolveWorktreeRetention(root)).toBe(2);
+  expect((await loadConfig(root, testHome())).defaultRunner).toBe('claude');
+  expect(await resolveWorktreeRetention(root, testHome())).toBe(2);
 });
 
 it('applies selected model policy at start and Continue gates', () => {
@@ -26,7 +27,7 @@ it('applies selected model policy at start and Continue gates', () => {
   expect(agentModelsLocked(root, process.env, selected)).toBe(true);
   expect(startRefusal(root, { model: 'sonnet' }, selected)).toMatchObject({ status: 409 });
   expect(continueRefusal(root, { effort: 'high' }, selected)).toMatchObject({ ok: false });
-  expect(agentModelsLocked(root)).toBe(false);
+  expect(agentModelsLocked(root, undefined, testHome())).toBe(false);
 });
 
 it('resolves task accounts and runtime auth verification in the selected Home', async () => {
@@ -34,7 +35,7 @@ it('resolves task accounts and runtime auth verification in the selected Home', 
   const resolved = await resolveProfileEnvForRoot(root, 'claude', undefined, process.env, selected);
   expect(resolved.env.CLAUDE_CONFIG_DIR).toBe(join(root, 'selected-account'));
   expect(await resolveRuntimeAuthVerificationTarget('claude', 'work', selected)).toEqual({ kind: 'profile', id: 'work', configDir: join(root, 'selected-account') });
-  expect((await resolveProfileEnvForRoot(root, 'claude')).env.CLAUDE_CONFIG_DIR).toBe(join(root, 'ambient-account'));
+  expect((await resolveProfileEnvForRoot(root, 'claude', undefined, undefined, testHome())).env.CLAUDE_CONFIG_DIR).toBe(join(root, 'ambient-account'));
 });
 
 it('refreshes the semaphore from the selected Home', async () => {

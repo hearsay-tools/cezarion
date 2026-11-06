@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,7 +9,7 @@ import { PROVIDER_IDS, ProviderAuthService, type ProviderId, type ProviderStatus
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
 import { RunStore } from '../runs/store.ts';
 import type { TaskWebhooks } from '../runs/webhook.ts';
-import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from '../workspace/config.ts';
+import { loadWorkspaceConfig, } from '../workspace/config.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { openFileInDefaultApp, openInApp } from './open-in-app.ts';
 import { openInTerminal } from './open-in-terminal.ts';
@@ -38,15 +39,22 @@ describe('resolveServerDeps', () => {
       openApp: vi.fn(),
     };
     // `/does/not/exist` proves the default catalog's adapters are never built for it.
-    const resolved = resolveServerDeps(injected, '/does/not/exist');
+    const resolved = resolveServerDeps({ ...injected, home: testHome() }, '/does/not/exist');
     for (const key of Object.keys(injected) as (keyof typeof injected)[]) expect(resolved[key]).toBe(injected[key]);
   });
 
-  it('falls back to the real default for every service that is absent', () => {
-    const resolved = resolveServerDeps({}, process.cwd());
+  it('falls back to the real default for every service that is absent', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'cez-default-services-'));
+    const home = testHome({ CEZ_HOME: root });
+    const resolved = resolveServerDeps({ home }, process.cwd());
     expect(resolved.modelCatalog).toBeInstanceOf(RunnerModelCatalog);
     expect(resolved.providerAuth).toBeInstanceOf(ProviderAuthService);
-    expect(resolved.workspaceConfig).toEqual({ load: loadWorkspaceConfig, mergeWrite: mergeWriteWorkspaceConfig });
+    // The default store binds the injected Home; wrappers replace the former function identities.
+    try {
+      await resolved.workspaceConfig.mergeWrite(config => { config.resources.maxParallel = 7; });
+      expect((await resolved.workspaceConfig.load()).resources.maxParallel).toBe(7);
+      expect((await loadWorkspaceConfig(home.workspaceConfig)).resources.maxParallel).toBe(7);
+    } finally { rmSync(root, { recursive: true, force: true }); }
     expect(resolved.openTerminal).toBe(openInTerminal);
     expect(resolved.openFile).toBe(openFileInDefaultApp);
     expect(resolved.openApp).toBe(openInApp);
@@ -54,7 +62,7 @@ describe('resolveServerDeps', () => {
 
   it('mixes injected and default services one by one', () => {
     const openApp = vi.fn();
-    const resolved = resolveServerDeps({ openApp }, process.cwd());
+    const resolved = resolveServerDeps({ home: testHome(), openApp }, process.cwd());
     expect(resolved.openApp).toBe(openApp);
     expect(resolved.openFile).toBe(openFileInDefaultApp);
   });
@@ -141,7 +149,7 @@ describe('createBootContext', () => {
 
   it('seeds the context from the caller deps and the launch key on disk', () => {
     const automationStore = {} as AutomationStore;
-    const context = createBootContext({ bootProjectId: 'boot', store, manager, automationStore }, root, dataDir);
+    const context = createBootContext({ home: testHome(), bootProjectId: 'boot', store, manager, automationStore }, root, dataDir);
     expect(context).toMatchObject({ id: 'boot', root, dataDir });
     expect(context.store).toBe(store);
     expect(context.manager).toBe(manager);
@@ -150,7 +158,7 @@ describe('createBootContext', () => {
   });
 
   it('names the boot project `default` and opens its own automation store when none is injected', () => {
-    const context = createBootContext({ store, manager }, root, dataDir);
+    const context = createBootContext({ home: testHome(), store, manager }, root, dataDir);
     expect(context.id).toBe('default');
     expect(context.automationStore).toBeInstanceOf(AutomationStore);
     expect(context.automationStore.dataDir).toBe(dataDir);
@@ -158,7 +166,7 @@ describe('createBootContext', () => {
 
   it('does not open the default automation store when one is injected', () => {
     const open = vi.spyOn(AutomationStore, 'open');
-    createBootContext({ store, manager, automationStore: {} as AutomationStore }, root, dataDir);
+    createBootContext({ home: testHome(), store, manager, automationStore: {} as AutomationStore }, root, dataDir);
     expect(open).not.toHaveBeenCalled();
     open.mockRestore();
   });
@@ -222,14 +230,14 @@ describe('context listeners', () => {
 
     it('runs the provider watch, then the webhook attach, then the project-ready event for a built context', () => {
       const events: string[] = [];
-      const contexts = new ProjectContexts({ listProjects: async () => [] });
+      const contexts = new ProjectContexts({ home: testHome(), listProjects: async () => [] });
       const listeners: ((ctx: ProjectContext) => void)[] = [];
       const register = contexts.onContextBuilt.bind(contexts);
       vi.spyOn(contexts, 'onContextBuilt').mockImplementation((listener) => {
         listeners.push(listener);
         return register(listener);
       });
-      createApp({
+      createApp({ home: testHome(),
         repoRoot: root,
         store,
         manager: {} as RunManager,

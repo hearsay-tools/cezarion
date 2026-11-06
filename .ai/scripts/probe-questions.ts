@@ -1,3 +1,4 @@
+import { resolveHome } from '../../packages/cezar/src/home/resolve.ts';
 import { setRunStatus } from '../../packages/cezar/src/runs/run-store.testkit.ts';
 // Manual real-harness probe for #505 PR B: a worker's CEZ:ASK question travels to its
 // parent, and the parent's reply answers it on the real harness.
@@ -20,6 +21,7 @@ import { planOwnedWorkspace } from '../../packages/cezar/src/delegation/workspac
 import { RunStore } from '../../packages/cezar/src/runs/store.ts';
 import { RunManager } from '../../packages/cezar/src/workflows/run.ts';
 
+const home = resolveHome({ purpose: 'cli' });
 const [backend, model] = process.argv.slice(2) as [RunnerId, string | undefined];
 if (!backend) { console.error('usage: probe-questions.ts <backend> [model]'); process.exit(2); }
 delete process.env.CEZ_DRY_RUN; process.env.CEZ_AUTONAME = '0';
@@ -41,7 +43,7 @@ const workspace = await planOwnedWorkspace(repoRoot, workerId, git('rev-parse', 
 store.createOwnedRun({ title: 'worker', task: TASK, workflow: 'quick-task', runner: backend, ...(model ? { model } : {}),
   steps: [{ id: 'task', name: 'Task', kind: 'agent' }] }, parent.id, randomUUID(), { role: 'worker', parentRunId: parent.id, permissions: [], workspace },
 'a'.repeat(64), { kind: 'internal' });
-const manager = new RunManager(store, repoRoot);
+const manager = new RunManager(store, repoRoot, { home });
 const events = (type: string) => store.readEvents(workerId).filter(event => event.type === type);
 const until = async (predicate: () => boolean, ms = 240_000) => {
   const start = Date.now();

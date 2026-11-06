@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { WaitRegistry } from './run/wait-registry.ts';
 import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -53,7 +54,7 @@ function assertIgnoredResolution(runId: string, waitId: string, result: CiWaitRe
   const host: Host = new Proxy(Object.create(null), {
     get(_target, property) { throw new Error(`Settled wait consulted ${String(property)}`); },
   });
-  const registry = new WaitRegistry({ store, repoRoot: root, dataDir: join(root, '.ai/cezar'), semaphore, work, disposed: () => false }, host, 10);
+  const registry = new WaitRegistry({ home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), semaphore, work, disposed: () => false }, host, 10);
   const before = structuredClone(store.getRun(runId));
   registry.resolveWait(runId, waitId, result);
   expect(store.getRun(runId)).toEqual(before);

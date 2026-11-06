@@ -4,7 +4,6 @@ import type { detectEnvironment } from './core/backend-detect.ts';
 import type { DelegationController } from './delegation/provision.ts';
 import type { startServer } from './server/server.ts';
 import { recoverWithProviderRuntimeAuthObservation, type ProviderRuntimeAuthObserver } from './server/provider-auth-runtime.ts';
-import { resolveHome } from './home/resolve.ts';
 import type { Home } from './home/home.ts';
 import { currentEntry } from './self-update/layout.ts';
 import { readNpmConfiguration } from './application-update/npm-process.ts';
@@ -31,9 +30,9 @@ export async function reconcileServeWorktrees(
   repo: Awaited<ReturnType<typeof getRepoInfo>>,
   store: RunStore,
   manager: RunManager,
-  previewHost?: PreviewHost,
+  previewHost: PreviewHost | undefined,
   steps = reconcileDefaults,
-  home?: Home,
+  home: Home,
 ): Promise<void> {
   // Startup reconcile (spec 006): sweep worktrees whose run no longer exists. Never over a store
   // that could not open (#779): its runs are unknown, and every worktree would look orphaned.
@@ -101,8 +100,8 @@ export function createServeApplicationUpdate(
   update: { latest?: string },
   getServer: () => ReturnType<typeof startServer>,
   readNpm = readNpmConfiguration,
-  store?: Pick<RunStore, 'close'>,
-  home = resolveHome({ purpose: 'compatibility' }),
+  store: Pick<RunStore, 'close'> | undefined,
+  home: Home,
 ): ApplicationUpdateService | undefined {
   // Discovery reads npm metadata only; a missing npm or source checkout degrades to manual update.
   const npm = readNpm();
@@ -167,16 +166,16 @@ export async function restartServe(
   server: StoppableServer & Pick<ReturnType<typeof startServer>, 'address'>,
   restart: (opts: RestartOptions) => void = restartProcess,
   opts: StopServeOptions = {},
-  home?: Home,
+  home: Home,
 ): Promise<void> {
   const port = restartEndpoint(server.address()).port;
   await stopServe(server, 'SIGTERM', opts);
-  restart({ server: null, args: process.argv.slice(2), port, supervised: isSupervised(), ...(home ? { entry: currentEntry(process.env, home) } : {}) });
+  restart({ server: null, args: process.argv.slice(2), port, supervised: isSupervised(), entry: currentEntry(process.env, home) });
 }
 
 /** The managed desktop updater; a restart re-execs this serve on the same port. */
 export function createServeSelfUpdate(
-  opts: { pkgName: string; version: string; store: RunStore; bindHost: string | undefined; home?: Home },
+  opts: { pkgName: string; version: string; store: RunStore; bindHost: string | undefined; home: Home },
   getServer: () => ReturnType<typeof startServer>,
 ): SelfUpdateService {
   return new SelfUpdateService({

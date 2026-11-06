@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { assertReplyDirection, sendRequestContext, sendAdmission, sendMessage, sendInput, type ConversationPair } from './conversation-send.ts';
 import { discoverTasks } from './task-discovery.ts';
 import { discoveredRunners, missingModelChoices, type HostDiscovery } from '../discovery/catalog.ts';
@@ -85,16 +86,16 @@ export type DelegationManager = Pick<RunManager,
   | 'reserveInboxInputs' | 'selectDelegationExecutionSettings' | 'settleOrphanedWorkerExecution'
   | 'steerWorker' | 'takeWorkerTerminationBlocker'>;
 
-export type DelegationProject = { id: string; root: string; store: RunStore; manager: DelegationManager };
+export type DelegationProject = { home: Home; id: string; root: string; store: RunStore; manager: DelegationManager };
 
 /**
  * Resolve an explicit workflow or skill. With neither, use the built-in quick-task constant, not
  * a repo override. Require at least one agent step and resolve its runner/account independently.
  */
-async function resolveSpawnWorkflow(project: Pick<DelegationProject, 'root' | 'manager'>, request: WorkerSpawnRequest): Promise<WorkflowDef> {
+async function resolveSpawnWorkflow(project: Pick<DelegationProject, 'root' | 'manager' | 'home'>, request: WorkerSpawnRequest): Promise<WorkflowDef> {
   const root = project.root;
   if (request.skill !== undefined) {
-    const skills = await discoverSkills(root, { builtin: project.manager.builtinSkills?.() ?? [] });
+    const skills = await discoverSkills(root, { builtin: project.manager.builtinSkills?.() ?? [] }, project.home);
     if (!skills.some(skill => skill.name === request.skill)) throw new DelegationPolicyError('invalid_input', `Unknown skill "${request.skill}"; available: ${skills.map(skill => skill.name).join(', ')}`);
     return plannedWorkflow(skillTaskSteps(request.skill));
   }

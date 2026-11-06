@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { captureSessions } from './runner-session-capture.testkit.ts';
 import { isDisposedDelegatedRun } from './run/run-guards.ts';
 import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
@@ -51,7 +52,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('disposed turn bookkeeping leaves durable fields unchanged before applying title markers', async () => {
     const run = store.createRun({ title: 'disposed root', task: 'task', workflow: 'quick-task', steps: [] });
     const disposed = () => true;
-    const context = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'), semaphore, work, disposed };
+    const context = { home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), semaphore, work, disposed };
     const host = unused<ConstructorParameters<typeof TurnBookkeeper>[1]>('TurnBookkeeperHost', { isDisposedDelegatedRun: disposed });
     const bookkeeper = new TurnBookkeeper(context, host);
     const snapshot = structuredClone(store.getRun(run.id));

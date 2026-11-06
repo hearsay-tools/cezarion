@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -44,9 +45,9 @@ describe('createCezarClient<AppType>', () => {
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     clearProjectProbeCache();
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-    contexts = new ProjectContexts({ listProjects });
-    await registerProject(repoRoot);
-    app = createApp({
+    contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    await registerProject(repoRoot, undefined, testHome());
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager: { isActive: () => false } as unknown as RunManager,

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -48,7 +49,7 @@ describe('recover() with tied runs in a one-slot project', () => {
     const second = 'eeeeeeee-1111-4222-8333-ffffffffffff';
     writeFileSync(join(repoRoot, '.ai/cezar/runs.json'), JSON.stringify([record(first), record(second)]));
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-    const manager = createFixtureManager(store, repoRoot, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }) });
+    const manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } }) });
 
     // The order the two leave the queue: recovery requeues both, then the pump starts them.
     const queued = new Set<string>();

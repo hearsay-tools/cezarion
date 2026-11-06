@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus, openTestRunStore } from '../runs/run-store.testkit.ts';
 import * as agentAccounts from '../workspace/agent-accounts.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -33,10 +34,10 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
     }
     const other = join(f.root, 'account-b'); mkdirSync(other);
-    await mergeWriteAgentAccounts(store => { store.accounts[0]!.configDir = other; });
+    await mergeWriteAgentAccounts(store => { store.accounts[0]!.configDir = other; }, testHome());
     // Matching replay cannot rebind accepted identity, including after the row is deleted.
     expect(await controller.service.spawn(a.caller, a.request)).toEqual(a.child);
-    if (change === 'delete') await mergeWriteAgentAccounts(store => { store.accounts = []; });
+    if (change === 'delete') await mergeWriteAgentAccounts(store => { store.accounts = []; }, testHome());
     if (mode === 'continue') expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true);
     else await launchAccepted(a, mode);
     await until(() => sessions.length === (mode === 'continue' ? 3 : 2));
@@ -97,13 +98,13 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   it.each(PROVISION_ROWS.supportedHomes)('pins supported homes while preserving %s profile limits', async runner => {
     const home = join(f.root, 'provider-home'); mkdirSync(home);
     const profile = runner === 'codex' ? 'work' : 'default';
-    if (runner === 'codex') await mergeWriteAgentAccounts(store => { store.accounts = [{ id: profile, provider: runner, configDir: home, label: '', addedAt: '' }]; });
+    if (runner === 'codex') await mergeWriteAgentAccounts(store => { store.accounts = [{ id: profile, provider: runner, configDir: home, label: '', addedAt: '' }]; }, testHome());
     const parent = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner, agentProfile: profile, worktree: false });
     await until(() => sessions.length === 1);
     const caller = controller.credentials.authenticate(delegationToken(sessions[0]!.spec))!;
     const admission = vi.spyOn(WorkspaceSemaphore.prototype, 'maxParallel').mockReturnValue(0);
     const child = await controller.service.spawn(caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
-    await mergeWriteAgentAccounts(store => { store.accounts = []; });
+    await mergeWriteAgentAccounts(store => { store.accounts = []; }, testHome());
     expect(admission).toHaveBeenCalled(); admission.mockRestore(); await f.releaseAdmission();
     await until(() => sessions.length === 2);
     expect(sessions[1]!.spec.env?.CODEX_HOME).toBe(runner === 'codex' ? home : undefined);
@@ -187,7 +188,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true }); recoveredStores.push(store);
     expect(store.getRun(worker.id)?.systemPrompt).toBe(legacyPrompt);
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager);
-    controller.attachProject({ id: 'restarted-legacy', root: f.root, store, manager });
+    controller.attachProject({ home: testHome(), id: 'restarted-legacy', root: f.root, store, manager });
     await manager.recover(); await until(() => sessions.length === 3);
     expect(sessions[2]!.spec.env?.CEZ_TASK_ID).toBe(worker.id);
     assertInlinePrompt(sessions[2]!.spec);
@@ -253,7 +254,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       await until(() => sessions.length === 1);
       const token = delegationToken(sessions[0]!.spec);
       const load = agentAccounts.loadAgentAccounts;
-      vi.spyOn(agentAccounts, 'loadAgentAccounts').mockImplementation(async () => { entered = true; await gate; return load(); });
+      vi.spyOn(agentAccounts, 'loadAgentAccounts').mockImplementation(async () => { entered = true; await gate; return load(testHome()); });
       doneTurn(sessions[0]!, 'one'); await until(() => entered);
       expect(f.store.getRun(run.id)?.status).toBe('running');
       expect(controller.credentials.authenticate(token)).toBeUndefined();
@@ -293,7 +294,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const run = f.store.createRun({ title: 'queued', task: 'recover', workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
     // A restart into a lazily built context: the old manager and store go first.
     f.manager.dispose(); f.store.close();
-    const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'lazy', root: f.root, status: 'ok' }], prepareManager: project => controller.attachProject(project) });
+    const contexts = new ProjectContexts({ home: testHome(), listProjects: async () => [{ id: 'lazy', root: f.root, status: 'ok' }], prepareManager: project => controller.attachProject(project) });
     try {
       const context = await contexts.context('lazy');
       await until(() => sessions.length >= 1);

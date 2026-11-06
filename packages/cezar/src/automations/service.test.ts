@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -47,7 +48,7 @@ describe('one-time writes after a crash-left reservation', () => {
     const runs = RunStore.open(join(dir, 'runs'));
     const project: AutomationServiceProject = { id: 'p', root: dir, automationStore, store: runs, manager: {} as RunManager };
     const launch = vi.fn(async () => ({ runId: 'second-task' }));
-    const service = createAutomationService({
+    const service = createAutomationService({ home: testHome(),
       timeZone: () => 'UTC',
       scheduleHandle: () => ({ projectId: 'p', store: automationStore, timeZone: 'UTC', now: () => NOW, launch, reconcile: async () => { reconcileAutomationReceipts(automationStore, runs); } }),
       emitChange: () => {}, changed: () => {},
@@ -90,7 +91,7 @@ describe('one-time writes that race or keep the due time (#1465 review)', () => 
     const automationStore = AutomationStore.open(join(dir, 'automations'), { now: () => new Date(NOW) });
     const runs = RunStore.open(join(dir, 'runs'));
     const project: AutomationServiceProject = { id: 'p', root: dir, automationStore, store: runs, manager: {} as RunManager };
-    const service = createAutomationService({
+    const service = createAutomationService({ home: testHome(),
       timeZone: () => 'UTC',
       scheduleHandle: () => ({ projectId: 'p', store: automationStore, timeZone: 'UTC', now: () => NOW, launch: async () => ({ runId: 'task' }) }),
       emitChange: () => {}, changed: () => {},

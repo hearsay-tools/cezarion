@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -84,7 +85,7 @@ describe('GET /api/v1/health — forge + capabilities', () => {
   });
 
   const makeApp = (over: Partial<ServerDeps> = {}) =>
-    createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', ...over });
+    createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', ...over });
 
   const health = async (over: Partial<ServerDeps> = {}): Promise<HealthBody> => {
     const res = await apiRequest(makeApp(over), '/api/v1/health');
@@ -298,7 +299,7 @@ describe('POST /api/v1/runs/:id/open-in-cli — hosted-mode defense in depth', (
 
   const post = (over: Partial<ServerDeps> = {}) =>
     apiRequest(
-      createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', ...over }),
+      createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', ...over }),
       `/api/v1/runs/${runId}/open-in-cli`,
       { method: 'POST' },
     );
@@ -326,7 +327,7 @@ describe('POST /api/v1/runs/:id/open-in-cli — hosted-mode defense in depth', (
 
   it('unknown runs still 404 first', async () => {
     process.env.CEZ_REMOTE = '1';
-    const app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
+    const app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
     const res = await apiRequest(app, '/api/v1/runs/nope/open-in-cli', { method: 'POST' });
     expect(res.status).toBe(404);
   });

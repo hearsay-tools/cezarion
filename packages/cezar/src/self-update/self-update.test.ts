@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { existsSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -49,36 +50,36 @@ describe('managed layout', () => {
   afterEach(() => rmSync(home, { recursive: true, force: true }));
 
   const fakeInstall = (id: string, version: string, source: 'registry' | 'local') => {
-    const entry = versionEntry(id, env);
+    const entry = versionEntry(id, env, testHome(env));
     mkdirSync(join(entry, '..'), { recursive: true });
     writeFileSync(entry, '// entry\n');
-    writeManifest(id, { version, source, installedAt: new Date(Date.parse('2026-09-25T10:00:00Z') + (source === 'local' ? 1 : 0)).toISOString() }, env);
+    writeManifest(id, { version, source, installedAt: new Date(Date.parse('2026-09-25T10:00:00Z') + (source === 'local' ? 1 : 0)).toISOString() }, env, testHome(env));
   };
 
   it('lists complete installs only and flips `current` atomically', () => {
     fakeInstall('0.11.0', '0.11.0', 'registry');
     fakeInstall('0.11.1+local', '0.11.1', 'local');
     // A manifest without an entry file is a torn install and must not be offered.
-    writeManifest('0.10.0', { version: '0.10.0', source: 'registry', installedAt: '2026-09-01T00:00:00Z' }, env);
+    writeManifest('0.10.0', { version: '0.10.0', source: 'registry', installedAt: '2026-09-01T00:00:00Z' }, env, testHome(env));
 
-    expect(listInstalled(env).map((entry) => entry.id)).toEqual(['0.11.1+local', '0.11.0']);
-    expect(activeId(env)).toBeNull();
+    expect(listInstalled(env, testHome(env)).map((entry) => entry.id)).toEqual(['0.11.1+local', '0.11.0']);
+    expect(activeId(env, testHome(env))).toBeNull();
 
-    activate('0.11.0', env);
-    expect(activeId(env)).toBe('0.11.0');
+    activate('0.11.0', env, testHome(env));
+    expect(activeId(env, testHome(env))).toBe('0.11.0');
     // The link's NAME is the id on every platform; its target is relative on POSIX and
     // absolute on Windows, where `current` is a junction.
-    expect(basename(readlinkSync(join(versionsDir(env), 'current')))).toBe('0.11.0');
-    expect(existsSync(currentEntry(env))).toBe(true);
+    expect(basename(readlinkSync(join(versionsDir(env, testHome(env)), 'current')))).toBe('0.11.0');
+    expect(existsSync(currentEntry(env, testHome(env)))).toBe(true);
 
-    activate('0.11.1+local', env);
-    expect(activeId(env)).toBe('0.11.1+local');
-    expect(listInstalled(env).find((entry) => entry.active)?.id).toBe('0.11.1+local');
+    activate('0.11.1+local', env, testHome(env));
+    expect(activeId(env, testHome(env))).toBe('0.11.1+local');
+    expect(listInstalled(env, testHome(env)).find((entry) => entry.active)?.id).toBe('0.11.1+local');
     // Replacing a link leaves the version it used to point at in place.
-    expect(existsSync(currentEntry(env))).toBe(true);
-    expect(existsSync(versionEntry('0.11.0', env))).toBe(true);
-    expect(existsSync(join(versionsDir(env), `.current.${process.pid}.tmp`))).toBe(false);
-    expect(() => activate('9.9.9', env)).toThrow(/not installed/);
+    expect(existsSync(currentEntry(env, testHome(env)))).toBe(true);
+    expect(existsSync(versionEntry('0.11.0', env, testHome(env)))).toBe(true);
+    expect(existsSync(join(versionsDir(env, testHome(env)), `.current.${process.pid}.tmp`))).toBe(false);
+    expect(() => activate('9.9.9', env, testHome(env))).toThrow(/not installed/);
   });
 
   it('derives the install id from the source', () => {
@@ -92,11 +93,11 @@ describe('managed layout', () => {
   it('refuses a version id that could escape the versions directory', () => {
     for (const id of ['..', '.', '.hidden', '0.11.1/../..', 'a..b', '']) {
       expect(() => assertSafeId(id)).toThrow(/invalid version id/);
-      expect(() => versionDir(id, env)).toThrow(/invalid version id/);
+      expect(() => versionDir(id, env, testHome(env))).toThrow(/invalid version id/);
     }
     for (const id of ['0.12.0', '0.12.0+local', '0.12.0-nightly.20260927.60', '0.9.2-pr743.1156.2']) {
       expect(assertSafeId(id)).toBe(id);
-      expect(versionDir(id, env)).toBe(join(versionsDir(env), id));
+      expect(versionDir(id, env, testHome(env))).toBe(join(versionsDir(env, testHome(env)), id));
     }
   });
 
@@ -106,21 +107,21 @@ describe('managed layout', () => {
   it('skips an unsafe directory name instead of throwing out of listInstalled', () => {
     fakeInstall('0.11.0', '0.11.0', 'registry');
     for (const junk of ['a..b', '-weird', 'has space', '0.1.0;rm']) {
-      mkdirSync(join(versionsDir(env), junk), { recursive: true });
+      mkdirSync(join(versionsDir(env, testHome(env)), junk), { recursive: true });
     }
-    expect(listInstalled(env).map((entry) => entry.id)).toEqual(['0.11.0']);
+    expect(listInstalled(env, testHome(env)).map((entry) => entry.id)).toEqual(['0.11.0']);
   });
 
   it('tells install kinds apart by where the entry file lives', () => {
-    expect(detectInstallKind(versionEntry('0.11.1', env), env)).toBe('managed');
-    expect(detectInstallKind('/Users/x/.npm/_npx/abc123/node_modules/@wjarka/cezarion/dist/index.js', env)).toBe('npx');
-    expect(detectInstallKind('/opt/homebrew/lib/node_modules/@wjarka/cezarion/dist/index.js', env)).toBe('global-npm');
+    expect(detectInstallKind(versionEntry('0.11.1', env, testHome(env)), env, testHome(env))).toBe('managed');
+    expect(detectInstallKind('/Users/x/.npm/_npx/abc123/node_modules/@wjarka/cezarion/dist/index.js', env, testHome(env))).toBe('npx');
+    expect(detectInstallKind('/opt/homebrew/lib/node_modules/@wjarka/cezarion/dist/index.js', env, testHome(env))).toBe('global-npm');
     const checkout = join(home, 'repo', 'packages', 'cezar');
     mkdirSync(join(checkout, 'src'), { recursive: true });
     mkdirSync(join(checkout, 'dist'), { recursive: true });
     writeFileSync(join(checkout, 'package.json'), '{}');
-    expect(detectInstallKind(join(checkout, 'dist', 'index.js'), env)).toBe('checkout');
-    expect(detectInstallKind(join(home, 'elsewhere', 'index.js'), env)).toBe('unknown');
+    expect(detectInstallKind(join(checkout, 'dist', 'index.js'), env, testHome(env))).toBe('checkout');
+    expect(detectInstallKind(join(home, 'elsewhere', 'index.js'), env, testHome(env))).toBe('unknown');
   });
 });
 
@@ -166,10 +167,10 @@ describe('activeId without a symlink', () => {
     const home = mkdtempSync(join(tmpdir(), 'cez-active-'));
     const env = { ...process.env, CEZ_HOME: home };
     try {
-      expect(activeId(env)).toBeNull();
-      mkdirSync(versionsDir(env), { recursive: true });
-      writeFileSync(join(versionsDir(env), 'current'), '0.11.1\n');
-      expect(activeId(env)).toBe('0.11.1');
+      expect(activeId(env, testHome(env))).toBeNull();
+      mkdirSync(versionsDir(env, testHome(env)), { recursive: true });
+      writeFileSync(join(versionsDir(env, testHome(env)), 'current'), '0.11.1\n');
+      expect(activeId(env, testHome(env))).toBe('0.11.1');
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

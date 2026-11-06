@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -65,7 +66,7 @@ describe('Git rediscovery for a project opened before its first commit (hearsay-
     roots.push(root);
     prepare(root);
     const store = RunStore.open(join(root, '.ai/cezar'));
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 16, ...limitsFor(root) } });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 16, ...limitsFor(root) } });
     const work = new TrackedWork();
     const original = globalThis.setInterval;
     const timers: Array<{ callback: () => void; ms: number }> = [];
@@ -74,7 +75,7 @@ describe('Git rediscovery for a project opened before its first commit (hearsay-
       if ((ms ?? 0) >= 10_000) timers.push({ callback, ms: ms ?? 0 });
       return original(callback, ms);
     }) as typeof setInterval);
-    const manager = createFixtureManager(store, root, { semaphore, work });
+    const manager = createFixtureManager(store, root, { home: testHome(), semaphore, work });
     spy.mockRestore();
     managers.push(manager);
     /** Fire every scheduler tick that falls inside the next `ms`, then let the pumps it began finish. */

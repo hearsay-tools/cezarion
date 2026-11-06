@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,7 +14,7 @@ import { enableRemoteSettings, readRemoteSettings } from '../remote-settings.ts'
 const noRunner: Runner = { capture: async () => ({ code: 0, stdout: '', stderr: '' }), interactive: async () => 0 };
 
 function opts(over: Partial<RunOptions> = {}): RunOptions {
-  return {
+  return { home: testHome(),
     dryRun: false,
     assumeYes: true,
     reconfigure: new Set(),
@@ -61,7 +62,7 @@ describe('engine', () => {
     expect(res.status).toBe('complete');
     expect(res.state.installed).toBe(true);
     expect(a.run).toHaveBeenCalledOnce();
-    expect(loadServerState().steps.a?.status).toBe('done');
+    expect(loadServerState(undefined, testHome()).steps.a?.status).toBe('done');
   });
 
   it('resume skips already-done steps', async () => {
@@ -83,10 +84,10 @@ describe('engine', () => {
     };
 
     await runInstall(strategy, opts({ externalProxy: true }));
-    expect(loadServerState().externalProxy).toBe(true);
+    expect(loadServerState(undefined, testHome()).externalProxy).toBe(true);
 
     await runInstall(strategy, opts({ externalProxy: undefined }));
-    expect(loadServerState().externalProxy).toBe(true);
+    expect(loadServerState(undefined, testHome()).externalProxy).toBe(true);
     expect(managedProxyStep.run).not.toHaveBeenCalled();
   });
 
@@ -119,7 +120,7 @@ describe('engine', () => {
     expect(res.status).toBe('failed');
     expect(res.state.installed).toBe(false);
     expect(b.run).not.toHaveBeenCalled();
-    expect(loadServerState().steps.a?.status).toBe('failed');
+    expect(loadServerState(undefined, testHome()).steps.a?.status).toBe('failed');
   });
 
   it('runDeploy invokes the strategy redeploy and completes', async () => {
@@ -161,7 +162,7 @@ describe('engine', () => {
     // reverse order: b undone before a
     expect(b2.undo).toHaveBeenCalledWith(expect.anything(), { artifacts: [{ kind: 'owned', type: 'file', path: '/etc/b' }] });
     expect(a2.undo).toHaveBeenCalledOnce();
-    const after = loadServerState();
+    const after = loadServerState(undefined, testHome());
     expect(after.steps).toEqual({});
     expect(after.installed).toBe(false);
     // platform is cleared so the host can be re-installed with any platform
@@ -188,7 +189,7 @@ describe('engine', () => {
           source: 'local',
         },
       ];
-    });
+    }, testHome());
     await runInstall(strategyOf([fakeStep('a')]), opts());
     const undo = fakeStep('a');
     const warn = vi.fn();
@@ -234,22 +235,22 @@ describe('engine', () => {
     // the second run actually RAN its step — it did NOT report "already done"
     // from the default record (the "asks me to reinstall" bug being fixed)
     expect(b.run).toHaveBeenCalledOnce();
-    expect(loadServerState('shop-example-com').domain).toBe('shop.example.com');
-    expect(loadServerState('shop-example-com').primaryPort).toBe(4322);
-    expect(loadServerState('shop-example-com').instance).toBe('shop-example-com');
+    expect(loadServerState('shop-example-com', testHome()).domain).toBe('shop.example.com');
+    expect(loadServerState('shop-example-com', testHome()).primaryPort).toBe(4322);
+    expect(loadServerState('shop-example-com', testHome()).instance).toBe('shop-example-com');
     // the default record is untouched (still port 4321, no domain)
-    expect(loadServerState().primaryPort).toBe(4321);
-    expect(loadServerState().domain).toBeUndefined();
+    expect(loadServerState(undefined, testHome()).primaryPort).toBe(4321);
+    expect(loadServerState(undefined, testHome()).domain).toBeUndefined();
   });
 
   // A grant names a port (ADR 0055). Another domain installed later on the same port must not
   // inherit it: uninstall withdraws it, and a fresh install on the port withdraws a leftover one.
-  const grantedPorts = () => readRemoteSettings().grants.map((grant) => grant.port);
+  const grantedPorts = () => readRemoteSettings(undefined, testHome()).grants.map((grant) => grant.port);
 
   it('uninstalling a cockpit withdraws its remote settings grant, and only its own', async () => {
     await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'shop-example-com', domain: 'shop.example.com', port: 4322 }));
-    await enableRemoteSettings(4321);
-    await enableRemoteSettings(4322);
+    await enableRemoteSettings(4321, undefined, undefined, testHome());
+    await enableRemoteSettings(4322, undefined, undefined, testHome());
     const res = await runUninstall(strategyOf([fakeStep('a')]), opts({ instance: 'shop-example-com' }));
     expect(res.status).toBe('complete');
     expect(grantedPorts()).toEqual([4321]);
@@ -257,23 +258,23 @@ describe('engine', () => {
 
   it('a real install after a dry-run preview withdraws a grant left on its port', async () => {
     await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'blog-example-com', domain: 'blog.example.com', port: 4322, dryRun: true }));
-    await enableRemoteSettings(4322);
+    await enableRemoteSettings(4322, undefined, undefined, testHome());
     await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'blog-example-com', domain: 'blog.example.com', port: 4322 }));
     expect(grantedPorts()).toEqual([]);
   });
 
   it('a fresh install withdraws a grant left on its port; re-running a completed install keeps its own', async () => {
-    await enableRemoteSettings(4322);
+    await enableRemoteSettings(4322, undefined, undefined, testHome());
     await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'blog-example-com', domain: 'blog.example.com', port: 4322 }));
     expect(grantedPorts()).toEqual([]);
-    await enableRemoteSettings(4322);
+    await enableRemoteSettings(4322, undefined, undefined, testHome());
     await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'blog-example-com', domain: 'blog.example.com', port: 4322 }));
     expect(grantedPorts()).toEqual([4322]);
   });
 
   it('a dry run only says it would withdraw a grant', async () => {
     await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'shop-example-com', domain: 'shop.example.com', port: 4322 }));
-    await enableRemoteSettings(4322);
+    await enableRemoteSettings(4322, undefined, undefined, testHome());
     const lines: string[] = [];
     await runUninstall(strategyOf([fakeStep('a')]), opts({ instance: 'shop-example-com', dryRun: true, ui: createAutoUi({}, (m) => lines.push(m)) }));
     expect(grantedPorts()).toEqual([4322]);
@@ -286,7 +287,7 @@ describe('engine', () => {
     expect(res.status).toBe('complete');
     // the named record file is gone → it no longer reserves a port or lists
     const { listServerInstances } = await import('./state.ts');
-    expect(listServerInstances().some((i) => i.instance === 'shop-example-com')).toBe(false);
+    expect(listServerInstances(testHome()).some((i) => i.instance === 'shop-example-com')).toBe(false);
   });
 
   it('--yes skips optional steps rather than running them non-interactively', async () => {
@@ -319,7 +320,7 @@ describe('engine — ledger preservation and uninstall safety (PR #423 review fi
   it('a cancelled --reconfigure re-run keeps the previously recorded artifacts', async () => {
     const a = fakeStep('a');
     await runInstall(strategyOf([a]), opts());
-    expect(loadServerState().steps.a?.created?.artifacts).toHaveLength(1);
+    expect(loadServerState(undefined, testHome()).steps.a?.created?.artifacts).toHaveLength(1);
     const a2 = fakeStep('a', {
       run: vi.fn(async () => {
         const { StepCancelled } = await import('./steps.ts');
@@ -328,7 +329,7 @@ describe('engine — ledger preservation and uninstall safety (PR #423 review fi
     });
     const res = await runInstall(strategyOf([a2]), opts({ reconfigure: new Set(['a']) }));
     expect(res.status).toBe('cancelled');
-    const after = loadServerState().steps.a;
+    const after = loadServerState(undefined, testHome()).steps.a;
     expect(after?.status).toBe('pending');
     expect(after?.created?.artifacts).toHaveLength(1); // ledger survives the cancel
   });
@@ -338,7 +339,7 @@ describe('engine — ledger preservation and uninstall safety (PR #423 review fi
     await runInstall(strategyOf([a]), opts());
     const aFail = fakeStep('a', { run: vi.fn(async () => { throw new StepAborted('boom'); }) });
     await runInstall(strategyOf([aFail]), opts({ reinstall: true }));
-    expect(loadServerState().steps.a?.created?.artifacts).toHaveLength(1);
+    expect(loadServerState(undefined, testHome()).steps.a?.created?.artifacts).toHaveLength(1);
     const aUndo = fakeStep('a');
     const res = await runUninstall(strategyOf([aUndo]), opts());
     expect(res.status).toBe('complete');
@@ -354,7 +355,7 @@ describe('engine — ledger preservation and uninstall safety (PR #423 review fi
       steps: () => [fakeStep('a')],
     };
     await expect(runUninstall(mac, opts())).rejects.toThrow(/ubuntu-vps/);
-    expect(loadServerState().steps.a?.status).toBe('done');
+    expect(loadServerState(undefined, testHome()).steps.a?.status).toBe('done');
   });
 
   it('uninstall keeps (and reports) records for step ids this binary does not know', async () => {
@@ -362,7 +363,7 @@ describe('engine — ledger preservation and uninstall safety (PR #423 review fi
     // an older binary that only knows step "a"
     const res = await runUninstall(strategyOf([fakeStep('a')]), opts());
     expect(res.status).toBe('failed'); // not "complete" — something was left behind
-    const state = loadServerState();
+    const state = loadServerState(undefined, testHome());
     expect(state.steps['future-step']?.status).toBe('done'); // ledger preserved
     expect(state.platform).toBe('ubuntu-vps'); // still claims the host
   });
@@ -376,21 +377,21 @@ describe('engine — ledger preservation and uninstall safety (PR #423 review fi
 
   it('a dry-run NEVER persists over a real install record (preview cannot poison the ledger)', async () => {
     await runInstall(strategyOf([fakeStep('a')]), opts()); // real install
-    const before = JSON.stringify(loadServerState());
+    const before = JSON.stringify(loadServerState(undefined, testHome()));
     // preview install AND preview uninstall on top of the real record
     const resI = await runInstall(strategyOf([fakeStep('a')]), opts({ dryRun: true }));
     expect(resI.status).toBe('complete');
     const resU = await runUninstall(strategyOf([fakeStep('a')]), opts({ dryRun: true }));
     expect(resU.status).toBe('complete');
     // the on-disk ledger is byte-identical: no dryRun stamp, no deleted steps
-    expect(JSON.stringify(loadServerState())).toBe(before);
-    expect(loadServerState().dryRun).toBeUndefined();
-    expect(loadServerState().steps.a?.status).toBe('done');
+    expect(JSON.stringify(loadServerState(undefined, testHome()))).toBe(before);
+    expect(loadServerState(undefined, testHome()).dryRun).toBeUndefined();
+    expect(loadServerState(undefined, testHome()).steps.a?.status).toBe('done');
   });
 
   it('a dry-run preview of platform A does not block a real install of platform B', async () => {
     await runInstall(strategyOf([fakeStep('a')]), opts({ dryRun: true })); // ubuntu-vps preview
-    expect(loadServerState().dryRun).toBe(true);
+    expect(loadServerState(undefined, testHome()).dryRun).toBe(true);
     const mac: PlatformStrategy = {
       id: 'macosx-ngrok',
       label: 'macOS + ngrok',
@@ -405,11 +406,11 @@ describe('engine — ledger preservation and uninstall safety (PR #423 review fi
   it('a real install does not resume from a CEZ_DRY_RUN preview record', async () => {
     const dry = fakeStep('a');
     await runInstall(strategyOf([dry]), opts({ dryRun: true }));
-    expect(loadServerState().dryRun).toBe(true);
+    expect(loadServerState(undefined, testHome()).dryRun).toBe(true);
     const real = fakeStep('a');
     const res = await runInstall(strategyOf([real]), opts());
     expect(real.run).toHaveBeenCalledOnce(); // did NOT report "already done"
     expect(res.state.installed).toBe(true);
-    expect(loadServerState().dryRun).toBeUndefined();
+    expect(loadServerState(undefined, testHome()).dryRun).toBeUndefined();
   });
 });

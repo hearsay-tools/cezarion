@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -81,7 +82,7 @@ describe('queued prompt stack routes (#472)', () => {
       deferMessage: () => rung === 'starting',
     } as unknown as RunManager;
 
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager,
@@ -129,7 +130,7 @@ describe('queued prompt stack routes (#472)', () => {
 
   it('does not probe or require provider credentials to amend a queued prompt', async () => {
     const status = vi.fn(() => Promise.reject(new Error('provider status must not be read')));
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager,

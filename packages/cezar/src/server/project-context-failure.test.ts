@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,10 +35,10 @@ describe('project context failures over HTTP and live feeds', () => {
     for (const root of [bootRoot, otherRoot]) mkdirSync(join(root, '.ai/cezar'), { recursive: true });
     clearProjectProbeCache();
     store = RunStore.open(join(bootRoot, '.ai/cezar'));
-    contexts = new ProjectContexts({ listProjects });
-    bootProjectId = (await registerProject(bootRoot)).id;
-    otherId = (await registerProject(otherRoot)).id;
-    app = createApp({ repoRoot: bootRoot, store, manager: {} as RunManager, version: 'test', bootProjectId, contexts });
+    contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    bootProjectId = (await registerProject(bootRoot, undefined, testHome())).id;
+    otherId = (await registerProject(otherRoot, undefined, testHome())).id;
+    app = createApp({ home: testHome(), repoRoot: bootRoot, store, manager: {} as RunManager, version: 'test', bootProjectId, contexts });
   });
 
   afterEach(() => {

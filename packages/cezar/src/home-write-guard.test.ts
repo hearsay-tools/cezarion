@@ -1,3 +1,4 @@
+import { testHome } from './home/test-home.testkit.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
@@ -28,9 +29,9 @@ describe('home write guard with HOME pinned to a sandbox', () => {
     vi.stubEnv('CEZ_HOME', realHome);
     const write = () => {
       if (writer === 'atomic JSON') return atomicWriteJsonSync(join(realHome, 'config.json'), {});
-      if (writer === 'agent accounts') return mergeWriteAgentAccounts(() => {});
-      if (writer === 'remote settings') return enableRemoteSettings(4321);
-      return saveServerState(freshServerState());
+      if (writer === 'agent accounts') return mergeWriteAgentAccounts(() => {}, testHome());
+      if (writer === 'remote settings') return enableRemoteSettings(4321, undefined, undefined, testHome());
+      return saveServerState(freshServerState(), undefined, testHome());
     };
     await expect(async () => write()).rejects.toThrow('refusing to write');
     for (const mutation of [existsSync, mkdirSync, writeFileSync, renameSync, rmSync, mkdir, writeFile, rename]) {
@@ -39,7 +40,7 @@ describe('home write guard with HOME pinned to a sandbox', () => {
   });
 
   it('does not let a custom env without VITEST bypass the process guard', async () => {
-    await expect(enableRemoteSettings(4321, { CEZ_HOME: realHome })).rejects.toThrow('refusing to write');
+    await expect(enableRemoteSettings(4321, { CEZ_HOME: realHome }, undefined, testHome({ CEZ_HOME: realHome }))).rejects.toThrow('refusing to write');
     expect(mkdir).not.toHaveBeenCalled();
     expect(() => assertCezarHomeWriteIsSandboxed(join(realHome, 'file'), {})).toThrow('refusing to write');
   });
@@ -58,14 +59,14 @@ describe('home write guard with HOME pinned to a sandbox', () => {
   it('keeps a remote grant in its checked directory when env changes during mkdir', async () => {
     const env = { CEZ_HOME: '/tmp/cez-guard-sandbox' };
     vi.mocked(mkdir).mockImplementationOnce(async () => { env.CEZ_HOME = realHome; return undefined; });
-    await enableRemoteSettings(4321, env);
+    await enableRemoteSettings(4321, env, undefined, testHome(env));
     expect(rename).toHaveBeenCalledWith(expect.any(String), '/tmp/cez-guard-sandbox/remote-settings/4321.json');
   });
 
   it('checks the install destination again after npm changes the home', async () => {
     const env = { CEZ_HOME: '/tmp/cez-guard-sandbox' };
     vi.mocked(existsSync).mockImplementation((path) => String(path).includes('.staging-'));
-    await expect(installFromRegistry('0.12.1', { env, runNpm: async () => { env.CEZ_HOME = realHome; } }))
+    await expect(installFromRegistry('0.12.1', { home: testHome(), env, runNpm: async () => { env.CEZ_HOME = realHome; } }))
       .rejects.toThrow('refusing to write');
     expect(renameSync).not.toHaveBeenCalled();
     for (const [path] of vi.mocked(rmSync).mock.calls) expect(String(path)).not.toContain(realHome);

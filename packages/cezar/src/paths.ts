@@ -3,13 +3,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import type { AgentHomePaths } from './agent-config/catalog.ts';
 import { isOmpProfileName } from './core/agent-profiles.ts';
 
-import { resolveHome } from './home/resolve.ts';
 import type { Home } from './home/home.ts';
-
-/** Compatibility shim for P1a-2. New entry points pass Home; see ADR 0059. */
-export function cezarHomeDir(env: NodeJS.ProcessEnv = process.env): string {
-  return resolveHome({ purpose: 'compatibility', env }).root;
-}
 
 /**
  * Test writers must never reach the account's real cezar home. HOME can be a
@@ -55,7 +49,7 @@ export function instanceSlug(domain: string | undefined | null): string {
 }
 
 /** The directory holding per-domain (named) server-install state files. */
-export function serverInstancesDir(home = resolveHome({ purpose: 'compatibility' })): string {
+export function serverInstancesDir(home: Home): string {
   return home.serverInstances;
 }
 
@@ -67,7 +61,7 @@ export function serverInstancesDir(home = resolveHome({ purpose: 'compatibility'
  * Distinct from the per-user project registry the multi-project workspace keeps
  * inside `~/.cezar/config.json` (see `workspaceConfigPath`) — they coexist.
  */
-export function serverStatePath(instance: string = DEFAULT_SERVER_INSTANCE, home = resolveHome({ purpose: 'compatibility' })): string {
+export function serverStatePath(instance: string = DEFAULT_SERVER_INSTANCE, home: Home): string {
   return home.serverState(instance);
 }
 
@@ -77,8 +71,8 @@ export function serverStatePath(instance: string = DEFAULT_SERVER_INSTANCE, home
  * been booted in. The legacy layout keeps it under `Home.root`, so the `CEZ_HOME`
  * override applies (tests/containers never touch a real home dir).
  */
-export function workspaceConfigPath(env: NodeJS.ProcessEnv = process.env, home?: Home): string {
-  return (home ?? resolveHome({ purpose: 'compatibility', env })).workspaceConfig;
+export function workspaceConfigPath(env: NodeJS.ProcessEnv = process.env, home: Home): string {
+  return home.workspaceConfig;
 }
 
 /**
@@ -86,7 +80,7 @@ export function workspaceConfigPath(env: NodeJS.ProcessEnv = process.env, home?:
  * `.ai/cezar/ui-state.json`. Cross-project UI prefs live here; per-project
  * state (pinned runs, templates) stays in each repo's file.
  */
-export function workspaceUiStatePath(home = resolveHome({ purpose: 'compatibility' })): string {
+export function workspaceUiStatePath(home: Home): string {
   return home.workspaceUiState;
 }
 
@@ -94,7 +88,7 @@ export function workspaceUiStatePath(home = resolveHome({ purpose: 'compatibilit
  * Agent accounts and per-project selections use their own file. Account deletion and selection
  * cleanup share one atomic write.
  */
-export function agentAccountsPath(home = resolveHome({ purpose: 'compatibility' })): string {
+export function agentAccountsPath(home: Home): string {
   return home.agentAccounts;
 }
 
@@ -117,7 +111,7 @@ export function expandTilde(path: string): string {
  * on the same host. The host-level installer is not concurrency-safe with
  * itself *for the same instance*.
  */
-export function serverLockPath(instance: string = DEFAULT_SERVER_INSTANCE, home = resolveHome({ purpose: 'compatibility' })): string {
+export function serverLockPath(instance: string = DEFAULT_SERVER_INSTANCE, home: Home): string {
   return home.serverLock(instance);
 }
 

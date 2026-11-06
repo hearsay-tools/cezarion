@@ -21,7 +21,7 @@ import {
 import { WEBHOOK_TRIGGERS, type WebhookTrigger } from '@open-mercato/cezar-contract/attention';
 import { projectWebhookUrlSchema } from '@open-mercato/cezar-contract/projects';
 import { PROVIDER_IDS, type ProviderId } from '../core/provider-auth.ts';
-import { assertCezarHomeWriteIsSandboxed, workspaceConfigPath } from '../paths.ts';
+import { assertCezarHomeWriteIsSandboxed, } from '../paths.ts';
 
 /**
  * `~/.cezar/config.json` — the per-user workspace config + project registry
@@ -321,7 +321,7 @@ export function defaultWorkspaceConfig(): WorkspaceConfig {
  * snapshot in memory. Delete the whole cezar home for a complete reset; older writers may leave
  * the snapshot behind.
  */
-export function workspaceConfigBackupPath(path: string = workspaceConfigPath()): string {
+export function workspaceConfigBackupPath(path: string): string {
   return `${path}.bak`;
 }
 
@@ -352,7 +352,7 @@ async function loadWorkspaceConfigBackup(path: string): Promise<WorkspaceConfig 
  * backup; preserve a valid empty primary. Failures degrade to defaults. Merge writers pass their
  * once-resolved path.
  */
-export async function loadWorkspaceConfig(path: string = workspaceConfigPath()): Promise<WorkspaceConfig> {
+export async function loadWorkspaceConfig(path: string): Promise<WorkspaceConfig> {
   let raw: string | null = null;
   try {
     raw = await readFile(path, 'utf8');
@@ -414,9 +414,9 @@ export function atomicWriteJsonSync(path: string, value: unknown): void {
  */
 export async function mergeWriteWorkspaceConfig(
   mutator: (config: WorkspaceConfig) => WorkspaceConfig | void,
-  home?: Home,
+  home: Home,
 ): Promise<WorkspaceConfig> {
-  const path = home?.workspaceConfig ?? workspaceConfigPath();
+  const path = home.workspaceConfig;
   const current = await loadWorkspaceConfig(path);
   const next = mutator(current) ?? current;
   backupBeforeWrite(path, next);

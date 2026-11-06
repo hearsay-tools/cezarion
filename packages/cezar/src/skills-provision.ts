@@ -1,3 +1,4 @@
+import type { Home } from './home/home.ts';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
@@ -101,6 +102,7 @@ export interface ProvisionResult {
 }
 
 export interface ProvisionOptions extends WorktreeFilesOptions {
+  home: Home;
   /** True once the run stopped: the pass writes nothing more from its next step on. */
   cancelled?: () => boolean;
 }
@@ -137,6 +139,7 @@ const entryPath = (agentDir: string, name: string) => `${agentDir}/skills/${name
 
 /** One pass's shared state: what it installed, and every path its closure still wants. */
 interface Pass {
+  home: Home;
   files: WorktreeFiles;
   installed: Set<string>;
   wanted: Set<string>;
@@ -153,7 +156,7 @@ export function provisionSkills(
   worktree: string,
   roots: readonly Skill[],
   catalog: readonly Skill[],
-  options: ProvisionOptions = {},
+  options: ProvisionOptions,
 ): Promise<ProvisionResult> {
   return withWorktreeFiles(worktree, 'skills', options, { installed: [], teamCopies: {} },
     (files) => provisionPass(files, roots, catalog, options));
@@ -170,7 +173,7 @@ async function provisionPass(
   try {
     checkpoint();
     const skills = passClosure(files, roots, catalog, result);
-    const pass: Pass = { files, installed: new Set(), wanted: new Set(), checkpoint };
+    const pass: Pass = { home: options.home, files, installed: new Set(), wanted: new Set(), checkpoint };
     for (const agentDir of TEAM_SKILL_AGENT_DIRS) {
       checkpoint();
       // Ignore first: an entry git could see must never exist, not even for a crash's length.
@@ -312,7 +315,7 @@ async function placeEntry(
 async function placeTeamCopies(pass: Pass, skill: Skill): Promise<string[]> {
   const { files } = pass;
   const staging = await files.stagingDir();
-  const written = new Set(await materializeSkillDir(staging, skill, async () => undefined).catch(() => [] as string[]));
+  const written = new Set(await materializeSkillDir(staging, skill, async () => undefined, pass.home).catch(() => [] as string[]));
   const copies: string[] = [];
   for (const agentDir of TEAM_SKILL_AGENT_DIRS) {
     pass.checkpoint();

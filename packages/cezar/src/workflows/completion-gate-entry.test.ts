@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { transitionTurnBoundary } from './run/turn-boundary.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { runnerHook, setupMonitoringFixture, waitForProduct } from './run-fixture.testkit.ts';
@@ -68,8 +69,8 @@ describe('the completion gate outside a turn end', () => {
   }
   const settleBoundary = vi.fn(() => true);
   function modules() {
-    const context: RunModuleContext = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work: new TrackedWork(),
-      semaphore: new WorkspaceSemaphore(), disposed: () => false };
+    const context: RunModuleContext = { home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work: new TrackedWork(),
+      semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false };
     gateHost = unused<CompletionGateHost>('gateHost', { active, pendingHumanAskSeq: () => undefined,
       parentCompletionBlockers: vi.fn(() => []), unansweredQuestions: () => [] });
     type SettlerArgs = ConstructorParameters<typeof TurnSettler>;
@@ -226,8 +227,8 @@ describe('completion refusal through a live runner', () => {
   beforeEach(() => {
     started = false;
     f.manager.dispose();
-    semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
-    f.manager = createFixtureManager(f.store, f.repoRoot, { semaphore });
+    semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } });
+    f.manager = createFixtureManager(f.store, f.repoRoot, { home: testHome(), semaphore });
     const tools = vi.spyOn(f.manager, 'cezarToolHandlers');
     runnerHook.runner = {
       backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',

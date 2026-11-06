@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS, STEP_KIND, WORKER_OUTCOME_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -305,7 +306,7 @@ describe('authenticated delegation HTTP family', () => {
     f.manager.dispose(); f.store.close();
     seedRuns(join(f.root, '.ai/cezar'), records);
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); const manager = createFixtureManager(reopened, f.root);
-    f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager });
+    f.service.registerProject({ home: testHome(), id: 'project', root: f.root, store: reopened, manager });
     try {
       for (let i = 0; i < 2; i++) {
         const response = await request('/cancel-wait', { waitId });

@@ -159,8 +159,8 @@ function withMachineDefaults(raw: unknown, machine: WorkspaceConfig['agentDefaul
  * cached for the same reason this one is not: `~/.cezar/` is shared by every cezar process on the
  * machine, so a snapshot is a staleness bug.
  */
-export async function loadConfig(repoRoot: string, home?: Home): Promise<CezConfig> {
-  const machine = (await loadWorkspaceConfig(home?.workspaceConfig)).agentDefaults;
+export async function loadConfig(repoRoot: string, home: Home): Promise<CezConfig> {
+  const machine = (await loadWorkspaceConfig(home.workspaceConfig)).agentDefaults;
   let raw: unknown = {};
   try {
     raw = JSON.parse(await readFile(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8'));
@@ -327,9 +327,9 @@ async function ownWorktreeRetention(repoRoot: string): Promise<number | undefine
  * enforcement site (boot sweeps, terminal transitions, the reclaim route) must
  * go through here so the setting can never be a lie.
  */
-export async function resolveWorktreeRetention(repoRoot: string, home?: Home): Promise<number> {
+export async function resolveWorktreeRetention(repoRoot: string, home: Home): Promise<number> {
   const own = await ownWorktreeRetention(repoRoot);
   if (own !== undefined) return own;
-  const workspace = await loadWorkspaceConfig(home?.workspaceConfig).catch(() => null);
+  const workspace = await loadWorkspaceConfig(home.workspaceConfig).catch(() => null);
   return workspace?.resources.worktreeRetentionDefault ?? DEFAULT_WORKTREE_RETENTION;
 }

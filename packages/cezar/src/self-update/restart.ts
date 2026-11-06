@@ -15,7 +15,6 @@
  */
 
 import { spawnDetached } from '../detached-process.ts';
-import { currentEntry } from './layout.ts';
 
 /** The slice of `http.Server` a restart needs — `@hono/node-server`'s `ServerType` is a union
  *  over http/https/http2 servers, and every member has these two. */
@@ -33,8 +32,8 @@ export interface RestartOptions {
   args: string[];
   port: number;
   supervised: boolean;
-  /** The entry to spawn; defaults to the managed `current` entry. */
-  entry?: string;
+  /** The entry selected by the caller from its managed Home. */
+  entry: string;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -66,7 +65,7 @@ export function restartProcess(opts: RestartOptions): void {
     if (opts.supervised) {
       process.exit(RESTART_EXIT_CODE);
     }
-    const entry = opts.entry ?? currentEntry(opts.env);
+    const entry = opts.entry;
     // The replacement cockpit outlives this process and is never stopped by it.
     const child = spawnDetached(process.execPath, [...process.execArgv, entry, ...restartArgs(opts.args, opts.port)], {
       stdio: 'inherit',

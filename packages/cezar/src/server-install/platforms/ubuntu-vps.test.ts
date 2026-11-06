@@ -1,3 +1,4 @@
+import { testHome } from '../../home/test-home.testkit.ts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -32,7 +33,7 @@ function ctxWith(over: {
   dryRun?: boolean | undefined;
   state?: Partial<InstallContext['state']>;
 }): InstallContext {
-  return {
+  return { home: testHome(),
     state: { schema: 1, installed: false, primaryPort: 4321, steps: {}, ...over.state },
     ui: over.ui ?? createAutoUi(),
     instance: 'default',

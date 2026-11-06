@@ -1,3 +1,4 @@
+import { testHome } from '../../home/test-home.testkit.ts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -53,7 +54,7 @@ describe('macosx-ngrok', () => {
   it('dry-run install walks every step and server-uninstall reverses it', async () => {
     // Leave the reserved domain blank to exercise the ephemeral-URL path.
     const ui = { ...createAutoUi(), text: async (o: { message: string; placeholder?: string }) => (o.message.includes('Reserved') ? '' : o.placeholder ?? 'ops') };
-    const run = {
+    const run = { home: testHome(),
       dryRun: true,
       assumeYes: true,
       reconfigure: new Set<string>(),
@@ -64,7 +65,7 @@ describe('macosx-ngrok', () => {
     };
     const res = await runInstall(macosxNgrok, run);
     expect(res.status).toBe('complete');
-    const state = loadServerState();
+    const state = loadServerState(undefined, testHome());
     expect(state.platform).toBe('macosx-ngrok');
     expect(state.steps.autostart?.status).toBe('done');
     expect(state.steps.ngrok?.status).toBe('done');
@@ -77,7 +78,7 @@ describe('macosx-ngrok', () => {
 
     const undone = await runUninstall(macosxNgrok, run);
     expect(undone.status).toBe('complete');
-    expect(loadServerState().steps).toEqual({});
+    expect(loadServerState(undefined, testHome()).steps).toEqual({});
   });
 });
 
@@ -293,7 +294,7 @@ describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
         program === 'curl' ? { code: 0, stdout: 'public_url', stderr: '' } : { code: 0, stdout: '', stderr: '' },
       interactive,
     };
-    return {
+    return { home: testHome(),
       state: { schema: 1, installed: true, primaryPort: 4321, steps: {} },
       ui: createAutoUi() as Ui,
       instance: 'default',

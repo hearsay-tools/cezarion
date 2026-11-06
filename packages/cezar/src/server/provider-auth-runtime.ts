@@ -19,7 +19,7 @@ const AUTH_ERROR_EVENT_TYPES = new Set(['error', 'session.error', 'note']);
 export type RuntimeAuthProfileResolver = (
   provider: ProviderId,
   profileId: string | undefined,
-  home?: Home,
+  home: Home,
 ) => Promise<RuntimeAuthVerificationTarget | null>;
 
 /**
@@ -32,6 +32,7 @@ export function watchProviderRuntimeAuthFailures(
   providerAuth: ProviderAuthService,
   onProviderStatus: (status: ProviderStatus) => void,
   resolveProfile: RuntimeAuthProfileResolver = resolveRuntimeAuthVerificationTarget,
+  home: Home,
 ): () => void {
   const onEvent = ({ runId, event }: { runId: string; event: RunEvent }): void => {
     if (!AUTH_ERROR_EVENT_TYPES.has(event.type)) return;
@@ -76,7 +77,7 @@ export function watchProviderRuntimeAuthFailures(
     // then stand down rather than answer for it.
     const observed = { generation: report.generation };
     void (async () => {
-      const target = await resolveProfile(provider, profileId);
+      const target = await resolveProfile(provider, profileId, home);
       // An account we cannot name cannot be verified: leave the latch exactly as it stands and let
       // Settings' Try again — which asks no such question — stay the way out.
       if (!target) return;
@@ -118,14 +119,13 @@ export class ProviderRuntimeAuthObserver {
     private readonly providerAuth: ProviderAuthService,
     private readonly onProviderStatus: (status: ProviderStatus) => void,
     private readonly resolveProfile: RuntimeAuthProfileResolver = resolveRuntimeAuthVerificationTarget,
-    private readonly home?: Home,
+    private readonly home: Home,
   ) {}
 
   watch(store: RunStore): void {
     if (this.watched.has(store)) return;
     this.watched.add(store);
-    watchProviderRuntimeAuthFailures(store, this.providerAuth, this.onProviderStatus, this.home
-      ? (provider, profileId) => this.resolveProfile(provider, profileId, this.home) : this.resolveProfile);
+    watchProviderRuntimeAuthFailures(store, this.providerAuth, this.onProviderStatus, this.resolveProfile, this.home);
   }
 }
 

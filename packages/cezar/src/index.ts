@@ -184,10 +184,10 @@ async function main(): Promise<void> {
       const bootProjectId = process.env.CEZ_SINGLE_PROJECT === '1' && isList
         ? await initWorkspace(repoRoot, home())
         : undefined;
-      process.exitCode = await runProjectsCommand(projectArgs, { defaultRoot: repoRoot, bootProjectId });
+      process.exitCode = await runProjectsCommand(projectArgs, { defaultRoot: repoRoot, bootProjectId, home: home() });
       return;
     case 'server-install':
-      await serverCommand('install', repoRoot, values.platform, {
+      await serverCommand('install', home(), repoRoot, values.platform, {
         yes: Boolean(values.yes),
         reconfigure: values.reconfigure,
         reinstall: Boolean(values.reinstall),
@@ -198,13 +198,13 @@ async function main(): Promise<void> {
       });
       return;
     case 'server-deploy':
-      await serverCommand('deploy', repoRoot, values.platform, {
+      await serverCommand('deploy', home(), repoRoot, values.platform, {
         yes: Boolean(values.yes),
         domain: values.domain,
       });
       return;
     case 'server-uninstall':
-      await serverCommand('uninstall', repoRoot, values.platform, {
+      await serverCommand('uninstall', home(), repoRoot, values.platform, {
         yes: Boolean(values.yes),
         domain: values.domain,
       });
@@ -294,7 +294,7 @@ async function serveCommand(
     sweepBranches: (keep) => void sweepMergedBranches({ root: repoRoot, store, manager, home }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
   });
   const delegation = await DelegationController.start();
-  delegation.attachProject({ id: bootProjectId ?? 'default', root: repoRoot, store, manager });
+  delegation.attachProject({ id: bootProjectId ?? 'default', root: repoRoot, store, manager, home });
   const providerAuth = new ProviderAuthService();
   const discovery = createHostDiscovery(repoRoot, providerAuth, home);
   delegation.service.setDiscovery(discovery);
@@ -551,7 +551,7 @@ async function runHeadless(
     const semaphore = new WorkspaceSemaphore({ home });
     await semaphore.refresh();
     const manager = new RunManager(store, repoRoot, { home, semaphore });
-    delegation.attachProject({ id: 'headless', root: repoRoot, store, manager });
+    delegation.attachProject({ id: 'headless', root: repoRoot, store, manager, home });
 
     store.on('event', ({ event }) => {
       switch (event.type) {
@@ -631,6 +631,7 @@ function augmentPathFromLoginShell(): void {
 
 async function serverCommand(
   mode: 'install' | 'uninstall' | 'deploy',
+  home: Home,
   repoRoot: string,
   platform: string | undefined,
   flags: {
@@ -661,7 +662,7 @@ async function serverCommand(
   // interactive install with an existing cockpit and no --domain also offers to
   // stand up a second instance — the exact "it asks me to reinstall" case.
   let domain = (flags.domain ?? '').trim() || undefined;
-  if (mode === 'install' && !domain && !flags.yes && process.stdin.isTTY && loadServerState(DEFAULT_SERVER_INSTANCE).installed) {
+  if (mode === 'install' && !domain && !flags.yes && process.stdin.isTTY && loadServerState(DEFAULT_SERVER_INSTANCE, home).installed) {
     try {
       const { createClackUi } = await import('./server-install/ui.ts');
       const answer = await createClackUi().text({
@@ -680,7 +681,7 @@ async function serverCommand(
   // Uninstall and deploy can read the platform from THIS instance's record when omitted.
   let chosen = platform;
   if ((mode === 'uninstall' || mode === 'deploy') && !chosen) {
-    chosen = loadServerState(instance).platform;
+    chosen = loadServerState(instance, home).platform;
   }
   if (!chosen) {
     console.error(`--platform is required. Valid platforms: ${ids.join(', ')}`);
@@ -704,14 +705,14 @@ async function serverCommand(
   // auto-picks the next free loopback port so it can't collide with the first.
   let port = flags.port;
   if (mode === 'install' && instance !== DEFAULT_SERVER_INSTANCE && port === undefined) {
-    const known = listServerInstances().some((i) => i.instance === instance);
+    const known = listServerInstances(home).some((i) => i.instance === instance);
     if (!known) {
-      port = nextFreeInstancePort();
+      port = nextFreeInstancePort(undefined, home);
       console.log(`\n  New instance "${instance}" (${domain}) → loopback port ${port} (override with --port).`);
     }
   }
 
-  const runOpts = {
+  const runOpts = { home,
     dryRun: process.env.CEZ_DRY_RUN === '1',
     assumeYes: flags.yes,
     reconfigure: new Set((flags.reconfigure ?? '').split(',').map((s) => s.trim()).filter(Boolean)),

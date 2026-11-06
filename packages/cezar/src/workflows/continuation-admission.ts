@@ -30,7 +30,7 @@ export type ContinueRunOptions = {
 export type ContinuationRefusal = { ok: false; error: string };
 export type ContinuationConversation = Parameters<RunStore['commitWorkerContinuation']>[4];
 
-export function modelLockRefusal(repoRoot: string, opts: ContinueRunOptions, home?: Home): ContinuationRefusal | undefined {
+export function modelLockRefusal(repoRoot: string, opts: ContinueRunOptions, home: Home): ContinuationRefusal | undefined {
   if (agentModelsLocked(repoRoot, process.env, home) && (opts.model?.trim() || opts.effort?.trim())) {
     return { ok: false, error: AGENT_MODELS_LOCKED_ERROR };
   }
@@ -189,7 +189,7 @@ export class ContinuationChecks {
   constructor(private readonly runId: string, private readonly repoRoot: string,
     private readonly opts: ContinueRunOptions, private readonly defer: boolean,
     private readonly conversation: ContinuationConversation, private readonly reads: AdmissionReads,
-    private readonly routedQuestionRefusal: string, private readonly home?: Home) {}
+    private readonly routedQuestionRefusal: string, private readonly home: Home) {}
 
   prepare() {
     const unavailable = this.availabilityRefusal();

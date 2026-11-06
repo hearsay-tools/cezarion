@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -60,7 +61,7 @@ describe('cezar home write safety', () => {
         lastOpenedAt: '',
         source: 'local',
       });
-    });
+    }, testHome());
 
     const written: unknown = JSON.parse(readFileSync(join(pinned, 'config.json'), 'utf8'));
     expect(written).toMatchObject({ projects: [{ id: 'shop' }] });
@@ -77,9 +78,9 @@ describe('cezar home write safety', () => {
         lastOpenedAt: '',
         source: 'local',
       });
-    });
+    }, testHome());
     process.env.CEZ_HOME = pinned;
-    expect((await loadWorkspaceConfig()).projects.map((p) => p.id)).toEqual(['shop']);
+    expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((p) => p.id)).toEqual(['shop']);
   });
 
   it('refuses a write into the real cezar home while running under vitest', () => {
@@ -87,7 +88,7 @@ describe('cezar home write safety', () => {
     vi.mocked(userInfo).mockReturnValue({ ...userInfo(), homedir: fakeUserHome });
     process.env.HOME = fakeUserHome;
     delete process.env.CEZ_HOME;
-    const target = workspaceConfigPath();
+    const target = workspaceConfigPath(undefined, testHome());
 
     expect(target).toBe(join(fakeUserHome, '.cezar', 'config.json'));
     expect(() => atomicWriteJsonSync(target, { projects: [] })).toThrow(/CEZ_HOME is not pinned/);
@@ -99,7 +100,7 @@ describe('cezar home write safety', () => {
     vi.mocked(userInfo).mockReturnValue({ ...userInfo(), homedir: fakeUserHome });
     process.env.HOME = fakeUserHome;
     delete process.env.CEZ_HOME;
-    const target = workspaceConfigPath();
+    const target = workspaceConfigPath(undefined, testHome());
     const existing = '{"projects":[{"id":"real","root":"/repos/real"}]}\n';
     mkdirSync(join(fakeUserHome, '.cezar'), { recursive: true });
     writeFileSync(target, existing);

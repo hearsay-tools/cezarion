@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -151,10 +152,10 @@ describe('resolveCapabilities — settings administration (hearsay-tools/cezario
     rmSync(home, { recursive: true, force: true });
   });
   const admin = (env: NodeJS.ProcessEnv, bindHost?: string, port: number | undefined = 4321) => {
-    const caps = resolveCapabilities({ CEZ_HOME: home, ...env }, bindHost, port);
+    const caps = resolveCapabilities({ CEZ_HOME: home, ...env }, bindHost, port, testHome({ CEZ_HOME: home, ...env }));
     return { localHandoff: caps.localHandoff, settingsAdmin: caps.settingsAdmin, remoteSettingsAdmin: caps.remoteSettingsAdmin };
   };
-  const grant = (port: number) => enableRemoteSettings(port, { CEZ_HOME: home });
+  const grant = (port: number) => enableRemoteSettings(port, { CEZ_HOME: home }, undefined, testHome({ CEZ_HOME: home }));
 
   it('a local cockpit administers settings without a grant', () => {
     expect(admin({})).toEqual({ localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false });
@@ -180,7 +181,7 @@ describe('resolveCapabilities — settings administration (hearsay-tools/cezario
 
   it('a cockpit whose port is not known yet is never granted', async () => {
     await grant(4321);
-    expect(resolveCapabilities({ CEZ_HOME: home, CEZ_REMOTE: '1' }, undefined, undefined).settingsAdmin).toBe(false);
+    expect(resolveCapabilities({ CEZ_HOME: home, CEZ_REMOTE: '1' }, undefined, undefined, testHome({ CEZ_HOME: home, CEZ_REMOTE: '1' })).settingsAdmin).toBe(false);
   });
 
   it('a grant never applies to a non-loopback bind', async () => {
@@ -193,7 +194,7 @@ describe('resolveCapabilities — settings administration (hearsay-tools/cezario
   it('withdrawing the grant takes effect on the next read', async () => {
     await grant(4321);
     expect(admin({ CEZ_REMOTE: '1' }).settingsAdmin).toBe(true);
-    await disableRemoteSettings({ CEZ_HOME: home }, 4321);
+    await disableRemoteSettings({ CEZ_HOME: home }, 4321, testHome({ CEZ_HOME: home }));
     expect(admin({ CEZ_REMOTE: '1' }).settingsAdmin).toBe(false);
   });
 

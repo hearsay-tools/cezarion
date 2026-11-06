@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,8 +43,8 @@ describe('controls on a run another cezar process owns', () => {
     runId = owner.createRun({ title: 'theirs', workflow: 'quick-task', task: 'theirs', steps: [] }).id;
     owner.flush();
     store = RunStore.open(dataDir, { keepLive: true });
-    manager = new RunManager(store, repoRoot, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
-    app = createApp({ repoRoot, store, manager, version: '0.0.0-test', providerAuth: connectedProviderAuth() });
+    manager = new RunManager(store, repoRoot, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
+    app = createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test', providerAuth: connectedProviderAuth() });
   });
 
   afterEach(() => {
@@ -135,7 +136,7 @@ describe('adopting a dead owner\'s run for a control', () => {
     dataDir = join(repoRoot, '.ai/cezar');
     mkdirSync(dataDir, { recursive: true });
     store = RunStore.open(dataDir, { keepLive: true });
-    manager = createFixtureManager(store, repoRoot, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }) });
+    manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } }) });
     started = [];
     const work = fixtureWork(repoRoot);
     const realTrack = work.track.bind(work);
@@ -143,7 +144,7 @@ describe('adopting a dead owner\'s run for a control', () => {
       if (label === 'execute' || label === 'runContinuation') started.push(label);
       return realTrack(label, promise);
     });
-    app = createApp({ repoRoot, store, manager, version: '0.0.0-test', providerAuth: connectedProviderAuth() });
+    app = createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test', providerAuth: connectedProviderAuth() });
   });
 
   afterEach(async () => {

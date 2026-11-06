@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { agentEnv, agentEnvForStep } from './run/launch-context.ts';
 import { terminalScratchDisposition } from './run/run-settlement.ts';
@@ -42,7 +43,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
   let manager: RunManager;
 
   const resolveStepEnv = (runId: string, backend: Parameters<typeof agentEnvForStep>[3], options?: Parameters<typeof agentEnvForStep>[4]) => {
-    const context = { store, repoRoot, dataDir };
+    const context = { home: testHome(), store, repoRoot, dataDir };
     return agentEnvForStep(context, { agentEnv: id => agentEnv(context, undefined, id), workerStep: () => undefined }, runId, backend, options);
   };
 
@@ -53,7 +54,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     process.env.CEZ_HOME = home;
     store = RunStore.open(dataDir);
     manager = createFixtureManager(store, repoRoot);
-    await registerProject(repoRoot);
+    await registerProject(repoRoot, undefined, testHome());
   });
 
   afterEach(async () => {
@@ -277,7 +278,7 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
   let manager: RunManager;
 
   const resolveStepEnv = (runId: string, backend: Parameters<typeof agentEnvForStep>[3], options?: Parameters<typeof agentEnvForStep>[4]) => {
-    const context = { store, repoRoot, dataDir };
+    const context = { home: testHome(), store, repoRoot, dataDir };
     return agentEnvForStep(context, { agentEnv: id => agentEnv(context, undefined, id), workerStep: () => undefined }, runId, backend, options);
   };
 
@@ -290,7 +291,7 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
     process.env.CEZ_HOME = home;
     store = RunStore.open(dataDir);
     manager = createFixtureManager(store, repoRoot);
-    await registerProject(repoRoot);
+    await registerProject(repoRoot, undefined, testHome());
   });
 
   afterEach(async () => {

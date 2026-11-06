@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
@@ -30,7 +31,7 @@ describe('peer discovery lifecycle', () => {
   });
   it('uses only the authenticated project store and needs no spawn permission or host discovery', async () => {
     const other = fixture();
-    const unregister = f.service.registerProject({ id: 'other', root: other.root, store: other.store, manager: other.manager });
+    const unregister = f.service.registerProject({ home: testHome(), id: 'other', root: other.root, store: other.store, manager: other.manager });
     try {
       const run = create();
       f.store.updateRun(f.parent.id, { delegation: { role: 'root', permissions: [], receipts: [] } });

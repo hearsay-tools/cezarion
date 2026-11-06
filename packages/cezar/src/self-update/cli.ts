@@ -6,7 +6,6 @@
 
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { resolveHome } from '../home/resolve.ts';
 import type { Home } from '../home/home.ts';
 
 import { branchOf, cezarPackageRoot, discoverCheckouts } from './checkouts.ts';
@@ -19,7 +18,7 @@ import { SelfUpdateService } from './service.ts';
 
 export interface SelfUpdateCliOptions {
   service: SelfUpdateService;
-  home?: Home;
+  home: Home;
   channel?: string;
   version?: string;
   modifyPath: boolean;
@@ -31,7 +30,7 @@ const MANAGED_COMMANDS = ['install', 'update', 'versions', 'use', 'link', 'unlin
 
 /** Run `argv[0]` when it names a managed-install command and answer its exit code; anything else
  *  is not ours. Runs before the global parseArgs: these flags are not cockpit flags. */
-export async function runManagedCommand(argv: string[], identity: { pkgName: string; version: string; entry: string }, getHome = () => resolveHome({ purpose: 'cli' })): Promise<number | undefined> {
+export async function runManagedCommand(argv: string[], identity: { pkgName: string; version: string; entry: string }, getHome: () => Home): Promise<number | undefined> {
   const [command, ...rest] = argv;
   if (!command || !MANAGED_COMMANDS.includes(command)) return undefined;
   const { values, positionals } = parseArgs({ args: rest, allowPositionals: true,
@@ -68,7 +67,7 @@ export async function runSelfUpdateCommand(command: string, args: string[], opts
 
 async function installCommand(opts: SelfUpdateCliOptions): Promise<number> {
   const { service } = opts;
-  console.log(`\n  cez install — managed layout under ${(opts.home ?? resolveHome({ purpose: 'compatibility' })).root} (this build: ${service.installKind})\n`);
+  console.log(`\n  cez install — managed layout under ${opts.home.root} (this build: ${service.installKind})\n`);
   try {
     const result = await service.installSelf((line) => console.log(`  · ${line}`));
     const dir = writeLaunchers(process.env, opts.home);
@@ -116,7 +115,7 @@ function printDevelopmentChannelHelp(): void {
 }
 
 /** Install `target` unless it is already installed, make it current, and write the launchers. */
-async function activateTarget(target: string, home?: Home): Promise<number> {
+async function activateTarget(target: string, home: Home): Promise<number> {
   try {
     const installed = findInstalled(target, process.env, home);
     const id = installed ? installed.id : (await installFromRegistry(target, { home, onLog: (line) => console.log(`  · ${line}`) })).id;
@@ -161,7 +160,7 @@ async function updateCommand(opts: SelfUpdateCliOptions): Promise<number> {
   return activateTarget(target, opts.home);
 }
 
-async function versionsCommand(home?: Home): Promise<number> {
+async function versionsCommand(home: Home): Promise<number> {
   const installed = listInstalled(process.env, home);
   if (installed.length === 0) {
     console.log('\n  no managed versions — run: cez install (or `cez link` in a built cez checkout)\n');
@@ -187,7 +186,7 @@ async function versionsCommand(home?: Home): Promise<number> {
   return 0;
 }
 
-async function useCommand(id: string | undefined, home?: Home): Promise<number> {
+async function useCommand(id: string | undefined, home: Home): Promise<number> {
   if (!id) {
     console.error('  usage: cez use <id>   (see: cez versions)');
     return 1;
@@ -203,7 +202,7 @@ async function useCommand(id: string | undefined, home?: Home): Promise<number> 
   return 0;
 }
 
-async function linkCommand(dir: string | undefined, use: boolean, home?: Home): Promise<number> {
+async function linkCommand(dir: string | undefined, use: boolean, home: Home): Promise<number> {
   const target = resolve(dir ?? process.cwd());
   const packageRoot = cezarPackageRoot(target);
   if (!packageRoot) {
@@ -229,7 +228,7 @@ async function linkCommand(dir: string | undefined, use: boolean, home?: Home): 
   }
 }
 
-async function unlinkCommand(id: string | undefined, home?: Home): Promise<number> {
+async function unlinkCommand(id: string | undefined, home: Home): Promise<number> {
   if (!id) {
     console.error('  usage: cez unlink <id>   (see: cez versions)');
     return 1;

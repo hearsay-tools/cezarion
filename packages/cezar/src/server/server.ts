@@ -384,8 +384,8 @@ export interface ServerDeps extends SelfUpdateServerDeps, ActivityServerDeps {
   providerAuth?: ProviderAuthService;
   /** Global provider enablement preferences. Tests may inject an in-memory store. */
   workspaceConfig?: {
-    load: typeof loadWorkspaceConfig;
-    mergeWrite: typeof mergeWriteWorkspaceConfig;
+    load: (path?: string) => ReturnType<typeof loadWorkspaceConfig>;
+    mergeWrite: (mutator: Parameters<typeof mergeWriteWorkspaceConfig>[0], home?: import('../home/home.ts').Home) => ReturnType<typeof mergeWriteWorkspaceConfig>;
   } | undefined;
   /** Shared runtime rejection observer. The CLI injects the instance already
    *  watching the boot store before recovery; createApp builds one for legacy
@@ -700,7 +700,7 @@ export function createApp(deps: ServerDeps) {
     bootProject: string;
   }> => {
     try {
-      const registry = (await loadWorkspaceConfig(deps.home?.workspaceConfig)).projects;
+      const registry = (await loadWorkspaceConfig(deps.home.workspaceConfig)).projects;
       const bootProject = await resolveBootProject(registry);
       const visible = await workspaceProjects.visibleProjects(registry, bootProject);
       return {
@@ -718,7 +718,7 @@ export function createApp(deps: ServerDeps) {
   };
   // Hosted-mode gate (spec §"Deployment modes") — read per request so
   // CEZ_REMOTE flips take effect live (and tests can toggle it).
-  const capabilities = () => resolveCapabilities(process.env, bindHost, deps.cezarPort?.());
+  const capabilities = () => resolveCapabilities(process.env, bindHost, deps.cezarPort?.(), deps.home);
   const singleProjectRefusal = (
     action: 'adding projects' | 'editing projects' | 'removing projects' | 'folder browsing',
   ) => ({ error: `single-project mode is enabled; ${action} is disabled` });
@@ -807,7 +807,7 @@ export function createApp(deps: ServerDeps) {
     const resolved = await workspaceProjects.resolveProjectId(raw);
     if ('error' in resolved) return { ...resolved, status: 404 };
     const { id } = resolved;
-    const known = await loadWorkspaceConfig(deps.home?.workspaceConfig).then((config) => config.projects.some((p) => p.id === id), () => false);
+    const known = await loadWorkspaceConfig(deps.home.workspaceConfig).then((config) => config.projects.some((p) => p.id === id), () => false);
     if (!known) return { error: `unknown project: ${id}`, status: 404 };
     let updated: WorkspaceProject | undefined;
     let outcome: WebhookEdit | undefined;
@@ -1343,7 +1343,7 @@ export function createApp(deps: ServerDeps) {
   /** A registered project's realpath'd root, or null when the id is unknown. */
   const projectRootFor = async (projectId: string): Promise<string | null> => {
     try {
-      return (await loadWorkspaceConfig(deps.home?.workspaceConfig)).projects.find((p) => p.id === projectId)?.root ?? null;
+      return (await loadWorkspaceConfig(deps.home.workspaceConfig)).projects.find((p) => p.id === projectId)?.root ?? null;
     } catch {
       return null;
     }
@@ -1988,7 +1988,7 @@ export function createApp(deps: ServerDeps) {
    *  that must keep answering. */
   const workspaceProjectsDir = async (): Promise<string> => {
     try {
-      return (await loadWorkspaceConfig(deps.home?.workspaceConfig)).projectsDir;
+      return (await loadWorkspaceConfig(deps.home.workspaceConfig)).projectsDir;
     } catch {
       return defaultWorkspaceConfig().projectsDir;
     }
@@ -1996,7 +1996,7 @@ export function createApp(deps: ServerDeps) {
 
   const workspaceBrowseRoot = async (): Promise<string> => {
     try {
-      return (await loadWorkspaceConfig(deps.home?.workspaceConfig)).browseRoot;
+      return (await loadWorkspaceConfig(deps.home.workspaceConfig)).browseRoot;
     } catch {
       return defaultWorkspaceConfig().browseRoot;
     }
@@ -2008,7 +2008,7 @@ export function createApp(deps: ServerDeps) {
       let projects: ProjectListEntry[] = [];
       let projectsDir = defaultWorkspaceConfig().projectsDir;
       try {
-        projectsDir = (await loadWorkspaceConfig(deps.home?.workspaceConfig)).projectsDir;
+        projectsDir = (await loadWorkspaceConfig(deps.home.workspaceConfig)).projectsDir;
         projects = await workspaceProjects.listVisibleProjects();
       } catch {
         // unreadable workspace — degrade to the empty registry + defaults
@@ -2043,7 +2043,7 @@ export function createApp(deps: ServerDeps) {
 
       let entry: WorkspaceProject | undefined;
       try {
-        entry = (await loadWorkspaceConfig(deps.home?.workspaceConfig)).projects.find((p) => p.id === id);
+        entry = (await loadWorkspaceConfig(deps.home.workspaceConfig)).projects.find((p) => p.id === id);
       } catch {
         // unreadable workspace — there is nothing to remove, and saying so is
         // more useful than a 500 the user cannot act on
@@ -2128,7 +2128,7 @@ export function createApp(deps: ServerDeps) {
       // write failure as a 500 where the honest answer is 404.
       let known = false;
       try {
-        known = (await loadWorkspaceConfig(deps.home?.workspaceConfig)).projects.some((p) => p.id === id);
+        known = (await loadWorkspaceConfig(deps.home.workspaceConfig)).projects.some((p) => p.id === id);
       } catch {
         // unreadable workspace — treat as unknown; the read-only case answers 404,
         // not a 500 the caller cannot act on (same reasoning as DELETE).
@@ -2484,7 +2484,7 @@ export function createApp(deps: ServerDeps) {
     const real = await realpath(requested).catch(() => requested);
     let known = false;
     try {
-      known = (await loadWorkspaceConfig(deps.home?.workspaceConfig)).projects.some((p) => p.root === real);
+      known = (await loadWorkspaceConfig(deps.home.workspaceConfig)).projects.some((p) => p.root === real);
     } catch {
       // unreadable workspace — treat as unknown; the write below will fail loudly
     }
@@ -2620,7 +2620,7 @@ export function createApp(deps: ServerDeps) {
   });
   // ---- chained family: workspace settings + GUI prefs (workspace-level) ----
   const workspaceConfigRoutes = new Hono<ProjectApiEnv>()
-    .get('/workspace/config', async (c) => c.json(workspaceConfigBody(await loadWorkspaceConfig(deps.home?.workspaceConfig))))
+    .get('/workspace/config', async (c) => c.json(workspaceConfigBody(await loadWorkspaceConfig(deps.home.workspaceConfig))))
 
     .put('/workspace/config', jsonZodValidator(() => workspaceConfigUpdateSchema), async (c) => {
       const parsed = { data: c.req.valid('json') };
@@ -2711,7 +2711,7 @@ export function createApp(deps: ServerDeps) {
     // Global GUI state (`~/.cezar/ui-state.json`) — same parse/key-cap/shallow-
     // merge semantics as the per-repo /api/v1/ui-state route below (the shared half
     // is `uiStateBodySchema`), but backed by the workspace file.
-    .get('/workspace/ui-state', async (c) => c.json(await readWorkspaceUiState(deps.home?.workspaceUiState)))
+    .get('/workspace/ui-state', async (c) => c.json(await readWorkspaceUiState(deps.home.workspaceUiState)))
 
     // The tighter body cap rides on `use` rather than inline on the route: `bodyLimit` is typed
     // as a bare MiddlewareHandler, and passing one to `.put()` collapses the route's schema, so
@@ -2771,8 +2771,8 @@ export function createApp(deps: ServerDeps) {
       // The default read stays fast and starts the team load in the background.
       // The cockpit follows it with `wait=1`, off the render path, so a cold
       // cache converges without polling or a manual reload (spec 005 / #555).
-      if (c.req.valid('query').wait === '1') await waitForTeamSkills(repoRoot);
-      return c.json(await discoverSkills(repoRoot, { builtin: builtinSkillsOf(c.get('project').manager) }));
+      if (c.req.valid('query').wait === '1') await waitForTeamSkills(repoRoot, deps.home);
+      return c.json(await discoverSkills(repoRoot, { builtin: builtinSkillsOf(c.get('project').manager) }, deps.home));
     })
 
     // Every team skill the configured sources offer, including those this project switched
@@ -2781,8 +2781,8 @@ export function createApp(deps: ServerDeps) {
     // `wait=1` lets the panel wait out a cold team-skill cache, same as `GET /skills` (spec 005).
     .get('/skills/importable', queryZodValidator(waitQuery), async (c) => {
       const repoRoot = c.get('project').root;
-      if (c.req.valid('query').wait === '1') await waitForTeamSkills(repoRoot);
-      return c.json(getTeamSkillsCached(repoRoot));
+      if (c.req.valid('query').wait === '1') await waitForTeamSkills(repoRoot, deps.home);
+      return c.json(getTeamSkillsCached(repoRoot, deps.home));
     })
 
     // Refresh team skills (spec 005): clone/fetch the configured skills repos,
@@ -2790,8 +2790,8 @@ export function createApp(deps: ServerDeps) {
     // team entries stay as they were (or absent).
     .post('/skills/refresh', async (c) => {
       const { root: repoRoot } = c.get('project');
-      await refreshTeamSkills(repoRoot);
-      return c.json(await discoverSkills(repoRoot, { builtin: builtinSkillsOf(c.get('project').manager) }));
+      await refreshTeamSkills(repoRoot, deps.home);
+      return c.json(await discoverSkills(repoRoot, { builtin: builtinSkillsOf(c.get('project').manager) }, deps.home));
     });
 
   // ---- chained family: GUI prefs / ui-state (project-scoped) ----
@@ -4581,7 +4581,7 @@ export function createApp(deps: ServerDeps) {
     number: z.coerce.number().int().positive(),
   });
   const branchForge = deps.branchForge ?? createGithubBranchForge({ forgeFactory: deps.forgeFactory });
-  const branchClassifyInput = (project: ClassifyProject) => classifyInputFor({ ...project, home: deps.home }, branchForge);
+  const branchClassifyInput = (project: Omit<ClassifyProject, 'home'>) => classifyInputFor({ ...project, home: deps.home }, branchForge);
   // ---- chained family: repo / git (project-scoped) ----
   const repoRoutes = new Hono<ProjectApiEnv>()
     .get('/repo', async (c) => {
@@ -4753,7 +4753,7 @@ export function createApp(deps: ServerDeps) {
   // The Settings → Agents knobs in one read (R6 Step 1.5) — an ADDITIVE
   // sibling of PUT /api/config below; /api/health keeps its protected shape.
   const configAnswer = async (repoRoot: string, config: CezConfig) => {
-    const archive = resolveArchiveOnMerge(config, await loadWorkspaceConfig(deps.home?.workspaceConfig));
+    const archive = resolveArchiveOnMerge(config, await loadWorkspaceConfig(deps.home.workspaceConfig));
     const nativeModels = await readAgentModelDefaults(repoRoot);
     const setup = resolveWorktreeSetup(config.worktreeSetup);
     const modelsLocked = agentModelsLocked(repoRoot, process.env, deps.home);
@@ -5202,7 +5202,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       const boot = { id: bootProjectId, root: deps.repoRoot, status: 'ok' as const };
       return [boot, ...(await visibleProjects()).filter(project => project.id !== bootProjectId && project.root !== deps.repoRoot)];
     },
-    enabled: async project => resolveArchiveOnMerge(await loadConfig(project.root, deps.home), await loadWorkspaceConfig(deps.home?.workspaceConfig)).enabled,
+    enabled: async project => resolveArchiveOnMerge(await loadConfig(project.root, deps.home), await loadWorkspaceConfig(deps.home.workspaceConfig)).enabled,
     repository: async project => {
       const repository = await resolveForgeRoot(project.root, deps.forgeFactory).discoverRepository();
       return repository.status === 'resolved' ? forgeRepositoryUrl('github', repository.handle.owner, repository.handle.name) : undefined;

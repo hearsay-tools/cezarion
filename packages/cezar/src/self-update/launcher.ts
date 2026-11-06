@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 /**
  * The launchers in `~/.cezar/bin/` and the one-line PATH hook that makes `cezar` a command.
  *
@@ -7,7 +8,6 @@
  * predates the cockpit's update dialog (this PoC's own situation).
  */
 
-import { resolveHome } from '../home/resolve.ts';
 import { appendFileSync, chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -19,7 +19,7 @@ import { binDir, CURRENT_LINK, PACKAGE_NAME, versionsDir } from './layout.ts';
 const PATH_MARKER = '# cezar managed install';
 const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
 
-export function posixLauncher(env: NodeJS.ProcessEnv, home = resolveHome({ purpose: 'compatibility', env })): string {
+export function posixLauncher(env: NodeJS.ProcessEnv, home: Home): string {
   // `CEZ_HOME` is honoured at run time too, so a launcher written under the default home keeps
   // working when the user later sets it — the launcher recomputes, it does not bake the path in.
   const homeExpr = home.rootOverride ? shellQuote(home.rootOverride) : '"${CEZ_HOME:-$HOME/.cezar}"';
@@ -56,13 +56,13 @@ exec node "$ENTRY" "$@"
 `;
 }
 
-export function windowsLauncher(env: NodeJS.ProcessEnv, home = resolveHome({ purpose: 'compatibility', env })): string {
+export function windowsLauncher(env: NodeJS.ProcessEnv, home: Home): string {
   const entry = join(home.root, 'versions', CURRENT_LINK, 'node_modules', ...PACKAGE_NAME.split('/'), 'dist', 'index.js');
   return `@echo off\r\nrem ${PATH_MARKER}\r\nnode "${entry}" %*\r\n`;
 }
 
 /** Write `cezar` and `cez` launchers. Returns the bin directory. Untested on Windows (PoC). */
-export function writeLaunchers(env: NodeJS.ProcessEnv = process.env, home = resolveHome({ purpose: 'compatibility', env })): string {
+export function writeLaunchers(env: NodeJS.ProcessEnv = process.env, home: Home): string {
   const dir = binDir(env, home);
   assertCezarHomeWriteIsSandboxed(dir, env);
   assertCezarHomeWriteIsSandboxed(versionsDir(env, home), env);

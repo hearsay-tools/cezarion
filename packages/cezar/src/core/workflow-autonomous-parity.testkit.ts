@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { partitionParity, type ParityPart, type ParityCollector } from './parity-partition.testkit.ts';
 import { observationClock } from './observation-clock.testkit.ts';
 import { fixtureWork } from '../workflows/fixture-cleanup.testkit.ts';
@@ -191,7 +192,7 @@ describe('autonomous turn-end parity — #426', () => {
         it(`${backend} ${row.id} ${row.name}${exemption ? ' — exemption: ordinary native idle control' : ''}`, async () => {
           const continuation = row.id === 'A14';
           const retainedAck = !exemption;
-          const semaphore = new WorkspaceSemaphore();
+          const semaphore = new WorkspaceSemaphore({ home: testHome() });
           let repoRoot = '';
           let clock: ReturnType<typeof observationClock>;
           let ready: (() => void) | undefined;

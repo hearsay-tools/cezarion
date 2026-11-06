@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,7 +21,7 @@ afterEach(() => vi.unstubAllEnvs());
 describe('Preview graphics with real Chromium', () => {
   // Mesa's software override is Linux-specific; other hosts exercise their default backend.
   const modes = process.platform === 'linux' ? ['host', 'software'] as const : ['host'] as const;
-  it.skipIf(process.platform === 'win32' || !resolveChromium()).each(modes)('streams a painted page with %s graphics', async mode => {
+  it.skipIf(process.platform === 'win32' || !resolveChromium(undefined, undefined, undefined, undefined, testHome())).each(modes)('streams a painted page with %s graphics', async mode => {
     if (mode === 'software') {
       // Remove display access and force Mesa's CPU renderer, including on GPU-equipped hosts.
       vi.stubEnv('DISPLAY', undefined);
@@ -29,7 +30,7 @@ describe('Preview graphics with real Chromium', () => {
     }
     const dir = mkdtempSync(join(tmpdir(), 'cez-preview-gpu-'));
     try {
-      const browser = await launchBrowser(join(dir, 'profile'), { ...process.env, CEZ_PREVIEW_NO_SANDBOX: '1' });
+      const browser = await launchBrowser(join(dir, 'profile'), { ...process.env, CEZ_PREVIEW_NO_SANDBOX: '1' }, testHome({ ...process.env, CEZ_PREVIEW_NO_SANDBOX: '1' }));
       try {
         const { cdp } = browser;
         await cdp.send('Page.enable');

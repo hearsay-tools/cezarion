@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -74,7 +75,7 @@ it('records the routing on recovery when the crash fell between the question and
     try {
       const parentCaller = credentials.authenticate(credentials.issue('project', f.p.id, randomUUID()))!;
       const service = new DelegationService();
-      service.registerProject({ id: 'project', root, store, manager });
+      service.registerProject({ home: testHome(), id: 'project', root, store, manager });
       await until(() => ['running', 'waiting'].includes(store.getRun(f.p.id)?.status ?? '') && store.getRun(f.w.id)?.status === 'waiting');
       await service.send(parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'reply', requestId: f.questionId, text: 'mock:agent-echo Use the parser', timeoutSeconds: 600 });
       await until(() => answered(f.w.id).length === 1);

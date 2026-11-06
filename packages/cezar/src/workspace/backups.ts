@@ -1,5 +1,4 @@
 import type { Home } from '../home/home.ts';
-import { resolveHome } from '../home/resolve.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { linkSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -33,7 +32,7 @@ function entries(home: string | Home, file: BackupFile): BackupEntry[] {
   }).sort((a, b) => b.time.localeCompare(a.time) || b.path.localeCompare(a.path));
 }
 
-export function listBackups(file?: BackupFile, home: string | Home = resolveHome({ purpose: 'compatibility' })): BackupEntry[] {
+export function listBackups(file: BackupFile | undefined, home: string | Home): BackupEntry[] {
   return (file ? [file] : BACKUP_FILES).flatMap((name) => entries(home, name));
 }
 

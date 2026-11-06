@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import {
   RUN_STATUS,
   WAIT_KIND,
@@ -94,7 +95,7 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
           expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id && !input.deliveredAt)).toHaveLength(1);
         } else {
           const service = new DelegationService();
-          const unregister = service.registerProject({ id: 'project', root, store, manager });
+          const unregister = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
           try {
             expect(await service.destroyForHuman('project', child.id)).toMatchObject({ state: 'complete', remaining: [] });
           } finally { unregister(); }

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -11,7 +12,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 for (const backend of RUNNER_IDS) {
   it.each(['live', 'restart'] as const)(`${backend}: %s parent resume executes its message once without human input`, async mode => {
-    const semaphore = new WorkspaceSemaphore();
+    const semaphore = new WorkspaceSemaphore({ home: testHome() });
     await withOwnedInputRun(backend, 'baseline', async fixture => {
       const { repoRoot, runId, parentRunId } = fixture;
       let { store, manager } = fixture;
@@ -26,7 +27,7 @@ for (const backend of RUNNER_IDS) {
       const credentials = new CredentialRegistry();
       const caller = credentials.authenticate(credentials.issue('project', parentRunId, randomUUID()))!;
       let service = new DelegationService();
-      service.registerProject({ id: 'project', root: repoRoot, store, manager });
+      service.registerProject({ home: testHome(), id: 'project', root: repoRoot, store, manager });
       const request = { id: randomUUID(), recipientRunId: runId, kind: 'request' as const, timeoutSeconds: 600,
         resume: true, text: 'mock:agent-echo Check the corrected result' };
       try {
@@ -41,7 +42,7 @@ for (const backend of RUNNER_IDS) {
           held!.mockRestore();
           await semaphore.release();
           service = new DelegationService();
-          service.registerProject({ id: 'project', root: repoRoot, store, manager });
+          service.registerProject({ home: testHome(), id: 'project', root: repoRoot, store, manager });
         }
         await waitFor(() => !!store.getRun(runId)?.agentInputs?.find(input => input.id === request.id)?.deliveredAt);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');

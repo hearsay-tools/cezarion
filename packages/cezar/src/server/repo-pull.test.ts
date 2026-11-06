@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
@@ -59,7 +60,7 @@ describe('project checkout pull', () => {
     remoteHead = git(source, 'rev-parse', 'HEAD');
     active.clear();
     store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
-    app = createApp({ repoRoot: root, store,
+    app = createApp({ home: testHome(), repoRoot: root, store,
       manager: { isActive: (id: string) => active.has(id) } as RunManager,
       version: 'test' });
   });

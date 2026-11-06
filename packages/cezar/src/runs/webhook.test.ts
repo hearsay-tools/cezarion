@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from './run-store.testkit.ts';
 import {
   RUN_STATUS,
@@ -494,13 +495,13 @@ describe('TaskWebhooks', () => {
   });
 
   it('holds recovery-time deliveries until the origin is known, and resolves the default alias by root', async () => {
-    const entry = await registerProject(root);
+    const entry = await registerProject(root, undefined, testHome());
     await mergeWriteWorkspaceConfig((config) => {
       config.projects.find((p) => p.id === entry.id)!.webhook = { url: 'https://bot.example/hook', token: 't' };
-    });
+    }, testHome());
     const store = RunStore.open(dataDir);
     const { calls, fetchImpl } = recorder();
-    const hooks = new TaskWebhooks({ fetch: fetchImpl });
+    const hooks = new TaskWebhooks({ home: testHome(), fetch: fetchImpl });
     const hook = hooks.attach({ id: 'default', root, store });
     expect(hooks.attach({ id: 'default', root, store })).toBe(hook);
 

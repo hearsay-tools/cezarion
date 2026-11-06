@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -28,8 +29,8 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'cez-stopped-')); roots.push(root);
   const data = join(root, '.ai/cezar');
   const store = RunStore.open(data);
-  const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 } });
-  const manager = createFixtureManager(store, root, { semaphore }); managers.push(manager);
+  const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } });
+  const manager = createFixtureManager(store, root, { home: testHome(), semaphore }); managers.push(manager);
   return { root, data, store, manager };
 }
 afterEach(async () => {
@@ -47,7 +48,7 @@ describe('stopped composer engine', { timeout: 15_000 }, () => {
     const { root, data, store, manager } = fixture();
     const accountDir = join(root, 'selected-account');
     mkdirSync(accountDir); writeFileSync(join(accountDir, 'settings.json'), '{}');
-    await mergeWriteAgentAccounts(accounts => { accounts.accounts.push({ id: 'stopped-composer-selected', provider: 'claude', configDir: accountDir, label: 'Selected', addedAt: '' }); });
+    await mergeWriteAgentAccounts(accounts => { accounts.accounts.push({ id: 'stopped-composer-selected', provider: 'claude', configDir: accountDir, label: 'Selected', addedAt: '' }); }, testHome());
     const run = manager.startRun(workflow, { task: 'original task', systemPrompt: 'private instruction', worktree: false,
       autonomous: true, runner: 'claude', model: 'opus', agentProfile: 'default',
       images: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' } }] });

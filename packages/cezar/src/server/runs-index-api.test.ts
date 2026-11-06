@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import {
   RUN_STATUS,
   STEP_KIND,
@@ -84,7 +85,7 @@ describe('workspace runs index API', () => {
   });
 
   const makeApp = (over: Partial<ServerDeps> = {}) =>
-    createApp({ repoRoot, store, manager: { finishBlockedReason: () => 'no open session' } as unknown as RunManager, version: '0.0.0-test', forgeFactory, ...over });
+    createApp({ home: testHome(), repoRoot, store, manager: { finishBlockedReason: () => 'no open session' } as unknown as RunManager, version: '0.0.0-test', forgeFactory, ...over });
 
   const getIndex = async (over: Partial<ServerDeps> = {}): Promise<RunsIndexResponse> => {
     const res = await apiRequest(makeApp(over), '/api/v1/workspace/runs-index');
@@ -104,8 +105,8 @@ describe('workspace runs index API', () => {
   });
 
   it('merges the boot project’s live store with a cold project read off disk, newest first', async () => {
-    const boot = await registerProject(repoRoot);
-    const other = await registerProject(otherRoot);
+    const boot = await registerProject(repoRoot, undefined, testHome());
+    const other = await registerProject(otherRoot, undefined, testHome());
     const live = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
     store.updateRun(live.id, { createdAt: '2026-07-10T10:00:00Z' });
     seedColdProject(otherRoot, [
@@ -122,7 +123,7 @@ describe('workspace runs index API', () => {
   it('agrees with a cold read on a run this cezar cannot read, and opening it says why (#779)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     onTestFinished(() => warn.mockRestore());
-    await registerProject(repoRoot);
+    await registerProject(repoRoot, undefined, testHome());
     // Valid summaries, records this schema rejects: only decoding finds out.
     const steps = [{ id: 's1', name: 'work', kind: STEP_KIND.agent, status: 'bogus', iterations: 1, tokensUsed: 0 }];
     store.close();
@@ -145,10 +146,10 @@ describe('workspace runs index API', () => {
   });
 
   it('never builds a project context — a search must not resume agents', async () => {
-    await registerProject(repoRoot);
-    const other = await registerProject(otherRoot);
+    await registerProject(repoRoot, undefined, testHome());
+    const other = await registerProject(otherRoot, undefined, testHome());
     seedColdProject(otherRoot, [storedRun({ id: 'cold-1', title: 'Cold task' })]);
-    const contexts = new ProjectContexts({ listProjects });
+    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
 
     const body = await getIndex({ contexts });
 
@@ -161,8 +162,8 @@ describe('workspace runs index API', () => {
   });
 
   it('scopes cold rows after delayed discovery without opening or writing their project', async () => {
-    await registerProject(repoRoot);
-    const other = await registerProject(otherRoot);
+    await registerProject(repoRoot, undefined, testHome());
+    const other = await registerProject(otherRoot, undefined, testHome());
     const foreignPr = 'https://github.com/foreign/repo/pull/42';
     const foreignIssue = 'https://github.com/foreign/repo/issues/43';
     seedColdProject(otherRoot, [storedRun({
@@ -173,7 +174,7 @@ describe('workspace runs index API', () => {
     const original = readPersistedText(join(otherRoot, '.ai/cezar'));
     let finish!: (handle: { owner: string; name: string }) => void;
     resolveRepoHandle.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
-    const contexts = new ProjectContexts({ listProjects });
+    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     const app = makeApp({ contexts });
     const request = async () => runsIndexResponseSchema.parse(
       await (await apiRequest(app, '/api/v1/workspace/runs-index')).json(),
@@ -198,8 +199,8 @@ describe('workspace runs index API', () => {
   });
 
   it.each(['unavailable', 'rejected'])('keeps cold references when identity is %s', async (failure) => {
-    await registerProject(repoRoot);
-    await registerProject(otherRoot);
+    await registerProject(repoRoot, undefined, testHome());
+    await registerProject(otherRoot, undefined, testHome());
     const url = 'https://github.com/foreign/repo/pull/42';
     seedColdProject(otherRoot, [storedRun({ id: 'cold', title: 'Research', referencedPullRequestUrl: url })]);
     if (failure === 'rejected') resolveRepoHandle.mockRejectedValue(new Error('offline'));
@@ -213,8 +214,8 @@ describe('workspace runs index API', () => {
   });
 
   it('sends the slim row — no steps, and optional keys absent rather than null', async () => {
-    await registerProject(repoRoot);
-    await registerProject(otherRoot);
+    await registerProject(repoRoot, undefined, testHome());
+    await registerProject(otherRoot, undefined, testHome());
     seedColdProject(otherRoot, [
       storedRun({
         id: 'cold-1',
@@ -277,8 +278,8 @@ describe('workspace runs index API', () => {
   });
 
   it('carries cost and the persisted usage peaks the cross-project table paints', async () => {
-    await registerProject(repoRoot);
-    await registerProject(otherRoot);
+    await registerProject(repoRoot, undefined, testHome());
+    await registerProject(otherRoot, undefined, testHome());
     seedColdProject(otherRoot, [
       storedRun({
         id: 'measured',
@@ -300,8 +301,8 @@ describe('workspace runs index API', () => {
   it('carries the tracker-reference inputs so a cross-project row can show its PR/issue chip', async () => {
     // Verbatim, not pre-resolved: the rule that picks between them (#407, #526) lives in the
     // cockpit's `taskReference()`, and resolving it a second time here would be a second rule.
-    await registerProject(repoRoot);
-    await registerProject(otherRoot);
+    await registerProject(repoRoot, undefined, testHome());
+    await registerProject(otherRoot, undefined, testHome());
     seedColdProject(otherRoot, [
       storedRun({
         id: 'tracked',
@@ -330,8 +331,8 @@ describe('workspace runs index API', () => {
   });
 
   it('includes archived runs — findable from a project is findable from anywhere', async () => {
-    await registerProject(repoRoot);
-    await registerProject(otherRoot);
+    await registerProject(repoRoot, undefined, testHome());
+    await registerProject(otherRoot, undefined, testHome());
     seedColdProject(otherRoot, [
       storedRun({ id: 'live', title: 'Live', createdAt: '2026-07-14T11:00:00Z' }),
       storedRun({ id: 'filed', title: 'Archived', archived: true, createdAt: '2026-07-14T10:00:00Z' }),
@@ -345,8 +346,8 @@ describe('workspace runs index API', () => {
   });
 
   it('caps each project\'s archived roots and names it in `truncated`, so no cap is silent', async () => {
-    await registerProject(repoRoot);
-    const other = await registerProject(otherRoot);
+    await registerProject(repoRoot, undefined, testHome());
+    const other = await registerProject(otherRoot, undefined, testHome());
     // 210 archived roots > the 200 window (#864: unarchived runs are never cut). Ids sort with the
     // timestamps so the newest survivors are predictable.
     seedColdProject(
@@ -370,7 +371,7 @@ describe('workspace runs index API', () => {
   });
 
   it('keeps parent wait phases and leaves workers out of a slim live/cold index without ownership resources', async () => {
-    await registerProject(repoRoot); await registerProject(otherRoot);
+    await registerProject(repoRoot, undefined, testHome()); await registerProject(otherRoot, undefined, testHome());
     const workerId = '10000000-0000-4000-8000-000000000002';
     const live = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
     const wait = { id: workerId, workerIds: [workerId], deadline: '2026-09-06T00:00:00.000Z', phase: 'parked' as const, outcomes: [] };
@@ -391,8 +392,8 @@ describe('workspace runs index API', () => {
   });
 
   it('carries pending human attention for hot and cold parked roots without opening the cold project', async () => {
-    await registerProject(repoRoot);
-    const other = await registerProject(otherRoot);
+    await registerProject(repoRoot, undefined, testHome());
+    const other = await registerProject(otherRoot, undefined, testHome());
     const live = store.createRun({ title: 'Hot question', workflow: 'quick-task', task: 'task', steps: [] });
     const delegation = { role: 'root' as const, permissions: [], receipts: [], wait: { id: live.id, workerIds: [live.id], deadline: '2026-09-09T00:00:00.000Z', phase: 'parked' as const, outcomes: [] } };
     const question = { type: 'ask.requested', requestId: 'question', questions: [{ header: 'Choice', question: 'Which option?', options: [{ label: 'First' }, { label: 'Second' }] }] };
@@ -405,7 +406,7 @@ describe('workspace runs index API', () => {
     mkdirSync(join(otherRoot, '.ai/cezar/runs'));
     writeFileSync(join(otherRoot, '.ai/cezar/runs/cold-question.ndjson'), JSON.stringify({ ...question, seq: 1, ts: new Date().toISOString() }) + '\n');
     const before = readPersistedText(join(otherRoot, '.ai/cezar'));
-    const contexts = new ProjectContexts({ listProjects });
+    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     const app = makeApp({ contexts });
     try {
       const body = runsIndexResponseSchema.parse(await (await apiRequest(app, '/api/v1/workspace/runs-index')).json());
@@ -423,8 +424,8 @@ describe('workspace runs index API', () => {
   });
 
   it('carries `autoResumeAt`, so a usage-limit park does not read as a failure', async () => {
-    await registerProject(repoRoot);
-    await registerProject(otherRoot);
+    await registerProject(repoRoot, undefined, testHome());
+    await registerProject(otherRoot, undefined, testHome());
     seedColdProject(otherRoot, [
       storedRun({
         id: 'parked',
@@ -449,8 +450,8 @@ describe('workspace runs index API', () => {
   });
 
   it('reads a crashed process’s `running` row as interrupted, exactly as opening it would', async () => {
-    await registerProject(repoRoot);
-    await registerProject(otherRoot);
+    await registerProject(repoRoot, undefined, testHome());
+    await registerProject(otherRoot, undefined, testHome());
     seedColdProject(otherRoot, [storedRun({ id: 'ghost', title: 'Ghost', status: RUN_STATUS.running })]);
 
     const body = await getIndex();
@@ -461,8 +462,8 @@ describe('workspace runs index API', () => {
   });
 
   it('skips a project whose folder is gone and degrades a corrupt index to no rows', async () => {
-    await registerProject(repoRoot);
-    await registerProject(otherRoot);
+    await registerProject(repoRoot, undefined, testHome());
+    await registerProject(otherRoot, undefined, testHome());
     mkdirSync(join(otherRoot, '.ai/cezar'), { recursive: true });
     // Never migrated, so the legacy file is what the cold reader parses.
     writeFileSync(join(otherRoot, '.ai/cezar/runs.json'), '{ not json', 'utf8');
@@ -482,7 +483,7 @@ describe('workspace runs index API', () => {
    */
   describe('reference statuses', () => {
     it('ships an empty map when the server has looked nothing up', async () => {
-      await registerProject(repoRoot);
+      await registerProject(repoRoot, undefined, testHome());
       const run = store.createRun({ title: 'Has a PR', workflow: 'build', task: 't', steps: [] });
       store.updateRun(run.id, { pullRequestUrl: 'https://github.com/acme/demo/pull/42' });
 
@@ -495,7 +496,7 @@ describe('workspace runs index API', () => {
     });
 
     it('ships what the cache holds, keyed by project', async () => {
-      await registerProject(repoRoot);
+      await registerProject(repoRoot, undefined, testHome());
       const run = store.createRun({ title: 'Has a PR', workflow: 'build', task: 't', steps: [] });
       store.updateRun(run.id, {
         pullRequestUrl: 'https://github.com/acme/demo/pull/42',
@@ -514,7 +515,7 @@ describe('workspace runs index API', () => {
       // Which reference is displayed is the cockpit's rule (#407, #526) and is deliberately not
       // re-derived here. A cache read costs nothing per number, so the superset is free — and it
       // is what lets the client apply its own rule to whatever it gets.
-      await registerProject(repoRoot);
+      await registerProject(repoRoot, undefined, testHome());
       const run = store.createRun({ title: 'Several', workflow: 'build', task: 't', steps: [] });
       store.updateRun(run.id, {
         pullRequestUrl: 'https://github.com/acme/demo/pull/42',
@@ -563,14 +564,14 @@ describe('workspace runs index API', () => {
     };
 
     it('keeps an old waiting root of a cold project behind newer archived roots and workers', async () => {
-      await registerProject(repoRoot);
-      const other = await registerProject(otherRoot);
+      await registerProject(repoRoot, undefined, testHome());
+      const other = await registerProject(otherRoot, undefined, testHome());
       seedColdProject(otherRoot, incident());
       expectWindow(await getIndex(), other.id);
     });
 
     it('keeps an old waiting root of the owned boot project too', async () => {
-      const boot = await registerProject(repoRoot);
+      const boot = await registerProject(repoRoot, undefined, testHome());
       store.close();
       seedRuns(join(repoRoot, '.ai/cezar'), incident());
       store = RunStore.open(join(repoRoot, '.ai/cezar'));
@@ -598,8 +599,8 @@ describe('workspace runs index API', () => {
     ];
 
     it('finds a cold project\'s run older than its newest 200 by title, PR and issue, never a worker', async () => {
-      await registerProject(repoRoot);
-      const other = await registerProject(otherRoot);
+      await registerProject(repoRoot, undefined, testHome());
+      const other = await registerProject(otherRoot, undefined, testHome());
       seedColdProject(otherRoot, oldAndMany());
       const index = await getIndex();
       expect(index.runs.map((run) => run.id)).not.toContain('oldest');
@@ -613,15 +614,15 @@ describe('workspace runs index API', () => {
     });
 
     it('finds runs in the owned boot project too', async () => {
-      await registerProject(repoRoot);
+      await registerProject(repoRoot, undefined, testHome());
       const run = store.createRun({ title: 'Boot needle', workflow: 'build', task: 't', steps: [] });
       store.setArchived(run.id, true);
       expect(ids((await search('?q=needle')).body)).toEqual([run.id]);
     });
 
     it('caps each project and names it in `truncated`', async () => {
-      await registerProject(repoRoot);
-      const other = await registerProject(otherRoot);
+      await registerProject(repoRoot, undefined, testHome());
+      const other = await registerProject(otherRoot, undefined, testHome());
       seedColdProject(otherRoot, oldAndMany());
       const { body } = await search('?q=newer&limit=2');
       expect(runsSearchResponseSchema.parse(body)).toMatchObject({ runs: [{}, {}], truncated: [other.id] });
@@ -636,8 +637,8 @@ describe('workspace runs index API', () => {
     });
 
     it('degrades an unreadable project to no rows, never a 500', async () => {
-      await registerProject(repoRoot);
-      await registerProject(otherRoot);
+      await registerProject(repoRoot, undefined, testHome());
+      await registerProject(otherRoot, undefined, testHome());
       mkdirSync(join(otherRoot, '.ai/cezar'), { recursive: true });
       writeFileSync(join(otherRoot, '.ai/cezar/runs.db'), 'not a database');
       const run = store.createRun({ title: 'Still here', workflow: 'build', task: 't', steps: [] });
@@ -647,8 +648,8 @@ describe('workspace runs index API', () => {
     it('skips an owned project whose store throws, never a 500 (index and search alike)', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       onTestFinished(() => warn.mockRestore());
-      await registerProject(repoRoot);
-      const other = await registerProject(otherRoot);
+      await registerProject(repoRoot, undefined, testHome());
+      const other = await registerProject(otherRoot, undefined, testHome());
       seedColdProject(otherRoot, [storedRun({ id: 'cold-needle', title: 'Cold needle' })]);
       vi.spyOn(store, 'searchRunSummaries').mockImplementation(() => { throw new Error('database is locked'); });
       // Only the windowed read the index makes; the app's own boot lists every run.
@@ -665,8 +666,8 @@ describe('workspace runs index API', () => {
     });
 
     it('treats a token that names a project as satisfied in that project, as the palette does', async () => {
-      await registerProject(repoRoot);
-      const other = await registerProject(otherRoot);
+      await registerProject(repoRoot, undefined, testHome());
+      const other = await registerProject(otherRoot, undefined, testHome());
       seedColdProject(otherRoot, [storedRun({ id: 'cold-db', title: 'Database migration' })]);
       const projectToken = other.name.toLowerCase().split(/[^a-z0-9]+/).filter((part) => part.length >= 3).pop()!;
       const { status, body } = await search(`?q=${encodeURIComponent(`${projectToken} database`)}`);
@@ -675,10 +676,10 @@ describe('workspace runs index API', () => {
     });
 
     it('never builds a project context', async () => {
-      await registerProject(repoRoot);
-      const other = await registerProject(otherRoot);
+      await registerProject(repoRoot, undefined, testHome());
+      const other = await registerProject(otherRoot, undefined, testHome());
       seedColdProject(otherRoot, [storedRun({ id: 'cold-1', title: 'Cold needle' })]);
-      const contexts = new ProjectContexts({ listProjects });
+      const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
       expect(ids((await search('?q=needle', { contexts })).body)).toEqual(['cold-1']);
       expect(contexts.peek(other.id)).toBeUndefined();
       expect(contexts.ids()).toEqual([]);
@@ -686,7 +687,7 @@ describe('workspace runs index API', () => {
     });
 
     it('is workspace-level only: no project-scoped spelling', async () => {
-      await registerProject(repoRoot);
+      await registerProject(repoRoot, undefined, testHome());
       const res = await apiRequest(makeApp(), '/api/v1/p/default/workspace/runs-search?q=ab');
       expect(res.status).toBe(404);
     });

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
@@ -54,7 +55,7 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     // A real manager: the reclaim routes claim through it, the same claim Continue is refused by.
     manager = createFixtureManager(store, repoRoot);
-    app = createApp({ repoRoot, store, manager, version: '0.0.0-test' });
+    app = createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test' });
   });
 
   afterEach(async () => {
@@ -456,7 +457,7 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
     manager.dispose(); store.close();
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
     manager = createFixtureManager(store, repoRoot);
-    app = createApp({ repoRoot, store, manager, version: '0.0.0-test' });
+    app = createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test' });
     expect(manager.continueRun(id, { text: 'continue' }).ok).toBe(false);
     expect(manager.claimForPublish(id)).toBeNull();
     expect(manager.claimWorktreeReclaim(id)).toBeNull();

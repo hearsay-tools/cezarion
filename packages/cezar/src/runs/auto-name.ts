@@ -151,7 +151,7 @@ export function postValidateTitle(title: string, refNumber?: number): string {
  * the heuristic title. `namerModel` is a Claude alias, so it is passed only
  * when the namer runs on Claude (the `plannerModel` precedent).
  */
-export async function generateRunName(repoRoot: string, ctx: NamerContext, home?: Home): Promise<NameResult | null> {
+export async function generateRunName(repoRoot: string, ctx: NamerContext, home: Home): Promise<NameResult | null> {
   try {
     const config = await loadConfig(repoRoot, home);
     const runner = createRunner(config.defaultRunner);

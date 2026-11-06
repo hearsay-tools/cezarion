@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,7 +26,7 @@ describe('WorkspaceSemaphore', () => {
   };
 
   it('defaults to the workspace schema defaults before any refresh', () => {
-    const sem = new WorkspaceSemaphore();
+    const sem = new WorkspaceSemaphore({ home: testHome() });
     expect(sem.maxParallel()).toBe(2);
     expect(sem.memoryLimitMb()).toBeNull();
     expect(sem.monitoringWakeIntervalMinutes()).toBe(5); // #810 — monitoring must self-resume
@@ -37,23 +38,23 @@ describe('WorkspaceSemaphore', () => {
    *  "Park until resumed". Absent and null must therefore answer differently. */
   describe('monitoringWakeIntervalMinutes: absent vs. explicit null (#810)', () => {
     it('falls back to the shipped default only when the key is ABSENT', () => {
-      const sem = new WorkspaceSemaphore({ initial: { maxParallel: 2, monitoringWakeIntervalMinutes: undefined } });
+      const sem = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 2, monitoringWakeIntervalMinutes: undefined } });
       expect(sem.monitoringWakeIntervalMinutes()).toBe(5);
     });
 
     it('preserves an explicit null (park until resumed)', () => {
-      const sem = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: null } });
+      const sem = new WorkspaceSemaphore({ home: testHome(), initial: { monitoringWakeIntervalMinutes: null } });
       expect(sem.monitoringWakeIntervalMinutes()).toBeNull();
     });
 
     it('preserves an explicit cadence', () => {
-      const sem = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 12 } });
+      const sem = new WorkspaceSemaphore({ home: testHome(), initial: { monitoringWakeIntervalMinutes: 12 } });
       expect(sem.monitoringWakeIntervalMinutes()).toBe(12);
     });
 
     it('a refresh that reports null parks, and one that reports a number re-arms', async () => {
       let wake: number | null = null;
-      const sem = new WorkspaceSemaphore({
+      const sem = new WorkspaceSemaphore({ home: testHome(),
         load: () => Promise.resolve({ maxParallel: 2, memoryLimitMb: null, monitoringWakeIntervalMinutes: wake }),
       });
       await sem.refresh();
@@ -65,7 +66,7 @@ describe('WorkspaceSemaphore', () => {
   });
 
   it('honors an initial override (test seam)', () => {
-    const sem = new WorkspaceSemaphore({ initial: { maxParallel: 5, memoryLimitMb: 512 } });
+    const sem = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 5, memoryLimitMb: 512 } });
     expect(sem.maxParallel()).toBe(5);
     expect(sem.memoryLimitMb()).toBe(512);
   });
@@ -76,7 +77,7 @@ describe('WorkspaceSemaphore', () => {
     // 2026-08-03-auto-resume-after-usage-limit). The two kinds bind different work, so they are
     // aggregated separately. `accountHolds` is optional on the participant, so a stub that
     // predates it — like the ones above — simply holds nothing.
-    const sem = new WorkspaceSemaphore();
+    const sem = new WorkspaceSemaphore({ home: testHome() });
     expect(sem.accountHolds().deadline.size + sem.accountHolds().inFlight.size).toBe(0);
 
     sem.register(participant(0));
@@ -101,7 +102,7 @@ describe('WorkspaceSemaphore', () => {
 
 
   it('busy() sums every registered participant; unregister stops counting', () => {
-    const sem = new WorkspaceSemaphore();
+    const sem = new WorkspaceSemaphore({ home: testHome() });
     const a = participant(2);
     const b = participant(1);
     const offA = sem.register(a);
@@ -113,7 +114,7 @@ describe('WorkspaceSemaphore', () => {
 
   it('refresh() swaps the cached limits and pumps every participant', async () => {
     let limits = { maxParallel: 1, memoryLimitMb: null as number | null };
-    const sem = new WorkspaceSemaphore({ load: () => Promise.resolve({ ...limits }) });
+    const sem = new WorkspaceSemaphore({ home: testHome(), load: () => Promise.resolve({ ...limits }) });
     const a = participant(0);
     sem.register(a);
     limits = { maxParallel: 7, memoryLimitMb: 1024 };
@@ -124,7 +125,7 @@ describe('WorkspaceSemaphore', () => {
   });
 
   it('release() pumps EVERY participant, not just the one that freed the slot', async () => {
-    const sem = new WorkspaceSemaphore();
+    const sem = new WorkspaceSemaphore({ home: testHome() });
     const a = participant(1);
     const b = participant(0, 1000);
     sem.register(a);
@@ -143,7 +144,7 @@ describe('WorkspaceSemaphore', () => {
         order.push(name);
       },
     });
-    const sem = new WorkspaceSemaphore();
+    const sem = new WorkspaceSemaphore({ home: testHome() });
     sem.register(named('idle', null));
     sem.register(named('newer', 2000));
     sem.register(named('older', 1000));
@@ -163,7 +164,7 @@ describe('WorkspaceSemaphore', () => {
         order.push(name);
       },
     });
-    const sem = new WorkspaceSemaphore();
+    const sem = new WorkspaceSemaphore({ home: testHome() });
     sem.register(named('idle', null));
     sem.register(named('unstarted', 1));
     sem.register(named('late-wake', 5, 9));
@@ -174,7 +175,7 @@ describe('WorkspaceSemaphore', () => {
   });
 
   it('a release landing mid-sweep re-runs the sweep instead of being dropped', async () => {
-    const sem = new WorkspaceSemaphore();
+    const sem = new WorkspaceSemaphore({ home: testHome() });
     let reentered = false;
     const a: SemaphoreParticipant & { pumped: number } = {
       pumped: 0,
@@ -202,7 +203,7 @@ describe('WorkspaceSemaphore', () => {
     mkdirSync(open, { recursive: true });
     try {
       let projectLimits = new Map<string, number>([[realpathSync(capped), 1]]);
-      const sem = new WorkspaceSemaphore({
+      const sem = new WorkspaceSemaphore({ home: testHome(),
         load: () => Promise.resolve({ maxParallel: 4, memoryLimitMb: null, projectLimits }),
       });
       await sem.refresh();
@@ -222,7 +223,7 @@ describe('WorkspaceSemaphore', () => {
 
   it('projectMaxParallel inherits the workspace cap when no projectLimits map is provided', () => {
     // An older load stub (resource slice only) → every root inherits.
-    const sem = new WorkspaceSemaphore({ initial: { maxParallel: 6 } });
+    const sem = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 6 } });
     expect(sem.projectMaxParallel('/tmp/whatever')).toBe(6);
   });
 
@@ -239,7 +240,7 @@ describe('WorkspaceSemaphore', () => {
     symlinkSync(real, link);
     try {
       // Registry keys by the realpath'd root (what registerProject stores)…
-      const sem = new WorkspaceSemaphore({
+      const sem = new WorkspaceSemaphore({ home: testHome(),
         load: () => Promise.resolve({ maxParallel: 4, memoryLimitMb: null, projectLimits: new Map([[real, 1]]) }),
       });
       await sem.refresh();
@@ -255,7 +256,7 @@ describe('WorkspaceSemaphore', () => {
 
   it('a failed load keeps the last good cache (never degrades to defaults) and still pumps', async () => {
     let fail = false;
-    const sem = new WorkspaceSemaphore({
+    const sem = new WorkspaceSemaphore({ home: testHome(),
       load: () =>
         fail
           ? Promise.reject(new Error('unreadable'))

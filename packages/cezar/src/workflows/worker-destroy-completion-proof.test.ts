@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 import { readPid, requirePid } from '../pid-file.testkit.ts';
@@ -36,7 +37,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(store.commitWorkerExecutionComplete(w.id, first.generation)).toBe(false);
     await until(() => store.getRun(w.id)?.status === 'waiting'); manager.requestWorkerStop(w.id);
     expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
-    store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
+    store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { home: testHome() });
     expect(await other.awaitRunTermination(w.id, 10)).toBe(true); other.dispose(); reopened.flush();
   });
 
@@ -75,8 +76,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it('admits the same manager deferred Continue without rotating its exact owned generation', async () => {
     manager.dispose();
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
-    replaceWorkerDestroyManager(createFixtureManager(store, root, { semaphore }));
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } });
+    replaceWorkerDestroyManager(createFixtureManager(store, root, { home: testHome(), semaphore }));
     const w = await worker(); manager.enqueueOwnedRun(w.id); await until(() => store.getRun(w.id)?.status === 'waiting');
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
     // Finish the old release sweep: Continue must schedule its own new queue entry.

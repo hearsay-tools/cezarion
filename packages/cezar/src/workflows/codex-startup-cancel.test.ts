@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -39,7 +40,7 @@ describe('Stop before the first Codex turn (#493)', { timeout: 15_000 }, () => {
     const root = mkdtempSync(join(tmpdir(), 'cez-codex-startup-'));
     const store = RunStore.open(join(root, '.ai/cezar'));
     const work = new TrackedWork();
-    const manager = new RunManager(store, root, { semaphore, work });
+    const manager = new RunManager(store, root, { home: testHome(), semaphore, work });
     const result = { root, store, manager, work };
     projects.push(result);
     return result;
@@ -69,7 +70,7 @@ describe('Stop before the first Codex turn (#493)', { timeout: 15_000 }, () => {
   });
 
   it.each(['fresh', 'Continue'] as const)('%s cancellation settles after real exit and admits another project', async mode => {
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } });
     const a = project(semaphore);
     const b = project(semaphore);
     let runId: string;
