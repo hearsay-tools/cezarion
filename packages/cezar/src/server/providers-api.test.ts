@@ -445,25 +445,24 @@ describe('workspace provider API', () => {
 
     const contexts = new ProjectContexts({
       listProjects: async () => [{ id: 'lazy', root: lazyRoot, status: 'not-git' }],
-    });
-    // As above: the subject is that a lazily built project's store is observed at all, so the CLI
-    // must confirm the rejection rather than let the self-check clear it.
-    const providerAuth = service({ claude: 'disconnected' });
-    const recover = vi.spyOn(RunManager.prototype, 'recover').mockImplementationOnce(
-      async function recoveryFailure(this: RunManager) {
-        const recoveringStore = (
-          this as unknown as { store: RunStore }
-        ).store;
-        recoveringStore.appendEvent(run.id, {
-          type: 'error',
-          message: 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
+      prepareManager: ({ store: recoveringStore, manager }) => {
+        const recover = vi.spyOn(manager, 'recover').mockImplementationOnce(async () => {
+          recoveringStore.appendEvent(run.id, {
+            type: 'error',
+            message: 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
+          });
         });
+        return () => recover.mockRestore();
       },
-    );
+    });
+    // The rejection arrives inside recovery, after lazy-store observers attach.
+    const providerAuth = service({ claude: 'disconnected' });
+    const runtimeFailure = vi.spyOn(providerAuth, 'reportRuntimeAuthFailure');
 
     try {
       const server = app({ providerAuth, contexts });
       expect((await apiRequest(server, '/api/v1/p/lazy/runs')).status).toBe(200);
+      expect(runtimeFailure).toHaveBeenCalledWith('claude');
       await expect((await apiRequest(server, '/api/v1/providers/status')).json()).resolves
         .toMatchObject({
           providers: expect.arrayContaining([
@@ -471,7 +470,7 @@ describe('workspace provider API', () => {
           ]),
         });
     } finally {
-      recover.mockRestore();
+      runtimeFailure.mockRestore();
       contexts.disposeAll();
       rmSync(lazyRoot, { recursive: true, force: true });
     }

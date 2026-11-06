@@ -19,7 +19,8 @@ import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
 import { ProviderAuthService } from '../core/provider-auth.ts';
-import { registerProject } from '../workspace/projects.ts';
+import { registerProject, listProjects } from '../workspace/projects.ts';
+import { ProjectContexts } from './project-context.ts';
 import { RunManager, type AutomationToolService, type StartRunInput } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp, startServer, WorkspaceEventBus } from './server.ts';
@@ -894,13 +895,20 @@ describe('GitHub automation API', () => {
       }],
     }));
     writeFileSync(join(dataDir, 'automation-state.json'), JSON.stringify({ version: 1, states: { nightly: { revision: 1, nextRunAt: occurrenceAt } } }));
-    // The real context builds a real RunManager; only its run creation is stubbed to a record.
-    const startRun = vi.spyOn(RunManager.prototype, 'startRun').mockImplementation(function (this: RunManager, workflow, input) {
-      return (this as unknown as { store: RunStore }).store.createRun({ title: 'automation', workflow: workflow.name, task: input.task, steps: [] });
+    const startRun = vi.fn();
+    const contexts = new ProjectContexts({
+      listProjects,
+      prepareManager: ({ store: projectStore, manager }) => {
+        const launch = vi.spyOn(manager, 'startRun').mockImplementation((workflow, input) => {
+          startRun();
+          return projectStore.createRun({ title: 'automation', workflow: workflow.name, task: input.task, steps: [] });
+        });
+        return () => launch.mockRestore();
+      },
     });
     const boot = await registerProject(root);
     const second = await registerProject(other);
-    const server = startServer({ ...discovery(), repoRoot: boot.root, bootProjectId: boot.id, store, manager: Object.assign(recordingManager(), { isActive: () => false }), version: '0.0.0-test' }, 0);
+    const server = startServer({ ...discovery(), repoRoot: boot.root, bootProjectId: boot.id, store, manager: Object.assign(recordingManager(), { isActive: () => false }), contexts, version: '0.0.0-test' }, 0);
     try {
       await new Promise<void>((resolve) => server.once('listening', () => resolve()));
       const automations = AutomationStore.open(dataDir);
@@ -910,6 +918,8 @@ describe('GitHub automation API', () => {
       expect(startRun).toHaveBeenCalledTimes(1);
       const receipt = automations.latestReceipts().get(`nightly:schedule:${occurrenceAt}`);
       expect(receipt).toMatchObject({ status: 'launched', runId: expect.any(String) });
+      expect(contexts.peek(second.id)?.store.getRun(receipt!.runId!)).toBeDefined();
+      expect(store.getRun(receipt!.runId!)).toBeUndefined();
       expect(automations.receipts().filter((row) => row.status === 'launch-error')).toEqual([]);
       // Give a best-effort reconcile row time to land before asserting it never did.
       // bound: negative window. The reconcile row is one best-effort write after the launch receipt, a few event-loop turns away; 100 ms covers it.
@@ -918,6 +928,7 @@ describe('GitHub automation API', () => {
       expect(second.id).not.toBe(boot.id);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
+      contexts.disposeAll();
       vi.restoreAllMocks();
       rmSync(other, { recursive: true, force: true });
       if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
