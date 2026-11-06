@@ -12,6 +12,8 @@ const NATIVE_TOKENS = new Set([
   'no-progress-ack-only', // Codex holds its native acknowledgement without a turn.
 ]);
 const FILE_NATIVE_TOKENS: Readonly<Record<string, readonly string[]>> = {
+  // Codex's native requestUserInput reply consumes this flag, outside shared scenarios.
+  'packages/cezar/scripts/mock-codex-app-server.mjs': ['resume-cezar-done'],
   // OpenCode's native question reply consumes this flag, outside shared scenarios.
   'packages/cezar/scripts/mock-opencode-serve.mjs': ['resume-cezar-done'],
 };

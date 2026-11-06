@@ -48,11 +48,12 @@ describe('shared scenario boundary', () => {
       expect(rule.check(file, adopted + `prompt.includes('mock:${token}');`)).toHaveLength(1);
     });
 
-  it('allows the native resume flag only in the OpenCode encoder', () => {
-    const source = adopted + "prompt.includes('mock:resume-cezar-done');";
-    expect(rule.check('packages/cezar/scripts/mock-opencode-serve.mjs', source)).toEqual([]);
-    expect(rule.check(file, source)).toHaveLength(1);
-  });
+  it.each(['mock-opencode-serve.mjs', 'mock-codex-app-server.mjs'])(
+    'allows the native resume flag in %s and refuses it without an exception', mock => {
+      const source = adopted + "prompt.includes('mock:resume-cezar-done');";
+      expect(rule.check(`packages/cezar/scripts/${mock}`, source)).toEqual([]);
+      expect(rule.check(file, source)).toHaveLength(1);
+    });
 
   it('leaves mocks that have not adopted the module alone', () => {
     expect(rule.check(file, "prompt.includes('mock:hold');")).toEqual([]);
