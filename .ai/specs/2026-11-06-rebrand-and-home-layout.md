@@ -242,11 +242,20 @@ zero accounts, the cockpit shows a banner with a one-click restore of the newest
 `config.json.bak` (ADR 0010) becomes the newest entry of this set.
 
 A test or stray process can also write a live file directly, past `HomeStore`. So
-`HomeStore` also stores each version it writes in `backups/` and records that version's hash.
-When it reads a file whose content does not match the last recorded hash, the write came
-from outside: the cockpit keeps the file as found, shows a banner that names the file, and
-offers to restore the last version that `HomeStore` wrote. This is the live-home twin of the
-legacy-home canary. A direct write between two reads is still detected at the next read.
+`HomeStore` also keeps each version it writes, in this order: (1) write the new version into
+`backups/` under its content hash and fsync it; (2) atomically replace the live file. A
+reader treats the live file as `HomeStore`'s own when its hash matches any stored version.
+A crash after step 1 leaves the old file, which matches its own stored version; a crash after
+step 2 leaves the new file, whose version step 1 already stored. So no crash looks like an
+outside write.
+
+When a read finds a hash that matches no stored version, the write came from outside. The
+cockpit keeps the file as found, pins the newest stored version as the restore target, and
+blocks every `HomeStore` write to that file until the user chooses in a banner: restore the
+pinned version, or accept the file as found (which stores it as a new version). Blocking
+the writes keeps a later merge from folding the outside content into a version that would
+then become the restore target. A direct write between two reads is detected at the next
+read.
 
 ## 6. Delivery
 
