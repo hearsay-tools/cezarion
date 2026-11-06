@@ -70,8 +70,11 @@ animation frames. Long tasks and Event
 Timing cover setting changes, loading, streaming, scrolling and interactions.
 Event Timing contains all delivered event entries with a 16 ms observation
 threshold, including multiple entries from one pointer action. It is not an INP
-score or one sample per interaction. Archived interaction elapsed time includes
-paging; Resource columns elapsed time includes closing the popover and applying
+score or one sample per interaction. Project archived interaction elapsed time
+includes paging. Global archived interaction measures only the tab switch: its
+endpoint returns the archived set before the project-only paging loop. The raw
+global interaction label `Archived tab and paging` is retained as recorded; it
+does not indicate global paging. The producer label will be corrected in S3b; Resource columns elapsed time includes closing the popover and applying
 the requested viewport. Expand and Search typing elapsed times end after two
 animation frames, not after a search response. These control timings are retained
 separately from Event Timing.
@@ -159,9 +162,11 @@ can retain allocations from earlier cases. Event p95 uses the nearest-rank rule.
 
 Values are median milliseconds across five repetitions, baseline → branch. N/A
 means that control was not used in that case. Search and expand include two
-animation frames; the timing limits described above apply.
+animation frames; the timing limits described above apply. The archived column
+includes paging for project rows only. Global rows measure a tab switch with no
+paging; their original raw labels remain unchanged.
 
-| Scope/width/setting/view | Archived tab and paging | Resource columns setting | Expand | Search typing |
+| Scope/width/setting/view | Archived tab (project: includes paging; global: no paging) | Resource columns setting | Expand | Search typing |
 |---|---:|---:|---:|---:|
 | project/1440/summary/active | N/A → N/A | N/A → N/A | 548.7 → 573.4 | 1372.9 → 452.9 |
 | project/1440/summary/archived | 14177.1 → 4362.7 | N/A → N/A | 767.4 → 798.9 | 1391.6 → 539.6 |
