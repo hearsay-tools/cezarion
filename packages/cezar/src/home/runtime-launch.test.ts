@@ -1,3 +1,4 @@
+import { testHome } from './test-home.testkit.ts';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { runtimeHomes } from './runtime-isolation.testkit.ts';
@@ -14,7 +15,7 @@ import { workerIdentity } from '../delegation/execution-identity.ts';
 it('keeps accepted run pins on the selected model policy through RunManager', () => {
   const { root, selected } = runtimeHomes();
   const store = RunStore.open(join(root, 'runs'));
-  const manager = new RunManager(store, root, { home: selected, semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+  const manager = new RunManager(store, root, { home: selected, semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
   try {
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'Test isolation', model: 'sonnet', effort: 'high' });
     expect(run.model).toBeUndefined();
@@ -32,7 +33,7 @@ it('keeps launch config, fresh-step and Continue decisions on the selected Home'
     expect(atTaskHead.defaultRunner(await atTaskHead.config(root, selected))).toBe('codex');
     expect(await atStepOpen.model(store, root, run.id, state, step, { task: 'Home' }, 'claude', undefined, selected)).toBe(AGENT_MODELS_LOCKED_ERROR);
     expect(atContinue.effort(root, run, step, undefined, selected)).toBe(AGENT_MODELS_LOCKED_ERROR);
-    expect(atContinue.effort(root, run, step, undefined)).toEqual({ effort: 'high' });
+    expect(atContinue.effort(root, run, step, undefined, testHome())).toEqual({ effort: 'high' });
     // These type-only views keep the complete config object and its machine defaults.
     expect(await narrowTitleConfig(root, selected)).toMatchObject({ defaultRunner: 'codex' });
     expect(await narrowReviewConfig(root, selected)).toMatchObject({ defaultRunner: 'codex' });
@@ -74,5 +75,5 @@ it.each(['run', 'step'] as const)('validates accepted worker %s pins against the
   const store = { getRun: () => ({ delegation: { role: 'worker' }, runner: 'claude', agentProfile: 'work', ...pin }),
     readWorkerIdentity: () => identity } as unknown as RunStore;
   expect(() => workerIdentity(store, root, 'worker', 'first', selected)).toThrow(AGENT_MODELS_LOCKED_ERROR);
-  expect(workerIdentity(store, root, 'worker', 'first')).toBe(identity);
+  expect(workerIdentity(store, root, 'worker', 'first', testHome())).toBe(identity);
 });

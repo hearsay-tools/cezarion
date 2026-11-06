@@ -25,7 +25,7 @@ import { openInTerminal } from './open-in-terminal.ts';
 import type { ProjectContext, ProjectContexts } from './project-context.ts';
 import { unavailableProviderMessage } from './provider-action-gate.ts';
 import type { ProviderRuntimeAuthObserver } from './provider-auth-runtime.ts';
-import type { ServerDeps } from './server.ts';
+import type { ServerDeps, WorkspaceEventBus } from './server.ts';
 
 /** The host-wide services `createApp` always has: the injected one, or the real default. */
 type HostServiceKey = 'modelCatalog' | 'providerAuth' | 'workspaceConfig' | 'openTerminal' | 'openFile' | 'openApp';
@@ -93,6 +93,11 @@ export function createProviderStatus(services: Pick<HostServices, 'modelCatalog'
   return { providerStatus, providerActionError, invalidateHostModels };
 }
 
+export function emitProviderRow(workspaceEvents: WorkspaceEventBus, providers: ProviderStatusResponse['providers'], id: ProviderId): void {
+  const row = providers.find(provider => provider.provider === id);
+  if (row) workspaceEvents.emit('provider-status', row);
+}
+
 /**
  * The boot project's context is SEEDED from the deps the caller already built (src/index.ts
  * `serveCommand` did the recover/prune/launch-key work at startup — observable boot behavior
@@ -101,12 +106,12 @@ export function createProviderStatus(services: Pick<HostServices, 'modelCatalog'
  * payloads name the boot project via `resolveBootProject` instead.
  */
 export function createBootContext(
-  deps: Pick<ServerDeps, 'bootProjectId' | 'store' | 'manager' | 'automationStore'>,
+  deps: Pick<ServerDeps, 'bootProjectId' | 'store' | 'manager' | 'automationStore' | 'home'>,
   bootRoot: string,
   bootDataDir: string,
 ): ProjectContext {
   return {
-    id: deps.bootProjectId ?? 'default',
+    id: deps.bootProjectId ?? 'default', home: deps.home,
     root: bootRoot,
     dataDir: bootDataDir,
     store: deps.store,

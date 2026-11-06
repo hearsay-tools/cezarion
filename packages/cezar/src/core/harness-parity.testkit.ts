@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import type { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 /**
  * Shared fixtures for the harness parity matrix (`harness-parity.test.ts`,
@@ -1543,7 +1544,7 @@ export async function withSkillParentRun(
     manager = createFixtureManager(store, repoRoot);
     drainBookkeeping = trackTurnBookkeeping(manager);
     controller = await DelegationController.start();
-    controller.attachProject({ id: 'project', root: repoRoot, store, manager });
+    controller.attachProject({ home: testHome(), id: 'project', root: repoRoot, store, manager });
     const parent = manager.startRun(plannedWorkflow(skillTaskSteps('parent-skill')), {
       task: promptFor(backend, 'baseline'), runner: backend, worktree: false, systemPrompt: 'parent extra',
     });

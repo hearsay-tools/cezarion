@@ -1,3 +1,6 @@
+import { Home } from './home.ts';
+import { useTestHome } from './test-home.testkit.ts';
+import { testHome } from './test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,7 +25,7 @@ it('links, lists and unlinks a managed checkout in the injected home after CEZ_H
   writeFileSync(join(checkout, 'dist', 'index.js'), '// fixture');
   const env = { CEZ_HOME: join(root, 'selected') };
   const home = resolveHome({ purpose: 'cli', env });
-  vi.stubEnv('CEZ_HOME', join(root, 'later'));
+  useTestHome(join(root, 'later') ? Home.sandbox(join(root, 'later')) : undefined);
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));
   const service = new SelfUpdateService({ pkgName: '@wjarka/cezarion', version: '1.2.3', entry: join(checkout, 'dist', 'index.js'), home, restart: () => {} });
@@ -35,7 +38,7 @@ it('links, lists and unlinks a managed checkout in the injected home after CEZ_H
   expect(log.mock.calls.flat().join('\n')).toContain(links[0]!.id);
   expect(await runSelfUpdateCommand('use', [links[0]!.id], opts)).toBe(0);
   expect(activeId(process.env, home)).toBe(links[0]!.id);
-  expect(listLinks()).toEqual([]);
+  expect(listLinks(undefined, testHome())).toEqual([]);
   // The active version is protected; a second link gives us an inactive one to remove.
   expect(await runSelfUpdateCommand('unlink', [links[0]!.id], opts)).toBe(1);
   const second = join(root, 'second');

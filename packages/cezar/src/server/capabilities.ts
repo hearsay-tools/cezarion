@@ -37,6 +37,7 @@
  * changes collection, persistence, events, or API run records.
  */
 
+import type { Home } from '../home/home.ts';
 import type { Capabilities } from '@open-mercato/cezar-contract';
 import { isPortGranted } from '../remote-settings.ts';
 
@@ -135,11 +136,11 @@ export function isLoopbackHostHeader(host: string | null | undefined): boolean {
  *  Read per request. The automations flag is a boot-time setting: the workspace scheduler is
  *  started once, on the server's `listening` event, so flipping the flag on afterwards gates
  *  the routes open without ever starting the poller. Boot-time flag, same wording. */
-export function resolveCapabilities(env: NodeJS.ProcessEnv = process.env, bindHost?: string, port?: number): Capabilities {
+export function resolveCapabilities(env: NodeJS.ProcessEnv = process.env, bindHost?: string, port?: number, home?: Home): Capabilities {
   const loopbackBind = isLoopbackHost(bindHost);
   const localHandoff = env.CEZ_REMOTE !== '1' && loopbackBind;
   // The host file is read only where it can matter: a remote cockpit bound to loopback.
-  const remoteSettingsAdmin = !localHandoff && loopbackBind && isPortGranted(env, port);
+  const remoteSettingsAdmin = !localHandoff && loopbackBind && isPortGranted(env, port, home);
   const hideAllUsage = env.CEZ_HIDE_TOKEN_METRICS === '1';
   const tokenUsageMetrics = !hideAllUsage && env.CEZ_HIDE_TOKEN_USAGE !== '1';
   const costMetrics = !hideAllUsage && env.CEZ_HIDE_COST !== '1';

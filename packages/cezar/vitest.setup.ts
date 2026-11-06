@@ -1,3 +1,5 @@
+import { Home } from './src/home/home.ts'
+import { configureTestHomeSelector } from './src/home/test-home.testkit.ts'
 import { checkWorkspaceResolution } from '../../scripts/check-workspace-resolution.mjs'
 
 checkWorkspaceResolution()
@@ -61,8 +63,12 @@ process.env.PATH = hideHostCommands(HOST_RUNNER_COMMANDS, join(sandboxTemp, 'pat
 // Both homes live inside `sandboxTemp`, so its exit, signal and dead-owner cleanup removes them too.
 const sandboxHome = mkdtempSync(join(sandboxTemp, 'cez-vitest-home-'))
 
+configureTestHomeSelector(home => {
+  if (home === undefined) delete process.env.CEZ_HOME
+  else process.env.CEZ_HOME = home.root
+})
 const pinSandboxHome = (): void => {
-  if (!process.env.CEZ_HOME) process.env.CEZ_HOME = sandboxHome
+  if (!process.env.CEZ_HOME) process.env.CEZ_HOME = Home.sandbox(sandboxHome).root
 }
 
 // Nor may a test resolve the developer's own agent folders (hearsay-tools/cezarion#1361).

@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,12 +24,12 @@ describe('workspace migrations', () => {
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'cez-migrations-home-'));
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-migrations-repo-'));
-    process.env.CEZ_HOME = home; // paths.ts sends all workspace paths here
+    useTestHome(home ? Home.sandbox(home) : undefined); // paths.ts sends all workspace paths here
   });
 
   afterEach(() => {
-    if (originalHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = originalHome;
+    if (originalHome === undefined) useTestHome(undefined);
+    else useTestHome(originalHome ? Home.sandbox(originalHome) : undefined);
     chmodSync(home, 0o700); // undo the unwritable-home test before cleanup
     rmSync(home, { recursive: true, force: true });
     rmSync(repoRoot, { recursive: true, force: true });
@@ -39,18 +42,18 @@ describe('workspace migrations', () => {
   };
 
   const rawGlobalConfig = () =>
-    JSON.parse(readFileSync(workspaceConfigPath(), 'utf8')) as Record<string, unknown>;
+    JSON.parse(readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8')) as Record<string, unknown>;
   const rawGlobalUiState = () =>
-    JSON.parse(readFileSync(workspaceUiStatePath(), 'utf8')) as Record<string, unknown>;
+    JSON.parse(readFileSync(workspaceUiStatePath(testHome()), 'utf8')) as Record<string, unknown>;
 
   it('fresh home: creates config.json with defaults and schemaVersion 1', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await runMigrations({ bootRepoRoot: null });
-    const config = await loadWorkspaceConfig();
+    await runMigrations({ home: testHome(), bootRepoRoot: null });
+    const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     expect(config).toEqual({ ...defaultWorkspaceConfig(), schemaVersion: 1 });
-    expect(statSync(workspaceConfigPath()).mode & 0o777).toBe(0o600);
+    expect(statSync(workspaceConfigPath(undefined, testHome())).mode & 0o777).toBe(0o600);
     // nothing to import → the global ui-state file is not created
-    expect(existsSync(workspaceUiStatePath())).toBe(false);
+    expect(existsSync(workspaceUiStatePath(testHome()))).toBe(false);
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -64,9 +67,9 @@ describe('workspace migrations', () => {
     const repoConfigBefore = readFileSync(join(repoRoot, '.ai/cezar/config.json'), 'utf8');
     const repoUiBefore = readFileSync(join(repoRoot, '.ai/cezar/ui-state.json'), 'utf8');
 
-    await runMigrations({ bootRepoRoot: repoRoot });
+    await runMigrations({ home: testHome(), bootRepoRoot: repoRoot });
 
-    const config = await loadWorkspaceConfig();
+    const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     expect(config.schemaVersion).toBe(1);
     expect(config.resources.maxParallel).toBe(5);
     expect(config.resources.memoryLimitMb).toBe(1024);
@@ -74,7 +77,7 @@ describe('workspace migrations', () => {
       appearance: { accent: 'violet', density: 'compact' },
       notifications: { enabled: false },
     });
-    expect(statSync(workspaceUiStatePath()).mode & 0o777).toBe(0o600);
+    expect(statSync(workspaceUiStatePath(testHome())).mode & 0o777).toBe(0o600);
     // additive: per-repo files are byte-identical
     expect(readFileSync(join(repoRoot, '.ai/cezar/config.json'), 'utf8')).toBe(repoConfigBefore);
     expect(readFileSync(join(repoRoot, '.ai/cezar/ui-state.json'), 'utf8')).toBe(repoUiBefore);
@@ -82,21 +85,21 @@ describe('workspace migrations', () => {
 
   it('never overwrites keys already set globally (crash-interrupted re-run safety)', async () => {
     writeFileSync(
-      workspaceConfigPath(),
+      workspaceConfigPath(undefined, testHome()),
       JSON.stringify({ resources: { maxParallel: 8 } }),
       'utf8',
     );
     writeFileSync(
-      workspaceUiStatePath(),
+      workspaceUiStatePath(testHome()),
       JSON.stringify({ appearance: { accent: 'lime' } }),
       'utf8',
     );
     writeRepoFile('config.json', { maxParallel: 5, memoryLimitMb: 1024 });
     writeRepoFile('ui-state.json', { appearance: { accent: 'violet' }, notifications: { enabled: true } });
 
-    await runMigrations({ bootRepoRoot: repoRoot });
+    await runMigrations({ home: testHome(), bootRepoRoot: repoRoot });
 
-    const config = await loadWorkspaceConfig();
+    const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     expect(config.resources.maxParallel).toBe(8); // globally set — kept
     expect(config.resources.memoryLimitMb).toBe(1024); // absent globally — imported
     const uiState = rawGlobalUiState();
@@ -107,34 +110,34 @@ describe('workspace migrations', () => {
   it('re-running the migration body is idempotent: imported values are not re-imported', async () => {
     writeRepoFile('config.json', { maxParallel: 5 });
     writeRepoFile('ui-state.json', { appearance: { accent: 'violet' } });
-    await runMigrations({ bootRepoRoot: repoRoot });
+    await runMigrations({ home: testHome(), bootRepoRoot: repoRoot });
 
     // Simulate a crash between the migration body and the version bump: force
     // schemaVersion back to 0 and re-run against CHANGED repo values. The
     // first pass wrote the keys globally, so the re-run must not overwrite.
     const raw = rawGlobalConfig();
-    writeFileSync(workspaceConfigPath(), JSON.stringify({ ...raw, schemaVersion: 0 }), 'utf8');
+    writeFileSync(workspaceConfigPath(undefined, testHome()), JSON.stringify({ ...raw, schemaVersion: 0 }), 'utf8');
     writeRepoFile('config.json', { maxParallel: 3 });
     writeRepoFile('ui-state.json', { appearance: { accent: 'lime' } });
-    await runMigrations({ bootRepoRoot: repoRoot });
+    await runMigrations({ home: testHome(), bootRepoRoot: repoRoot });
 
-    const config = await loadWorkspaceConfig();
+    const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     expect(config.schemaVersion).toBe(1);
     expect(config.resources.maxParallel).toBe(5);
     expect(rawGlobalUiState().appearance).toEqual({ accent: 'violet' });
   });
 
   it('a completed migration is skipped entirely on the next boot', async () => {
-    await runMigrations({ bootRepoRoot: null });
+    await runMigrations({ home: testHome(), bootRepoRoot: null });
     const run = vi.fn(async () => {});
-    await runMigrations({ bootRepoRoot: null }, [{ to: 1, id: '001-spy', run }]);
+    await runMigrations({ home: testHome(), bootRepoRoot: null }, [{ to: 1, id: '001-spy', run }]);
     expect(run).not.toHaveBeenCalled();
   });
 
   it('out-of-range repo values are not imported (defaults kept)', async () => {
     writeRepoFile('config.json', { maxParallel: 99, memoryLimitMb: 12.5 });
-    await runMigrations({ bootRepoRoot: repoRoot });
-    const config = await loadWorkspaceConfig();
+    await runMigrations({ home: testHome(), bootRepoRoot: repoRoot });
+    const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     expect(config.resources.maxParallel).toBe(2);
     expect(config.resources.memoryLimitMb).toBeNull();
   });
@@ -142,11 +145,11 @@ describe('workspace migrations', () => {
   it('an unwritable home degrades with ONE warning and never throws', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     chmodSync(home, 0o500); // read-only home dir → the atomic write fails
-    await expect(runMigrations({ bootRepoRoot: null })).resolves.toBeUndefined();
+    await expect(runMigrations({ home: testHome(), bootRepoRoot: null })).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]?.[0])).toContain('001-workspace-config');
     chmodSync(home, 0o700);
-    expect(existsSync(workspaceConfigPath())).toBe(false);
+    expect(existsSync(workspaceConfigPath(undefined, testHome()))).toBe(false);
   });
 
   it('runs migrations in ascending order and persists schemaVersion after EACH step', async () => {
@@ -165,16 +168,16 @@ describe('workspace migrations', () => {
       // migration 1's bump must already be on disk when migration 2 runs
       versionSeenBySecond = rawGlobalConfig().schemaVersion;
     });
-    await runMigrations({ bootRepoRoot: null }, [second, first]); // deliberately out of order
+    await runMigrations({ home: testHome(), bootRepoRoot: null }, [second, first]); // deliberately out of order
     expect(order).toEqual([1, 2]);
     expect(versionSeenBySecond).toBe(1);
-    expect((await loadWorkspaceConfig()).schemaVersion).toBe(2);
+    expect((await loadWorkspaceConfig(testHome().workspaceConfig)).schemaVersion).toBe(2);
   });
 
   it('a failing migration warns once and stops the chain (later steps do not run)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const second = vi.fn(async () => {});
-    await runMigrations({ bootRepoRoot: null }, [
+    await runMigrations({ home: testHome(), bootRepoRoot: null }, [
       { to: 1, id: '001-boom', run: async () => Promise.reject(new Error('boom')) },
       { to: 2, id: '002-after', run: second },
     ]);
@@ -182,7 +185,7 @@ describe('workspace migrations', () => {
     expect(String(warn.mock.calls[0]?.[0])).toContain('001-boom');
     expect(second).not.toHaveBeenCalled();
     // nothing persisted — the next boot retries from 0 (idempotent)
-    expect(existsSync(workspaceConfigPath())).toBe(false);
+    expect(existsSync(workspaceConfigPath(undefined, testHome()))).toBe(false);
   });
 
   it('stays at schemaVersion 1 — a purely additive key needs no migration', () => {

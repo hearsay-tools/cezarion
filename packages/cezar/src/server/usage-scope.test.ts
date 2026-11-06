@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,7 +39,7 @@ describe('usage SSE fan-out is scoped per project', () => {
     home = mkdtempSync(join(tmpdir(), 'cez-usage-home-'));
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-usage-boot-'));
     otherRoot = mkdtempSync(join(tmpdir(), 'cez-usage-other-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     delete process.env.CEZ_REMOTE;
     process.env.CEZ_DRY_RUN = '1';
     for (const root of [repoRoot, otherRoot]) {
@@ -50,9 +53,9 @@ describe('usage SSE fan-out is scoped per project', () => {
       task: 'boot',
       steps: [],
     }).id;
-    contexts = new ProjectContexts({ listProjects });
-    await registerProject(repoRoot);
-    app = createApp({
+    contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    await registerProject(repoRoot, undefined, testHome());
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager: { isActive: () => false } as unknown as RunManager,
@@ -66,8 +69,8 @@ describe('usage SSE fan-out is scoped per project', () => {
     contexts.disposeAll();
     store.flush();
     for (const dir of [home, repoRoot, otherRoot]) rmSync(dir, { recursive: true, force: true });
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
     else process.env.CEZ_REMOTE = savedRemote;
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
@@ -109,7 +112,7 @@ describe('usage SSE fan-out is scoped per project', () => {
   it("each project's stream carries only its own runs from a shared snapshot", async () => {
     // Build the second project's context lazily (first API touch), then give
     // its store a run of its own.
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     expect((await apiRequest(app, `/api/v1/p/${other.id}/runs`)).status).toBe(200);
     const otherStore = contexts.peek(other.id)?.store;
     expect(otherStore).toBeDefined();
@@ -149,7 +152,7 @@ describe('usage SSE fan-out is scoped per project', () => {
   });
 
   it('a snapshot owned entirely by another project arrives as an empty record (stale samples clear)', async () => {
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     expect((await apiRequest(app, `/api/v1/p/${other.id}/runs`)).status).toBe(200);
 
     const otherStream = await openStream(`/api/v1/p/${other.id}/events`);

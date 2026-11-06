@@ -29,7 +29,9 @@ import { once } from 'node:events';
 import { ApplicationUpdateService } from ${source('application-update/service.ts')};
 import { RunStore } from ${source('runs/store.ts')};
 import { startServer } from ${source('server/server.ts')};
+import { Home } from ${source('home/home.ts')};
 const root = ${JSON.stringify(root)};
+const home = Home.sandbox(join(root, 'home'));
 const original = join(root, 'prefix/lib/node_modules/@wjarka/cezarion');
 await mkdir(join(original, 'dist'), { recursive: true });
 await mkdir(join(original, 'web/dist'), { recursive: true });
@@ -40,7 +42,7 @@ let arm;
 const gate = new Promise(resolve => { arm = resolve });
 let handoffs = 0;
 const service = new ApplicationUpdateService({ packageRoot: original, launchEntry: join(original,'dist/index.js'),
-  npmPrefix: join(root,'prefix'), npmCache: join(root,'cache'), home: join(root,'home'), targetVersion: () => '2.0.0',
+  npmPrefix: join(root,'prefix'), npmCache: join(root,'cache'), home: home.root, targetVersion: () => '2.0.0',
   runNpm: async args => {
     const target = join(args[args.indexOf('--prefix') + 1], 'node_modules/@wjarka/cezarion');
     await cp(original, target, {recursive:true});
@@ -51,7 +53,7 @@ const service = new ApplicationUpdateService({ packageRoot: original, launchEntr
   handoff: () => { process.send?.({event:'handoff', count: ++handoffs}); void server.shutdownForRestart(); },
 });
 await service.apply();
-const server = startServer({repoRoot:root, store:RunStore.open(join(root,'.ai/cezar')), manager:{}, version:'1.0.0', applicationUpdate:service},0);
+const server = startServer({home, repoRoot:root, store:RunStore.open(join(root,'.ai/cezar')), manager:{}, version:'1.0.0', applicationUpdate:service},0);
 server.prependListener('request', (req,res) => { if (req.url.endsWith('/restart')) {
   res.on('finish', () => process.send?.({event:'finish'}));
   res.on('close', () => process.send?.({event:'close'}));

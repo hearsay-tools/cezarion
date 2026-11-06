@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -11,7 +14,7 @@ describe('managed update review regressions', () => {
   let home: string;
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'cezar-update-review-'));
-    vi.stubEnv('CEZ_HOME', home);
+    useTestHome(home ? Home.sandbox(home) : undefined);
     vi.useFakeTimers();
   });
   afterEach(() => {
@@ -20,13 +23,13 @@ describe('managed update review regressions', () => {
     rmSync(home, { recursive: true, force: true });
   });
   const install = (id: string, source: 'registry' | 'local' | 'link', version = id) => {
-    const entry = versionEntry(id);
+    const entry = versionEntry(id, undefined, testHome());
     mkdirSync(dirname(entry), { recursive: true }); writeFileSync(entry, '// fixture');
-    writeManifest(id, { source, version, installedAt: '2026-10-01T00:00:00Z' });
+    writeManifest(id, { source, version, installedAt: '2026-10-01T00:00:00Z' }, undefined, testHome());
     return entry;
   };
   const document = { 'dist-tags': { latest: '0.16.0' }, versions: { '0.15.0': {}, '0.16.0': {} }, time: { '0.15.0': '2026-09-01T00:00:00Z', '0.16.0': '2026-10-01T00:00:00Z' } };
-  const service = (registry: RegistryCache, hosted = false) => new SelfUpdateService({
+  const service = (registry: RegistryCache, hosted = false) => new SelfUpdateService({ home: testHome(),
     pkgName: '@wjarka/cezarion', version: '0.15.0', entry: install('0.15.0', 'registry'),
     restart: vi.fn(), trimPaths: () => hosted, registry,
   });
@@ -35,10 +38,10 @@ describe('managed update review regressions', () => {
   it.each(['local', 'link'] as const)('refuses unpublished installed %s builds in hosted mode', async source => {
     const svc = service(registry(), true);
     const id = '0.16.0+' + source;
-    install(id, source, '0.16.0'); activate('0.15.0');
+    install(id, source, '0.16.0'); activate('0.15.0', undefined, testHome());
     expect(await svc.forwardOnlyRefusal(id)).toMatch(/published registry/);
     expect(() => svc.apply(id)).toThrow(/published registry/);
-    expect(activeId()).toBe('0.15.0');
+    expect(activeId(undefined, testHome())).toBe('0.15.0');
   });
 
   it('enforces registry-only apply for a hosted request using an otherwise local service', async () => {
@@ -70,10 +73,10 @@ describe('managed update review regressions', () => {
     install('0.16.0', 'registry');
     expect(await svc.forwardOnlyRefusal('0.16.0')).toBeNull();
     expect(svc.apply('0.16.0').status).toBe('restarting');
-    expect(activeId()).toBe('0.16.0');
+    expect(activeId(undefined, testHome())).toBe('0.16.0');
     const local = service(registry()); install('0.16.0+local', 'local', '0.16.0');
     expect(local.apply('0.16.0+local').status).toBe('restarting');
-    expect(activeId()).toBe('0.16.0+local');
+    expect(activeId(undefined, testHome())).toBe('0.16.0+local');
   });
 
   it.each([false, true])('redacts hosted job logs and errors without changing local diagnostics (trimPaths=%s)', async hosted => {

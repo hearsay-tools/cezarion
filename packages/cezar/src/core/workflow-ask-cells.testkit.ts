@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { autoEndObservationClock, observationClock } from './observation-clock.testkit.ts';
 import { AUTO_END_DELAY_MS } from './runner-runtime.ts';
 import { IDLE_TIMEOUT_MS } from '../workflows/run.ts';
@@ -49,7 +50,7 @@ describe('intermediate workflow ASK parity — #427', () => {
     const modes = row.id === 'Q7' ? ['fresh', 'continuation'] : ['fresh'];
     for (const mode of modes) it(`${backend} ${row.id} ${row.name} (${mode})`, async () => {
       let clock: ReturnType<typeof autoEndObservationClock> | undefined;
-      const semaphore = new WorkspaceSemaphore();
+      const semaphore = new WorkspaceSemaphore({ home: testHome() });
       let repoRoot = '';
       let idleClock: ReturnType<typeof observationClock> | undefined;
       let expireDeadline: (() => void) | undefined;

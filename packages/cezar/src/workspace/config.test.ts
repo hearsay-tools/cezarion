@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -28,14 +31,14 @@ describe('workspace config', () => {
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'cez-workspace-'));
-    process.env.CEZ_HOME = home; // paths.ts sends all workspace paths here
+    useTestHome(home ? Home.sandbox(home) : undefined); // paths.ts sends all workspace paths here
     delete process.env.CEZ_BROWSE_ROOT;
     delete process.env.CEZ_PROJECTS_DIR;
   });
 
   afterEach(() => {
-    if (originalHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = originalHome;
+    if (originalHome === undefined) useTestHome(undefined);
+    else useTestHome(originalHome ? Home.sandbox(originalHome) : undefined);
     if (originalBrowseRoot === undefined) delete process.env.CEZ_BROWSE_ROOT;
     else process.env.CEZ_BROWSE_ROOT = originalBrowseRoot;
     if (originalProjectsDir === undefined) delete process.env.CEZ_PROJECTS_DIR;
@@ -45,7 +48,7 @@ describe('workspace config', () => {
   });
 
   const write = (value: unknown) =>
-    writeFileSync(workspaceConfigPath(), typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
+    writeFileSync(workspaceConfigPath(undefined, testHome()), typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
 
   const project = (id: string) => ({
     id,
@@ -58,7 +61,7 @@ describe('workspace config', () => {
 
   it('a missing file behaves exactly like the defaults (zero-config, no warning)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const config = await loadWorkspaceConfig();
+    const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     expect(config).toEqual(defaultWorkspaceConfig());
     expect(config.schemaVersion).toBe(0);
     expect(config.browseRoot).toBe('~/');
@@ -76,23 +79,23 @@ describe('workspace config', () => {
       disabledProviders: ['codex', 'future', 'codex', 4, 'opencode'],
       futureTopLevelKey: { keep: true },
     });
-    expect((await loadWorkspaceConfig()).disabledProviders).toEqual(['codex', 'opencode']);
+    expect((await loadWorkspaceConfig(testHome().workspaceConfig)).disabledProviders).toEqual(['codex', 'opencode']);
 
     const written = await mergeWriteWorkspaceConfig((config) => {
       config.disabledProviders = ['claude'];
-    });
+    }, testHome());
     expect(written.disabledProviders).toEqual(['claude']);
-    const raw = JSON.parse(readFileSync(workspaceConfigPath(), 'utf8')) as Record<string, unknown>;
+    const raw = JSON.parse(readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8')) as Record<string, unknown>;
     expect(raw.futureTopLevelKey).toEqual({ keep: true });
   });
 
   it('keeps the global model lock optional and degrades a non-boolean value per key', async () => {
     expect(defaultWorkspaceConfig().modelsLocked).toBeUndefined();
     write({ modelsLocked: true, projectsDir: '/tmp/projects' });
-    expect((await loadWorkspaceConfig()).modelsLocked).toBe(true);
+    expect((await loadWorkspaceConfig(testHome().workspaceConfig)).modelsLocked).toBe(true);
 
     write({ modelsLocked: 'yes', projectsDir: '/tmp/projects' });
-    const config = await loadWorkspaceConfig();
+    const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     expect(config.modelsLocked).toBeUndefined();
     expect(config.projectsDir).toBe('/tmp/projects');
   });
@@ -105,7 +108,7 @@ describe('workspace config', () => {
       projectsDir: '~/checkouts',
     });
     write({ browseRoot: '/srv/source', projectsDir: '/srv/checkouts' });
-    expect(await loadWorkspaceConfig()).toMatchObject({
+    expect(await loadWorkspaceConfig(testHome().workspaceConfig)).toMatchObject({
       browseRoot: '/srv/source',
       projectsDir: '/srv/checkouts',
     });
@@ -122,15 +125,15 @@ describe('workspace config', () => {
 
   it('degrades invalid composer defaults per key and preserves unknown nested keys', async () => {
     write({ composerDefaults: { autonomous: 'yes', worktree: false, future: 42 } });
-    expect((await loadWorkspaceConfig()).composerDefaults).toEqual({ worktree: false, future: 42 });
+    expect((await loadWorkspaceConfig(testHome().workspaceConfig)).composerDefaults).toEqual({ worktree: false, future: 42 });
   });
 
   it('keeps a retired skillsAutoUpdate key and unknown keys untouched on unrelated writes', async () => {
     write({ skillsAutoUpdate: 'no', futureKey: true });
     await mergeWriteWorkspaceConfig((config) => {
       config.resources.maxParallel = 3;
-    });
-    const raw = JSON.parse(readFileSync(workspaceConfigPath(), 'utf8')) as Record<string, unknown>;
+    }, testHome());
+    const raw = JSON.parse(readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8')) as Record<string, unknown>;
     expect(raw.skillsAutoUpdate).toBe('no');
     expect(raw.futureKey).toBe(true);
   });
@@ -140,9 +143,9 @@ describe('workspace config', () => {
       config.schemaVersion = 1;
       config.resources.maxParallel = 4;
       config.projects.push(project('cezar'));
-    });
-    expect(statSync(workspaceConfigPath()).mode & 0o777).toBe(0o600);
-    const config = await loadWorkspaceConfig();
+    }, testHome());
+    expect(statSync(workspaceConfigPath(undefined, testHome())).mode & 0o777).toBe(0o600);
+    const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     expect(config.schemaVersion).toBe(1);
     expect(config.resources.maxParallel).toBe(4);
     expect(config.projects).toEqual([project('cezar')]);
@@ -151,24 +154,24 @@ describe('workspace config', () => {
   it('a corrupt file degrades to defaults with one warning and is left on disk untouched', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     write('{not json');
-    const config = await loadWorkspaceConfig();
+    const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     expect(config).toEqual(defaultWorkspaceConfig());
     expect(warn).toHaveBeenCalledTimes(1);
     // never overwritten by a load — only the next successful merge-write replaces it
-    expect(readFileSync(workspaceConfigPath(), 'utf8')).toBe('{not json');
+    expect(readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8')).toBe('{not json');
   });
 
   it('a non-object top level degrades to defaults too (never throws)', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     write('[1, 2, 3]');
-    expect(await loadWorkspaceConfig()).toEqual(defaultWorkspaceConfig());
+    expect(await loadWorkspaceConfig(testHome().workspaceConfig)).toEqual(defaultWorkspaceConfig());
   });
 
   it('every atomic write stages through its own tmp file (pid + random, never a shared name)', () => {
     // Two cezar processes (a `serve` per repo, a settings PUT, `cezar run`)
     // share `~/.cezar/` — a fixed `${path}.tmp` would let one writer O_TRUNC
     // the other's staging file mid-write and rename corruption into place.
-    const path = workspaceConfigPath();
+    const path = workspaceConfigPath(undefined, testHome());
     const a = atomicTmpPath(path);
     const b = atomicTmpPath(path);
     expect(a).not.toBe(b); // unique per call, even within one process
@@ -182,27 +185,27 @@ describe('workspace config', () => {
   it('a merge-write leaves no staging file behind', async () => {
     await mergeWriteWorkspaceConfig((config) => {
       config.projects.push(project('cezar'));
-    });
-    const dir = readdirSync(dirname(workspaceConfigPath()));
+    }, testHome());
+    const dir = readdirSync(dirname(workspaceConfigPath(undefined, testHome())));
     expect(dir.filter((name) => name.endsWith('.tmp'))).toEqual([]);
-    expect((await loadWorkspaceConfig()).projects.map((p) => p.id)).toEqual(['cezar']);
+    expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((p) => p.id)).toEqual(['cezar']);
   });
 
   it('concurrent merge-writes from stale in-memory copies keep both writers projects', async () => {
     // Writer A reads the (empty) config into memory…
-    const stale = await loadWorkspaceConfig();
+    const stale = await loadWorkspaceConfig(testHome().workspaceConfig);
     expect(stale.projects).toEqual([]);
     // …then writer B registers its project first…
     await mergeWriteWorkspaceConfig((config) => {
       config.projects.push(project('writer-b'));
-    });
+    }, testHome());
     // …and writer A merge-writes WITHOUT using its stale copy: the mutator
     // gets a freshly re-read config, so B's registration survives.
     await mergeWriteWorkspaceConfig((config) => {
       expect(config.projects.map((p) => p.id)).toEqual(['writer-b']);
       config.projects.push(project('writer-a'));
-    });
-    const config = await loadWorkspaceConfig();
+    }, testHome());
+    const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     expect(config.projects.map((p) => p.id).sort()).toEqual(['writer-a', 'writer-b']);
   });
 
@@ -214,8 +217,8 @@ describe('workspace config', () => {
     });
     await mergeWriteWorkspaceConfig((config) => {
       config.schemaVersion = 1;
-    });
-    const raw = JSON.parse(readFileSync(workspaceConfigPath(), 'utf8')) as Record<string, unknown>;
+    }, testHome());
+    const raw = JSON.parse(readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8')) as Record<string, unknown>;
     expect(raw.futureTopLevelKey).toEqual({ nested: true });
     expect((raw.resources as Record<string, unknown>).futureResourceKey).toBe('kept');
     expect((raw.resources as Record<string, unknown>).maxParallel).toBe(3);
@@ -231,7 +234,7 @@ describe('workspace config', () => {
       resources: { maxParallel: 99, maxMonitoringSessions: 99, monitoringWakeIntervalMinutes: 0, memoryLimitMb: 'lots', worktreeRetentionDefault: -1 },
       projects: [project('good')],
     });
-    const config = await loadWorkspaceConfig();
+    const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     expect(config.schemaVersion).toBe(0);
     expect(config.browseRoot).toBe('~/');
     expect(config.projectsDir).toBe('~/cezar/projects');
@@ -248,25 +251,25 @@ describe('workspace config', () => {
   describe('monitoringWakeIntervalMinutes default (#810)', () => {
     it('defaults to 5 minutes when the key is absent', async () => {
       write({ resources: { maxParallel: 3 } });
-      const config = await loadWorkspaceConfig();
+      const config = await loadWorkspaceConfig(testHome().workspaceConfig);
       expect(config.resources.monitoringWakeIntervalMinutes).toBe(5);
     });
 
     it('preserves an explicit null — "park until resumed" is a real choice, not a missing value', async () => {
       write({ resources: { monitoringWakeIntervalMinutes: null } });
-      const config = await loadWorkspaceConfig();
+      const config = await loadWorkspaceConfig(testHome().workspaceConfig);
       expect(config.resources.monitoringWakeIntervalMinutes).toBeNull();
     });
 
     it('keeps an explicit in-range cadence', async () => {
       write({ resources: { monitoringWakeIntervalMinutes: 17 } });
-      const config = await loadWorkspaceConfig();
+      const config = await loadWorkspaceConfig(testHome().workspaceConfig);
       expect(config.resources.monitoringWakeIntervalMinutes).toBe(17);
     });
 
     it('degrades an out-of-range cadence to the working default, not to park', async () => {
       write({ resources: { monitoringWakeIntervalMinutes: 999 } });
-      const config = await loadWorkspaceConfig();
+      const config = await loadWorkspaceConfig(testHome().workspaceConfig);
       expect(config.resources.monitoringWakeIntervalMinutes).toBe(5);
     });
   });
@@ -281,7 +284,7 @@ describe('workspace config', () => {
         { ...project('also-good'), source: 'weird' }, // bad enum degrades per-key
       ],
     });
-    const config = await loadWorkspaceConfig();
+    const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     expect(config.projects.map((p) => p.id)).toEqual(['good', 'also-good']);
     expect(config.projects[1]?.source).toBe('local');
   });
@@ -294,7 +297,7 @@ describe('workspace config', () => {
         project('inherits'), // no key → inherit (undefined)
       ],
     });
-    const config = await loadWorkspaceConfig();
+    const config = await loadWorkspaceConfig(testHome().workspaceConfig);
     // A bad maxParallel degrades that one key without evicting the entry.
     expect(config.projects.map((p) => p.id)).toEqual(['capped', 'too-big', 'inherits']);
     expect(config.projects[0]?.maxParallel).toBe(1);
@@ -304,57 +307,57 @@ describe('workspace config', () => {
 
   it('memoryLimitMb keeps an explicit null and a real value', async () => {
     write({ resources: { memoryLimitMb: null } });
-    expect((await loadWorkspaceConfig()).resources.memoryLimitMb).toBeNull();
+    expect((await loadWorkspaceConfig(testHome().workspaceConfig)).resources.memoryLimitMb).toBeNull();
     write({ resources: { memoryLimitMb: 2048 } });
-    expect((await loadWorkspaceConfig()).resources.memoryLimitMb).toBe(2048);
+    expect((await loadWorkspaceConfig(testHome().workspaceConfig)).resources.memoryLimitMb).toBe(2048);
   });
 
   it('mergeWriteWorkspaceConfig accepts a returned replacement config', async () => {
     const written = await mergeWriteWorkspaceConfig((config) => ({
       ...config,
       projectsDir: '/srv/checkouts',
-    }));
+    }), testHome());
     expect(written.projectsDir).toBe('/srv/checkouts');
-    expect((await loadWorkspaceConfig()).projectsDir).toBe('/srv/checkouts');
+    expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projectsDir).toBe('/srv/checkouts');
   });
 
   describe('registry backup and self-heal', () => {
     const registerOne = () =>
       mergeWriteWorkspaceConfig((config) => {
         config.projects.push(project('shop'));
-      });
+      }, testHome());
 
     it('snapshots a non-empty registry beside the config on every merge-write', async () => {
       await registerOne();
-      const snapshot = JSON.parse(readFileSync(workspaceConfigBackupPath(), 'utf8')) as WorkspaceConfig;
+      const snapshot = JSON.parse(readFileSync(workspaceConfigBackupPath(testHome().workspaceConfig), 'utf8')) as WorkspaceConfig;
       expect(snapshot.projects.map((p) => p.id)).toEqual(['shop']);
-      expect(statSync(workspaceConfigBackupPath()).mode & 0o777).toBe(0o600);
+      expect(statSync(workspaceConfigBackupPath(testHome().workspaceConfig)).mode & 0o777).toBe(0o600);
     });
 
     it('refreshes the snapshot when the last project is unregistered, so it cannot resurrect (#731)', async () => {
       await registerOne();
       await mergeWriteWorkspaceConfig((config) => {
         config.projects = [];
-      });
+      }, testHome());
       // The snapshot now mirrors the emptied registry — no stale entry survives.
       expect(
-        (JSON.parse(readFileSync(workspaceConfigBackupPath(), 'utf8')) as WorkspaceConfig).projects,
+        (JSON.parse(readFileSync(workspaceConfigBackupPath(testHome().workspaceConfig), 'utf8')) as WorkspaceConfig).projects,
       ).toEqual([]);
       // A config that parses and is simply empty is the user's own state.
-      expect((await loadWorkspaceConfig()).projects).toEqual([]);
+      expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects).toEqual([]);
       // And losing config.json entirely must NOT bring the removed project back
       // from a stale snapshot — recovery settles on the empty registry the user
       // intended, which was the #731 data-integrity defect.
-      rmSync(workspaceConfigPath());
-      expect((await loadWorkspaceConfig()).projects).toEqual([]);
+      rmSync(workspaceConfigPath(undefined, testHome()));
+      expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects).toEqual([]);
     });
 
     it('restores the registry when the config file went missing', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       await registerOne();
-      rmSync(workspaceConfigPath());
+      rmSync(workspaceConfigPath(undefined, testHome()));
 
-      const restored = await loadWorkspaceConfig();
+      const restored = await loadWorkspaceConfig(testHome().workspaceConfig);
       expect(restored.projects.map((p) => p.id)).toEqual(['shop']);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('restored 1 project(s)'));
     });
@@ -364,30 +367,30 @@ describe('workspace config', () => {
       await registerOne();
 
       write('');
-      expect((await loadWorkspaceConfig()).projects.map((p) => p.id)).toEqual(['shop']);
+      expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((p) => p.id)).toEqual(['shop']);
 
       write('{ not json');
-      expect((await loadWorkspaceConfig()).projects.map((p) => p.id)).toEqual(['shop']);
+      expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((p) => p.id)).toEqual(['shop']);
     });
 
     it('writes the recovered registry back on the next merge-write, so a restart keeps it', async () => {
       vi.spyOn(console, 'warn').mockImplementation(() => {});
       await registerOne();
-      rmSync(workspaceConfigPath());
+      rmSync(workspaceConfigPath(undefined, testHome()));
 
       await mergeWriteWorkspaceConfig((config) => {
         config.projects.push(project('warehouse'));
-      });
-      const onDisk = JSON.parse(readFileSync(workspaceConfigPath(), 'utf8')) as WorkspaceConfig;
+      }, testHome());
+      const onDisk = JSON.parse(readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8')) as WorkspaceConfig;
       expect(onDisk.projects.map((p) => p.id)).toEqual(['shop', 'warehouse']);
     });
 
     it('falls back to the defaults when neither the config nor a usable snapshot exists', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      writeFileSync(workspaceConfigBackupPath(), JSON.stringify({ projects: [] }), 'utf8');
+      writeFileSync(workspaceConfigBackupPath(testHome().workspaceConfig), JSON.stringify({ projects: [] }), 'utf8');
       write('{ not json');
 
-      expect((await loadWorkspaceConfig()).projects).toEqual([]);
+      expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects).toEqual([]);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('is corrupt'));
     });
   });

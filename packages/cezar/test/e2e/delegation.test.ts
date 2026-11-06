@@ -112,6 +112,7 @@ test('installed CLI completes owned-worker lifecycle with lost spawn reply and o
     const installed = join(consumer, 'node_modules/@wjarka/cezarion');
     const load = (file: string) => import(pathToFileURL(join(installed, 'dist', file)).href);
     const { RunStore } = await load('runs/store.js') as typeof import('../../src/runs/store.ts');
+    const { Home } = await load('home/home.js') as typeof import('../../src/home/home.ts');
     const { RunManager } = await load('workflows/run.js') as typeof import('../../src/workflows/run.ts');
     const { DelegationController, bundledWorkerInvocation } = await load('delegation/provision.js') as typeof import('../../src/delegation/provision.ts');
     const { WorkspaceSemaphore } = await load('workspace/semaphore.js') as typeof import('../../src/workspace/semaphore.ts');
@@ -163,13 +164,13 @@ rl.on('line', line => {
 });
 rl.on('close', () => queue.then(() => process.exit(0)));
 `, { mode: 0o755 });
-    process.env.CEZ_HOME = join(root, 'cez-home'); process.env.CEZ_DRY_RUN = '1';
+    const selectedHome = Home.sandbox(join(root, 'cez-home')); process.env.CEZ_DRY_RUN = '1';
     process.env.CEZ_AUTONAME = '0'; process.env.CEZ_REVIEW_GATE = '1';
     process.env.CEZ_CLAUDE_BIN = mock; process.env.CLAUDE_CONFIG_DIR = home;
     delete process.env.CEZ_DELEGATION_TOKEN; delete process.env.CEZ_DELEGATION_URL;
     store = RunStore.open(join(repo, '.ai/cezar'), { keepLive: true });
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
-    manager = new RunManager(store, repo, { semaphore, work });
+    const semaphore = new WorkspaceSemaphore({ home: selectedHome, initial: { maxParallel: 1 } });
+    manager = new RunManager(store, repo, { home: selectedHome, semaphore, work });
     // Observe the real provisioner without replacing its identity, environment,
     // instructions, credential generation, or revocation behavior.
     const environments = new Map<string, Record<string, string>>();
@@ -179,7 +180,7 @@ rl.on('close', () => queue.then(() => process.exit(0)));
     });
 
     controller = await DelegationController.start();
-    controller.attachProject({ id: 'package-project', root: repo, store, manager });
+    controller.attachProject({ home: selectedHome, id: 'package-project', root: repo, store, manager });
     const parent = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'package parent', runner: 'claude', worktree: false });
     await until(() => exists(join(wire, parent.id + '.started')), 'parent process starts');
     const invocation = bundledWorkerInvocation();

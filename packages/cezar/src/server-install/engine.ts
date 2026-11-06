@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { loadWorkspaceConfig } from '../workspace/config.ts';
 import { disableRemoteSettings, isGranted, readRemoteSettings } from '../remote-settings.ts';
 import { acquireLock, deleteServerState, isResolved, loadServerState, saveServerState } from './state.ts';
@@ -21,6 +22,7 @@ import {
  */
 
 export interface RunOptions {
+  home?: Home;
   dryRun: boolean;
   assumeYes: boolean;
   reconfigure: ReadonlySet<string>;
@@ -109,10 +111,11 @@ function buildContext(state: ServerState, opts: RunOptions): InstallContext {
   const instance = opts.instance ?? 'default';
   const ctx: InstallContext = {
     state,
+    home: opts.home,
     ui,
     instance,
     runner: opts.runner ?? defaultRunner,
-    save: async () => saveServerState(state, instance),
+    save: async () => saveServerState(state, instance, opts.home),
     dryRun: opts.dryRun,
     assumeYes: opts.assumeYes,
     reconfigure: opts.reconfigure,
@@ -130,12 +133,12 @@ function buildContext(state: ServerState, opts: RunOptions): InstallContext {
  * stops owning the port, so a later cockpit on that port, with another login, starts without it.
  */
 async function withdrawRemoteSettings(ctx: InstallContext, port: number, why: string, when = true): Promise<void> {
-  if (!when || !isGranted(readRemoteSettings(), port)) return;
+  if (!when || !isGranted(readRemoteSettings(process.env, ctx.home), port)) return;
   if (ctx.dryRun) {
     ctx.ui.info(`DRY RUN — would withdraw the remote settings grant for port ${port} (${why}).`);
     return;
   }
-  await disableRemoteSettings(process.env, port);
+  await disableRemoteSettings(process.env, port, ctx.home);
   ctx.ui.info(`Withdrew the remote settings grant for port ${port} (${why}). \`cez remote-settings enable --port ${port}\` grants it again.`);
 }
 
@@ -235,13 +238,21 @@ async function runInstallStep(step: InstallStep, ctx: InstallContext, opts: RunO
   }
 }
 
-export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): Promise<RunResult> {
-  const release = acquireLock(opts.instance);
+/** Keep the install, uninstall and deploy context under the same whole-run lock. */
+async function withInstallContext(opts: RunOptions, run: (ctx: InstallContext) => Promise<RunResult>): Promise<RunResult> {
+  const release = acquireLock(opts.instance, opts.home);
   try {
-    const state = loadServerState(opts.instance);
+    return await run(buildContext(loadServerState(opts.instance, opts.home), opts));
+  } finally {
+    release();
+  }
+}
+
+export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): Promise<RunResult> {
+  return withInstallContext(opts, async ctx => {
+    const { state } = ctx;
     // buildContext reconciles dry-run records first, so a preview of platform A
     // never blocks a real install of platform B (the reset clears `platform`).
-    const ctx = buildContext(state, opts);
     const freshInstall = setupInstallRecord(state, strategy, opts);
 
     await strategy.preflight(ctx); // throws PreflightError to refuse politely
@@ -278,16 +289,12 @@ export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): 
     state.updatedAt = opts.now;
     await ctx.save();
     return { status: 'complete', state };
-  } finally {
-    release();
-  }
+  });
 }
 
 export async function runUninstall(strategy: PlatformStrategy, opts: RunOptions): Promise<RunResult> {
-  const release = acquireLock(opts.instance);
-  try {
-    const state = loadServerState(opts.instance);
-    const ctx = buildContext(state, opts);
+  return withInstallContext(opts, async ctx => {
+    const { state } = ctx;
     // Same guard as install/deploy: undoing with the wrong strategy would skip
     // the real artifacts and (before this guard existed) destroy their ledger.
     if (state.platform && state.platform !== strategy.id) {
@@ -296,7 +303,7 @@ export async function runUninstall(strategy: PlatformStrategy, opts: RunOptions)
       );
     }
 
-    const registeredProjects = (await loadWorkspaceConfig()).projects.length;
+    const registeredProjects = (await loadWorkspaceConfig(opts.home?.workspaceConfig)).projects.length;
     if (registeredProjects > 0) {
       ctx.ui.warn(
         `${registeredProjects} ${registeredProjects === 1 ? 'project is' : 'projects are'} registered in ~/.cezar/config.json.`,
@@ -359,11 +366,9 @@ export async function runUninstall(strategy: PlatformStrategy, opts: RunOptions)
     // A named instance is fully gone now — drop its (empty) record so it no
     // longer reserves a port or shows up as an install. The default record is
     // kept, matching the legacy single-host behavior.
-    if (ctx.instance !== 'default') deleteServerState(ctx.instance);
+    if (ctx.instance !== 'default') deleteServerState(ctx.instance, ctx.home);
     return { status: 'complete', state };
-  } finally {
-    release();
-  }
+  });
 }
 
 /**
@@ -372,10 +377,8 @@ export async function runUninstall(strategy: PlatformStrategy, opts: RunOptions)
  * + re-verify); holds the single-writer lock for the whole run.
  */
 export async function runDeploy(strategy: PlatformStrategy, opts: RunOptions): Promise<RunResult> {
-  const release = acquireLock(opts.instance);
-  try {
-    const state = loadServerState(opts.instance);
-    const ctx = buildContext(state, opts);
+  return withInstallContext(opts, async ctx => {
+    const { state } = ctx;
     if (state.platform && state.platform !== strategy.id) {
       throw new PreflightError(
         `this host has a ${state.platform} install recorded — deploy it with --platform ${state.platform}`,
@@ -403,7 +406,5 @@ export async function runDeploy(strategy: PlatformStrategy, opts: RunOptions): P
     state.updatedAt = opts.now;
     await ctx.save();
     return { status: 'complete', state };
-  } finally {
-    release();
-  }
+  });
 }

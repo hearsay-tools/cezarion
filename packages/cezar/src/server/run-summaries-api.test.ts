@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -25,19 +28,19 @@ describe('run summaries API', () => {
   beforeEach(() => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-run-summaries-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-run-summaries-repo-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
   });
 
   afterEach(() => {
     store.flush();
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
   });
 
   const app = () =>
-    createApp({ repoRoot, store, manager: { finishBlockedReason: () => 'no open session' } as unknown as RunManager, version: '0.0.0-test' });
+    createApp({ home: testHome(), repoRoot, store, manager: { finishBlockedReason: () => 'no open session' } as unknown as RunManager, version: '0.0.0-test' });
 
   const getJson = async (path: string): Promise<unknown> => {
     const res = await apiRequest(app(), path);
@@ -164,7 +167,7 @@ describe('run summaries API', () => {
         schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump deps' },
       } as Parameters<AutomationStore['create']>[0], 'auto-7f3');
       const search = async (q: string) => {
-        const res = await apiRequest(createApp({
+        const res = await apiRequest(createApp({ home: testHome(),
           repoRoot, store, automationStore, manager: {} as RunManager, version: '0.0.0-test',
         }), `/api/v1/run-summaries/archived?q=${encodeURIComponent(q)}`);
         expect(res.status).toBe(200);

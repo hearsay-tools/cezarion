@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { rmSync, writeFileSync } from 'node:fs';
@@ -45,7 +46,7 @@ async function withAnsweredWorker(backend: RunnerId, env: Record<string, string>
     const credentials = new CredentialRegistry();
     const caller = credentials.authenticate(credentials.issue('project', parentRunId, randomUUID()))!;
     const service = new DelegationService();
-    service.registerProject({ id: 'project', root: repoRoot, store, manager });
+    service.registerProject({ home: testHome(), id: 'project', root: repoRoot, store, manager });
     const send = async (text: string, requestId?: string) => {
       const id = randomUUID();
       await service.send(caller, { id, recipientRunId: runId, text, timeoutSeconds: 600,
@@ -57,7 +58,7 @@ async function withAnsweredWorker(backend: RunnerId, env: Record<string, string>
     const answerFixture: AnswerFixture = { store, manager, runId, askSeq, send, answer, restart: async () => {
       ({ store, manager } = await fixture.restart());
       Object.assign(answerFixture, { store, manager });
-      service.registerProject({ id: 'project', root: repoRoot, store, manager });
+      service.registerProject({ home: testHome(), id: 'project', root: repoRoot, store, manager });
     } };
     try { await body(answerFixture); } finally { credentials.close(); }
   }, { env });

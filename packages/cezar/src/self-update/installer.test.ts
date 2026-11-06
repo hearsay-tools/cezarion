@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -31,31 +32,31 @@ describe('installing into the managed layout', () => {
     mkdirSync(dist, { recursive: true });
     writeFileSync(join(dist, 'index.js'), `// ${marker}\n`);
   };
-  const staged = () => (existsSync(versionsDir(env)) ? readdirSync(versionsDir(env)).filter((name) => name.startsWith('.staging-')) : []);
+  const staged = () => (existsSync(versionsDir(env, testHome(env))) ? readdirSync(versionsDir(env, testHome(env))).filter((name) => name.startsWith('.staging-')) : []);
 
   it('moves a finished install into place, writes its manifest and leaves no staging behind', async () => {
     const seen: string[][] = [];
-    const result = await installFromRegistry('0.12.1', {
+    const result = await installFromRegistry('0.12.1', { home: testHome(env),
       env,
       runNpm: async (args, cwd, onLog) => {
         seen.push(args);
         // While npm runs, the version is NOT there yet — only the staging directory is.
-        expect(existsSync(versionDir('0.12.1', env))).toBe(false);
+        expect(existsSync(versionDir('0.12.1', env, testHome(env)))).toBe(false);
         expect(staged()).toHaveLength(1);
         await npmThatInstalls()(args, cwd, onLog);
       },
     });
-    expect(result).toEqual({ id: '0.12.1', version: '0.12.1', entry: versionEntry('0.12.1', env) });
+    expect(result).toEqual({ id: '0.12.1', version: '0.12.1', entry: versionEntry('0.12.1', env, testHome(env)) });
     expect(seen[0]?.at(-1)).toBe('@wjarka/cezarion@0.12.1');
-    expect(existsSync(versionEntry('0.12.1', env))).toBe(true);
-    expect(readManifest('0.12.1', env)).toMatchObject({ version: '0.12.1', source: 'registry' });
+    expect(existsSync(versionEntry('0.12.1', env, testHome(env)))).toBe(true);
+    expect(readManifest('0.12.1', env, testHome(env))).toMatchObject({ version: '0.12.1', source: 'registry' });
     expect(staged()).toEqual([]);
-    expect(listInstalled(env).map((entry) => entry.id)).toEqual(['0.12.1']);
+    expect(listInstalled(env, testHome(env)).map((entry) => entry.id)).toEqual(['0.12.1']);
   });
 
   it('leaves nothing behind when npm fails', async () => {
     await expect(
-      installFromRegistry('0.12.1', {
+      installFromRegistry('0.12.1', { home: testHome(env),
         env,
         runNpm: async () => {
           throw new Error('npm install failed (exit 1): ETARGET');
@@ -63,27 +64,27 @@ describe('installing into the managed layout', () => {
       }),
     ).rejects.toThrow('ETARGET');
     expect(staged()).toEqual([]);
-    expect(existsSync(versionDir('0.12.1', env))).toBe(false);
-    expect(listInstalled(env)).toEqual([]);
+    expect(existsSync(versionDir('0.12.1', env, testHome(env)))).toBe(false);
+    expect(listInstalled(env, testHome(env))).toEqual([]);
   });
 
   it('refuses an install whose entry file never appeared', async () => {
-    await expect(installFromRegistry('0.12.1', { env, runNpm: async () => {} })).rejects.toThrow('entry file is missing');
+    await expect(installFromRegistry('0.12.1', { home: testHome(env), env, runNpm: async () => {} })).rejects.toThrow('entry file is missing');
     expect(staged()).toEqual([]);
-    expect(existsSync(versionDir('0.12.1', env))).toBe(false);
+    expect(existsSync(versionDir('0.12.1', env, testHome(env)))).toBe(false);
   });
 
   it('answers an already installed version without running npm', async () => {
-    await installFromRegistry('0.12.1', { env, runNpm: npmThatInstalls('first') });
+    await installFromRegistry('0.12.1', { home: testHome(env), env, runNpm: npmThatInstalls('first') });
     let ran = false;
-    await installFromRegistry('0.12.1', {
+    await installFromRegistry('0.12.1', { home: testHome(env),
       env,
       runNpm: async () => {
         ran = true;
       },
     });
     expect(ran).toBe(false);
-    expect(readFileSync(versionEntry('0.12.1', env), 'utf8')).toContain('first');
+    expect(readFileSync(versionEntry('0.12.1', env, testHome(env)), 'utf8')).toContain('first');
   });
 
   it.each(['npm failure', 'missing entry', 'success'])('keeps the active local install until replacement is ready: %s', async outcome => {
@@ -93,29 +94,29 @@ describe('installing into the managed layout', () => {
       const dir = args[args.indexOf('--pack-destination') + 1]!;
       writeFileSync(join(dir, 'fixture.tgz'), 'fixture');
     };
-    await installFromLocal(pkg, { env, runNpm: async (args, cwd, log) => args[0] === 'pack' ? pack(args, cwd, log) : npmThatInstalls('original')(args, cwd, log) });
-    activate('0.12.1+local', env);
-    const originalManifest = readManifest('0.12.1+local', env);
+    await installFromLocal(pkg, { home: testHome(env), env, runNpm: async (args, cwd, log) => args[0] === 'pack' ? pack(args, cwd, log) : npmThatInstalls('original')(args, cwd, log) });
+    activate('0.12.1+local', env, testHome(env));
+    const originalManifest = readManifest('0.12.1+local', env, testHome(env));
     let oldEntryWhileStaging = '';
-    const replacement = installFromLocal(pkg, { env, runNpm: async (args, cwd, log) => {
+    const replacement = installFromLocal(pkg, { home: testHome(env), env, runNpm: async (args, cwd, log) => {
       if (args[0] === 'pack') return pack(args, cwd, log);
-      oldEntryWhileStaging = existsSync(currentEntry(env)) ? readFileSync(currentEntry(env), 'utf8') : 'missing';
+      oldEntryWhileStaging = existsSync(currentEntry(env, testHome(env))) ? readFileSync(currentEntry(env, testHome(env)), 'utf8') : 'missing';
       if (outcome === 'npm failure') throw new Error('ETARGET');
       if (outcome === 'success') await npmThatInstalls('replacement')(args, cwd, log);
     } });
     if (outcome === 'success') await replacement;
     else await expect(replacement).rejects.toThrow(outcome === 'npm failure' ? 'ETARGET' : 'entry file is missing');
     expect(oldEntryWhileStaging).toContain('original');
-    expect(activeId(env)).toBe('0.12.1+local');
-    expect(readFileSync(currentEntry(env), 'utf8')).toContain(outcome === 'success' ? 'replacement' : 'original');
-    if (outcome !== 'success') expect(readManifest('0.12.1+local', env)).toEqual(originalManifest);
+    expect(activeId(env, testHome(env))).toBe('0.12.1+local');
+    expect(readFileSync(currentEntry(env, testHome(env)), 'utf8')).toContain(outcome === 'success' ? 'replacement' : 'original');
+    if (outcome !== 'success') expect(readManifest('0.12.1+local', env, testHome(env))).toEqual(originalManifest);
     expect(staged()).toEqual([]);
   });
 
   it('never builds a path from an unsafe version id', async () => {
     let ran = false;
     await expect(
-      installFromRegistry('..', {
+      installFromRegistry('..', { home: testHome(env),
         env,
         runNpm: async () => {
           ran = true;
@@ -171,13 +172,13 @@ describe('a read-only service', () => {
     const home = mkdtempSync(join(tmpdir(), 'cez-readonly-'));
     try {
       const env = { ...process.env, CEZ_HOME: home };
-      const entry = join(versionsDir(env), 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js');
-      const base = { pkgName: '@wjarka/cezarion', version: '0.12.0', entry, restart: () => {}, env };
+      const entry = join(versionsDir(env, testHome(env)), 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js');
+      const base = { home: testHome(env), pkgName: '@wjarka/cezarion', version: '0.12.0', entry, restart: () => {}, env };
       expect(new SelfUpdateService(base).capability().canSelfUpdate).toBe(true);
       const readOnly = new SelfUpdateService({ ...base, readOnly: true });
       expect(readOnly.capability()).toMatchObject({ canSelfUpdate: false });
       expect(() => readOnly.apply('0.12.1')).toThrow('without an updater');
-      expect(existsSync(versionsDir(env))).toBe(false);
+      expect(existsSync(versionsDir(env, testHome(env)))).toBe(false);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

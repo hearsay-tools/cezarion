@@ -4,15 +4,18 @@
  * its command runs.
  */
 
+import type { Home } from './home/home.ts';
 import { resolveHome } from './home/resolve.ts';
 export type SubcommandRunner = (argv: string[], env: NodeJS.ProcessEnv) => Promise<number>;
 
 export const SUBCOMMAND_NAMES = ['backup', 'discover', 'artifact', 'task', 'automation', 'webhook', 'worker', 'message', 'remote-settings'] as const;
 
 /** The runner for `name`, or nothing when `name` is not a subcommand. */
-export async function loadSubcommand(name: string | undefined): Promise<SubcommandRunner | undefined> {
+export async function loadSubcommand(name: string | undefined, home: (env: NodeJS.ProcessEnv) => Home = env => resolveHome({ purpose: 'cli', env })): Promise<SubcommandRunner | undefined> {
   switch (name) {
-    case 'backup': return (await import('./workspace/backup-cli.ts')).runBackupCommand;
+    case 'backup': return async (argv, env) => {
+      return (await import('./workspace/backup-cli.ts')).runBackupCommand(argv, env, home(env));
+    };
     case 'discover': return (await import('./discovery/cli.ts')).runDiscoverCommand;
     case 'artifact': return (await import('./artifacts/cli.ts')).runArtifactCommand;
     case 'task': return (await import('./task-cli/cli.ts')).runTaskCommand;
@@ -20,16 +23,16 @@ export async function loadSubcommand(name: string | undefined): Promise<Subcomma
     case 'webhook': return (await import('./webhooks/cli.ts')).runWebhookCommand;
     case 'message': return (await import('./delegation/cli.ts')).runMessageCommand;
     case 'worker': return (await import('./delegation/cli.ts')).runWorkerCommand;
-    case 'remote-settings': return (await import('./remote-settings-cli.ts')).runRemoteSettingsCommand;
+    case 'remote-settings': return async (argv, env) => {
+      return (await import('./remote-settings-cli.ts')).runRemoteSettingsCommand(argv, env, undefined, home(env));
+    };
     default: return undefined;
   }
 }
 
 /** Run `argv[0]` when it names a subcommand and answer its exit code; anything else is not ours. */
 export async function runSubcommand(argv: string[], env: NodeJS.ProcessEnv, home = () => resolveHome({ purpose: 'cli', env })): Promise<number | undefined> {
-  // Only operator commands receive Home. Task runners keep their two-argument contract.
-  if (argv[0] === 'backup') return (await import('./workspace/backup-cli.ts')).runBackupCommand(argv.slice(1), env, home());
-  if (argv[0] === 'remote-settings') return (await import('./remote-settings-cli.ts')).runRemoteSettingsCommand(argv.slice(1), env, undefined, home());
-  const run = await loadSubcommand(argv[0]);
+  // Only operator runners call the lazy Home factory. Task runners keep two arguments.
+  const run = await loadSubcommand(argv[0], () => home());
   return run ? run(argv.slice(1), env) : undefined;
 }

@@ -1,3 +1,6 @@
+import { Home } from './home/home.ts';
+import { useTestHome } from './home/test-home.testkit.ts';
+import { testHome } from './home/test-home.testkit.ts';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -86,14 +89,15 @@ describe('discoverSkills team-skill off-list', () => {
     return repoRoot;
   }
 
-  const teamNames = async (repoRoot: string) =>
-    (await discoverSkills(repoRoot)).filter((skill) => skill.source === 'team').map((skill) => skill.name);
+  const teamNames = async (repoRoot: string) => {
+    return (await discoverSkills(repoRoot, undefined, testHome())).filter((skill) => skill.source === 'team').map((skill) => skill.name);
+  };
 
   // A home of its own: an inherited CEZ_HOME keeps a real workspace ui-state this must not touch.
   let home: string;
   beforeEach(async () => {
     home = await mkdtemp(join(tmpdir(), 'cezar-skills-home-'));
-    vi.stubEnv('CEZ_HOME', home);
+    useTestHome(home ? Home.sandbox(home) : undefined);
     vi.spyOn(remote, 'getTeamSkillsCached').mockReturnValue([teamSkill('x', A), teamSkill('y', A)]);
   });
 
@@ -112,8 +116,8 @@ describe('discoverSkills team-skill off-list', () => {
   });
 
   it('ignores the legacy importedSkills keys, project and workspace', async () => {
-    await mkdir(dirname(workspaceUiStatePath()), { recursive: true });
-    await writeFile(workspaceUiStatePath(), JSON.stringify({ importedSkills: ['nothing'] }));
+    await mkdir(dirname(workspaceUiStatePath(testHome())), { recursive: true });
+    await writeFile(workspaceUiStatePath(testHome()), JSON.stringify({ importedSkills: ['nothing'] }));
     expect(await teamNames(await project({ importedSkills: [] }))).toEqual(['x', 'y']);
   });
 
@@ -123,8 +127,9 @@ describe('discoverSkills team-skill off-list', () => {
 
   it('switching one source off lets the same name from another source win', async () => {
     vi.spyOn(remote, 'getTeamSkillsCached').mockReturnValue([teamSkill('x', A), teamSkill('x', B)]);
-    const catalog = async (uiState?: Record<string, unknown>) =>
-      (await discoverSkills(await project(uiState))).filter((skill) => skill.name === 'x');
+    const catalog = async (uiState?: Record<string, unknown>) => {
+      return (await discoverSkills(await project(uiState), undefined, testHome())).filter((skill) => skill.name === 'x');
+    };
     expect((await catalog()).map((s) => s.team?.repo)).toEqual([A]);
     expect((await catalog({ disabledTeamSkills: [{ repo: A, name: 'x' }] })).map((s) => s.team?.repo)).toEqual([B]);
   });
@@ -147,7 +152,7 @@ describe('discoverSkills local entrypoints', () => {
     await writeFile(join(skillsDir, 'yes.md'), '---\ninteractive: yes\n---\nBody');
     await writeFile(join(skillsDir, 'missing.md'), 'Body');
 
-    const skills = (await discoverSkills(repoRoot)).filter((skill) => skill.source === 'cezar');
+    const skills = (await discoverSkills(repoRoot, undefined, testHome())).filter((skill) => skill.source === 'cezar');
     expect(skills.find((skill) => skill.name === 'true')).toMatchObject({
       interactive: true,
       body: 'Body',
@@ -168,7 +173,7 @@ describe('discoverSkills local entrypoints', () => {
     await writeFile(join(skillsDir, 'om-example/SKILL.md'), '# Example skill');
     await writeFile(join(skillsDir, 'om-example/references/agentic-setup.md'), '# Supporting doc');
 
-    const skills = (await discoverSkills(repoRoot)).filter((skill) => skill.source === 'cezar');
+    const skills = (await discoverSkills(repoRoot, undefined, testHome())).filter((skill) => skill.source === 'cezar');
 
     expect(skills.map((skill) => skill.name)).toEqual(['flat', 'legacy', 'om-example']);
     expect(skills.some((skill) => skill.name === 'agentic-setup')).toBe(false);
@@ -184,7 +189,7 @@ describe('discoverSkills local entrypoints', () => {
     await writeFile(join(canonicalDir, 'SKILL.md'), '# Example skill');
     await symlink('../../.agents/skills/om-example', join(mirrorRoot, 'om-example'), 'dir');
 
-    const skills = (await discoverSkills(repoRoot)).filter((skill) => skill.name === 'om-example');
+    const skills = (await discoverSkills(repoRoot, undefined, testHome())).filter((skill) => skill.name === 'om-example');
 
     expect(skills).toHaveLength(1);
     expect(skills[0]?.source).toBe('agents');
@@ -210,7 +215,7 @@ describe('discoverSkills built-in skills (#774)', () => {
     await writeFile(join(skillsDir, 'zz-last.md'), 'Body');
     await writeFile(join(skillsDir, 'shadowed.md'), 'REPO');
 
-    const skills = (await discoverSkills(repoRoot, { builtin: [builtin('aa-first'), builtin('shadowed')] }))
+    const skills = (await discoverSkills(repoRoot, { builtin: [builtin('aa-first'), builtin('shadowed')] }, testHome()))
       .filter((skill) => skill.source === 'cezar' || skill.source === 'builtin');
     expect(skills.map((skill) => `${skill.source}:${skill.name}`)).toEqual(['cezar:shadowed', 'cezar:zz-last', 'builtin:aa-first']);
     expect(skills.find((skill) => skill.name === 'shadowed')?.body).toBe('REPO');
@@ -219,7 +224,7 @@ describe('discoverSkills built-in skills (#774)', () => {
   it('lists no built-in when the caller passes none', async () => {
     const repoRoot = await mkdtemp(join(tmpdir(), 'cezar-skills-'));
     tempDirs.push(repoRoot);
-    expect((await discoverSkills(repoRoot)).some((skill) => skill.source === 'builtin')).toBe(false);
+    expect((await discoverSkills(repoRoot, undefined, testHome())).some((skill) => skill.source === 'builtin')).toBe(false);
   });
 });
 
@@ -253,7 +258,7 @@ describe('discoverSkills global dirs', () => {
     const { home, repoRoot, restore } = await plantGlobalHome();
     try {
       expect(homedir()).toBe(home);
-      const skills = await discoverSkills(repoRoot);
+      const skills = await discoverSkills(repoRoot, undefined, testHome());
       expect(skills.find((skill) => skill.name === planted.agents)).toBeUndefined();
       expect(skills.find((skill) => skill.name === planted.claude)).toBeUndefined();
       expect(skills.filter((skill) => skill.source === 'global')).toEqual([]);
@@ -268,7 +273,7 @@ describe('discoverSkills global dirs', () => {
     delete process.env.VITEST;
     try {
       expect(homedir()).toBe(home);
-      const skills = (await discoverSkills(repoRoot)).filter((skill) => skill.source === 'global');
+      const skills = (await discoverSkills(repoRoot, undefined, testHome())).filter((skill) => skill.source === 'global');
       expect(skills.map((skill) => skill.name).sort()).toEqual([planted.agents, planted.claude].sort());
     } finally {
       if (vitest !== undefined) process.env.VITEST = vitest;

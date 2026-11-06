@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -15,10 +18,10 @@ let home: string;
 const originalHome = process.env.CEZ_HOME;
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'cez-backups-'));
-  process.env.CEZ_HOME = home;
+  useTestHome(home ? Home.sandbox(home) : undefined);
 });
 afterEach(() => {
-  process.env.CEZ_HOME = originalHome;
+  useTestHome(originalHome ? Home.sandbox(originalHome) : undefined);
   rmSync(home, { recursive: true, force: true });
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -26,16 +29,16 @@ afterEach(() => {
 
 it.each(['config.json', 'agent-accounts.json'] as const)('backs up changed %s once, and skips unchanged writes', async (file) => {
   const write = file === 'config.json' ? mergeWriteWorkspaceConfig : mergeWriteAgentAccounts;
-  await write(() => undefined);
-  expect(listBackups(file)).toEqual([]);
+  await write(() => undefined, testHome());
+  expect(listBackups(file, testHome())).toEqual([]);
   const old = readFileSync(join(home, file));
-  await write((value) => { value.extra = 'changed'; });
-  const [entry] = listBackups(file);
-  expect(listBackups(file)).toHaveLength(1);
+  await write((value) => { value.extra = 'changed'; }, testHome());
+  const [entry] = listBackups(file, testHome());
+  expect(listBackups(file, testHome())).toHaveLength(1);
   expect(readFileSync(entry!.path)).toEqual(old);
   expect(entry!.path).toContain(createHash('sha256').update(old).digest('hex').slice(0, 8));
-  await write(() => undefined);
-  expect(listBackups(file)).toHaveLength(1);
+  await write(() => undefined, testHome());
+  expect(listBackups(file, testHome())).toHaveLength(1);
   if (process.platform !== 'win32') {
     expect(statSync(entry!.path).mode & 0o777).toBe(0o600);
     expect(statSync(join(home, 'backups')).mode & 0o777).toBe(0o700);
@@ -53,7 +56,7 @@ it('prunes in the write: last 20 plus the newest per day within 30 days', () => 
       atomicWriteJsonSync(path, { day, hour });
     }
   }
-  const retained = listBackups('config.json');
+  const retained = listBackups('config.json', testHome());
   const recent = retained.slice(0, 20);
   expect(recent).toHaveLength(20);
   const older = retained.slice(20);
@@ -68,109 +71,109 @@ it('restores pre-change account JSON through the CLI and backs up the replaced v
   vi.setSystemTime(new Date('2026-11-01T00:00:00Z'));
   const old = { version: 1, accounts: [{ id: 'work', provider: 'claude', configDir: '/old/account' }], future: { token: 'fixture' } };
   writeFileSync(join(home, 'agent-accounts.json'), JSON.stringify(old));
-  await mergeWriteAgentAccounts((store) => { store.accounts = []; });
+  await mergeWriteAgentAccounts((store) => { store.accounts = []; }, testHome());
   vi.setSystemTime(new Date('2026-11-02T00:00:00Z'));
   const replaced = readFileSync(join(home, 'agent-accounts.json'));
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-  expect(await runBackupCommand(['list', 'agent-accounts.json'], process.env)).toBe(0);
+  expect(await runBackupCommand(['list', 'agent-accounts.json'], process.env, testHome())).toBe(0);
   expect(JSON.parse(log.mock.calls[0]![0])).toHaveLength(1);
-  expect(await runBackupCommand(['restore', 'agent-accounts.json', '--at', '2026-11-01T00:00:00Z'], process.env)).toBe(0);
-  expect((await loadAgentAccounts()).accounts[0]!.id).toBe('work');
-  expect((await loadAgentAccounts()).future).toEqual(old.future);
-  expect(listBackups('agent-accounts.json')).toHaveLength(2);
-  expect(readFileSync(listBackups('agent-accounts.json')[0]!.path)).toEqual(replaced);
+  expect(await runBackupCommand(['restore', 'agent-accounts.json', '--at', '2026-11-01T00:00:00Z'], process.env, testHome())).toBe(0);
+  expect((await loadAgentAccounts(testHome())).accounts[0]!.id).toBe('work');
+  expect((await loadAgentAccounts(testHome())).future).toEqual(old.future);
+  expect(listBackups('agent-accounts.json', testHome())).toHaveLength(2);
+  expect(readFileSync(listBackups('agent-accounts.json', testHome())[0]!.path)).toEqual(replaced);
 });
 
 it('keeps config.json.bak recovery and restores an older registry without losing unknown fields', async () => {
   writeFileSync(join(home, 'config.json'), JSON.stringify({ projects: [], future: 'old' }));
-  await mergeWriteWorkspaceConfig((config) => { config.future = 'new'; });
+  await mergeWriteWorkspaceConfig((config) => { config.future = 'new'; }, testHome());
   vi.spyOn(console, 'log').mockImplementation(() => {});
-  expect(await runBackupCommand(['restore', 'config.json'], process.env)).toBe(0);
-  expect((await loadWorkspaceConfig()).future).toBe('old');
+  expect(await runBackupCommand(['restore', 'config.json'], process.env, testHome())).toBe(0);
+  expect((await loadWorkspaceConfig(testHome().workspaceConfig)).future).toBe('old');
   expect(JSON.parse(readFileSync(join(home, 'config.json.bak'), 'utf8')).future).toBe('old');
 });
 
 it('creates a missing backup directory and warns once for an unusable one without blocking writes', async () => {
-  await mergeWriteWorkspaceConfig(() => undefined);
+  await mergeWriteWorkspaceConfig(() => undefined, testHome());
   writeFileSync(join(home, 'backups'), 'not a directory');
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  await mergeWriteWorkspaceConfig((value) => { value.extra = 1; });
-  await mergeWriteWorkspaceConfig((value) => { value.extra = 2; });
+  await mergeWriteWorkspaceConfig((value) => { value.extra = 1; }, testHome());
+  await mergeWriteWorkspaceConfig((value) => { value.extra = 2; }, testHome());
   expect(warning).toHaveBeenCalledTimes(1);
-  expect((await loadWorkspaceConfig()).extra).toBe(2);
+  expect((await loadWorkspaceConfig(testHome().workspaceConfig)).extra).toBe(2);
   rmSync(join(home, 'backups'));
-  await mergeWriteWorkspaceConfig((value) => { value.extra = 3; });
-  expect(listBackups('config.json')).toHaveLength(1);
+  await mergeWriteWorkspaceConfig((value) => { value.extra = 3; }, testHome());
+  expect(listBackups('config.json', testHome())).toHaveLength(1);
 });
 
 it('does not back up ui-state or account config directories', () => {
   mkdirSync(join(home, 'claude-work'));
   atomicWriteJsonSync(join(home, 'ui-state.json'), { tab: 1 });
   atomicWriteJsonSync(join(home, 'ui-state.json'), { tab: 2 });
-  expect(listBackups()).toEqual([]);
+  expect(listBackups(undefined, testHome())).toEqual([]);
 });
 
 it.each([['restore', '../config.json'], ['restore', 'config.json', '--at', 'invalid'], ['restore', 'config.json'], ['list', 'config.json', '--at', '2026-01-01']])('rejects invalid or unavailable backups: %j', async (...args) => {
   vi.spyOn(console, 'error').mockImplementation(() => {});
-  expect(await runBackupCommand(args, process.env)).toBe(1);
+  expect(await runBackupCommand(args, process.env, testHome())).toBe(1);
 });
 
 
 it('orders same-clock writes and keeps a snapshot for repeated content', async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-01T00:00:00Z'));
-  await mergeWriteAgentAccounts((store) => { store.marker = 'a'; });
-  await mergeWriteAgentAccounts((store) => { store.marker = 'b'; });
-  await mergeWriteAgentAccounts((store) => { store.marker = 'a'; });
-  await mergeWriteAgentAccounts((store) => { store.marker = 'c'; });
-  await mergeWriteAgentAccounts((store) => { store.marker = 'd'; });
-  const snapshots = listBackups('agent-accounts.json');
+  await mergeWriteAgentAccounts((store) => { store.marker = 'a'; }, testHome());
+  await mergeWriteAgentAccounts((store) => { store.marker = 'b'; }, testHome());
+  await mergeWriteAgentAccounts((store) => { store.marker = 'a'; }, testHome());
+  await mergeWriteAgentAccounts((store) => { store.marker = 'c'; }, testHome());
+  await mergeWriteAgentAccounts((store) => { store.marker = 'd'; }, testHome());
+  const snapshots = listBackups('agent-accounts.json', testHome());
   expect(snapshots).toHaveLength(4);
   expect(snapshots.map((entry) => JSON.parse(readFileSync(entry.path, 'utf8')).marker)).toEqual(['c', 'a', 'b', 'a']);
   expect(new Set(snapshots.map((entry) => entry.time)).size).toBe(4);
   vi.spyOn(console, 'log').mockImplementation(() => {});
-  expect(await runBackupCommand(['restore', 'agent-accounts.json'], process.env)).toBe(0);
-  expect((await loadAgentAccounts()).marker).toBe('c');
-  expect(listBackups('agent-accounts.json')).toHaveLength(5);
+  expect(await runBackupCommand(['restore', 'agent-accounts.json'], process.env, testHome())).toBe(0);
+  expect((await loadAgentAccounts(testHome())).marker).toBe('c');
+  expect(listBackups('agent-accounts.json', testHome())).toHaveLength(5);
 });
 
 it('rejects a zone-less restore time without changing live JSON', async () => {
-  await mergeWriteAgentAccounts((store) => { store.marker = 'before'; });
-  await mergeWriteAgentAccounts((store) => { store.marker = 'after'; });
+  await mergeWriteAgentAccounts((store) => { store.marker = 'before'; }, testHome());
+  await mergeWriteAgentAccounts((store) => { store.marker = 'after'; }, testHome());
   const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-  expect(await runBackupCommand(['restore', 'agent-accounts.json', '--at', '2026-11-01T00:00:00'], process.env)).toBe(1);
+  expect(await runBackupCommand(['restore', 'agent-accounts.json', '--at', '2026-11-01T00:00:00'], process.env, testHome())).toBe(1);
   expect(error).toHaveBeenCalledWith('Invalid --at time; use an ISO UTC time');
-  expect((await loadAgentAccounts()).marker).toBe('after');
+  expect((await loadAgentAccounts(testHome())).marker).toBe('after');
 });
 
 it.each(['config.json', 'agent-accounts.json'] as const)('warns when restoring %s drops invalid snapshot rows', async (file) => {
   const key = file === 'config.json' ? 'projects' : 'accounts';
   writeFileSync(join(home, file), JSON.stringify({ [key]: [{ broken: true }], future: 'preserved' }));
   const write = file === 'config.json' ? mergeWriteWorkspaceConfig : mergeWriteAgentAccounts;
-  await write((value) => { value.future = 'new'; });
+  await write((value) => { value.future = 'new'; }, testHome());
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'log').mockImplementation(() => {});
-  expect(await runBackupCommand(['restore', file], process.env)).toBe(0);
+  expect(await runBackupCommand(['restore', file], process.env, testHome())).toBe(0);
   expect(warning).toHaveBeenCalledWith(`[cez] restore dropped 1 invalid ${key} entries from the snapshot`);
   expect(JSON.parse(readFileSync(join(home, file), 'utf8')).future).toBe('preserved');
 });
 
 it('ignores incomplete or changed snapshots when listing and selecting a restore', async () => {
-  await mergeWriteAgentAccounts((store) => { store.marker = 'original'; });
-  await mergeWriteAgentAccounts((store) => { store.marker = 'second'; });
-  const good = listBackups('agent-accounts.json')[0]!;
+  await mergeWriteAgentAccounts((store) => { store.marker = 'original'; }, testHome());
+  await mergeWriteAgentAccounts((store) => { store.marker = 'second'; }, testHome());
+  const good = listBackups('agent-accounts.json', testHome())[0]!;
   const dir = join(home, 'backups', 'agent-accounts.json');
   writeFileSync(join(dir, '2099-01-01T00-00-00.000Z-deadbeef.json'), '{');
   writeFileSync(join(dir, 'unfinished.tmp'), '{');
-  expect(listBackups('agent-accounts.json')).toEqual([good]);
+  expect(listBackups('agent-accounts.json', testHome())).toEqual([good]);
   vi.spyOn(console, 'log').mockImplementation(() => {});
-  expect(await runBackupCommand(['restore', 'agent-accounts.json'], process.env)).toBe(0);
-  expect((await loadAgentAccounts()).marker).toBe('original');
+  expect(await runBackupCommand(['restore', 'agent-accounts.json'], process.env, testHome())).toBe(0);
+  expect((await loadAgentAccounts(testHome())).marker).toBe('original');
 });
 
 
 it('cleans a failed partial staging write without publishing it or blocking the live write', async () => {
-  await mergeWriteWorkspaceConfig(() => undefined);
+  await mergeWriteWorkspaceConfig(() => undefined, testHome());
   const original = fs.writeFileSync;
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(fs, 'writeFileSync').mockImplementation((path, data, options) => {
@@ -180,27 +183,27 @@ it('cleans a failed partial staging write without publishing it or blocking the 
     }
     original(path, data, options);
   });
-  await mergeWriteWorkspaceConfig((config) => { config.marker = 'saved'; });
-  expect((await loadWorkspaceConfig()).marker).toBe('saved');
-  expect(listBackups('config.json')).toEqual([]);
+  await mergeWriteWorkspaceConfig((config) => { config.marker = 'saved'; }, testHome());
+  expect((await loadWorkspaceConfig(testHome().workspaceConfig)).marker).toBe('saved');
+  expect(listBackups('config.json', testHome())).toEqual([]);
   expect(fs.readdirSync(join(home, 'backups', 'config.json'))).toEqual([]);
   expect(warning).toHaveBeenCalledTimes(1);
 });
 
 it('publishes only completed staging bytes and retries an exclusive publication collision', async () => {
-  await mergeWriteWorkspaceConfig(() => undefined);
+  await mergeWriteWorkspaceConfig(() => undefined, testHome());
   const previous = readFileSync(join(home, 'config.json'));
   const link = fs.linkSync;
   let attempts = 0;
   vi.spyOn(fs, 'linkSync').mockImplementation((stage, target) => {
     expect(readFileSync(stage)).toEqual(previous);
-    expect(listBackups('config.json')).toEqual([]);
+    expect(listBackups('config.json', testHome())).toEqual([]);
     if (attempts++ === 0) throw Object.assign(new Error('collision'), { code: 'EEXIST' });
     link(stage, target);
   });
-  await mergeWriteWorkspaceConfig((config) => { config.marker = 'changed'; });
+  await mergeWriteWorkspaceConfig((config) => { config.marker = 'changed'; }, testHome());
   expect(attempts).toBe(2);
-  const snapshots = listBackups('config.json');
+  const snapshots = listBackups('config.json', testHome());
   expect(snapshots).toHaveLength(1);
   expect(readFileSync(snapshots[0]!.path)).toEqual(previous);
   expect(fs.readdirSync(join(home, 'backups', 'config.json'))).toHaveLength(1);

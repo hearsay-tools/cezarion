@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -33,7 +36,7 @@ describe('workspace activity API', () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-activity-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-activity-boot-'));
     otherRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-activity-other-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     clearProjectProbeCache();
@@ -51,13 +54,13 @@ describe('workspace activity API', () => {
   const ciProgress = new CiProgressRegistry();
   const manager = { finishBlockedReason: () => 'no open session', isActive: () => false, ciProgress } as unknown as RunManager;
   const get = async (path: string, contexts?: ProjectContexts) =>
-    apiRequest(createApp({ repoRoot, store, manager, version: '0.0.0-test', ...(contexts ? { contexts } : {}) }), path);
+    apiRequest(createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test', ...(contexts ? { contexts } : {}) }), path);
 
   it('reads every visible project, and never builds a context for one this process has not loaded', async () => {
-    const boot = await registerProject(repoRoot);
-    const other = await registerProject(otherRoot);
+    const boot = await registerProject(repoRoot, undefined, testHome());
+    const other = await registerProject(otherRoot, undefined, testHome());
     const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
-    const contexts = new ProjectContexts({ listProjects });
+    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
 
     const res = await get('/api/v1/workspace/activity', contexts);
 
@@ -71,7 +74,7 @@ describe('workspace activity API', () => {
   });
 
   it('reads one project by id, the boot alias included', async () => {
-    const boot = await registerProject(repoRoot);
+    const boot = await registerProject(repoRoot, undefined, testHome());
     const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
     for (const id of ['default', boot.id]) {
       const res = await get(`/api/v1/workspace/activity?project=${id}`);
@@ -82,12 +85,12 @@ describe('workspace activity API', () => {
   });
 
   it('reads each run’s latest tool and rate from the process’s tool activity tracker', async () => {
-    await registerProject(repoRoot);
+    await registerProject(repoRoot, undefined, testHome());
     const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
     const toolActivity = new ToolActivityTracker();
     toolActivity.observe(run.id, { type: 'item.started', item: { kind: 'tool', id: 'a', name: 'Bash', toolKind: 'execute', title: 'Ran npm test', status: TOOL_STATUS.running } }, (text) => text);
 
-    const res = await apiRequest(createApp({ repoRoot, store, manager, version: '0.0.0-test', toolActivity }), '/api/v1/workspace/activity?project=default');
+    const res = await apiRequest(createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test', toolActivity }), '/api/v1/workspace/activity?project=default');
 
     const task = activitySnapshotSchema.parse(await res.json()).projects[0]!.tasks[0]!;
     expect(task.tool).toMatchObject({ title: 'Ran npm test', toolKind: 'execute', status: TOOL_STATUS.running });
@@ -95,7 +98,7 @@ describe('workspace activity API', () => {
   });
 
   it('refuses a malformed project id in the query, and answers 404 for an unknown one', async () => {
-    await registerProject(repoRoot);
+    await registerProject(repoRoot, undefined, testHome());
     const malformed = await get('/api/v1/workspace/activity?project=Not:a-slug');
     expect(malformed.status).toBe(400);
     expect(await malformed.json()).toEqual({ error: expect.stringContaining('project') });
@@ -105,7 +108,7 @@ describe('workspace activity API', () => {
   });
 
   it('reports a boot store that cannot open as the failure, never as an empty project', async () => {
-    const boot = await registerProject(repoRoot);
+    const boot = await registerProject(repoRoot, undefined, testHome());
     store.close();
     const failure = new RunStoreOpenError('unsupported-schema', join(repoRoot, '.ai/cezar', RUNS_DB_FILE), 'runs.db was written by a newer cezar.');
     store = RunStore.unavailable(join(repoRoot, '.ai/cezar'), failure);
@@ -123,9 +126,9 @@ describe('workspace activity API', () => {
   });
 
   it('keeps an unregistered boot project when the registry reads fine', async () => {
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
-    const contexts = new ProjectContexts({ listProjects });
+    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
 
     const body = activitySnapshotSchema.parse(await (await get('/api/v1/workspace/activity', contexts)).json());
 
@@ -176,7 +179,7 @@ describe('workspace activity API', () => {
   });
 
   it('reads the check progress the boot manager’s CI watchers publish, and plugs in the demand it marks', async () => {
-    const boot = await registerProject(repoRoot);
+    const boot = await registerProject(repoRoot, undefined, testHome());
     const wait = makePrWait();
     const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
     setRunStatus(store, run.id, RUN_STATUS.waiting, { waits: [wait] });

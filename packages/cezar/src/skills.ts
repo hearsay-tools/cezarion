@@ -1,3 +1,4 @@
+import type { Home } from './home/home.ts';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve, basename, dirname, extname } from 'node:path';
@@ -77,7 +78,7 @@ function globalSkillDirs(): Array<{ dir: string; source: Skill['source'] }> {
  *
  * Caller-supplied builtin skills come last; discovered skills of the same name take precedence.
  */
-export async function discoverSkills(repoRoot: string, options: { builtin?: readonly Skill[] } = {}): Promise<Skill[]> {
+export async function discoverSkills(repoRoot: string, options: { builtin?: readonly Skill[] } = {}, home?: Home): Promise<Skill[]> {
   const [lists, uiState] = await Promise.all([
     Promise.all([
       ...SKILL_DIRS.map(({ dir, source }) => readMarkdownSkills(resolve(repoRoot, dir), source)),
@@ -86,7 +87,7 @@ export async function discoverSkills(repoRoot: string, options: { builtin?: read
     readProjectUiState(repoRoot),
   ]);
   const teamSkills = filterDisabledTeamSkills(
-    filterDisabledTeamSources(getTeamSkillsCached(repoRoot), readDisabledSkillsReposSync(repoRoot)),
+    filterDisabledTeamSources(getTeamSkillsCached(repoRoot, home), readDisabledSkillsReposSync(repoRoot)),
     readDisabledTeamSkills(uiState),
   );
   const merged: Skill[] = [];

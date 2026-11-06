@@ -1,3 +1,5 @@
+import { resolveHome } from '../../home/resolve.ts';
+import { useTestHome } from '../../home/test-home.testkit.ts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { StepLoop } from './step-loop.ts';
 import { runGroupedCommand } from '../grouped-command.ts';
@@ -6,7 +8,7 @@ vi.mock('../grouped-command.ts', () => ({ runGroupedCommand: vi.fn(async () => (
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); });
 
 it.each(['0', '1'])('check steps remove only the home locator with full-env=%s', async (full) => {
-  vi.stubEnv('CEZ_HOME', '/live/home');
+  useTestHome(resolveHome({ purpose: 'cli', env: { CEZ_HOME: '/live/home' } }));
   vi.stubEnv('cez_home', '/live/lower');
   vi.stubEnv('CEZ_AGENT_ENV_FULL', full);
   vi.stubEnv('CEZ_ENV_PASSTHROUGH', 'CEZ_HOME');

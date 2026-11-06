@@ -288,6 +288,7 @@ import {
   attachProjectWebhooks,
   createBootContext,
   createProviderStatus,
+  emitProviderRow,
   resolveServerDeps,
   watchProviderRuntimeAuth,
 } from './server-deps.ts';
@@ -384,8 +385,8 @@ export interface ServerDeps extends SelfUpdateServerDeps, ActivityServerDeps {
   providerAuth?: ProviderAuthService;
   /** Global provider enablement preferences. Tests may inject an in-memory store. */
   workspaceConfig?: {
-    load: typeof loadWorkspaceConfig;
-    mergeWrite: typeof mergeWriteWorkspaceConfig;
+    load: (path?: string) => ReturnType<typeof loadWorkspaceConfig>;
+    mergeWrite: (mutator: Parameters<typeof mergeWriteWorkspaceConfig>[0], home?: import('../home/home.ts').Home) => ReturnType<typeof mergeWriteWorkspaceConfig>;
   } | undefined;
   /** Shared runtime rejection observer. The CLI injects the instance already
    *  watching the boot store before recovery; createApp builds one for legacy
@@ -718,7 +719,7 @@ export function createApp(deps: ServerDeps) {
   };
   // Hosted-mode gate (spec §"Deployment modes") — read per request so
   // CEZ_REMOTE flips take effect live (and tests can toggle it).
-  const capabilities = () => resolveCapabilities(process.env, bindHost, deps.cezarPort?.());
+  const capabilities = () => resolveCapabilities(process.env, bindHost, deps.cezarPort?.(), deps.home);
   const singleProjectRefusal = (
     action: 'adding projects' | 'editing projects' | 'removing projects' | 'folder browsing',
   ) => ({ error: `single-project mode is enabled; ${action} is disabled` });
@@ -1386,8 +1387,7 @@ export function createApp(deps: ServerDeps) {
           await providerAuth.status(),
           workspace.disabledProviders,
         );
-        const row = result.providers.find(({ provider: id }) => id === provider.data);
-        if (row) workspaceEvents.emit('provider-status', row);
+        emitProviderRow(workspaceEvents, result.providers, provider.data);
         return c.json(result);
       },
     )
@@ -1404,8 +1404,7 @@ export function createApp(deps: ServerDeps) {
         }
         invalidateHostModels(provider.data);
         const result = await providerStatus({ refresh: true });
-        const row = result.providers.find(({ provider: id }) => id === provider.data);
-        if (row) workspaceEvents.emit('provider-status', row);
+        emitProviderRow(workspaceEvents, result.providers, provider.data);
         return c.json(result);
       },
     )
@@ -2771,8 +2770,8 @@ export function createApp(deps: ServerDeps) {
       // The default read stays fast and starts the team load in the background.
       // The cockpit follows it with `wait=1`, off the render path, so a cold
       // cache converges without polling or a manual reload (spec 005 / #555).
-      if (c.req.valid('query').wait === '1') await waitForTeamSkills(repoRoot);
-      return c.json(await discoverSkills(repoRoot, { builtin: builtinSkillsOf(c.get('project').manager) }));
+      if (c.req.valid('query').wait === '1') await waitForTeamSkills(repoRoot, deps.home);
+      return c.json(await discoverSkills(repoRoot, { builtin: builtinSkillsOf(c.get('project').manager) }, deps.home));
     })
 
     // Every team skill the configured sources offer, including those this project switched
@@ -2781,8 +2780,8 @@ export function createApp(deps: ServerDeps) {
     // `wait=1` lets the panel wait out a cold team-skill cache, same as `GET /skills` (spec 005).
     .get('/skills/importable', queryZodValidator(waitQuery), async (c) => {
       const repoRoot = c.get('project').root;
-      if (c.req.valid('query').wait === '1') await waitForTeamSkills(repoRoot);
-      return c.json(getTeamSkillsCached(repoRoot));
+      if (c.req.valid('query').wait === '1') await waitForTeamSkills(repoRoot, deps.home);
+      return c.json(getTeamSkillsCached(repoRoot, deps.home));
     })
 
     // Refresh team skills (spec 005): clone/fetch the configured skills repos,
@@ -2790,8 +2789,8 @@ export function createApp(deps: ServerDeps) {
     // team entries stay as they were (or absent).
     .post('/skills/refresh', async (c) => {
       const { root: repoRoot } = c.get('project');
-      await refreshTeamSkills(repoRoot);
-      return c.json(await discoverSkills(repoRoot, { builtin: builtinSkillsOf(c.get('project').manager) }));
+      await refreshTeamSkills(repoRoot, deps.home);
+      return c.json(await discoverSkills(repoRoot, { builtin: builtinSkillsOf(c.get('project').manager) }, deps.home));
     });
 
   // ---- chained family: GUI prefs / ui-state (project-scoped) ----
@@ -4581,7 +4580,7 @@ export function createApp(deps: ServerDeps) {
     number: z.coerce.number().int().positive(),
   });
   const branchForge = deps.branchForge ?? createGithubBranchForge({ forgeFactory: deps.forgeFactory });
-  const branchClassifyInput = (project: ClassifyProject) => classifyInputFor({ ...project, home: deps.home }, branchForge);
+  const branchClassifyInput = (project: Omit<ClassifyProject, 'home'>) => classifyInputFor({ ...project, home: deps.home }, branchForge);
   // ---- chained family: repo / git (project-scoped) ----
   const repoRoutes = new Hono<ProjectApiEnv>()
     .get('/repo', async (c) => {

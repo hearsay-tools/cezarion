@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
@@ -42,7 +45,7 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
     // `keep` now falls back to the workspace default, so pin CEZ_HOME at an
     // empty temp dir — the suite must never read the developer's real ~/.cezar.
     cezHome = mkdtempSync(join(tmpdir(), 'cez-wtapi-home-'));
-    process.env.CEZ_HOME = cezHome;
+    useTestHome(cezHome ? Home.sandbox(cezHome) : undefined);
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-wtapi-'));
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
     await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
@@ -54,15 +57,15 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     // A real manager: the reclaim routes claim through it, the same claim Continue is refused by.
     manager = createFixtureManager(store, repoRoot);
-    app = createApp({ repoRoot, store, manager, version: '0.0.0-test' });
+    app = createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test' });
   });
 
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
     manager.dispose();
     store.flush();
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     rmSync(repoRoot, { recursive: true, force: true });
     rmSync(cezHome, { recursive: true, force: true });
   });
@@ -456,7 +459,7 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
     manager.dispose(); store.close();
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
     manager = createFixtureManager(store, repoRoot);
-    app = createApp({ repoRoot, store, manager, version: '0.0.0-test' });
+    app = createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test' });
     expect(manager.continueRun(id, { text: 'continue' }).ok).toBe(false);
     expect(manager.claimForPublish(id)).toBeNull();
     expect(manager.claimWorktreeReclaim(id)).toBeNull();
