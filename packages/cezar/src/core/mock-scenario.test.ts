@@ -75,6 +75,25 @@ describe('shared mock scenario selection', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it.each(['pi', 'omp'] as const)('keeps the lifecycle wait after the %s deferred opening', async runner => {
+    vi.useFakeTimers();
+    try {
+      const events: string[] = [];
+      const state = context();
+      state.runner = runner;
+      state.lifecycle = vi.fn(async () => { events.push('wait'); return ' wait receipt'; });
+      const prompt = 'mock:deferred-turn-start mock:cezar-wait';
+      let settled = false;
+      const result = Promise.resolve(play(scenarioFor(prompt, state)!, encoder(events))).then(() => { settled = true; });
+      expect(events).toEqual(['open']);
+      // bound: advance fake time after the optional deferred module has loaded.
+      await vi.waitFor(() => expect(settled).toBe(true), { timeout: 3_000 });
+      await result;
+      expect(state.lifecycle).toHaveBeenCalledExactlyOnceWith(['cezar_wait', { kind: 'timer', seconds: 60, note: 'Re-check the downstream work.' }]);
+      expect(events).toEqual(['open', 'open', 'wait', `Investigating: ${prompt} wait receipt`, 'start:read', 'end:read', 'end']);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('delegates crash wire details to the supplied boundary', () => {
     const state = context();
     state.crash = vi.fn();
