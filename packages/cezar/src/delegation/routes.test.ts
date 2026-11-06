@@ -289,7 +289,7 @@ describe('authenticated delegation HTTP family', () => {
     const response = await listener.request(`http://127.0.0.1${path}`, { headers: { authorization: `Bearer ${f.token}`, host: '127.0.0.1' } });
     expect(response.status).toBe(404);
   });
-  it('refuses spawn through an existing credential as soon as the task turns workers off (#2784)', async () => {
+  it('refuses spawn through an existing credential as soon as the task turns workers off (hearsay-tools/cezarion#2784)', async () => {
     f.store.updateRun(f.parent.id, { allowWorkers: false });
     const response = await request('/spawn', { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
     expect(response.status).toBe(409);

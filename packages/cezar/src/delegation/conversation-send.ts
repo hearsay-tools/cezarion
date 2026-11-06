@@ -32,7 +32,7 @@ export function sendAdmission(pair: ConversationPair, root: RunRecord, request: 
   const peer = relationship === 'peer';
   const destroyed = recipient.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete';
   // A peer whose Finish is pending takes nothing more: Finish would settle it unread (spec § 5).
-  // A peer that turned task messaging off takes no new message; a reply to its own request still lands (#2784).
+  // A peer that turned task messaging off takes no new message; a reply to its own request still lands (hearsay-tools/cezarion#2784).
   const closed = peer && request.kind !== 'reply' && !messagingAllowed(recipient);
   const resumable = closed || !['queued', 'running', 'waiting'].includes(recipient.status) || !!recipient.stopping || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy) || (peer && finishing(recipient));
   const resume = !!request.resume && resumable;

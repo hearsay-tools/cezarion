@@ -2701,7 +2701,7 @@ export class RunStore extends EventEmitter {
     if (!run) return undefined;
     const committed = (patch.status === 'done' && doneCommits(run)) || patch.handoffRecords !== undefined ||
       patch.archiveWhenDone !== undefined || patch.autoMergePr !== undefined ||
-      // A disabled task access must be durable before the next delegated call reads it (#2784).
+      // A disabled task access must be durable before the next delegated call reads it (hearsay-tools/cezarion#2784).
       patch.allowWorkers !== undefined || patch.allowMessaging !== undefined;
     return this.writeRun(id, run, patch, committed ? 'committed' : 'debounced');
   }
