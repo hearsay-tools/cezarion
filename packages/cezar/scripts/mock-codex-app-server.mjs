@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import { stall, waitForRelease } from './mock-lifecycle.mjs';
 import { closeSync } from 'node:fs';
+import { createInterface } from 'node:readline';
+import { appendFileSync } from 'node:fs';
+import * as parityGateFs from 'node:fs';
+import { withoutSessionContextParts } from './mock-session-context.mjs';
 // Load only when configured: ordinary mock turns retain their event-loop ordering.
 const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
   : (await import('./mock-failure-control.mjs')).readFailureControl();
@@ -15,12 +19,8 @@ const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
 // `MOCK_CODEX_IGNORE_EOF=1` switches to the #703 teardown shape instead: the
 // server stays deaf to stdin EOF (the CLI hang the EOF watchdog exists for)
 // and handles SIGTERM itself, exiting 143 rather than dying from the signal.
-import { createInterface } from 'node:readline';
-import { appendFileSync } from 'node:fs';
 const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 
-import * as parityGateFs from 'node:fs';
-import { withoutSessionContextParts } from './mock-session-context.mjs';
 
 // #401: let the test observe the actual monitoring park before releasing late wire frames.
 async function afterParityPark(prompt) {

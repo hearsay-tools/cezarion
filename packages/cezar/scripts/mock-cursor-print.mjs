@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { stall, waitForRelease } from './mock-lifecycle.mjs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 // Load only when configured: ordinary mock turns retain their event-loop ordering.
 const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
   : (await import('./mock-failure-control.mjs')).readFailureControl();
@@ -7,10 +10,7 @@ const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? unde
 // acknowledgement and a held response both hold that first model work.
 const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
   : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['hold-ack', 'hold-response']);
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 const { answerNudge, NO_WAIT_NUDGE_PREFIX } = await import('./mock-nudge.mjs');
-import { randomUUID } from 'node:crypto';
 
 const args = process.argv.slice(2);
 if (args.includes('--version')) { process.stdout.write('2026.10.01-e373342\n'); process.exit(0); }

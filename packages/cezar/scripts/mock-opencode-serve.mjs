@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 import { stall, waitForRelease } from './mock-lifecycle.mjs';
+import { createHash } from 'node:crypto';
+import { appendFileSync, existsSync as sessionStoreExists, mkdirSync, readFileSync, writeFileSync as sessionStoreWrite } from 'node:fs';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import * as parityGateFs from 'node:fs';
+import { withoutSessionContextBody } from './mock-session-context.mjs';
 // Load only when configured: ordinary mock turns retain their event-loop ordering.
 const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
   : (await import('./mock-failure-control.mjs')).readFailureControl();
@@ -13,12 +20,7 @@ let inputClosed = false;
 // response resolves immediately — every part and the closing `session.idle`
 // arrive over SSE afterwards, so a correct stream (v1 and v2 alike) must
 // take its turn-end from `session.idle`, never from the HTTP response.
-import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync as sessionStoreExists, mkdirSync, readFileSync, writeFileSync as sessionStoreWrite } from 'node:fs';
-import { createServer } from 'node:http';
 const { answerNudgeBody, silentNudge } = await import('./mock-nudge.mjs');
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
 
 // #872: the first N starts die before listening, the way opencode 1.18.33 did
 // when started within ~2 s of SIGTERM to the previous server on the same DB.
@@ -39,8 +41,6 @@ if (failStarts > 0) {
 
 if (process.env.CEZ_MOCK_ARGS_FILE && process.env.OPENCODE_CONFIG_CONTENT) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, JSON.stringify({ type: 'runtime-config', config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT) }) + '\n');
 if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}')); }
-import * as parityGateFs from 'node:fs';
-import { withoutSessionContextBody } from './mock-session-context.mjs';
 
 // #401: let the test observe the actual monitoring park before releasing late wire frames.
 async function afterParityPark(prompt) {
