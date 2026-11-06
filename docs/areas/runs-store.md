@@ -42,3 +42,12 @@ History deletion removes cache rows and dirty markers with the run row.
 Deleting `runs.db` removes task ownership too: artifact bytes survive, but orphan snapshots
 stay outside the shelf until their source tasks are restored. Dropping the cache table alone
 is unsupported; removing the completed-backfill marker lets the next pass rebuild cache rows.
+
+Visible report shelves also demand a report-index watch. Local live events schedule
+one run scan, at most once per second. A 5 s tick retries dirty runs and checks
+quiet live runs. It does not scan clean settled history. The index's process-local
+epoch and content/metadata counters support project-scoped shelf reconciliation;
+no new durable state is required. `list()` retains its live/dirty reconciliation,
+selected-page checks and retry/revision fences. Without shelf demand, startup
+backfill and live-to-terminal reconciliation still run. A shelf closing before a
+pending terminal scan does not cancel that reconciliation.

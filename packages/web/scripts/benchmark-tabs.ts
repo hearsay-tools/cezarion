@@ -14,6 +14,11 @@ import { createTabFixture } from '../e2e/tab-fixture.ts'
 import { pollFor } from '../e2e/poll.ts'
 
 const { values } = parseArgs({ options: { 'build-root': { type: 'string' }, output: { type: 'string' }, quick: { type: 'boolean' }, windows: { type: 'boolean' }, workload: { type: 'string' }, counts: { type: 'string' } } })
+if (values.workload === 'reports') {
+  const { benchmarkReports } = await import('./benchmark-reports')
+  await benchmarkReports(resolve(values['build-root'] ?? '.'), resolve(values.output ?? 'docs/performance/report-shelf-refresh.raw.json'), !!values.quick)
+  process.exit(0)
+}
 const buildRoot = resolve(values['build-root'] ?? '.')
 const output = resolve(values.output ?? '.ai/qa/924/tabs.json')
 const warmupMs = values.quick ? 1_000 : 5_000, sampleMs = values.quick ? 3_000 : 20_000

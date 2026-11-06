@@ -116,7 +116,6 @@ function createRunsIndexRefresher(queryClient: QueryClient): {
     pending = setTimeout(() => {
       pending = undefined
       void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex })
-      void queryClient.invalidateQueries({ predicate: query => query.queryKey[1] === 'reports', refetchType: 'active' })
     }, RUNS_INDEX_REFRESH_DEBOUNCE_MS)
   }
   return {

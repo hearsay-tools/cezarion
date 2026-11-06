@@ -4,6 +4,12 @@ import type { ProjectApiEnv } from './server.ts';
 import { queryZodValidator } from './validators.ts';
 
 export const reportsRoutes = new Hono<ProjectApiEnv>()
+  .get('/reports/state', c => {
+    const store = c.get('project').store;
+    if (store.unavailable) return c.json({ error: store.unavailable.message }, 409);
+    store.reports.markRead();
+    return c.json(store.reports.state());
+  })
   .get('/reports', queryZodValidator(reportsQuerySchema), async c => {
     const store = c.get('project').store;
     if (store.unavailable) return c.json({ error: store.unavailable.message }, 409);

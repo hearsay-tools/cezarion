@@ -22,3 +22,16 @@ Browser ownership: read `.ai/specs/2026-10-08-browser-tab-coordination.md` first
 - **Ordering.** The feed gives every `run-summary` and `run-deleted` one process-wide `seq`. Within one connection and one `generation`, the numbers a client receives are contiguous across projects, starting after `ready.seq`. A jump means lost frames: the cockpit applies the frame, then reconciles as after a reconnect. A new `generation` is a reset, and a reopened connection takes a new baseline; neither is a gap. A document that joins a shared feed after its `ready` takes the first numbered frame as its baseline. `seq` rides in the data, not in the SSE `id:`, because the stream has no replay.
 - **Snapshots.** `GET /workspace/runs-index` answers `generation` and `eventSeq`. The route reads `eventSeq` after its last `await` and before its synchronous reads, so every frame at or below it is in the snapshot and every frame above it is newer.
 - **Detail.** A summary never stands in for a full record. On `run-summary`, an observed task detail drops its Finish verdict and fetches at once when no fetch is in flight, then at most once more per 400 ms. A response from a fetch that started before the latest event never restores the verdict. An unobserved cached detail drops its verdict and is marked stale without a fetch. A worker's event keeps the parent's trailing refresh.
+
+**Report shelves.** `reports:project:<projectId>` is a trusted-only topic family
+(`server/reports-topic.ts`, `loopbackReadable: false`). A mounted shelf owns its
+subscription. Its first subscriber starts the report index watch; its last release
+stops the watch. Subscribe sends `{type: 'snapshot', epoch, generation,
+metadataGeneration}`. Content changes increment `generation`; searchable/displayed
+task changes increment `metadataGeneration`. Changes coalesce for 500 ms. Metadata
+frames carry the latest `{runId, taskTitle, taskStatus}` per changed task; content
+frames require a list reconciliation. The finite twin is
+`GET /api/v1/p/:projectId/reports/state`, every 5 s while visible; each read holds
+15 s of watch demand. Both transports compare all three counters. A shelf fences
+in-flight content/search reads and replays concurrent metadata patches onto
+unfiltered responses. Unrelated workspace events do not invalidate report shelves.

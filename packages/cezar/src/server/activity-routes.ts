@@ -1,3 +1,4 @@
+import { registerReportsTopic } from './reports-topic.ts';
 import { Hono } from 'hono';
 import type { ActivitySnapshot } from '@open-mercato/cezar-contract';
 import { activityQuerySchema } from '@open-mercato/cezar-contract/activity';
@@ -95,6 +96,7 @@ export function createActivityRoutes(routeDeps: ActivityRouteDeps) {
   const changes: ActivityChangeSource[] = [...(routeDeps.changes ?? []), ...(toolActivity && !activity.tools ? [toolActivity] : []), ci.changes];
   if (socketHub) {
     socketHub.onClose(ci.release);
+    registerReportsTopic(socketHub, workspaceProjects);
     registerActivityTopics(socketHub, {
       sources,
       workspaceProjects,
