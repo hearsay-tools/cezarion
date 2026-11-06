@@ -33,8 +33,7 @@ export function resolveHome({ env = process.env }: ResolveHomeOptions): Home {
     cache,
     skillsCache: join(cache, 'skills'),
     skillFilesCache: join(cache, 'skill-files'),
-    posixLauncherHome: override ? "'" + override.replaceAll("'", "'\"'\"'") + "'" : '"${CEZ_HOME:-$HOME/.cezar}"',
-    windowsLauncherHome: root,
+    rootOverride: override,
     serverState: (instance = 'default') => instance === 'default'
       ? join(root, 'server.json') : join(serverInstances, `${instance}.json`),
     serverLock: (instance = 'default') => instance === 'default'

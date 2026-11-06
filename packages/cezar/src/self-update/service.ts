@@ -67,7 +67,7 @@ export class SelfUpdateService {
 
   /** The configured channel: workspace config wins, then `CEZ_UPDATE_CHANNEL`, then stable. */
   async channel(): Promise<UpdateChannel> {
-    const config = await loadWorkspaceConfig();
+    const config = await loadWorkspaceConfig(this.deps.home?.workspaceConfig);
     if (config.updateChannel) return config.updateChannel;
     const seed = this.env.CEZ_UPDATE_CHANNEL;
     return seed === 'nightly' || seed === 'development' ? seed : 'stable';
@@ -76,7 +76,7 @@ export class SelfUpdateService {
   async setChannel(channel: UpdateChannel): Promise<void> {
     await mergeWriteWorkspaceConfig((config) => {
       config.updateChannel = channel;
-    });
+    }, this.deps.home);
   }
 
   /** The channel's newest version when it is newer than the running one — what health's

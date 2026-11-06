@@ -23,11 +23,11 @@ export async function restoreBackup(file: BackupFile, at?: string, home?: Home):
   if (file === 'config.json') {
     const restored = workspaceConfigSchema.parse(raw);
     warnDroppedEntries(raw, 'projects', restored.projects.length);
-    await mergeWriteWorkspaceConfig(() => restored);
+    await mergeWriteWorkspaceConfig(() => restored, home);
   } else {
     const restored = storeSchema.parse(raw);
     warnDroppedEntries(raw, 'accounts', restored.accounts.length);
-    await mergeWriteAgentAccounts(() => restored);
+    await mergeWriteAgentAccounts(() => restored, home);
   }
   return entry.time;
 }

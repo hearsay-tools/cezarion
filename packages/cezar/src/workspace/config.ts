@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { backupBeforeWrite } from './backups.ts';
 import { randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
@@ -413,8 +414,9 @@ export function atomicWriteJsonSync(path: string, value: unknown): void {
  */
 export async function mergeWriteWorkspaceConfig(
   mutator: (config: WorkspaceConfig) => WorkspaceConfig | void,
+  home?: Home,
 ): Promise<WorkspaceConfig> {
-  const path = workspaceConfigPath();
+  const path = home?.workspaceConfig ?? workspaceConfigPath();
   const current = await loadWorkspaceConfig(path);
   const next = mutator(current) ?? current;
   backupBeforeWrite(path, next);

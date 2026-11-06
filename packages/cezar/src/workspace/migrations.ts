@@ -25,7 +25,7 @@ export interface WorkspaceMigration {
   /** Stable id for the warning line, e.g. `'001-workspace-config'`. */
   id: string;
   /** The migration body — MUST be idempotent (see module docs). */
-  run(ctx: { home: string; bootRepoRoot: string | null }): Promise<void>;
+  run(ctx: { home: string; bootRepoRoot: string | null }, paths?: Home): Promise<void>;
 }
 
 /** Tolerant raw-JSON read: missing/unreadable/malformed/non-object → null. */
@@ -90,11 +90,11 @@ async function readRepoResourceKeys(
 const migration001: WorkspaceMigration = {
   to: 1,
   id: '001-workspace-config',
-  async run({ bootRepoRoot }) {
+  async run({ bootRepoRoot }, paths) {
     // Raw presence check BEFORE the first write: after any merge-write the
     // global file contains every defaulted key, so "already set globally"
     // must be decided against what the user's file held coming in.
-    const rawGlobal = await readRawObject(workspaceConfigPath());
+    const rawGlobal = await readRawObject(paths?.workspaceConfig ?? workspaceConfigPath());
     const rawResources = asObject(rawGlobal?.resources);
     const imported = bootRepoRoot ? await readRepoResourceKeys(bootRepoRoot) : {};
     await mergeWriteWorkspaceConfig((config) => {
@@ -104,7 +104,7 @@ const migration001: WorkspaceMigration = {
       if (imported.memoryLimitMb !== undefined && rawResources?.memoryLimitMb === undefined) {
         config.resources.memoryLimitMb = imported.memoryLimitMb;
       }
-    });
+    }, paths);
     if (!bootRepoRoot) return;
     const repoUiState = await readUiState(bootRepoRoot);
     // The two prefs that went GLOBAL at step 3.5, read out of the per-repo bag and validated with
@@ -126,7 +126,7 @@ const migration001: WorkspaceMigration = {
       for (const [key, value] of Object.entries(importable)) {
         if (state[key] === undefined) state[key] = value;
       }
-    });
+    }, paths);
   },
 };
 
@@ -157,10 +157,10 @@ export async function runMigrations(
   for (const migration of ordered) {
     if (migration.to <= current) continue;
     try {
-      await migration.run({ home, bootRepoRoot: opts.bootRepoRoot });
+      await migration.run({ home, bootRepoRoot: opts.bootRepoRoot }, resolvedHome);
       const written = await mergeWriteWorkspaceConfig((config) => {
         config.schemaVersion = Math.max(config.schemaVersion, migration.to);
-      });
+      }, resolvedHome);
       current = written.schemaVersion;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

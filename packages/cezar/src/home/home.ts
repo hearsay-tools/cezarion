@@ -15,9 +15,8 @@ export interface Home {
   readonly cache: string;
   readonly skillsCache: string;
   readonly skillFilesCache: string;
-  /** Runtime shell expression: default launchers must keep honoring a later CEZ_HOME. */
-  readonly posixLauncherHome: string;
-  readonly windowsLauncherHome: string;
+  /** The nonempty legacy override, kept as data for the managed launcher. */
+  readonly rootOverride: string | undefined;
   serverState(instance?: string): string;
   serverLock(instance?: string): string;
 }

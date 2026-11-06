@@ -58,7 +58,7 @@ it('passes the boot Home to both updater services and keeps the legacy dry paths
   const server = () => { throw new Error('No restart in this test'); };
   createServeApplicationUpdate('/repo', {}, server, () => undefined, store, home);
   expect(ApplicationUpdateService).toHaveBeenCalledWith(expect.objectContaining({
-    home: '/resolved/home', resolvedHome: home, npmPrefix: '/resolved/home/dry-prefix', npmCache: '/resolved/home/dry-cache',
+    home: '/resolved/home', npmPrefix: '/resolved/home/dry-prefix', npmCache: '/resolved/home/dry-cache',
   }));
   createServeSelfUpdate({ pkgName: 'cezarion', version: '1.0.0', store, bindHost: undefined, home }, server as () => ReturnType<typeof startServer>);
   expect(SelfUpdateService).toHaveBeenCalledWith(expect.objectContaining({ home }));
@@ -68,5 +68,5 @@ it('passes the resolved boot home to migrations', async () => {
   const home = resolveHome({ purpose: 'server', env: { CEZ_HOME: '/resolved/home' } });
   const run = vi.fn(async () => {});
   await runMigrations({ bootRepoRoot: '/repo', home }, [{ id: 'test', to: 1, run }]);
-  expect(run).toHaveBeenCalledWith({ home: '/resolved/home', bootRepoRoot: '/repo' });
+  expect(run).toHaveBeenCalledWith({ home: '/resolved/home', bootRepoRoot: '/repo' }, home);
 });

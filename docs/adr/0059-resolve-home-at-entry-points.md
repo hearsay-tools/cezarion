@@ -9,8 +9,8 @@ never derive `homedir()` elsewhere. The new layout itself remains deferred to P2
 ## Decision
 
 `home/resolve.ts` resolves a `Home` object without filesystem access. CLI dispatch
-resolves it lazily once for operator commands. Server boot reuses the injected
-object, or resolves one when called directly. Task commands (`artifact`, `message`,
+resolves it lazily once for operator commands. Server updater consumers reuse the injected
+object, or resolve one when called directly. Task commands (`artifact`, `message`,
 `worker`, `task`, `automation`, `webhook`, `discover`) receive no `Home` and do not
 invoke the factory. The selected object passes through migrations, managed update
 services, application update boot, backup listing and preview download.
@@ -19,10 +19,11 @@ services, application update boot, backup listing and preview download.
 registry, install, dry cache, dry prefix, backups and application updates use
 `CEZ_HOME || join(homedir(), '.cezar')`, while skills and browser caches use
 `join(homedir(), '.cache', 'cez')` and ignore `CEZ_HOME`. Server state and install
-locks keep their default and named-instance paths. Launcher home expressions
-remain distinct from resolved directories: the default POSIX launcher evaluates
+locks keep their default and named-instance paths. The launcher keeps runtime expressions
+separate from resolved directories: the default POSIX launcher evaluates
 `"${CEZ_HOME:-$HOME/.cezar}"` when it runs. Windows keeps its baked entry path.
-The historical POSIX quote spelling is preserved byte for byte.
+Home carries only path data and the original override. Shell rendering stays in the
+launcher; its historical POSIX quote spelling is preserved byte for byte.
 
 `HOME_LOCATING_ENV` remains the only list of home-locating variables. The resolver
 reads only those names from its supplied environment. `homedir()` continues to
@@ -54,5 +55,6 @@ injection adds the named backup path without changing either rule.
 explicit env-object override. Launcher fixtures were generated from the old
 implementation and compare both generated formats byte for byte.
 `home/entry-points.test.ts` checks dispatch isolation and propagation through boot
-services and migrations. Existing path, write-guard and task-home-read suites keep
+services and migrations. `home/write-isolation.test.ts` checks that injected-home
+restore and migration writes leave a different ambient home untouched. Existing path, write-guard and task-home-read suites keep
 their expectations.

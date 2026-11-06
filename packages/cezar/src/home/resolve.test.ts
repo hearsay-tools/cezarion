@@ -56,7 +56,7 @@ describe('legacy Home compatibility (release switch off)', () => {
   it.each(cases)('preserves every named path and public path helper: $name', ({ env, expected }) => {
     vi.stubEnv('CEZ_HOME', env.CEZ_HOME ?? '');
     const home = resolveHome({ purpose: 'cli', env });
-    const { serverState: _state, serverLock: _lock, posixLauncherHome: _posix, windowsLauncherHome: _windows, ...paths } = home;
+    const { serverState: _state, serverLock: _lock, rootOverride: _override, ...paths } = home;
     expect(slashPaths({ ...paths, serverState: home.serverState(), namedServerState: home.serverState('example-com'),
       serverLock: home.serverLock(), namedServerLock: home.serverLock('example-com'),
       currentEntry: currentEntry(env, home), bareSkills: bareDirFor('team/skills', home), skillFiles: skillFilesCacheDirFor('team/skills', home),

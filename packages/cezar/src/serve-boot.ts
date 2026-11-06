@@ -111,7 +111,7 @@ export function createServeApplicationUpdate(
       packageRoot: join(dirname(fileURLToPath(import.meta.url)), '..'),
       launchEntry: resolve(process.argv[1] ?? ''),
       npmPrefix: npmPrefix ?? home.dryPrefix,
-      npmCache: npmCache ?? home.dryCache, npmBin: npm?.npmBin, home: home.root, resolvedHome: home, targetVersion: () => update.latest,
+      npmCache: npmCache ?? home.dryCache, npmBin: npm?.npmBin, home: home.root, targetVersion: () => update.latest,
       dryRun: process.env.CEZ_DRY_RUN === '1',
       armRestart: (plan) => armRestartHelper(plan, { repoRoot, ...restartEndpoint(getServer().address()), npmBin: npm?.npmBin ?? 'npm' }),
       handoff: () => { void stopServe(getServer(), 'SIGTERM', { store }).then(() => process.exit(0)); },
