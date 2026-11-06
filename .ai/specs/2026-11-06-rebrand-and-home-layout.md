@@ -86,12 +86,12 @@ moves the live install away from what upstream and old builds resolve.
 | npm package | `@wjarka/cezarion`, alias `cezarion` | `@hearsay-tools/skein` (unscoped `skein` is taken, so no unscoped alias; `npx @hearsay-tools/skein`) | last `cezarion` release depends on the new package and prints a notice; then `npm deprecate` |
 | CLI binary | `cezarion`, `cez` | `skein` | `cez` and `cezarion` work and print one notice to stderr, never to JSON stdout |
 | Env vars | 144 `CEZ_*` names in source, 85 in `.env.example` | `SKEIN_*` | `CEZ_*` read as fallback; the new name wins; one boot warning lists the old names that are set |
-| Per-project dir | `.ai/cezar/` (505 files mention it) | `.ai/skein/` | both read; opt-in `skein migrate-project` moves it when no task is live and repairs worktrees |
+| Per-project dir | `.ai/cezar/` (505 files mention it) | `.ai/skein/` | both read; opt-in `skein migrate-project` (P4) |
 | Home | `~/.cezar`, `~/.cache/cez` | section 3 layout | read once by the migration, then a canary |
 | GitHub repo | `hearsay-tools/cezarion` | `hearsay-tools/skein` (GitHub redirects the old name) | old citations stay valid; the citation checker accepts both |
 | Docs | README, AGENTS.md, docs/, specs | new name; specs and ADRs keep history | — |
 | Desktop / mobile ids | `tools.hearsay.cezarion`, `tools.hearsay.cezarion.mobile` | `tools.hearsay.skein`, `tools.hearsay.skein.mobile` | section 4.1 |
-| launchd labels | `ai.cezar.cockpit`, `ai.cezar.ngrok` (same as upstream) | `tools.hearsay.skein.cockpit`, `tools.hearsay.skein.ngrok` | migration unloads the old label only if its plist points at our binary |
+| launchd labels | `ai.cezar.cockpit`, `ai.cezar.ngrok` (same as upstream) | `tools.hearsay.skein.cockpit`, `tools.hearsay.skein.ngrok` | migration unloads an old label only if it is ours: the cockpit plist when it points at our launcher, the ngrok plist when the server-install state records it as an owned artifact (`macosx-ngrok.ts` records it) |
 | systemd / nginx | `cezar.service`, `cezar-<slug>.service`, site `cezar-<slug>` | `skein.service`, `skein-<slug>.service`, site `skein-<slug>` | server migration swaps them, with rollback |
 
 ## 3. New home layout and live-install protection
@@ -151,11 +151,13 @@ Resolved once, at the process entry point, from the platform. No setting is requ
 One code path, `migrateLegacyHome()`, runs at the first boot of the new build and as
 `skein migrate [--dry-run]`.
 
-1. Make sure no other process serves or writes the legacy home. Every cockpit that shares
-   it (on a server: every instance in `server.json` and `server-instances/` whose home is the
-   same) is stopped first; a boot-time migration refuses to start while another live
-   cockpit's pid holds the legacy home, and tells the user which one. Then take
-   `~/.cezar/.migrating` with `O_EXCL`. A second process waits or stops.
+1. Take `~/.cezar/.migrating` with `O_EXCL` first; a second migration waits or stops. While
+   that file exists, every `HomeStore` writer refuses to write the legacy home (it checks
+   before it takes `write.lock`), and a cockpit refuses to start on it. Then make sure no
+   cockpit still serves the legacy home: every instance that shares it (on a server, every
+   instance in `server.json` and `server-instances/` with the same home) is stopped, and the
+   migration aborts, removing `.migrating`, when a live presence lease remains. It names the
+   cockpit that holds it.
 2. If the new config dir has `install.json` with `migratedFrom`, do nothing (idempotent).
 3. Write a full backup: `<state>/backups/legacy-cezar-home-<UTC>.tar.gz` (without `versions/`,
    caches and `tmp/`).
@@ -233,7 +235,7 @@ release are the single user-visible change.
 | **P1 Home object** | (a) `Home` type and `resolveHome` (legacy layout while the switch is off), passed down from entry points; no ambient `cezarHomeDir()`. (b) `HomeStore` writer with `install.json` marker (written into the legacy home too), test-runner refusal and lease. (c) Backups and restore command for every registry-type file; shrink banner. (d) Lint: test code writes only through `Home.sandbox`. ADR superseding the "literal `~/.cezar`" rule. | No (backup restore command is new) |
 | **P2 Layout and migration** | (a) XDG / macOS / Windows / `SKEIN_HOME` resolver. (b) `migrateLegacyHome` with backup, `MOVED.json`, canary. (c) Server migration for systemd units and nginx sites, with rollback. (d) launchd label move. All behind the switch. | No |
 | **P3 Name surfaces** | (a) One env helper: `SKEIN_*` first, `CEZ_*` fallback (additive). (b) `skein` bin added beside `cezarion` and `cez` (additive). (c) Package `@hearsay-tools/skein` prepared; publish waits for the switch. (d) Desktop and mobile new IDs and the bridge build, behind the switch. (e) Docs and display names, merged with the switch PR. | Additive names only |
-| **P4 Project dir** | Dual read of `.ai/cezar/` and `.ai/skein/` (additive); `skein migrate-project` (refuses while a task is live; moves the dir; runs `git worktree repair`). | Command only |
+| **P4 Project dir** | Dual read of `.ai/cezar/` and `.ai/skein/` (additive); `skein migrate-project`: refuses while a task is live; moves the dir; runs `git worktree repair`; then, in one run-store transaction, rewrites every stored absolute path under the old dir (each run's `worktreePath`, owned-workspace receipts, artifact and handoff paths), so Continue and retained workers find their worktrees. A dry run lists every rewrite first. | Command only |
 | **Switch** | Turn `SKEIN_SWITCH` on; deprecation notices start; docs land. Then owner actions: stable release, npm publish and deprecate, repo rename, store listings, apptension-host server migration. | Yes: the release |
 | **P5 Window end** | Remove aliases and `CEZ_*` fallbacks, two minor releases or 60 days after the release. | Yes |
 
