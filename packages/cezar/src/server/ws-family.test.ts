@@ -175,3 +175,17 @@ describe('a topic family', () => {
     hub.close();
   });
 });
+
+describe('the hub close listeners', () => {
+  it('runs each listener once at close, and at once when the hub is already closed', () => {
+    const hub = createSocketHub();
+    const calls: string[] = [];
+    hub.onClose(() => calls.push('held'));
+    const released = hub.onClose(() => calls.push('released'));
+    released();
+    hub.close();
+    hub.close();
+    hub.onClose(() => calls.push('late'));
+    expect(calls).toEqual(['held', 'late']);
+  });
+});

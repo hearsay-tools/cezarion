@@ -1,0 +1,142 @@
+import { EventEmitter } from 'node:events';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ActivitySnapshot } from '@open-mercato/cezar-contract';
+import { activityToolSchema } from '@open-mercato/cezar-contract/activity';
+import { makePrWait, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { fakeStore, makeRoot, NOW } from '../activity/activity.testkit.ts';
+import { ACTIVITY_COALESCE_MS } from '../activity/publisher.ts';
+import { ToolActivityTracker } from '../activity/tool-activity.ts';
+import { CiProgressRegistry } from '../ci-wait/progress.ts';
+import type { UiToolItem } from '../core/ui-events.ts';
+import type { RunRecord } from '../runs/store.ts';
+import { createActivityRoutes } from './activity-routes.ts';
+import type { LoadedProject } from './activity-sources.ts';
+import { ACTIVITY_PROJECT_TOPIC_PREFIX } from './activity-topic.ts';
+import { ProjectContextError } from './project-context.ts';
+import type { SocketHub, TopicFamilyResolver, TopicPublisher } from './ws.ts';
+
+/**
+ * The activity route's wiring (spec 2026-11-05-live-activity-view, Live transport): one activity
+ * demand for the process, the tool tracker's and the CI registries' changes as publisher triggers,
+ * and the release of every CI registry plug on the server's close path.
+ */
+
+const TOOL_STATUS = activityToolSchema.shape.status.enum;
+const tool = (id: string): UiToolItem => ({ kind: 'tool', id, name: 'Bash', toolKind: 'execute', title: `Ran ${id}`, status: TOOL_STATUS.running });
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
+});
+afterEach(() => vi.useRealTimers());
+
+function project(id: string, runs: RunRecord[], ciProgress: CiProgressRegistry): LoadedProject {
+  const store = Object.assign(new EventEmitter(), fakeStore(runs));
+  return { id, root: `/repos/${id}`, store, manager: { isActive: () => false, ciProgress } } as unknown as LoadedProject;
+}
+
+function wire(options: { boot: RunRecord[]; docs?: RunRecord[] }) {
+  const registries = { boot: new CiProgressRegistry(), docs: new CiProgressRegistry() };
+  const boot = project('boot', options.boot, registries.boot);
+  const docs = project('docs', options.docs ?? [], registries.docs);
+  const toolActivity = new ToolActivityTracker({ now: () => Date.now() });
+  const topics = new Map<string, TopicPublisher>();
+  const families = new Map<string, TopicFamilyResolver>();
+  const closeListeners = new Set<() => void>();
+  const hub: SocketHub = {
+    registerTopic: (name, publisher) => { topics.set(name, publisher); },
+    registerTopicFamily: (prefix, resolve) => { families.set(prefix, resolve); },
+    handleUpgrade: () => undefined,
+    close: () => { for (const listener of closeListeners) listener(); },
+    onClose: (listener) => { closeListeners.add(listener); return () => closeListeners.delete(listener); },
+  };
+  createActivityRoutes({
+    bootContext: boot,
+    contexts: { peek: (id) => (id === 'docs' ? docs : undefined) },
+    workspaceProjects: {
+      listVisibleProjects: async () => [{ id: 'boot', name: 'Boot' }, { id: 'docs', name: 'Docs' }] as never,
+      resolveBootProject: async () => 'boot',
+      projectFailure: () => ({ error: 'unavailable', status: 503 }),
+      resolveLiveProject: async (id: string) => {
+        if (id === 'boot' || id === 'default') return boot;
+        if (id === 'docs') return docs;
+        throw new ProjectContextError('unknown-project', id);
+      },
+    } as never,
+    toolActivity,
+    socketHub: hub,
+  });
+  /** Subscribe as the hub does: start, then the subscriber's own snapshot. */
+  const subscribe = async (projectId: string) => {
+    const publisher = (await families.get(ACTIVITY_PROJECT_TOPIC_PREFIX)!(projectId))!;
+    const frames: ActivitySnapshot[] = [];
+    const stop = publisher.start((data) => frames.push(data as ActivitySnapshot));
+    await publisher.snapshot();
+    return { frames, stop };
+  };
+  return { registries, toolActivity, hub, subscribe };
+}
+
+describe('activity route wiring', () => {
+  it('sends a tool event to topic subscribers as one coalesced frame', async () => {
+    const root = makeRoot({ status: RUN_STATUS.running });
+    const { toolActivity, subscribe } = wire({ boot: [root] });
+    const { frames, stop } = await subscribe('boot');
+
+    for (const id of ['one', 'two', 'three']) toolActivity.observe(root.id, { type: 'item.started', item: tool(id) }, (text) => text);
+    await vi.advanceTimersByTimeAsync(ACTIVITY_COALESCE_MS);
+    expect(frames).toHaveLength(1);
+    const card = frames[0]!.projects[0]!.tasks[0]!;
+    expect(card.tool?.title).toBe('Ran three');
+    expect(card.rate.at(-1)).toBe(3);
+    stop();
+  });
+
+  it('sends a CI progress update to topic subscribers', async () => {
+    const wait = makePrWait();
+    const root = makeRoot({ status: RUN_STATUS.waiting, waits: [wait] });
+    const { registries, subscribe } = wire({ boot: [root] });
+    const { frames, stop } = await subscribe('boot');
+
+    registries.boot.publish(wait.id, [{ name: 'build', state: 'PENDING', link: '', bucket: 'pending' }, { name: 'lint', state: 'SUCCESS', link: '', bucket: 'pass' }]);
+    await vi.advanceTimersByTimeAsync(ACTIVITY_COALESCE_MS);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!.projects[0]!.tasks[0]!.wait).toMatchObject({ detail: { counts: { pass: 1, pending: 1 } } });
+    stop();
+  });
+
+  it("lets a topic subscriber's demand reach a secondary project's CI registry", async () => {
+    const wait = makePrWait();
+    const root = makeRoot({ status: RUN_STATUS.waiting, waits: [wait] });
+    const { registries, subscribe } = wire({ boot: [], docs: [root] });
+    registries.docs.publish(wait.id, [{ name: 'build', state: 'PENDING', link: '', bucket: 'pending' }]);
+
+    const { stop } = await subscribe('docs');
+    expect(registries.docs.wanted(wait.id)).toBe(true);
+    stop();
+    expect(registries.docs.wanted(wait.id)).toBe(false);
+  });
+
+  it('releases every CI registry plug when the server closes', async () => {
+    const bootWait = makePrWait();
+    const docsWait = makePrWait();
+    const { registries, hub, subscribe } = wire({
+      boot: [makeRoot({ status: RUN_STATUS.waiting, waits: [bootWait] })],
+      docs: [makeRoot({ status: RUN_STATUS.waiting, waits: [docsWait] })],
+    });
+    registries.boot.publish(bootWait.id, [{ name: 'build', state: 'PENDING', link: '', bucket: 'pending' }]);
+    registries.docs.publish(docsWait.id, [{ name: 'build', state: 'PENDING', link: '', bucket: 'pending' }]);
+    const boot = await subscribe('boot');
+    const docs = await subscribe('docs');
+    expect([registries.boot.wanted(bootWait.id), registries.docs.wanted(docsWait.id)]).toEqual([true, true]);
+
+    hub.close();
+    // The subscribers still hold their demand, but no registry reads it any more.
+    expect([registries.boot.wanted(bootWait.id), registries.docs.wanted(docsWait.id)]).toEqual([false, false]);
+    registries.boot.publish(bootWait.id, [{ name: 'build', state: 'SUCCESS', link: '', bucket: 'pass' }]);
+    await vi.advanceTimersByTimeAsync(ACTIVITY_COALESCE_MS);
+    expect(boot.frames).toEqual([]); // nor wakes a publisher
+    boot.stop();
+    docs.stop();
+  });
+});

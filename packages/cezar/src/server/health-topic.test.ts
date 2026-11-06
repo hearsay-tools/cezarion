@@ -34,6 +34,7 @@ function stubHub() {
     },
     handleUpgrade: () => undefined,
     close: () => undefined,
+    onClose: () => () => undefined,
   };
   return { hub, topics, families };
 }

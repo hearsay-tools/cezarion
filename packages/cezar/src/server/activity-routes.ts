@@ -23,17 +23,51 @@ export interface ActivityServerDeps {
 export interface ActivityRouteDeps extends Omit<ActivitySourceDeps, 'ciOf'>, ActivityServerDeps {
   contexts: ActivitySourceDeps['contexts'] & { onContextBuilt?(listener: () => void): () => void };
   workspaceProjects: ActivitySourceDeps['workspaceProjects'] & Pick<WorkspaceProjects, 'resolveLiveProject'>;
-  /** The projects activity readers watch; the CI progress registry reads it. */
+  /** The projects activity readers watch: the HTTP route, the topics and every CI progress
+   *  registry share this one instance. */
   demand?: ActivityDemand;
   /** The trackers (tool activity, CI progress) and the clock. Default CI progress: each loaded
    *  project's own manager's registry, which its CI watchers publish to. */
   activity?: Omit<ActivityDeps, 'onUnreadable'>;
-  /** The trackers' change signals, which wake the topics' publishers. */
+  /** More change signals that wake the topics' publishers, besides the tool tracker and the CI
+   *  progress registries. */
   changes?: readonly ActivityChangeSource[];
-  /** The live server's socket hub: when present, the activity topics register on it too. */
+  /** The live server's socket hub: when present, the activity topics register on it too, and its
+   *  close (the server's close path) releases what the route plugged into the CI registries. */
   socketHub?: SocketHub | undefined;
   /** Project added or removed (the workspace event bus). */
   workspaceEvents?: { on(listener: (event: string, data: unknown) => void): () => void };
+}
+
+/**
+ * The CI progress registries the activity view reads (spec 2026-11-05-live-activity-view, CI check
+ * progress). A project's registry is its own manager's, which need not be the boot manager's (each
+ * workspace semaphore has its own). The first read of a project plugs its registry in once: the
+ * registry gets the process's one activity demand, and its changes wake the topics' publishers.
+ * `release` undoes every plug; the server's close path calls it.
+ */
+export function ciProgressPlugs(demand: ActivityDemand) {
+  const plugged = new WeakSet<CiProgressRegistry>();
+  const releases: Array<() => void> = [];
+  const listeners = new Set<() => void>();
+  const changes: ActivityChangeSource = {
+    onChange: (listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  };
+  const progressOf = (project: LoadedProject): CiProgressSource | undefined => {
+    // A manager test double may carry no registry.
+    const registry: CiProgressRegistry | undefined = project.manager.ciProgress;
+    if (registry && !plugged.has(registry)) {
+      plugged.add(registry);
+      releases.push(registry.useDemand(demand));
+      releases.push(registry.onChange(() => { for (const listener of [...listeners]) listener(); }));
+    }
+    return registry;
+  };
+  const release = () => { for (const undo of releases.splice(0)) undo(); };
+  return { progressOf, changes, release };
 }
 
 /**
@@ -49,29 +83,18 @@ export function createActivityRoutes(routeDeps: ActivityRouteDeps) {
   const { contexts, workspaceProjects, demand = new ActivityDemand(), activity = {}, socketHub, workspaceEvents, toolActivity } = routeDeps;
   const tools = activity.tools ?? toolActivity;
   const deps: ActivityDeps = { ...activity, ...(tools ? { tools } : {}), onUnreadable: unreadableLogger() };
-  const plugged = new WeakSet<CiProgressRegistry>();
-  /**
-   * The check progress of the project's own CI watchers: its manager's registry, which need not be
-   * the boot manager's (each workspace semaphore has its own). Each registry gets this route's
-   * demand once. An explicit `activity.ci` replaces them all.
-   */
-  const progressOf = (project: LoadedProject): CiProgressSource | undefined => {
-    if (activity.ci) return undefined;
-    // A manager test double may carry no registry.
-    const registry: CiProgressRegistry | undefined = project.manager.ciProgress;
-    if (registry && !plugged.has(registry)) {
-      registry.useDemand(demand);
-      plugged.add(registry);
-    }
-    return registry;
-  };
-  const sources = createActivitySources({ ...routeDeps, ciOf: progressOf });
+  // An explicit `activity.ci` replaces every project's registry.
+  const ci = ciProgressPlugs(demand);
+  const sources = createActivitySources({ ...routeDeps, ciOf: (project) => (activity.ci ? undefined : ci.progressOf(project)) });
+  // The publishers wake on the tool tracker's changes and on every plugged registry's changes.
+  const changes: ActivityChangeSource[] = [...(routeDeps.changes ?? []), ...(toolActivity && !activity.tools ? [toolActivity] : []), ci.changes];
   if (socketHub) {
+    socketHub.onClose(ci.release);
     registerActivityTopics(socketHub, {
       sources,
       workspaceProjects,
       demand,
-      publisher: { ...deps, ...(routeDeps.changes ? { changes: routeDeps.changes } : {}),
+      publisher: { ...deps, changes,
         onBuildError: (error) => console.warn('[cez] activity snapshot failed; the next change retries it:', error) },
       onProjectsChange: (listener) => {
         const offBuilt = contexts.onContextBuilt?.(listener);

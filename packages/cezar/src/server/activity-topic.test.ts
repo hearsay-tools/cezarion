@@ -48,6 +48,7 @@ function wire() {
     registerTopicFamily: (prefix, resolve, options) => { families.set(prefix, { resolve, options }); },
     handleUpgrade: () => undefined,
     close: () => undefined,
+    onClose: () => () => undefined,
   };
   const scopeListeners = new Set<() => void>();
   const projectListeners = new Set<(event: ProjectEvent, projectId: string) => void>();

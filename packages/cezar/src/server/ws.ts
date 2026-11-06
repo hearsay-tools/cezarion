@@ -91,6 +91,9 @@ export interface SocketHub {
   /** Stop publishers, terminate clients, clear timers. Idempotent; the server
    *  that routes upgrades here calls it on its own `close`. */
   close(): void;
+  /** Call `listener` once when the hub closes: whatever a topic's registration holds for the
+   *  server's lifetime is released there. Returns the release of the listener itself. */
+  onClose(listener: () => void): () => void;
 }
 
 interface TopicState {
@@ -138,6 +141,7 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let closed = false;
+  const closeListeners = new Set<() => void>();
 
   const send = (ws: WebSocket, frame: unknown): void => {
     // OPEN as the literal 1: the check must hold for any socket implementation.
@@ -352,6 +356,17 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
         ws.terminate();
       }
       wss.close();
+      for (const listener of [...closeListeners]) listener();
+      closeListeners.clear();
+    },
+
+    onClose(listener) {
+      if (closed) {
+        listener();
+        return () => undefined;
+      }
+      closeListeners.add(listener);
+      return () => { closeListeners.delete(listener); };
     },
   };
 

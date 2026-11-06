@@ -70,6 +70,7 @@ export class ToolActivityTracker implements ToolActivitySource {
   private readonly now: () => number;
   /** The second of the last prune sweep: observe() sweeps at most once a second. */
   private sweptSecond = Number.NEGATIVE_INFINITY;
+  private readonly listeners = new Set<() => void>();
 
   constructor(options: { now?: () => number } = {}) {
     this.now = options.now ?? Date.now;
@@ -83,6 +84,17 @@ export class ToolActivityTracker implements ToolActivitySource {
    */
   observe(runId: string, event: UiEvent, redact: (text: string) => string): void {
     this.record(undefined, runId, event, redact);
+  }
+
+  /** Call `listener` after a tool call starts, or the latest one changes its title or status.
+   *  The activity topics listen while they have subscribers. Returns the release. */
+  onChange(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  private changed(): void {
+    for (const listener of [...this.listeners]) listener();
   }
 
   private record(owner: FeedOwner | undefined, runId: string, event: UiEvent, redact: (text: string) => string): void {
@@ -103,6 +115,7 @@ export class ToolActivityTracker implements ToolActivitySource {
     if (run && repeated(run, item, redact)) return;
     if (!run?.open.has(item.id)) {
       this.started(runId, item, at, { terminal, closes, owner, title: toolTitle(item, redact) });
+      this.changed();
       return;
     }
     if (closes) {
@@ -116,6 +129,7 @@ export class ToolActivityTracker implements ToolActivitySource {
     latest.tool = terminal
       ? { ...latest.tool, ...title, status: item.status, endedAt: latest.tool.endedAt ?? iso(at) }
       : { ...latest.tool, ...title, status: item.status };
+    this.changed();
   }
 
   /**
