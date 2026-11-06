@@ -5,7 +5,10 @@ Status: accepted by the owner (2026-11-06).
 Owner decisions (2026-11-06):
 
 - Name: **Skein** (Hearsay Skein). CLI `skein`. See section 2.
-- Delivery: all phases ship together in one release. P0 is not released on its own.
+- Delivery: one release. Slices land dark on `main` behind `SKEIN_SWITCH`; one switch PR turns
+  them on. The P0 safety fixes take effect as they merge (section 6).
+- Merge authority: phase coordinators merge slice PRs through land-pr. The switch PR, the npm
+  publish, the repo rename, the store listings and the server migration wait for the owner.
 - Per-project dir: read both `.ai/cezar/` and `.ai/skein/`; an opt-in `migrate-project` moves it.
 - Desktop and mobile bundle IDs: change them too (section 4.1).
 
