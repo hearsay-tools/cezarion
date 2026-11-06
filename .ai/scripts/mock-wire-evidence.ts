@@ -52,8 +52,9 @@ function prompt(scenario: string, runner: RunnerId, park: string): string {
 const turns = (events: AgentEvent[]) => events.filter(event => event.type === 'turn-end').length;
 const failed = (events: AgentEvent[]) => events.some(event => event.type === 'error');
 
-function acknowledged(runner: RunnerId, file: string, offset = 0): boolean {
-  return readFileSync(file, 'utf8').slice(offset).trim().split('\n').some(line => {
+function acknowledgementBoundary(runner: RunnerId, file: string, offset = 0): number | undefined {
+  const lines = readFileSync(file, 'utf8').slice(offset).split('\n');
+  const index = lines.findIndex(line => {
     if (!line) return false;
     const record = JSON.parse(line) as { channel: string; path?: string; data: string };
     if (runner === 'opencode') return record.channel === 'http-response' && /prompt_async|message/.test(record.path ?? '');
@@ -65,6 +66,18 @@ function acknowledged(runner: RunnerId, file: string, offset = 0): boolean {
       return frame.type === 'response' && frame.command === 'prompt';
     } catch { return false; }
   });
+  if (index < 0) return undefined;
+  return offset + lines.slice(0, index + 1).join('\n').length + 1;
+}
+
+function acknowledged(runner: RunnerId, file: string, offset = 0): boolean {
+  return acknowledgementBoundary(runner, file, offset) !== undefined;
+}
+
+function trimAtAcknowledgement(runner: RunnerId, file: string, offset = 0) {
+  const boundary = acknowledgementBoundary(runner, file, offset);
+  if (boundary === undefined) throw new Error('Missing recipe acknowledgement boundary');
+  writeFileSync(file, readFileSync(file, 'utf8').slice(0, boundary));
 }
 
 function stallFramesRecorded(runner: RunnerId, file: string): boolean {
@@ -114,10 +127,18 @@ async function send(session: AgentSession, text: string) {
   await waitFor(() => session.sendMessage([{ type: 'text', text }]), 5_000);
 }
 
-async function sendSteer(session: AgentSession) {
+function openingTurnActive(runner: RunnerId, file: string, events: AgentEvent[]): boolean {
+  const data = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line).data).join('\n');
+  const starts = { claude: /isReplay/, codex: /turn\/started/, opencode: /message.updated/, pi: /turn_start/, omp: /turn_start/, cursor: /never/ };
+  const ends = { claude: /"type":"result"/, codex: /turn\/completed/, opencode: /session.idle/, pi: /turn_end/, omp: /turn_end/, cursor: /never/ };
+  return starts[runner].test(data) && !ends[runner].test(data) && turns(events) === 0;
+}
+
+async function sendSteer(session: AgentSession, runner: RunnerId, file: string, events: AgentEvent[]) {
   let accepted: false | Promise<void> = false;
   // bound: the opening native ACK must clear before the runner admits agent input.
   await waitFor(() => {
+    if (!openingTurnActive(runner, file, events)) throw new Error(`Steering window closed: ${runner}`);
     accepted = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo Evidence steer.' }], ['wire-steer']);
     return accepted !== false;
   }, 5_000);
@@ -149,12 +170,13 @@ async function driveRecipe(scenario: string, runner: RunnerId, session: AgentSes
   if (scenario === 'ack-only') {
     // bound: wait for this prompt's native ACK/replay, not an arbitrary elapsed duration.
     await waitFor(() => acknowledged(runner, file), 5_000);
+    trimAtAcknowledgement(runner, file);
     return;
   }
   if (scenario === 'steer-tool' || scenario === 'steer-late') {
     // bound: inject only after the tool starts or the last assistant message arrives.
     await waitFor(() => events.some(event => event.type === (scenario === 'steer-tool' ? 'tool-call' : 'text')), 5_000);
-    await sendSteer(session);
+    await sendSteer(session, runner, file, events);
   }
   if (scenario === 'resume-cezar-done' && (runner === 'codex' || runner === 'opencode')) {
     // bound: native questions hold their turn open until the human answer.
@@ -198,6 +220,7 @@ async function driveFollowups(scenario: string, runner: RunnerId, session: Agent
       // This wire deliberately never emits a turn. Stop after ACK/activity, not a turn-end.
       // bound: no-reply ACK arrives on its native wire; Cursor print has only process startup.
       await waitFor(() => acknowledged(runner, file, offset), 5_000);
+      trimAtAcknowledgement(runner, file, offset);
     } else await followTurn(session, events, FINAL);
   }
   if (runner === 'opencode' && (scenario === 'autonomous-cap' || scenario === 'autonomous-cezar-ask-cap' || scenario === 'silent-tail-ack-delay')) {
@@ -227,19 +250,22 @@ async function recordRecipe(runner: RunnerId, scenario: string) {
       // The real tool transport returns a stable unavailable receipt without a controller.
       cezarTools: { name: 'cezar_ci_evidence', command: process.execPath, args: [fileURLToPath(new URL('../../packages/cezar/scripts/mock-wire-tools.mjs', import.meta.url))] },
       env: { CEZ_MOCK_WIRE_FILE: file, CEZ_MOCK_NOTES: '0', CEZ_MOCK_RELEASE_FILE: join(cwd, 'release'),
+        CEZ_MOCK_STEER_MS: '2000',
         CEZ_MOCK_STEER_LINES: scenario === 'steer-tool' ? '1' : '0',
         CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_TOOL_SOCKET: '', CEZ_TOOL_TOKEN: '',
         NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE ?? '' },
     }, event => events.push(event), { onActivity: () => { activity += 1; }, onUiEvent: event => { if (event.type === 'ask.requested') asked = true; } });
     const settled = session.result.catch(() => undefined);
     await driveRecipe(scenario, runner, session, events, () => activity, cwd, file, observed.exits, () => asked);
+    const transcript = readFileSync(file, 'utf8');
     stopFixture(session, scenario, cwd);
     // bound: end uses a 10-second SIGTERM escalation; evidence must never hang on a fixture.
     let timer: ReturnType<typeof setTimeout> | undefined;
     try { await Promise.race([settled, new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error('Mock teardown exceeded 12 seconds')), 12_000);
     })]); } finally { clearTimeout(timer); }
-    expect(readFileSync(file, 'utf8').length).toBeGreaterThan(0);
+    writeFileSync(file, transcript);
+    expect(transcript.length).toBeGreaterThan(0);
     counts[runner] = (counts[runner] ?? 0) + 1;
   } finally {
     if (session) { stopFixture(session, scenario, cwd); session.interrupt(); }
