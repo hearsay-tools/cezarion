@@ -24,9 +24,9 @@ export function previewToolEnabled(env: NodeJS.ProcessEnv = process.env): boolea
   return env.CEZ_PREVIEW === '1';
 }
 
-/** Automations are on under the exact value `1` only (spec 2026-10-02-scheduled-automations). */
+/** Automations are on unless the value is exactly `0` (spec 2026-10-02-scheduled-automations). */
 export function automationsToolEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CEZ_AUTOMATIONS === '1';
+  return env.CEZ_AUTOMATIONS !== '0';
 }
 
 /**
@@ -237,10 +237,10 @@ export function cezarToolNames(env: NodeJS.ProcessEnv = process.env): string[] {
 
 /**
  * Env names a harness must forward to the adapter process. Several harnesses spawn MCP servers
- * from an allowlist, so the preview and automations opt-ins ride along explicitly or the adapter never sees it.
+ * from an allowlist, so preview opt-in and automations opt-out must both reach the adapter.
  */
 export function cezarToolEnvNames(env: NodeJS.ProcessEnv = process.env): string[] {
-  return ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET', ...(previewToolEnabled(env) ? ['CEZ_PREVIEW'] : []), ...(automationsToolEnabled(env) ? ['CEZ_AUTOMATIONS'] : [])];
+  return ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET', 'CEZ_AUTOMATIONS', ...(previewToolEnabled(env) ? ['CEZ_PREVIEW'] : [])];
 }
 
 export function cezarServerInstructions(env: NodeJS.ProcessEnv = process.env): string {

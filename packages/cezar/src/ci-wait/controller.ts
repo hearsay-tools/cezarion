@@ -127,7 +127,7 @@ export class CiToolController {
       descriptor: { name: `cezar_ci_${randomUUID().replaceAll('-', '')}`, command: process.execPath, args: source ? ['--import', fileURLToPath(import.meta.resolve('tsx')), entry.replace(/\.js$/, '.ts')] : [entry] },
       // #781: the session carries the preview opt-in, so its runner admits and forwards exactly
       // the tools this session's adapter lists.
-      env: { CEZ_TOOL_TOKEN: token, CEZ_TOOL_SOCKET: this.address, ...(previewToolEnabled() ? { CEZ_PREVIEW: '1' } : {}), ...(automationsToolEnabled() ? { CEZ_AUTOMATIONS: '1' } : {}) },
+      env: { CEZ_TOOL_TOKEN: token, CEZ_TOOL_SOCKET: this.address, ...(previewToolEnabled() ? { CEZ_PREVIEW: '1' } : {}), CEZ_AUTOMATIONS: automationsToolEnabled() ? '1' : '0' },
       revoke: () => { this.capabilities.delete(token); capability.lifetime.abort(); },
     };
   }

@@ -19,7 +19,7 @@ export type NavItem = {
    *  driver available — see `visibleNavItems`. */
   forge?: boolean
   /** Automations-gated (#801): the item exists only while `/api/health` reports
-   *  `capabilities.automations` — automations are opt-in via `CEZ_AUTOMATIONS=1`. Independent of
+   *  `capabilities.automations` — automations are on unless `CEZ_AUTOMATIONS=0`. Independent of
    *  `forge`: a schedule needs no GitHub remote (#766), so the item carries this gate ALONE; the
    *  editor disables its GitHub kind when the forge is unavailable. See `visibleNavItems`. */
   automations?: boolean
@@ -54,7 +54,7 @@ export type NavAvailability = {
  * The nav items a surface should actually render: a gated item drops out — nav item AND tab —
  * unless the health payload says its feature is there. The forge-gated GitHub item needs the
  * forge driver (spec §"GitHub tab (forge tab)"); the Automations item needs
- * `capabilities.automations`, which is off unless `CEZ_AUTOMATIONS=1` (#801), and no forge.
+ * `capabilities.automations`, which is on unless `CEZ_AUTOMATIONS=0`, and no forge.
  *
  * Gates are ANDed per item, never ORed, so an item may carry more than one of them.
  *

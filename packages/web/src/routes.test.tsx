@@ -422,7 +422,7 @@ describe('the global settings area (/settings/global)', () => {
       expect(currentPathname()).toBe(`/p/${BOOT}/${path}`)
       expect(routeName()).toBe('automations')
       expect(await screen.findByText('Automations are off')).not.toBeNull()
-      expect(screen.getByText(/CEZ_AUTOMATIONS=1/)).not.toBeNull()
+      expect(screen.getByText(/Unset CEZ_AUTOMATIONS/)).not.toBeNull()
     })
   }
 

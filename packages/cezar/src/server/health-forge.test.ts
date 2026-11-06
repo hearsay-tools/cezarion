@@ -107,7 +107,7 @@ describe('GET /api/v1/health — forge + capabilities', () => {
       settingsAdmin: true,
       remoteSettingsAdmin: false,
       singleProject: false,
-      automations: false,
+      automations: true,
       preview: false,
       voice: false,
       tokenMetrics: true,
@@ -159,7 +159,7 @@ describe('GET /api/v1/health — forge + capabilities', () => {
       settingsAdmin: false,
       remoteSettingsAdmin: false,
       singleProject: false,
-      automations: false,
+      automations: true,
       preview: false,
       voice: false,
       tokenMetrics: true,
@@ -190,7 +190,7 @@ describe('GET /api/v1/health — forge + capabilities', () => {
       settingsAdmin: false,
       remoteSettingsAdmin: false,
       singleProject: false,
-      automations: false,
+      automations: true,
       preview: false,
       voice: false,
       tokenMetrics: true,
@@ -207,7 +207,7 @@ settingsAdmin: true,
 remoteSettingsAdmin: false,
 
       singleProject: false,
-      automations: false,
+      automations: true,
       preview: false,
       voice: false,
       tokenMetrics: true,
@@ -218,7 +218,12 @@ remoteSettingsAdmin: false,
 
   // #801 — the automations capability rides the same payload, and is what the cockpit's nav gate
   // reads. Asserted as a whole object so a capability leaking on by accident cannot pass.
-  it('reports automations:false by default — GitHub automations are opt-in', async () => {
+  it('reports automations:true by default', async () => {
+    expect((await health()).capabilities.automations).toBe(true);
+  });
+
+  it('reports automations:false with CEZ_AUTOMATIONS=0', async () => {
+    process.env.CEZ_AUTOMATIONS = '0';
     expect((await health()).capabilities.automations).toBe(false);
   });
 
@@ -245,7 +250,7 @@ remoteSettingsAdmin: false,
       settingsAdmin: true,
       remoteSettingsAdmin: false,
       singleProject: false,
-      automations: false,
+      automations: true,
       preview: false,
       voice: false,
       tokenMetrics: false,

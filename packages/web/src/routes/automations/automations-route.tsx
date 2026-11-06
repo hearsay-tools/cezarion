@@ -49,7 +49,7 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
           icon={<ZapIcon />}
           tone="neutral"
           title="Automations are off"
-          subtitle="This server does not run schedules, poll GitHub or launch tasks from them. Set CEZ_AUTOMATIONS=1 and restart cezar to turn automations on."
+          subtitle="This server does not run schedules, poll GitHub or launch tasks from them. Unset CEZ_AUTOMATIONS or set it to 1 and restart cezar to turn automations on."
           heading="h2"
         />
       </div>

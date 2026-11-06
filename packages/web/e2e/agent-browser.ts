@@ -394,7 +394,7 @@ export function servedRoot(): string {
  * (`.ai/scripts/test-env-up.sh`); this is that rule for the specs that boot their own server.
  *
  * No ambient `CEZ_*` variable reaches the fixture (hearsay-tools/cezarion#1045). An agent's shell
- * inherits the live cockpit's opt-ins (`CEZ_PREVIEW=1`, `CEZ_AUTOMATIONS=1`, …) and its per-task
+ * inherits the live cockpit's feature overrides (`CEZ_PREVIEW=1`, `CEZ_AUTOMATIONS=0`, …) and its per-task
  * plumbing (`CEZ_TASK_ID`, `CEZ_DELEGATION_*`, …); spreading them turned features on that CI never
  * enables, and with preview on the task view rebuilt when health arrived and closed the hand-off
  * dialog. A spec that needs a flag passes it in `extra`, which is applied after the scrub.

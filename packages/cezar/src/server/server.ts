@@ -488,7 +488,7 @@ export function projectRouteManifest(app: Hono): ProjectRouteInfo[] {
 }
 
 /** 409 body for every automations route while GitHub automations are off (#801). */
-const AUTOMATIONS_OFF = 'Automations are disabled — set CEZ_AUTOMATIONS=1 to enable them';
+const AUTOMATIONS_OFF = 'Automations are disabled — unset CEZ_AUTOMATIONS or set it to 1 and restart to enable them';
 
 /** 404 body for a run whose row is in runs.db but whose record this cezar cannot decode (#779). */
 const UNREADABLE_RUN_ERROR = 'this run could not be read by this cezar: its record in runs.db does not fit this version (a newer cezar may have written it). It is left in the database untouched.';
@@ -2941,7 +2941,7 @@ export function createApp(deps: ServerDeps) {
   const manualChecks = new Map<string, ManualCheck>();
 
   /**
-   * The automations gate (#801): with `CEZ_AUTOMATIONS` unset, every route of the feature
+   * The automations gate (#801): with `CEZ_AUTOMATIONS=0`, every route of the feature
    * answers 409 before touching a store, a lease or GitHub.
    *
    * Written as MIDDLEWARE rather than a line in each handler so the family cannot drift: a route
@@ -3000,7 +3000,7 @@ export function createApp(deps: ServerDeps) {
   });
   // #1465: every project's manager gets the schedule tools over this service. A manager reads
   // them at call time, so a session recovered before its project's context finished building
-  // reaches them once this runs. The tools themselves stay behind CEZ_AUTOMATIONS=1.
+  // reaches them once this runs. The tools themselves are disabled by CEZ_AUTOMATIONS=0.
   const attachAutomationTools = (project: ProjectContext) => project.manager.setAutomationTools?.(
     createAutomationToolService(automationService, project, { timeZone: localTimeZone }),
   );

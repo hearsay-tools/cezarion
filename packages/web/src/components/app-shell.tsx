@@ -83,7 +83,7 @@ export type AppShellProps = {
    *  passes the health payload's truth. */
   forgeAvailable?: boolean
   /** Automations gating (#801): `false` drops the Automations nav item — GitHub automations are
-   *  opt-in via `CEZ_AUTOMATIONS=1`. Defaults to shown for the same reason as `forgeAvailable`;
+   *  on unless `CEZ_AUTOMATIONS=0`. Defaults to shown for the same reason as `forgeAvailable`;
    *  the container passes the health payload's truth. */
   automationsAvailable?: boolean
   /** Global chrome banner, rendered in its own row above the scroller. Absent renders nothing —

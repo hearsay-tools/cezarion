@@ -287,9 +287,9 @@ describe('cez automation', () => {
     });
 
     it('automations off: the 409 is relayed verbatim with exit 2', async () => {
-      vi.stubEnv('CEZ_AUTOMATIONS', '');
+      vi.stubEnv('CEZ_AUTOMATIONS', '0');
       expect(await run(['add', '--name', 'N', '--cron', '0 7 * * *', '--prompt', 'P'])).toBe(EXIT.refused);
-      expect(last()).toEqual({ code: 'refused', status: 409, error: 'Automations are disabled — set CEZ_AUTOMATIONS=1 to enable them' });
+      expect(last()).toEqual({ code: 'refused', status: 409, error: 'Automations are disabled — unset CEZ_AUTOMATIONS or set it to 1 and restart to enable them' });
     });
   });
 

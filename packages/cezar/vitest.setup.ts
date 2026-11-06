@@ -107,7 +107,7 @@ const HOST_BIN_AND_MODE_KEYS = [
   'CEZ_PI_BIN', // Use the default Pi executable, not the host wrapper.
   'CEZ_OMP_BIN', // Use the default OMP executable, not the host wrapper.
   'CEZ_REMOTE', // Keep local-mode capabilities unless the test opts into hosted mode.
-  'CEZ_AUTOMATIONS', // Keep automation routes and scheduling opt-in for each test.
+  'CEZ_AUTOMATIONS', // Restore default-on automations unless the test opts out.
   'CEZ_PREVIEW', // Keep preview capabilities and tool registration opt-in for each test.
   'CEZ_VOICE', // Keep voice mode opt-in for each test (hearsay-tools/cezarion#1470).
   'CEZ_SINGLE_PROJECT', // Keep multi-project mode unless the test opts into one project.

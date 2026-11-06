@@ -49,7 +49,7 @@ export const capabilitiesSchema = z.object({
   remoteSettingsAdmin: z.boolean(),
   singleProject: z.boolean(),
   /**
-   * `true` means `CEZ_AUTOMATIONS=1` opted this server into GitHub automations (#801). Off — the
+   * `true` by default; only `CEZ_AUTOMATIONS=0` disables automations. Off — the
    * default — the whole feature is absent: no `Automations` nav item anywhere it is rendered, the
    * `/api/v1/…/automations*` family answers `409`, and the workspace scheduler never polls GitHub.
    *

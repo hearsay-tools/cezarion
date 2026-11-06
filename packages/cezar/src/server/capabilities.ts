@@ -15,11 +15,11 @@
  * enables it.
  *
  * `automations` (spec 2026-07-25-github-automations, #801): GitHub automations
- * are **opt-in** via `CEZ_AUTOMATIONS=1` and off by default. Off, the
+ * are on by default; only `CEZ_AUTOMATIONS=0` disables them. Off, the
  * `Automations` nav item is gone everywhere it is rendered, the
  * `/automations*` endpoints refuse, and the workspace scheduler never polls
- * GitHub — the flag removes the behavior, not only the UI. Activation is
- * strict, like the capabilities above. Nothing on disk is touched:
+ * GitHub or fires schedules. The flag removes the behavior, not only the UI.
+ * Nothing on disk is touched:
  * definitions, receipts and high-watermarks survive the flag being off, so
  * unsetting it and restarting restores the feature wholesale.
  *
@@ -128,7 +128,7 @@ export function isLoopbackHostHeader(host: string | null | undefined): boolean {
 }
 
 /** `CEZ_REMOTE=1` or a non-loopback bind host ⇒ hosted mode (no local handoff).
- *  `CEZ_AUTOMATIONS=1` ⇒ GitHub automations exist (#801).
+ *  `CEZ_AUTOMATIONS=0` ⇒ automations are disabled.
  *  `CEZ_PREVIEW=1` ⇒ live preview exists (#781); same boot-time-flag caveat as `automations`.
  *  `CEZ_VOICE=1` plus `TYPESAFE_API_KEY` (or `CEZ_DRY_RUN=1`) ⇒ voice mode exists; same caveat.
  *
@@ -148,7 +148,7 @@ export function resolveCapabilities(env: NodeJS.ProcessEnv = process.env, bindHo
     settingsAdmin: localHandoff || remoteSettingsAdmin,
     remoteSettingsAdmin,
     singleProject: env.CEZ_SINGLE_PROJECT === '1',
-    automations: env.CEZ_AUTOMATIONS === '1',
+    automations: env.CEZ_AUTOMATIONS !== '0',
     preview: env.CEZ_PREVIEW === '1',
     // Boot-time flag, like `automations`. The key is read here only as present or absent; the
     // fake engine under CEZ_DRY_RUN needs none.
