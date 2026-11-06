@@ -10,7 +10,7 @@ function size(element: HTMLElement) {
   return button ? Number(button.dataset.size) : Number.parseFloat(element.style.height) || 60
 }
 function resize() {
-  for (const [callback, elements] of observers) callback([...elements].filter(element => element.isConnected).map(target => ({ target, contentRect: { width: 1000, height: size(target) } }) as unknown as ResizeObserverEntry), {} as ResizeObserver)
+  for (const [callback, elements] of observers) callback([...elements].filter(element => element.isConnected).map(target => { return { target, contentRect: { width: 1000, height: size(target) } } as unknown as ResizeObserverEntry }), {} as ResizeObserver)
 }
 function setupGeometry() {
   const offsets = new WeakMap<Element, number>()
