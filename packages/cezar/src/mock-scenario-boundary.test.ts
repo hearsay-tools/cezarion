@@ -70,6 +70,23 @@ describe('shared scenario boundary', () => {
       expect(rule.check(nativeFile, adopted + '/mock:(resume-cezar-done|hold)/.test(prompt);')).toHaveLength(1);
     });
 
+  it.each([
+    '/mock:(?:(?:provider-error-early)|hold)/.test(prompt);',
+    '/mock:(?:(?:(?:provider-error-early))|hold)/.test(prompt);',
+    '/mock:(?:provider-error-early\\)|hold)/.test(prompt);',
+    '/mock:(?:provider-error-early[)]|hold)/.test(prompt);',
+  ])('finds shared alternatives after nested or literal parentheses: %s', sample => {
+    expect(rule.check(file, adopted + sample)).toHaveLength(1);
+  });
+
+  it.each([
+    '/mock:(?:(?:(?:provider-error-early)))/.test(prompt);',
+    '/mock:(?:provider-error-early\\))/.test(prompt);',
+    '/mock:(?:provider-error-early[)])/.test(prompt);',
+  ])('keeps nested native alternatives exempt: %s', sample => {
+    expect(rule.check(file, adopted + sample)).toEqual([]);
+  });
+
   it('leaves mocks that have not adopted the module alone', () => {
     expect(rule.check(file, "prompt.includes('mock:hold');")).toEqual([]);
     expect(rule.check(file, "// import './mock-scenario.mjs'\nprompt.includes('mock:hold');")).toEqual([]);

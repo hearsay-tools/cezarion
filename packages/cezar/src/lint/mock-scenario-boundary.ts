@@ -89,18 +89,41 @@ function sharedToken(file: string, token: string): boolean {
   return SHARED.some(name => token === name || token.startsWith(`${name}-`));
 }
 
+/** Scan one balanced group; escaped characters and classes cannot close it. */
+function groupEnd(value: string, start: number): number {
+  let depth = 1;
+  let inClass = false;
+  for (let i = start; i < value.length; i++) {
+    const char = value[i];
+    if (char === '\\') { i++; continue; }
+    if (char === '[') inClass = true;
+    else if (char === ']') inClass = false;
+    else if (!inClass) {
+      if (char === '(') depth++;
+      else if (char === ')' && --depth === 0) return i;
+    }
+  }
+  return value.length;
+}
+
+function groupedShared(file: string, value: string): boolean {
+  let start = value.indexOf('mock:(');
+  while (start >= 0) {
+    const content = start + 'mock:('.length;
+    const end = groupEnd(value, content);
+    for (const word of value.slice(content, end).match(/[a-z0-9-]+/g) ?? []) {
+      if (sharedToken(file, word)) return true;
+    }
+    start = value.indexOf('mock:(', end + 1);
+  }
+  return false;
+}
+
 function namesShared(file: string, value: string, regex: boolean): boolean {
   for (const match of value.matchAll(TOKEN)) {
     if (sharedToken(file, match[1]!)) return true;
   }
-  if (!regex) return false;
-  // Apply exemptions to individual grouped alternatives, never to the whole expression.
-  for (const group of value.matchAll(/mock:\((?:\?:)?([^)]*)\)/g)) {
-    for (const token of group[1]!.match(/[a-z0-9-]+/g) ?? []) {
-      if (sharedToken(file, token)) return true;
-    }
-  }
-  return false;
+  return regex && groupedShared(file, value);
 }
 
 export const mockScenarioBoundary: SourceRule = {
