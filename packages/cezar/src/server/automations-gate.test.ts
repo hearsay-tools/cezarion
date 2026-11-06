@@ -7,7 +7,9 @@ import { AutomationStore } from '../automations/store.ts';
 import { WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
-import { sweepRegisteredPreviewLeftovers } from './project-context.ts';
+import { ProjectContexts, sweepRegisteredPreviewLeftovers } from './project-context.ts';
+import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
+import { CompletionActionCoordinator } from './completion-actions.ts';
 import { createApp, startServer, type ServerDeps } from './server.ts';
 import * as git from './git.ts';
 import { createWorkspaceProjects } from './workspace-projects.ts';
@@ -250,6 +252,12 @@ describe('automations gate (#801)', () => {
     it.each(['project discovery', 'Git inspection'] as const)('does not restart after closing during %s', async (stage) => {
       delete process.env.CEZ_AUTOMATIONS;
       const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start').mockResolvedValue();
+      // Only automation startup may inspect the secondary project. Health uses the boot root.
+      vi.spyOn(ProjectContexts.prototype, 'warmAll').mockResolvedValue([]);
+      vi.spyOn(ArchiveOnMergeCoordinator.prototype, 'start').mockImplementation(() => {});
+      vi.spyOn(CompletionActionCoordinator.prototype, 'start').mockImplementation(() => {});
+      const automationRoot = join(repoRoot, 'automation-only');
+      mkdirSync(automationRoot);
       let entered!: () => void;
       let release!: () => void;
       const reached = new Promise<void>((resolve) => { entered = resolve; });
@@ -260,10 +268,11 @@ describe('automations gate (#801)', () => {
           entered();
           await pending;
         }
-        return [];
+        return [{ id: 'automation-only', name: 'Automation only', root: automationRoot,
+          addedAt: '', lastOpenedAt: '', source: 'local' as const, status: 'ok' as const }];
       });
-      vi.spyOn(git, 'getRepoInfo').mockImplementation(async () => {
-        if (stage === 'Git inspection') {
+      vi.spyOn(git, 'getRepoInfo').mockImplementation(async (root) => {
+        if (stage === 'Git inspection' && root === automationRoot) {
           entered();
           await pending;
         }
