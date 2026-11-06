@@ -28,7 +28,7 @@ function peerLine(request: ActivityRequest, cards: ReadonlyMap<string, Box>, ind
   const from = cards.get(request.senderRunId)
   const to = cards.get(request.recipientRunId)
   const base = { requestId: request.requestId, kind: 'peer' as const }
-  if (from && to) return { ...base, ...peerPath(from, to) }
+  if (from && to) return { ...base, ...peerPath(from, to, [...cards.values()]) }
   if (from) return { ...base, ...stubPath(from, 'sender'), away: recipientName(index, request) }
   if (to) return { ...base, ...stubPath(to, 'recipient'), away: senderName(index, request) }
   return undefined

@@ -1,3 +1,6 @@
+import { COLUMN_GAP } from './layout'
+import { blocked, channelDetour, gridDetour, othersThan, roundedPath, spanOf } from './line-route'
+
 /**
  * The shapes of the lines between tasks (spec 2026-11-05-live-activity-view, "Lines between
  * tasks"). Pure: boxes in, an SVG path and a label point out. All boxes are relative to the graph
@@ -36,9 +39,10 @@ export const center = (box: Box): Point => ({ x: box.x + box.w / 2, y: box.y + b
 
 /**
  * A peer line from the sender card to the recipient card. Cards in one column (their left edges
- * within 40 px) bow out to the right; otherwise the line leaves the facing edges.
+ * within 40 px) bow out to the right; otherwise the line leaves the facing edges. A curve that
+ * would cross another of `cards` (a column between the two) runs through the gaps instead.
  */
-export function peerPath(from: Box, to: Box): LinePath {
+export function peerPath(from: Box, to: Box, cards: readonly Box[] = []): LinePath {
   const ay = from.y + PEER_ANCHOR_Y
   const by = to.y + PEER_ANCHOR_Y
   if (Math.abs(from.x - to.x) < 40) {
@@ -51,6 +55,10 @@ export function peerPath(from: Box, to: Box): LinePath {
   const bx = right ? to.x : to.x + to.w
   const k = Math.max(40, Math.abs(bx - ax) * 0.5) * (right ? 1 : -1)
   const end = bx - (right ? 2 : -2)
+  if (blocked(spanOf({ x: ax, y: ay }, { x: bx, y: by }), othersThan(cards, from, to))) {
+    const detour = channelDetour({ x: ax, y: ay }, { x: bx, y: by }, COLUMN_GAP, othersThan(cards, from, to))
+    return { d: roundedPath(detour.points), label: detour.label }
+  }
   return { d: `M${pt({ x: ax, y: ay })} C ${pt({ x: ax + k, y: ay })}, ${pt({ x: bx - k, y: by })}, ${pt({ x: end, y: by })}`, label: { x: (ax + bx) / 2, y: (ay + by) / 2 } }
 }
 
@@ -85,9 +93,11 @@ export const ARC_MAX_LIFT = 30
  * the pills, down into the top middle of the recipient; a farther pill gets a higher arc, up to
  * `ARC_MAX_LIFT`, and the label sits near the top. Pills in different rows: through the gap
  * between the rows, from the facing edges (the sender's bottom to the recipient's top, or the
- * other way up), so the arc never crosses either pill; the label sits in the gap.
+ * other way up), so the arc never crosses either pill; the label sits in the gap. When that curve
+ * would cross another of `pills` (rows between the two), the arc runs through the row and column
+ * gaps around it (`gridDetour`).
  */
-export function arcPath(from: Box, to: Box): LinePath {
+export function arcPath(from: Box, to: Box, pills: readonly Box[] = []): LinePath {
   const ax = from.x + from.w / 2
   const bx = to.x + to.w / 2
   if (to.y >= from.y + from.h || to.y + to.h <= from.y) {
@@ -95,6 +105,10 @@ export function arcPath(from: Box, to: Box): LinePath {
     const ay = down ? from.y + from.h + 1 : from.y - 1
     const by = down ? to.y - 3 : to.y + to.h + 3
     const k = (by - ay) / 2
+    if (blocked(spanOf({ x: ax, y: ay }, { x: bx, y: by }), othersThan(pills, from, to))) {
+      const detour = gridDetour(from, to, pills)
+      return { d: roundedPath(detour.points), label: detour.label }
+    }
     return { d: `M${pt({ x: ax, y: ay })} C ${pt({ x: ax, y: ay + k })}, ${pt({ x: bx, y: by - k })}, ${pt({ x: bx, y: by })}`, label: { x: (ax + bx) / 2, y: (ay + by) / 2 } }
   }
   const ay = from.y - 1

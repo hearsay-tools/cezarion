@@ -1,12 +1,17 @@
 import { cleanup, render, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ActivityProject } from '@open-mercato/cezar-api-client/contract/activity'
 
 import { ACTIVITY_WAIT_KIND, NOW, RUN_STATUS, TOOL_STATUS, iso, project, request, run, worker } from './activity.testkit'
+import { ARC_LABEL } from './global-arcs'
 import { ProjectPanel } from './global-panel'
+import { gridBoxes, inside, labelBox, overlaps, placeBoxes, samplePath } from './line-layout.testkit'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 function renderPanel(value: ActivityProject) {
   return render(
@@ -62,5 +67,24 @@ describe('ProjectPanel', () => {
     const pill = container.querySelector('[data-activity-pill="asks"]') as HTMLElement
     expect(pill.className).toContain('border-pending')
     expect(pill.querySelector('[data-slot="activity-pill-line"]')?.textContent).toBe('Needs you · Your turn')
+  })
+
+  describe('arc routing', () => {
+    const GRID = [['a', 'b', 'c'], ['d', 'e', 'f'], ['g', 'h', 'i']]
+    const boxes = gridBoxes(GRID)
+    const tasks = GRID.flat().map((id) => run({ runId: id, title: `Task ${id}` }))
+    const arcOf = (requestId: string) => document.querySelector(`path[data-request="${requestId}"]`)?.getAttribute('d') ?? ''
+    const labelOf = (requestId: string) => document.querySelector(`[data-slot="activity-arc-label"][data-request="${requestId}"]`) as HTMLElement
+
+    it('routes an arc between the first and third rows of one column around the pill between them, label in a gap', () => {
+      placeBoxes('data-activity-pill', boxes)
+      const down = request({ senderRunId: 'a', recipientRunId: 'g' })
+      renderPanel(project({ tasks, requests: [down] }))
+      const others = Object.entries(boxes).filter(([id]) => id !== 'a' && id !== 'g').map(([, box]) => box)
+      const crossed = samplePath(arcOf(down.requestId)).filter((p) => others.some((box) => inside(p, box)))
+      expect(crossed).toEqual([])
+      const label = labelBox(labelOf(down.requestId), ARC_LABEL)
+      expect(Object.values(boxes).filter((box) => overlaps(label, box))).toEqual([])
+    })
   })
 })

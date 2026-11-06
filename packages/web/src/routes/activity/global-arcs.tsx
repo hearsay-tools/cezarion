@@ -13,6 +13,9 @@ import { useOverlayMeasure } from './use-overlay-measure'
  * adds the march and the comets.
  */
 
+/** The size an age label takes, for placing labels clear of the pills and of each other. */
+export const ARC_LABEL = { w: 104, h: 20 }
+
 export interface ArcShape {
   requestId: string
   d: string
@@ -32,11 +35,12 @@ function pillBoxes(host: HTMLElement): Map<string, Box> {
 /** Every arc whose two pills are in the host. */
 export function measureArcs(host: HTMLElement, arcs: readonly ActivityRequest[]): ArcShape[] {
   const pills = pillBoxes(host)
+  const all = [...pills.values()]
   const shapes: ArcShape[] = []
   for (const request of arcs) {
     const from = pills.get(request.senderRunId)
     const to = pills.get(request.recipientRunId)
-    if (from && to) shapes.push({ requestId: request.requestId, ...arcPath(from, to) })
+    if (from && to) shapes.push({ requestId: request.requestId, ...arcPath(from, to, all) })
   }
   return shapes
 }
