@@ -1,0 +1,277 @@
+# One mock scenario module and six wire encoders
+
+Source: candidate 3 of the 2026-11-03 architecture review (cezar task f5410885).
+Campaign task: d18f6eb8. Baseline: `main` at `bc5764da7`.
+
+## Goal
+
+Today each fake-agent scenario is written once per native mock, in that mock's
+wire encoding. A workflow feature that changes what the fake agent does must edit
+up to six mocks. After this work:
+
+- One module, `packages/cezar/scripts/mock-scenario.mjs`, decides what the fake
+  agent does for every shared `mock:` scenario: its text, reasoning, tool calls,
+  cezar tool calls, waits, sleeps and turn end.
+- Each runner mock is an encoder for its own wire. It turns the module's steps
+  into native frames, and it keeps its native acknowledgement, rejection,
+  failure and steering encoding.
+- One module, `packages/cezar/scripts/mock-lifecycle.mjs`
+  (hearsay-tools/cezarion#1529), owns the no-progress stall, the atomic pid
+  write and the release wait.
+
+A workflow feature then changes one scenario script, and each encoder is checked
+once against its real runner and mapper.
+
+## Evidence
+
+Measured on `main` at `bc5764da7`.
+
+### Size
+
+| Mock | Lines | Process model |
+|---|---:|---|
+| `mock-claude.mjs` | 958 | one process per session, stream-json on stdin |
+| `mock-codex-app-server.mjs` | 892 | one process per session, JSON-RPC on stdio |
+| `mock-opencode-serve.mjs` | 1,169 | one HTTP server per process, SSE events |
+| `mock-pi-rpc.mjs` | 651 | one process per session, RPC on stdio |
+| `mock-omp-rpc.mjs` | 749 | one process per session, RPC on stdio |
+| `mock-cursor-print.mjs` | 246 | one process per turn; cross-turn state in a file under `.ai/cezar/mock-cursor-print/` |
+| **Total** | **4,665** | |
+
+No function in these files is above complexity 20 (largest: 18).
+
+### Change coupling
+
+From 2026-09-15 to 2026-11-03, 70 commits changed these six mocks. 28 of them
+changed four or more mocks. Workflow features that forced six-mock edits:
+a0b806246 (hearsay-tools/cezarion#1662), 26e62e6f0 (hearsay-tools/cezarion#2446),
+463a5bf01 (hearsay-tools/cezarion#1240), faa0c92ab (hearsay-tools/cezarion#1262),
+1091b54f2 (hearsay-tools/cezarion#933). The review's "37 of 70 changed no runner"
+depends on how a runner change is counted; with "touched a `src/core` runner,
+transport or mapper file" the count is 29 of 70. The conclusion is the same: most
+mock edits do not follow a runner change.
+
+### Scenario inventory
+
+C Claude, X Codex, O OpenCode, P pi, M OMP, U Cursor print. A scenario in four or
+more mocks is **shared**; this campaign moves the shared scenarios.
+
+| Scenario | C | X | O | P | M | U | Notes |
+|---|---|---|---|---|---|---|---|
+| `agent-echo` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| `autonomous` (+ `-cap`, `-cezar-ask-cap`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | content already in `mock-autonomous.mjs` |
+| `cezar-ask` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Claude: a marker inside the default reply |
+| `cezar-done` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Claude: a marker inside the default reply |
+| `cezar-tool` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | content in `mock-ci-tool.mjs` |
+| `ci-wait` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | content in `mock-ci-tool.mjs` |
+| `crash-stderr` (+ variants) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | content in `mock-runner-crash.mjs` |
+| `deferred-turn-start` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | delay in `mock-deferred-turn-start.mjs` |
+| `hold` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| `hold-cezar-ask` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| `hold-cezar-done` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| `hold-gated` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| `multi-pr-refs` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | content in `mock-multi-pr.mjs` |
+| `no-progress-*` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | hearsay-tools/cezarion#1529 |
+| `silent-tail-*` and the final-message nudge | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | content in `mock-silent-tail.mjs` |
+| `tool-tail` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| `turn-messages` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | decoder in `mock-turn-messages.mjs` |
+| `ack-only` | ✓ | ✓ | ✓ | ✓ | ✓ | – | a per-turn process cannot hold an ack |
+| `busy-progress` | ✓ | ✓ | ✓ | ✓ | – | ✓ | OMP sends progress, but under `no-progress` matching |
+| `provider-error` | – | ✓ | ✓ | ✓ | ✓ | ✓ | Claude uses the failure control and `auth-error` |
+| `resume-cezar-done` | ✓ | ✓ | ✓ | ✓ | ✓ | – | Cursor: a resume origin in its state file |
+| `steer-tool` | ✓ | ✓ | ✓ | ✓ | ✓ | – | wire limit: no steering in print mode |
+| `steer-late` | – | ✓ | ✓ | ✓ | ✓ | – | |
+| `subagent-after-park` | ✓ | ✓ | ✓ | – | ✓ | – | |
+| `cezar-wait` | ✓ | – | – | ✓ | ✓ | – | inside the default reply |
+
+About 60 more tokens exist in only one to three mocks (approvals, native asks,
+permissions, Codex channels, OMP local commands, Cursor print modes). They encode
+one wire's own behavior and stay in their mock.
+
+### Copied helpers
+
+| Helper | Copies |
+|---|---|
+| `watchdogStall` | C, X, O, P, M; inline in U |
+| `watchdogWritePid` | all six |
+| `waitForMockRelease` | C, X (adds a `suffix`), O, P, M; `waitForRelease` in U |
+| `afterParityPark` | C, X, O, M |
+| "Keep this fixture standalone" comment | C, X, O, P. No test copies a mock any more (`cez/native-mock-source`, hearsay-tools/cezarion#1479). |
+
+### Drift in shared scenarios
+
+The copies already differ. Examples:
+
+| Scenario | Difference |
+|---|---|
+| `hold` | C, P, M: sleep 250, text, sleep 250, end. X, O: one 250 ms timer, then text and end. U: sleep 500, then the default reply |
+| `hold-cezar-ask` | release fallback 400 ms in C, X, P, M, U; 250 ms in O |
+| `busy-progress` | final text "busy complete" (C, P, U), "busy progress finished" (M) |
+| `cezar-done` | text "parity done: the task is complete" (P, M), "Done." (U); C appends the call to its default reply |
+| `steer-tool` | final text "steer tool done\nsaw: …" (C, X); "steer tool done" (P, M) |
+| `multi-pr-refs` | the extra frames differ: reasoning, a subagent message, a child message, or none |
+| `no-progress` | `mock:gate-prompt-ack` only in P and M; U's stall is inline, has no `input-closed` variant, and its `ignore-term` keeps the old listener and has no 12 s backstop; O closes input by flag, the others by `closeSync(0)` |
+
+## Design
+
+### Constraints
+
+- GLOSSARY "Native failure control" and "Native delivery control": each mock keeps
+  its native rejection, acknowledgement and failure encoding. The failure state
+  survives mock subprocess restarts. The real runner and its transport stay in use.
+  `mock-failure-control.mjs` and `mock-delivery-control.mjs` do not change.
+- ADR 0020 and `docs/areas/runners.md`: native mock-wire parity runs for every
+  `RUNNER_IDS` entry. An injected normalized event is not coverage.
+- `cez/native-mock-source` (hearsay-tools/cezarion#1479): no test reads, splices or
+  swaps mock source. The new modules are ordinary imports of the mocks.
+- `CEZ_DRY_RUN=1` runs all six mocks from the published package. The reply to a
+  prompt without a `mock:` token is user-visible dry-run behavior. It stays
+  byte-identical for every runner. It may move into the scenario module only with
+  its per-runner text unchanged.
+- Event-loop order: today a mock's synchronous frames go out in one tick, and
+  optional modules load only when configured. The player must not add an `await`
+  between two synchronous steps.
+
+### The scenario module
+
+`packages/cezar/scripts/mock-scenario.mjs` exports:
+
+```js
+/** The shared scenario a prompt selects, or undefined. First match wins. */
+export function scenarioFor(prompt, context);
+/** Runs a scenario's steps through one encoder. Awaits only asynchronous steps. */
+export function play(scenario, encoder);
+```
+
+- `context` carries `runner` (a `RUNNER_IDS` value), `lifecycle(call)` (the mock's
+  cezar tool call, as `mock-autonomous.mjs` receives it today), `session` (cross-turn
+  state; in memory, or Cursor print's state file) and `unsupported` (the scenario
+  names this wire cannot carry; see below).
+- A scenario is `{ name, beforeFailure, steps }`. `beforeFailure` says whether the
+  scenario runs before the mock's native failure control. The module owns the match
+  order, including the substring order that keeps `mock:hold-cezar-done` from
+  matching `mock:hold`.
+- The module imports the existing content modules (`mock-autonomous.mjs`,
+  `mock-multi-pr.mjs`, `mock-silent-tail.mjs`, `mock-turn-messages.mjs`,
+  `mock-ci-tool.mjs`, `mock-runner-crash.mjs`, `mock-deferred-turn-start.mjs`) and
+  `mock-lifecycle.mjs`. They stay where they are.
+
+### The encoder seam
+
+A step is a plain object. The encoder has one method per step kind:
+
+| Step | The encoder emits |
+|---|---|
+| `open` | the native turn start, after the mock's own acknowledgement |
+| `text(parts)` | one assistant message; `parts` are its deltas. A part may be a function of `lifecycle`, so a cezar tool call runs before the text goes out |
+| `reasoning(text)` | one reasoning or thinking block |
+| `toolStart(call)` / `toolEnd(call)` | a tool call and its result; `call` has `id`, `name`, `input`, `output`, `isError` |
+| `child(steps)` | child (subagent) work, where the wire has it |
+| `progress` | one native progress signal with no content |
+| `sleep(ms)` | nothing; the player waits |
+| `release(fallbackMs)` | nothing; the player waits on `CEZ_MOCK_RELEASE_FILE` through `mock-lifecycle.mjs` |
+| `park` | nothing; the player waits on the prompt's `parity-release=` path |
+| `readSteers` | the steers the wire admitted during the turn, in its native order |
+| `stall` | hands the turn to `mock-lifecycle.mjs` `stall()` |
+| `end` | the native turn end (usage, result frame, idle, settle) |
+
+Wire details stay in the encoder: usage shapes, ids, `threadId`, uuids on a result,
+OpenCode's idle timer, the Claude replay frame. The mock still owns: the line or
+request parser, acknowledgement and delivery control, the failure control check at
+the point the scenario's `beforeFailure` names, steering admission, the untokened
+default reply, and every token that is not shared.
+
+`unsupported` replaces silent gaps. A wire that cannot carry a step (Cursor print:
+no held ack, no steering, no child work) names those scenarios. `scenarioFor` then
+skips them, so the prompt falls through as it does today. Each entry must match a
+declared `PARITY_EXEMPTIONS` entry or an existing fall-through.
+
+### Unifying drift
+
+The copies differ (see Evidence). A scenario script has one version. For each
+difference, the slice that adopts the script picks one version by this rule:
+
+1. The parity catalog row in `harness-parity.testkit.ts` (`SCENARIOS`) decides
+   what the mock must do.
+2. A detail the catalog does not name takes the version most mocks use, unless a
+   test pins another version; then the pinned version wins.
+3. A test assertion never changes to fit a unified script. If a test pins two
+   different versions on two runners, the scenario keeps a per-runner parameter,
+   and the slice reports it.
+
+Unification changes test-only fixture output, never what a user sees: shared
+scenarios start only from a `mock:` token, and the untokened reply stays
+byte-identical.
+
+### Behavior-neutral proof per slice
+
+1. **Wire diff.** Slice 2 adds an opt-in recorder: when `CEZ_MOCK_WIRE_FILE` is set,
+   each mock appends every frame it writes, normalized (ids, timestamps, paths,
+   pids). An evidence script drives each real runner through `HARNESS_ADAPTERS`
+   with every shared scenario's prompt, one session per runner and scenario, and
+   writes one transcript per pair. A slice records on its base and on its head and
+   diffs them. Every difference must be a drift item listed in the PR body with the
+   rule that chose it. An encoder slice with no listed item has an empty diff.
+2. **Parity.** `npm run test:parity` and the touched runner's harness parity files
+   pass with unchanged assertions.
+3. **Mapper and dry run.** The runner's `*-ui-mapper.test.ts`, `npm run
+   test:package` after `npm run build` (dry run from the packed tarball), and the
+   browser specs `npm run test:e2e:affected` selects.
+4. **Guard.** A source-scan test (regex over `blank()` from
+   `test-wait-discipline.testkit.ts`, as `contract-import-boundaries.test.ts` does)
+   fails when a mock that imports `mock-scenario.mjs` still matches a shared token
+   itself. The last encoder slice to land makes the import required for all six
+   `RUNNER_IDS` mocks. The guard ships with a red proof
+   (`docs/sdlc/regression-proof.md`).
+
+## Slices
+
+Each slice lands as its own PR into `main`.
+
+| # | Issue | Work type | Change | Depends on |
+|---|---|---|---|---|
+| 1 | hearsay-tools/cezarion#1529 | feature (bug fix, plan approved on the issue) | `mock-lifecycle.mjs`: stall, pid write, release wait; Cursor print backstop, `gate-prompt-ack` for every mock, loud unsupported `input-closed`. The readiness-order fix and its `RUNNER_IDS` cell already landed in c0df8224b (hearsay-tools/cezarion#1628) | none |
+| 2 | new | cleanup (test tooling) | `CEZ_MOCK_WIRE_FILE` recorder in each mock's single frame writer; transcript script; `.env.example` | none; PR opens after 1 merges (hot files) |
+| 3 | new | cleanup | `mock-scenario.mjs` with the player and every shared script; pi becomes the first encoder; the guard; `afterParityPark` moves in; docs | 1 and 2 merged |
+| 4 | new | cleanup | OMP encoder | 3 merged |
+| 5 | new | cleanup | Codex encoder | 3 merged |
+| 6 | new | cleanup | Claude encoder | 3 merged |
+| 7 | new | cleanup | OpenCode encoder | 3 merged |
+| 8 | new | cleanup | Cursor print encoder, with its `unsupported` list and file-backed `session` | 3 merged |
+
+Slices 4 to 8 change one mock each and can run in parallel. Slice 3 defines the
+whole step vocabulary from the inventory above, so an encoder slice should not need
+to change `mock-scenario.mjs`. When it does, the worker asks the coordinator first.
+The last of 4 to 8 to merge makes the guard require all six mocks.
+
+Slice 3 also updates step 8 of `AGENT_PROTOCOL.md` § 10 (a new runner's mock is an
+encoder over `mock-scenario.mjs`), and adds two GLOSSARY entries, "Mock scenario"
+and "Wire encoder". Slice 1 adds the "No-progress stall" entry that
+hearsay-tools/cezarion#1529 carries.
+
+## Acceptance
+
+- No runner mock implements a shared scenario token itself; the guard enforces it.
+- One copy each of the stall, the pid write, the release wait and the park wait.
+- The untokened reply of each mock is byte-identical to `bc5764da7`.
+- Every existing test passes with unchanged assertions, including all parity,
+  mapper, package and browser suites CI runs.
+- Each encoder PR records its wire diff and the drift item behind every difference.
+- Measured after the last slice: total lines of the six mocks and of the new
+  modules, against 4,665.
+
+## Out of scope
+
+- Runner-specific tokens (approvals, native asks, permissions, Codex channels,
+  OMP local commands, Cursor print modes).
+- `mock-failure-control.mjs`, `mock-delivery-control.mjs` and each mock's native
+  failure, rejection and acknowledgement encoding.
+- Runner, transport and mapper source under `packages/cezar/src/core/`.
+- Test assertions. A test that needs a change is a finding for the coordinator.
+- An in-process mock wire (hearsay-tools/cezarion#2517, closed as not planned).
+
+## Case tables
+
+None of the template's case tables applies: no run state, cross-run relationship,
+tool grant, worktree write, detached process or restored client state changes.
+Slice 1 keeps the existing `leftover` children and their own exit backstops.
