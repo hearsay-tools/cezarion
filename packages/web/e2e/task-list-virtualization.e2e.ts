@@ -106,3 +106,28 @@ it('paints rows on the first frame that contains a large list', async () => {
     } finally { await request('Target.detachFromTarget', { sessionId }) }
   })
 })
+
+it.each([['summary', 2], ['detailed', 2], ['phone', 34], ['global', 8]] as const)('bounds the %s archived footer correction and accepts a settled paging click', async (presentation, bound) => {
+  const archived = await createTabFixture(process.cwd(), { taskList: 'project', taskListSizes: { active: 0, archived: 300, projects: 1 } })
+  try {
+    browser.setViewport(presentation === 'phone' ? 360 : 1440, presentation === 'phone' ? 640 : 900)
+    browser.goto(`${archived.origin}${presentation === 'global' ? '/tasks' : '/p/boot/'}?tasks=virtual`)
+    browser.waitForFunction(`document.querySelector('[data-view="archived"]') !== null`)
+    if (presentation === 'detailed') {
+      browser.click('[data-slot="task-columns-trigger"]')
+      browser.click('[data-slot="popover-content"] button')
+      browser.press('Escape')
+    }
+    browser.click('[data-view="archived"]')
+    const footer = presentation === 'global' ? '[data-slot="task-list-items"]' : '[data-route="tasks"] button.self-center'
+    browser.waitForFunction(`document.querySelector('${footer}') !== null && window.__cezIdle`)
+    const before = browser.evaluate(`(() => {const e=document.querySelector('${footer}');e.scrollIntoView({block:'end'});return e.getBoundingClientRect().bottom})()`) as number
+    const after = waitForSettledSample<number>(browser, `document.querySelector('${footer}').getBoundingClientRect().bottom`)
+    // Measured fixed-row residual <=1px; card end padding costs32px, global rounding4px.
+    expect(Math.abs(after - before)).toBeLessThanOrEqual(bound)
+    if (presentation !== 'global') {
+      browser.click(footer)
+      browser.waitForFunction(`document.querySelector('[data-slot="tasks-result-count"]')?.textContent.includes('300 tasks') && !document.querySelector('${footer}')`)
+    }
+  } finally { await archived.stop() }
+})

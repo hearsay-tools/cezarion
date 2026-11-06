@@ -757,7 +757,7 @@ function TaskList({
     >
       <div data-slot="global-summary-head" className="text-[12px]" role="row" aria-rowindex={1}>{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <span role="columnheader" key={label}>{label}</span>)}</div>
       <TooltipProvider>
-            <TaskListItems items={tasks} itemKey={(task) => `${task.run.projectId}/${task.run.id}`}>{(task, index) => (
+            <TaskListItems {...(summary ? { itemSize: 115 } : {})} items={tasks} itemKey={(task) => `${task.run.projectId}/${task.run.id}`}>{(task, index) => (
               <TaskRow
                 key={`${task.run.projectId}/${task.run.id}`}
                 task={task}

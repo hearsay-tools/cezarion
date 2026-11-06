@@ -118,8 +118,21 @@ export async function runTaskListsBenchmark(values: TaskListBenchmarkOptions = {
         }
         const until = async (expression: string) => pollFor(async () => await evaluate(`Boolean(${expression})`) || undefined, () => `Not ready: ${expression}`, { timeoutMs: 60_000, intervalMs: 100, tries: 600 })
         const click = async (expression: string) => {
-          const point = await evaluate(`(()=>{const e=${expression};if(!e)return null;e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
-          if (!point) throw new Error(`Missing control: ${expression}`)
+          let previous = '', stableSince = 0
+          const point = await pollFor(async () => {
+            const sample = await evaluate(`(()=>{
+              const e=${expression};if(!e || window.__cezIdle!==true || document.fonts.status!=='loaded')return null;
+              e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();
+              const x=r.x+r.width/2,y=r.y+r.height/2;
+              return e.contains(document.elementFromPoint(x,y)) ? {x,y,width:r.width,height:r.height} : null;
+            })()`)
+            const signature = JSON.stringify(sample)
+            if (!sample || signature !== previous) { previous = signature; stableSince = performance.now(); return undefined }
+            return performance.now() - stableSince >= 200 ? { x: sample.x, y: sample.y } : undefined
+          }, () => `Unsettled click target: ${expression}`, {
+            // bound: fonts, query idle, virtual row-size correction and 200 ms stable geometry.
+            timeoutMs: 60_000, intervalMs: 50,
+          })
           report.lastClick = { expected: expression, point }
           await page('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
           await page('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })

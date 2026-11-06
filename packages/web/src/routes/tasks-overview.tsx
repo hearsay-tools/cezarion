@@ -673,7 +673,7 @@ function SummaryTasksTable({ rows, onRename, onTogglePin, now, showTokens, showC
   const aria = taskListRowIndexes(rows.map(({ run }) => run.id), expandedRuns)
   return <div data-slot="tasks-summary"><div className="rounded-lg border border-border bg-card p-5" role="table" aria-rowcount={aria.rowCount}>
     <div role="row" aria-rowindex={1} className="task-summary-grid">{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <div role="columnheader" key={label} className="h-8 border-b border-border text-start text-[12px] font-medium uppercase text-muted-foreground">{label}</div>)}</div>
-    <TaskListItems items={rows} itemKey={({ run }) => run.id}>{({ run, queuePosition }, index) =>
+    <TaskListItems itemSize={103} items={rows} itemKey={({ run }) => run.id}>{({ run, queuePosition }, index) =>
       <SummaryTaskRow run={run} queuePosition={queuePosition} rowIndex={aria.indexes[index]!} onRename={onRename} onTogglePin={onTogglePin} now={now} showTokens={showTokens} showCost={showCost} automationName={automationName} open={expandedRuns.has(run.id)} toggleExpandedRun={toggleExpandedRun} />
     }</TaskListItems>
   </div></div>
@@ -765,7 +765,7 @@ function GroupedTasks({
             <div role="row" aria-rowindex={1} className="task-resource-row">
               {columns.map((column) => <TaskColumnHeader key={column.id} column={column} expanded={isColumnExpanded(column.id, expandedColumns)} onToggle={onToggleColumn} disabled={columnsPending} />)}
             </div>
-            <TaskListItems items={rows} itemKey={({ run }) => run.id}>{({ run, queuePosition }, index) =>
+            <TaskListItems itemSize={50} items={rows} itemKey={({ run }) => run.id}>{({ run, queuePosition }, index) =>
               <TableRow rowIndex={index + 2} run={run} queuePosition={queuePosition} onRename={onRename} onTogglePin={onTogglePin} now={now} columns={columns} expandedColumns={expandedColumns} automationName={automationName} />
             }</TaskListItems>
           </div>
@@ -773,7 +773,7 @@ function GroupedTasks({
       </div> : null}
       {/* Phones mount cards only, regardless of saved desktop columns. */}
       {!desktop ? <div data-slot="task-cards" className="flex flex-col rounded-lg border border-border bg-card p-5">
-        <TaskListItems items={rows} itemKey={({ run }) => run.id}>{({ run, queuePosition }) => (
+        <TaskListItems itemSize={178} items={rows} itemKey={({ run }) => run.id}>{({ run, queuePosition }) => (
           <TaskCard key={run.id} resourcesOpen={expandedRuns.has(run.id)} onToggleResources={toggleExpandedRun} run={run} queuePosition={queuePosition} now={now} showTokens={showTokens} showCost={showCost} onTogglePin={onTogglePin} automationName={automationName} />
         )}</TaskListItems>
       </div> : null}

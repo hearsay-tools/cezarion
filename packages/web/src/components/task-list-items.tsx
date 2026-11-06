@@ -6,8 +6,9 @@ import { TaskListFocusContext, useTaskListFocus, useTaskListFocusState } from '@
 import { taskListKeepMounted, virtualizeTaskList } from '@/lib/task-list-render'
 
 /** One item includes its expanded preview. The page remains the sole vertical scroll owner. */
-export function TaskListItems<T>({ items, itemKey, children }: {
+export function TaskListItems<T>({ items, itemKey, children, itemSize }: {
   items: readonly T[]
+  itemSize?: number
   itemKey: (item: T) => string
   children: (item: T, index: number) => ReactElement
 }) {
@@ -58,7 +59,7 @@ export function TaskListItems<T>({ items, itemKey, children }: {
       focus.onBlurCapture(event)
       if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) setFocused(null)
     }}>
-    {virtual ? <VirtualTaskItems items={items} keys={keys} handle={handle} scroll={scroll} margin={geometry.margin} focused={pageFocus?.focused ?? focused} editing={editing}>{children}</VirtualTaskItems>
+    {virtual ? <VirtualTaskItems itemSize={itemSize} items={items} keys={keys} handle={handle} scroll={scroll} margin={geometry.margin} focused={pageFocus?.focused ?? focused} editing={editing}>{children}</VirtualTaskItems>
       : (geometry.available === null && eligible ? [] : items).map((item, index) => <div key={keys[index]} data-task-item={keys[index]} data-first={index === 0} data-last={index === items.length - 1} className="task-list-flat-item">{children(item, index)}</div>)}
   </div>
 }
@@ -71,7 +72,8 @@ export function TaskListFocusBoundary({ layout, revision, children, ...props }: 
   </TaskListScrollAnchor></TaskListFocusContext>
 }
 
-function VirtualTaskItems<T>({ items, keys, handle, scroll, margin, focused, editing, children }: {
+function VirtualTaskItems<T>({ items, keys, handle, scroll, margin, focused, editing, children, itemSize }: {
+  itemSize: number | undefined
   items: readonly T[]; keys: readonly string[]
   handle: React.RefObject<VirtualizerHandle | null>; scroll: React.RefObject<HTMLElement | null>
   margin: number; focused: string | null; editing: string | null
@@ -82,7 +84,7 @@ function VirtualTaskItems<T>({ items, keys, handle, scroll, margin, focused, edi
   const added = keys.length - previous.current.length
   const shift = added > 0 && previous.current.every((key, index) => keys[index + added] === key)
   useLayoutEffect(() => { previous.current = keys })
-  return <TaskListScrollAnchor revision={keys} keys={keys} scroll={scroll} handle={handle} shifting={shift}><Virtualizer ref={handle} ssrCount={1} scrollRef={scroll} startMargin={margin} shift={shift}
+  return <TaskListScrollAnchor revision={keys} keys={keys} scroll={scroll} handle={handle} shifting={shift}><Virtualizer ref={handle} ssrCount={1} {...(itemSize === undefined ? {} : { itemSize })} scrollRef={scroll} startMargin={margin} shift={shift}
     keepMounted={[...new Set([...taskListKeepMounted(keys, focused), ...taskListKeepMounted(keys, editing)])]} data={items}>
     {(item, index) => <div key={keys[index]} data-task-item={keys[index]} data-first={index === 0} data-last={index === items.length - 1}>{children(item, index)}</div>}
   </Virtualizer></TaskListScrollAnchor>
