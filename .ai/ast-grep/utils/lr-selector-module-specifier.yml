@@ -6,7 +6,7 @@ rule:
         - any:
             - kind: string
             - kind: template_string
-        - regex: ^['"`]([^'"`]*/)?(config|skills|skills-remote|agent-model-policy|models|agent-profiles|execution-identity|run-scheduling|execution-account|ui-state|model-identity|attachment-path|load|types)\.(ts|js)['"`]$
+        - regex: (^['"`]|/)(config|skills|skills-remote|agent-model-policy|models|agent-profiles|execution-identity|run-scheduling|execution-account|ui-state|model-identity|attachment-path|load|types)\.(ts|js)['"`]$
         - not:
             has:
               kind: template_substitution

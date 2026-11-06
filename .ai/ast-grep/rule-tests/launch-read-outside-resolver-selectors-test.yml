@@ -1,5 +1,6 @@
 id: launch-read-outside-resolver-selectors
 valid:
+  - const control = await import("../owner's/display-config.ts");
   - atTaskHead.runner(handle, configHandle)
   - atTaskHead.hydrateQueuedInput(context, read, id, recipe)
   - await atStepOpen.model(store, root, id, state, step, recipe, backend, identity)
@@ -28,6 +29,8 @@ valid:
   - import display from '../ui-state.js.bak';
   - const control = await import(`../display-config.ts`);
 invalid:
+  - const owned = await import("../owner's/config.ts");
+  - import { loadConfig } from "../owner's/config.ts";
   - const source = await import('../model-identity.js');
   - export * as policy from '../../agent-model-policy.ts'
   - import * as owned from '../load.ts';
