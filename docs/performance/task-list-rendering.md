@@ -248,12 +248,14 @@ Normal CLI defaults and fixture sizes remain the full workload described above.
 
 The PR was rebased onto `f7edfaf48679278a7c2763a0249f4aad5d1be6f5`, which includes Phase 2 S5. The fixture conflict keeps S5 index updates/ticks and S3b insertion/summary-streaming behavior. The task-list benchmark does not send index commands or use the index seed, so the resolution does not change its measured workload. Published measurements remain historical runs on the source hashes shown below; they do not measure the rebased S5 index path.
 
+Later changes (the rebase onto S5 `f7edfaf48` and later, the focus-restore retry in `use-task-list-focus.ts`, and the benchmark poll count) leave the measured render paths unchanged: index commands are not used by this workload, the retry observer exists only while a focused control is missing or not yet focusable after a layout change, and the poll count only extends the readiness limit.
+
 Large-list A timings were measured at `5a32a5816`. Later commits remove work on
 those paths: unchanged observer callbacks bail out,
 focus no longer reruns route derivations, and owner lookup no longer mounts every
 row before virtualization. They also add row-size hints and bounded initialization.
-The A timings are not final-source numbers. The mount-count and small-list checks
-below were repeated at final source `6608d3696`.
+The A timings are not pre-rebase-source numbers. The mount-count and small-list checks
+below were repeated at pre-rebase source `6608d3696`.
 
 Large global groups do less scroll work with virtualization. In paired runs on the
 same branch, global frame p95 falls in all five pairs at both widths. The median
@@ -266,9 +268,9 @@ on this shared host. The global desktop absolute commit p95 medians are 75.3 ms
 flat and 102.1 ms virtual. This study does not show a lower global desktop commit
 cost from virtualization.
 
-Acceptance criterion 6 is met by lower **scroll work** (global paired frame p95
+The recorded pre-rebase evidence supports acceptance criterion 6 through lower **scroll work** (global paired frame p95
 improves 5/5 at both viewports) and lower **update work** (the small global list
-renders/event falls 3.5 → 0.4 in the final-source recheck). It does not show a
+renders/event falls 3.5 → 0.4 at pre-rebase source `6608d3696`). This is evidence at the measured sources, not a new measurement of the reviewed S5 source. It does not show a
 universal timing improvement,
 an optimal crossover near 100 rows, or Phase 2's commit-time acceptance. Phase 2
 must compare global Tasks React commit time on main against `0320d57fb` under its
@@ -379,7 +381,7 @@ a reduction greater than 1 ms to avoid rounding ties.
 
 ### Small global group under summary events
 
-Both modes mount 50 rows. The final-source repeat uses five runs per build at
+Both modes mount 50 rows. The pre-rebase-source repeat uses five runs per build at
 `6608d3696026bcf9fac60bbae0b684861bf8aa31` and baseline `fdf9cf7dd`.
 Row renders per published event fall from 3.51 to 0.39 (89%). Commit p95 falls
 from 25.8 to 16.7 ms; p50 stays 0.1 ms. Event Timing p95 rises from 80 to 96 ms.
@@ -401,13 +403,13 @@ The active C cases do not click Archived. Elapsed interactions include the new
 200 ms geometry settlement; they are not comparable to the A interaction times.
 The final harness SHA256 is
 `9b1786ddffc8e773fde1fcfa914a5317684c47077c8f247cb8d16f49aef48951`.
-All final source trees were clean. Branch and baseline build hashes are
+All pre-rebase source trees were clean. Branch and baseline build hashes are
 `73dd4af7440a7ff8ca30600f8d4bf9bd46746daa3bffa45ed25f4baac474c019`
 and `a960638d2507fa30dfedd9e5517a5ce3cd8551ef9aec25dd03a635263210335e`
 respectively. The final indexes retain both hashes and all host samples.
 Load1 ranges were 13.39–14.07 for branch C, 14.00–15.04 for baseline C,
 and 14.40–23.07 for the mount recheck. The original C samples remain in the
-original 85-run raw data; this table replaces their final-source claim.
+original 85-run raw data; this table replaces their pre-rebase-source claim.
 
 ### API, long tasks and interactions
 
@@ -454,7 +456,7 @@ unmounted offscreen rows above the threshold, as approved in decision D5.
 Raw data: [branch pairs](task-list-rendering/s3b/branch/index.json),
 [baseline large](task-list-rendering/s3b/baseline/index.json),
 [branch small](task-list-rendering/s3b/branch-small/index.json), and
-[baseline small](task-list-rendering/s3b/baseline-small/index.json). Final-source
+[baseline small](task-list-rendering/s3b/baseline-small/index.json). Pre-rebase-source
 rechecks: [mounts](task-list-rendering/s3b/final-mount/index.json),
 [branch C](task-list-rendering/s3b/final-branch-small/index.json), and
 [baseline C](task-list-rendering/s3b/final-baseline-small/index.json).
@@ -464,7 +466,7 @@ encoding as S3a; all samples were round-trip checked against the original output
 
 ### Final mount and initialization checks
 
-The unchanged case matrix ran once per flat/virtual case at final source
+The unchanged case matrix ran once per flat/virtual case at pre-rebase source
 `6608d3696` with `--quick`: ten cases, used only to recheck mounted work.
 Its shorter stream is not a five-run timing study. Threshold 100 stays conservative;
 these samples do not establish an optimal crossover. The original paired A runs
