@@ -38,8 +38,11 @@ describe('automations on the shared environment', () => {
   it('advertises automations by default in the sidebar and API', async ({ skip }) => {
     skip(!automationsAvailable, 'the shared environment explicitly disabled automations')
     browser.goto(`${baseUrl}/p/${bootProject}/`)
-    browser.waitForFunction(`document.querySelector('[data-slot="sidebar"] a[href$="/automations"]') !== null`)
-    expect(browser.count('[data-slot="sidebar"] a[href$="/automations"]')).toBeGreaterThan(0)
+    browser.click('[data-slot="sidebar"] button[aria-label="More views"]')
+    const automationLink = `[role="menu"] a[href="/p/${bootProject}/automations"]`
+    browser.waitForFunction(`document.querySelector('${automationLink}') !== null`)
+    browser.click(automationLink)
+    browser.waitForFunction(`location.pathname === '/p/${bootProject}/automations'`)
     expect((await fetch(`${baseUrl}/api/v1/automations`)).status).toBe(200)
   }, 60_000)
 
