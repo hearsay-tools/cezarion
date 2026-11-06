@@ -1,6 +1,4 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { PlayIcon } from 'lucide-react'
-import { ArrowUpIcon, CheckIcon, ChevronDownIcon, MicIcon, PaperclipIcon, SquareIcon, TerminalIcon, XIcon } from '@/components/design-icons'
 import {
   useCallback,
   useEffect,
@@ -8,10 +6,9 @@ import {
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
-  useRef,
   useReducer,
+  useRef,
   useState,
-  type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
   type ReactNode,
@@ -20,17 +17,13 @@ import {
 
 import { putUiState } from '@/api/client'
 import { queryKeys, useSkills, useUiState } from '@/api/queries'
-import type { AttachmentInput } from '@open-mercato/cezar-api-client'
-import { Button } from '@/components/ui/button'
-import { Command, CommandItem, CommandList } from '@/components/ui/command'
-import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
+import type { AttachmentInput, Skill } from '@open-mercato/cezar-api-client'
 import { toast } from '@/components/ui/toaster'
 import { insertTemplate } from '@/lib/prompt-templates'
 import { isEditableTarget } from '@/lib/use-command-shortcut'
 import { bumpSkillUsage, filterSkills, fuzzyMatch, isProjectSkill } from '@/lib/skills'
 import { useNow } from '@/lib/use-now'
 import { isSubmitShortcut } from '@/lib/use-submit-shortcut'
-import { cn } from '@/lib/utils'
 
 import {
   fileToPendingAttachment,
@@ -39,7 +32,50 @@ import {
   type PendingAttachment,
 } from './composer-attachments'
 import { applyCompletion, detectTrigger, type TriggerState } from './composer-text'
-import { formatElapsed, useDictation } from './dictation'
+import { useDictation } from './dictation'
+import {
+  ComposerDictationButton,
+  ComposerEditor,
+  ComposerFeedback,
+  composerFinishLabel,
+  ComposerFinishButton,
+  ComposerFrame,
+  ComposerMenuList,
+  ComposerStopButton,
+  ComposerSubmitRow,
+} from './composer-parts'
+import {
+  composerAttachmentReadError,
+  composerCaret,
+  composerDictationBlocked,
+  composerDisclosureKey,
+  composerDropFiles,
+  composerEditsBlocked,
+  composerErrorMessage,
+  composerFeedbackShown,
+  composerFieldSizing,
+  composerHasCompactFeedback,
+  composerHasContent,
+  composerLabelledStop,
+  composerMergeTranscript,
+  composerMobileCompact,
+  composerMobileOpen,
+  composerNextMenuIndex,
+  composerPasteFiles,
+  composerPrimaryFinish,
+  composerPrimaryStop,
+  composerReadOnly,
+  composerRestoreText,
+  composerRootClass,
+  composerSendRefused,
+  composerShowStop,
+  composerStopRefused,
+  composerSubmitLabel,
+  composerVoiceClear,
+  composerWidthChanged,
+  type ComposerMenuCandidate,
+  type ComposerSubmitMode,
+} from './composer-view'
 
 /**
  * The SHARED composer (spec §"Task thread" composer + §"New task" composer intelligence —
@@ -166,46 +202,119 @@ export interface ComposerHandle {
 
 const QUICK_REPLIES: Record<string, string> = { KeyA: 'Yes, approved.', KeyC: 'Continue.' }
 
-export function Composer({
-  onSubmit,
-  retainDraftUntilSuccess = false,
-  onStop,
-  onFinish,
-  finishing = false,
-  secondaryAction,
-  stopOnEmpty = false,
-  stopping = false,
-  emptySubmitLabel,
-  compactFeedback = false,
-  idleFeedback,
-  pendingLabel = 'Starting task…',
-  failureHint = 'Could not confirm submission. Check Tasks before you retry. Your draft is kept.',
-  clearOnSuccess = true,
-  onPendingChange,
-  value,
-  onValueChange,
-  autoFocus = false,
-  mobileCollapsible = false,
-  mobileDisclosureKey,
-  footerStart,
-  footerEnd,
-  sessionControls,
-  executionOptions,
-  agentOptions,
-  sendAriaLabel = 'Send',
-  disabled = false,
-  disabledReason = 'Session closed — Continue to reopen.',
-  allowEmptySubmit = false,
-  placeholder = 'Reply — / for skills, @ for files…',
-  ariaLabel = 'Reply to the agent',
-  autocompleteSkills = true,
-  quickReplies = false,
-  getMentionCandidates,
-  voiceProposal = false,
-  ref,
-}: ComposerProps) {
-  // Optionally controlled: `value` (when given) shadows the internal state, and every write is
-  // mirrored to both — updater functions resolve against whichever is authoritative end now.
+const COMPOSER_DEFAULTS = {
+  retainDraftUntilSuccess: false,
+  finishing: false,
+  stopOnEmpty: false,
+  stopping: false,
+  compactFeedback: false,
+  pendingLabel: 'Starting task…',
+  failureHint: 'Could not confirm submission. Check Tasks before you retry. Your draft is kept.',
+  clearOnSuccess: true,
+  autoFocus: false,
+  mobileCollapsible: false,
+  sendAriaLabel: 'Send',
+  disabled: false,
+  disabledReason: 'Session closed — Continue to reopen.',
+  allowEmptySubmit: false,
+  placeholder: 'Reply — / for skills, @ for files…',
+  ariaLabel: 'Reply to the agent',
+  autocompleteSkills: true,
+  quickReplies: false,
+  voiceProposal: false,
+}
+
+function defined<T>(value: T | undefined, fallback: T): T {
+  return value === undefined ? fallback : value
+}
+
+function composerInput(props: ComposerProps): Required<Pick<ComposerProps,
+  'retainDraftUntilSuccess' | 'finishing' | 'stopOnEmpty' | 'stopping' | 'compactFeedback' | 'pendingLabel' | 'failureHint' | 'clearOnSuccess' | 'autoFocus' | 'mobileCollapsible' | 'sendAriaLabel' | 'disabled' | 'disabledReason' | 'allowEmptySubmit' | 'placeholder' | 'ariaLabel' | 'autocompleteSkills' | 'quickReplies' | 'voiceProposal'
+>> & ComposerProps {
+  return {
+    ...props,
+    retainDraftUntilSuccess: defined(props.retainDraftUntilSuccess, COMPOSER_DEFAULTS.retainDraftUntilSuccess),
+    finishing: defined(props.finishing, COMPOSER_DEFAULTS.finishing),
+    stopOnEmpty: defined(props.stopOnEmpty, COMPOSER_DEFAULTS.stopOnEmpty),
+    stopping: defined(props.stopping, COMPOSER_DEFAULTS.stopping),
+    compactFeedback: defined(props.compactFeedback, COMPOSER_DEFAULTS.compactFeedback),
+    pendingLabel: defined(props.pendingLabel, COMPOSER_DEFAULTS.pendingLabel),
+    failureHint: defined(props.failureHint, COMPOSER_DEFAULTS.failureHint),
+    clearOnSuccess: defined(props.clearOnSuccess, COMPOSER_DEFAULTS.clearOnSuccess),
+    autoFocus: defined(props.autoFocus, COMPOSER_DEFAULTS.autoFocus),
+    mobileCollapsible: defined(props.mobileCollapsible, COMPOSER_DEFAULTS.mobileCollapsible),
+    sendAriaLabel: defined(props.sendAriaLabel, COMPOSER_DEFAULTS.sendAriaLabel),
+    disabled: defined(props.disabled, COMPOSER_DEFAULTS.disabled),
+    disabledReason: defined(props.disabledReason, COMPOSER_DEFAULTS.disabledReason),
+    allowEmptySubmit: defined(props.allowEmptySubmit, COMPOSER_DEFAULTS.allowEmptySubmit),
+    placeholder: defined(props.placeholder, COMPOSER_DEFAULTS.placeholder),
+    ariaLabel: defined(props.ariaLabel, COMPOSER_DEFAULTS.ariaLabel),
+    autocompleteSkills: defined(props.autocompleteSkills, COMPOSER_DEFAULTS.autocompleteSkills),
+    quickReplies: defined(props.quickReplies, COMPOSER_DEFAULTS.quickReplies),
+    voiceProposal: defined(props.voiceProposal, COMPOSER_DEFAULTS.voiceProposal),
+  }
+}
+
+function composerMenuCandidates(
+  trigger: TriggerState | null,
+  skills: readonly Skill[],
+  skillUsage: Parameters<typeof filterSkills>[2],
+  getMentionCandidates: (() => string[]) | undefined,
+): ComposerMenuCandidate[] {
+  if (trigger === null) return []
+  if (trigger.trigger === '/') {
+    return filterSkills(skills, trigger.query, skillUsage).map((skill) => ({
+      value: `${skill.name} ${skill.path}`,
+      insert: skill.name,
+      label: skill.name,
+      description: skill.description,
+      emphasized: isProjectSkill(skill),
+    }))
+  }
+  return (getMentionCandidates?.() ?? [])
+    .filter((path) => fuzzyMatch(path, trigger.query))
+    .map((path) => ({ value: path, insert: path, label: path, emphasized: false }))
+}
+
+function composerActiveValue(candidates: readonly ComposerMenuCandidate[], menuValue: string): string | undefined {
+  return candidates.some((candidate) => candidate.value === menuValue) ? menuValue : candidates[0]?.value
+}
+
+function composerClearSuccessfulDraft(
+  mounted: boolean,
+  retain: boolean,
+  clearOnSuccess: boolean,
+  textMatches: boolean,
+  imagesMatch: boolean,
+  clearText: () => void,
+  clearImages: () => void,
+): void {
+  if (!mounted || !retain || !clearOnSuccess) return
+  if (textMatches) clearText()
+  if (imagesMatch) clearImages()
+}
+
+function composerRestoreFailedDraft(
+  retain: boolean,
+  restoreOnError: boolean,
+  message: string,
+  messageText: string,
+  messageImages: PendingAttachment[],
+  setError: (message: string) => void,
+  setText: (next: string | ((current: string) => string)) => void,
+  setImages: (next: PendingAttachment[] | ((current: PendingAttachment[]) => PendingAttachment[])) => void,
+): void {
+  if (retain) {
+    setError(message)
+    return
+  }
+  toast(message, { tone: 'danger' })
+  if (!restoreOnError) return
+  setText((current) => composerRestoreText(current, messageText))
+  setImages((current) => [...messageImages, ...current].slice(0, MAX_ATTACHMENTS))
+}
+
+function useComposerText(value: string | undefined, onValueChange: ((text: string) => void) | undefined) {
   const [internalText, setInternalText] = useState('')
   const text = value ?? internalText
   const textRef = useRef(text)
@@ -217,6 +326,19 @@ export function Composer({
     setInternalText(resolved)
     onValueChangeRef.current?.(resolved)
   }, [])
+  return { text, textRef, setText }
+}
+
+export function Composer(props: ComposerProps) {
+  const {
+    onSubmit, retainDraftUntilSuccess, onStop, onFinish, finishing, secondaryAction, stopOnEmpty,
+    stopping, emptySubmitLabel, compactFeedback, idleFeedback, pendingLabel, failureHint,
+    clearOnSuccess, onPendingChange, value, onValueChange, autoFocus, mobileCollapsible,
+    mobileDisclosureKey, footerStart, footerEnd, sessionControls, executionOptions, agentOptions,
+    sendAriaLabel, disabled, disabledReason, allowEmptySubmit, placeholder, ariaLabel,
+    autocompleteSkills, quickReplies, getMentionCandidates, voiceProposal, ref,
+  } = composerInput(props)
+  const { text, textRef, setText } = useComposerText(value, onValueChange)
   const [images, setImages] = useState<PendingAttachment[]>([])
   // Mirrors `images` for reads inside event handlers that must not run through a setState updater
   // (StrictMode double-invokes those in dev — see addFiles / #double-paste).
@@ -226,18 +348,6 @@ export function Composer({
   const stopPending = stopping || stoppingLocally
   const stopPendingRef = useRef(stopPending)
   stopPendingRef.current = stopPending
-  const hasContent = text.trim() !== '' || images.length > 0
-  const primaryStop = !hasContent && ((onStop !== undefined && stopOnEmpty) || stopPending)
-  // Never displaces a live primary (#281): Stop keeps the slot wherever it already had it, and a
-  // host only passes `onFinish` for a status whose empty-draft primary would otherwise be a
-  // disabled Send. The `!hasContent` guard is the whole affordance — a typed draft means Send.
-  const primaryFinish = !hasContent && !primaryStop && onFinish !== undefined
-  // Stop wears its word whenever the control beside it does (#281). Next to the bare arrow Send it
-  // reads fine as an icon — two icons, one row — but next to a labelled Finish or Continue it read
-  // as an unexplained square beside a verb. The condition follows the PRIMARY's own label rule
-  // rather than naming Finish, so a future promoted primary cannot reintroduce the mismatch.
-  const labelledStop = primaryStop || primaryFinish || (!hasContent && emptySubmitLabel !== undefined)
-  const submitLabel = !hasContent && emptySubmitLabel ? emptySubmitLabel : sendAriaLabel
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
   const attachmentEpoch = useRef(0)
@@ -247,8 +357,7 @@ export function Composer({
     return () => { mounted.current = false }
   }, [])
   const [submissionError, setSubmissionError] = useState<string | null>(null)
-  const readOnly = stopPending || (retainDraftUntilSuccess && busy)
-  const editsBlocked = () => stopPendingRef.current || (retainDraftUntilSuccess && busyRef.current)
+  const editsBlocked = () => composerEditsBlocked(stopPendingRef.current, retainDraftUntilSuccess, busyRef.current)
   const [trigger, setTrigger] = useState<TriggerState | null>(null)
   const [menuValue, setMenuValue] = useState('')
   // Skills load on the FIRST `/` trigger and stay cached — not on every thread visit.
@@ -256,23 +365,19 @@ export function Composer({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const textareaId = useId()
   const optionsId = useId()
+  const attachInputRef = useRef<HTMLInputElement>(null)
   const localMobileDisclosures = useRef(new Map<string, boolean>())
   const mobileDisclosures = mobileDisclosureKey === undefined ? localMobileDisclosures.current : mobileOpenByTask
-  const disclosureKey = mobileDisclosureKey ?? 'default'
-  const [, bumpMobileDisclosure] = useReducer((n: number) => n + 1, 0)
-  const mobileOpen = mobileDisclosures.get(disclosureKey) ?? false
-  const mobileCompact = mobileCollapsible && !mobileOpen
+  const disclosureKey = composerDisclosureKey(mobileDisclosureKey)
+  const [, bumpMobileDisclosure] = useReducer((count: number) => count + 1, 0)
+  const mobileOpen = composerMobileOpen(mobileDisclosures, disclosureKey)
   const rootRef = useRef<HTMLDivElement>(null)
   const menuListRef = useRef<HTMLDivElement>(null)
   const pendingCaretRef = useRef<number | null>(null)
 
   const skills = useSkills(autocompleteSkills && skillsWanted)
-  // The `/` list orders most-used first (#519) and a pick bumps `skillUsage`, so this — the
-  // highest-traffic skill surface — both reads and feeds the same stats as the pickers.
   const uiState = useUiState()
   const queryClient = useQueryClient()
-  // A recognition error leaves the draft alone; Try again goes through the same guard as the mic,
-  // read at click time: the toast outlives the render that raised it.
   const disabledRef = useRef(disabled)
   disabledRef.current = disabled
   const dictation = useDictation((message, retry) =>
@@ -289,73 +394,40 @@ export function Composer({
     if (autoFocus) textareaRef.current?.focus()
   }, []) // deliberately not [autoFocus]
 
-  // ---- autocomplete ------------------------------------------------------------------------
-
-  /** Re-read the trigger from the real textarea (value + caret) — the one source of truth. */
   const syncTrigger = useCallback(() => {
-    const el = textareaRef.current
-    if (!el || disabled || editsBlocked()) {
+    const element = textareaRef.current
+    if (!element || disabled || editsBlocked()) {
       setTrigger(null)
       return
     }
-    const next = detectTrigger(el.value, el.selectionStart ?? el.value.length)
+    const next = detectTrigger(element.value, composerCaret(element.selectionStart, element.value.length))
     if (next?.trigger === '/' && !autocompleteSkills) return setTrigger(null)
     if (next?.trigger === '@' && getMentionCandidates === undefined) return setTrigger(null)
     if (next?.trigger === '/') setSkillsWanted(true)
     setTrigger(next)
   }, [autocompleteSkills, disabled, getMentionCandidates, retainDraftUntilSuccess])
 
-  interface MenuCandidate {
-    value: string
-    insert: string
-    label: string
-    description?: string | undefined
-    emphasized: boolean
-  }
-
-  const candidates = useMemo((): MenuCandidate[] => {
-    if (trigger === null) return []
-    if (trigger.trigger === '/') {
-      return filterSkills(skills.data ?? [], trigger.query, uiState.data?.skillUsage).map((skill) => ({
-        // The path suffix keeps values unique when a project skill shadows a global one.
-        value: `${skill.name} ${skill.path}`,
-        insert: skill.name,
-        label: skill.name,
-        description: skill.description,
-        emphasized: isProjectSkill(skill),
-      }))
-    }
-    const paths = getMentionCandidates?.() ?? []
-    return paths
-      .filter((path) => fuzzyMatch(path, trigger.query))
-      .map((path) => ({ value: path, insert: path, label: path, emphasized: false }))
-  }, [getMentionCandidates, skills.data, trigger, uiState.data?.skillUsage])
-
-  const activeValue = candidates.some((c) => c.value === menuValue)
-    ? menuValue
-    : candidates[0]?.value
+  const candidates = useMemo(
+    () => composerMenuCandidates(trigger, skills.data ?? [], uiState.data?.skillUsage, getMentionCandidates),
+    [getMentionCandidates, skills.data, trigger, uiState.data?.skillUsage],
+  )
+  const activeValue = composerActiveValue(candidates, menuValue)
   const menuOpen = trigger !== null
 
-  // Arrow keys are handled by the textarea, so cmdk never gets its own keyboard event to
-  // scroll the active result. Read the committed selection before paint and keep it visible.
   useLayoutEffect(() => {
     if (!menuOpen || !activeValue) return
-    const selected = [...(menuListRef.current?.querySelectorAll('[data-slot="composer-menu-item"]') ?? [])]
-      .find((item) => item.getAttribute('data-value') === activeValue)
+    const items = menuListRef.current?.querySelectorAll('[data-slot="composer-menu-item"]')
+    const selected = [...(items ?? [])].find((item) => item.getAttribute('data-value') === activeValue)
     selected?.scrollIntoView({ block: 'nearest' })
   }, [activeValue, menuOpen])
 
   const closeMenu = useCallback(() => setTrigger(null), [])
 
-  const pick = (candidate: MenuCandidate) => {
-    const el = textareaRef.current
-    if (!el || trigger === null || editsBlocked()) return
-    const caret = el.selectionStart ?? el.value.length
-    const next = applyCompletion(el.value, trigger, caret, candidate.insert)
-    // Frequency sort (#519): a `/` completion is a skill pick, so it counts — same guard as
-    // /new's submit (#408): only bump once the CURRENT map is known. The PUT merge is shallow,
-    // so bumping off an unresolved/errored ui-state query would send a one-entry map and wipe
-    // every accumulated count. Fire-and-forget; a lost bump costs one count, nothing more.
+  const pick = (candidate: ComposerMenuCandidate) => {
+    const element = textareaRef.current
+    if (!element || trigger === null || editsBlocked()) return
+    const caret = composerCaret(element.selectionStart, element.value.length)
+    const next = applyCompletion(element.value, trigger, caret, candidate.insert)
     if (trigger.trigger === '/' && uiState.data !== undefined) {
       putUiState({ skillUsage: bumpSkillUsage(uiState.data.skillUsage, candidate.insert) })
         .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.uiState }))
@@ -364,200 +436,148 @@ export function Composer({
     setText(next.text)
     pendingCaretRef.current = next.caret
     setTrigger(null)
-    el.focus()
+    element.focus()
   }
 
-  // Restore the caret after a completion replaced the token mid-draft.
   useLayoutEffect(() => {
     const caret = pendingCaretRef.current
-    const el = textareaRef.current
-    if (caret !== null && el) {
-      el.setSelectionRange(caret, caret)
+    const element = textareaRef.current
+    if (caret !== null && element) {
+      element.setSelectionRange(caret, caret)
       pendingCaretRef.current = null
     }
   }, [text])
 
-  // ---- sizing (44px phone / 54px desktop; CSS caps reading mode without remounting) ----------
-
   useLayoutEffect(() => {
-    const el = textareaRef.current
-    if (!el) return
-    // Native sizing follows line wrapping and font loading, including width-only changes.
-    if (typeof CSS !== 'undefined' && CSS.supports('field-sizing', 'content')) return
-    // Older Safari/Firefox keep the shipped growth behavior. Watch inline size only:
-    // observing our own block-size writes would create a ResizeObserver feedback loop.
+    const element = textareaRef.current
+    if (!element || composerFieldSizing()) return
     const resize = () => {
-      el.style.height = 'auto'
-      el.style.height = `${Math.min(el.scrollHeight, 220)}px`
+      element.style.height = 'auto'
+      element.style.height = `${Math.min(element.scrollHeight, 220)}px`
     }
     resize()
-    let width = el.clientWidth
+    let width = element.clientWidth
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
-      if (el.clientWidth === width) return
-      width = el.clientWidth
+      if (!composerWidthChanged(element.clientWidth, width)) return
+      width = element.clientWidth
       resize()
     })
-    observer?.observe(el)
+    observer?.observe(element)
     let disposed = false
     void document.fonts?.ready.then(() => { if (!disposed) resize() })
     return () => { disposed = true; observer?.disconnect() }
   }, [text, mobileOpen])
 
-  // ---- attachments ---------------------------------------------------------------------------
-
-  const addFiles = useCallback(
-    (files: readonly File[]) => {
-      if (disabled || editsBlocked()) return
-      const epoch = attachmentEpoch.current
-      // Side effects (screening toasts + async encode) run OUTSIDE any setState updater: React
-      // StrictMode double-invokes updater functions in dev, so screening here would encode and
-      // append each pasted file twice (#double-paste). `imagesRef` gives the current count
-      // without reading through state; each async append re-checks the cap functionally.
-      const intake = screenFiles(files, imagesRef.current.length)
-      for (const reason of intake.rejected) toast(reason, { tone: 'danger' })
-      for (const file of intake.accepted) {
-        void fileToPendingAttachment(file).then(
-          (attachment) => {
-            // Stop never submits the draft: finish reads already accepted before it.
-            if (!mounted.current || (retainDraftUntilSuccess && busyRef.current && !stopPendingRef.current) || epoch !== attachmentEpoch.current) return
-            setImages((prev) => (prev.length >= MAX_ATTACHMENTS ? prev : [...prev, attachment]))
-          },
-          () => toast(`${file.name || 'Attachment'} could not be read — try attaching it again`, { tone: 'danger' }),
-        )
-      }
-    },
-    [disabled, retainDraftUntilSuccess],
-  )
-
-  const onPaste = (event: ClipboardEvent) => {
-    // `kind: 'file'` rather than an `image/` type test (#950): the clipboard carries a pasted
-    // `.md` as a file item too, and `screenFiles` is what decides whether cezar takes it. The
-    // text half of the clipboard is start alone so an ordinary ⌘V still types.
-    const files = [...(event.clipboardData?.items ?? [])]
-      .filter((item) => item.kind === 'file')
-      .map((item) => item.getAsFile())
-      .filter((file): file is File => file !== null)
-    if (files.length === 0) return
-    event.preventDefault()
-    addFiles(files)
-  }
+  const addFiles = useCallback((files: readonly File[]) => {
+    if (disabled || editsBlocked()) return
+    const epoch = attachmentEpoch.current
+    const intake = screenFiles(files, imagesRef.current.length)
+    for (const reason of intake.rejected) toast(reason, { tone: 'danger' })
+    for (const file of intake.accepted) {
+      void fileToPendingAttachment(file).then(
+        (attachment) => {
+          const stale = !mounted.current
+            || (retainDraftUntilSuccess && busyRef.current && !stopPendingRef.current)
+            || epoch !== attachmentEpoch.current
+          if (stale) return
+          setImages((prev) => (prev.length >= MAX_ATTACHMENTS ? prev : [...prev, attachment]))
+        },
+        () => toast(composerAttachmentReadError(file.name), { tone: 'danger' }),
+      )
+    }
+  }, [disabled, retainDraftUntilSuccess])
 
   const onDrop = (event: DragEvent) => {
-    const files = [...(event.dataTransfer?.files ?? [])]
+    const files = composerDropFiles(event.dataTransfer?.files)
     if (files.length === 0) return
     event.preventDefault()
     addFiles(files)
   }
 
-  // ---- submit --------------------------------------------------------------------------------
-
-  /** The one rule for "a send would not start": the composer is disabled, stopping or busy, or
-   *  the message is empty. `send` and the handle's `submit` both ask it, so they cannot differ. */
   const sendRefused = useCallback(
-    (messageText: string, messageImages: PendingAttachment[]) =>
-      disabled || stopping || busyRef.current ||
-      (messageText.trim() === '' && messageImages.length === 0 && !allowEmptySubmit),
+    (messageText: string, messageImages: PendingAttachment[]) => composerSendRefused(
+      disabled, stopping, busyRef.current, allowEmptySubmit, messageText, messageImages.length,
+    ),
     [disabled, stopping, allowEmptySubmit],
   )
 
-  const send = useCallback(
-    async (messageText: string, messageImages: PendingAttachment[], restoreOnError: boolean) => {
-      const body = messageText.trim()
-      if (sendRefused(messageText, messageImages)) return
-      // Lock before any callback/state update: two keyboard events can share a render.
-      busyRef.current = true
-      if (retainDraftUntilSuccess) attachmentEpoch.current += 1
-      setBusy(true)
-      setSubmissionError(null)
-      onPendingChange?.(true)
-      setTrigger(null)
-      if (restoreOnError && !retainDraftUntilSuccess) {
-        setText('')
-        setImages([])
+  const send = useCallback(async (messageText: string, messageImages: PendingAttachment[], restoreOnError: boolean) => {
+    const body = messageText.trim()
+    if (sendRefused(messageText, messageImages)) return
+    busyRef.current = true
+    if (retainDraftUntilSuccess) attachmentEpoch.current += 1
+    setBusy(true)
+    setSubmissionError(null)
+    onPendingChange?.(true)
+    setTrigger(null)
+    if (restoreOnError && !retainDraftUntilSuccess) {
+      setText('')
+      setImages([])
+    }
+    try {
+      await onSubmit(body, messageImages.map(({ mediaType, data }) => ({ mediaType, data })))
+      composerClearSuccessfulDraft(
+        mounted.current, retainDraftUntilSuccess, clearOnSuccess,
+        textRef.current === messageText, imagesRef.current === messageImages,
+        () => setText(''), () => setImages([]),
+      )
+    } catch (error) {
+      if (!mounted.current && retainDraftUntilSuccess) return
+      composerRestoreFailedDraft(
+        retainDraftUntilSuccess, restoreOnError, composerErrorMessage(error), messageText, messageImages,
+        setSubmissionError, setText, setImages,
+      )
+    } finally {
+      busyRef.current = false
+      if (mounted.current) {
+        onPendingChange?.(false)
+        setBusy(false)
       }
-      try {
-        await onSubmit(body, messageImages.map(({ mediaType, data }) => ({ mediaType, data })))
-        if (mounted.current && retainDraftUntilSuccess && clearOnSuccess) {
-          // A controlled host may have supplied a newer draft while the request was pending.
-          if (textRef.current === messageText) setText('')
-          if (imagesRef.current === messageImages) setImages([])
-        }
-      } catch (error) {
-        if (!mounted.current && retainDraftUntilSuccess) return
-        const message = error instanceof Error ? error.message : String(error)
-        if (retainDraftUntilSuccess) {
-          setSubmissionError(message)
-        } else {
-          toast(message, { tone: 'danger' })
-          if (restoreOnError) {
-            setText((current) => (current === '' ? messageText : `${messageText}\n${current}`))
-            setImages((current) => [...messageImages, ...current].slice(0, MAX_ATTACHMENTS))
-          }
-        }
-      } finally {
-        busyRef.current = false
-        if (mounted.current) {
-          onPendingChange?.(false)
-          setBusy(false)
-        }
-      }
-    },
-    [sendRefused, onSubmit, retainDraftUntilSuccess, clearOnSuccess, onPendingChange, setText],
-  )
+    }
+  }, [sendRefused, onSubmit, retainDraftUntilSuccess, clearOnSuccess, onPendingChange, setText])
 
-  /** Returns whether the send started: false when `sendRefused` (disabled, stopping, busy, empty). */
   const submitDraft = useCallback(() => {
     if (sendRefused(textRef.current, imagesRef.current)) return false
     void send(textRef.current, imagesRef.current, true)
     return true
   }, [sendRefused, send])
 
-  // Rides the same `pendingCaretRef` + layout-effect restore the `/` autocomplete uses, rather
-  // than a rAF: the caret is set in the same paint as the text, so there is no window in which a
-  // closing dropdown can take the focus back (the QA finding on #413's first cut).
-  useImperativeHandle(
-    ref,
-    () => ({
-      insertAtCaret: (snippet: string) => {
-        if (editsBlocked()) return
-        const el = textareaRef.current
-        const result = insertTemplate(textRef.current, el?.selectionStart ?? textRef.current.length, snippet)
-        setText(result.text)
-        pendingCaretRef.current = result.caret
-        el?.focus()
-      },
-      // The voice proposal (spec 2026-10-21-voice-mode) reads, fills and sends the draft. Both
-      // writes keep the composer's own guards: `submit` is the send button's `submitDraft`.
-      getDraft: () => textRef.current,
-      setDraft: (next: string) => {
-        if (editsBlocked()) return false
-        setText(next)
-        return true
-      },
-      // Removes text a voice proposal put there, never the user's own: it ignores the Stop-pending
-      // guard (a draft left behind would become the next task's), but not a send in flight, which
-      // owns the text now, nor an edit, which makes the draft the user's.
-      clearVoiceDraft: (voiceText: string) => {
-        if (textRef.current === '') return true
-        if (busyRef.current || textRef.current !== voiceText) return false
-        setText('')
-        return true
-      },
-      submit: submitDraft,
-    }),
-    [setText, retainDraftUntilSuccess, submitDraft],
-  )
+  useImperativeHandle(ref, () => ({
+    insertAtCaret: (snippet: string) => {
+      if (editsBlocked()) return
+      const element = textareaRef.current
+      const caret = composerCaret(element?.selectionStart ?? null, textRef.current.length)
+      const result = insertTemplate(textRef.current, caret, snippet)
+      setText(result.text)
+      pendingCaretRef.current = result.caret
+      element?.focus()
+    },
+    getDraft: () => textRef.current,
+    setDraft: (next: string) => {
+      if (editsBlocked()) return false
+      setText(next)
+      return true
+    },
+    clearVoiceDraft: (voiceText: string) => {
+      const outcome = composerVoiceClear(textRef.current, busyRef.current, voiceText)
+      if (outcome === 'empty') return true
+      if (outcome === 'blocked') return false
+      setText('')
+      return true
+    },
+    submit: submitDraft,
+  }), [setText, retainDraftUntilSuccess, submitDraft])
 
   const stop = async () => {
-    if (!onStop || stopping || busyRef.current) return
+    if (composerStopRefused(onStop, stopping, busyRef.current)) return
     busyRef.current = true
     setBusy(true)
     setStoppingLocally(true)
     setSubmissionError(null)
     try {
-      await onStop()
+      await onStop?.()
     } catch (error) {
-      if (mounted.current) setSubmissionError(error instanceof Error ? error.message : String(error))
+      if (mounted.current) setSubmissionError(composerErrorMessage(error))
     } finally {
       busyRef.current = false
       if (mounted.current) {
@@ -568,72 +588,58 @@ export function Composer({
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (menuOpen) {
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault()
-        if (candidates.length === 0) return
-        const at = candidates.findIndex((c) => c.value === activeValue)
-        const delta = event.key === 'ArrowDown' ? 1 : -1
-        const next = candidates[(at + delta + candidates.length) % candidates.length]!
-        setMenuValue(next.value)
-        return
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        closeMenu()
-        return
-      }
-      if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey) {
-        const active = candidates.find((c) => c.value === activeValue)
-        if (active) {
-          event.preventDefault()
-          pick(active)
-          return
-        }
-        // No match to accept: the menu is inert — close it and let Enter mean "send".
-        closeMenu()
-      }
-    }
-    const shouldSend = isSubmitShortcut({
-      key: event.key,
-      shiftKey: event.shiftKey,
-      metaKey: event.metaKey,
-      ctrlKey: event.ctrlKey,
-      altKey: event.altKey,
-      repeat: event.repeat,
-      isComposing: event.nativeEvent.isComposing,
-    })
-    if (shouldSend) {
-      event.preventDefault()
-      submitDraft()
-    }
+    if (menuOpen && moveMenu(event)) return
+    if (!isSubmitShortcut(submitEvent(event))) return
+    event.preventDefault()
+    submitDraft()
   }
 
-  // ---- quick replies (legacy parity: window-global, only while the composer can send) --------
+  const moveMenu = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      if (candidates.length === 0) return true
+      const at = candidates.findIndex((candidate) => candidate.value === activeValue)
+      const delta = event.key === 'ArrowDown' ? 1 : -1
+      const next = candidates[composerNextMenuIndex(at, delta, candidates.length)]!
+      setMenuValue(next.value)
+      return true
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeMenu()
+      return true
+    }
+    if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey) {
+      const active = candidates.find((candidate) => candidate.value === activeValue)
+      if (active) {
+        event.preventDefault()
+        pick(active)
+        return true
+      }
+      closeMenu()
+    }
+    return false
+  }
 
   useEffect(() => {
     if (!quickReplies || disabled) return
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
       if (!event.altKey || event.metaKey || event.ctrlKey || event.repeat) return
-      // Option composes characters on macOS; leave typing and character insertion alone.
       if (isEditableTarget(event.target)) return
       const reply = QUICK_REPLIES[event.code]
       if (reply === undefined) return
       event.preventDefault()
-      // Canned replies bypass the draft entirely — nothing to restore on failure.
       void send(reply, [], false)
     }
     window.addEventListener('keydown', onWindowKeyDown)
     return () => window.removeEventListener('keydown', onWindowKeyDown)
   }, [disabled, quickReplies, send])
 
-  // ---- dictation actions -----------------------------------------------------------------------
-
   const insertTranscript = (alsoSend: boolean) => {
-    if (disabled || stopPendingRef.current || (busyRef.current && (alsoSend || retainDraftUntilSuccess))) return
+    if (composerDictationBlocked(disabled, stopPendingRef.current, busyRef.current, alsoSend, retainDraftUntilSuccess)) return
     const transcript = dictation.finish()
     if (transcript === '') return
-    const merged = text.trim() === '' ? transcript : `${text.replace(/\s*$/, '')} ${transcript}`
+    const merged = composerMergeTranscript(text, transcript)
     if (alsoSend) {
       if (retainDraftUntilSuccess) setText(merged)
       void send(merged, images, true)
@@ -644,452 +650,137 @@ export function Composer({
     textareaRef.current?.focus()
   }
 
+  const hasContent = composerHasContent(text, images.length)
+  const primaryStop = composerPrimaryStop(hasContent, onStop, stopOnEmpty, stopPending)
+  const primaryFinish = composerPrimaryFinish(hasContent, primaryStop, onFinish)
+  const mode: ComposerSubmitMode = {
+    hasContent,
+    primaryStop,
+    primaryFinish,
+    labelledStop: composerLabelledStop(primaryStop, primaryFinish, hasContent, emptySubmitLabel),
+    submitLabel: composerSubmitLabel(hasContent, emptySubmitLabel, sendAriaLabel),
+    busy,
+    stopPending,
+    finishing,
+    finishLabel: composerFinishLabel(finishing),
+    finishTitle: 'Close the session and mark this task done',
+    disabled,
+    allowEmptySubmit,
+    readOnly: composerReadOnly(stopPending, retainDraftUntilSuccess, busy),
+    mobileCompact: composerMobileCompact(mobileCollapsible, mobileOpen),
+    mobileCollapsible,
+    executionOptions: executionOptions != null,
+    sessionControls: sessionControls != null,
+    showStop: composerShowStop(onStop, stopPending),
+  }
   const recording = dictation.recording
-
-  const dictationButton = dictation.supported ? (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      disabled={disabled || readOnly}
-      aria-label="Start dictation"
-      title="Dictation"
-      className={cn('h-11 gap-1.5 px-2.5 text-xs font-medium text-muted-foreground md:h-8', mobileCompact && 'hidden md:inline-flex')}
-      onClick={() => { if (!editsBlocked()) dictation.start() }}
-    >
-      <MicIcon aria-hidden="true" className="size-3.5" />
-      {executionOptions || sessionControls ? null : 'Dictation'}
-    </Button>
-  ) : null
-
-  const finishControl = primaryFinish ? (
-    <Button
-      type="button"
-      data-slot="composer-finish"
-      aria-label={finishing ? 'Finishing…' : 'Finish'}
-      aria-busy={finishing || undefined}
-      title="Close the session and mark this task done"
-      // Deliberately NOT gated on `disabled`, which is the SENDING gate — a disconnected or
-      // disabled provider cannot carry a message, but finishing only settles the run the engine
-      // already owns and needs no credentials. `stopControl` above has always been independent of
-      // it for exactly that reason. Gating Finish here would strand a Needs-you task whose
-      // provider went away with no way out of the list, since the Session tab's kebab no longer
-      // carries Finish once this button has it.
-      disabled={busy || stopPending || finishing}
-      className="h-11 w-auto gap-[7px] px-5 active:opacity-80"
-      onClick={() => void onFinish?.()}
-    >
-      <CheckIcon aria-hidden="true" />
-      {finishing ? 'Finishing…' : 'Finish'}
-    </Button>
-  ) : null
-
-  const stopControl = onStop || stopPending ? (
-    <Button
-      type="button"
-      variant="outline"
-      size="icon-sm"
-      aria-label={stopPending ? 'Stopping…' : 'Stop'}
-      aria-busy={stopPending || undefined}
-      title={stopPending ? 'Waiting for execution to stop' : 'Stop execution; keep existing work'}
-      disabled={busy || stopPending}
-      className={cn('h-11 min-w-11 active:opacity-80', labelledStop ? 'w-auto px-3' : 'w-11')}
-      onClick={() => void stop()}
-    >
-      <SquareIcon aria-hidden="true" className="size-3 fill-current" />
-      {labelledStop ? (stopPending ? 'Stopping…' : 'Stop') : null}
-    </Button>
-  ) : null
-
-  const hasCompactFeedback = stopPending || busy || submissionError !== null || idleFeedback != null
-  const feedback = <>
-          {retainDraftUntilSuccess || onStop || stopping ? (
-            <div className={cn(
-              'overflow-y-auto text-xs leading-5 text-muted-foreground',
-              compactFeedback && !hasCompactFeedback ? 'h-0' : 'px-3 pbe-2 md:px-4',
-              compactFeedback ? hasCompactFeedback && 'min-h-6' : 'h-24 md:h-20',
-            )}>
-              <div
-                id={`${textareaId}-submission`}
-                role={submissionError === null ? 'status' : 'alert'}
-                aria-atomic="true"
-                tabIndex={submissionError === null ? undefined : 0}
-                className="break-words"
-              >
-                {stopPending ? 'Stopping execution. Your draft is kept.' : busy ? pendingLabel : submissionError !== null ? (
-                  <>
-                    <p className="font-medium text-foreground">{submissionError}</p>
-                    <p>{failureHint}</p>
-                  </>
-                ) : idleFeedback ?? null}
-              </div>
-            </div>
-          ) : null}
-  </>
-
-  const submissionControls = (
-              <div data-slot="composer-submit-row" className={cn('ms-auto flex min-w-0 flex-wrap items-center justify-end gap-1 md:flex-nowrap', executionOptions && 'new-task-submission')}>
-                {executionOptions || sessionControls ? null : dictationButton}
-                {footerEnd ? (
-                  <div id={optionsId} data-slot="composer-footer-end" className={cn('min-w-0 flex-wrap items-center gap-1.5 md:flex-nowrap', executionOptions && 'me-auto', mobileCollapsible && 'max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11', mobileCompact ? 'hidden md:flex' : 'flex')}>
-                    <div className="contents" inert={readOnly || undefined}>{footerEnd}</div>
-                  </div>
-                ) : null}
-                <div className="flex min-w-[100px] items-center justify-end gap-1" data-slot="composer-actions">
-                  {/* One outline slot: Stop while the host offers it, the host's own control
-                      otherwise. Never both — the host hands over one or the other. */}
-                  {stopControl ?? secondaryAction}
-                  {finishControl}
-                  {!primaryStop && !primaryFinish ? (
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      aria-label={submitLabel}
-                      aria-busy={busy && !stopPending || undefined}
-                      disabled={disabled || busy || stopPending || (!hasContent && !allowEmptySubmit)}
-                      className={cn(
-                        executionOptions ? 'h-12 w-full gap-2 px-6' : sessionControls ? 'h-11 w-auto gap-2 px-5' : 'size-11',
-                        !hasContent && emptySubmitLabel && 'w-auto px-3',
-                        'active:opacity-80',
-                      )}
-                      onClick={submitDraft}
-                    >
-                      {!sessionControls && !hasContent && emptySubmitLabel ? <PlayIcon aria-hidden="true" /> : null}
-                      {executionOptions || sessionControls || (!hasContent && emptySubmitLabel) ? submitLabel : null}
-                      {sessionControls || hasContent || !emptySubmitLabel ? <ArrowUpIcon aria-hidden="true" /> : null}
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-  )
-
-  return (
-    <Popover open={menuOpen} onOpenChange={(open) => (open ? undefined : closeMenu())}>
-      <PopoverAnchor asChild>
-        <div
-          ref={rootRef}
-          data-slot="composer"
-          data-disabled={disabled || undefined}
-          data-voice-proposal={voiceProposal || undefined}
-          onDrop={onDrop}
-          onDragOver={(event) => event.preventDefault()}
-          className={cn(
-            executionOptions && 'new-task-composer',
-            sessionControls && 'session-composer',
-            disabled && 'opacity-80',
-          )}
-        >
-          <div
-            data-slot="composer-editor"
-            className={cn("rounded-xl border border-[var(--composer-border)] bg-card shadow-none transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/15", executionOptions && "new-task-editor")}
-          >
-            {images.length > 0 ? (
-            <div data-slot="composer-thumbs" className="flex flex-nowrap items-center gap-2 overflow-x-auto px-4 pbs-3 md:flex-wrap md:overflow-visible">
-              {images.map((attachment, index) => (
-                <button
-                  key={`${attachment.name}-${index}`}
-                  type="button"
-                  aria-label={`Remove ${attachment.name}`}
-                  title={readOnly ? 'Attachment submitted' : 'Click to remove'}
-                  disabled={readOnly}
-                  className={cn(
-                    'group relative shrink-0 overflow-hidden rounded-md border border-border',
-                    attachment.isImage
-                      ? 'size-12'
-                      : 'flex h-12 min-w-11 max-w-[200px] items-center gap-1.5 bg-muted/40 px-2.5 text-xs text-muted-foreground',
-                  )}
-                  onClick={() => { if (!editsBlocked()) setImages((current) => current.filter((_, i) => i !== index)) }}
-                >
-                  {/* An image previews; a file (#950) has nothing to look at, so it gets its own
-                      name instead — the one place the user's filename is used at all. */}
-                  {attachment.isImage ? (
-                    <img src={attachment.preview} alt="" className="size-full object-cover" />
-                  ) : (
-                    <>
-                      <PaperclipIcon aria-hidden="true" className="size-3.5 shrink-0" />
-                      <span className="truncate">{attachment.name}</span>
-                    </>
-                  )}
-                  <span className="absolute inset-0 hidden items-center justify-center bg-background/70 group-hover:flex group-focus-visible:flex">
-                    <XIcon aria-hidden="true" className="size-4" />
-                  </span>
-                </button>
-              ))}
-            </div>
-            ) : null}
-
-          {/* A real label keeps password managers from treating nearby page text as a
-              one-time-code prompt on client-side navigation (#71); aria-label alone doesn't. */}
-          <label htmlFor={textareaId} className={executionOptions ? "hidden px-5 pbs-5 text-xs text-muted-foreground md:block" : "sr-only"}>{executionOptions ? "Task description" : ariaLabel}</label>
-          <textarea
-            ref={textareaRef}
-            id={textareaId}
-            autoComplete="off"
-            // One intrinsic row on phones; desktop minimum and autosize retain the full input.
-            rows={1}
-            value={text}
-            disabled={disabled}
-            readOnly={readOnly}
-            aria-busy={readOnly || undefined}
-            aria-describedby={retainDraftUntilSuccess ? `${textareaId}-submission` : undefined}
-            aria-label={ariaLabel}
-            placeholder={disabled ? disabledReason : placeholder}
-            // 16px on touch widths — iOS zooms any focused input below 16px (spec mobile rule).
-            className={cn(
-              'block field-sizing-content min-h-11 w-full overflow-y-auto resize-none bg-transparent px-3 pbs-2.5 pbe-1 text-base leading-normal outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed md:min-h-[54px] md:px-4 md:pbs-3 md:text-sm',
-              mobileCompact ? 'max-h-11 md:max-h-[220px]' : 'max-h-[220px]',
-              executionOptions && 'md:text-base',
-            )}
-            onChange={(event) => {
-              if (editsBlocked()) return
-              setText(event.target.value)
-              syncTrigger()
-            }}
-            onKeyDown={onKeyDown}
-            onSelect={syncTrigger}
-            onPaste={onPaste}
-          />
-
-          {executionOptions ? <p data-slot="composer-skill-hint" className="flex items-center gap-2 px-5 pbs-3 pbe-2 text-xs text-muted-foreground"><TerminalIcon aria-hidden="true" className="size-[15px] shrink-0" />Type / for a skill or workflow</p> : null}
-          {sessionControls && recording ? <div data-slot="session-controls" inert={readOnly || undefined}>{sessionControls}</div> : null}
-          {recording ? (
-            <div>
-              <DictationBar
-                transcript={recording.transcript}
-                startedAt={recording.startedAt}
-                insertionDisabled={readOnly}
-                onCancel={dictation.cancel}
-                onInsert={() => insertTranscript(false)}
-                onInsertAndSend={() => insertTranscript(true)}
-              />
-              {stopControl ? <div className="flex justify-end px-2 pbe-2">{stopControl}</div> : null}
-            </div>
-          ) : (
-            // The footer may WRAP (the /new pill row on narrow widths), but the trailing
-            // controls wrap on phones to keep long model/account labels inside the viewport.
-            <div data-slot="composer-toolbar" className="flex flex-wrap items-center gap-1 gap-y-1 px-1.5 pbs-1 pbe-1.5 md:gap-y-1.5 md:px-2 md:pbs-1.5 md:pbe-2">
-              {sessionControls ? <div data-slot="session-controls" inert={readOnly || undefined}>{sessionControls}</div> : null}
-              {/* Tools and context wrap together. New-task execution options get their own
-                  section; thread composers retain their compact, wrapping footer. */}
-              <div data-slot="composer-footer-start" className={cn('flex min-w-0 flex-wrap items-center gap-1', executionOptions && 'w-full')}>
-                <AttachButton disabled={disabled || readOnly} onFiles={addFiles} />
-                {mobileCollapsible ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="size-11 md:hidden"
-                    aria-label={mobileOpen ? 'Collapse composer' : 'Expand composer'}
-                    aria-expanded={mobileOpen}
-                    aria-controls={footerEnd ? `${textareaId} ${optionsId}` : textareaId}
-                    onClick={() => {
-                      mobileDisclosures.set(disclosureKey, !mobileOpen)
-                      bumpMobileDisclosure()
-                    }}
-                  >
-                    <ChevronDownIcon aria-hidden="true" className={cn('transition-transform motion-reduce:transition-none', !mobileOpen && 'rotate-180')} />
-                  </Button>
-                ) : null}
-                <div className="contents" inert={readOnly || undefined}>{footerStart}</div>
-                {executionOptions || sessionControls ? <div>{dictationButton}</div> : null}
-              </div>
-              {executionOptions ? null : submissionControls}
-
-            </div>
-          )}
-          {executionOptions ? null : feedback}
-
-          </div>
-          {executionOptions ? <>
-            <div data-slot="composer-agent-options" inert={readOnly || undefined}>{agentOptions}</div>
-            <div data-slot="composer-execution-panel" inert={readOnly || undefined}>{executionOptions}</div>
-            {submissionControls}
-            <div data-slot="composer-feedback">{feedback}</div>
-          </> : null}
-        </div>
-      </PopoverAnchor>
-
-      <PopoverContent
-        side="top"
-        align="start"
-        sideOffset={8}
-        className="w-80 max-w-[calc(100vw-2rem)] p-0"
-        // Focus stays in the textarea — the menu is a suggestion surface, not a focus trap.
-        onOpenAutoFocus={(event) => event.preventDefault()}
-        // Interacting with the composer itself (typing, clicking the textarea) is not
-        // "outside" — only a genuine elsewhere-click dismisses.
-        onInteractOutside={(event) => {
-          if (rootRef.current?.contains(event.target as Node)) event.preventDefault()
-        }}
-      >
-        <Command shouldFilter={false} value={activeValue ?? ''} onValueChange={setMenuValue}>
-          <CommandList
-            ref={menuListRef}
-            data-slot="composer-menu"
-            data-trigger={trigger?.trigger}
-            // Clamped to the popper's reported space so the open keyboard (collisionPadding
-            // via the shared PopoverContent) shrinks the menu instead of hiding its tail.
-            className="max-h-[min(16rem,var(--radix-popover-content-available-height))] p-1"
-          >
-            {candidates.length === 0 ? (
-              <p className="px-3 py-4 text-center text-xs text-muted-foreground">
-                {trigger?.trigger === '@'
-                  ? 'No files seen in this session yet — full file search arrives with the Files tab.'
-                  : skills.isPending
-                    ? 'Loading skills…'
-                    : 'No matching skills.'}
-              </p>
-            ) : (
-              candidates.map((candidate) => (
-                <CommandItem
-                  key={candidate.value}
-                  value={candidate.value}
-                  data-slot="composer-menu-item"
-                  data-emphasized={candidate.emphasized || undefined}
-                  onSelect={() => pick(candidate)}
-                >
-                  <span
-                    className={cn(
-                      'shrink-0 truncate',
-                      candidate.emphasized && 'font-semibold',
-                      trigger?.trigger === '@' && 'font-mono text-xs',
-                    )}
-                  >
-                    {candidate.label}
-                  </span>
-                  {candidate.description ? (
-                    <span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">
-                      {candidate.description}
-                    </span>
-                  ) : null}
-                </CommandItem>
-              ))
-            )}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  )
-}
-
-/** The paperclip + its hidden multi-file input (legacy `#msg-attach`). */
-function AttachButton({
-  disabled,
-  onFiles,
-}: {
-  disabled: boolean
-  onFiles: (files: readonly File[]) => void
-}) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  return (
-    <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Attach files"
-        title="Attach an image, PDF, TXT or MD file (or paste a screenshot)"
-        disabled={disabled}
-        className="size-11 text-muted-foreground"
-        onClick={() => inputRef.current?.click()}
-      >
-        <PaperclipIcon aria-hidden="true" className="size-[15px]" />
-      </Button>
-      {/* Both spellings of every type: an OS dialog filters on the extension as often as on the
-          MIME type, and `accept="image/*,text/plain"` alone greys out a `.md` on Windows (#950). */}
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*,application/pdf,text/plain,text/markdown,.pdf,.txt,.md,.markdown,.log"
-        multiple
-        className="hidden"
-        aria-hidden="true"
-        tabIndex={-1}
-        onChange={(event) => {
-          onFiles([...(event.target.files ?? [])])
-          event.target.value = ''
-        }}
-      />
-    </>
-  )
-}
-
-/**
- * The recording overlay (paseo `DictationOverlay`): swaps in for the footer bar — pulsing
- * indicator, mm:ss, the growing partial transcript, then ✕ cancel / ✓ insert / ↑ insert-and-send.
- */
-function DictationBar({
-  transcript,
-  startedAt,
-  insertionDisabled,
-  onCancel,
-  onInsert,
-  onInsertAndSend,
-}: {
-  transcript: string
-  startedAt: number
-  insertionDisabled: boolean
-  onCancel: () => void
-  onInsert: () => void
-  onInsertAndSend: () => void
-}) {
   const now = useNow(1000)
-  return (
-    <div
-      data-slot="dictation-overlay"
-      role="status"
-      aria-label="Dictation in progress"
-      className="flex items-center gap-2.5 rounded-b-xl border-bs border-border bg-muted/60 px-3 py-2"
-    >
-      <span
-        aria-hidden="true"
-        className="size-2 flex-none animate-pulse rounded-full bg-danger motion-reduce:animate-none"
-      />
-      <span data-slot="dictation-timer" className="text-xs font-medium text-muted-foreground tabular-nums">
-        {formatElapsed(startedAt, now)}
-      </span>
-      <span
-        data-slot="dictation-transcript"
-        aria-live="polite"
-        className="min-w-0 flex-1 truncate text-sm text-foreground"
-      >
-        {transcript === '' ? (
-          <span className="text-muted-foreground">Listening…</span>
-        ) : (
-          transcript
-        )}
-      </span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Cancel dictation"
-        className="size-11 text-muted-foreground md:size-8"
-        onClick={onCancel}
-      >
-        <XIcon aria-hidden="true" />
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon-sm"
-        disabled={insertionDisabled}
-        aria-label="Insert transcription"
-        className="size-11 md:size-8"
-        onClick={onInsert}
-      >
-        <CheckIcon aria-hidden="true" />
-      </Button>
-      <Button
-        type="button"
-        size="icon-sm"
-        disabled={insertionDisabled}
-        aria-label="Insert transcription and send"
-        className="size-11 md:size-8"
-        onClick={onInsertAndSend}
-      >
-        <ArrowUpIcon aria-hidden="true" />
-      </Button>
-    </div>
+  const dictationButton = dictation.supported ? <ComposerDictationButton mode={mode} onStart={() => { if (!editsBlocked()) dictation.start() }} /> : null
+  const finishControl = mode.primaryFinish ? <ComposerFinishButton mode={mode} onFinish={() => void onFinish?.()} /> : null
+  const stopControl = mode.showStop ? <ComposerStopButton mode={mode} onStop={() => void stop()} /> : null
+  const feedback = (
+    <ComposerFeedback
+      shown={composerFeedbackShown(retainDraftUntilSuccess, onStop, stopping)}
+      compactFeedback={compactFeedback}
+      hasCompactFeedback={composerHasCompactFeedback(stopPending, busy, submissionError, idleFeedback)}
+      textareaId={textareaId}
+      submissionError={submissionError}
+      stopPending={stopPending}
+      busy={busy}
+      pendingLabel={pendingLabel}
+      failureHint={failureHint}
+      idleFeedback={idleFeedback}
+    />
   )
+  const submissionControls = (
+    <ComposerSubmitRow
+      mode={mode}
+      emptySubmitLabel={emptySubmitLabel}
+      optionsId={optionsId}
+      dictationButton={dictationButton}
+      footerEnd={footerEnd}
+      stopControl={stopControl}
+      secondaryAction={secondaryAction}
+      finishControl={finishControl}
+      onSubmit={submitDraft}
+    />
+  )
+
+  return (
+    <ComposerFrame
+      open={menuOpen}
+      onClose={closeMenu}
+      rootRef={rootRef}
+      disabled={disabled}
+      voiceProposal={voiceProposal}
+      onDrop={onDrop}
+      className={composerRootClass(executionOptions, sessionControls, disabled)}
+      menu={(
+        <ComposerMenuList
+          menuListRef={menuListRef}
+          trigger={trigger?.trigger}
+          activeValue={activeValue}
+          skillsPending={skills.isPending}
+          candidates={candidates}
+          onValueChange={setMenuValue}
+          onPick={pick}
+        />
+      )}
+    >
+      <ComposerEditor
+        mode={mode}
+        executionOptions={executionOptions}
+        sessionControls={sessionControls}
+        images={images}
+        onRemoveImage={(index) => { if (!editsBlocked()) setImages((current) => current.filter((_, item) => item !== index)) }}
+        textareaId={textareaId}
+        textareaRef={textareaRef}
+        text={text}
+        disabled={disabled}
+        retainDraftUntilSuccess={retainDraftUntilSuccess}
+        ariaLabel={ariaLabel}
+        disabledReason={disabledReason}
+        placeholder={placeholder}
+        onTextChange={(next) => { if (!editsBlocked()) { setText(next); syncTrigger() } }}
+        onKeyDown={onKeyDown}
+        onSelect={syncTrigger}
+        onPaste={(event) => {
+          const files = composerPasteFiles(event.clipboardData?.items)
+          if (files.length === 0) return
+          event.preventDefault()
+          addFiles(files)
+        }}
+        recording={recording}
+        onCancelDictation={dictation.cancel}
+        onInsertTranscript={() => insertTranscript(false)}
+        onInsertAndSend={() => insertTranscript(true)}
+        now={now}
+        stopControl={stopControl}
+        mobileCollapsible={mobileCollapsible}
+        mobileOpen={mobileOpen}
+        optionsId={optionsId}
+        footerEnd={footerEnd}
+        onToggleMobile={() => { mobileDisclosures.set(disclosureKey, !mobileOpen); bumpMobileDisclosure() }}
+        footerStart={footerStart}
+        attachInputRef={attachInputRef}
+        addFiles={addFiles}
+        dictationButton={dictationButton}
+        submissionControls={submissionControls}
+        feedback={feedback}
+        agentOptions={agentOptions}
+      />
+    </ComposerFrame>
+  )
+}
+
+function submitEvent(event: KeyboardEvent<HTMLTextAreaElement>) {
+  return {
+    key: event.key,
+    shiftKey: event.shiftKey,
+    metaKey: event.metaKey,
+    ctrlKey: event.ctrlKey,
+    altKey: event.altKey,
+    repeat: event.repeat,
+    isComposing: event.nativeEvent.isComposing,
+  }
 }
