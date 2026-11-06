@@ -335,7 +335,19 @@ describe('the cockpit suite', () => {
     expect(bareKills).toEqual([])
   })
 
-  it('scans every spec and the browser-driving helpers', () => {
+  it('scans every real spec and browser-driving helper through the default directory', () => {
+    const visited: string[] = []
+    scanSuite(undefined, undefined, (path) => visited.push(path))
+    // Infrastructure primitives are deliberately excluded; real specs and all other helpers are scanned.
+    const primitives = new Set(['agent-browser.ts', 'fixture-server.ts', 'poll.ts', 'vitest.config.ts'])
+    const expected = readdirSync(e2eDir).filter((name) => name.endsWith('.ts') && !primitives.has(name))
+      .map((name) => join(e2eDir, name)).sort()
+    expect(visited.filter((path) => path.startsWith(e2eDir + '/')).sort()).toEqual(expected)
+    expect(expected.some((path) => path.endsWith('/contrast.ts'))).toBe(true)
+    expect(expected.some((path) => path.endsWith('.e2e.ts'))).toBe(true)
+  })
+
+  it('scans every spec and browser helper in a fixture directory', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-wait-scan-'))
     const names = ['first.e2e.ts', 'second.e2e.ts', 'browser-helper.ts']
     try {
