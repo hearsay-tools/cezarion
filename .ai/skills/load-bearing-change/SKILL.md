@@ -32,15 +32,6 @@ A spec's "Resolved assumptions" table answering a COST question with "opt-in, de
 null" does not show that the zero-config path still works — cost-safe and functional
 are separate reviews. See [AGENTS.md § Zero config](../../../AGENTS.md#zero-config): *never trade a working default for a knob*.
 
-<!-- until: hearsay-tools/cezarion#2520 -->
-**Preserve queue-head reads when changing queue boundaries.** When splitting, merging
-or re-keying a queue, list every value the old task read when it reached the queue
-head, and read each one again at the head of the new queue. Carry stable identity
-through the queue rather than an earlier copy of mutable settings
-. Test the boundary: hold the head
-task, enqueue another, change the value, release the head, and assert what the queued
-task used. Cover removal or deselection when applicable.
-
 **Enumerate the transitions out of every state you add or keep.** "Who fires this?" is
 the question that finds these bugs in one step. A parked run wakes only through a path
 someone wrote: a human message, the turn-end nudge, the resolution of a durable wait it

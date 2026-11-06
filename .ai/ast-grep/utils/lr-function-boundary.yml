@@ -1,0 +1,14 @@
+id: lr-function-boundary
+language: typescript
+rule:
+  any:
+    - kind: function_declaration
+    - kind: function_expression
+    - kind: generator_function_declaration
+    - kind: generator_function
+    - kind: method_definition
+    - kind: arrow_function
+    - kind: internal_module
+    - kind: class_declaration
+    - kind: class
+    - kind: class_body

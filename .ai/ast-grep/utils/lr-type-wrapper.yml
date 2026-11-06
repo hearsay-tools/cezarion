@@ -1,0 +1,15 @@
+id: lr-type-wrapper
+language: typescript
+rule:
+  any:
+    - kind: type_annotation
+    - kind: parenthesized_type
+    - kind: union_type
+    - kind: type_arguments
+    - all:
+        - kind: generic_type
+        - has:
+            field: name
+            kind: type_identifier
+            regex: ^Readonly$
+    - kind: parenthesized_expression

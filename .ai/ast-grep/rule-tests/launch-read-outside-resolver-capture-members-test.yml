@@ -1,0 +1,53 @@
+id: launch-read-outside-resolver-capture-members
+valid:
+  - atTaskHead.runner(handle, configHandle)
+  - atTaskHead.hydrateQueuedInput(context, read, id, recipe)
+  - await atStepOpen.model(store, root, id, state, step, recipe, backend, identity)
+  - await atStepOpen.agentEnvForStep(context, host, id, backend)
+  - atContinue.hydrateQueuedContinuation(context, read, id, accepted)
+  - atContinue.openingImages(host, id, stepId, checkpoint, content)
+  - atLiveInput.enabledSkills(state, root, disabled)
+  - atTaskHead.attachments(context, id, urls, kind)
+  - 'function lifecycle(run: RunRecord) { return { ...run, status: "queued" } }'
+  - "function lifecycle(found: RunRecord) { let run; run = found }"
+  - "function lifecycle(run: RunRecord) { const input = run.agentInputs?.find(entry => entry.id === id); return { ...input, text: result } }"
+  - "function format(input: ResolvedInput) { const alias = input; return alias.prompt }"
+  - const alias = { ...handle }; let second; second = handle
+  - "type Recipe = ResolvedInput; function format(input: Recipe) { return input.prompt }"
+  - "function lifecycle(context: RunModuleContext, runId: string) { const first = context.store.getRun(runId); const second = first; return second?.model }"
+  - "function f(config: DisplayConfig) { return { ...config }; }"
+  - "function f(config: DisplayConfig) { return Object.assign({}, config); }"
+  - "function f(config: DisplayConfig) { return Object.entries(config); }"
+  - "function f(config: DisplayConfig) { return Object.keys(config); }"
+  - "function f(config: DisplayConfig) { return Object.values(config); }"
+  - "function f(config: DisplayConfig) { return structuredClone(config); }"
+  - "function f(config: DisplayConfig) { return JSON.stringify(config); }"
+  - "function f({ ...recipe }: DisplayConfig) { return recipe.model; }"
+  - "function first(raw: LaunchConfig) { return raw; } function second(raw: DisplayConfig) { return Object.entries(raw); }"
+  - "function outer(raw: LaunchConfig) { return (raw: DisplayConfig) => Object.entries(raw); }"
+  - async function f() { const recipe = await atTaskHead.config(root); return atTaskHead.runner(source, recipe); }
+  - const alias = handle;
+  - "function f({ name }: DisplayConfig) { return name; }"
+  - "function f(launch: DisplayConfig) { return Object.entries(launch.config); }"
+  - "function f(launch: DisplayConfig) { return {...launch.config}; }"
+  - 'function f(launch: DisplayConfig) { return structuredClone(launch["config"]); }'
+  - "const { steps }: DisplayConfig = accepted();"
+  - "const { baseBranch }: DisplayConfig = accepted();"
+  - "const { allowedTools }: DisplayConfig = accepted();"
+  - "const { bashAllowlist }: DisplayConfig = accepted();"
+  - "const { persistedAttachments }: DisplayConfig = accepted();"
+  - "const { ...recipe }: DisplayConfig = accepted(); recipe.model;"
+  - "function f(raw: unknown) { return Object.entries(<DisplayConfig>raw); }"
+  - "function f(raw: unknown) { return Object.entries(raw as DisplayConfig); }"
+  - "function f(raw: unknown) { return Object.entries(raw satisfies DisplayConfig); }"
+  - const step = atStepOpen.workflowStep(workflow, index) as WorkflowStepDef;
+  - "function f(raw: LaunchConfig) { { const raw: Display = display(); return {...raw}; } }"
+  - "function f(raw: LaunchConfig) { { const raw: Display = display(); return Object.entries(raw); } }"
+  - "function f(config: DisplayConfig) { return () => Object.entries(config); }"
+  - "function f(raw: DisplayConfig) { return (Object.entries)(raw); }"
+  - "function f(raw: DisplayConfig) { return Object['entries'](raw); }"
+  - "function f(raw: DisplayConfig) { return JSON['stringify'](raw); }"
+  - "function f(raw: DisplayConfig) { return (structuredClone)(raw); }"
+  - "function f(raw: DisplayConfig) { return Object.assign!({},raw); }"
+invalid:
+  - "function f(config: CezConfig) { return { config }; }"

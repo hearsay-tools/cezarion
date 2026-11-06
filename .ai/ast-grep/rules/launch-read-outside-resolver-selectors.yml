@@ -1,0 +1,292 @@
+# Semantic utils generated from ../launch-read-normalization/; edit that source.
+language: typescript
+severity: error
+message: "Production-source read rule; test and testkit readers observe ownership and error behavior outside
+  production selection. Use narrow phase operations in launch-read-resolver.ts at the original read point. The
+  launch-read-outside-resolver rule family does not follow arbitrary aliases of context.store.getRun()
+  results. The launch-read-outside-resolver rule family does not infer launch-source types through nested
+  structural member paths with two or more property accesses before the launch field or copy operation (class
+  fix: hearsay-tools/cezarion#2744). See packages/cezar/src/workflows/launch-read-resolver.types.testkit.ts
+  for compiled handle and lifecycle-store alias controls (owner decision: option A)."
+files:
+  - packages/cezar/src/workflows/run.ts
+  - packages/cezar/src/workflows/run/**/*.ts
+ignores:
+  - packages/cezar/src/workflows/run/launch-read-resolver.ts
+  - packages/cezar/src/**/*.test.ts
+  - packages/cezar/src/**/*.testkit.ts
+id: launch-read-outside-resolver-selectors
+rule:
+  any:
+    - all:
+        - any:
+            - kind: import_statement
+            - kind: export_statement
+        - has:
+            stopBy: end
+            any:
+              - kind: import_specifier
+              - kind: export_specifier
+            has:
+              field: name
+              regex: ^(loadWorkflows|stepToolGrant|loadConfig|agentModelsLocked|readAgentModelProvider|normalizeModelForBackend|workerIdentity|workerStepIdentity|ownedWorkflow|continuationDefStep|resolveProfileEnvForRoot|boundWorkerAccountEnv|captureWorkerAccount|discoverSkills|filterDisabledTeamSkills|filterDisabledTeamSources|readDisabledTeamSkills|readDisabledSkillsReposSync|readProjectUiState|readProjectUiStateSync|getTeamSkillsCached|resolveAttachmentPath|readPersistedAttachments|accountHeldFor|executionAccount|queuedRecoveryInput)$
+    - all:
+        - kind: import_statement
+        - has:
+            kind: namespace_import
+            stopBy: end
+        - has:
+            field: source
+            regex: (^|/)(config|skills|skills-remote|agent-model-policy|models|agent-profiles|execution-identity|run-scheduling|execution-account|ui-state|model-identity|attachment-path|load|types)\.(ts|js)['"]$
+    - all:
+        - kind: export_statement
+        - regex: ^export\s+\*
+        - has:
+            field: source
+            regex: (^|/)(config|skills|skills-remote|agent-model-policy|models|agent-profiles|execution-identity|run-scheduling|execution-account|ui-state|model-identity|attachment-path|load|types)\.(ts|js)['"]$
+    - all:
+        - kind: call_expression
+        - has:
+            field: function
+            matches: selector-call-target
+    - all:
+        - kind: call_expression
+        - has:
+            field: function
+            regex: ^import$
+        - has:
+            field: arguments
+            has:
+              kind: string
+              regex: (^|/)(config|skills|skills-remote|agent-model-policy|models|agent-profiles|execution-identity|run-scheduling|execution-account|ui-state|model-identity|attachment-path|load|types)\.(ts|js)['"]$
+    - all:
+        - kind: import_statement
+        - has:
+            kind: import_clause
+            has:
+              kind: identifier
+        - has:
+            field: source
+            regex: (^|/)(config|skills|skills-remote|agent-model-policy|models|agent-profiles|execution-identity|run-scheduling|execution-account|ui-state|model-identity|attachment-path|load|types)\.(ts|js)['"]$
+utils:
+  selector-call-target:
+    matches: normalize-selector-target
+  normalize-selector-target:
+    any:
+      - all:
+          - kind: identifier
+            pattern: $SOURCE
+          - regex: ^(loadWorkflows|stepToolGrant|loadConfig|agentModelsLocked|readAgentModelProvider|normalizeModelForBackend|workerIdentity|workerStepIdentity|ownedWorkflow|continuationDefStep|resolveProfileEnvForRoot|boundWorkerAccountEnv|captureWorkerAccount|discoverSkills|filterDisabledTeamSkills|filterDisabledTeamSources|readDisabledTeamSkills|readDisabledSkillsReposSync|readProjectUiState|readProjectUiStateSync|getTeamSkillsCached|resolveAttachmentPath|readPersistedAttachments|accountHeldFor|executionAccount|queuedRecoveryInput)$
+          - not:
+              inside:
+                stopBy: end
+                all:
+                  - matches: lr-lexical-scope
+                  - matches: normalize-scope-declares-value
+      - all:
+          - kind: member_expression
+          - has:
+              field: object
+              all:
+                - kind: identifier
+                  pattern: $SOURCE
+                - regex: ^source$
+                - not:
+                    inside:
+                      stopBy: end
+                      all:
+                        - matches: lr-lexical-scope
+                        - matches: normalize-scope-declares-value
+          - has:
+              field: property
+              regex: ^(loadWorkflows|stepToolGrant|loadConfig|agentModelsLocked|readAgentModelProvider|normalizeModelForBackend|workerIdentity|workerStepIdentity|ownedWorkflow|continuationDefStep|resolveProfileEnvForRoot|boundWorkerAccountEnv|captureWorkerAccount|discoverSkills|filterDisabledTeamSkills|filterDisabledTeamSources|readDisabledTeamSkills|readDisabledSkillsReposSync|readProjectUiState|readProjectUiStateSync|getTeamSkillsCached|resolveAttachmentPath|readPersistedAttachments|accountHeldFor|executionAccount|queuedRecoveryInput)$
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: normalize-selector-target
+  normalize-scope-declares-value:
+    any:
+      - has:
+          matches: normalize-lexical-value-declaration
+          stopBy:
+            matches: lr-nested-scope
+      - all:
+          - matches: lr-function-scope
+          - has:
+              matches: normalize-hoisted-var-declaration
+              stopBy:
+                matches: lr-function-boundary
+  normalize-lexical-value-declaration:
+    all:
+      - matches: normalize-value-declaration
+      - not:
+          any:
+            - all:
+                - kind: variable_declarator
+                - inside:
+                    kind: variable_declaration
+            - all:
+                - matches: normalize-binding-pattern
+                - inside:
+                    all:
+                      - kind: for_in_statement
+                      - has:
+                          field: kind
+                          regex: ^var$
+  normalize-hoisted-var-declaration:
+    any:
+      - all:
+          - kind: variable_declarator
+          - has:
+              field: name
+              matches: normalize-binding-pattern
+          - inside:
+              kind: variable_declaration
+      - all:
+          - kind: for_in_statement
+          - has:
+              field: kind
+              regex: ^var$
+          - has:
+              field: left
+              matches: normalize-binding-pattern
+  normalize-value-declaration:
+    any:
+      - all:
+          - any:
+              - kind: required_parameter
+              - kind: optional_parameter
+          - has:
+              field: pattern
+              matches: normalize-binding-pattern
+      - all:
+          - kind: variable_declarator
+          - has:
+              field: name
+              matches: normalize-binding-pattern
+      - all:
+          - any:
+              - kind: function_declaration
+              - kind: generator_function_declaration
+              - kind: class_declaration
+              - kind: enum_declaration
+              - kind: internal_module
+          - has:
+              field: name
+              pattern: $SOURCE
+      - all:
+          - any:
+              - kind: identifier
+              - kind: type_identifier
+          - pattern: $SOURCE
+          - inside:
+              any:
+                - all:
+                    - kind: function_declaration
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: generator_function_declaration
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: class_declaration
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: enum_declaration
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: internal_module
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: function_expression
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: generator_function
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: class
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+      - all:
+          - matches: normalize-binding-pattern
+          - inside:
+              all:
+                - kind: catch_clause
+                - has:
+                    field: parameter
+                    matches: normalize-binding-pattern
+      - all:
+          - matches: normalize-binding-pattern
+          - inside:
+              all:
+                - kind: for_in_statement
+                - has:
+                    field: kind
+                    regex: ^(const|let|var)$
+                - has:
+                    field: left
+                    matches: normalize-binding-pattern
+      - all:
+          - kind: import_clause
+          - has:
+              kind: identifier
+              pattern: $SOURCE
+      - all:
+          - kind: namespace_import
+          - has:
+              kind: identifier
+              pattern: $SOURCE
+      - all:
+          - kind: import_specifier
+          - any:
+              - has:
+                  field: alias
+                  pattern: $SOURCE
+              - all:
+                  - not:
+                      has:
+                        field: alias
+                        kind: identifier
+                  - has:
+                      field: name
+                      pattern: $SOURCE
+  normalize-binding-pattern:
+    any:
+      - all:
+          - any:
+              - kind: identifier
+              - kind: shorthand_property_identifier_pattern
+          - pattern: $SOURCE
+      - all:
+          - any:
+              - kind: object_pattern
+              - kind: array_pattern
+              - kind: rest_pattern
+          - has:
+              matches: normalize-binding-pattern
+      - all:
+          - kind: pair_pattern
+          - has:
+              field: value
+              matches: normalize-binding-pattern
+      - all:
+          - any:
+              - kind: assignment_pattern
+              - kind: object_assignment_pattern
+          - has:
+              field: left
+              matches: normalize-binding-pattern

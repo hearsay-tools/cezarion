@@ -1,0 +1,106 @@
+id: launch-read-outside-resolver-fields
+valid:
+  - atTaskHead.runner(handle, configHandle)
+  - atTaskHead.hydrateQueuedInput(context, read, id, recipe)
+  - await atStepOpen.model(store, root, id, state, step, recipe, backend, identity)
+  - await atStepOpen.agentEnvForStep(context, host, id, backend)
+  - atContinue.hydrateQueuedContinuation(context, read, id, accepted)
+  - atContinue.openingImages(host, id, stepId, checkpoint, content)
+  - atLiveInput.enabledSkills(state, root, disabled)
+  - atTaskHead.attachments(context, id, urls, kind)
+  - 'function lifecycle(record: RunRecord) { return record.worktreeSetup?.status === "running" || record.worktreeSetup === undefined }'
+  - const chosen = await atStepOpen.resolveModel(handle, stepId); chosen.backendModel
+  - const { runner } = atTaskHead.resolveRunner(handle)
+  - "function format(input: ResolvedInput) { return input.prompt }"
+  - "function format(config: ResolvedConfig) { return config.model }"
+  - "function format(input?: ResolvedInput) { return input?.prompt }"
+  - "function before() { const observed = store.getRun(id); return observed.status }; function format(observed: ResolvedInput) { return observed.model }"
+  - "const input: ResolvedInput = project(); input.prompt"
+  - "function lifecycle(context: RunModuleContext, runId: string, stepId: string) { const observed = context.store.getRun(runId); return observed?.steps.find(candidate => candidate.id === stepId)?.usageInvocationEpoch }"
+  - "function lifecycle(run: RunRecord) { return run.steps }"
+  - "function lifecycle(step: StepState) { return step.usageInvocationEpoch }"
+  - "function lifecycle(run: RunRecord) { return run.autonomous }"
+  - "function lifecycle(run: RunRecord) { return !!run.workflowDef }"
+  - "function lifecycle(run: RunRecord) { return run.continuationMessage?.origin === 'human' }"
+  - "function lifecycle(context: RunModuleContext, id: string) { return context.store.getRun(id)?.continuationMessage?.agentInputId === id }"
+  - "function lifecycle(run: RunRecord) { return !run.queuedMessages?.length }"
+  - "function format(workflow: ResolvedWorkflow) { return workflow.steps }"
+  - "function lifecycle(context: RunModuleContext, id: string) { const observed = context.store.getRun(id); return observed?.['status'] }"
+  - "function select(context: RunModuleContext, runId: string) { const first = context.store.getRun(runId); const second = first; return second?.model }"
+  - "function f(workflow: Display) { return workflow['steps']; }"
+  - "function f(config: Display) { return config.baseBranch; }"
+  - "function f(step: Display) { return step.allowedTools; }"
+  - "function f(step: Display) { return (step).model; }"
+  - "function f(step: Display) { return step!.model; }"
+  - "function f(step: Display) { return (step as Display).model; }"
+  - "function f(step: Display) { return (step satisfies Display).model; }"
+  - "function f(recipe: StartRunInput) { return (recipe: Display) => recipe.model; }"
+  - "function f(recipe: StartRunInput) { return function nested(recipe: Display) { return recipe.model; }; }"
+  - "function f(recipe: Display) { return (() => recipe.model)(); }"
+  - "function f(recipe: StartRunInput) { return 1; } function g(recipe: Display) { return (() => recipe.model)(); }"
+  - "function f(recipe: StartRunInput) { { const recipe: Display = display(); return recipe.model; } }"
+  - "const recipe: StartRunInput = accepted(); function f(recipe: Display) { return () => recipe.model; }"
+  - "function f(raw: unknown) { return (raw as Display).model; }"
+  - const recipe=accepted() as Display; recipe.model;
+  - "function f(recipe: StartRunInput) { const g = () => { const recipe=accepted() as Display; return recipe.model; }; return g; }"
+  - function f<WorkflowStepDef extends {model:string}>(source:WorkflowStepDef) { return source.model; }
+  - class Holder<WorkflowDef extends {steps:string}> { f(source:WorkflowDef) { return source.steps; } }
+invalid:
+  - input['model']
+  - input?.model
+  - input.model
+  - "function f(step: WorkflowStepDef) { return (step satisfies WorkflowStepDef).model; }"
+  - "function f(raw: unknown) { return (raw as WorkflowStepDef).model; }"
+  - "function f(step: WorkflowStepDef) { return (step as WorkflowStepDef).model; }"
+  - "import type { StartRunInput as Recipe } from './types.ts'; function choose(recipe: Recipe) { const { model: chosen } = recipe; return chosen }"
+  - const recipe=<StartRunInput>accepted(); recipe.model;
+  - "function f(raw: LaunchConfig) { return (raw as any).model; }"
+  - import type { WorkflowStepDef as Recipe } from "./types.ts"; (raw as Recipe).model;
+  - const recipe=accepted() satisfies StartRunInput; recipe.model;
+  - "function f(step: WorkflowStepDef) { return step!.model; }"
+  - "function f(recipe: StartRunInput) { { return () => recipe.model; } }"
+  - "function f(raw: LaunchSource) { return (raw as any).model; }"
+  - "import type { StartRunInput as Recipe } from './types.ts'; function choose(recipe: Recipe) { return recipe['model'] }"
+  - const recipe=(accepted() as StartRunInput)!; (() => recipe.model)();
+  - const recipe=accepted() as StartRunInput; recipe.model;
+  - "function f(step: WorkflowStepDef) { return (step).model; }"
+  - "function f(raw: unknown) { return (<WorkflowStepDef>raw).model; }"
+  - "function f() { const recipe: StartRunInput = accepted(); return () => recipe.model; }"
+  - "function f(raw: unknown) { return (raw satisfies WorkflowStepDef).model; }"
+  - "import type { StartRunInput as Recipe } from './types.ts'; function choose(recipe: Recipe) { return recipe.model }"
+  - store.getRun(runId)?.model
+  - "const recipe: StartRunInput = read(); items.map(() => recipe.model);"
+  - const startRecord = store.getRun(runId); const { taskImages } = startRecord
+  - const { runId, workflow, input } = execution
+  - "function f(recipe: StartRunInput) { return items.map(() => recipe.model); }"
+  - "function select(recipe: StartRunInput) { const { model = fallback } = recipe; return model }"
+  - "const { input: accepted } = job"
+  - "const recipe: StartRunInput = accepted(); recipe.model"
+  - const startRecord = store.getRun(runId); startRecord?.['taskImages']
+  - "const { [key]: selected } = input"
+  - const model = job.input.model
+  - "function f(recipe: StartRunInput) { return function nested() { return recipe.model; }; }"
+  - "function select(recipe: StartRunInput) { return recipe['model'] }"
+  - run.continuationMessage?.text
+  - "function select() { function format(input: ResolvedInput) { return input.prompt }; return input.model }"
+  - "function f(recipe: StartRunInput) { return (() => recipe.model)(); }"
+  - "type Recipe = StartRunInput; function choose(recipe: Recipe) { return recipe.model }"
+  - "const { ['model']: selected } = input"
+  - "function select(recipe?: StartRunInput) { return recipe?.model }"
+  - "function format(input: ResolvedInput) { return input.prompt }; input.model"
+  - "function f(step: WorkflowStepDef) { return ((step!) as WorkflowStepDef)['model']; }"
+  - run.queuedMessages?.map(message => message.text)
+  - const stored = store.getRun(id); ({ model } = stored)
+  - record?.continuationMessage
+  - input[key]
+  - const { model = fallback } = input
+  - "function select(recipe: StartRunInput) { return recipe.model }"
+  - const { effort } = stepIdentity
+  - input?.['model']
+  - "({ model: selected } = input)"
+  - "const { model: selected = fallback } = input"
+  - "function select(input: StartRunInput) { return input.model }"
+  - "function choose(source: Pick<RunRecord, 'effort'>) { return source.effort }"
+  - "import type { CezConfig as Options } from '../../config.ts'; function choose(options: Options) { return options.defaultRunner }"
+  - const startRecord = store.getRun(runId); startRecord?.taskImages
+  - "function f<Holder>() { { type Holder = {step:WorkflowStepDef}; let data!:Holder; return data.step.model; } }"

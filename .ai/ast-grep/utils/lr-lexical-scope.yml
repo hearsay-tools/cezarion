@@ -1,0 +1,6 @@
+id: lr-lexical-scope
+language: typescript
+rule:
+  any:
+    - matches: lr-nested-scope
+    - kind: program

@@ -1,0 +1,491 @@
+helpers:
+  workflow-asserted-expression:
+    any:
+      - matches: lr-workflow-assertion
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: lr-workflow-asserted-expression
+  workflow-assertion:
+    all:
+      - matches: lr-assertion-wrapper
+      - has:
+          matches: lr-workflow-type
+  workflow-member-receiver:
+    all:
+      - any:
+          - kind: member_expression
+          - kind: subscript_expression
+      - any:
+          - has:
+              field: property
+              pattern: $MEMBER
+          - has:
+              field: index
+              kind: string
+              has:
+                kind: string_fragment
+                pattern: $MEMBER
+      - has:
+          field: object
+          matches: lr-workflow-property-holder
+  workflow-property-holder:
+    any:
+      - all:
+          - kind: identifier
+            pattern: $SOURCE
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $HOLDER_VALUE_SCOPE
+                    - any:
+                        - has:
+                            all:
+                              - matches: lr-value-declaration
+                              - has:
+                                  field: type
+                                  matches: lr-workflow-property-type
+                            stopBy:
+                              matches: lr-nested-scope
+                        - all:
+                            - matches: lr-function-scope
+                            - has:
+                                all:
+                                  - matches: lr-hoisted-var-declaration
+                                  - all:
+                                      - matches: lr-value-declaration
+                                      - has:
+                                          field: type
+                                          matches: lr-workflow-property-type
+                                stopBy:
+                                  matches: lr-function-boundary
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - matches: lr-scope-declares-value
+                      - inside:
+                          pattern: $HOLDER_VALUE_SCOPE
+                          stopBy: end
+                    stopBy: end
+      - all:
+          - kind: this
+          - inside:
+              all:
+                - kind: class_body
+                - pattern: $CLASS_SCOPE
+                - has:
+                    any:
+                      - all:
+                          - any:
+                              - kind: property_signature
+                              - kind: public_field_definition
+                          - has:
+                              field: name
+                              pattern: $MEMBER
+                          - has:
+                              field: type
+                              matches: lr-workflow-type
+                      - all:
+                          - kind: method_definition
+                          - has:
+                              field: name
+                              regex: ^constructor$
+                          - has:
+                              field: parameters
+                              kind: formal_parameters
+                              has:
+                                all:
+                                  - any:
+                                      - kind: required_parameter
+                                      - kind: optional_parameter
+                                  - has:
+                                      field: pattern
+                                      pattern: $MEMBER
+                                  - has:
+                                      field: type
+                                      matches: lr-workflow-type
+                                  - any:
+                                      - has:
+                                          kind: accessibility_modifier
+                                      - regex: ^readonly\s
+                    stopBy:
+                      matches: lr-nested-scope
+              stopBy: end
+          - not:
+              inside:
+                all:
+                  - matches: lr-this-binding-boundary
+                  - inside:
+                      pattern: $CLASS_SCOPE
+                      stopBy: end
+                stopBy: end
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: lr-workflow-property-holder
+      - all:
+          - matches: lr-assertion-wrapper
+          - has:
+              matches: lr-workflow-property-type
+  workflow-property-root-type:
+    any:
+      - all:
+          - any:
+              - kind: object_type
+              - kind: interface_body
+          - has:
+              all:
+                - any:
+                    - kind: property_signature
+                    - kind: public_field_definition
+                - has:
+                    field: name
+                    pattern: $MEMBER
+                - has:
+                    field: type
+                    matches: lr-workflow-type
+      - all:
+          - matches: lr-type-wrapper
+          - has:
+              matches: lr-workflow-property-root-type
+  workflow-property-type:
+    any:
+      - matches: lr-workflow-property-root-type
+      - all:
+          - kind: type_identifier
+            pattern: $HOLDER_TYPE
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $HOLDER_TYPE_SCOPE
+                    - has:
+                        all:
+                          - all:
+                              - any:
+                                  - kind: type_alias_declaration
+                                  - kind: interface_declaration
+                              - has:
+                                  field: name
+                                  kind: type_identifier
+                                  pattern: $HOLDER_TYPE
+                          - any:
+                              - has:
+                                  field: value
+                                  matches: lr-workflow-property-root-type
+                              - has:
+                                  field: body
+                                  matches: lr-workflow-property-root-type
+                        stopBy:
+                          matches: lr-nested-scope
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - has:
+                          all:
+                            - any:
+                                - kind: type_alias_declaration
+                                - kind: interface_declaration
+                            - has:
+                                field: name
+                                kind: type_identifier
+                                pattern: $HOLDER_TYPE
+                          stopBy:
+                            matches: lr-nested-scope
+                      - inside:
+                          pattern: $HOLDER_TYPE_SCOPE
+                          stopBy: end
+                    stopBy: end
+          - not:
+              inside:
+                all:
+                  - has:
+                      field: type_parameters
+                      has:
+                        kind: type_parameter
+                        has:
+                          field: name
+                          pattern: $HOLDER_TYPE
+                  - inside:
+                      pattern: $HOLDER_TYPE_SCOPE
+                      stopBy: end
+                stopBy: end
+      - all:
+          - matches: lr-type-wrapper
+          - has:
+              matches: lr-workflow-property-type
+  workflow-receiver:
+    any:
+      - matches: lr-workflow-assertion
+      - matches: lr-workflow-reference
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: lr-workflow-receiver
+      - matches: lr-workflow-member-receiver
+  workflow-reference:
+    all:
+      - kind: identifier
+        pattern: $SOURCE
+      - any:
+          - all:
+              - regex: ^(workflow)$
+              - not:
+                  inside:
+                    stopBy: end
+                    all:
+                      - matches: lr-lexical-scope
+                      - matches: lr-scope-declares-value
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $VALUE_WORKFLOW_SCOPE
+                    - any:
+                        - has:
+                            any:
+                              - all:
+                                  - matches: lr-value-declaration
+                                  - has:
+                                      field: type
+                                      matches: lr-workflow-type
+                              - all:
+                                  - kind: variable_declarator
+                                  - has:
+                                      field: name
+                                      kind: identifier
+                                      pattern: $SOURCE
+                                  - has:
+                                      field: value
+                                      matches: lr-workflow-asserted-expression
+                            stopBy:
+                              matches: lr-nested-scope
+                        - all:
+                            - matches: lr-function-scope
+                            - has:
+                                all:
+                                  - matches: lr-hoisted-var-declaration
+                                  - any:
+                                      - all:
+                                          - matches: lr-value-declaration
+                                          - has:
+                                              field: type
+                                              matches: lr-workflow-type
+                                      - all:
+                                          - kind: variable_declarator
+                                          - has:
+                                              field: name
+                                              kind: identifier
+                                              pattern: $SOURCE
+                                          - has:
+                                              field: value
+                                              matches: lr-workflow-asserted-expression
+                                stopBy:
+                                  matches: lr-function-boundary
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - matches: lr-scope-declares-value
+                      - inside:
+                          pattern: $VALUE_WORKFLOW_SCOPE
+                          stopBy: end
+                    stopBy: end
+  workflow-root-type:
+    any:
+      - all:
+          - kind: type_identifier
+            pattern: $ROOT_WORKFLOW_TYPE
+          - regex: ^(WorkflowDef)$
+          - not:
+              inside:
+                matches: lr-lexical-scope
+                stopBy: end
+                has:
+                  all:
+                    - any:
+                        - kind: type_alias_declaration
+                        - kind: interface_declaration
+                        - kind: class_declaration
+                    - has:
+                        field: name
+                        kind: type_identifier
+                        pattern: $ROOT_WORKFLOW_TYPE
+                  stopBy:
+                    matches: lr-nested-scope
+          - not:
+              inside:
+                has:
+                  field: type_parameters
+                  has:
+                    kind: type_parameter
+                    has:
+                      field: name
+                      pattern: $ROOT_WORKFLOW_TYPE
+                stopBy: end
+      - all:
+          - kind: type_identifier
+            pattern: $ROOT_WORKFLOW_TYPE
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $ROOT_WORKFLOW_SCOPE
+                    - has:
+                        all:
+                          - kind: import_specifier
+                          - has:
+                              field: alias
+                              pattern: $ROOT_WORKFLOW_TYPE
+                          - has:
+                              field: name
+                              regex: ^(WorkflowDef)$
+                        stopBy:
+                          matches: lr-nested-scope
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - has:
+                          any:
+                            - all:
+                                - any:
+                                    - kind: type_alias_declaration
+                                    - kind: interface_declaration
+                                    - kind: class_declaration
+                                - has:
+                                    field: name
+                                    kind: type_identifier
+                                    pattern: $ROOT_WORKFLOW_TYPE
+                            - all:
+                                - kind: import_specifier
+                                - any:
+                                    - has:
+                                        field: alias
+                                        pattern: $ROOT_WORKFLOW_TYPE
+                                    - has:
+                                        field: name
+                                        kind: type_identifier
+                                        pattern: $ROOT_WORKFLOW_TYPE
+                          stopBy:
+                            matches: lr-nested-scope
+                      - inside:
+                          pattern: $ROOT_WORKFLOW_SCOPE
+                          stopBy: end
+                    stopBy: end
+          - not:
+              inside:
+                all:
+                  - has:
+                      field: type_parameters
+                      has:
+                        kind: type_parameter
+                        has:
+                          field: name
+                          pattern: $ROOT_WORKFLOW_TYPE
+                  - inside:
+                      pattern: $ROOT_WORKFLOW_SCOPE
+                      stopBy: end
+                stopBy: end
+      - all:
+          - kind: member_expression
+          - has:
+              field: object
+              all:
+                - kind: call_expression
+                - has:
+                    field: function
+                    regex: ^import$
+          - has:
+              field: property
+              regex: ^(WorkflowDef)$
+      - all:
+          - matches: lr-type-wrapper
+          - has:
+              matches: lr-workflow-root-type
+  workflow-type:
+    any:
+      - matches: lr-workflow-root-type
+      - all:
+          - kind: type_identifier
+            pattern: $REF_WORKFLOW_TYPE
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $REF_WORKFLOW_SCOPE
+                    - has:
+                        all:
+                          - kind: type_alias_declaration
+                          - has:
+                              field: name
+                              kind: type_identifier
+                              pattern: $REF_WORKFLOW_TYPE
+                          - has:
+                              field: value
+                              matches: lr-workflow-root-type
+                        stopBy:
+                          matches: lr-nested-scope
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - has:
+                          any:
+                            - all:
+                                - any:
+                                    - kind: type_alias_declaration
+                                    - kind: interface_declaration
+                                    - kind: class_declaration
+                                - has:
+                                    field: name
+                                    kind: type_identifier
+                                    pattern: $REF_WORKFLOW_TYPE
+                            - all:
+                                - kind: import_specifier
+                                - any:
+                                    - has:
+                                        field: alias
+                                        pattern: $REF_WORKFLOW_TYPE
+                                    - has:
+                                        field: name
+                                        kind: type_identifier
+                                        pattern: $REF_WORKFLOW_TYPE
+                          stopBy:
+                            matches: lr-nested-scope
+                      - inside:
+                          pattern: $REF_WORKFLOW_SCOPE
+                          stopBy: end
+                    stopBy: end
+          - not:
+              inside:
+                all:
+                  - has:
+                      field: type_parameters
+                      has:
+                        kind: type_parameter
+                        has:
+                          field: name
+                          pattern: $REF_WORKFLOW_TYPE
+                  - inside:
+                      pattern: $REF_WORKFLOW_SCOPE
+                      stopBy: end
+                stopBy: end
+      - all:
+          - matches: lr-type-wrapper
+          - has:
+              matches: lr-workflow-type
+      - all:
+          - matches: lr-view-type-wrapper
+          - has:
+              kind: type_arguments
+              has:
+                matches: lr-workflow-type

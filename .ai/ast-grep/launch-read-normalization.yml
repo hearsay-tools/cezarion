@@ -1,0 +1,18 @@
+bindings:
+  capture:
+    capture-expression: capture-expression
+    copy-expression: copy-expression
+    source-type: source-type
+    input-type: input-type
+    copy-call-target: copy-target
+    workflow-type: workflow-type
+  fields:
+    raw-receiver: raw-receiver
+    input-receiver: input-receiver
+    workflow-receiver: workflow-receiver
+    input-extra-receiver: input-receiver
+    workflow-extra-receiver: workflow-receiver
+    config-receiver: config-receiver
+    step-receiver: step-receiver
+  selectors:
+    selector-call-target: selector-target

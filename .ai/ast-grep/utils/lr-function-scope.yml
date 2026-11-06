@@ -1,0 +1,12 @@
+id: lr-function-scope
+language: typescript
+rule:
+  any:
+    - kind: function_declaration
+    - kind: function_expression
+    - kind: generator_function_declaration
+    - kind: generator_function
+    - kind: method_definition
+    - kind: arrow_function
+    - kind: program
+    - kind: internal_module

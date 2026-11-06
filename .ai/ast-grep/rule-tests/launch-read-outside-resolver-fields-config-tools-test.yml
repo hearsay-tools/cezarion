@@ -1,0 +1,66 @@
+id: launch-read-outside-resolver-fields-config-tools
+valid:
+  - atTaskHead.runner(handle, configHandle)
+  - atTaskHead.hydrateQueuedInput(context, read, id, recipe)
+  - await atStepOpen.model(store, root, id, state, step, recipe, backend, identity)
+  - await atStepOpen.agentEnvForStep(context, host, id, backend)
+  - atContinue.hydrateQueuedContinuation(context, read, id, accepted)
+  - atContinue.openingImages(host, id, stepId, checkpoint, content)
+  - atLiveInput.enabledSkills(state, root, disabled)
+  - atTaskHead.attachments(context, id, urls, kind)
+  - 'function lifecycle(record: RunRecord) { return record.worktreeSetup?.status === "running" || record.worktreeSetup === undefined }'
+  - const chosen = await atStepOpen.resolveModel(handle, stepId); chosen.backendModel
+  - const { runner } = atTaskHead.resolveRunner(handle)
+  - "function format(input: ResolvedInput) { return input.prompt }"
+  - "function format(config: ResolvedConfig) { return config.model }"
+  - "function format(input?: ResolvedInput) { return input?.prompt }"
+  - "function before() { const observed = store.getRun(id); return observed.status }; function format(observed: ResolvedInput) { return observed.model }"
+  - "const input: ResolvedInput = project(); input.prompt"
+  - "function lifecycle(context: RunModuleContext, runId: string, stepId: string) { const observed = context.store.getRun(runId); return observed?.steps.find(candidate => candidate.id === stepId)?.usageInvocationEpoch }"
+  - "function lifecycle(run: RunRecord) { return run.steps }"
+  - "function lifecycle(step: StepState) { return step.usageInvocationEpoch }"
+  - "function lifecycle(run: RunRecord) { return run.autonomous }"
+  - "function lifecycle(run: RunRecord) { return !!run.workflowDef }"
+  - "function lifecycle(run: RunRecord) { return run.continuationMessage?.origin === 'human' }"
+  - "function lifecycle(context: RunModuleContext, id: string) { return context.store.getRun(id)?.continuationMessage?.agentInputId === id }"
+  - "function lifecycle(run: RunRecord) { return !run.queuedMessages?.length }"
+  - "function format(workflow: ResolvedWorkflow) { return workflow.steps }"
+  - "function lifecycle(context: RunModuleContext, id: string) { const observed = context.store.getRun(id); return observed?.['status'] }"
+  - "function select(context: RunModuleContext, runId: string) { const first = context.store.getRun(runId); const second = first; return second?.model }"
+  - "function f(workflow: Display) { return workflow['steps']; }"
+  - "function f(config: Display) { return config.baseBranch; }"
+  - "function f(step: Display) { return step.allowedTools; }"
+  - "function f(step: Display) { return (step).model; }"
+  - "function f(step: Display) { return step!.model; }"
+  - "function f(step: Display) { return (step as Display).model; }"
+  - "function f(step: Display) { return (step satisfies Display).model; }"
+  - "function f(recipe: StartRunInput) { return (recipe: Display) => recipe.model; }"
+  - "function f(recipe: StartRunInput) { return function nested(recipe: Display) { return recipe.model; }; }"
+  - "function f(recipe: Display) { return (() => recipe.model)(); }"
+  - "function f(recipe: StartRunInput) { return 1; } function g(recipe: Display) { return (() => recipe.model)(); }"
+  - "function f(recipe: StartRunInput) { { const recipe: Display = display(); return recipe.model; } }"
+  - "const recipe: StartRunInput = accepted(); function f(recipe: Display) { return () => recipe.model; }"
+  - "function f(raw: unknown) { return (raw as Display).model; }"
+  - const recipe=accepted() as Display; recipe.model;
+  - "function f(recipe: StartRunInput) { const g = () => { const recipe=accepted() as Display; return recipe.model; }; return g; }"
+  - class C { source!:CezConfig; f() { const view={source:{baseBranch:'display'}, f() { return this.source.baseBranch; }}; return view.f(); } }
+  - class C { source!:CezConfig; f() { return function(this:{source:{baseBranch:string}}) { return this.source.baseBranch; }; } }
+  - class C { source!:CezConfig; f() { return class Inner { source={baseBranch:'display'}; f=()=>this.source.baseBranch; }; } }
+invalid:
+  - 'import type { CezConfig as Options } from "../../config.ts"; function f(options: Options) { return options.baseBranch; }'
+  - "function f(step: WorkflowStepDef) { const {allowedTools} = step; }"
+  - "function f(step: WorkflowStepDef) { return step['allowedTools']; }"
+  - "function f(step: WorkflowStepDef) { return step.allowedTools; }"
+  - "function f(config: CezConfig) { const {baseBranch} = config; }"
+  - "function f(config: CezConfig) { return config['baseBranch']; }"
+  - "function f(config: CezConfig) { return config.baseBranch; }"
+  - "import type { CezConfig as Options } from '../../config.ts'; function choose(options: Options) { return options.defaultRunner }"
+  - class C { source!:CezConfig; f() { return () => this.source.baseBranch; } }
+  - declare function get():unknown; function f() { return (get() as {config:CezConfig}).config.baseBranch; }
+  - declare function get():unknown; function f() { return (<{config:CezConfig}>get()).config.baseBranch; }
+  - declare const holder:{config:CezConfig}; function f() { return (holder satisfies {config:CezConfig}).config.baseBranch; }
+  - "function f<Holder>() { { type Holder = {config:CezConfig}; let data!:Holder; return data.config.baseBranch; } }"
+  - "function f<Holder>() { { interface Holder {config:CezConfig}; let data!:Holder; return data.config.baseBranch; } }"
+  - "class C { source!:CezConfig; f() { return { [this.source.defaultRunner]() {return 1;} }; } }"
+  - "class C { source!:CezConfig; f() { return { get [this.source.defaultRunner]() {return 1;} }; } }"
+  - "class C { source!:CezConfig; f() { return { [(()=>this.source.defaultRunner)()]() {return 1;} }; } }"

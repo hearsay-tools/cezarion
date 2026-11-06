@@ -1,0 +1,109 @@
+id: launch-read-outside-resolver-selectors
+valid:
+  - atTaskHead.runner(handle, configHandle)
+  - atTaskHead.hydrateQueuedInput(context, read, id, recipe)
+  - await atStepOpen.model(store, root, id, state, step, recipe, backend, identity)
+  - await atStepOpen.agentEnvForStep(context, host, id, backend)
+  - atContinue.hydrateQueuedContinuation(context, read, id, accepted)
+  - atContinue.openingImages(host, id, stepId, checkpoint, content)
+  - atLiveInput.enabledSkills(state, root, disabled)
+  - atTaskHead.attachments(context, id, urls, kind)
+  - import type { LaunchSource, ConfigHandle } from './launch-read-resolver.ts'
+  - export { narrowTitleConfig } from './launch-read-resolver.ts'
+  - export function launch() { return resolver.atTaskHead.runner(handle) }
+  - import { attachmentDirectory } from '../attachment-path.ts';
+  - import { queuedStartAt } from '../run-scheduling.ts';
+  - import type { CezConfig } from '../../config.ts';
+  - import { waitForCachedTeamSkills } from '../../skills-remote.ts';
+  - import other from '../display.ts';
+  - import * as other from '../display.ts';
+  - (displayWorkflows)(root)
+  - displayGrant!(step)
+  - (displayWorkflows as Loader)(root)
+  - import display from '../my-ui-state.ts';
+  - import display from '../ui-state.ts.bak';
+  - import * as display from '../my-ui-state.ts';
+  - const display = await import('../ui-state.ts.bak');
+  - import display from '../my-ui-state.js';
+  - import display from '../ui-state.js.bak';
+invalid:
+  - const source = await import('../model-identity.js');
+  - export * as policy from '../../agent-model-policy.ts'
+  - import * as owned from '../load.ts';
+  - export * from '../ui-state.js';
+  - import owned from '../models.js';
+  - export * from '../../config.ts'
+  - import owned from '../load.ts';
+  - import * as owned from '../types.js';
+  - export { loadConfig as title } from '../../config.ts'
+  - import * as owned from '../attachment-path.ts';
+  - import * as owned from '../agent-model-policy.js';
+  - import owned from '../attachment-path.ts';
+  - (loadWorkflows as Loader)(root)
+  - import owned from '../agent-model-policy.js';
+  - export { workerIdentity as pick } from '../../delegation/execution-identity.ts'
+  - import * as owned from '../execution-account.js';
+  - import * as owned from '../model-identity.ts';
+  - import owned from '../types.js';
+  - stepToolGrant!(step)
+  - import * as owned from '../skills-remote.js';
+  - import owned from '../model-identity.ts';
+  - import * as owned from '../model-identity.js';
+  - import * as source from '../../config.ts'; await source['loadConfig'](root)
+  - import * as owned from '../load.js';
+  - import owned from '../execution-account.js';
+  - import owned from '../skills-remote.js';
+  - (loadWorkflows)(root)
+  - import * as owned from '../ui-state.ts';
+  - import * as owned from '../skills.js';
+  - import owned from '../ui-state.ts';
+  - import * as owned from '../attachment-path.js';
+  - import owned from '../model-identity.js';
+  - import owned from '../execution-identity.js';
+  - import { loadConfig as get } from '../../config.ts'; await get(root)
+  - import { resolveAttachmentPath as owned } from '../attachment-path.ts';
+  - import * as owned from '../execution-account.ts';
+  - import owned from '../skills.js';
+  - import owned from '../load.js';
+  - import * as owned from '../ui-state.js';
+  - import owned from '../attachment-path.js';
+  - import owned from '../execution-account.ts';
+  - import * as owned from '../run-scheduling.js';
+  - import owned from '../ui-state.js';
+  - import * as owned from '../agent-profiles.js';
+  - import * as owned from '../config.js';
+  - import { normalizeModelForBackend as owned } from '../model-identity.ts';
+  - import owned from '../config.js';
+  - import * as owned from '../run-scheduling.ts';
+  - import owned from '../run-scheduling.js';
+  - import owned from '../agent-profiles.js';
+  - import { readProjectUiState as owned } from '../ui-state.ts';
+  - import owned from '../run-scheduling.ts';
+  - import * as owned from '../models.js';
+  - import * as owned from '../execution-identity.js';
+  - import { stepToolGrant as owned } from '../types.ts';
+  - import * as owned from '../execution-identity.ts';
+  - import { loadWorkflows as owned } from '../load.ts';
+  - (<Loader>loadWorkflows)(root)
+  - import owned from '../execution-identity.ts';
+  - import owned from '../skills.ts';
+  - import * as owned from '../agent-model-policy.ts';
+  - import owned from '../skills-remote.ts';
+  - import * as owned from '../skills-remote.ts';
+  - import * as owned from '../agent-profiles.ts';
+  - import * as owned from '../skills.ts';
+  - import owned from '../agent-model-policy.ts';
+  - import * as owned from '../config.ts';
+  - import owned from '../types.ts';
+  - (stepToolGrant satisfies GrantFn)(step)
+  - import owned from '../models.ts';
+  - import * as owned from '../types.ts';
+  - import owned from '../agent-profiles.ts';
+  - import owned from '../config.ts';
+  - stepToolGrant(step)
+  - import { loadConfig as pick } from '../../config.ts'; const a = pick; const b = a; await b(root)
+  - await loadConfig(root)
+  - import * as owned from '../models.ts';
+  - const source = await import('../../config.ts'); await source['loadConfig'](root)
+  - loadWorkflows(root)
+  - await source.readAgentModelProvider(backend, root)

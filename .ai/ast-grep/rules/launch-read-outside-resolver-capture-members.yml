@@ -1,0 +1,878 @@
+# Semantic utils generated from ../launch-read-normalization/; edit that source.
+language: typescript
+severity: error
+message: "Production-source read rule; test and testkit readers observe ownership and error behavior outside
+  production selection. Use narrow phase operations in launch-read-resolver.ts at the original read point. The
+  launch-read-outside-resolver rule family does not follow arbitrary aliases of context.store.getRun()
+  results. The launch-read-outside-resolver rule family does not infer launch-source types through nested
+  structural member paths with two or more property accesses before the launch field or copy operation (class
+  fix: hearsay-tools/cezarion#2744). See packages/cezar/src/workflows/launch-read-resolver.types.testkit.ts
+  for compiled handle and lifecycle-store alias controls (owner decision: option A)."
+files:
+  - packages/cezar/src/workflows/run.ts
+  - packages/cezar/src/workflows/run/**/*.ts
+ignores:
+  - packages/cezar/src/workflows/run/launch-read-resolver.ts
+  - packages/cezar/src/**/*.test.ts
+  - packages/cezar/src/**/*.testkit.ts
+id: launch-read-outside-resolver-capture-members
+utils:
+  normalize-capture-expression:
+    any:
+      - matches: normalize-capture-reference
+      - matches: normalize-factory-reference
+      - matches: normalize-config-member
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: normalize-capture-expression
+      - matches: normalize-capture-member-receiver
+  normalize-capture-reference:
+    all:
+      - any:
+          - kind: identifier
+            pattern: $SOURCE
+          - kind: shorthand_property_identifier
+            pattern: $SOURCE
+      - any:
+          - all:
+              - regex: ^(job|input|effectiveInput|continuation|workflow|step|toolsStep|stepIdentity|config|configHandle|launch|execution)$
+              - not:
+                  inside:
+                    stopBy: end
+                    all:
+                      - matches: lr-lexical-scope
+                      - matches: normalize-scope-declares-value
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $VALUE_CAPTURE_SCOPE
+                    - any:
+                        - has:
+                            any:
+                              - all:
+                                  - matches: normalize-value-declaration
+                                  - has:
+                                      field: type
+                                      matches: normalize-capture-type
+                              - all:
+                                  - kind: variable_declarator
+                                  - has:
+                                      field: name
+                                      kind: identifier
+                                      pattern: $SOURCE
+                                  - has:
+                                      field: value
+                                      matches: normalize-capture-asserted-expression
+                            stopBy:
+                              matches: lr-nested-scope
+                        - all:
+                            - matches: lr-function-scope
+                            - has:
+                                all:
+                                  - matches: normalize-hoisted-var-declaration
+                                  - any:
+                                      - all:
+                                          - matches: normalize-value-declaration
+                                          - has:
+                                              field: type
+                                              matches: normalize-capture-type
+                                      - all:
+                                          - kind: variable_declarator
+                                          - has:
+                                              field: name
+                                              kind: identifier
+                                              pattern: $SOURCE
+                                          - has:
+                                              field: value
+                                              matches: normalize-capture-asserted-expression
+                                stopBy:
+                                  matches: lr-function-boundary
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - matches: normalize-scope-declares-value
+                      - inside:
+                          pattern: $VALUE_CAPTURE_SCOPE
+                          stopBy: end
+                    stopBy: end
+  normalize-factory-reference:
+    all:
+      - kind: identifier
+        pattern: $SOURCE
+      - all:
+          - inside:
+              all:
+                - matches: lr-lexical-scope
+                - pattern: $FACTORY_SCOPE
+                - any:
+                    - has:
+                        all:
+                          - kind: variable_declarator
+                          - has:
+                              field: name
+                              kind: identifier
+                              pattern: $SOURCE
+                          - has:
+                              field: value
+                              matches: normalize-factory-expression
+                        stopBy:
+                          matches: lr-nested-scope
+                    - all:
+                        - matches: lr-function-scope
+                        - has:
+                            all:
+                              - matches: normalize-hoisted-var-declaration
+                              - all:
+                                  - kind: variable_declarator
+                                  - has:
+                                      field: name
+                                      kind: identifier
+                                      pattern: $SOURCE
+                                  - has:
+                                      field: value
+                                      matches: normalize-factory-expression
+                            stopBy:
+                              matches: lr-function-boundary
+              stopBy: end
+          - not:
+              inside:
+                all:
+                  - matches: lr-lexical-scope
+                  - matches: normalize-scope-declares-value
+                  - inside:
+                      pattern: $FACTORY_SCOPE
+                      stopBy: end
+                stopBy: end
+  normalize-config-member:
+    all:
+      - any:
+          - kind: member_expression
+          - kind: subscript_expression
+      - has:
+          field: object
+          matches: normalize-capture-receiver
+      - any:
+          - has:
+              field: property
+              regex: ^config$
+          - has:
+              field: index
+              regex: ^['"]config['"]$
+  normalize-capture-member-receiver:
+    all:
+      - any:
+          - kind: member_expression
+          - kind: subscript_expression
+      - any:
+          - has:
+              field: property
+              pattern: $MEMBER
+          - has:
+              field: index
+              kind: string
+              has:
+                kind: string_fragment
+                pattern: $MEMBER
+      - has:
+          field: object
+          matches: normalize-capture-property-holder
+  normalize-scope-declares-value:
+    any:
+      - has:
+          matches: normalize-lexical-value-declaration
+          stopBy:
+            matches: lr-nested-scope
+      - all:
+          - matches: lr-function-scope
+          - has:
+              matches: normalize-hoisted-var-declaration
+              stopBy:
+                matches: lr-function-boundary
+  normalize-value-declaration:
+    any:
+      - all:
+          - any:
+              - kind: required_parameter
+              - kind: optional_parameter
+          - has:
+              field: pattern
+              matches: normalize-binding-pattern
+      - all:
+          - kind: variable_declarator
+          - has:
+              field: name
+              matches: normalize-binding-pattern
+      - all:
+          - any:
+              - kind: function_declaration
+              - kind: generator_function_declaration
+              - kind: class_declaration
+              - kind: enum_declaration
+              - kind: internal_module
+          - has:
+              field: name
+              pattern: $SOURCE
+      - all:
+          - any:
+              - kind: identifier
+              - kind: type_identifier
+          - pattern: $SOURCE
+          - inside:
+              any:
+                - all:
+                    - kind: function_declaration
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: generator_function_declaration
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: class_declaration
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: enum_declaration
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: internal_module
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: function_expression
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: generator_function
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: class
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+      - all:
+          - matches: normalize-binding-pattern
+          - inside:
+              all:
+                - kind: catch_clause
+                - has:
+                    field: parameter
+                    matches: normalize-binding-pattern
+      - all:
+          - matches: normalize-binding-pattern
+          - inside:
+              all:
+                - kind: for_in_statement
+                - has:
+                    field: kind
+                    regex: ^(const|let|var)$
+                - has:
+                    field: left
+                    matches: normalize-binding-pattern
+      - all:
+          - kind: import_clause
+          - has:
+              kind: identifier
+              pattern: $SOURCE
+      - all:
+          - kind: namespace_import
+          - has:
+              kind: identifier
+              pattern: $SOURCE
+      - all:
+          - kind: import_specifier
+          - any:
+              - has:
+                  field: alias
+                  pattern: $SOURCE
+              - all:
+                  - not:
+                      has:
+                        field: alias
+                        kind: identifier
+                  - has:
+                      field: name
+                      pattern: $SOURCE
+  normalize-capture-type:
+    any:
+      - matches: normalize-capture-root-type
+      - all:
+          - kind: type_identifier
+            pattern: $REF_CAPTURE_TYPE
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $REF_CAPTURE_SCOPE
+                    - has:
+                        all:
+                          - kind: type_alias_declaration
+                          - has:
+                              field: name
+                              kind: type_identifier
+                              pattern: $REF_CAPTURE_TYPE
+                          - has:
+                              field: value
+                              matches: normalize-capture-root-type
+                        stopBy:
+                          matches: lr-nested-scope
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - has:
+                          any:
+                            - all:
+                                - any:
+                                    - kind: type_alias_declaration
+                                    - kind: interface_declaration
+                                    - kind: class_declaration
+                                - has:
+                                    field: name
+                                    kind: type_identifier
+                                    pattern: $REF_CAPTURE_TYPE
+                            - all:
+                                - kind: import_specifier
+                                - any:
+                                    - has:
+                                        field: alias
+                                        pattern: $REF_CAPTURE_TYPE
+                                    - has:
+                                        field: name
+                                        kind: type_identifier
+                                        pattern: $REF_CAPTURE_TYPE
+                          stopBy:
+                            matches: lr-nested-scope
+                      - inside:
+                          pattern: $REF_CAPTURE_SCOPE
+                          stopBy: end
+                    stopBy: end
+          - not:
+              inside:
+                all:
+                  - has:
+                      field: type_parameters
+                      has:
+                        kind: type_parameter
+                        has:
+                          field: name
+                          pattern: $REF_CAPTURE_TYPE
+                  - inside:
+                      pattern: $REF_CAPTURE_SCOPE
+                      stopBy: end
+                stopBy: end
+      - all:
+          - matches: lr-type-wrapper
+          - has:
+              matches: normalize-capture-type
+      - all:
+          - matches: lr-view-type-wrapper
+          - has:
+              kind: type_arguments
+              has:
+                matches: normalize-capture-type
+  normalize-capture-asserted-expression:
+    any:
+      - matches: normalize-capture-assertion
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: normalize-capture-asserted-expression
+  normalize-hoisted-var-declaration:
+    any:
+      - all:
+          - kind: variable_declarator
+          - has:
+              field: name
+              matches: normalize-binding-pattern
+          - inside:
+              kind: variable_declaration
+      - all:
+          - kind: for_in_statement
+          - has:
+              field: kind
+              regex: ^var$
+          - has:
+              field: left
+              matches: normalize-binding-pattern
+  normalize-factory-expression:
+    any:
+      - matches: normalize-source-factory
+      - matches: normalize-capture-assertion
+      - all:
+          - any:
+              - matches: lr-expression-wrapper
+              - kind: await_expression
+          - has:
+              matches: normalize-factory-expression
+  normalize-capture-receiver:
+    any:
+      - matches: normalize-capture-assertion
+      - matches: normalize-capture-reference
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: normalize-capture-receiver
+      - matches: normalize-capture-member-receiver
+  normalize-capture-property-holder:
+    any:
+      - all:
+          - kind: identifier
+            pattern: $SOURCE
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $HOLDER_VALUE_SCOPE
+                    - any:
+                        - has:
+                            all:
+                              - matches: normalize-value-declaration
+                              - has:
+                                  field: type
+                                  matches: normalize-capture-property-type
+                            stopBy:
+                              matches: lr-nested-scope
+                        - all:
+                            - matches: lr-function-scope
+                            - has:
+                                all:
+                                  - matches: normalize-hoisted-var-declaration
+                                  - all:
+                                      - matches: normalize-value-declaration
+                                      - has:
+                                          field: type
+                                          matches: normalize-capture-property-type
+                                stopBy:
+                                  matches: lr-function-boundary
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - matches: normalize-scope-declares-value
+                      - inside:
+                          pattern: $HOLDER_VALUE_SCOPE
+                          stopBy: end
+                    stopBy: end
+      - all:
+          - kind: this
+          - inside:
+              all:
+                - kind: class_body
+                - pattern: $CLASS_SCOPE
+                - has:
+                    any:
+                      - all:
+                          - any:
+                              - kind: property_signature
+                              - kind: public_field_definition
+                          - has:
+                              field: name
+                              pattern: $MEMBER
+                          - has:
+                              field: type
+                              matches: normalize-capture-type
+                      - all:
+                          - kind: method_definition
+                          - has:
+                              field: name
+                              regex: ^constructor$
+                          - has:
+                              field: parameters
+                              kind: formal_parameters
+                              has:
+                                all:
+                                  - any:
+                                      - kind: required_parameter
+                                      - kind: optional_parameter
+                                  - has:
+                                      field: pattern
+                                      pattern: $MEMBER
+                                  - has:
+                                      field: type
+                                      matches: normalize-capture-type
+                                  - any:
+                                      - has:
+                                          kind: accessibility_modifier
+                                      - regex: ^readonly\s
+                    stopBy:
+                      matches: lr-nested-scope
+              stopBy: end
+          - not:
+              inside:
+                all:
+                  - matches: normalize-this-binding-boundary
+                  - inside:
+                      pattern: $CLASS_SCOPE
+                      stopBy: end
+                stopBy: end
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: normalize-capture-property-holder
+      - all:
+          - matches: lr-assertion-wrapper
+          - has:
+              matches: normalize-capture-property-type
+  normalize-lexical-value-declaration:
+    all:
+      - matches: normalize-value-declaration
+      - not:
+          any:
+            - all:
+                - kind: variable_declarator
+                - inside:
+                    kind: variable_declaration
+            - all:
+                - matches: normalize-binding-pattern
+                - inside:
+                    all:
+                      - kind: for_in_statement
+                      - has:
+                          field: kind
+                          regex: ^var$
+  normalize-binding-pattern:
+    any:
+      - all:
+          - any:
+              - kind: identifier
+              - kind: shorthand_property_identifier_pattern
+          - pattern: $SOURCE
+      - all:
+          - any:
+              - kind: object_pattern
+              - kind: array_pattern
+              - kind: rest_pattern
+          - has:
+              matches: normalize-binding-pattern
+      - all:
+          - kind: pair_pattern
+          - has:
+              field: value
+              matches: normalize-binding-pattern
+      - all:
+          - any:
+              - kind: assignment_pattern
+              - kind: object_assignment_pattern
+          - has:
+              field: left
+              matches: normalize-binding-pattern
+  normalize-capture-root-type:
+    any:
+      - all:
+          - kind: type_identifier
+            pattern: $ROOT_CAPTURE_TYPE
+          - regex: ^(StartRunInput|PendingJob|PendingContinuation|WorkflowDef|WorkflowStepDef|WorkerStepIdentity|CezConfig|LaunchConfig|LaunchSource|ExecutionLaunch|Execution)$
+          - not:
+              inside:
+                matches: lr-lexical-scope
+                stopBy: end
+                has:
+                  all:
+                    - any:
+                        - kind: type_alias_declaration
+                        - kind: interface_declaration
+                        - kind: class_declaration
+                    - has:
+                        field: name
+                        kind: type_identifier
+                        pattern: $ROOT_CAPTURE_TYPE
+                  stopBy:
+                    matches: lr-nested-scope
+          - not:
+              inside:
+                has:
+                  field: type_parameters
+                  has:
+                    kind: type_parameter
+                    has:
+                      field: name
+                      pattern: $ROOT_CAPTURE_TYPE
+                stopBy: end
+      - all:
+          - kind: type_identifier
+            pattern: $ROOT_CAPTURE_TYPE
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $ROOT_CAPTURE_SCOPE
+                    - has:
+                        all:
+                          - kind: import_specifier
+                          - has:
+                              field: alias
+                              pattern: $ROOT_CAPTURE_TYPE
+                          - has:
+                              field: name
+                              regex: ^(StartRunInput|PendingJob|PendingContinuation|WorkflowDef|WorkflowStepDef|WorkerStepIdentity|CezConfig|LaunchConfig|LaunchSource|ExecutionLaunch|Execution)$
+                        stopBy:
+                          matches: lr-nested-scope
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - has:
+                          any:
+                            - all:
+                                - any:
+                                    - kind: type_alias_declaration
+                                    - kind: interface_declaration
+                                    - kind: class_declaration
+                                - has:
+                                    field: name
+                                    kind: type_identifier
+                                    pattern: $ROOT_CAPTURE_TYPE
+                            - all:
+                                - kind: import_specifier
+                                - any:
+                                    - has:
+                                        field: alias
+                                        pattern: $ROOT_CAPTURE_TYPE
+                                    - has:
+                                        field: name
+                                        kind: type_identifier
+                                        pattern: $ROOT_CAPTURE_TYPE
+                          stopBy:
+                            matches: lr-nested-scope
+                      - inside:
+                          pattern: $ROOT_CAPTURE_SCOPE
+                          stopBy: end
+                    stopBy: end
+          - not:
+              inside:
+                all:
+                  - has:
+                      field: type_parameters
+                      has:
+                        kind: type_parameter
+                        has:
+                          field: name
+                          pattern: $ROOT_CAPTURE_TYPE
+                  - inside:
+                      pattern: $ROOT_CAPTURE_SCOPE
+                      stopBy: end
+                stopBy: end
+      - all:
+          - kind: member_expression
+          - has:
+              field: object
+              all:
+                - kind: call_expression
+                - has:
+                    field: function
+                    regex: ^import$
+          - has:
+              field: property
+              regex: ^(StartRunInput|PendingJob|PendingContinuation|WorkflowDef|WorkflowStepDef|WorkerStepIdentity|CezConfig|LaunchConfig|LaunchSource|ExecutionLaunch|Execution)$
+      - all:
+          - matches: lr-type-wrapper
+          - has:
+              matches: normalize-capture-root-type
+  normalize-capture-assertion:
+    all:
+      - matches: lr-assertion-wrapper
+      - has:
+          matches: normalize-capture-type
+  normalize-source-factory:
+    all:
+      - kind: call_expression
+      - has:
+          field: function
+          matches: normalize-source-factory-target
+  normalize-capture-property-type:
+    any:
+      - matches: normalize-capture-property-root-type
+      - all:
+          - kind: type_identifier
+            pattern: $HOLDER_TYPE
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $HOLDER_TYPE_SCOPE
+                    - has:
+                        all:
+                          - all:
+                              - any:
+                                  - kind: type_alias_declaration
+                                  - kind: interface_declaration
+                              - has:
+                                  field: name
+                                  kind: type_identifier
+                                  pattern: $HOLDER_TYPE
+                          - any:
+                              - has:
+                                  field: value
+                                  matches: normalize-capture-property-root-type
+                              - has:
+                                  field: body
+                                  matches: normalize-capture-property-root-type
+                        stopBy:
+                          matches: lr-nested-scope
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - has:
+                          all:
+                            - any:
+                                - kind: type_alias_declaration
+                                - kind: interface_declaration
+                            - has:
+                                field: name
+                                kind: type_identifier
+                                pattern: $HOLDER_TYPE
+                          stopBy:
+                            matches: lr-nested-scope
+                      - inside:
+                          pattern: $HOLDER_TYPE_SCOPE
+                          stopBy: end
+                    stopBy: end
+          - not:
+              inside:
+                all:
+                  - has:
+                      field: type_parameters
+                      has:
+                        kind: type_parameter
+                        has:
+                          field: name
+                          pattern: $HOLDER_TYPE
+                  - inside:
+                      pattern: $HOLDER_TYPE_SCOPE
+                      stopBy: end
+                stopBy: end
+      - all:
+          - matches: lr-type-wrapper
+          - has:
+              matches: normalize-capture-property-type
+  normalize-this-binding-boundary:
+    any:
+      - kind: function_expression
+      - kind: function_declaration
+      - kind: generator_function
+      - kind: generator_function_declaration
+      - all:
+          - any:
+              - kind: statement_block
+              - kind: formal_parameters
+          - inside:
+              all:
+                - kind: method_definition
+                - not:
+                    inside:
+                      kind: class_body
+      - all:
+          - any:
+              - all:
+                  - any:
+                      - kind: statement_block
+                      - kind: formal_parameters
+                  - inside:
+                      kind: method_definition
+                      inside:
+                        kind: class_body
+                        inside:
+                          pattern: $CLASS_SCOPE
+                          stopBy: end
+              - inside:
+                  field: value
+                  kind: public_field_definition
+                  inside:
+                    kind: class_body
+                    inside:
+                      pattern: $CLASS_SCOPE
+                      stopBy: end
+              - all:
+                  - kind: class_static_block
+                  - inside:
+                      kind: class_body
+                      inside:
+                        pattern: $CLASS_SCOPE
+                        stopBy: end
+  normalize-source-factory-target:
+    any:
+      - all:
+          - kind: identifier
+          - regex: ^bindLaunchSource$
+      - all:
+          - kind: member_expression
+          - has:
+              field: object
+              regex: ^(atTaskHead|atContinue)$
+          - has:
+              field: property
+              regex: ^(config|executionInput|jobInput)$
+      - all:
+          - kind: subscript_expression
+          - has:
+              field: object
+              regex: ^(atTaskHead|atContinue)$
+          - has:
+              field: index
+              regex: ^['"](config|executionInput|jobInput)['"]$
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: normalize-source-factory-target
+  normalize-capture-property-root-type:
+    any:
+      - all:
+          - any:
+              - kind: object_type
+              - kind: interface_body
+          - has:
+              all:
+                - any:
+                    - kind: property_signature
+                    - kind: public_field_definition
+                - has:
+                    field: name
+                    pattern: $MEMBER
+                - has:
+                    field: type
+                    matches: normalize-capture-type
+      - all:
+          - matches: lr-type-wrapper
+          - has:
+              matches: normalize-capture-property-root-type
+rule:
+  any:
+    - all:
+        - kind: shorthand_property_identifier
+        - matches: normalize-capture-expression
+    - all:
+        - kind: pair
+        - has:
+            field: value
+            matches: normalize-capture-expression
+    - all:
+        - kind: return_statement
+        - has:
+            matches: normalize-capture-expression
+        - inside:
+            kind: method_definition
+            stopBy: end
+    - all:
+        - kind: arrow_function
+        - has:
+            field: body
+            matches: normalize-capture-expression

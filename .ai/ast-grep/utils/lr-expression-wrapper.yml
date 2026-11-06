@@ -1,0 +1,14 @@
+id: lr-expression-wrapper
+language: typescript
+rule:
+  any:
+    - kind: parenthesized_expression
+    - kind: non_null_expression
+    - kind: as_expression
+    - kind: satisfies_expression
+    - kind: type_assertion
+    - all:
+        - kind: unary_expression
+          regex: ^void\s
+        - inside:
+            kind: non_null_expression
