@@ -608,3 +608,30 @@ no anchor correction was pending, and no focus/startup pins were active. A secon
 180-frame reproduction had no uncovered frame. Flat mode never has this
 virtualization gap; both sampled flat controls stayed covered. This is a jump
 limitation, separate from the retained anchor during content updates.
+
+
+### Later layout-change correction
+
+A later QA check found that folding Finished above a virtual Working group could
+shrink the page below its old scroll offset. The browser clamped scrolling and
+unmounted the saved anchor before the page could restore it. The correction
+captures before local fold/preview changes, then restores the same logical key
+through its list's virtual item offset if that row is temporarily unmounted.
+It retains the pending correction until the mounted row's position, the
+virtualizer's scroll offset and its committed start margin agree; this prevents a
+delayed virtualizer correction from undoing the restore after a large fold. An
+already-settled snapshot releases immediately, and ordinary resize callbacks do
+not schedule a logical scroll.
+The list registration is removed on unmount. A filtered-out anchor has no fallback
+to another row: it retains scrollTop, subject to the browser's new height clamp.
+A surviving anchor retains its viewport position. The focused tests cover both.
+This correction and the committed-membership/worker-response follow-up postdate
+the final-head timing table; that table remains evidence at its recorded hashes.
+
+Follow-up verification: 184 focused unit tests, web typecheck, lint and all 29
+browser checks (28 virtualization cases plus index smoke) passed. The bundled
+browser-coverage quality run timed out after 20 minutes without a measurement.
+The approved replacement used the seven focused unit files: 431 changed functions
+inventoried, maximum complexity 20 and measured maximum CRAP 30, with no exceeded
+limits. Coverage was unavailable for 99 functions, so this is partial quality
+evidence; CI's complexity gate and coverage merge cover the remaining paths.

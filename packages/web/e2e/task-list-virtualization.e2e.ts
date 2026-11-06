@@ -187,3 +187,59 @@ it.each([['project', 1440, 900], ['project', 360, 640], ['global', 1440, 900], [
     expect(Math.abs(after - before.top)).toBeLessThanOrEqual(2)
   } finally { await large.stop() }
 })
+
+it.each([
+  ['project', 1440, 900, 'fold'], ['project', 360, 640, 'fold'],
+  ['global', 1440, 900, 'fold'], ['global', 360, 640, 'fold'],
+  ['project', 1440, 900, 'preview'], ['project', 360, 640, 'preview'],
+  ['global', 1440, 900, 'preview'], ['global', 360, 640, 'preview'],
+  ['global', 1440, 900, 'storage'],
+] as const)('anchors %s at %s x %s after an earlier %s collapses', async (scope, width, height, change) => {
+  const large = await createTabFixture(process.cwd(), { taskList: scope, taskListSizes: { active: 310, archived: 0, projects: scope === 'global' ? 3 : 1 } })
+  try {
+    await large.control({ update: large.runs.slice(0, scope === 'global' ? 1 : 120).map(run => ({ ...run, patch: { status: RUN_STATUS.done } })) })
+    browser.setViewport(width, height)
+    browser.goto(`${large.origin}${scope === 'project' ? '/p/boot/' : '/tasks'}?tasks=virtual`)
+    const route = `[data-route="${scope === 'project' ? 'tasks' : 'global-tasks'}"]`
+    const finished = `${route} [data-bucket="Finished"]`
+    browser.waitForFunction(`document.querySelector('${finished} [data-run-id]') !== null && window.__cezIdle`)
+    const preview = `${finished} [data-run-id] button[data-task-control="resources"]`
+    if (change === 'preview') {
+      // Pin this control so the same expanded row remains mounted above the viewport.
+      browser.evaluate(`window.__collapsePreview=document.querySelector('${preview}');window.__collapsePreview.focus();window.__collapsePreview.click()`)
+      browser.waitForFunction(`window.__collapsePreview.getAttribute('aria-expanded') === 'true' && window.__cezIdle`)
+    }
+    browser.evaluate(`(() => {const owner=document.querySelector('[data-slot="main"]'),group=document.querySelector('${route} [data-bucket="Working"]');owner.scrollTop+=group.getBoundingClientRect().top-owner.getBoundingClientRect().top+${scope === 'global' ? 12000 : 15000}})()`)
+    const sample = `(() => {const owner=document.querySelector('[data-slot="main"]'),edge=owner.getBoundingClientRect().top;const row=[...document.querySelectorAll('${route} [data-bucket="Working"] [data-run-id]')].find(e=>e.getBoundingClientRect().bottom>edge&&e.getBoundingClientRect().top<edge+owner.clientHeight);return row?{id:row.dataset.runId,top:row.getBoundingClientRect().top}:null})()`
+    const before = waitForSettledSample(browser, sample) as { id: string; top: number }
+    if (change !== 'preview') {
+      if (change === 'storage') browser.evaluate(`localStorage.setItem('cez-task-list-folds',JSON.stringify({[JSON.stringify(['global','active','Finished'])]:true}));window.dispatchEvent(new StorageEvent('storage',{key:'cez-task-list-folds'}))`)
+      else browser.evaluate(`document.querySelector('${finished} [data-slot="status-group-toggle"]').click()`)
+      browser.waitForFunction(`document.querySelector('${finished} [data-slot="status-group-toggle"]').getAttribute('aria-expanded') === 'false'`)
+    } else {
+      browser.evaluate('window.__collapsePreview.click()')
+      browser.waitForFunction(`window.__collapsePreview.getAttribute('aria-expanded') === 'false'`)
+    }
+    const after = waitForSettledSample(browser, `(() => {const row=document.querySelector('${route} [data-run-id="${before.id}"]');return row?row.getBoundingClientRect().top:null})()`) as number
+    expect(Math.abs(after - before.top)).toBeLessThanOrEqual(2)
+  } finally { await large.stop() }
+})
+
+it.each(['project', 'global'] as const)('keeps %s query scroll when the anchor survives or leaves the filtered list', (scope) => {
+  browser.setViewport(1440, 900)
+  browser.goto(`${fixture.origin}${scope === 'project' ? '/p/boot/' : '/tasks'}?tasks=virtual`)
+  const route = `[data-route="${scope === 'project' ? 'tasks' : 'global-tasks'}"]`
+  browser.waitForFunction(`document.querySelector('${route} [data-run-id]') !== null && window.__cezIdle`)
+  browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop=6500`)
+  const sample = `(() => {const owner=document.querySelector('[data-slot="main"]'),edge=owner.getBoundingClientRect().top;const row=[...document.querySelectorAll('${route} [data-run-id]')].find(e=>e.getBoundingClientRect().bottom>edge&&e.getBoundingClientRect().top<edge+owner.clientHeight);return row?{id:row.dataset.runId,top:row.getBoundingClientRect().top,scroll:owner.scrollTop}:null})()`
+  const before = waitForSettledSample(browser, sample) as { id: string; top: number; scroll: number }
+  const query = (value: string) => browser.evaluate(`(()=>{const input=document.querySelector('${route} input[placeholder*="Search"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}))})()`)
+  query('Tab task')
+  browser.waitForFunction(`new URLSearchParams(location.search).get('q') === 'Tab task' && window.__cezIdle`)
+  const after = waitForSettledSample(browser, `(() => {const row=document.querySelector('${route} [data-run-id="${before.id}"]');return row?row.getBoundingClientRect().top:null})()`) as number
+  expect(Math.abs(after - before.top)).toBeLessThanOrEqual(2)
+  query('Tab task 149')
+  browser.waitForFunction(`new URLSearchParams(location.search).get('q') === 'Tab task 149' && window.__cezIdle && document.querySelector('${route} [data-run-id="${before.id}"]') === null`)
+  const removed = waitForSettledSample(browser, `(()=>{const owner=document.querySelector('[data-slot="main"]');return {scroll:owner.scrollTop,max:Math.max(0,owner.scrollHeight-owner.clientHeight)}})()`) as { scroll: number; max: number }
+  expect(Math.abs(removed.scroll - Math.min(before.scroll, removed.max))).toBeLessThanOrEqual(2)
+})

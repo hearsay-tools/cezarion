@@ -18,7 +18,7 @@ export function useTaskListFocusState(layout: string, revision: unknown, trackMe
 
 export function useTaskListFocus(layout: string, revision?: unknown, onFocused?: (key: string | null) => void, contains?: (key: string) => boolean) {
   const membership = useRef(contains)
-  membership.current = contains
+  useLayoutEffect(() => { membership.current = contains })
   const ref = useRef<HTMLDivElement>(null)
   const focused = useRef<{ element: HTMLElement; runId: string; project: string | undefined; control: string | null; label: string | null; tag: string } | null>(null)
   const onFocusCapture = (event: FocusEvent<HTMLDivElement>) => {

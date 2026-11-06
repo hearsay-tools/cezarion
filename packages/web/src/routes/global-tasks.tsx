@@ -70,7 +70,7 @@ import {
 import { scopeTo } from '@/lib/project-router'
 import { allProjectTags } from '@/lib/project-tags'
 import { canBeUnread, isReadDoneItem, isUnread, unreadMarkerTone } from '@/lib/read-state'
-import { runTitle, type BucketLabel, type ListView } from '@/lib/task-groups'
+import { BUCKET_ORDER, runTitle, type BucketLabel, type ListView } from '@/lib/task-groups'
 import { groupIndexedTasks, groupMembers, groupTone, originCounts, rowTasks, type TaskOrigin, type TaskStatusGroup } from '@/lib/task-origin'
 import { useSearchParamsWriter } from '@/lib/use-search-params-writer'
 import { useTaskListFolds } from '@/lib/use-task-list-folds'
@@ -304,7 +304,7 @@ export function GlobalTasksRoute() {
   )
 
   return (
-    <TaskListFocusBoundary layout={groupBy} revision={index.data} data-route="global-tasks" data-presentation={groupBy === 'none' ? 'summary' : 'cards'} data-filter-details={filterDetailsOpen} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+    <TaskListFocusBoundary layout={groupBy} revision={groups} visibilityRevision={JSON.stringify([BUCKET_ORDER.map(folds.isCollapsed), [...expandedRuns].sort(), view, filterDetailsOpen])} data-route="global-tasks" data-presentation={groupBy === 'none' ? 'summary' : 'cards'} data-filter-details={filterDetailsOpen} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
       <header className="flex shrink-0 flex-col gap-[22px]">
         <div className="flex flex-col gap-2"><h1 className="text-[30px] font-semibold tracking-tight">All tasks</h1><p className="text-[13px] text-muted-foreground">{groupBy === 'none' ? 'Every project. One place to review what your agents have shipped.' : 'Filter across projects and act on each run without opening the session.'}</p></div>
         <div className="flex items-center gap-6 border-b border-border">

@@ -47,7 +47,7 @@ import {
   type TaskColumnIcon,
   type TaskColumnId,
 } from '@/lib/task-columns'
-import { ARCHIVED_WINDOW, listCounts, runTitle, withArchivedPages, type BucketLabel, type ListView } from '@/lib/task-groups'
+import { ARCHIVED_WINDOW, BUCKET_ORDER, listCounts, runTitle, withArchivedPages, type BucketLabel, type ListView } from '@/lib/task-groups'
 import {
   groupMembers,
   groupProjectRuns,
@@ -104,6 +104,7 @@ export type ArchivedPages = {
  * Below `md` the table becomes a stacked card list (the New task FAB is the shell's, #621) — same rows, same order,
  * same data, only the framing changes (mockup `tasks-home.html`, mobile section).
  */
+const noAutomationName = () => undefined
 export function TasksOverview({
   runs,
   view,
@@ -130,7 +131,7 @@ export function TasksOverview({
   urlQuery = '',
   onQueryChange,
   foldScope = 'project',
-  automationName = () => undefined,
+  automationName = noAutomationName,
 }: {
   /** Undefined while `/api/runs` has not answered: the header renders, the body stays empty —
    *  an empty state before we know there are no runs would be a lie. */
@@ -189,8 +190,8 @@ export function TasksOverview({
   const desktop = useIsDesktop()
   const { expandedRuns, toggleExpandedRun } = useTaskListExpansion()
   const headerRef = React.useRef<HTMLElement>(null)
-  const all = runs ?? []
-  const derived = useProjectTaskGroups({ all, view, query, origin, archivedPages, archivedTotal, automationName })
+  const all = React.useMemo(() => runs ?? [], [runs])
+  const derived = React.useMemo(() => deriveProjectTaskGroups({ all, view, query, origin, archivedPages, archivedTotal, automationName }), [all, view, query, origin, archivedPages, archivedTotal, automationName])
   const { groups, needle } = derived
   const columns = React.useMemo(() => taskColumnsForCapabilities({ tokens: showTokens, cost: showCost }), [showTokens, showCost])
   // A search shows every group holding a match, folded or not, without saving that choice.
@@ -203,7 +204,7 @@ export function TasksOverview({
   // drop the task at the top of the active list by a click that looked like it did nothing.
   const pinToggle = view === 'archived' ? undefined : onTogglePin
   return (
-    <TaskTitleEditorProvider runs={archivedPages ? [...all, ...archivedPages.runs] : all} onRename={onRename}><TaskListFocusBoundary layout={`${desktop}:${detailedTable}`} revision={runs} data-route="tasks" data-presentation={detailedTable ? 'resources' : 'summary'} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+    <TaskTitleEditorProvider runs={archivedPages ? [...all, ...archivedPages.runs] : all} onRename={onRename}><TaskListFocusBoundary layout={`${desktop}:${detailedTable}`} revision={groups} visibilityRevision={JSON.stringify([BUCKET_ORDER.map(folds.isCollapsed), [...expandedRuns].sort(), view, expandedColumns])} data-route="tasks" data-presentation={detailedTable ? 'resources' : 'summary'} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
       {/* One set of search/view controls across breakpoints keeps query and selection intact.
           Mobile places search above the list filters; the shell already supplies its title. */}
       <header ref={headerRef} className="flex shrink-0 flex-col gap-[22px]">
@@ -326,8 +327,7 @@ function TasksHeading({ projectName, detailedTable }: { projectName?: string | u
     <div className="flex flex-col gap-2"><h1 className="text-[30px] font-semibold tracking-tight">Project tasks</h1><p className="text-[13px] text-muted-foreground">{projectName ? `${projectName} · ` : ''}{detailedTable ? 'Every resource column shown. Fold columns without losing the saved view.' : 'Review runs, pull requests and resource usage.'}</p></div>
   )
 }
-/** The caller's origin when it holds one (the route keeps it in the URL); otherwise the page's
- *  own, starting at All. */
+/** Use the caller's URL origin when present; otherwise keep page state, starting at All. */
 function useOriginOrOwn(origin: TaskOrigin | undefined, onChange: ((origin: TaskOrigin) => void) | undefined) {
   const [own, setOwn] = React.useState<TaskOrigin>('all')
   return [origin ?? own, onChange ?? setOwn] as const
@@ -337,7 +337,7 @@ function useOriginOrOwn(origin: TaskOrigin | undefined, onChange: ((origin: Task
  * tabs, chips, caption and bulk actions show. Pure arithmetic over the props, kept out of the
  * markup.
  */
-function useProjectTaskGroups({ all, view, query, origin, archivedPages, archivedTotal, automationName }: {
+function deriveProjectTaskGroups({ all, view, query, origin, archivedPages, archivedTotal, automationName }: {
   all: readonly RunSummary[]
   view: ListView
   query: string
