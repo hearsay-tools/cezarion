@@ -242,20 +242,38 @@ zero accounts, the cockpit shows a banner with a one-click restore of the newest
 `config.json.bak` (ADR 0010) becomes the newest entry of this set.
 
 A test or stray process can also write a live file directly, past `HomeStore`. So
-`HomeStore` also keeps each version it writes, in this order: (1) write the new version into
-`backups/` under its content hash and fsync it; (2) atomically replace the live file. A
-reader treats the live file as `HomeStore`'s own when its hash matches any stored version.
-A crash after step 1 leaves the old file, which matches its own stored version; a crash after
-step 2 leaves the new file, whose version step 1 already stored. So no crash looks like an
-outside write.
+`HomeStore` keeps a version log per file in `backups/<file>/`: every version it wrote, by
+content hash, plus a `HEAD` record that names the committed version. One write, all under
+`write.lock`:
 
-When a read finds a hash that matches no stored version, the write came from outside. The
-cockpit keeps the file as found, pins the newest stored version as the restore target, and
-blocks every `HomeStore` write to that file until the user chooses in a banner: restore the
-pinned version, or accept the file as found (which stores it as a new version). Blocking
-the writes keeps a later merge from folding the outside content into a version that would
-then become the restore target. A direct write between two reads is detected at the next
-read.
+1. Re-read the live file. If its hash is not `HEAD`, an outside write happened since the last
+   read: stop and flag it (below) instead of overwriting it.
+2. Store the new version under its hash and record it as `PENDING`; fsync both.
+3. Atomically replace the live file.
+4. Set `HEAD` to the new hash and clear `PENDING`; fsync.
+
+A read compares the live file with `HEAD`. A match is `HomeStore`'s own. A match with
+`PENDING` means a crash between steps 3 and 4: the read finishes step 4. Anything else, an
+older stored version included, is an outside write. A crash before step 3 leaves the old file,
+which still matches `HEAD`.
+
+On an outside write the cockpit keeps the file as found, pins the `HEAD` version as the
+restore target, and blocks every `HomeStore` write to that file until the user chooses in a
+banner: restore the pinned version, or accept the file as found (stored as a new version and
+made `HEAD`). Blocking keeps a later merge from folding the outside content into the restore
+target.
+
+The migration (section 4 step 5) stores each copied file as a version and sets `HEAD`
+before the new home goes live. The first build with `HomeStore` does the same on its first
+boot for each file of an existing home that has no `HEAD`, so an upgrade is never flagged.
+
+Limit: outside writers do not take `write.lock`. A write that lands between step 1 and step 3
+of one `HomeStore` write is replaced without a flag; the window is one atomic rename long,
+and the overwritten content is the outside write itself, not user data.
+
+Every version, rotating backup, migration copy and migration archive holds the same data as
+the live files, webhook tokens included. They are created private: `0600` files in `0700`
+directories on Unix, and an ACL that grants only the current user on Windows.
 
 ## 6. Delivery
 
