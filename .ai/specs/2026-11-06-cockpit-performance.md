@@ -18,7 +18,7 @@ the baseline and on the branch.
 
 - `GET /workspace/runs-index` rebuilds every visible project's window on each call (808 rows,
   about 764 KiB in the sample). The app shell always mounts it
-  (`web/src/hooks/use-workspace-signals.ts:44`). `createRunsIndexRefresher`
+  (`web/src/components/use-workspace-signals.ts:44`). `createRunsIndexRefresher`
   (`web/src/api/global-events.tsx:103-133`) invalidates it, and every active report query,
   400 ms after any `run` or `run-deleted` event. The timer holds its first deadline, so
   sustained events allow about 150 full-index requests per minute (ceiling, not measured).
@@ -44,7 +44,7 @@ the baseline and on the branch.
   numbers (API p50/p95) and, for browser paths, interaction numbers (React commit duration,
   long tasks, Event Timing) (epic criterion 4).
 - Reuse existing harnesses: `packages/web/scripts/benchmark-tabs.ts` with
-  `scripts/tab-fixture-server.mjs` (production build, CDP network capture including the
+  `packages/web/scripts/tab-fixture-server.mjs` (production build, CDP network capture including the
   SharedWorker, server CPU), `packages/cezar/scripts/benchmark-run-store.ts`,
   `benchmark-family-reconcile.ts` and `benchmark-stuck-destroys.ts` (server CPU versus Git
   child CPU). React commit timing uses a harness-only `react-dom/profiling` alias and a
@@ -87,7 +87,8 @@ the baseline and on the branch.
 6. **Detail.** For an observed detail, a `run-summary` strips `finishBlocked` and starts a
    fetch at once if none is in flight, then at most one trailing fetch per 400 ms. A
    response whose fetch started before the latest event never restores `finishBlocked`.
-   An unobserved detail is marked stale (`refetchType: 'none'`). A worker's event keeps
+   An unobserved cached detail also loses `finishBlocked` at once, so a remount never shows
+   Finish or Accept from an old verdict, and is marked stale (`refetchType: 'none'`). A worker's event keeps
    today's trailing parent refresh. Escalation if open-detail measurements regress: push
    full records for demanded runs over the task lane.
 7. **Shared worker.** Bump `LIVE_WORKER_NAME` and `LIVE_PROTOCOL`
@@ -107,22 +108,27 @@ time; client parse and zod time; with detail open and closed.
      `indexRun(run)` through `serial()`, trailing, at most once per run per second;
    - a 5 s tick reconciles dirty runs and live runs with no local event in 5 s (runs owned
      by another process, quiet runs);
-   - a `run` event for a run that owns cached rows emits a metadata change
-     `{runId, taskTitle, taskStatus}` only when those values changed.
+   - a `run` event for a run that owns cached rows emits a metadata change only when a
+     field changed that report rows display or report search reads (`matchingRows()` calls
+     `matchesRunSearch(summary, q, {scope: 'stored'})`, so every stored-scope field in
+     `RUN_SEARCH_FIELDS`, such as `titleSummary`, branch and references, plus title and status). Each metadata change increments `metadataGeneration`.
    A content change is emitted only when `indexRun` finds a different set, `present()` drops
    a row, or the store deletes the run. Settled clean runs are never scanned. `list()` is
    unchanged.
 2. **Topic.** `reports:project:<projectId>` on the WebSocket bus (new
    `server/reports-topic.ts`, registered beside `activity-routes.ts:98`). The first
-   subscriber starts `watch()`, the last releases it. Subscribe sends `{epoch, generation}`;
+   subscriber starts `watch()`, the last releases it. Subscribe sends
+   `{epoch, generation, metadataGeneration}`;
    changes are coalesced to one frame per 500 ms. `loopbackReadable: false`.
 3. **HTTP twin.** `GET /api/v1/p/:projectId/reports/state` returns
    `{epoch, generation, metadataGeneration}` and is added to `allowedLiveRead`. A read marks
    watch demand for 15 s.
 4. **Client.** A mounted shelf subscribes; finite (remote) mode reads the twin every 5 s. A
-   content frame, or a changed epoch or generation, invalidates `[P,'reports']` (active,
-   `cancelRefetch: false`). A metadata frame patches title and status in cached `q=''` pages
-   and invalidates `q≠''` shelves. Delete `global-events.tsx:119`. Keep
+   content frame, or a changed `epoch` or `generation`, invalidates `[P,'reports']` (active,
+   `cancelRefetch: false`). A metadata frame patches the displayed task fields in cached
+   `q=''` pages and invalidates `q≠''` shelves. A changed `metadataGeneration` seen only in a
+   snapshot or a twin read (reconnect, remote mode) invalidates `[P,'reports']`. Both
+   transports compare all three counters. Delete `global-events.tsx:119`. Keep
    `refetchOnWindowFocus`.
 
 Workload: extend `benchmark-tabs.ts --workload reports`: project P with 60 settled runs × 2
@@ -153,7 +159,7 @@ May ship as two PRs in order: S3a (exclusive mount) then S3b (virtual tier).
    the focused or renaming row mounted (`keepMounted`) and refocuses the same run's control
    after a remount or breakpoint flip. In the virtual tier, inserts above the viewport keep
    the first visible row in place.
-5. **Scroll.** Query changes keep the position and pathname changes reset it, as today (D5).
+5. **Scroll.** Query changes keep the position and pathname changes reset it, as today (D6).
 
 Workload: `benchmark-task-lists.ts` on production builds of baseline and branch; project
 300 active + 1000 archived, global 10 × 200 archived + 300 active; 1440x900 and 360x640 ×
@@ -169,9 +175,10 @@ scroll frame times.
 2. Per-root generation and a module epoch. `invalidateProjectProbe(root)` runs from
    `removeProject` (after the write) and `registerProject` (new entry). A late flight never
    writes after an invalidation or `clearProjectProbeCache`. Removal also evicts the entry.
-3. `getRepoInfo` runs one `git rev-parse --show-toplevel --abbrev-ref HEAD` (3 processes to 2
-   with an origin remote). `remote get-url` stays (it honors `insteadOf`).
-4. No stale-while-refresh (D6). The 5 s maximum age stays.
+3. `getRepoInfo` runs one `git rev-parse --show-toplevel --abbrev-ref HEAD`: one process
+   fewer in every case (3 to 2 with an origin remote; the no-origin fallbacks keep their extra
+   commands). `remote get-url` stays (it honors `insteadOf`).
+4. No stale-while-refresh (D8). The 5 s maximum age stays.
 5. Correct the "refreshed async" wording at
    `.ai/specs/2026-07-20-multi-project-workspace.md:347`.
 
@@ -261,7 +268,7 @@ the first merges. S3 only rebases at `global-tasks.tsx:206`. S4 touches no share
 | Hidden tab | Demand released; reconcile on restore | Same | Same, through the fence |
 | Cold cache | Events dropped; first GET | Same | Overlay kept; first GET merges it |
 | Detail open | Instant full-record push | Immediate fetch, one per 400 ms | As S1 |
-| Detail closed, cached | Full record patched silently | Marked stale; refetch on mount | As S1 |
+| Detail closed, cached | Full record patched silently | `finishBlocked` cleared; marked stale; refetch on mount | As S1 |
 | Old tab or old shared worker | Full records | Legacy stream unchanged; new name isolates workers | As S1 |
 
 ### S2: report shelves (shelf of project P open and visible)
@@ -280,7 +287,7 @@ the first merges. S3 only rebases at `global-tasks.tsx:206`. S4 touches no share
 | Reconnect or missed event | No report reconcile until the next run event | Resubscribe snapshot; mismatch refetches |
 | Hidden tab | No events; focus refetch | Topic released; snapshot plus focus refetch on restore |
 | Remote mode | No run frames; refetch only on mount and focus | 5 s twin read; refetch when a counter moves |
-| No shelf open | No scans | No scans; watch off |
+| No shelf open | Startup backfill and live-to-terminal reconcile (`onRun`) only | Same; watch off |
 
 ### S3: task lists
 
@@ -314,14 +321,14 @@ the first merges. S3 only rebases at `global-tasks.tsx:206`. S4 touches no share
 
 | Case | Baseline | After S4 |
 |---|---|---|
-| Cold, K concurrent readers | K × 3 Git processes per root | 1 × 2 per root; same result for all |
+| Cold, K concurrent readers (origin remote) | K × 3 Git processes per root | 1 × 2 per root; same result for all |
 | Warm (< 5 s) | Cached, no Git | Same |
-| Expired, K concurrent | K × 3 per root | 1 × 2 per root |
+| Expired, K concurrent (origin remote) | K × 3 per root | 1 × 2 per root |
 | Refresh fails, then retry | Not cached; next call recomputes | Same; slot released in `finally` |
 | Root deleted on disk | `missing` within 5 s | Same |
 | Project removed during a flight | Late write keeps an orphan entry forever | No write; entry evicted; re-register probes fresh |
 | `clearProjectProbeCache` during a flight | Late write restores the result | No write |
-| Git missing | `ok`, no branch or forge | Same, 2 attempted spawns |
+| Git missing | `ok`, no branch or forge, stops after the first failed spawn | Same |
 | Server restart | Cold cache | Same |
 
 ### Remote mode (finite HTTP, no SSE or WebSocket)
