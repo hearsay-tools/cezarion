@@ -211,7 +211,14 @@ difference, the slice that adopts the script picks one version by this rule:
 The timing parameters this rule's point 3 produced are Codex F11
 (`silent-tail-late-turn-start`: release before turn start, then the `.content`
 release before text) and Cursor F10 (`silent-tail-slow-done`: release the tail
-through the release file rather than a sleep). Both retain their pinned tests.
+through the release file rather than a sleep). Cursor also keeps the `cezar-done`
+text `Done.` plus the unchanged lifecycle note, pinned by
+`packages/cezar/test/e2e/cursor-print.test.ts:43`; other runners keep the shared
+completion text. Cursor F3 (`silent-tail-again`) keeps its reasoning in the
+README read-tool result, with no thinking frames on the opening or nudge turn;
+`packages/cezar/src/core/workflow-final-message-cells.testkit.ts:319` pins that
+tool output in fresh and continued runs. Other runners keep the shared thinking
+script. All retain their pinned tests.
 
 Unification changes test-only fixture output, never what a user sees: shared
 scenarios start only from a `mock:` token, and the untokened reply stays
@@ -284,8 +291,11 @@ byte-identical.
    or regex literal. It must read literals, so it cannot use `blank()` from
    `lint/blank.ts`, which erases them; comments stay ignored. Synthetic cases pin
    what it refuses and allows, as `mock-source-boundary.test.ts` does for
-   `cez/native-mock-source`. The last encoder slice to land makes the import
-   required for all six `RUNNER_IDS` mocks. The rule ships with a red proof
+   `cez/native-mock-source`. The final encoder slice, hearsay-tools/cezarion#2774 (PR
+   hearsay-tools/cezarion#2818), makes the import required for all six
+   `RUNNER_IDS` mocks. An exhaustive runner-to-mock map and a runner-key test
+   prevent a new runner from bypassing the guard. Helpers remain optional;
+   comments and sample strings do not count as imports. The rule ships with a red proof
    (`docs/sdlc/regression-proof.md`): a shared token added back to the pi mock.
 
 ## Slices
@@ -306,7 +316,8 @@ Each slice lands as its own PR into `main`.
 Slices 4 to 8 change one mock each and can run in parallel. Slice 3 defines the
 whole step vocabulary from the inventory above, so an encoder slice should not need
 to change `mock-scenario.mjs`. When it does, the worker asks the coordinator first.
-The last of 4 to 8 to merge makes the guard require all six mocks.
+Slice 8 (hearsay-tools/cezarion#2774, PR hearsay-tools/cezarion#2818) lands
+the final guard step: all six runner mocks must import the scenario module.
 
 Slice 3 also updates step 8 of `AGENT_PROTOCOL.md` § 10 (a new runner's mock is an
 encoder over `mock-scenario.mjs`), and adds two GLOSSARY entries, "Mock scenario"

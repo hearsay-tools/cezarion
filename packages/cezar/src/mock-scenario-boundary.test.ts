@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { mockScenarioBoundary as rule } from './lint/mock-scenario-boundary.ts';
+import { RUNNER_IDS } from './core/agent-runner.ts';
+import { RUNNER_MOCKS, mockScenarioBoundary as rule } from './lint/mock-scenario-boundary.ts';
 
 const file = 'packages/cezar/scripts/mock-pi-rpc.mjs';
 const adopted = "import { play, scenarioFor } from './mock-scenario.mjs';\n";
 
 describe('shared scenario boundary', () => {
+  it('requires an encoder entry for every runner', () => {
+    expect(Object.keys(RUNNER_MOCKS).sort()).toEqual([...RUNNER_IDS].sort());
+  });
+
   it.each([
     "prompt.includes('mock:hold');", 'prompt.includes("mock:hold-cezar-done");',
     'const value = `mock:cezar-done`;', '/mock:no-progress/.test(prompt);',
@@ -48,6 +53,12 @@ describe('shared scenario boundary', () => {
       expect(rule.check(file, adopted + `prompt.includes('mock:${token}');`)).toHaveLength(1);
     });
 
+  it('allows the late ask reply modifier only in Cursor print', () => {
+    const source = adopted + "prompt.includes('mock:cezar-ask-reply-late');";
+    expect(rule.check('packages/cezar/scripts/mock-cursor-print.mjs', source)).toEqual([]);
+    expect(rule.check(file, source)).toHaveLength(1);
+  });
+
   it.each(['mock-opencode-serve.mjs', 'mock-codex-app-server.mjs'])(
     'allows the native resume flag in %s and refuses it without an exception', mock => {
       const source = adopted + "prompt.includes('mock:resume-cezar-done');";
@@ -87,10 +98,32 @@ describe('shared scenario boundary', () => {
     expect(rule.check(file, adopted + sample)).toEqual([]);
   });
 
-  it('leaves mocks that have not adopted the module alone', () => {
+  it('leaves optional mock helpers without the module alone', () => {
+    const file = 'packages/cezar/scripts/mock-helper.mjs';
     expect(rule.check(file, "prompt.includes('mock:hold');")).toEqual([]);
     expect(rule.check(file, "// import './mock-scenario.mjs'\nprompt.includes('mock:hold');")).toEqual([]);
     expect(rule.check(file, 'const sample = "from \'./mock-scenario.mjs\'";\nprompt.includes(\'mock:hold\');')).toEqual([]);
+  });
+
+  it.each([
+    'mock-claude.mjs', 'mock-codex-app-server.mjs', 'mock-opencode-serve.mjs',
+    'mock-pi-rpc.mjs', 'mock-cursor-print.mjs', 'mock-omp-rpc.mjs',
+  ])('requires the scenario import in %s', mock => {
+    const required = `packages/cezar/scripts/${mock}`;
+    expect(rule.check(required, "console.log('ordinary');")).toEqual([
+      { line: 1, message: expect.stringContaining('must import mock-scenario.mjs') },
+    ]);
+    expect(rule.check(required, adopted)).toEqual([]);
+  });
+
+  it.each([
+    "// import './mock-scenario.mjs';",
+    "/* import './mock-scenario.mjs'; */",
+    'const sample = "from \'./mock-scenario.mjs\'";',
+  ])('does not count a sample or commented import: %s', source => {
+    expect(rule.check(file, source)).toEqual([
+      { line: 1, message: expect.stringContaining('must import mock-scenario.mjs') },
+    ]);
   });
 
   it('recognizes dynamic imports and ignores a sample before a real literal', () => {

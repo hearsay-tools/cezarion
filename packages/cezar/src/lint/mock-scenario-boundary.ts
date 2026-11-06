@@ -1,5 +1,17 @@
+import type { RunnerId } from '../core/agent-runner.ts';
 import { regexEnd } from './blank.ts';
 import { blankOnce, lineAt, type SourceRule } from './source-rule.ts';
+
+/** Exhaustive runner keys keep a new backend from bypassing the import guard. */
+export const RUNNER_MOCKS = {
+  claude: 'mock-claude.mjs',
+  codex: 'mock-codex-app-server.mjs',
+  opencode: 'mock-opencode-serve.mjs',
+  pi: 'mock-pi-rpc.mjs',
+  cursor: 'mock-cursor-print.mjs',
+  omp: 'mock-omp-rpc.mjs',
+} satisfies Record<RunnerId, string>;
+const REQUIRED_MOCKS = new Set(Object.values(RUNNER_MOCKS).map(name => `packages/cezar/scripts/${name}`));
 
 const SHARED = ['agent-echo', 'autonomous', 'cezar-ask', 'cezar-done', 'cezar-tool', 'ci-wait',
   'crash-stderr', 'deferred-turn-start', 'hold', 'multi-pr-refs', 'no-progress', 'gate-prompt-ack',
@@ -12,6 +24,8 @@ const NATIVE_TOKENS = new Set([
   'no-progress-ack-only', // Codex holds its native acknowledgement without a turn.
 ]);
 const FILE_NATIVE_TOKENS: Readonly<Record<string, readonly string[]>> = {
+  // Cursor print owns per-turn ask reply timing; the module does not own this modifier.
+  'packages/cezar/scripts/mock-cursor-print.mjs': ['cezar-ask-reply-late'],
   // Codex's native requestUserInput reply consumes this flag, outside shared scenarios.
   'packages/cezar/scripts/mock-codex-app-server.mjs': ['resume-cezar-done'],
   // OpenCode's native question reply consumes this flag, outside shared scenarios.
@@ -133,7 +147,11 @@ export const mockScenarioBoundary: SourceRule = {
     && file !== 'packages/cezar/scripts/mock-scenario.mjs',
   check: (file, source) => {
     const code = blankOnce(source);
-    if (!importsScenario(source, code)) return [];
+    if (!importsScenario(source, code)) {
+      return REQUIRED_MOCKS.has(file)
+        ? [{ line: 1, message: 'Runner mocks must import mock-scenario.mjs (hearsay-tools/cezarion#2774).' }]
+        : [];
+    }
     return literals(source, code).filter(literal => namesShared(file, literal.value, literal.regex)).map(literal => ({
       line: lineAt(source, literal.offset),
       message: 'Use mock-scenario.mjs for shared scenario selection and scripts (hearsay-tools/cezarion#2769).',

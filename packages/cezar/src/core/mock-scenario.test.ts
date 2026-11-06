@@ -104,6 +104,17 @@ describe('shared mock scenario selection', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it.each([['cursor', 'Done.'], ['pi', 'parity done: the task is complete']] as const)(
+    'keeps the %s completion text and lifecycle note', async (runner, reply) => {
+      const state = context();
+      state.runner = runner;
+      state.lifecycle = vi.fn(async () => ' receipt');
+      const events: string[] = [];
+      await play(scenarioFor('mock:cezar-done', state)!, encoder(events));
+      expect(events).toEqual(['open', `${reply} receipt`, 'end']);
+      expect(state.lifecycle).toHaveBeenCalledExactlyOnceWith(['cezar_done', {}]);
+    });
+
   it('delegates crash wire details to the supplied boundary', () => {
     const state = context();
     state.crash = vi.fn();
@@ -233,6 +244,26 @@ describe('shared mock scenario player', () => {
 
 
 describe('silent-tail shared scripts', () => {
+  it.each(['cursor', 'pi'] as const)('keeps the %s silent-again reasoning boundary', async runner => {
+    const state = context();
+    state.runner = runner;
+    const events: string[] = [];
+    const wire = encoder(events);
+    const calls: { name: string; output: string }[] = [];
+    wire.toolEnd = step => { calls.push(step.call); };
+    await play(scenarioFor('mock:silent-tail-again', state)!, wire);
+    if (runner === 'cursor') {
+      expect(calls).toEqual([expect.objectContaining({ name: 'read', output: expect.stringContaining('cezar_done') })]);
+      expect(events.some(value => value.startsWith('Task complete.'))).toBe(false);
+    } else {
+      expect(calls).toEqual([expect.objectContaining({ name: 'bash', output: 'created' })]);
+      expect(events.some(value => value.startsWith('Task complete.'))).toBe(true);
+    }
+    events.length = 0;
+    await play(scenarioFor('Your turn ended without a wait or done.', state)!, wire);
+    if (runner === 'cursor') expect(events).toEqual(['open', 'open', 'end']);
+    else expect(events).toEqual(['open', 'open', expect.stringContaining('cezar_done'), 'end']);
+  });
   it.each([
     ['pi', 'silent-tail'], ['pi', 'tool-tail'], ['pi', 'silent-tail-again'],
     ['pi', 'silent-tail-no-reply'], ['pi', 'silent-tail-late-reply'],
