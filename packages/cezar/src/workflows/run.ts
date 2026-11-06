@@ -34,6 +34,7 @@ import { deriveAccountHolds } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
+import type { CiProgressRegistry } from '../ci-wait/progress.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../ci-wait/controller.ts';
 import { workerIdentity, type WorkerAccountBinding } from '../delegation/execution-identity.ts';
@@ -110,6 +111,8 @@ export class RunManager {
   }
 
   private readonly ciResources: ReturnType<typeof acquireCiResources>;
+  /** The check progress of the workspace's CI waits, for the activity view. */
+  get ciProgress(): CiProgressRegistry { return this.ciResources.progress; }
   /** #781: the workspace-wide preview host. Absent (`cez run`, tests) means every registration is `headless`. */
   private readonly preview?: PreviewHostLike | undefined;
   /** The same host, for a removal outside this manager that must release a run's preview first. */

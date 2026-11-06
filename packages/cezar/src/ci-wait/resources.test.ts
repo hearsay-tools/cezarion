@@ -53,3 +53,23 @@ describe('the shared tool controller', () => {
       'Cezar tools could not start: the server stopped. Every agent session needs a private named pipe. Fix the cause, then Continue the task.');
   });
 });
+
+// spec 2026-11-05-live-activity-view: the activity view reads the progress the workspace's one
+// supervisor publishes, whichever manager the view reaches it through.
+describe('the shared check progress', () => {
+  it('is one registry per workspace, shared by every manager of it, and a fresh one after the last release', () => {
+    const workspace = {};
+    const first = acquireCiResources(workspace);
+    const second = acquireCiResources(workspace);
+    const other = acquireCiResources({});
+    try {
+      expect(second.progress).toBe(first.progress);
+      expect(other.progress).not.toBe(first.progress);
+    } finally {
+      for (const resources of [first, second, other]) resources.release();
+    }
+    const again = acquireCiResources(workspace);
+    expect(again.progress).not.toBe(first.progress);
+    again.release();
+  });
+});

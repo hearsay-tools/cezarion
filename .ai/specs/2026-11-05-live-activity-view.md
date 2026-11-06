@@ -467,6 +467,9 @@ active, it hands over to `gh pr checks --watch` and probes only the head SHA eve
 - A progress read never changes the wait's outcome. A failed read keeps the last
   progress and is not an error. The `--watch` process, the head probe and the result
   are unchanged.
+- A progress read takes none of the GitHub client's query permits, which stay with
+  the outcome queries; it keeps its own query timeout, and one runs at a time across
+  the supervisor.
 - Merge waits poll no checks today and get no progress. The detail shows the PR
   number and the deadline only (see the state table).
 

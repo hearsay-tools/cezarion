@@ -3,9 +3,12 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { activitySnapshotSchema, activityToolSchema } from '@open-mercato/cezar-contract/activity';
+import { makePrWait, RUN_STATUS, WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { ActivityDemand } from '../activity/demand.ts';
 import { ToolActivityTracker } from '../activity/tool-activity.ts';
+import { CiProgressRegistry } from '../ci-wait/progress.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
@@ -45,7 +48,8 @@ describe('workspace activity API', () => {
     }
   });
 
-  const manager = { finishBlockedReason: () => 'no open session', isActive: () => false } as unknown as RunManager;
+  const ciProgress = new CiProgressRegistry();
+  const manager = { finishBlockedReason: () => 'no open session', isActive: () => false, ciProgress } as unknown as RunManager;
   const get = async (path: string, contexts?: ProjectContexts) =>
     apiRequest(createApp({ repoRoot, store, manager, version: '0.0.0-test', ...(contexts ? { contexts } : {}) }), path);
 
@@ -169,5 +173,67 @@ describe('workspace activity API', () => {
     expect(res.status).toBe(200);
     expect(demand.has('shop')).toBe(true);
     expect(demand.has('docs')).toBe(false);
+  });
+
+  it('reads the check progress the boot manager’s CI watchers publish, and plugs in the demand it marks', async () => {
+    const boot = await registerProject(repoRoot);
+    const wait = makePrWait();
+    const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
+    setRunStatus(store, run.id, RUN_STATUS.waiting, { waits: [wait] });
+    ciProgress.publish(wait.id, [{ name: 'build', state: 'PENDING', link: '', bucket: 'pending' }]);
+    try {
+      expect(ciProgress.wanted(wait.id)).toBe(false);
+      const res = await get(`/api/v1/workspace/activity?project=${boot.id}`);
+      const body = activitySnapshotSchema.parse(await res.json());
+      expect(body.projects[0]!.tasks[0]!.wait).toMatchObject({ kind: WAIT_KIND.pr, detail: { checks: [{ name: 'build', bucket: 'pending' }], counts: { pending: 1 } } });
+      expect(ciProgress.wanted(wait.id)).toBe(true);
+    } finally {
+      ciProgress.remove(wait.id);
+    }
+  });
+
+  // Without a shared semaphore, each project's manager holds its own registry: its CI watchers
+  // publish there, and the read of that project must read it there.
+  it('reads each project’s check progress from its own manager, and plugs the demand into every registry', async () => {
+    const demand = new ActivityDemand();
+    const otherStore = RunStore.open(join(otherRoot, '.ai/cezar'));
+    try {
+      const pending = [{ name: 'build', state: 'PENDING', link: '', bucket: 'pending' as const }];
+      const seeded = (runs: RunStore, title: string) => {
+        const wait = makePrWait();
+        const run = runs.createRun({ title, workflow: 'build', task: 't', steps: [] });
+        setRunStatus(runs, run.id, RUN_STATUS.waiting, { waits: [wait] });
+        return wait;
+      };
+      const project = (id: string, root: string, runs: RunStore) => {
+        const registry = new CiProgressRegistry();
+        const owned = { id, root, store: runs, manager: { isActive: () => false, ciProgress: registry } } as never;
+        return { owned, registry };
+      };
+      const boot = project('shop', repoRoot, store);
+      const other = project('docs', otherRoot, otherStore);
+      const bootWait = seeded(store, 'Boot task');
+      const otherWait = seeded(otherStore, 'Docs task');
+      boot.registry.publish(bootWait.id, pending);
+      other.registry.publish(otherWait.id, pending);
+      const workspaceProjects = {
+        listVisibleProjects: async () => [{ id: 'shop', name: 'Shop', root: repoRoot }, { id: 'docs', name: 'Docs', root: otherRoot }],
+        resolveBootProject: async () => 'shop',
+        resolveLiveProject: async () => boot.owned,
+        projectFailure: () => ({ error: 'unknown project', status: 404 as const }),
+      } as unknown as WorkspaceProjects;
+      const routes = createActivityRoutes({ bootContext: boot.owned, contexts: { peek: (id) => (id === 'docs' ? other.owned : undefined) }, workspaceProjects, demand });
+
+      const res = await routes.request('/workspace/activity');
+
+      const body = activitySnapshotSchema.parse(await res.json());
+      const waitOf = (projectId: string) => body.projects.find((entry) => entry.projectId === projectId)!.tasks[0]!.wait;
+      for (const projectId of ['shop', 'docs']) {
+        expect(waitOf(projectId), projectId).toMatchObject({ kind: WAIT_KIND.pr, detail: { checks: [{ name: 'build', bucket: 'pending' }], counts: { pending: 1 } } });
+      }
+      expect([boot.registry.wanted(bootWait.id), other.registry.wanted(otherWait.id)]).toEqual([true, true]);
+    } finally {
+      otherStore.close();
+    }
   });
 });

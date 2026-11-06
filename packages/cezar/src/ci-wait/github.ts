@@ -165,14 +165,22 @@ export class GithubCiClient {
     this.command = options.command ?? (this.env.CEZ_DRY_RUN === '1' ? { file: process.execPath, args: ['-e', dryRunCommand] } : { file: 'gh', args: [] });
     this.cwd = options.cwd;
   }
-  private async query(args: string[], signal: AbortSignal): Promise<CiCommandResult> {
+  /**
+   * One bounded gh query. An outcome query waits for one of the shared query permits; a progress
+   * query (`permit: false`) takes none, and its caller bounds how many run.
+   */
+  private async query(args: string[], signal: AbortSignal, permit = true): Promise<CiCommandResult> {
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(CI_QUERY_TIMEOUT_MS)]);
     let release: (() => void) | undefined;
     try {
-      release = await this.queries.acquire(bounded);
-      return await runCiCommand({ file: this.command.file, args: [...this.command.args, ...args] }, bounded, false, this.env, this.cwd); }
+      if (permit) release = await this.queries.acquire(bounded);
+      return await this.runCommand(args, bounded); }
     catch (error) { if (!signal.aborted && bounded.aborted) throw new CiGithubError('query_timeout', 'GitHub query exceeded ten seconds; check connectivity and retry.', true); throw error; }
     finally { release?.(); }
+  }
+  /** Run one gh command under a held query permit. */
+  protected runCommand(args: string[], signal: AbortSignal): Promise<CiCommandResult> {
+    return runCiCommand({ file: this.command.file, args: [...this.command.args, ...args] }, signal, false, this.env, this.cwd);
   }
   private async readMetadata(pr: string, signal: AbortSignal, merge = false): Promise<CiPrIdentity & GithubPrMetadata & { raw: unknown }> {
     if (!ciWaitRequestSchema.safeParse({pr}).success) throw new CiGithubError('invalid_request', 'Provide an HTTPS GitHub pull request URL.');
@@ -236,7 +244,18 @@ export class GithubCiClient {
     return parseActiveWorkflowRuns(result.stdout);
   }
   async checks(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubCheck[]> {
-    const result = await this.query(['pr', 'checks', String(pr.prNumber), '--repo', `github.com/${pr.repository}`, '--json', 'name,state,link,bucket'], signal);
+    return this.readChecks(pr, signal);
+  }
+  /**
+   * A checks read for the activity view's progress (spec 2026-11-05-live-activity-view). It takes
+   * no shared query permit, so outcome queries always have all of them; it keeps its own ten-second
+   * bound. The caller runs at most one at a time.
+   */
+  progressChecks(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubCheck[]> {
+    return this.readChecks(pr, signal, false);
+  }
+  private async readChecks(pr: CiPrIdentity, signal: AbortSignal, permit = true): Promise<GithubCheck[]> {
+    const result = await this.query(['pr', 'checks', String(pr.prNumber), '--repo', `github.com/${pr.repository}`, '--json', 'name,state,link,bucket'], signal, permit);
     // gh documents 1 for failed checks and 8 for pending. Only validated JSON decides CI outcome.
     if (![0, 1, 8].includes(result.code) || !result.stdout.trim()) {
       // gh's empty-check path emits no JSON; pin the exact CLI diagnostic, never a generic exit 1.

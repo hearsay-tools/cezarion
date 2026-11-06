@@ -6,7 +6,7 @@ import { workerRevision } from '../delegation/results.ts';
 import type { RunRecord, RunStore } from '../runs/store.ts';
 import { readActivityRequests, type ActivityRequestStore } from './requests.ts';
 import { firstLine } from './text.ts';
-import { activityWait, type CiProgressSource } from './wait.ts';
+import { activityWait, type CiProgressSource, type ProjectCiProgress } from './wait.ts';
 
 export type { CiProgressSource } from './wait.ts';
 
@@ -18,11 +18,12 @@ export interface ToolActivitySource {
 /** What the read model needs from a project's run store. It reads; it never writes a run. */
 export type ActivityStore = ActivityRequestStore & Pick<RunStore, 'listRunSummaries' | 'listOwnedWorkers' | 'withReadCache'>;
 
-/** One project to read: its store and run manager when this process has loaded it. */
+/** One project to read: its store and run manager when this process has loaded it. `ci` is the
+ *  check progress of that project's own CI watchers; without it, `ActivityDeps.ci` is read. */
 export interface ActivityProjectSource {
   projectId: string;
   name: string;
-  loaded?: { store: ActivityStore; isActive: (runId: string) => boolean } | undefined;
+  loaded?: { store: ActivityStore; isActive: (runId: string) => boolean; ci?: CiProgressSource | undefined } | undefined;
   /** A loaded project whose run store cannot open. */
   unavailable?: ActivityProject['unavailable'];
 }
@@ -69,7 +70,8 @@ export function buildActivityProject(source: ActivityProjectSource, deps: Activi
   // One snapshot decodes each cold record once: claims, cards, workers, reconcile lookups and
   // request titles all read the same runs (hearsay-tools/cezarion#2378).
   const store = loggingUnreadable(loaded.store, (runId) => deps.onUnreadable?.(source.projectId, runId));
-  return loaded.store.withReadCache(() => loadedProject(store, loaded.isActive, deps, options, empty));
+  const ci = loaded.ci ?? deps.ci;
+  return loaded.store.withReadCache(() => loadedProject(store, loaded.isActive, { ...deps, ...(ci ? { ci } : {}) }, options, empty));
 }
 
 /**
@@ -104,7 +106,8 @@ function loggingUnreadable(store: ActivityStore, log: (runId: string) => void): 
 function loadedProject(store: ActivityStore, isActive: (runId: string) => boolean, deps: ActivityDeps,
   options: { now: number; carryOver?: Iterable<string> }, empty: Omit<ActivityProject, 'loaded'>): { project: ActivityProject; openLedgers: Set<string> } {
   const { active, inReview } = activeRoots(store);
-  const context: RunContext = { now: options.now, tools: deps.tools ?? noTools, ci: deps.ci ?? noProgress };
+  const ci = deps.ci ?? noProgress;
+  const context: RunContext = { now: options.now, tools: deps.tools ?? noTools, ci: { read: (waitId) => ci.read(waitId, empty.projectId) } };
   const roots: RunRecord[] = [];
   for (const id of active) {
     const root = store.getRun(id);
@@ -134,7 +137,7 @@ function activeRoots(store: ActivityStore): { active: Set<string>; inReview: num
 
 const byCreation = (a: RunRecord, b: RunRecord) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
 
-type RunContext = { now: number; tools: ToolActivitySource; ci: CiProgressSource };
+type RunContext = { now: number; tools: ToolActivitySource; ci: ProjectCiProgress };
 
 function activityRoot(store: ActivityStore, root: RunRecord, context: RunContext): ActivityRun {
   const ledger = root.delegation?.role === 'root' ? root.delegation.conversation : undefined;
