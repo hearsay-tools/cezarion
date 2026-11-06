@@ -641,3 +641,10 @@ At `ce4793199`, the approved replacement used the seven focused unit files: 431 
 inventoried, maximum complexity 20 and measured maximum CRAP 30, with no exceeded
 limits. Coverage was unavailable for 99 functions, so this is partial quality
 evidence; CI's complexity gate and coverage merge cover the remaining paths.
+
+Archived-page query results also now memoize on their stable fields, including
+the enriched pagination object. A route rerender with unchanged archived answers
+retains the groups identity; changes to data, placeholder/error/loading state,
+pagination availability or callbacks still invalidate it. This identity test
+failed before the correction and passes after it. This follow-up postdates the
+recorded performance studies and makes no new timing claim.

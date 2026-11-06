@@ -1607,23 +1607,23 @@ function useArchivedPages(runs: readonly RunSummary[] | undefined, view: ListVie
     return () => clearTimeout(timer)
   }, [typed])
   const windowFull = runs !== undefined && listCounts(runs).archived >= ARCHIVED_WINDOW
-  const query = useArchivedRuns(needle, view === 'archived' && (needle !== '' || windowFull))
-  const loaded = query.data?.pages
-  const pages = React.useMemo<ArchivedPages | undefined>(() => (loaded || query.isError ? {
+  const { data, isError, isPlaceholderData, hasNextPage, isFetchingNextPage, fetchNextPage, refetch } = useArchivedRuns(needle, view === 'archived' && (needle !== '' || windowFull))
+  const loaded = data?.pages
+  const pages = React.useMemo<ArchivedPages | undefined>(() => (loaded || isError ? {
     runs: (loaded ?? []).flatMap((page) => page.runs),
     // `placeholderData` keeps the previous text's pages on screen while the next ones load.
-    query: query.isPlaceholderData ? null : needle,
-    hasMore: query.hasNextPage,
-    loading: query.isFetchingNextPage,
+    query: isPlaceholderData ? null : needle,
+    hasMore: hasNextPage,
+    loading: isFetchingNextPage,
     // A failed first page has nothing to continue from, so retrying it is a refetch.
-    onLoadMore: () => void (loaded ? query.fetchNextPage() : query.refetch()),
-    failed: query.isError,
-  } : undefined), [loaded, query])
-  // The tab counts every archived task, so only the unfiltered answer's total is the count; a
-  // search's total is its matches.
+    onLoadMore: () => void (loaded ? fetchNextPage() : refetch()),
+    failed: isError,
+  } : undefined), [loaded, isError, isPlaceholderData, needle, hasNextPage, isFetchingNextPage, fetchNextPage, refetch])
+  // Only the unfiltered total counts all archived tasks; a search total counts matches.
   const unfiltered = needle === ''
     ? loaded
     : queryClient.getQueryData<InfiniteData<ArchivedRunsResponse>>(queryKeys.runs.archived(''))?.pages
   const plainHasMore = unfiltered === undefined ? undefined : unfiltered.at(-1)?.nextCursor != null
-  return { pages: pages && { ...pages, plainHasMore }, total: unfiltered?.[0]?.total, search: setTyped }
+  const enrichedPages = React.useMemo(() => pages && { ...pages, plainHasMore }, [pages, plainHasMore])
+  return { pages: enrichedPages, total: unfiltered?.[0]?.total, search: setTyped }
 }
