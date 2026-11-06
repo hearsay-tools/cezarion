@@ -30,8 +30,7 @@ const gaps: Array<{ runner: RunnerId; scenario: string; reason: string }> = [];
 const counts: Partial<Record<RunnerId, number>> = {};
 
 function gap(runner: RunnerId, scenario: string): string | undefined {
-  if (runner === 'cursor' && ['ack-only', 'resume-cezar-done', 'steer-tool', 'steer-late', 'subagent-after-park', 'no-progress-input-closed', 'silent-tail-late-turn-start'].includes(scenario)) return 'Cursor print has no persistent input, steering or child wire for this recipe.';
-  if (scenario === 'no-progress-gated-ack' && runner !== 'pi' && runner !== 'omp') return 'This baseline wire has no direct mock:gate-prompt-ack gate.';
+  if (runner === 'cursor' && ['ack-only', 'resume-cezar-done', 'steer-tool', 'steer-late', 'subagent-after-park', 'silent-tail-late-turn-start'].includes(scenario)) return 'Cursor print has no persistent input, steering or child wire for this recipe.';
   if (runner === 'pi' && scenario === 'subagent-after-park') return 'Pi has no child wire for this recipe.';
   if (runner === 'claude' && scenario === 'steer-late') return 'Claude has no direct mock:steer-late token.';
   if (scenario === 'silent-tail-ack-delay' && runner !== 'opencode') return 'f7-delay-ack is an OpenCode HTTP acknowledgement recipe.';
@@ -153,7 +152,7 @@ async function followTurn(session: AgentSession, events: AgentEvent[], text: str
 }
 
 async function driveRecipe(scenario: string, runner: RunnerId, session: AgentSession, events: AgentEvent[], activity: () => number, cwd: string, file: string, exits: ReturnType<typeof observeExits>['exits'], asked: () => boolean) {
-  if (scenario.startsWith('crash-stderr') && scenario !== 'crash-stderr-clean') {
+  if ((scenario.startsWith('crash-stderr') && scenario !== 'crash-stderr-clean') || (runner === 'cursor' && scenario === 'no-progress-input-closed')) {
     // bound: the held-pipe recipe starts its leader exit only after child readiness.
     await waitFor(() => exits.length > 0, 5_000);
     appendFileSync(file, `${JSON.stringify({ channel: 'process-exit', ...exits[0] })}\n`);
