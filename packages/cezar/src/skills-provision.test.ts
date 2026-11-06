@@ -1,4 +1,5 @@
-import { testHome } from './home/test-home.testkit.ts';
+import { Home } from './home/home.ts';
+import { testHome, useTestHome } from './home/test-home.testkit.ts';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -178,6 +179,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
   beforeEach(async () => {
     home = mkdtempSync(join(tmpdir(), 'cez-provision-home-'));
     vi.stubEnv('HOME', home);
+    useTestHome(Home.sandbox(home));
     main = realpathSync(mkdtempSync(join(tmpdir(), 'cez-provision-main-')));
     await git(main, 'init', '-q', '-b', 'main');
     writeFileSync(join(main, 'a.txt'), 'one\n');
