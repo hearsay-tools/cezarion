@@ -119,7 +119,7 @@ export async function runTaskListsBenchmark(values: TaskListBenchmarkOptions = {
         const until = async (expression: string) => pollFor(async () => await evaluate(`Boolean(${expression})`) || undefined, () => `Not ready: ${expression}`, { timeoutMs: 60_000, intervalMs: 100, tries: 600 })
         const click = async (expression: string) => {
           // Keep the same control while virtual overscan changes the first mounted row.
-          await evaluate(`window.__taskListProbe.clickTarget=${expression}`)
+          await evaluate(`(()=>{window.__taskListProbe.clickTarget=${expression};return true})()`)
           let previous = '', stableSince = 0
           const point = await pollFor(async () => {
             const sample = await evaluate(`(()=>{
