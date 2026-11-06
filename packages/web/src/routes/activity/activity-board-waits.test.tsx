@@ -145,6 +145,22 @@ describe('the hover highlight', () => {
     expect(card('waiter').getAttribute('data-linked')).toBeNull()
   })
 
+  it('keeps the highlight of a focused card when the pointer leaves it, and moves it with the pointer', () => {
+    renderBoard(project({ tasks: [WAITER, PEER, OTHER] }), BOXES)
+    const link = within(card('peer')).getByRole('link', { name: 'API contract review' })
+    fireEvent.pointerEnter(card('peer'))
+    fireEvent.focus(link)
+    fireEvent.pointerLeave(card('peer'))
+    expect(card('waiter').getAttribute('data-linked')).toBe('true')
+    // The pointer wins while it is on a card; the focus returns when it leaves.
+    fireEvent.pointerEnter(card('waiter'))
+    expect(card('peer').getAttribute('data-linked')).toBe('true')
+    fireEvent.pointerLeave(card('waiter'))
+    expect(card('waiter').getAttribute('data-linked')).toBe('true')
+    fireEvent.blur(link)
+    expect(document.querySelectorAll('[data-linked]')).toHaveLength(0)
+  })
+
   it('does nothing for a card no wait links', () => {
     renderBoard(project({ tasks: [WAITER, PEER, OTHER] }), BOXES)
     fireEvent.pointerEnter(card('other'))

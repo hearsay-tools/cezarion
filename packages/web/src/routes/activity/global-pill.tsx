@@ -9,6 +9,7 @@ import { EMPTY_MOTION, type MotionState } from './activity-motion'
 import { RunShape, ToneWord } from './activity-tone'
 import { isLiveStatus, rootNow, type NowContext } from './now-box'
 import { Heartbeat } from './now-box-view'
+import type { OnHover } from './use-wait-highlight'
 
 /**
  * One compact pill of the global view (spec 2026-11-05-live-activity-view, "Global view"): the
@@ -31,7 +32,7 @@ interface PillProps {
   motion?: MotionState
   /** A peer wait links this pill to the pill under the pointer or holding the focus. */
   linked?: boolean
-  onHover?: (runId: string | undefined) => void
+  onHover?: OnHover
 }
 
 const NO_WAITS: readonly PeerWait[] = []

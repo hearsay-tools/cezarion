@@ -10,6 +10,7 @@ import { askOf, finishedText, foldedWorkers, lineTexts, nameOf, recipientName, s
 import { EMPTY_MOTION, passedChecks, type MotionState } from './activity-motion'
 import { RunShape, TONE_BORDER, TONE_FILL, TONE_INK } from './activity-tone'
 import { isLiveStatus, rootNow, workerLine, type NowContext } from './now-box'
+import type { OnHover } from './use-wait-highlight'
 import { Heartbeat, NowBoxView } from './now-box-view'
 
 /**
@@ -33,8 +34,8 @@ export interface CardProps {
   narrow: boolean
   /** A peer wait links this card to the card under the pointer or holding the focus. */
   linked?: boolean
-  /** The pointer or the focus entered this card (its run id) or left it (undefined). */
-  onHover?: (runId: string | undefined) => void
+  /** The pointer or the focus entered this card or left it. */
+  onHover?: OnHover
   motion?: MotionState
   /** A card that left the view, drawn while it collapses: no line ends at it, and it is hidden
    *  from assistive technology and from the keyboard. */
@@ -153,11 +154,11 @@ function PeerLinks({ task, requests, waits, index }: Pick<CardProps, 'task' | 'r
 export function hoverHandlers(runId: string, onHover: CardProps['onHover']): HTMLAttributes<HTMLElement> {
   if (!onHover) return {}
   return {
-    onPointerEnter: () => onHover(runId),
-    onPointerLeave: () => onHover(undefined),
-    onFocus: () => onHover(runId),
+    onPointerEnter: () => onHover('pointer', runId),
+    onPointerLeave: () => onHover('pointer', undefined),
+    onFocus: () => onHover('focus', runId),
     onBlur: (event) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onHover(undefined)
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onHover('focus', undefined)
     },
   }
 }
