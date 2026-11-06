@@ -8,6 +8,28 @@ export interface FallbackEntry {
   value(value: unknown, error?: string): void
   reset(reason: string, signal: AbortSignal): Promise<void>
 }
+/**
+ * One recurring read for the consumers of `path`. A failed read reaches them as `HTTP <status>`
+ * with the answer's JSON body (`HTTP 0`: no answer), as the shared owner reports it, and still
+ * throws, so the cycle backs off.
+ */
+async function readFor(fetcher: typeof fetch, path: string, consumers: readonly FallbackEntry[], signal: AbortSignal): Promise<void> {
+  const deliver = (value: unknown, error?: string) => { for (const consumer of consumers) consumer.value(value, error) }
+  const response = await fetcher(path, { credentials: 'include', signal }).catch((error: unknown) => {
+    if (!signal.aborted) deliver(undefined, 'HTTP 0')
+    throw error
+  })
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => undefined)
+    signal.throwIfAborted()
+    deliver(body, `HTTP ${response.status}`)
+    throw new Error(`read HTTP ${response.status}`)
+  }
+  const value: unknown = await response.json()
+  signal.throwIfAborted()
+  for (const consumer of consumers) consumer.value(value)
+}
+
 /** One finite cycle per document. Timers and pending HTTP work disappear with visible demand. */
 export function createLiveFallback(
   entries: () => FallbackEntry[],
@@ -77,22 +99,7 @@ export function createLiveFallback(
         if (!readAt.has(path)) { readAt.set(path, Date.now()); continue }
         if (Date.now() - readAt.get(path)! < intervalMs) continue
         readAt.set(path, Date.now())
-        const consumers = () => active.filter(consumer => consumer.demand.kind === 'read' && consumer.demand.path === path)
-        // A failed read reaches its consumers as `HTTP <status>` with the answer's JSON body
-        // (`HTTP 0`: no answer), as the shared owner reports it; the cycle still backs off.
-        const response = await fetcher(path, { credentials: 'include', signal: current.signal }).catch((error: unknown) => {
-          if (!current.signal.aborted) for (const consumer of consumers()) consumer.value(undefined, 'HTTP 0')
-          throw error
-        })
-        if (!response.ok) {
-          const body: unknown = await response.json().catch(() => undefined)
-          current.signal.throwIfAborted()
-          for (const consumer of consumers()) consumer.value(body, `HTTP ${response.status}`)
-          throw new Error(`read HTTP ${response.status}`)
-        }
-        const value: unknown = await response.json()
-        current.signal.throwIfAborted()
-        for (const consumer of active) if (consumer.demand.kind === 'read' && consumer.demand.path === path) consumer.value(value)
+        await readFor(fetcher, path, active.filter(consumer => consumer.demand.kind === 'read' && consumer.demand.path === path), current.signal)
       }
       failures = 0
     } catch { if (!stopped) failures = Math.min(failures + 1, 5) }
