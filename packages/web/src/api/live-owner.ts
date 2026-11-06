@@ -258,7 +258,7 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
   /**
    * What a late subscriber is owed at once: the latest topic value, or the workspace `ready` (the
    * generation and the last frame already delivered) and then the barrier ping, which still marks
-   * the attachment live (#795). `fresh`: the document held no workspace demand before this sync,
+   * the attachment live (hearsay-tools/cezarion#795). `fresh`: the document held no workspace demand before this sync,
    * so it opened a new attachment and reset its own seq baseline. Otherwise only the epoch moved,
    * and a `ready` in the same generation would hide a frame the document dropped meanwhile.
    */
