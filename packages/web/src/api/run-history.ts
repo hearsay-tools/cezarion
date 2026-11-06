@@ -268,9 +268,10 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     // Resetting an unavailable optimization would discard it and unmount the
     // thread, losing the caller's scroll intent while the same failure retries.
     if (fallback) return
-    // The page first, so the context read after it reaches it.
+    // The page first, so the context read after it reaches it. The jump does not wait for the
+    // context: the Subagents section stays hidden until it lands (`currentComplete`).
     await queryClient.resetQueries({ queryKey: ['run-history', scope, runId], exact: true })
-    await queryClient.invalidateQueries({ queryKey: ['run-history-context', scope, runId], exact: true })
+    void queryClient.invalidateQueries({ queryKey: ['run-history-context', scope, runId], exact: true })
   }, [fallback, queryClient, runId, scope])
 
   return {

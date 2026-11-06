@@ -335,6 +335,21 @@ describe('useRunHistory', () => {
     expect(mockHistory).toHaveBeenLastCalledWith('run-1', undefined, expect.any(Object))
   })
 
+  it('jump-to-latest resolves with the newest page while the context is still loading', async () => {
+    mockHistory.mockResolvedValue(page(100))
+    mockContext.mockResolvedValueOnce(context()).mockReturnValueOnce(new Promise(() => {}))
+    const { wrapper } = harness()
+    const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
+    await waitFor(() => expect(result.current.currentComplete).toBe(true))
+
+    let jumped = false
+    await act(async () => { await result.current.jumpToLatest(); jumped = true })
+    expect(jumped).toBe(true)
+    // The context refresh still started after the page reset.
+    expect(mockContext).toHaveBeenCalledTimes(2)
+    mockContext.mockReset()
+  })
+
   it('compacts a long live prefix into a fresh persisted tail page', async () => {
     FakeEventSource.instances = []
     vi.stubGlobal('EventSource', FakeEventSource)
