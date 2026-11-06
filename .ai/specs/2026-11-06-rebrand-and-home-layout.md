@@ -144,6 +144,12 @@ Resolved once, at the process entry point, from the platform. No setting is requ
    one setup that scrubs `CEZ_*` and `<NAME>_*`, pins `HOME`, `XDG_*` and `<NAME>_HOME`
    to a sandbox, and writes a `test` marker. A lint rule refuses test code that writes
    through a home path it did not get from `Home.sandbox`.
+7. **Limits.** Agents keep an operator's own `XDG_*` values, because OpenCode and Cursor read
+   them; so a process in a task can still derive the default live paths, as any process of
+   that user can. What stops a test is not hiding paths but four layers together: a test
+   setup that pins `HOME`, `XDG_*` and the home variables (ours, item 6); the marker check in
+   every `HomeStore` writer; a name that old and foreign copies do not resolve; and rotating
+   backups plus the canary for a direct file write that bypasses all of them.
 
 ## 4. Migration for existing installs
 
@@ -188,7 +194,12 @@ One code path, `migrateLegacyHome()`, runs at the first boot of the new build an
    window-end cleanup never deletes it; it prints what still uses it.
 
 **`CEZ_HOME` set to a non-default dir** (containers, custom hosts): treat it as
-`<NAME>_HOME` one-root, migrate in place into `config/`, `state/`, and so on.
+`<NAME>_HOME` one-root, migrate in place into `config/`, `state/`, and so on. The migration
+also writes a pointer, `home.json` (`{ "root": "<dir>" }`), in the default config dir, and the
+boot warning tells the operator to rename the variable. `resolveHome` uses `<NAME>_HOME`, then
+`CEZ_HOME` during the window, then the pointer, then the default; so a host that still sets
+only `CEZ_HOME`, or no variable, keeps its custom home after P5 removes the fallback. A
+test covers a restart after P5 with an existing custom home.
 
 **Server installs** (apptension-host serves 12 projects): `<name> server migrate` first stops
 every instance that shares the legacy home, migrates that home once, then for each instance in
