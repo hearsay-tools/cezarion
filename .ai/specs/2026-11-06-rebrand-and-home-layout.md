@@ -116,8 +116,7 @@ Resolved once, at the process entry point, from the platform. No setting is requ
 1. **The live path never leaves the cockpit.** `buildChildEnv` drops every home-locating
    variable (`CEZ_HOME`, `SKEIN_HOME`, `XDG_*` overrides that the cockpit itself set) for
    agent sessions and host commands. A task that needs the cockpit uses its API URL and
-   token, not the home path. The self-update launcher (`self-update/launcher.ts:22`) stops
-   writing a `CEZ_HOME` that equals the default into the launcher script.
+   token, not the home path.
 2. **Explicit resolution.** Library code has no ambient `cezarHomeDir()`. The CLI and server
    entry points call `resolveHome({ purpose })` once and pass a `Home` object down. Tests
    build `Home.sandbox(tmpdir)`. A module that needs a path and has no `Home` cannot get one.
@@ -131,9 +130,12 @@ Resolved once, at the process entry point, from the platform. No setting is requ
    - a write to a dir with no marker, unless the caller is an entry point that creates one.
    The check reads the marker, not the path, so pinned `HOME`, inherited variables and
    custom env objects cannot hide the live home.
-4. **Per-install lease.** The serving cockpit holds a lock file in the runtime dir
-   (`cockpit.lock`: pid, installId). CLI writers from other processes take the same short
-   lock. This stops lost updates; the marker stops tests.
+4. **Presence lease and write lock.** Two separate files in the runtime dir. The serving
+   cockpit holds `cockpit.lease` (pid, installId) for its whole life; it only tells other
+   processes that a cockpit serves this home (the migration reads it, step 1 in section 4).
+   Every writer, the cockpit included, takes `write.lock` only for the read-modify-write of
+   one file, so CLI writers never wait on the cockpit's lifetime. This stops lost updates; the
+   marker stops tests.
 5. **Foreign and old code.** We cannot change what upstream or an old build does. After
    migration, their default (`~/.cezar`) is no longer the live home. The new build watches
    it as a canary: a write there after migration shows a warning that names the file and time.
@@ -147,7 +149,11 @@ Resolved once, at the process entry point, from the platform. No setting is requ
 One code path, `migrateLegacyHome()`, runs at the first boot of the new build and as
 `skein migrate [--dry-run]`.
 
-1. Take `~/.cezar/.migrating` with `O_EXCL`. A second process waits or stops.
+1. Make sure no other process serves or writes the legacy home. Every cockpit that shares
+   it (on a server: every instance in `server.json` and `server-instances/` whose home is the
+   same) is stopped first; a boot-time migration refuses to start while another live
+   cockpit's pid holds the legacy home, and tells the user which one. Then take
+   `~/.cezar/.migrating` with `O_EXCL`. A second process waits or stops.
 2. If the new config dir has `install.json` with `migratedFrom`, do nothing (idempotent).
 3. Write a full backup: `<state>/backups/legacy-cezar-home-<UTC>.tar.gz` (without `versions/`,
    caches and `tmp/`).
@@ -162,8 +168,9 @@ One code path, `migrateLegacyHome()`, runs at the first boot of the new build an
 **`CEZ_HOME` set to a non-default dir** (containers, custom hosts): treat it as
 `SKEIN_HOME` one-root, migrate in place into `config/`, `state/`, and so on.
 
-**Server installs** (apptension-host serves 12 projects): `skein server migrate` handles each
-instance in `server.json` and `server-instances/`: stop the old unit, migrate, install
+**Server installs** (apptension-host serves 12 projects): `skein server migrate` first stops
+every instance that shares the legacy home, migrates that home once, then for each instance in
+`server.json` and `server-instances/`: install
 `skein[-<slug>].service` and the nginx site on the same port, start, check health. On
 failure it re-enables the old unit and old site. Old unit files stay as `*.migrated`.
 
@@ -216,7 +223,7 @@ release are the single user-visible change.
 
 | Phase | Slices (one PR each unless noted) | Visible before the switch? |
 | --- | --- | --- |
-| **P0 Safety** | (a) `buildChildEnv` never forwards `CEZ_HOME` (or any later home variable); the launcher stops writing a default `CEZ_HOME`. In-task commands that read the home today (`cez artifact publish` reads the registry at `artifacts/cli.ts:45` to build its link) get what they need from the task context or the cockpit API instead, so a host with a custom home keeps working. (`CEZ_HOME` reached agents only through the blanket `CEZ_*` allowance added in `fedab0ed1`, not by design.) (b) The guard compares against `os.userInfo().homedir` (passwd, not `$HOME`), runs for every env object, and covers `node:test`; `test:unit` and `test:package` load the sandbox setup. (c) Rotating backups for `config.json` and `agent-accounts.json`. (d) Issue to `apptension/toolkit-dev`: audit-agent-readiness probes run foreign suites with a scrubbed env and a temp `HOME`. | No: backups appear in the state dir only |
+| **P0 Safety** | (a) `buildChildEnv` never forwards `CEZ_HOME` (or any later home variable); In-task commands that read the home today (`cez artifact publish` reads the registry at `artifacts/cli.ts:45` to build its link) get what they need from the task context or the cockpit API instead, so a host with a custom home keeps working. (`CEZ_HOME` reached agents only through the blanket `CEZ_*` allowance added in `fedab0ed1`, not by design.) (b) The guard compares against `os.userInfo().homedir` (passwd, not `$HOME`), runs for every env object, and covers `node:test`; `test:unit` and `test:package` load the sandbox setup. (c) Rotating backups for `config.json` and `agent-accounts.json`. (d) Issue to `apptension/toolkit-dev`: audit-agent-readiness probes run foreign suites with a scrubbed env and a temp `HOME`. | No: backups appear in the state dir only |
 | **P1 Home object** | (a) `Home` type and `resolveHome` (legacy layout while the switch is off), passed down from entry points; no ambient `cezarHomeDir()`. (b) `HomeStore` writer with `install.json` marker (written into the legacy home too), test-runner refusal and lease. (c) Backups and restore command for every registry-type file; shrink banner. (d) Lint: test code writes only through `Home.sandbox`. ADR superseding the "literal `~/.cezar`" rule. | No (backup restore command is new) |
 | **P2 Layout and migration** | (a) XDG / macOS / Windows / `SKEIN_HOME` resolver. (b) `migrateLegacyHome` with backup, `MOVED.json`, canary. (c) Server migration for systemd units and nginx sites, with rollback. (d) launchd label move. All behind the switch. | No |
 | **P3 Name surfaces** | (a) One env helper: `SKEIN_*` first, `CEZ_*` fallback (additive). (b) `skein` bin added beside `cezarion` and `cez` (additive). (c) Package `@hearsay-tools/skein` prepared; publish waits for the switch. (d) Desktop and mobile new IDs and the bridge build, behind the switch. (e) Docs and display names, merged with the switch PR. | Additive names only |
@@ -224,8 +231,8 @@ release are the single user-visible change.
 | **Switch** | Turn `SKEIN_SWITCH` on; deprecation notices start; docs land. Then owner actions: stable release, npm publish and deprecate, repo rename, store listings, apptension-host server migration. | Yes: the release |
 | **P5 Window end** | Remove aliases and `CEZ_*` fallbacks, two minor releases or 60 days after the release. | Yes |
 
-Dependencies: P1(a) before every other P1, P2 and P3(a); P2(a) before P2(b–d); P2(b) before
-P2(c); P1(b) before P2(b). P0 and P3(a–b) run in parallel with P1. The switch needs every
-phase accepted on `main`.
+Dependencies: P1(a) before every other P1 slice and P2; P2(a) before P2(b–d); P2(b) before
+P2(c); P1(b) before P2(b). P0 and P3(a–b) do not depend on P1 and run in parallel with it.
+The switch needs P0 to P4 accepted on `main`; P5 follows the release.
 
 Every slice updates `BACKWARD_COMPATIBILITY.md`, `.env.example` and the area docs it touches.
