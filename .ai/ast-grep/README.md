@@ -7,7 +7,7 @@ scans over `blank()` and a clone detector miss. It knows no types and resolves n
 matches names (`state`, `active`), and a rule says in a comment what it leaves out.
 
 `npm run lint` scans the repository with every rule and fails a match beyond the baseline, in CI's
-required Lint step and, through the bridge test `packages/cezar/src/lint/lint-runner.test.ts`, in Squeal.
+required Lint step and, through the bridge tests `packages/cezar/src/lint/lint-ast-grep-{1,2}.test.ts`, in Squeal.
 The failure carries the rule's `message`, which names the owner to use instead.
 `packages/cezar/src/ast-grep-rules.test.ts` runs each rule's own cases. [The lint guide](../../docs/sdlc/lint.md)
 covers every repository rule.
