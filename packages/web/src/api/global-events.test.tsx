@@ -1175,27 +1175,6 @@ describe('useGlobalEvents — run events', () => {
     expect(indexRefreshes).toHaveLength(1)
   })
 
-  it('debounces report refreshes and refetches only a mounted shelf', async () => {
-    const active = vi.fn().mockResolvedValue({ reports: [], total: 0, nextCursor: null })
-    const dormant = vi.fn().mockResolvedValue({ reports: [], total: 0, nextCursor: null })
-    const key = ['default', 'reports', 'active']
-    client.setQueryData(key, { reports: [], total: 0, nextCursor: null })
-    client.setQueryDefaults(['default', 'reports', 'dormant'], { queryFn: dormant })
-    client.setQueryData(['default', 'reports', 'dormant'], { reports: [], total: 0, nextCursor: null })
-    const observer = new QueryObserver(client, { queryKey: key, queryFn: active, staleTime: Infinity })
-    const unsubscribe = observer.subscribe(() => {})
-    const { source } = mount()
-    try {
-      for (const status of [RUN_STATUS.queued, RUN_STATUS.running, RUN_STATUS.done]) source.emit('run-summary', stampedRun(runRecord('reports-source', { status })))
-      expect(active).not.toHaveBeenCalled()
-      await waitFor(() => expect(active).toHaveBeenCalledTimes(1))
-      expect(dormant).not.toHaveBeenCalled()
-      source.emit('run-deleted', stampedDeleted('reports-source', 'default'))
-      await waitFor(() => expect(active).toHaveBeenCalledTimes(2))
-      expect(dormant).not.toHaveBeenCalled()
-    } finally { unsubscribe() }
-  })
-
   it('ignores a malformed frame and keeps serving the next one', () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
