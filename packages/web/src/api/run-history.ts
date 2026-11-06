@@ -269,9 +269,9 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     // thread, losing the caller's scroll intent while the same failure retries.
     if (fallback) return
     // The page first, so the context read after it reaches it.
-    await queryClient.resetQueries({ queryKey: historyKey, exact: true })
-    await queryClient.invalidateQueries({ queryKey: contextKey, exact: true })
-  }, [contextKey, fallback, historyKey, queryClient])
+    await queryClient.resetQueries({ queryKey: ['run-history', scope, runId], exact: true })
+    await queryClient.invalidateQueries({ queryKey: ['run-history-context', scope, runId], exact: true })
+  }, [fallback, queryClient, runId, scope])
 
   return {
     visibleEvents,
