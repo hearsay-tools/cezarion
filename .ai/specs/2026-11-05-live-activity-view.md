@@ -23,6 +23,7 @@ Open it in a browser. It runs a scripted 50-second loop with sample data.
 | D7 | When the live coordinator has topics, live data comes from a new WebSocket topic. Without topics (remote mode, or no working SharedWorker), the view reads the HTTP snapshot every 5 s while it is visible. | docs/areas/realtime-events.md: a new live signal is a topic; remote mode opens no WebSocket. |
 | D8 | The view shows **active work**: root tasks that are `queued`, `running` or `waiting`, and any root that still has a live worker (a worker whose status is `queued`, `running` or `waiting`: `isLiveStatus`). Tasks in `review`, `failed`, `done` or `cancelled` are not cards. One summary chip counts tasks in review and links to Tasks. | Planner: review is finished work at the human gate; many review tasks would crowd out live work. |
 | D9 | Card placement is stable. A card keeps its column and order while it stays on the view. State changes never move a card. | Planner: a living view that reorders on every change cannot be read. |
+| D10 | An open **peer wait** (`cez message wait --peer`) is drawn too: a dotted line from each named peer to the waiter, not a request line. Pointing at or focusing a card outlines the cards its peer waits link to. | Owner, 2026-11-06 (option A with the hover highlight, from three mockups). |
 
 ## What the user sees
 
@@ -63,7 +64,7 @@ changes.
 | waiting-for-merge | Waiting for merge | "PR <n>". The merge poller keeps its PR state local until the wait settles (`runMerge()` in `supervisor.ts`), so the view shows no live merge state. | Deadline. |
 | waiting-for-command (process wait) | Waiting for command | The wait's `note`, or "Process <pid>" without one. The wait stores no command line. | Elapsed time and deadline. |
 | monitoring (timer) | Waiting for timer | The timer note. | "Wakes 16:00 · in 27:52", counting down. |
-| peer wait (`kind: 'peer'`, `cez message wait --peer`) | Waiting for a peer | "For <task>", or "For N tasks". A message from a named peer, or that peer settling, ends it. | Deadline. |
+| peer wait (`kind: 'peer'`, `cez message wait --peer`) | Waiting for a peer | "For <task>", or "For N tasks". A message from a named peer, or that peer settling, ends it. | Deadline. A wait line to each named peer (D10). |
 | usage-limit | Paused | "Usage limit". | "Resumes 15:40", counting down. |
 | waiting-for-capacity, queued | Queued | "Waiting for a free slot". | Elapsed time. |
 
@@ -104,6 +105,25 @@ reply comes, a comet in the success tone travels back. The line turns solid, the
 label says "Replied", and both fade out. A request that closes without a reply
 (timed-out, cancelled, destroyed and the other outcomes) fades out with no comet.
 
+**Peer-wait lines (D10).** One line for each peer named by an open peer wait: a live
+root whose top wait (`wait.kind: 'peers'`) names that peer. A wait is not a request:
+the peer owes no reply, and a message from it or its settling ends the wait.
+
+- The line runs from the peer card to the waiter card, the way the awaited message
+  will travel. It is dotted (round dots), in the peer message tone, with no arrowhead.
+  A hollow ring marks the waiter's end, as the ring status shape means "waiting for
+  something outside".
+- The dots drift slowly from the peer to the waiter (`activity-drift`, a 2.4 s loop).
+- The label sits in the column gap, as a peer label does: "Waiting", the wait's age, and
+  a bar for how much of the wait's deadline window is used. Its border is dashed.
+- A new wait line fades in. An ended wait line fades out with no comet: the snapshot
+  does not say why the wait ended (the peer wrote or settled, the wait timed out or was
+  cancelled).
+- A wait and a request between the same two cards take separate lanes.
+- **Highlight.** While the pointer is on a card, or the focus is inside it, every card
+  a peer wait links to it gets an outline in the peer tone, and the wait lines that
+  touch it draw thicker and opaque. Request lines do not take part.
+
 **Other motion.**
 
 - A card whose rung changes flashes its border once in the new tone.
@@ -122,7 +142,9 @@ label says "Replied", and both fade out. A request that closes without a reply
 - **Just now**: the last six changes the client saw since the view opened, newest
   first, with an age: a state change, a worker that started or finished, a request
   that opened or closed, a check that passed. It starts empty: "Watching since 15:32".
-- **Legend**: the shapes, the heartbeat, the two line tones and the comet.
+- **Legend**: the shapes, the heartbeat, the two line tones, the wait line and the comet.
+  A peer wait is not a request: it is not an "Open requests" entry and not counted in
+  the Open requests chip.
 
 ### Global view (`/activity`)
 
@@ -138,7 +160,9 @@ projects with no active work collapse into one line at the bottom. A project wit
 with its notice and its link, because the view does not know whether it is idle. A panel holds one compact pill for
 each card: shape, title, a small heartbeat and one line (the verb in the rung tone and
 a short main line), and one dot for each live worker. Open peer requests are arcs
-above the pills, with the same marching dashes, comets and age label. Peer messages
+above the pills, with the same marching dashes, comets and age label. Open peer waits
+are dotted arcs from the peer pill to the waiter pill, labelled "Waiting · <age>", with
+the same highlight on pointer and focus (D10). Peer messages
 never cross projects, so arcs never leave a panel. "Open project activity →" goes to
 the project view. The summary chips count every project.
 
@@ -146,27 +170,30 @@ the project view. The summary chips count every project.
 
 - **Columns**: as many columns as fit at a minimum card width of 300 px, with 96 px
   gaps so the lines and labels have room. On a narrow screen: one column, and peer
-  lines become a small "→ <task>" link on the sender card.
+  lines become a small "→ <task>" link on the sender card; wait lines become a
+  "⋯ waits on <task>" link on the waiter card.
 - **Dense mode**: with more than 12 cards, cards drop the detail line and fold workers
   into a row of dots with a count. The heartbeat and the line stay.
 - **Many lines**: a request between two cards that are both on screen is a full
   line. A request whose other end is a card off screen is a short stub that ends at
   the viewport edge with that card's name; the stub follows the same tones, marching
-  and comets. No line is drawn when neither end is on screen.
+  and comets. No line is drawn when neither end is on screen. Wait lines follow the
+  same rule.
 - **Reduced motion** (`prefers-reduced-motion: reduce`): no pulse, breath, sweep,
-  march, comet, slide or FLIP. Lines are static dashes; changes apply at once; the
+  march, drift, comet, slide or FLIP. Lines are static dashes and dots; changes apply at once; the
   ages still tick.
 - **Hidden tab**: the view stops its animations and releases its topic subscription
   (`live-visibility`), and reconciles from a fresh snapshot when it becomes visible.
 - **Performance**: animations use only `transform` and `opacity` (the pulse is a
-  scaled pseudo-element, not an animated `box-shadow`). The one exception is the march:
-  open line, stub and arc dashes animate `stroke-dashoffset` in CSS only, because no
-  transform moves dashes along a curve; it pauses on a hidden tab and is static with
-  reduced motion. Line geometry is recomputed on
+  scaled pseudo-element, not an animated `box-shadow`). The one exception is the march
+  and the drift: open line, stub and arc dashes, and wait-line dots, animate
+  `stroke-dashoffset` in CSS only, because no transform moves dashes along a curve; they
+  pause on a hidden tab and are static with reduced motion. Line geometry is recomputed on
   layout change (`ResizeObserver`), not on every frame. A `requestAnimationFrame` loop
   runs only while a comet is in flight.
 - **Access**: each card is a link to its task. Each card has a text form of its lines:
-  "Waiting for a reply from <task>" and "<task> waits for your reply". The summary
+  "Waiting for a reply from <task>" and "<task> waits for your reply"; for a peer wait,
+  "Waiting for a message from <task>" and "<task> waits for you to write". The summary
   chips are a polite live region; the cards and the feed are not, so a busy project
   does not flood a screen reader.
 - **Tokens**: only theme tokens, in light and dark. The purple status token stays

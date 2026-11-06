@@ -106,4 +106,13 @@ describe('diffActivity', () => {
     const triggers = diffActivity(at(0, project({ tasks: [A] })), at(1_000, project({ tasks: [A, B], requests: [PEER] })))
     expect(kinds(triggers)).toEqual(['card-entered', 'request-opened', 'chip-changed', 'chip-changed'])
   })
+
+  it('opens and closes a peer wait as the waiter starts and stops waiting on a peer', () => {
+    const waiting = { ...A, status: RUN_STATUS.waiting, rung: 'waiting-on-workers' as const, wait: { kind: ACTIVITY_WAIT_KIND.peers, since: iso(-1_000), deadline: iso(600_000), detail: { peerRunIds: ['b'] } } }
+    const wait = { id: 'wait:a:b', waiterRunId: 'a', peerRunId: 'b', since: iso(-1_000), deadline: iso(600_000) }
+    const isWait = (trigger: ActivityTrigger) => trigger.kind === 'wait-opened' || trigger.kind === 'wait-closed'
+    expect(between({ tasks: [A, B] }, { tasks: [waiting, B] }).filter(isWait)).toEqual([{ kind: 'wait-opened', projectId: 'cezarion', wait }])
+    expect(between({ tasks: [waiting, B] }, { tasks: [A, B] }).filter(isWait)).toEqual([{ kind: 'wait-closed', projectId: 'cezarion', wait }])
+    expect(between({ tasks: [waiting, B] }, { tasks: [waiting, B] })).toEqual([])
+  })
 })

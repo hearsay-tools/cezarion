@@ -48,14 +48,65 @@ export const senderName = (index: ReadonlyMap<string, RunEntry>, request: Activi
 export const recipientName = (index: ReadonlyMap<string, RunEntry>, request: ActivityRequest) => nameOf(index, request.recipientRunId, request.recipientTitle)
 
 /**
- * The text form of the lines that touch one row (a card's root or one worker row): "Waiting for a
- * reply from <task>" for each request it sent, "<task> waits for your reply" for each it owes.
+ * An open peer wait (`cez message wait --peer`): a root task waits until a named peer writes to it
+ * or settles. One link for each named peer. Its line runs from the peer to the waiter, the way the
+ * awaited message will travel. Only a root registers a peer wait, and its peers are roots.
  */
-export function lineTexts(runId: string, requests: readonly ActivityRequest[], index: ReadonlyMap<string, RunEntry>): string[] {
+export interface PeerWait {
+  /** `wait:<waiter>:<peer>`: the key of its line, its label and its motion. */
+  id: string
+  waiterRunId: string
+  peerRunId: string
+  since: string
+  deadline: string
+}
+
+export const peerWaitId = (waiterRunId: string, peerRunId: string) => `wait:${waiterRunId}:${peerRunId}`
+
+/** The open peer waits of the cards: every peer named by a live root whose top wait is a peer wait. */
+export function peerWaits(tasks: readonly ActivityRun[]): PeerWait[] {
+  const waits: PeerWait[] = []
+  for (const task of tasks) {
+    const wait = task.wait
+    if (!isLiveStatus(task.status) || wait?.kind !== 'peers') continue
+    for (const peerRunId of new Set(wait.detail.peerRunIds)) {
+      if (peerRunId === task.runId) continue
+      waits.push({ id: peerWaitId(task.runId, peerRunId), waiterRunId: task.runId, peerRunId, since: wait.since, deadline: wait.deadline })
+    }
+  }
+  return waits
+}
+
+/** The cards a peer wait links to `runId`: the peers it waits on and the tasks that wait on it. */
+export function linkedByWaits(runId: string, waits: readonly PeerWait[]): Set<string> {
+  const linked = new Set<string>()
+  for (const wait of waits) {
+    if (wait.waiterRunId === runId) linked.add(wait.peerRunId)
+    if (wait.peerRunId === runId) linked.add(wait.waiterRunId)
+  }
+  return linked
+}
+
+/** The peer waits a card holds: the narrow layout's "⋯ waits on <task>" links. */
+export function sentPeerWaits(cardId: string, waits: readonly PeerWait[]): PeerWait[] {
+  return waits.filter((wait) => wait.waiterRunId === cardId)
+}
+
+/**
+ * The text form of the lines that touch one row (a card's root or one worker row): "Waiting for a
+ * reply from <task>" for each request it sent, "<task> waits for your reply" for each it owes;
+ * "Waiting for a message from <task>" for each peer it waits on, "<task> waits for you to write"
+ * for each task that waits on it.
+ */
+export function lineTexts(runId: string, requests: readonly ActivityRequest[], index: ReadonlyMap<string, RunEntry>, waits: readonly PeerWait[] = []): string[] {
   const texts: string[] = []
   for (const request of requests) {
     if (request.senderRunId === runId) texts.push(`Waiting for a reply from ${recipientName(index, request)}`)
     if (request.recipientRunId === runId) texts.push(`${senderName(index, request)} waits for your reply`)
+  }
+  for (const wait of waits) {
+    if (wait.waiterRunId === runId) texts.push(`Waiting for a message from ${nameOf(index, wait.peerRunId)}`)
+    if (wait.peerRunId === runId) texts.push(`${nameOf(index, wait.waiterRunId)} waits for you to write`)
   }
   return texts
 }

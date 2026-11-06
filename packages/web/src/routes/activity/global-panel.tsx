@@ -4,12 +4,13 @@ import { Link } from 'react-router'
 
 import { cn } from '@/lib/utils'
 
-import { nameOf, projectNotice, runIndex } from './activity-model'
-import { EMPTY_MOTION, type MotionState } from './activity-motion'
+import { nameOf, peerWaits, projectNotice, runIndex } from './activity-model'
+import { EMPTY_MOTION, waitGhosts, type MotionState } from './activity-motion'
 import { ActivityArcs } from './global-arcs'
-import { idleLead, panelArcs, panelCounts } from './global-model'
+import { idleLead, panelArcs, panelCounts, panelWaitArcs } from './global-model'
 import { ActivityPill } from './global-pill'
 import type { NowContext } from './now-box'
+import { useWaitHighlight } from './use-wait-highlight'
 
 /**
  * The global view's project panels and its idle line (spec 2026-11-05-live-activity-view,
@@ -64,17 +65,38 @@ function WorkPanel({ project, now, motion = EMPTY_MOTION, paused = false }: Pane
   const headingId = React.useId()
   const index = React.useMemo(() => runIndex(project), [project])
   const arcs = useArcs(project, motion)
+  const waits = React.useMemo(() => peerWaits(project.tasks), [project.tasks])
+  // The panel's wait arcs: its open peer waits between two pills, then the ended ones fading out.
+  const waitArcs = React.useMemo(
+    () => panelWaitArcs(project.tasks, [...waits, ...waitGhosts(project.projectId, waits, motion)]),
+    [project.tasks, project.projectId, waits, motion],
+  )
+  const highlight = useWaitHighlight(waits)
   const ctx: NowContext = { now, titleOf: (runId) => nameOf(index, runId) }
-  const layoutKey = `${project.tasks.map((task) => task.runId).join(',')}:${arcs.map((arc) => arc.requestId).join(',')}`
+  const layoutKey = `${project.tasks.map((task) => task.runId).join(',')}:${arcs.map((arc) => arc.requestId).join(',')}:${waitArcs.map((wait) => wait.id).join(',')}`
+  const room = arcs.length > 0 || waitArcs.length > 0
   return (
     <section aria-labelledby={headingId} data-slot="activity-panel" data-project={project.projectId} className={PANEL}>
       <PanelHeader project={project} headingId={headingId} detail={panelCounts(project)} to={projectActivityPath(project.projectId)} label="Open project activity →" />
       {/* The arcs rise above the pills: their strip reserves the room above each row. */}
-      <div className={cn('relative mt-3', arcs.length > 0 && 'md:mt-1 md:pt-10')}>
-        <ul data-slot="activity-pills" aria-label={`${project.name} tasks`} className={cn('grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] items-start gap-3.5', arcs.length > 0 && 'md:gap-y-11')}>
-          {project.tasks.map((task) => <ActivityPill key={task.runId} projectId={project.projectId} task={task} requests={project.requests} index={index} ctx={ctx} motion={motion} />)}
+      <div className={cn('relative mt-3', room && 'md:mt-1 md:pt-10')}>
+        <ul data-slot="activity-pills" aria-label={`${project.name} tasks`} className={cn('grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] items-start gap-3.5', room && 'md:gap-y-11')}>
+          {project.tasks.map((task) => (
+            <ActivityPill
+              key={task.runId}
+              projectId={project.projectId}
+              task={task}
+              requests={project.requests}
+              waits={waits}
+              index={index}
+              ctx={ctx}
+              motion={motion}
+              linked={highlight.linked.has(task.runId)}
+              onHover={highlight.onHover}
+            />
+          ))}
         </ul>
-        {arcs.length > 0 ? <ActivityArcs arcs={arcs} layoutKey={layoutKey} now={now} motion={motion} paused={paused} /> : null}
+        {room ? <ActivityArcs arcs={arcs} waits={waitArcs} active={highlight.active} layoutKey={layoutKey} now={now} motion={motion} paused={paused} /> : null}
       </div>
     </section>
   )

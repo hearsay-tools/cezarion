@@ -4,12 +4,13 @@ import type { ActivityProject, ActivityRequest, ActivityRun } from '@open-mercat
 import type { FeedEntry } from './activity-feed'
 import { ActivityCard } from './activity-card'
 import { ActivityLines } from './activity-lines'
-import { nameOf, runIndex } from './activity-model'
-import { EMPTY_MOTION, type MotionState } from './activity-motion'
+import { nameOf, peerWaits, runIndex, type PeerWait } from './activity-model'
+import { EMPTY_MOTION, waitGhosts, type MotionState } from './activity-motion'
 import { ActivityRail } from './activity-rail'
 import { COLUMN_GAP, DENSE_AFTER, columnCount, placeCards, samePlacement, type Columns } from './layout'
 import type { NowContext } from './now-box'
 import { useFlip } from './use-flip'
+import { useWaitHighlight } from './use-wait-highlight'
 
 /**
  * The project graph and its rail (spec 2026-11-05-live-activity-view, "Project view"): task cards
@@ -42,15 +43,23 @@ function useStablePlacement(ids: readonly string[], count: number, weight: (id: 
   return next
 }
 
-/** What the motion still draws of a project: cards that left and requests that closed, while
- *  they collapse or fade. Each is left out once the snapshot has it again. */
-export function ghostsOf(project: ActivityProject, motion: MotionState): { cards: ActivityRun[]; requests: ActivityRequest[]; folding: ActivityRequest[] } {
+export interface Ghosts {
+  cards: ActivityRun[]
+  requests: ActivityRequest[]
+  folding: ActivityRequest[]
+  waits: PeerWait[]
+}
+
+/** What the motion still draws of a project: cards that left, requests that closed and peer waits
+ *  that ended, while they collapse or fade. Each is left out once the snapshot has it again. */
+export function ghostsOf(project: ActivityProject, motion: MotionState, waits: readonly PeerWait[] = peerWaits(project.tasks)): Ghosts {
   const tasks = new Set(project.tasks.map((task) => task.runId))
   const open = new Set(project.requests.map((request) => request.requestId))
   const closing = Object.values(motion.closing).filter((ghost) => ghost.projectId === project.projectId && !open.has(ghost.request.requestId))
   return {
     cards: Object.values(motion.leaving).filter((ghost) => ghost.projectId === project.projectId && !tasks.has(ghost.task.runId)).map((ghost) => ghost.task),
     requests: closing.map((ghost) => ghost.request),
+    waits: waitGhosts(project.projectId, waits, motion),
     // The rail entry folds while the reply comet travels, or while a closure without a reply
     // fades; it leaves no gap while the line still says "Replied".
     folding: closing.filter((ghost) => ghost.phase === 'reply' || !ghost.replied).map((ghost) => ghost.request),
@@ -72,8 +81,11 @@ export function ActivityBoard({ project, now, watchingSince, motion = EMPTY_MOTI
   const hostRef = React.useRef<HTMLDivElement>(null)
   const count = columnCount(useWidth(hostRef))
   const index = React.useMemo(() => runIndex(project), [project])
-  const ghosts = React.useMemo(() => ghostsOf(project, motion), [project, motion])
+  const waits = React.useMemo(() => peerWaits(project.tasks), [project.tasks])
+  const ghosts = React.useMemo(() => ghostsOf(project, motion, waits), [project, motion, waits])
   const drawnRequests = React.useMemo(() => [...project.requests, ...ghosts.requests], [project.requests, ghosts.requests])
+  const drawnWaits = React.useMemo(() => [...waits, ...ghosts.waits], [waits, ghosts.waits])
+  const highlight = useWaitHighlight(waits)
   const tasks = new Map([...ghosts.cards, ...project.tasks].map((task) => [task.runId, task]))
   const ghostIds = new Set(ghosts.cards.map((task) => task.runId))
   // A card with workers is taller; the weight keeps the columns near the same height.
@@ -83,7 +95,7 @@ export function ActivityBoard({ project, now, watchingSince, motion = EMPTY_MOTI
   const dense = project.tasks.length > DENSE_AFTER
   const ctx: NowContext = { now, titleOf: (runId) => nameOf(index, runId) }
   const placement = columns.map((column) => column.join(',')).join('|')
-  const layoutKey = `${project.tasks.length}:${count}:${dense}:${placement}:${drawnRequests.map((request) => request.requestId).join(',')}`
+  const layoutKey = `${project.tasks.length}:${count}:${dense}:${placement}:${drawnRequests.map((request) => request.requestId).join(',')}:${drawnWaits.map((wait) => wait.id).join(',')}`
   useFlip(hostRef, 'data-flip', placement, !still && !paused)
 
   return (
@@ -104,11 +116,27 @@ export function ActivityBoard({ project, now, watchingSince, motion = EMPTY_MOTI
             <div key={i} data-slot="activity-column" className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-[30px] max-md:gap-4">
               {column.map((id) => {
                 const task = tasks.get(id)
-                return task ? <ActivityCard key={id} task={task} requests={project.requests} index={index} ctx={ctx} dense={dense} narrow={narrow} motion={motion} ghost={ghostIds.has(id)} /> : null
+                if (!task) return null
+                return (
+                  <ActivityCard
+                    key={id}
+                    task={task}
+                    requests={project.requests}
+                    waits={waits}
+                    index={index}
+                    ctx={ctx}
+                    dense={dense}
+                    narrow={narrow}
+                    motion={motion}
+                    ghost={ghostIds.has(id)}
+                    linked={highlight.linked.has(id)}
+                    onHover={highlight.onHover}
+                  />
+                )
               })}
             </div>
           ))}
-          <ActivityLines requests={drawnRequests} index={index} peers={!narrow} layoutKey={layoutKey} now={now} motion={motion} paused={paused || still} />
+          <ActivityLines requests={drawnRequests} waits={drawnWaits} active={highlight.active} index={index} peers={!narrow} layoutKey={layoutKey} now={now} motion={motion} paused={paused || still} />
         </div>
       </div>
       <ActivityRail requests={project.requests} closing={ghosts.folding} index={index} now={now} watchingSince={watchingSince} feed={feed} motion={motion} />

@@ -60,6 +60,16 @@ function LegendLine({ className }: { className: string }) {
   )
 }
 
+/** A wait line in small: round dots and the ring at the waiter's end. */
+function LegendWait() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 34 10" className="h-2.5 w-[34px] shrink-0">
+      <path d="M2 5h24" strokeWidth={2.2} strokeLinecap="round" strokeDasharray="0 6" className="stroke-message-peer-accent opacity-80" />
+      <circle cx="29.5" cy="5" r="3" strokeWidth={1.6} className="fill-card stroke-message-peer-accent" />
+    </svg>
+  )
+}
+
 function Legend() {
   const row = 'flex items-center gap-2'
   return (
@@ -70,6 +80,7 @@ function Legend() {
       <div className={row}><StatusDot tone="running" shape="workers" aria-hidden="true" />Robot: waiting for its own workers</div>
       <div className={row}><Heartbeat rate={[0, 2, 5, 1, 3, 0, 4, 2]} className="w-[34px]" />Heartbeat: tool calls, last 30 s</div>
       <div className={row}><LegendLine className="stroke-message-peer-accent" />Open request, task to task</div>
+      <div className={row}><LegendWait />Waits for a peer to write</div>
       <div className={row}><LegendLine className="stroke-message-inbound-accent" />Open question, worker to parent</div>
       <div className={row}><svg aria-hidden="true" viewBox="0 0 34 10" className="h-2.5 w-[34px] shrink-0"><circle cx="17" cy="5" r="4" className="fill-foreground" /></svg>Comet: a message is travelling</div>
     </div>

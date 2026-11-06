@@ -7,7 +7,7 @@ import type {
   ActivityWorker,
 } from '@open-mercato/cezar-api-client/contract/activity'
 
-import { projectNotice, summarize, type ActivitySummary } from './activity-model'
+import { peerWaits, projectNotice, summarize, type ActivitySummary, type PeerWait } from './activity-model'
 import { isLiveStatus } from './now-box'
 
 /**
@@ -32,6 +32,11 @@ export type ActivityTrigger =
   | { kind: 'card-left'; projectId: string; task: ActivityRun }
   | { kind: 'check-passed'; projectId: string; runId: string; pr: number; name: string }
   | { kind: 'chip-changed'; chip: keyof ActivitySummary; from: number; to: number }
+  /** A root started waiting on a peer: its wait line fades in. */
+  | { kind: 'wait-opened'; projectId: string; wait: PeerWait }
+  /** A peer wait ended. The snapshot does not say why (the peer wrote or settled, the wait timed
+   *  out or was cancelled), so the line only fades. */
+  | { kind: 'wait-closed'; projectId: string; wait: PeerWait }
 
 type Emit = (trigger: ActivityTrigger) => void
 
@@ -93,6 +98,15 @@ function diffRequests(before: ActivityProject, after: ActivityProject, emit: Emi
   }
 }
 
+function diffWaits(before: ActivityProject, after: ActivityProject, emit: Emit) {
+  const previous = peerWaits(before.tasks)
+  const next = peerWaits(after.tasks)
+  const was = new Set(previous.map((wait) => wait.id))
+  const open = new Set(next.map((wait) => wait.id))
+  for (const wait of next) if (!was.has(wait.id)) emit({ kind: 'wait-opened', projectId: after.projectId, wait })
+  for (const wait of previous) if (!open.has(wait.id)) emit({ kind: 'wait-closed', projectId: after.projectId, wait })
+}
+
 const CHIPS: readonly (keyof ActivitySummary)[] = ['needsYou', 'working', 'waiting', 'queued', 'activeWorkers', 'openRequests', 'inReview']
 
 function diffChips(before: readonly ActivityProject[], after: readonly ActivityProject[], emit: Emit) {
@@ -104,7 +118,7 @@ function diffChips(before: readonly ActivityProject[], after: readonly ActivityP
 /**
  * Every animation trigger between two snapshots of one scope, in a stable order: per project in
  * the next snapshot's order, its cards (entered, changed, left), then its requests (opened,
- * closed), then the summary chips. No previous snapshot: no triggers.
+ * closed), then its peer waits (opened, closed), then the summary chips. No previous snapshot: no triggers.
  */
 export function diffActivity(previous: ActivitySnapshot | undefined, next: ActivitySnapshot): ActivityTrigger[] {
   if (previous === undefined) return []
@@ -116,6 +130,7 @@ export function diffActivity(previous: ActivitySnapshot | undefined, next: Activ
     if (!readable(was) || !readable(project)) continue
     diffCards(was, project, emit)
     diffRequests(was, project, emit)
+    diffWaits(was, project, emit)
   }
   diffChips(previous.projects, next.projects, emit)
   return triggers

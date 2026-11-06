@@ -1,6 +1,7 @@
 /* The activity view's motion (spec 2026-11-05-live-activity-view, "Size, motion and access").
  * Every animation moves `transform` or `opacity` only, with one named exception: the march of
- * open line dashes animates `stroke-dashoffset`, because no transform moves dashes along a curve.
+ * open line dashes and the drift of wait-line dots animate `stroke-dashoffset`, because no
+ * transform moves dashes along a curve.
  * Durations match `MOTION_MS` in activity-motion.ts. A hidden tab pauses everything
  * (`data-activity-paused`); reduced motion turns every animation off, and lines stay static
  * dashes. */
@@ -199,6 +200,16 @@
     stroke-dashoffset: -22;
   }
 }
+/* Wait lines: round dots drift slowly from the peer to the waiter, the way the awaited message
+ * will travel. Two dot periods (`0 8`) per loop. */
+.activity-drift {
+  animation: activity-drift 2.4s linear infinite;
+}
+@keyframes activity-drift {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
 .activity-line-in {
   animation: activity-line-in 0.8s ease-out;
 }
@@ -241,6 +252,7 @@
   .activity-bump,
   .activity-check-pass,
   .activity-march,
+  .activity-drift,
   .activity-line-in,
   .activity-line-out {
     animation: none;

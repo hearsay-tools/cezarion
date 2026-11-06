@@ -15,11 +15,12 @@ import { seedRuns } from './seed-runs'
 
 /**
  * The live activity view (spec .ai/specs/2026-11-05-live-activity-view.md, slice S8) on a real
- * dry-run cockpit. The store holds a peer request between two root tasks and a worker that asks
- * its parent; a live task runs and holds its turn. The test reads the cards' now-box verbs, the
- * text form of the lines (never their geometry) and the rail's open requests. Then it closes the
- * peer request through the cockpit's own route and waits until the view drops the line and the
- * rail entry, with no reload: the activity topic carries the change.
+ * dry-run cockpit. The store holds a peer request between two root tasks, a root that waits on a
+ * peer (`cez message wait --peer`) and a worker that asks its parent; a live task runs and holds
+ * its turn. The test reads the cards' now-box verbs, the text form of the lines (never their
+ * geometry), whether the wait line is drawn, and the rail's open requests. Then it closes the peer
+ * request through the cockpit's own route and waits until the view drops the line and the rail
+ * entry, with no reload: the activity topic carries the change.
  *
  * Not covered here, on purpose:
  * - A CI wait. The dry-run `gh` answers every check as passed and `--watch` exits at once, so a
@@ -33,14 +34,17 @@ import { seedRuns } from './seed-runs'
 const HOLD = 'activity-e2e-hold'
 const hourAhead = new Date(Date.now() + 3_600_000).toISOString()
 const minuteAgo = new Date(Date.now() - 60_000).toISOString()
+const WAIT_SECONDS = 1800
 
 const senderId = randomUUID()
 const recipientId = randomUUID()
 const parentId = randomUUID()
 const workerId = randomUUID()
+const waiterId = randomUUID()
 const titles = {
   sender: 'Schema migration',
   recipient: 'API contract review',
+  waiter: 'Schema rollout',
   parent: 'Parser coordinator',
   worker: 'Parser worker',
 }
@@ -95,6 +99,12 @@ beforeAll(async () => {
       waits: [{ id: randomUUID(), kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA['ask-line'], registeredAt: minuteAgo, phase: WAIT_PHASE.open, turnId: 'turn-1',
         questions: [{ header: 'Scope', question: 'Ship the contract before the migration?' }] }],
     }),
+    // Waits for the recipient to write or settle: "Waiting for a peer", and a wait line.
+    record(waiterId, titles.waiter, {
+      delegation: { role: 'root', permissions: [], receipts: [] },
+      waits: [{ id: randomUUID(), kind: WAIT_KIND.peer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: minuteAgo, phase: WAIT_PHASE.open, turnId: 'turn-1',
+        deadline: new Date(Date.parse(minuteAgo) + WAIT_SECONDS * 1000).toISOString(), timeoutSeconds: WAIT_SECONDS, peerIds: [recipientId] }],
+    }),
     // Waits for its worker, which asks it a question: "Waiting for workers" and "Asks parent".
     record(parentId, titles.parent, {
       delegation: {
@@ -138,16 +148,19 @@ afterAll(async () => {
 
 type CardFacts = { verb: string | null; lines: string[] }
 type BoardFacts = {
-  cards: Record<'sender' | 'recipient' | 'parent' | 'running', CardFacts | null>
+  cards: Record<'sender' | 'recipient' | 'waiter' | 'parent' | 'running', CardFacts | null>
+  waitLine: boolean
   worker: { line: string; lines: string[] } | null
   rail: { id: string; text: string }[]
   openChip: string | null
 }
 
 /** One page read of the project board: each card's verb and the text form of its own lines (not
- *  its workers'), the worker row, the rail's open requests and the open-requests chip. */
-const board = () => `(() => {
-  const ids = ${JSON.stringify({ sender: senderId, recipient: recipientId, parent: parentId, running: runningId })};
+ *  its workers'), whether the peer-wait line is drawn, the worker row, the rail's open requests
+ *  and the open-requests chip. */
+const board = () => {
+  return `(() => {
+  const ids = ${JSON.stringify({ sender: senderId, recipient: recipientId, waiter: waiterId, parent: parentId, running: runningId })};
   const texts = (el, selector) => [...el.querySelectorAll(selector)].map(li => li.textContent.trim());
   const card = id => {
     const el = document.querySelector('[data-activity-card="' + id + '"]');
@@ -159,6 +172,7 @@ const board = () => `(() => {
   const row = document.querySelector('[data-slot="activity-worker"][data-run="${workerId}"]');
   return {
     cards: Object.fromEntries(Object.entries(ids).map(([key, id]) => [key, card(id)])),
+    waitLine: document.querySelector('path[data-wait="wait:${waiterId}:${recipientId}"]') !== null,
     worker: row ? {
       line: row.querySelector('[data-slot="activity-worker-line"]')?.textContent?.trim() ?? '',
       lines: texts(row, '[data-slot="activity-line-text"] li'),
@@ -168,6 +182,7 @@ const board = () => `(() => {
     openChip: document.querySelector('[data-slot="activity-chip"][data-chip="open requests"] strong')?.textContent ?? null,
   };
 })()`
+}
 
 describe('activity view', () => {
   it('shows the cards, the lines and the open requests, and drops a request when it closes', async () => {
@@ -178,7 +193,9 @@ describe('activity view', () => {
 
     expect(before.cards.running?.verb).toBe('Doing')
     expect(before.cards.sender).toEqual({ verb: 'Waiting for reply', lines: [`Waiting for a reply from ${titles.recipient}`] })
-    expect(before.cards.recipient).toEqual({ verb: 'Needs you', lines: [`${titles.sender} waits for your reply`] })
+    expect(before.cards.recipient).toEqual({ verb: 'Needs you', lines: [`${titles.sender} waits for your reply`, `${titles.waiter} waits for you to write`] })
+    expect(before.cards.waiter).toEqual({ verb: 'Waiting for a peer', lines: [`Waiting for a message from ${titles.recipient}`] })
+    expect(before.waitLine).toBe(true)
     expect(before.cards.parent).toEqual({ verb: 'Waiting for workers', lines: [`${titles.worker} waits for your reply`] })
     expect(before.worker?.line).toContain('Asks parent')
     expect(before.worker?.line).toContain(familyRequest.text)
