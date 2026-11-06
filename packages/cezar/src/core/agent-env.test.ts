@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChildEnv, buildCommandEnv, looksSecret } from './agent-env.ts';
+import { buildChildEnv, buildCommandEnv, withoutHomeEnv, looksSecret } from './agent-env.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
 
 /**
@@ -484,4 +484,34 @@ describe('looksSecret', () => {
       expect(looksSecret(n)).toBe(false);
     }
   });
+});
+
+describe('cockpit home isolation (hearsay-tools/cezarion#2779)', () => {
+  for (const full of ['0', '1']) {
+    const source = {
+      CEZ_HOME: '/live/home', cez_home: '/live/lower', Cez_Home: '/live/mixed',
+      CEZ_AGENT_ENV_FULL: full, CEZ_ENV_PASSTHROUGH: 'CEZ_HOME,CUSTOM_VALUE',
+      CUSTOM_VALUE: 'preserved', PATH: '/bin', CEZ_TASK_ID: 'task',
+    };
+    for (const backend of RUNNER_IDS) {
+      it(`${backend} removes every home spelling in full-env=${full}, including per-run env`, () => {
+        const env = buildChildEnv({ backend, source, extraEnv: { CEZ_HOME: '/extra/home', CEZ_PROJECT_ID: 'project' } });
+        expect(Object.keys(env).filter(name => name.toUpperCase() === 'CEZ_HOME')).toEqual([]);
+        expect(env).toMatchObject({ PATH: '/bin', CUSTOM_VALUE: 'preserved', CEZ_PROJECT_ID: 'project' });
+        expect(source.CEZ_HOME).toBe('/live/home');
+      });
+    }
+    it(`preview commands remove home in full-env=${full}`, () => {
+      expect(buildCommandEnv({ source, extraEnv: { CEZ_HOME: '/extra/home' } })).toEqual({
+        CEZ_AGENT_ENV_FULL: full, CEZ_ENV_PASSTHROUGH: 'CEZ_HOME,CUSTOM_VALUE',
+        CUSTOM_VALUE: 'preserved', PATH: '/bin', CEZ_TASK_ID: 'task',
+      });
+    });
+    it(`host env stripping preserves every unrelated value in full-env=${full}`, () => {
+      expect(withoutHomeEnv({ ...source, SECRET: 'keep', EMPTY: '', UNSET: undefined })).toEqual({
+        CEZ_AGENT_ENV_FULL: full, CEZ_ENV_PASSTHROUGH: 'CEZ_HOME,CUSTOM_VALUE',
+        CUSTOM_VALUE: 'preserved', PATH: '/bin', CEZ_TASK_ID: 'task', SECRET: 'keep', EMPTY: '', UNSET: undefined,
+      });
+    });
+  }
 });

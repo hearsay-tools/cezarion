@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { owningProjectId, runArtifactCommand } from './cli.ts';
+import { afterEach, expect, it, vi } from 'vitest';
+import { runArtifactCommand } from './cli.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -45,105 +45,22 @@ it('shows help successfully without context', async () => {
   expect(output.mock.calls[0]?.[0]).toContain('cez artifact publish');
 });
 
-it.each(['boot', 'owner', 'aliased-owner'])('preserves the registered %s project in publication links, independent of cwd', async (owner) => {
-  const root = await mkdtemp(join(tmpdir(), 'cez-artifact-owner-'));
+// Ownership now comes from task context. Path aliases and cwd cannot change that identity.
+it.each([undefined, 'owner'])('publishes with project context %s without reading the home', async (projectId) => {
+  const root = await mkdtemp(join(tmpdir(), 'cez-artifact-context-'));
   try {
-    const home = join(root, 'home');
-    const project = join(root, owner);
-    await mkdir(home);
-    await mkdir(join(project, '.ai/cezar'), { recursive: true });
-    const alias = join(root, 'alias');
-    if (owner === 'aliased-owner') await symlink(project, alias, 'dir');
-    const registry = JSON.stringify({ projects: [
-      { id: 'unrelated', root: join(root, 'unrelated') },
-      { id: owner, root: owner === 'aliased-owner' ? alias : project },
-    ] });
-    await writeFile(join(home, 'config.json'), registry);
-    const runId = randomUUID();
+    const home = join(root, 'unreadable-home');
+    await mkdir(home, { mode: 0 });
     const source = join(root, 'report.md');
-    await writeFile(source, 'owned snapshot');
+    await writeFile(source, 'snapshot');
+    const runId = randomUUID();
     const output = vi.spyOn(console, 'log').mockImplementation(() => {});
     expect(await runArtifactCommand(['publish', source], {
-      CEZ_HOME: home, CEZ_TASK_ID: runId,
-      CEZ_ARTIFACTS_DIR: artifactDirectory(join(project, '.ai/cezar'), runId),
+      CEZ_HOME: home, CEZ_PROJECT_ID: projectId, CEZ_TASK_ID: runId,
+      CEZ_ARTIFACTS_DIR: artifactDirectory(root, runId),
     })).toBe(0);
     const result = JSON.parse(String(output.mock.calls[0]?.[0]));
-    expect(result.link).toBe(`/p/${owner}/tasks/${runId}/files?artifact=${result.id}`);
+    expect(result.link).toBe(`${projectId ? `/p/${projectId}` : ''}/tasks/${runId}/files?artifact=${result.id}`);
     expect(result.markdown).toBe(`[report\\.md](${result.link})`);
-    expect(await readFile(join(home, 'config.json'), 'utf8')).toBe(registry);
-    expect(await readdir(home)).toEqual(['config.json']);
   } finally { await rm(root, { recursive: true, force: true }); }
-});
-it.each(['missing', 'corrupt', 'unreadable', 'empty', 'unmatched'])('keeps publication working with a %s registry', async (state) => {
-  const root = await mkdtemp(join(tmpdir(), 'cez-artifact-fallback-'));
-  try {
-    const home = join(root, 'home');
-    await mkdir(home);
-    const config = join(home, 'config.json');
-    if (state === 'corrupt') await writeFile(config, '{');
-    // A directory gives a deterministic read failure even when tests run as root.
-    if (state === 'unreadable') await mkdir(config);
-    if (state === 'empty') await writeFile(config, '{"projects":[]}');
-    if (state === 'unmatched') await writeFile(config, JSON.stringify({ projects: [{ id: 'other', root: join(root, 'other') }] }));
-    const before = await readdir(home);
-    const runId = randomUUID();
-    const source = join(root, 'report.md');
-    await writeFile(source, 'fallback snapshot');
-    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(await runArtifactCommand(['publish', source], {
-      CEZ_HOME: home, CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: artifactDirectory(root, runId),
-    })).toBe(0);
-    const result = JSON.parse(String(output.mock.calls[0]?.[0]));
-    expect(result.link).toBe(`/tasks/${runId}/files?artifact=${result.id}`);
-    expect(result.markdown).toContain(`](${result.link})`);
-    expect(await readdir(home)).toEqual(before);
-  } finally { await rm(root, { recursive: true, force: true }); }
-});
-
-// #925: the ownership match must be realpath-SYMMETRIC — canonicalizing both spellings before
-// comparing — so an artifacts directory reached through an OS alias still names its owner. The
-// registry side is pinned above (`aliased-owner`); this pins the env side, whose spelling the
-// match site must never trust to arrive canonical.
-describe('owningProjectId (#925)', () => {
-  it('matches the owner when CEZ_ARTIFACTS_DIR is spelled through a symlink alias', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'cez-artifact-symmetric-'));
-    try {
-      const project = join(root, 'owner');
-      const alias = join(root, 'alias');
-      await mkdir(join(project, '.ai/cezar/runs'), { recursive: true });
-      await symlink(project, alias, 'dir');
-      const runId = randomUUID();
-      const dir = artifactDirectory(join(project, '.ai/cezar'), runId);
-      await mkdir(dir, { mode: 0o700 });
-      // The aliased spelling survives `resolve` untouched — only a symmetric canonicalization
-      // can see it names the same directory the registry knows.
-      const aliased = join(alias, '.ai/cezar/runs', `${runId}-artifacts`);
-      expect(aliased).not.toBe(dir);
-
-      expect(owningProjectId(
-        [{ id: 'owner', root: project }, { id: 'unrelated', root: join(root, 'unrelated') }],
-        aliased,
-        runId,
-      )).toBe('owner');
-    } finally { await rm(root, { recursive: true, force: true }); }
-  });
-
-  // Every probe stays inside a temporary root. Spelled under `process.cwd()` they reached into
-  // the checkout, including a live cockpit's `.ai/cezar/runs`. A fresh random path there on
-  // every run also kept Squeal from ever recording this file: its input closure never repeated.
-  it('never names a project whose storage is a different directory', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'cez-artifact-other-'));
-    try {
-      const runId = randomUUID();
-      expect(owningProjectId([{ id: 'other', root }], join(root, '.ai/cezar/runs', `${runId}-artifacts`), randomUUID())).toBeUndefined();
-    } finally { await rm(root, { recursive: true, force: true }); }
-  });
-
-  it('reads an absent directory as unowned rather than throwing', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'cez-artifact-absent-'));
-    try {
-      expect(owningProjectId([{ id: 'other', root }], join(root, 'absent-runs', `${randomUUID()}-artifacts`), randomUUID())).toBeUndefined();
-    } finally { await rm(root, { recursive: true, force: true }); }
-  });
 });
