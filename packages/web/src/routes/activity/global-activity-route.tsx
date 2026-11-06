@@ -7,7 +7,6 @@ import { orderProjects } from '@/lib/project-order'
 import { useProjectOrder } from '@/lib/use-project-order'
 
 import { ActivityHeader, ScopeSwitch, SummaryChips } from './activity-header'
-import { ActivityLoading } from './activity-loading'
 import { summarize } from './activity-model'
 import { useServerNow } from './activity-route'
 import { groupProjects, inRailOrder } from './global-model'
@@ -36,13 +35,14 @@ export function GlobalActivityRoute() {
   const snapshot = activity.data?.projects
   const groups = React.useMemo(() => groupProjects(inRailOrder(snapshot ?? [], railIds)), [snapshot, railIds])
 
-  if (activity.isPending) return <ActivityLoading />
   return (
     <div data-route="activity-global" className="flex min-h-full w-full flex-col gap-4 px-[18px] py-6 md:px-7">
       <ActivityHeader name="All projects" generatedAt={activity.data?.generatedAt}>
         <ScopeSwitch scope="all" projectId={boot} />
       </ActivityHeader>
       {snapshot ? <SummaryChips summary={summarize(snapshot)} tasksTo="/tasks" /> : null}
+      {/* The header and the scope switch stay while the snapshot loads: the user can switch away. */}
+      {activity.isPending ? <p data-slot="activity-loading" role="status" className="text-xs text-muted-foreground">Loading activity…</p> : null}
       {activity.isError ? (
         <div role="alert" className="flex items-center gap-3 text-[13px] text-muted-foreground">
           Could not load activity: {activity.error.message}

@@ -138,6 +138,17 @@ describe('GlobalActivityRoute', () => {
     expect(within(pill('a1')).getByRole('link', { name: '→ Fixing flaky shard' }).getAttribute('href')).toBe('/p/alpha/tasks/a2')
   })
 
+  it('keeps the header and the scope switch while the snapshot loads', async () => {
+    serve()
+    // The snapshot never answers; the registry still does.
+    const answer = fetchMock.getMockImplementation()
+    fetchMock.mockImplementation(async (input, init) => (String(input).startsWith('/api/v1/workspace/activity') ? new Promise<Response>(() => {}) : answer!(input, init)))
+    renderRoute()
+    expect(screen.getByRole('heading', { level: 1, name: 'Activity · All projects' })).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toBe('Loading activity…')
+    expect((await screen.findByRole('link', { name: 'This project' })).getAttribute('href')).toBe('/p/alpha/activity')
+  })
+
   it('says when there is no project to show', async () => {
     serve({ body: snapshot() })
     renderRoute()
