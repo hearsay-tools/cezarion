@@ -114,4 +114,4 @@ export const tableRow = (id: string) => document.querySelector(`[data-slot="task
 
 export const card = (id: string) => document.querySelector(`[data-slot="task-card"][data-run-id="${id}"]`)
 
-export const cellsOf = (id: string): string[] => [...(tableRow(id)?.querySelectorAll('td') ?? [])].map((td) => td.textContent ?? '')
+export const cellsOf = (id: string): string[] => [...(tableRow(id)?.querySelectorAll('[role=cell]') ?? [])].map((td) => td.textContent ?? '')

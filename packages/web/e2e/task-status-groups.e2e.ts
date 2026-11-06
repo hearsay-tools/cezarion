@@ -58,7 +58,7 @@ afterAll(async () => {
 })
 
 const pages = [
-  { name: 'project', path: () => `/p/${project}/`, row: '[data-slot="task-card"], [data-slot="tasks-table"] tbody tr' },
+  { name: 'project', path: () => `/p/${project}/`, row: '[data-slot="task-card"], [data-slot="task-table-row"]' },
   { name: 'global', path: () => '/tasks', row: '[data-slot="global-task-row"]' },
 ]
 

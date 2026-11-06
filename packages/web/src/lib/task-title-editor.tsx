@@ -6,9 +6,15 @@ import { runTitle } from '@/lib/task-groups'
 /** Publish only to the old and new editing rows, never to every mounted title. */
 function createTitleStore(begin: (run: RunSummary) => void) {
   const listeners = new Map<string, Set<() => void>>()
+  const selectionListeners = new Set<() => void>()
   let selected: { id: string; editor: TitleEditor } | undefined
   return {
     begin,
+    editingId: () => selected?.id ?? null,
+    subscribeSelection(listener: () => void) {
+      selectionListeners.add(listener)
+      return () => { selectionListeners.delete(listener) }
+    },
     snapshot: (id: string) => selected?.id === id ? selected.editor : null,
     subscribe(id: string, listener: () => void) {
       let row = listeners.get(id)
@@ -19,6 +25,7 @@ function createTitleStore(begin: (run: RunSummary) => void) {
     publish(id: string | undefined, editor: TitleEditor) {
       const previous = selected?.id
       selected = id && editor.editing ? { id, editor } : undefined
+      if (previous !== selected?.id) for (const listener of selectionListeners) listener()
       for (const changed of new Set([previous, selected?.id])) {
         if (changed) for (const listener of listeners.get(changed) ?? []) listener()
       }
@@ -59,4 +66,12 @@ export function useTaskTitleEditor(run: RunSummary): TitleEditor {
   const snapshot = useCallback(() => store.snapshot(run.id), [store, run.id])
   const editor = useSyncExternalStore(subscribe, snapshot) ?? inactiveEditor
   return { ...editor, begin: () => store.begin(run) }
+}
+
+const noSelection = () => null
+const noSubscription = () => () => {}
+/** Lists pin an active draft independently of keyboard focus. No provider on global rows. */
+export function useTaskEditingRunId(): string | null {
+  const store = useContext(TaskTitleEditingContext)
+  return useSyncExternalStore(store?.subscribeSelection ?? noSubscription, store?.editingId ?? noSelection)
 }

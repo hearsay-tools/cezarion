@@ -79,7 +79,7 @@ describe('TasksOverview — the table', () => {
       runs: [run({ id: 'fresh', branch: 'feat/fresh-workspace' })],
     })
 
-    const branchHeader = document.querySelector<HTMLElement>('th[data-column-id="branch"]')
+    const branchHeader = document.querySelector<HTMLElement>('[role=columnheader][data-column-id="branch"]')
     expect(branchHeader?.getAttribute('data-folded')).toBe('true')
     const restore = within(branchHeader as HTMLElement).getByRole('button', {
       name: 'Expand Branch column',
@@ -90,14 +90,14 @@ describe('TasksOverview — the table', () => {
     expect(onToggleColumn).toHaveBeenCalledWith('branch')
     expect(location()).toBe('/')
 
-    expect(tableRow('fresh')?.querySelector('td[data-column-id="branch"]')?.textContent).toBe('')
-    expect(tableRow('fresh')?.querySelector('td[data-column-id="branch"]')?.getAttribute('aria-hidden')).toBe(
+    expect(tableRow('fresh')?.querySelector('[role=cell][data-column-id="branch"]')?.textContent).toBe('')
+    expect(tableRow('fresh')?.querySelector('[role=cell][data-column-id="branch"]')?.getAttribute('aria-hidden')).toBe(
       'true',
     )
-    expect(document.querySelector('col[data-column-id="branch"]')?.getAttribute('style')).toContain('42px')
-    expect(document.querySelector('th[data-column-id="status"] button')).toBeNull()
-    expect(document.querySelector('th[data-column-id="task"] button')).toBeNull()
-    expect(document.querySelector('[data-slot="tasks-table"] table')?.className).not.toContain('min-w-[1040px]')
+    expect(document.querySelector('.task-resource-grid')?.getAttribute('style')).toContain('42px')
+    expect(document.querySelector('[role=columnheader][data-column-id="status"] button')).toBeNull()
+    expect(document.querySelector('[role=columnheader][data-column-id="task"] button')).toBeNull()
+    expect(document.querySelector('[data-slot="tasks-table"] [role=table]')?.className).not.toContain('min-w-[1040px]')
   })
 
   it('disables optional headers while workspace column state is loading', () => {
@@ -133,7 +133,7 @@ describe('TasksOverview — the table', () => {
     renderOverview({ runs: [run({ id: 'long-title', title })] })
 
     const row = tableRow('long-title') as HTMLElement
-    const taskCell = row.querySelector<HTMLElement>('td[data-column-id="task"]')
+    const taskCell = row.querySelector<HTMLElement>('[role=cell][data-column-id="task"]')
     const titleLink = within(taskCell as HTMLElement).getByRole('link', { name: title })
 
     expect(taskCell?.className).toContain('min-w-[320px]')
@@ -158,17 +158,17 @@ describe('TasksOverview — the table', () => {
       ],
     })
 
-    const table = document.querySelector<HTMLElement>('[data-slot="tasks-table"] table')
-    const status = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="status"]')
-    const workflow = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="workflow"]')
-    const workflowHeader = document.querySelector<HTMLElement>('th[data-column-id="workflow"]')
-    const reference = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="reference"]')
-    const diff = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="diff"]')
-    const tokens = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="tokens"] > span')
-    const cost = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="cost"] > span')
-    const memory = tableRow('compact-secondary')?.querySelector<HTMLElement>('td[data-column-id="memory"] > span')
+    const table = document.querySelector<HTMLElement>('[data-slot="tasks-table"] [role=table]')
+    const status = tableRow('compact-secondary')?.querySelector<HTMLElement>('[role=cell][data-column-id="status"]')
+    const workflow = tableRow('compact-secondary')?.querySelector<HTMLElement>('[role=cell][data-column-id="workflow"]')
+    const workflowHeader = document.querySelector<HTMLElement>('[role=columnheader][data-column-id="workflow"]')
+    const reference = tableRow('compact-secondary')?.querySelector<HTMLElement>('[role=cell][data-column-id="reference"]')
+    const diff = tableRow('compact-secondary')?.querySelector<HTMLElement>('[role=cell][data-column-id="diff"]')
+    const tokens = tableRow('compact-secondary')?.querySelector<HTMLElement>('[role=cell][data-column-id="tokens"] > span')
+    const cost = tableRow('compact-secondary')?.querySelector<HTMLElement>('[role=cell][data-column-id="cost"] > span')
+    const memory = tableRow('compact-secondary')?.querySelector<HTMLElement>('[role=cell][data-column-id="memory"] > span')
 
-    expect(table?.className).toContain('table-fixed')
+    expect(table?.className).toContain('task-resource-grid')
     expect(status?.className).toContain('overflow-hidden')
     expect(workflow?.className).toContain('truncate')
     expect(workflowHeader?.textContent).toContain('Workflow')
@@ -316,7 +316,7 @@ describe('TasksOverview — the table', () => {
       ],
     })
 
-    const headers = [...document.querySelector('[data-slot="tasks-table"]')!.querySelectorAll('th')].map(
+    const headers = [...document.querySelector('[data-slot="tasks-table"]')!.querySelectorAll('[role=columnheader]')].map(
       (cell) => cell.textContent,
     )
     expect(headers).toEqual(['Status', 'Task', 'Workflow', 'Branch', '±', 'Ref', 'CPU', 'Mem', 'Started'])
@@ -333,8 +333,8 @@ describe('TasksOverview — the table', () => {
     ])
 
     const queued = tableRow('queued-hidden') as HTMLElement
-    expect(queued.querySelectorAll('td')).toHaveLength(8)
-    expect(queued.querySelector('[data-slot="queue-note"]')?.getAttribute('colspan')).toBe('2')
+    expect(queued.querySelectorAll('[role=cell]')).toHaveLength(8)
+    expect(queued.querySelector('[data-slot="queue-note"]')?.getAttribute('aria-colspan')).toBe('2')
     expect(queued.textContent).not.toContain('12.0k')
     expect(queued.textContent).not.toContain('$0.02')
   })
@@ -348,7 +348,7 @@ describe('TasksOverview — the table', () => {
     const queued = tableRow('queued-folded') as HTMLElement
     expect(queued.querySelector('[data-slot="queue-note"]')).toBeNull()
     for (const column of ['cpu', 'memory']) {
-      const cell = queued.querySelector(`td[data-column-id="${column}"]`)
+      const cell = queued.querySelector(`[role=cell][data-column-id="${column}"]`)
       expect(cell?.getAttribute('data-folded')).toBe('true')
       expect(cell?.textContent).toBe('')
     }
@@ -364,8 +364,8 @@ describe('TasksOverview — the table', () => {
     })
 
     const queued = tableRow('queued-partly-folded') as HTMLElement
-    expect(queued.querySelector('[data-slot="queue-note"]')?.getAttribute('colspan')).toBe('2')
-    expect(queued.querySelector(`td[data-column-id="${folded}"]`)).toBeNull()
+    expect(queued.querySelector('[data-slot="queue-note"]')?.getAttribute('aria-colspan')).toBe('2')
+    expect(queued.querySelector(`[role=cell][data-column-id="${folded}"]`)).toBeNull()
   })
 
   it('keeps headers and normal/queued rows logically aligned when several columns are folded', () => {
@@ -377,17 +377,17 @@ describe('TasksOverview — the table', () => {
       ],
     })
 
-    const headerIds = [...document.querySelector('[data-slot="tasks-table"]')!.querySelectorAll('th')].map((header) =>
+    const headerIds = [...document.querySelector('[data-slot="tasks-table"]')!.querySelectorAll('[role=columnheader]')].map((header) =>
       header.getAttribute('data-column-id'),
     )
     const logicalRowIds = (id: string) =>
-      [...(tableRow(id)?.querySelectorAll('td') ?? [])].map((cell) => cell.getAttribute('data-column-id'))
+      [...(tableRow(id)?.querySelectorAll('[role=cell]') ?? [])].map((cell) => cell.getAttribute('data-column-id'))
 
     expect(logicalRowIds('aligned')).toEqual(headerIds)
     expect(logicalRowIds('aligned-queue')).toEqual(headerIds)
     expect(tableRow('aligned-queue')?.querySelector('[data-slot="queue-note"]')).toBeNull()
-    expect(document.querySelector('th[data-column-id="cpu"]')?.getAttribute('data-folded')).toBe('true')
-    expect(document.querySelector('th[data-column-id="memory"]')?.getAttribute('data-folded')).toBe('true')
+    expect(document.querySelector('[role=columnheader][data-column-id="cpu"]')?.getAttribute('data-folded')).toBe('true')
+    expect(document.querySelector('[role=columnheader][data-column-id="memory"]')?.getAttribute('data-folded')).toBe('true')
   })
 
   it('uses action-oriented names and pressed state on every optional header', () => {
@@ -399,9 +399,9 @@ describe('TasksOverview — the table', () => {
     expect(screen.getByRole('button', { name: 'Expand Workflow column', pressed: false })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Fold Branch column', pressed: true })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Fold CPU column', pressed: true })).not.toBeNull()
-    expect(document.querySelector('[data-slot="tasks-table"]')!.querySelectorAll('thead button')).toHaveLength(9)
-    expect(document.querySelector('th[data-column-id="status"]')?.textContent).toBe('Status')
-    expect(document.querySelector('th[data-column-id="task"]')?.textContent).toBe('Task')
+    expect(document.querySelector('[data-slot="tasks-table"]')!.querySelectorAll('[role=columnheader] button')).toHaveLength(9)
+    expect(document.querySelector('[role=columnheader][data-column-id="status"]')?.textContent).toBe('Status')
+    expect(document.querySelector('[role=columnheader][data-column-id="task"]')?.textContent).toBe('Task')
   })
 
   it('does not render capability-hidden columns or disturb their saved choices', () => {
@@ -413,10 +413,10 @@ describe('TasksOverview — the table', () => {
       runs: [run({ id: 'capability-hidden', inputTokens: 123, costUsd: 0.42 })],
     })
 
-    expect(document.querySelector('th[data-column-id="tokens"]')).toBeNull()
-    expect(document.querySelector('th[data-column-id="cost"]')).toBeNull()
-    expect(tableRow('capability-hidden')?.querySelector('td[data-column-id="tokens"]')).toBeNull()
-    expect(tableRow('capability-hidden')?.querySelector('td[data-column-id="cost"]')).toBeNull()
+    expect(document.querySelector('[role=columnheader][data-column-id="tokens"]')).toBeNull()
+    expect(document.querySelector('[role=columnheader][data-column-id="cost"]')).toBeNull()
+    expect(tableRow('capability-hidden')?.querySelector('[role=cell][data-column-id="tokens"]')).toBeNull()
+    expect(tableRow('capability-hidden')?.querySelector('[role=cell][data-column-id="cost"]')).toBeNull()
     expect(expandedColumns).toEqual({ tokens: false, cost: false, branch: true })
   })
 
@@ -428,7 +428,7 @@ describe('TasksOverview — the table', () => {
     })
 
     expect(screen.getByRole('button', { name: 'Expand Workflow column', pressed: false })).not.toBeNull()
-    expect(tableRow('archived-folded')?.querySelector('td[data-column-id="workflow"]')?.textContent).toBe('')
+    expect(tableRow('archived-folded')?.querySelector('[role=cell][data-column-id="workflow"]')?.textContent).toBe('')
     fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: 'needle' } })
     expect(tableRow('archived-folded')).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Expand Workflow column', pressed: false })).not.toBeNull()
@@ -454,7 +454,7 @@ describe('TasksOverview — the table', () => {
       ],
     })
 
-    const allHeaders = [...document.querySelector('[data-slot="tasks-table"]')!.querySelectorAll('th')].map(
+    const allHeaders = [...document.querySelector('[data-slot="tasks-table"]')!.querySelectorAll('[role=columnheader]')].map(
       (cell) => cell.textContent,
     )
     expect(allHeaders.filter((header) => header === 'IN / OUT' || header === 'Cost')).toEqual(headers)
@@ -531,7 +531,7 @@ describe('TasksOverview — the table', () => {
     })
     const note = tableRow('q2')?.querySelector('[data-slot="queue-note"]')
     expect(note?.textContent).toBe('#2 in queue')
-    expect(note?.getAttribute('colspan')).toBe('2')
+    expect(note?.getAttribute('aria-colspan')).toBe('2')
     // The note replaces the CPU/Mem cells — a queued run has no process to measure.
     expect(tableRow('q2')?.querySelectorAll('[data-usage]')).toHaveLength(0)
     expect(tableRow('q1')?.querySelector('[data-slot="queue-note"]')?.textContent).toBe('#1 in queue')
@@ -1098,7 +1098,7 @@ describe('design frame 4 task summary', () => {
   it('starts with five summary columns and reveals live resource facts without navigation', () => {
     renderOverview({ runs: [run({ id: 'summary', title: 'Review layout', inputTokens: 123, outputTokens: 45, costUsd: 0.2, peakRssBytes: 1024 ** 3 })] }, false)
     const summary = document.querySelector('[data-slot="tasks-summary"]') as HTMLElement
-    expect([...summary.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['Task', 'Workflow', 'Changes', 'Pull request', 'Started'])
+    expect([...summary.querySelectorAll('[role=columnheader]')].map((cell) => cell.textContent)).toEqual(['Task', 'Workflow', 'Changes', 'Pull request', 'Started'])
     expect(document.querySelector('[data-slot="tasks-table"]')).toBeNull()
     const toggle = within(summary).getByRole('button', { name: 'Show resources for Review layout' })
     expect(toggle.getAttribute('aria-expanded')).toBe('false')

@@ -1,9 +1,9 @@
 /* Revised project resource table (25), workspace cards (26), mobile FAB. */
 [data-route="tasks"], [data-route="global-tasks"] { min-width: 0; }
-[data-slot="tasks-table"] table { min-width: 1040px; }
-[data-slot="tasks-table"] thead { background: var(--muted); }
-[data-slot="tasks-table"] th { height: 48px; }
-[data-slot="tasks-table"] td { height: 50px; }
+[data-slot="tasks-table"] [role="table"] { min-width: 1040px; }
+[data-slot="tasks-table"] .task-resource-grid > [role="row"] { background: var(--muted); }
+[data-slot="tasks-table"] [role="columnheader"] { height: 48px; }
+[data-slot="tasks-table"] [role="cell"] { height: 50px; }
 [data-slot="global-tasks-table"] { padding: 0; overflow: visible; border: 0; background: transparent; }
 [data-slot="global-task-row"] { display: grid; grid-template-columns: auto 1fr auto; gap: 8px 16px; padding: 22px; margin-block-end: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
 [data-slot="global-task-row"] > div { height: auto; min-width: 0; max-width: none; padding: 0; border: 0; white-space: normal; }
@@ -37,14 +37,14 @@
   [data-presentation="summary"] [data-slot="global-task-age"] { grid-column: 5; grid-row: 1; text-align: start; }
   [data-presentation="summary"] [data-slot="global-task-actions"] { margin: 0; }
   [data-presentation="summary"] [data-slot="global-task-actions"] > span { gap: 8px; }
-  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > td { height: 102px; }
-  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > td:first-child { vertical-align: middle; }
-  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > td:first-child > div { margin-block-start: 8px; }
+  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > [role="cell"] { height: 102px; }
+  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > [role="cell"]:first-child { vertical-align: middle; }
+  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > [role="cell"]:first-child > div { margin-block-start: 8px; }
   [data-slot="tasks-summary"] [aria-controls^="task-resources-"] { min-height: 26px; }
 }
 
 @media (min-width: 768px) {
-  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > td:first-child { padding-block-start: 12px; padding-block-end: 12px; }
+  [data-slot="tasks-summary"] [data-slot="task-summary-row"] > [role="cell"]:first-child { padding-block-start: 12px; padding-block-end: 12px; }
 }
 
 [data-filter-details="false"] [data-slot="group-controls"],
@@ -58,7 +58,7 @@
   [data-presentation="summary"] [data-slot="global-task-diff"] { display: block; }
   [data-presentation="summary"] [data-slot="global-task-row"] { min-height: 102px; }
   [data-presentation="summary"] [data-slot="global-task-title"] button { min-height: 26px; }
-  [data-slot="tasks-table"] table { min-width: 1240px; }
+  [data-slot="tasks-table"] [role="table"] { min-width: 1240px; }
   [data-slot="tasks-table"] col[data-column-id="workflow"][data-expanded="true"] { width: 120px !important; }
   [data-slot="tasks-table"] col[data-column-id="memory"][data-expanded="true"] { width: 120px !important; }
 }
@@ -154,3 +154,17 @@
 :is([data-slot="tasks-summary"], [data-slot="task-card"], [data-route="global-tasks"][data-presentation="summary"]) [data-slot="pr-chip"]:is([data-status="merged"], [data-conflicting="true"]) > svg { display: none; }
 :is([data-slot="tasks-summary"], [data-slot="task-card"], [data-route="global-tasks"][data-presentation="summary"]) [data-slot="pr-chip"]:is([data-status="merged"], [data-conflicting="true"])[data-status="merged"]::after { content: ' · Merged'; white-space: pre; }
 :is([data-slot="tasks-summary"], [data-slot="task-card"], [data-route="global-tasks"][data-presentation="summary"]) [data-slot="pr-chip"]:is([data-status="merged"], [data-conflicting="true"])[data-conflicting="true"]::after { content: ' · Conflicts'; white-space: pre; }
+
+/* Virtualizer wrappers are implementation details; flags describe logical run positions. */
+.task-list-flat-item { content-visibility: auto; contain-intrinsic-block-size: auto 102px; }
+.task-summary-grid { display: grid; grid-template-columns: minmax(0, 1fr) 136px 106px 116px 70px; align-items: center; }
+[data-slot="task-summary-row"] { border-block-end: 1px solid var(--border); }
+[data-last="true"] [data-slot="task-summary-row"] { border-block-end: 0; }
+.task-resource-grid { min-inline-size: 1240px; }
+.task-resource-row { display: grid; grid-template-columns: var(--task-columns); align-items: center; }
+.task-resource-row > [role="cell"] { display: flex; align-items: center; min-inline-size: 0; max-inline-size: none; }
+.task-resource-row > [role="cell"].text-right { justify-content: end; }
+.task-resource-row > [role="columnheader"] { display: flex; align-items: center; }
+[data-last="true"] .task-resource-row > [role="cell"] { border-block-end: 0; }
+[data-first="true"] > [data-slot="task-card"] { padding-block-start: 0; }
+[data-last="true"] > [data-slot="task-card"] { border-block-end: 0; padding-block-end: 0; }

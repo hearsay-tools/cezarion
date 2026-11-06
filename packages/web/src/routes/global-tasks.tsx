@@ -1,9 +1,12 @@
+import { GlobalTasksEmptyState, GlobalTasksLoadError, OtherProjects, TruncatedNotice } from './global-tasks-states'
+import { TaskListItems, TaskListScrollAnchor } from '@/components/task-list-items'
+import { TaskListFocusContext, useTaskListFocusState } from '@/lib/use-task-list-focus'
 import { runAddress } from '@/api/run-address'
 import { useRunCacheWriter } from '@/api/use-run-cache-writer'
 import './task-lists.css'
 import { useMutation } from '@tanstack/react-query'
-import { ArchiveRestoreIcon, EyeIcon, EyeOffIcon, ListChecksIcon, SearchXIcon } from 'lucide-react'
-import { ArchiveIcon, LayersIcon, PlusIcon, SearchIcon, SlidersHorizontalIcon, XIcon } from '@/components/design-icons'
+import { ArchiveRestoreIcon, EyeIcon, EyeOffIcon } from 'lucide-react'
+import { ArchiveIcon, PlusIcon, SearchIcon, SlidersHorizontalIcon, XIcon } from '@/components/design-icons'
 import * as React from 'react'
 import { Link } from 'react-router'
 import { controlLocation } from '@open-mercato/cezar-api-client/contract/control-locations'
@@ -16,7 +19,6 @@ import {
   useRunsIndex,
 } from '@/api/queries'
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
-import { CenteredState } from '@/components/centered-state'
 import { FacetFilter, SegmentedControl, ToggleChip } from '@/components/facet-filter'
 import { Pill } from '@/components/pill'
 import { ReferenceList } from '@/components/reference-overflow'
@@ -188,6 +190,12 @@ function useIndexedRunMutation<V extends { task: GlobalTask }>({
 }
 
 export function GlobalTasksRoute() {
+  const [expandedRuns, setExpandedRuns] = React.useState<Set<string>>(() => new Set())
+  const toggleExpandedRun = React.useCallback((id: string) => setExpandedRuns((current) => {
+    const next = new Set(current)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  }), [])
   const projects = useProjects()
   // The same host gate the per-project table honours: `CEZ_HIDE_COST` and friends turn these
   // columns off everywhere, and a cross-project view is not an exception.
@@ -208,6 +216,7 @@ export function GlobalTasksRoute() {
     [searchParams],
   )
   const now = useNow(30_000)
+  const listFocus = useTaskListFocusState(groupBy, index.data)
 
   /**
    * `replace`, always: filtering is one continuous gesture, and a history entry per click would
@@ -219,7 +228,12 @@ export function GlobalTasksRoute() {
    * silently reverting the first.
    */
   const commit = (next: (current: GlobalTasksUrlState) => GlobalTasksUrlState) =>
-    writeSearchParams((current) => urlStateToSearchParams(next(urlStateFromSearchParams(current))))
+    writeSearchParams((current) => {
+      const params = urlStateToSearchParams(next(urlStateFromSearchParams(current)))
+      const renderer = current.get('tasks')
+      if (renderer === 'flat' || renderer === 'virtual') params.set('tasks', renderer)
+      return params
+    })
   const setFilters = (next: (current: GlobalTaskFilters) => GlobalTaskFilters) =>
     commit((state) => ({ ...state, filters: next(state.filters) }))
   const setGroupBy = (groupBy: GroupBy) => commit((state) => ({ ...state, groupBy }))
@@ -271,6 +285,8 @@ export function GlobalTasksRoute() {
   const clearFacet = (facet: FacetId) => setFilters((current) => ({ ...current, [facet]: [] }))
   const archive = useArchiveIndexedRun()
   const setRead = useReadIndexedRun()
+  const onArchive = React.useCallback((task: GlobalTask, archived: boolean) => archive.mutate({ task, archived }), [archive.mutate])
+  const onSetRead = React.useCallback((task: GlobalTask, read: boolean) => setRead.mutate({ task, read }), [setRead.mutate])
 
   const loadError = index.error ?? projects.error
   if (loadError) return <GlobalTasksLoadError groupBy={groupBy} filterDetailsOpen={filterDetailsOpen} message={loadError.message} onRetry={() => { void index.refetch(); void projects.refetch() }} />
@@ -293,7 +309,7 @@ export function GlobalTasksRoute() {
   )
 
   return (
-    <div data-route="global-tasks" data-presentation={groupBy === 'none' ? 'summary' : 'cards'} data-filter-details={filterDetailsOpen} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+    <TaskListFocusContext value={listFocus.value}><TaskListScrollAnchor revision={index.data}><div {...listFocus.props} data-route="global-tasks" data-presentation={groupBy === 'none' ? 'summary' : 'cards'} data-filter-details={filterDetailsOpen} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
       <header className="flex shrink-0 flex-col gap-[22px]">
         <div className="flex flex-col gap-2"><h1 className="text-[30px] font-semibold tracking-tight">All tasks</h1><p className="text-[13px] text-muted-foreground">{groupBy === 'none' ? 'Every project. One place to review what your agents have shipped.' : 'Filter across projects and act on each run without opening the session.'}</p></div>
         <div className="flex items-center gap-6 border-b border-border">
@@ -351,8 +367,9 @@ export function GlobalTasksRoute() {
               folds,
               row: {
                 now,
-                onArchive: (task, archived) => archive.mutate({ task, archived }),
-                onSetRead: (task, read) => setRead.mutate({ task, read }),
+                onArchive,
+                expandedRuns, toggleExpandedRun,
+                onSetRead,
                 busy: archive.isPending || setRead.isPending,
                 showCost: metrics.cost,
                 automationName: nameOf,
@@ -363,27 +380,7 @@ export function GlobalTasksRoute() {
         <OtherProjects registry={registry} />
 
       </div>
-    </div>
-  )
-}
-
-/** The page when the index or the registry did not load: the reason, and Retry. */
-function GlobalTasksLoadError({ groupBy, filterDetailsOpen, message, onRetry }: {
-  groupBy: GroupBy
-  filterDetailsOpen: boolean
-  message: string
-  onRetry: () => void
-}) {
-  return (
-    <div data-route="global-tasks" data-presentation={groupBy === 'none' ? 'summary' : 'cards'} data-filter-details={filterDetailsOpen} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
-      <CenteredState
-        icon={<LayersIcon />}
-        tone="danger"
-        title="Tasks across projects did not load"
-        subtitle={message}
-        actions={<Button variant="outline" onClick={onRetry}>Retry</Button>}
-      />
-    </div>
+    </div></TaskListScrollAnchor></TaskListFocusContext>
   )
 }
 
@@ -405,31 +402,6 @@ function GlobalTaskResults({ view, filtered, visibleCount, referenceRequests, li
       </ReferenceStatusProvider>
       {lists.groupBy === 'none' ? <p className="text-[11px] text-muted-foreground">Resource details—including tokens, cost, CPU and peak memory—are available when a task row is expanded.</p> : null}
     </>
-  )
-}
-
-/** Projects whose older archived tasks the index left out, and where to find them. */
-function TruncatedNotice({ projects, perProjectLimit }: { projects: readonly string[]; perProjectLimit: number | undefined }) {
-  if (projects.length === 0) return null
-  return (
-    <p data-slot="global-tasks-truncated" className="text-[11px] text-soft-foreground">
-      Showing every active task and the newest {perProjectLimit} archived tasks per project — older archived tasks in{' '}
-      {projects.join(', ')} are in that project&rsquo;s own Tasks page.
-    </p>
-  )
-}
-
-/** A door to each registered project's own Tasks page, once there is more than one. */
-function OtherProjects({ registry }: { registry: readonly { id: string; name: string }[] }) {
-  if (registry.length <= 1) return null
-  return (
-    <section data-slot="other-projects" className="rounded-lg border border-border bg-card p-5">
-      <h2 className="text-base font-semibold">Other projects</h2>
-      <div className="mt-3 flex flex-col divide-y divide-border">{registry.map((project) => <div key={project.id} className="flex min-h-14 items-center justify-between gap-3">
-        <span className="min-w-0 truncate text-[13px]">{project.name}</span>
-        <Link to={scopeTo(project.id, '/')} className="inline-flex min-h-11 shrink-0 items-center rounded-md px-3 text-xs text-accent-text hover:bg-accent-strong/10">View tasks<span className="sr-only"> for {project.name}</span></Link>
-      </div>)}</div>
-    </section>
   )
 }
 
@@ -760,6 +732,7 @@ function FilterBar({
 /** Each group owns a list of task cards, with the same scoped actions on desktop and mobile. */
 function TaskList({
   summary = false,
+  expandedRuns, toggleExpandedRun,
   tasks,
   now,
   showProject,
@@ -769,6 +742,8 @@ function TaskList({
   showCost,
   automationName,
 }: {
+  expandedRuns: ReadonlySet<string>
+  toggleExpandedRun: (id: string) => void
   summary?: boolean
   tasks: readonly GlobalTask[]
   now: number
@@ -781,16 +756,19 @@ function TaskList({
 }) {
   return (
     <div
-      data-slot="global-tasks-table"
+      role={summary ? "table" : undefined} aria-rowcount={summary ? tasks.length + 1 : undefined} data-slot="global-tasks-table"
       className="overflow-x-auto rounded-lg border border-border bg-card p-5"
     >
-      <div data-slot="global-summary-head" className="text-[12px]" aria-hidden="true">{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <span key={label}>{label}</span>)}</div>
+      <div data-slot="global-summary-head" className="text-[12px]" role="row" aria-rowindex={1}>{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <span role="columnheader" key={label}>{label}</span>)}</div>
       <TooltipProvider>
-            {tasks.map((task) => (
+            <TaskListItems items={tasks} itemKey={(task) => `${task.run.projectId}/${task.run.id}`}>{(task, index) => (
               <TaskRow
                 key={`${task.run.projectId}/${task.run.id}`}
                 task={task}
                 summary={summary}
+                rowIndex={index + 2}
+                resourcesOpen={expandedRuns.has(`${task.run.projectId}/${task.run.id}`)}
+                toggleExpandedRun={toggleExpandedRun}
                 now={now}
                 showProject={showProject}
                 onArchive={onArchive}
@@ -799,7 +777,7 @@ function TaskList({
                 showCost={showCost}
                 automationName={automationName(task)}
               />
-            ))}
+            )}</TaskListItems>
       </TooltipProvider>
     </div>
   )
@@ -812,7 +790,8 @@ function TaskList({
  * renders outside every `/p/:projectId`, so the scope-aware `Link` would have no project to
  * prefix with, and each row points at a DIFFERENT project anyway.
  */
-function TaskRow({
+export const TaskRow = React.memo(function TaskRow({
+  rowIndex, resourcesOpen, toggleExpandedRun,
   summary,
   task,
   now,
@@ -823,6 +802,9 @@ function TaskRow({
   showCost,
   automationName,
 }: {
+  rowIndex: number
+  resourcesOpen: boolean
+  toggleExpandedRun: (id: string) => void
   summary: boolean
   task: GlobalTask
   now: number
@@ -834,11 +816,8 @@ function TaskRow({
   automationName: string | undefined
 }) {
   const { run } = task
-  const [resourcesOpen, setResourcesOpen] = React.useState(false)
   const attention = deriveAttention(run)
   const to = scopeTo(run.projectId, `/tasks/${run.id}`)
-  const unread = isUnread(run)
-  const readDone = isReadDoneItem(run)
   // The SAME rule every other surface applies (#407, #526) — the index carries the six inputs
   // rather than a pre-resolved chip precisely so this is one function, not two. Plural here
   // because a task genuinely has several: opened on an issue, about one PR, having created
@@ -854,15 +833,61 @@ function TaskRow({
   const usage = usageCells(run, run.usage)
 
   return (
-    <article data-status={run.status} data-expanded={resourcesOpen} data-slot="global-task-row" data-run-id={run.id} data-project={run.projectId} className="hover:bg-muted max-md:flex max-md:flex-wrap max-md:items-center max-md:gap-x-3 max-md:gap-y-2 max-md:border-b max-md:border-border max-md:py-5 max-md:first:pt-0 max-md:last:border-0 max-md:last:pb-0">
+    <article role={summary ? "row" : undefined} aria-rowindex={summary ? rowIndex : undefined} data-status={run.status} data-expanded={resourcesOpen} data-slot="global-task-row" data-run-id={run.id} data-project={run.projectId} className="hover:bg-muted max-md:flex max-md:flex-wrap max-md:items-center max-md:gap-x-3 max-md:gap-y-2 max-md:border-b max-md:border-border max-md:py-5 ">
       {/* The one column with no fixed width, so every pixel the others give up lands here — and
           dropping Branch gave up 140 of them. A cross-project list is read by TITLE. */}
-      <div data-slot="global-task-title">
+      <GlobalTaskTitle summary={summary} task={task} showProject={showProject} automationName={automationName} resourcesOpen={resourcesOpen} toggleExpandedRun={toggleExpandedRun} />
+      <div role={summary ? "cell" : undefined} data-slot="global-task-references">
+        {references.length > 0 ? (
+          <ReferenceChips references={references} run={run} repoBase={task.project?.repoUrl} />
+        ) : (
+          <Dash />
+        )}
+      </div>
+      <div role={summary ? "cell" : undefined} data-slot="global-task-workflow" className="text-[13px] text-muted-foreground">
+        {run.workflow}
+      </div>
+      <div role={summary ? "cell" : undefined} data-slot="global-task-diff" className="text-xs text-muted-foreground"><span title="Change totals are available in the project task list">—</span></div>
+      <div role={summary ? "cell" : undefined} data-slot="global-task-age" className="text-right text-xs text-soft-foreground tabular-nums">
+        {shortAge(run.startedAt ?? run.createdAt, now)}
+      </div>
+      {!summary || resourcesOpen ? <div role={summary ? "cell" : undefined} data-slot="global-task-actions">
+        <span className="inline-flex items-center gap-0.5">
+          <ReadToggle task={task} busy={busy} onSetRead={onSetRead} />
+          <ArchiveToggle task={task} busy={busy} onArchive={onArchive} /><Button asChild variant="outline"><Link to={to}>Open task</Link></Button>
+        </span>
+      </div> : null}
+    {resourcesOpen ? <div role={summary ? "cell" : undefined} data-slot="global-task-resources" className="col-span-full flex flex-col gap-3">
+      <TaskPreview projectId={run.projectId} runId={run.id} status={attention.label} error={run.error} open={<Button asChild variant="outline" className="min-h-11"><Link to={to}>Open task<span className="sr-only">: {runTitle(run)}</span></Link></Button>} />
+      <dl className="grid grid-cols-2 gap-4 rounded-md bg-muted/50 p-4 text-xs md:grid-cols-3">
+        {showCost ? <div><dt className="text-muted-foreground">Cost</dt><dd className="mt-1">{formatCost(run.costUsd) || '—'}</dd></div> : null}
+        <div><dt className="text-muted-foreground">CPU</dt><dd data-usage="cpu" data-usage-kind={usage.cpu.kind} title={usage.cpu.title} className="mt-1">{usage.cpu.text || '—'}</dd></div>
+        <div><dt className="text-muted-foreground">Memory</dt><dd data-usage="mem" data-usage-kind={usage.mem.kind} title={usage.mem.title} className="mt-1">{usage.mem.text || '—'}</dd></div>
+      </dl>
+    </div> : null}
+    </article>
+  )
+}, (previous, next) => {
+  // The projection wrapper is recreated when any index row changes. Stable summaries still skip work.
+  const { task: a, ...before } = previous
+  const { task: b, ...after } = next
+  return a.run === b.run && a.project === b.project && a.projectName === b.projectName && a.tags.length === b.tags.length && a.tags.every((tag, index) => tag === b.tags[index])
+    && (Object.keys(before) as (keyof typeof before)[]).every((key) => before[key] === after[key])
+})
+
+function GlobalTaskTitle({ summary, task, showProject, automationName, resourcesOpen, toggleExpandedRun }: Pick<React.ComponentProps<typeof TaskRow>, 'summary' | 'task' | 'showProject' | 'automationName' | 'resourcesOpen' | 'toggleExpandedRun'>) {
+  const { run } = task
+  const attention = deriveAttention(run)
+  const to = scopeTo(run.projectId, `/tasks/${run.id}`)
+  const unread = isUnread(run)
+  const readDone = isReadDoneItem(run)
+  return (      <div role={summary ? "cell" : undefined} data-slot="global-task-title">
         <span className="flex min-w-0 items-center gap-1.5">
           {run.delegation?.role === 'worker' ? <span className="shrink-0 text-xs text-muted-foreground">Worker</span> : null}
           <Link
             to={to}
             title={runTitle(run)}
+            data-task-control="title"
             className={cn(
               'min-w-0 truncate text-[14px] md:text-[13px]',
               unread
@@ -897,7 +922,7 @@ function TaskRow({
           />
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <button type="button" aria-expanded={resourcesOpen} aria-label={`${resourcesOpen ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} onClick={() => setResourcesOpen((value) => !value)} aria-describedby={`global-status-${run.projectId}-${run.id}`} title="Resources and actions" className="min-h-[26px] rounded-md p-0 text-[11px] text-muted-foreground hover:bg-muted"><Pill id={`global-status-${run.projectId}-${run.id}`} dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>{attention.label}</Pill></button>
+          <button type="button" data-task-control="resources" aria-expanded={resourcesOpen} aria-label={`${resourcesOpen ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} onClick={() => toggleExpandedRun(`${run.projectId}/${run.id}`)} aria-describedby={`global-status-${run.projectId}-${run.id}`} title="Resources and actions" className="min-h-[26px] rounded-md p-0 text-[11px] text-muted-foreground hover:bg-muted"><Pill id={`global-status-${run.projectId}-${run.id}`} dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>{attention.label}</Pill></button>
       <span>
         {task.tags.length > 0 ? (
           <span className="flex flex-wrap items-center gap-1">
@@ -912,36 +937,7 @@ function TaskRow({
 
         </div>
       </div>
-      <div data-slot="global-task-references">
-        {references.length > 0 ? (
-          <ReferenceChips references={references} run={run} repoBase={task.project?.repoUrl} />
-        ) : (
-          <Dash />
-        )}
-      </div>
-      <div data-slot="global-task-workflow" className="text-[13px] text-muted-foreground">
-        {run.workflow}
-      </div>
-      <div data-slot="global-task-diff" className="text-xs text-muted-foreground"><span title="Change totals are available in the project task list">—</span></div>
-      <div data-slot="global-task-age" className="text-right text-xs text-soft-foreground tabular-nums">
-        {shortAge(run.startedAt ?? run.createdAt, now)}
-      </div>
-      {!summary || resourcesOpen ? <div data-slot="global-task-actions">
-        <span className="inline-flex items-center gap-0.5">
-          <ReadToggle task={task} busy={busy} onSetRead={onSetRead} />
-          <ArchiveToggle task={task} busy={busy} onArchive={onArchive} /><Button asChild variant="outline"><Link to={to}>Open task</Link></Button>
-        </span>
-      </div> : null}
-    {resourcesOpen ? <div data-slot="global-task-resources" className="col-span-full flex flex-col gap-3">
-      <TaskPreview projectId={run.projectId} runId={run.id} status={attention.label} error={run.error} open={<Button asChild variant="outline" className="min-h-11"><Link to={to}>Open task<span className="sr-only">: {runTitle(run)}</span></Link></Button>} />
-      <dl className="grid grid-cols-2 gap-4 rounded-md bg-muted/50 p-4 text-xs md:grid-cols-3">
-        {showCost ? <div><dt className="text-muted-foreground">Cost</dt><dd className="mt-1">{formatCost(run.costUsd) || '—'}</dd></div> : null}
-        <div><dt className="text-muted-foreground">CPU</dt><dd data-usage="cpu" data-usage-kind={usage.cpu.kind} title={usage.cpu.title} className="mt-1">{usage.cpu.text || '—'}</dd></div>
-        <div><dt className="text-muted-foreground">Memory</dt><dd data-usage="mem" data-usage-kind={usage.mem.kind} title={usage.mem.title} className="mt-1">{usage.mem.text || '—'}</dd></div>
-      </dl>
-    </div> : null}
-    </article>
-  )
+)
 }
 
 /**
@@ -1084,36 +1080,4 @@ export function TagChip({ tag, className }: { tag: string; className?: string | 
 
 function Dash() {
   return <span className="text-xs text-soft-foreground">—</span>
-}
-
-/** What an empty global list honestly means, given how it got empty. */
-function GlobalTasksEmptyState({ view, filtered }: { view: ListView; filtered: boolean }) {
-  if (filtered) {
-    return (
-      <CenteredState
-        heading="h2"
-        icon={<SearchXIcon />}
-        tone="neutral"
-        title="No matching tasks"
-        subtitle="No task in any project matches these filters."
-      />
-    )
-  }
-  return view === 'archived' ? (
-    <CenteredState
-      heading="h2"
-      icon={<ArchiveIcon />}
-      tone="neutral"
-      title="Nothing archived yet"
-      subtitle="Finished tasks you archive land here, from every project."
-    />
-  ) : (
-    <CenteredState
-      heading="h2"
-      icon={<ListChecksIcon />}
-      tone="neutral"
-      title="No tasks yet"
-      subtitle="Start a task in any project and it shows up here."
-    />
-  )
 }

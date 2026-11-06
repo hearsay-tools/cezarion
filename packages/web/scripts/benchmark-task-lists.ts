@@ -25,6 +25,7 @@ export type TaskListBenchmarkOptions = {
   prepareOnly?: boolean | undefined
   /** Tiny correctness workload for CI, not performance evidence. */
   smoke?: boolean
+  study?: string | undefined
 }
 
 export async function runTaskListsBenchmark(values: TaskListBenchmarkOptions = {}) {
@@ -70,22 +71,31 @@ export async function runTaskListsBenchmark(values: TaskListBenchmarkOptions = {
   const save = () => writeFileSync(output, JSON.stringify(report, null, 2))
   // React's profiling build records actualDuration when a DevTools consumer is installed before boot.
   const probe = `(() => {
-    const state = window.__taskListProbe = {commits:[], longTasks:[], events:[], frames:[], root:null};
-    window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {supportsFiber:true, inject:()=>1, onCommitFiberUnmount(){}, onPostCommitFiberRoot(){}, onCommitFiberRoot(id,root){state.root=root;state.commits.push(root.current.actualDuration)}};
+    const state = window.__taskListProbe = {renderedRows:[], commits:[], longTasks:[], events:[], frames:[], root:null};
+    window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {supportsFiber:true, inject:()=>1, onCommitFiberUnmount(){}, onPostCommitFiberRoot(){}, onCommitFiberRoot(id,root){state.root=root;state.commits.push(root.current.actualDuration);let count=0;const visit=n=>{if(!n)return;const slot=n.memoizedProps?.['data-slot'];if(n.actualDuration>0){if(['task-summary-row','task-table-row','task-card','global-task-row'].includes(slot))count++;visit(n.child)}visit(n.sibling)};visit(root.current);state.renderedRows.push(count)}};
     for (const [type,key] of [['longtask','longTasks'],['event','events']]) {
       try { new PerformanceObserver(list=>state[key].push(...list.getEntries().map(e=>({name:e.name,ms:e.duration})))).observe({type,buffered:true,durationThreshold:16}) } catch {}
     }
   })();`
   function casesFor(scope: 'project' | 'global') {
+    if (values.study) {
+      if (values.study === 'small' && scope !== 'global') return []
+      const cases = values.study === 'small' ? [{ width: 1440, height: 900, setting: 'summary', view: 'active' }] : scope === 'project'
+        ? [{ width: 1440, height: 900, setting: 'summary', view: 'archived' }, { width: 1440, height: 900, setting: 'detailed', view: 'archived' }, { width: 360, height: 640, setting: 'summary', view: 'archived' }]
+        : [{ width: 1440, height: 900, setting: 'summary', view: 'archived' }, { width: 360, height: 640, setting: 'summary', view: 'archived' }]
+      return Array.from({ length: values.quick ? 1 : 5 }, (_, repetition) => cases.flatMap((entry) =>
+        (values.study === 'branch' ? repetition % 2 ? ['virtual', 'flat'] : ['flat', 'virtual'] : ['flat']).map(tier => ({ ...entry, repetition, tier })))).flat()
+    }
     const repetitions = Array.from({ length: values.quick || values.smoke ? 1 : 5 }, (_, i) => i)
     const viewports = values.quick ? [[1440, 900]] : [[1440, 900], [360, 640]]
     const settings = scope === 'project' ? ['summary', 'detailed'] : ['summary', 'grouped']
     return repetitions.flatMap(repetition => viewports.flatMap(([width, height]) => settings.flatMap(setting =>
-      ['active', 'archived'].map(view => ({ repetition, width: width!, height: height!, setting, view })),
+      ['active', 'archived'].map(view => ({ repetition, width: width!, height: height!, setting, view, tier: 'auto' })),
     )))
   }
   for (const scope of ['project', 'global'] as const) {
-    const fixture = await createTabFixture(root, { serverPackage, taskList: scope, ...(values.smoke ? { taskListSizes: { active: 3, archived: 5, projects: 2 } } : {}) })
+    if (!casesFor(scope).length) continue
+    const fixture = await createTabFixture(root, { serverPackage, taskList: scope, ...(values.study === 'small' ? { taskListSizes: { active: 5, archived: 5, projects: 10 } } : values.smoke ? { taskListSizes: { active: 3, archived: 5, projects: 2 } } : {}) })
     const serverState = captureFixtureServer(fixture.server)
     fixture.server.once('exit', () => {
       report.fixtureExits ??= []
@@ -138,14 +148,14 @@ export async function runTaskListsBenchmark(values: TaskListBenchmarkOptions = {
           return { name, elapsedMs: performance.now() - at }
         }
         for (const testCase of casesFor(scope)) {
-          const { repetition, width, height, setting, view } = testCase
+          const { repetition, width, height, setting, view, tier } = testCase
           report.pendingCase = { scope, ...testCase }; save()
           console.log(`start ${scope} ${setting} ${view} ${repetition} ${width}x${height}`)
           const before = loadavg()
           const browserPids = new Set<number>((await request('SystemInfo.getProcessInfo')).processInfo.map((process: { id: number }) => process.id))
           stopMemory = startMemoryProbe(fixture.server.pid!, browserPids)
           await page('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
-          await page('Page.navigate', { url: `${fixture.origin}${scope === 'project' ? '/p/boot/' : '/tasks'}${setting === 'grouped' ? '?group=project' : ''}` })
+          await page('Page.navigate', { url: `${fixture.origin}${scope === 'project' ? '/p/boot/' : '/tasks'}?tasks=${tier}${setting === 'grouped' ? '&group=project' : ''}` })
           await until(`document.querySelector('[data-slot="${scope === 'project' ? 'task-summary-row' : 'global-task-row'}"]')`)
           await until(`window.__cezIdle === true && document.fonts.status === 'loaded'`)
           await evaluate('window.__taskListProbe.commits=[];window.__taskListProbe.longTasks=[];window.__taskListProbe.events=[]')
@@ -160,9 +170,10 @@ export async function runTaskListsBenchmark(values: TaskListBenchmarkOptions = {
           await frame()
           await until('window.__taskListProbe.root')
           for (const process of (await request('SystemInfo.getProcessInfo')).processInfo) browserPids.add(process.id)
-          await evaluate('window.__taskListProbe.commits=[]')
+          await evaluate('window.__taskListProbe.commits=[];window.__taskListProbe.renderedRows=[]')
           const interactions: any[] = setting === 'detailed' ? [{ name: 'Resource columns setting', elapsedMs: performance.now() - settingAt }] : []
-          if (view === 'archived') { const at = performance.now(); await loadAllArchived(); interactions.push({ name: 'Archived tab and paging', elapsedMs: performance.now() - at }) }
+          if (view === 'archived') { const at = performance.now(); await loadAllArchived(); interactions.push({ name: scope === 'global' ? 'Archived tab' : 'Archived tab and paging', elapsedMs: performance.now() - at }) }
+          await evaluate('window.__taskListProbe.commits=[];window.__taskListProbe.renderedRows=[]')
           const streamAt = performance.now()
           const startPublished = (await fixture.control({ summaryStreaming: true })).published
           await pause(values.smoke ? 20 : values.quick ? 500 : 3_000)
@@ -171,7 +182,7 @@ export async function runTaskListsBenchmark(values: TaskListBenchmarkOptions = {
           const sample = await evaluate(`(()=>{
             const s=window.__taskListProbe;let fibers=0;const visit=n=>{if(!n)return;fibers++;visit(n.child);visit(n.sibling)};visit(s.root.current);
             const route=document.querySelector('[data-route="${scope === 'project' ? 'tasks' : 'global-tasks'}"]');
-            return {mountedRows:route.querySelectorAll('[data-slot=task-summary-row],[data-slot=task-table-row],[data-slot=task-card],[data-slot=global-task-row]').length,rowsWithRunId:route.querySelectorAll('[data-run-id]').length,allMountedRows:document.querySelectorAll('[data-run-id]').length,domNodes:document.querySelectorAll('*').length,fibers,commits:s.commits,longTasks:s.longTasks,eventTiming:s.events,representation:route.querySelector('[data-slot="task-cards"]')?.getClientRects().length?'cards':route.dataset.presentation};
+            return {mountedRows:route.querySelectorAll('[data-slot=task-summary-row],[data-slot=task-table-row],[data-slot=task-card],[data-slot=global-task-row]').length,rowsWithRunId:route.querySelectorAll('[data-run-id]').length,allMountedRows:document.querySelectorAll('[data-run-id]').length,domNodes:document.querySelectorAll('*').length,fibers,commits:s.commits,renderedRows:s.renderedRows,longTasks:s.longTasks,eventTiming:s.events,representation:route.querySelector('[data-slot="task-cards"]')?.getClientRects().length?'cards':route.dataset.presentation};
           })()`)
           const api: number[] = []
           for (let i = 0; i < 10; i++) { const at = performance.now(); const response = await fetch(`${fixture.origin}/api/v1/projects`); await response.arrayBuffer(); if (!response.ok) throw new Error(`API ${response.status}`); api.push(performance.now() - at) }
@@ -203,6 +214,6 @@ export async function runTaskListsBenchmark(values: TaskListBenchmarkOptions = {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-const { values } = parseArgs({ options: { 'build-root': { type: 'string' }, build: { type: 'boolean' }, output: { type: 'string' }, quick: { type: 'boolean' }, 'prepare-only': { type: 'boolean' } } })
+const { values } = parseArgs({ options: { 'build-root': { type: 'string' }, build: { type: 'boolean' }, output: { type: 'string' }, quick: { type: 'boolean' }, 'prepare-only': { type: 'boolean' }, study: { type: 'string' } } })
   await runTaskListsBenchmark({ ...values, buildRoot: values['build-root'], prepareOnly: values['prepare-only'] })
 }

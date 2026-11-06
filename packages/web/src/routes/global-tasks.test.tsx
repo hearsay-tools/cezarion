@@ -1356,3 +1356,22 @@ describe('global tasks — status groups and origin (hearsay-tools/cezarion#1616
     expect(screen.getByRole('button', { name: 'Finished 1' }).getAttribute('aria-expanded')).toBe('true')
   })
 })
+
+it('keeps an expanded run open after a group move and a filter round trip', async () => {
+  localStorage.clear()
+  stubFetch()
+  const client = createQueryClient()
+  renderPage(client, '/tasks?tasks=flat')
+  await screen.findByText('Bump the runner')
+  const row = () => document.querySelector<HTMLElement>('[data-slot="global-task-row"][data-run-id="i1"]')!
+  fireEvent.click(within(row()).getByRole('button', { name: 'Show resources for Bump the runner' }))
+  act(() => client.setQueryData(workspaceQueryKeys.runsIndex, (previous: { runs: RunIndexEntry[] }) => ({ ...previous, runs: previous.runs.map(run => run.id === 'i1' ? { ...run, status: RUN_STATUS.running } : run) })))
+  expect(within(row()).getByRole('button', { name: 'Hide resources for Bump the runner' })).not.toBeNull()
+  const input = screen.getByRole('textbox', { name: 'Search tasks across projects' })
+  fireEvent.change(input, { target: { value: 'Checkout' } })
+  await waitFor(() => expect(row()).toBeNull())
+  expect(search()).toContain('tasks=flat')
+  fireEvent.change(input, { target: { value: '' } })
+  await waitFor(() => expect(row()).not.toBeNull())
+  expect(within(row()).getByRole('button', { name: 'Hide resources for Bump the runner' })).not.toBeNull()
+})
