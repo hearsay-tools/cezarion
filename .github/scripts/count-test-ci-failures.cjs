@@ -67,13 +67,8 @@ function scan(options, {request, now = Date.now, maxRequests = DEFAULT_LIMITS.ma
     return {rows: rows.slice(0, limit), total};
   }
   let runs;
-  try {
-    const query = options.since ? `?created=${encodeURIComponent(`${options.since}..${options.until}`)}` : '';
-    const listed = pages(`${root}/actions/workflows/ci.yml/runs${query}`, 'workflow_runs', options.runs ?? 1000);
-    if (options.since && listed.total >= 1000) problem('GitHub date-query result cap reached; use a smaller date range');
-    runs = listed.rows;
-    if (new Set(runs.map(run => run.id)).size !== runs.length) problem('duplicate runs in listing; coverage may have shifted');
-  } catch (error) { problem(`run listing: ${error.message}`); return report; }
+  try { runs = listRuns(); }
+  catch (error) { problem(`run listing: ${error.message}`); return report; }
   const seenRuns = new Set(), seenJobs = new Set();
   for (const source of runs) {
     if (stopped) break;
@@ -81,42 +76,66 @@ function scan(options, {request, now = Date.now, maxRequests = DEFAULT_LIMITS.ma
     if (seenRuns.has(source.id)) continue;
     seenRuns.add(source.id);
     report.runsScanned++;
-    try {
-      for (let attempt = 1; attempt <= source.run_attempt; attempt++) {
-        const metadata = attempt === source.run_attempt ? source : get(`${root}/actions/runs/${source.id}/attempts/${attempt}`);
-        if (metadata.id !== source.id || metadata.run_attempt !== attempt) throw new Error(`invalid attempt ${attempt}`);
-        if (metadata.status !== 'completed') problem(`run ${source.id} attempt ${attempt} is not completed`);
-        const {rows: jobs} = pages(`${root}/actions/runs/${source.id}/attempts/${attempt}/jobs`, 'jobs');
-        if (new Set(jobs.map(job => job?.id)).size !== jobs.length) problem(`duplicate jobs in run ${source.id} attempt ${attempt}`);
-        for (const job of jobs) {
-          if (!positiveId(job?.id) || job.run_id !== source.id || !positiveId(job.run_attempt) || job.run_attempt > attempt || typeof job.name !== 'string') throw new Error(`invalid job in attempt ${attempt}`);
-          const key = `${source.id}:${job.run_attempt}:${job.id}`;
-          if (seenJobs.has(key)) continue;
-          seenJobs.add(key);
-          if (job.status !== 'completed') problem(`job ${job.id} is not completed`);
-          // Do not follow arbitrary URLs supplied by remote data.
-          const prefix = `https://api.github.com${root}/check-runs/`;
-          if (typeof job.check_run_url !== 'string' || !job.check_run_url.startsWith(prefix) || !/^\d+$/.test(job.check_run_url.slice(prefix.length))) throw new Error(`invalid check URL for job ${job.id}`);
-          const checkPath = job.check_run_url.slice('https://api.github.com'.length);
-          const check = get(checkPath);
-          const count = check?.output?.annotations_count;
-          if (!Number.isSafeInteger(count) || count < 0) throw new Error(`missing annotation count for job ${job.id}`);
-          if (!count) continue;
-          const {rows: annotations} = pages(`${checkPath}/annotations`);
-          if (annotations.length !== count) throw new Error(`incomplete annotations for job ${job.id}`);
-          for (const annotation of annotations) {
-            if (annotation?.annotation_level !== 'failure' || !matchesFile(annotation, options.testFile)) continue;
-            report.failures.push({runId: source.id, attempt: job.run_attempt, jobId: job.id, job: job.name, url: `https://github.com/${options.repo}/actions/runs/${source.id}/job/${job.id}`, title: annotation.title ?? '', path: annotation.path ?? '', message: annotation.message ?? ''});
-          }
-        }
-      }
-      const current = get(`${root}/actions/runs/${source.id}`);
-      if (current.run_attempt !== source.run_attempt || current.status !== source.status || current.updated_at !== source.updated_at) problem(`run ${source.id} changed during collection; repeat the scan`);
-    } catch (error) { problem(`run ${source.id}: ${error.message}`); }
+    scanRun(source);
   }
   report.failingRuns = new Set(report.failures.map(row => row.runId)).size;
   report.failingAttempts = new Set(report.failures.map(row => `${row.runId}:${row.attempt}`)).size;
   return report;
+
+  function listRuns() {
+    const query = options.since ? `?created=${encodeURIComponent(`${options.since}..${options.until}`)}` : '';
+    const listed = pages(`${root}/actions/workflows/ci.yml/runs${query}`, 'workflow_runs', options.runs ?? 1000);
+    if (options.since && listed.total >= 1000) problem('GitHub date-query result cap reached; use a smaller date range');
+    const rows = listed.rows;
+    if (new Set(rows.map(run => run.id)).size !== rows.length) problem('duplicate runs in listing; coverage may have shifted');
+    return rows;
+  }
+  function checkPathFor(job) {
+    // Do not follow arbitrary URLs supplied by remote data.
+    const prefix = `https://api.github.com${root}/check-runs/`;
+    if (typeof job.check_run_url !== 'string' || !job.check_run_url.startsWith(prefix) || !/^\d+$/.test(job.check_run_url.slice(prefix.length))) throw new Error(`invalid check URL for job ${job.id}`);
+    return job.check_run_url.slice('https://api.github.com'.length);
+  }
+  function scanAnnotations(source, job, checkPath) {
+    const check = get(checkPath);
+    const count = check?.output?.annotations_count;
+    if (!Number.isSafeInteger(count) || count < 0) throw new Error(`missing annotation count for job ${job.id}`);
+    if (!count) return;
+    const {rows: annotations} = pages(`${checkPath}/annotations`);
+    if (annotations.length !== count) throw new Error(`incomplete annotations for job ${job.id}`);
+    for (const annotation of annotations) {
+      if (annotation?.annotation_level !== 'failure' || !matchesFile(annotation, options.testFile)) continue;
+      report.failures.push({runId: source.id, attempt: job.run_attempt, jobId: job.id, job: job.name, url: `https://github.com/${options.repo}/actions/runs/${source.id}/job/${job.id}`, title: annotation.title ?? '', path: annotation.path ?? '', message: annotation.message ?? ''});
+    }
+  }
+  function scanJob(source, attempt, job) {
+    if (!positiveId(job?.id) || job.run_id !== source.id || !positiveId(job.run_attempt) || job.run_attempt > attempt || typeof job.name !== 'string') throw new Error(`invalid job in attempt ${attempt}`);
+    const key = `${source.id}:${job.run_attempt}:${job.id}`;
+    if (seenJobs.has(key)) return;
+    seenJobs.add(key);
+    if (job.status !== 'completed') problem(`job ${job.id} is not completed`);
+    scanAnnotations(source, job, checkPathFor(job));
+  }
+  function scanJobs(source, attempt) {
+    const {rows: jobs} = pages(`${root}/actions/runs/${source.id}/attempts/${attempt}/jobs`, 'jobs');
+    if (new Set(jobs.map(job => job?.id)).size !== jobs.length) problem(`duplicate jobs in run ${source.id} attempt ${attempt}`);
+    for (const job of jobs) scanJob(source, attempt, job);
+  }
+  function scanAttempts(source) {
+    for (let attempt = 1; attempt <= source.run_attempt; attempt++) {
+      const metadata = attempt === source.run_attempt ? source : get(`${root}/actions/runs/${source.id}/attempts/${attempt}`);
+      if (metadata.id !== source.id || metadata.run_attempt !== attempt) throw new Error(`invalid attempt ${attempt}`);
+      if (metadata.status !== 'completed') problem(`run ${source.id} attempt ${attempt} is not completed`);
+      scanJobs(source, attempt);
+    }
+  }
+  function scanRun(source) {
+    try {
+      scanAttempts(source);
+      const current = get(`${root}/actions/runs/${source.id}`);
+      if (current.run_attempt !== source.run_attempt || current.status !== source.status || current.updated_at !== source.updated_at) problem(`run ${source.id} changed during collection; repeat the scan`);
+    } catch (error) { problem(`run ${source.id}: ${error.message}`); }
+  }
 }
 
 function formatReport(report) {

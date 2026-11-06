@@ -47,6 +47,65 @@ function summaryFor(pattern,base,start,end) {
   const body=`**Agent context**\n\n${marker}\n${evidence}\n\n${classification}: ${pattern.counts.failures} failure occurrences in ${pattern.counts.runs} runs, ${pattern.counts.shas} commits, and ${pattern.counts.contexts} independent change contexts.\n\nObserved run-creation window: ${start} through ${end}. Counts cover this window, not lifetime totals; passing comparisons are not failures. Partial scan counts are lower bounds when the linked sweep reports incomplete coverage.\n\nAffected workflows (untrusted metadata):\n\n${code(workflows.join('\n'))}\n\nFailure evidence (first 20 of ${failureLinks.length} run attempts):\n${failureLinks.slice(0,20).map(url=>`- [Run attempt](${url})`).join('\n')}\n\nSuccessful unchanged-SHA retry comparisons (first 20 of ${comparisons.length}):\n${comparisons.length?comparisons.slice(0,20).map(text=>`- ${text}`).join('\n'):'None observed.'}\n\nThis evidence does not establish flakiness by itself. A passing retry can reflect runner, dependency, or infrastructure changes; investigate before attributing nondeterminism to the test.\n`;
   return {marker,evidence,body};
 }
+async function collectEvidence(writer) {
+  const evidence=new Map();
+  for(const issue of writer.issues) {
+    evidence.set(issue.number,[issue.body||'',...(await writer.commentsFor(issue)).map(c=>c.body||'')].join('\n'));
+  }
+  return evidence;
+}
+// Adopts one matching open issue as the pattern's owner, or reports why it
+// cannot. Returns false when the pattern must be skipped after a problem.
+async function adoptOwner(ctx,pattern,owners,marker) {
+  const {api,writer,url,base}=ctx;
+  if(owners.length)return true;
+  const matches=writer.issues.filter(i=>i.state==='open' && corroborates(i,ctx.evidence.get(i.number)||'',pattern,url));
+  if(matches.length>1) {api.problem('ambiguous-owner');return false;}
+  if(matches.length!==1)return true;
+  const target=matches[0],body=`${target.body||''}\n\n${marker}`;
+  if(body.length>60000) {api.problem('adoption-body-limit',{issueNumber:target.number});return false;}
+  await api.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}',{...base,issue_number:target.number,body});
+  target.body=body;
+  return true;
+}
+async function reportStepCauses(ctx,pattern) {
+  const {api,writer,available}=ctx;
+  const targets=new Map();
+  // Reuse source-step reconciliation even when only a subset of that
+  // step's causes meets the sweep's evidence threshold.
+  for(const occurrence of pattern.occurrences) {
+    const issueCount=writer.issues.length;
+    const results=await writer.reportStep({...occurrence,causes:[occurrence.cause],labels:[labelFor(pattern.cause,available)],bodyFor:bodyForPattern});
+    api.manifest.reports.issues+=writer.issues.length-issueCount;
+    for(const result of results) {
+      if(result.reported)api.manifest.reports.occurrences++;
+      targets.set(result.issue.number,result.issue);
+    }
+  }
+  return targets;
+}
+async function upsertSummaries(ctx,pattern,targets) {
+  const {api,writer,base,url,start,end}=ctx;
+  const summary=summaryFor(pattern,url,start,end);
+  for(const issue of targets.values()) {
+    const comments=await writer.commentsFor(issue),previous=comments.find(c=>(c.body||'').includes(summary.marker));
+    if(previous?.body.includes(summary.evidence))continue;
+    if(previous) {
+      await api.request('PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}',{...base,comment_id:previous.id,body:summary.body});previous.body=summary.body;
+    } else {
+      const {data:created}=await api.request('POST /repos/{owner}/{repo}/issues/{issue_number}/comments',{...base,issue_number:issue.number,body:summary.body});comments.push(created);
+    }
+  }
+}
+async function reportPattern(ctx,pattern) {
+  const marker=signatureMarker(pattern.cause.signature);
+  const owners=ctx.writer.issues.filter(i=>(i.body||'').includes(marker));
+  const openOwners=owners.filter(i=>i.state==='open');
+  if(openOwners.length>1) {ctx.api.problem('ambiguous-owner');return;}
+  if(!(await adoptOwner(ctx,pattern,owners,marker)))return;
+  const targets=await reportStepCauses(ctx,pattern);
+  await upsertSummaries(ctx,pattern,targets);
+}
 async function reportPatterns({api,owner,repo,patterns,start,end}) {
   if(!patterns.length||api.stopped)return api.manifest.reports;
   const base={owner,repo},url=`https://github.com/${owner}/${repo}`;
@@ -57,48 +116,8 @@ async function reportPatterns({api,owner,repo,patterns,start,end}) {
     const available=new Set((await api.paginate('GET /repos/{owner}/{repo}/labels',base)).map(label=>label.name));
     // Resolve all potential owners before creating any issue. Partial lookups
     // must never be mistaken for evidence that no remediation report exists.
-    const evidence=new Map();
-    for(const issue of writer.issues) {
-      evidence.set(issue.number,[issue.body||'',...(await writer.commentsFor(issue)).map(c=>c.body||'')].join('\n'));
-    }
-    for(const pattern of patterns) {
-      const marker=signatureMarker(pattern.cause.signature);
-      const owners=writer.issues.filter(i=>(i.body||'').includes(marker));
-      const openOwners=owners.filter(i=>i.state==='open');
-      if(openOwners.length>1) {api.problem('ambiguous-owner');continue;}
-      if(!owners.length) {
-        const matches=writer.issues.filter(i=>i.state==='open' && corroborates(i,evidence.get(i.number)||'',pattern,url));
-        if(matches.length>1) {api.problem('ambiguous-owner');continue;}
-        if(matches.length===1) {
-          const target=matches[0],body=`${target.body||''}\n\n${marker}`;
-          if(body.length>60000) {api.problem('adoption-body-limit',{issueNumber:target.number});continue;}
-          await api.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}',{...base,issue_number:target.number,body});
-          target.body=body;
-        }
-      }
-      const targets=new Map();
-      // Reuse source-step reconciliation even when only a subset of that
-      // step's causes meets the sweep's evidence threshold.
-      for(const occurrence of pattern.occurrences) {
-        const issueCount=writer.issues.length;
-        const results=await writer.reportStep({...occurrence,causes:[occurrence.cause],labels:[labelFor(pattern.cause,available)],bodyFor:bodyForPattern});
-        api.manifest.reports.issues+=writer.issues.length-issueCount;
-        for(const result of results) {
-          if(result.reported)api.manifest.reports.occurrences++;
-          targets.set(result.issue.number,result.issue);
-        }
-      }
-      const summary=summaryFor(pattern,url,start,end);
-      for(const issue of targets.values()) {
-        const comments=await writer.commentsFor(issue),previous=comments.find(c=>(c.body||'').includes(summary.marker));
-        if(previous?.body.includes(summary.evidence))continue;
-        if(previous) {
-          await api.request('PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}',{...base,comment_id:previous.id,body:summary.body});previous.body=summary.body;
-        } else {
-          const {data:created}=await api.request('POST /repos/{owner}/{repo}/issues/{issue_number}/comments',{...base,issue_number:issue.number,body:summary.body});comments.push(created);
-        }
-      }
-    }
+    const ctx={api,writer,base,url,start,end,available,evidence:await collectEvidence(writer)};
+    for(const pattern of patterns) await reportPattern(ctx,pattern);
   } catch(error) {
     const code=['issue-limit','occurrence-limit'].includes(error?.code)?error.code:'reporting-incomplete';
     api.problem(code);
