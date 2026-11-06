@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { RUN_STATUS, request, run, worker } from './activity.testkit'
+import { RUN_STATUS, iso, request, run, worker } from './activity.testkit'
 import type { ActivityTrigger } from './activity-diff'
 import { EMPTY_MOTION, MOTION_MS, applyMotion, checkKey, isStill, passedChecks, planMotion, type MotionState } from './activity-motion'
 
 const A = run({ runId: 'a', title: 'Porting upstream SSE' })
 const PEER = request({ senderRunId: 'a', recipientRunId: 'b' })
+const WAIT = { id: 'wait:a:b', waiterRunId: 'a', peerRunId: 'b', since: iso(-1_000), deadline: iso(600_000) }
 const projectId = 'cezarion'
 
 /** One trigger of each kind. */
@@ -22,6 +23,8 @@ const TRIGGERS: ActivityTrigger[] = [
   { kind: 'card-left', projectId, task: A },
   { kind: 'check-passed', projectId, runId: 'a', pr: 7, name: 'lint' },
   { kind: 'chip-changed', chip: 'working', from: 1, to: 2 },
+  { kind: 'wait-opened', projectId, wait: WAIT },
+  { kind: 'wait-closed', projectId, wait: WAIT },
 ]
 
 /** The state after the plan's changes, then after each of its timers in time order. */
@@ -102,5 +105,23 @@ describe('planMotion', () => {
     const state = applyMotion(EMPTY_MOTION, planMotion([{ kind: 'check-passed', projectId, runId: 'a', pr: 7, name: 'lint' }, { kind: 'check-passed', projectId, runId: 'ab', pr: 7, name: 'test' }], 1, false).changes)
     expect(Object.keys(state.checks)).toEqual([checkKey('a', 'lint'), checkKey('ab', 'test')])
     expect([...passedChecks(state, 'a')]).toEqual(['lint'])
+  })
+
+  it('fades a new wait line in, and keeps an ended one drawn while it fades out, with no comet', () => {
+    const opened = playOut([{ kind: 'wait-opened', projectId, wait: WAIT }])
+    expect(opened.started.opening).toHaveProperty(WAIT.id)
+    expect(opened.started.comets).toEqual({})
+    expect(opened.end.opening).toEqual({})
+    const closed = playOut([{ kind: 'wait-closed', projectId, wait: WAIT }])
+    expect(closed.started.waitsClosing[WAIT.id]).toMatchObject({ projectId, wait: WAIT })
+    expect(closed.started.comets).toEqual({})
+    expect(closed.states.at(-1)?.at).toBe(MOTION_MS.fade)
+    expect(closed.end.waitsClosing).toEqual({})
+  })
+
+  it('stops the fade of a wait that opens again', () => {
+    const plan = planMotion([{ kind: 'wait-opened', projectId, wait: WAIT }], 2, false)
+    const state = applyMotion(playOut([{ kind: 'wait-closed', projectId, wait: WAIT }]).started, plan.changes)
+    expect(state.waitsClosing).toEqual({})
   })
 })

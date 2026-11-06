@@ -1,6 +1,6 @@
 import type { ActivityProject, ActivityRequest } from '@open-mercato/cezar-api-client/contract/activity'
 
-import { projectNotice } from './activity-model'
+import { projectNotice, type PeerWait } from './activity-model'
 import { isLiveStatus } from './now-box'
 
 /**
@@ -53,6 +53,12 @@ export function groupProjects(projects: readonly ActivityProject[]): GlobalGroup
 export function panelArcs(project: Pick<ActivityProject, 'tasks' | 'requests'>): ActivityRequest[] {
   const pills = new Set(project.tasks.map((task) => task.runId))
   return project.requests.filter((request) => request.relationship === 'peer' && pills.has(request.senderRunId) && pills.has(request.recipientRunId))
+}
+
+/** The peer waits a panel draws as arcs: those between two of its own pills. */
+export function panelWaitArcs(tasks: readonly { runId: string }[], waits: readonly PeerWait[]): PeerWait[] {
+  const pills = new Set(tasks.map((task) => task.runId))
+  return waits.filter((wait) => pills.has(wait.waiterRunId) && pills.has(wait.peerRunId))
 }
 
 /** "3 active tasks · 2 workers": the panel header's count of pills and live workers. */

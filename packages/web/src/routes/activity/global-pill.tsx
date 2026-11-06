@@ -3,8 +3,8 @@ import { Link } from 'react-router'
 
 import { cn } from '@/lib/utils'
 
-import { CardEffects, LineText } from './activity-card'
-import { lineTexts, recipientName, sentPeerRequests, type RunEntry } from './activity-model'
+import { CardEffects, LineText, hoverHandlers } from './activity-card'
+import { lineTexts, nameOf, recipientName, sentPeerRequests, sentPeerWaits, type PeerWait, type RunEntry } from './activity-model'
 import { EMPTY_MOTION, type MotionState } from './activity-motion'
 import { RunShape, ToneWord } from './activity-tone'
 import { isLiveStatus, rootNow, type NowContext } from './now-box'
@@ -24,10 +24,18 @@ interface PillProps {
   projectId: string
   task: ActivityRun
   requests: readonly ActivityRequest[]
+  /** The panel's open peer waits: the pill's text form and its narrow-layout links. */
+  waits?: readonly PeerWait[]
   index: ReadonlyMap<string, RunEntry>
   ctx: NowContext
   motion?: MotionState
+  /** A peer wait links this pill to the pill under the pointer or holding the focus. */
+  linked?: boolean
+  onHover?: (runId: string | undefined) => void
 }
+
+const NO_WAITS: readonly PeerWait[] = []
+const PEER_LINK = 'relative z-[1] inline-flex min-h-11 items-center text-[12px] text-message-peer-accent hover:underline focus-visible:outline-2 focus-visible:outline-ring'
 
 function WorkerDots({ task }: { task: ActivityRun }) {
   const live = task.workers.filter((worker) => isLiveStatus(worker.status))
@@ -40,30 +48,42 @@ function WorkerDots({ task }: { task: ActivityRun }) {
   )
 }
 
-/** Below `md` the arcs are hidden; the sender pill names each peer it waits on instead. */
-function PeerLinks({ projectId, task, requests, index }: Omit<PillProps, 'ctx' | 'motion'>) {
+/** Below `md` the arcs are hidden; the sender pill names each peer it asked, and the waiter pill
+ *  each peer it waits on, instead. */
+function PeerLinks({ projectId, task, requests, waits, index }: Pick<PillProps, 'projectId' | 'task' | 'requests' | 'index'> & { waits: readonly PeerWait[] }) {
   const sent = sentPeerRequests(task.runId, requests)
-  if (sent.length === 0) return null
+  const waiting = sentPeerWaits(task.runId, waits)
+  if (sent.length === 0 && waiting.length === 0) return null
   return (
     <ul data-slot="activity-peer-links" className="mt-1 ml-[19px] flex flex-col md:hidden">
       {sent.map((request) => (
         <li key={request.requestId}>
-          <Link to={projectTaskPath(projectId, request.recipientRunId)} className="relative z-[1] inline-flex min-h-11 items-center text-[12px] text-message-peer-accent hover:underline focus-visible:outline-2 focus-visible:outline-ring">
-            → {recipientName(index, request)}
-          </Link>
+          <Link to={projectTaskPath(projectId, request.recipientRunId)} className={PEER_LINK}>→ {recipientName(index, request)}</Link>
+        </li>
+      ))}
+      {waiting.map((wait) => (
+        <li key={wait.id}>
+          <Link to={projectTaskPath(projectId, wait.peerRunId)} className={PEER_LINK}>⋯ waits on {nameOf(index, wait.peerRunId)}</Link>
         </li>
       ))}
     </ul>
   )
 }
 
-export function ActivityPill({ projectId, task, requests, index, ctx, motion = EMPTY_MOTION }: PillProps) {
+export function ActivityPill({ projectId, task, requests, waits = NO_WAITS, index, ctx, motion = EMPTY_MOTION, linked = false, onHover }: PillProps) {
   const box = rootNow(task, ctx)
   return (
     <li
       data-activity-pill={task.runId}
       data-rung={task.rung}
-      className={cn('relative min-w-0 rounded-[10px] border bg-card-2 px-2.5 py-2', box.action ? 'border-pending' : 'border-border', task.runId in motion.entering && 'activity-card-enter')}
+      data-linked={linked ? 'true' : undefined}
+      {...hoverHandlers(task.runId, onHover)}
+      className={cn(
+        'relative min-w-0 rounded-[10px] border bg-card-2 px-2.5 py-2',
+        box.action ? 'border-pending' : 'border-border',
+        linked && 'outline-2 outline-offset-2 outline-message-peer-accent',
+        task.runId in motion.entering && 'activity-card-enter',
+      )}
     >
       <CardEffects task={task} motion={motion} glow={box.action !== undefined} />
       <div className="flex items-center gap-[7px]">
@@ -83,9 +103,9 @@ export function ActivityPill({ projectId, task, requests, index, ctx, motion = E
         {' · '}
         <span data-slot="activity-main" className={cn(box.mono && 'font-mono text-[11px]')}>{box.main}</span>
       </p>
-      <LineText texts={lineTexts(task.runId, requests, index)} />
+      <LineText texts={lineTexts(task.runId, requests, index, waits)} />
       <WorkerDots task={task} />
-      <PeerLinks projectId={projectId} task={task} requests={requests} index={index} />
+      <PeerLinks projectId={projectId} task={task} requests={requests} waits={waits} index={index} />
     </li>
   )
 }

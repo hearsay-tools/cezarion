@@ -3,6 +3,7 @@ import type { ActivityRequest, ActivityRun } from '@open-mercato/cezar-api-clien
 import { attentionOfRung, type AttentionTone } from '@/lib/attention'
 
 import type { ActivityTrigger } from './activity-diff'
+import type { PeerWait } from './activity-model'
 
 /**
  * The motion of the activity view (spec 2026-11-05-live-activity-view, "Other motion", "Lines
@@ -44,10 +45,13 @@ export interface MotionState {
   workerEnter: Record<string, Keyed>
   /** Settled workers kept as a row: a flash, then the fold. */
   workerHold: Record<string, Keyed & { tone: AttentionTone; phase: 'flash' | 'fold' }>
-  /** Lines that fade in behind the opening comet; rail entries that slide in. */
+  /** Lines that fade in behind the opening comet (or, for a peer wait, on their own); rail
+   *  entries that slide in. */
   opening: Record<string, Keyed>
   /** Closed requests still drawn: the reply comet, then "Replied", then the fade. */
   closing: Record<string, Keyed & { projectId: string; request: ActivityRequest; replied: boolean; phase: 'reply' | 'replied' | 'fade' }>
+  /** Ended peer waits still drawn while their line fades out. */
+  waitsClosing: Record<string, Keyed & { projectId: string; wait: PeerWait }>
   comets: Record<string, Keyed & { requestId: string; reverse: boolean; tone: CometTone }>
   bumps: Record<string, Keyed>
   /** A card whose main line slides in at a new tool call. */
@@ -61,7 +65,7 @@ export type MotionField = keyof MotionState
 type Entry<F extends MotionField> = MotionState[F][string]
 
 export const EMPTY_MOTION: MotionState = {
-  flash: {}, entering: {}, leaving: {}, workerEnter: {}, workerHold: {}, opening: {}, closing: {}, comets: {}, bumps: {}, slides: {}, checks: {},
+  flash: {}, entering: {}, leaving: {}, workerEnter: {}, workerHold: {}, opening: {}, closing: {}, waitsClosing: {}, comets: {}, bumps: {}, slides: {}, checks: {},
 }
 
 export const checkKey = (runId: string, name: string) => `${runId}\n${name}`
@@ -159,6 +163,12 @@ function planOne(plan: Planner, trigger: ActivityTrigger) {
     case 'request-opened': return planOpened(plan, trigger.request)
     case 'request-closed': return planClosed(plan, trigger.projectId, trigger.request, trigger.status === 'replied')
     case 'chip-changed': return plan.timed('bumps', trigger.chip, {}, MOTION_MS.bump)
+    case 'wait-opened':
+      plan.drop('waitsClosing', trigger.wait.id)
+      return plan.timed('opening', trigger.wait.id, {}, MOTION_MS.fade)
+    case 'wait-closed':
+      plan.drop('opening', trigger.wait.id)
+      return plan.timed('waitsClosing', trigger.wait.id, { projectId: trigger.projectId, wait: trigger.wait }, MOTION_MS.fade)
   }
 }
 
@@ -190,3 +200,9 @@ export function applyMotion(state: MotionState, changes: readonly MotionChange[]
 
 /** True when no motion entry is left. */
 export const isStill = (state: MotionState) => Object.values(state).every((field) => Object.keys(field).length === 0)
+
+/** The ended peer waits whose lines still fade out, left out once `open` has them again. */
+export function waitGhosts(projectId: string, open: readonly PeerWait[], motion: MotionState): PeerWait[] {
+  const ids = new Set(open.map((wait) => wait.id))
+  return Object.values(motion.waitsClosing).filter((ghost) => ghost.projectId === projectId && !ids.has(ghost.wait.id)).map((ghost) => ghost.wait)
+}

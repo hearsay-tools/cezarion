@@ -1,3 +1,4 @@
+import type { HTMLAttributes } from 'react'
 import type { ActivityRequest, ActivityRun, ActivityWorker } from '@open-mercato/cezar-api-client/contract/activity'
 
 import { Button } from '@/components/ui/button'
@@ -5,7 +6,7 @@ import { Link } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
 
 import { since, span } from './activity-format'
-import { askOf, finishedText, foldedWorkers, lineTexts, recipientName, sentPeerRequests, type RunEntry } from './activity-model'
+import { askOf, finishedText, foldedWorkers, lineTexts, nameOf, recipientName, sentPeerRequests, sentPeerWaits, type PeerWait, type RunEntry } from './activity-model'
 import { EMPTY_MOTION, passedChecks, type MotionState } from './activity-motion'
 import { RunShape, TONE_BORDER, TONE_FILL, TONE_INK } from './activity-tone'
 import { isLiveStatus, rootNow, workerLine, type NowContext } from './now-box'
@@ -21,12 +22,19 @@ import { Heartbeat, NowBoxView } from './now-box-view'
 export interface CardProps {
   task: ActivityRun
   requests: readonly ActivityRequest[]
+  /** The open peer waits of the view: the card's text form and its narrow-layout links. */
+  waits?: readonly PeerWait[]
   index: ReadonlyMap<string, RunEntry>
   ctx: NowContext
   /** More than 12 cards: no detail line, workers folded into dots. */
   dense: boolean
-  /** One column: peer lines become "→ <task>" links on the sender card. */
+  /** One column: peer lines become "→ <task>" links on the sender card, and wait lines "⋯ waits
+   *  on <task>" links on the waiter card. */
   narrow: boolean
+  /** A peer wait links this card to the card under the pointer or holding the focus. */
+  linked?: boolean
+  /** The pointer or the focus entered this card (its run id) or left it (undefined). */
+  onHover?: (runId: string | undefined) => void
   motion?: MotionState
   /** A card that left the view, drawn while it collapses: no line ends at it, and it is hidden
    *  from assistive technology and from the keyboard. */
@@ -118,20 +126,40 @@ function Workers({ task, requests, index, ctx, dense, motion }: Omit<CardProps, 
   )
 }
 
-function PeerLinks({ task, requests, index }: Pick<CardProps, 'task' | 'requests' | 'index'>) {
+const PEER_LINK = 'relative z-[1] text-[12px] text-message-peer-accent hover:underline focus-visible:outline-2 focus-visible:outline-ring max-md:inline-flex max-md:min-h-11 max-md:items-center'
+
+function PeerLinks({ task, requests, waits, index }: Pick<CardProps, 'task' | 'requests' | 'index'> & { waits: readonly PeerWait[] }) {
   const sent = sentPeerRequests(task.runId, requests)
-  if (sent.length === 0) return null
+  const waiting = sentPeerWaits(task.runId, waits)
+  if (sent.length === 0 && waiting.length === 0) return null
   return (
     <ul data-slot="activity-peer-links" className="mt-2 flex flex-col gap-1">
       {sent.map((request) => (
         <li key={request.requestId}>
-          <Link to={taskPath(request.recipientRunId)} className="relative z-[1] text-[12px] text-message-peer-accent hover:underline focus-visible:outline-2 focus-visible:outline-ring max-md:inline-flex max-md:min-h-11 max-md:items-center">
-            → {recipientName(index, request)}
-          </Link>
+          <Link to={taskPath(request.recipientRunId)} className={PEER_LINK}>→ {recipientName(index, request)}</Link>
+        </li>
+      ))}
+      {waiting.map((wait) => (
+        <li key={wait.id}>
+          <Link to={taskPath(wait.peerRunId)} className={PEER_LINK}>⋯ waits on {nameOf(index, wait.peerRunId)}</Link>
         </li>
       ))}
     </ul>
   )
+}
+
+/** Pointer and focus handlers that report the card to the board's wait highlight. Focus moving
+ *  between two elements of one card keeps the card. */
+export function hoverHandlers(runId: string, onHover: CardProps['onHover']): HTMLAttributes<HTMLElement> {
+  if (!onHover) return {}
+  return {
+    onPointerEnter: () => onHover(runId),
+    onPointerLeave: () => onHover(undefined),
+    onFocus: () => onHover(runId),
+    onBlur: (event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onHover(undefined)
+    },
+  }
 }
 
 /** The card's entry and its collapse. */
@@ -151,7 +179,9 @@ export function CardEffects({ task, motion, glow }: { task: ActivityRun; motion:
   )
 }
 
-export function ActivityCard({ task, requests, index, ctx, dense, narrow, motion = EMPTY_MOTION, ghost = false }: CardProps) {
+const NO_WAITS: readonly PeerWait[] = []
+
+export function ActivityCard({ task, requests, waits = NO_WAITS, index, ctx, dense, narrow, motion = EMPTY_MOTION, ghost = false, linked = false, onHover }: CardProps) {
   const box = rootNow(task, ctx)
   // A ghost is not a line end: the lines measure only `data-activity-card`.
   const identity = ghost ? { 'data-activity-ghost': task.runId, inert: true, 'aria-hidden': true } : { 'data-activity-card': task.runId }
@@ -161,7 +191,14 @@ export function ActivityCard({ task, requests, index, ctx, dense, narrow, motion
       {...identity}
       data-flip={task.runId}
       data-rung={task.rung}
-      className={cn('relative min-w-0 rounded-xl border bg-card px-3.5 py-3', box.action ? 'border-pending' : 'border-border', cardMotion(task, motion, ghost))}
+      data-linked={linked && !ghost ? 'true' : undefined}
+      {...(ghost ? {} : hoverHandlers(task.runId, onHover))}
+      className={cn(
+        'relative min-w-0 rounded-xl border bg-card px-3.5 py-3',
+        box.action ? 'border-pending' : 'border-border',
+        linked && !ghost && 'outline-2 outline-offset-2 outline-message-peer-accent',
+        cardMotion(task, motion, ghost),
+      )}
     >
       <CardEffects task={task} motion={motion} glow={box.action !== undefined && !ghost} />
       <header className="flex items-center gap-2">
@@ -174,7 +211,7 @@ export function ActivityCard({ task, requests, index, ctx, dense, narrow, motion
         <Heartbeat rate={task.rate} />
       </header>
       <p className="mt-0.5 mb-2 ml-5 truncate text-[11.5px] text-muted-foreground">{metaLine(task, ctx.now)}</p>
-      <LineText texts={lineTexts(task.runId, requests, index)} />
+      <LineText texts={lineTexts(task.runId, requests, index, waits)} />
       <NowBoxView box={box} now={ctx.now} dense={dense} motion={now} />
       {box.action ? (
         <div className="mt-2 flex gap-1.5">
@@ -183,7 +220,7 @@ export function ActivityCard({ task, requests, index, ctx, dense, narrow, motion
           </Button>
         </div>
       ) : null}
-      {narrow ? <PeerLinks task={task} requests={requests} index={index} /> : null}
+      {narrow ? <PeerLinks task={task} requests={requests} waits={waits} index={index} /> : null}
       <Workers task={task} requests={requests} index={index} ctx={ctx} dense={dense} motion={motion} />
     </article>
   )

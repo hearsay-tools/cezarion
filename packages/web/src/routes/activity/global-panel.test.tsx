@@ -1,4 +1,4 @@
-import { cleanup, render, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ActivityProject } from '@open-mercato/cezar-api-client/contract/activity'
@@ -105,6 +105,51 @@ describe('ProjectPanel', () => {
       const narrow = request({ senderRunId: 'q', recipientRunId: 's' })
       renderPanel(project({ tasks: ['p', 'q', 'r', 's', 't'].map((id) => run({ runId: id })), requests: [wide, narrow] }))
       expect(overlaps(labelBox(labelOf(wide.requestId), ARC_LABEL), labelBox(labelOf(narrow.requestId), ARC_LABEL))).toBe(false)
+    })
+  })
+
+  describe('peer waits', () => {
+    const waiter = run({
+      runId: 'waiter',
+      title: 'Schema migration',
+      status: RUN_STATUS.waiting,
+      rung: 'waiting-on-workers',
+      wait: { kind: ACTIVITY_WAIT_KIND.peers, since: iso(-192_000), deadline: iso(408_000), detail: { peerRunIds: ['peer'] } },
+    })
+    const peer = run({ runId: 'peer', title: 'API contract review' })
+    const other = run({ runId: 'other', title: 'Release notes' })
+    const pill = (runId: string) => document.querySelector(`[data-activity-pill="${runId}"]`) as HTMLElement
+    const waitArc = () => document.querySelector('path[data-wait="wait:waiter:peer"]')
+
+    it('draws a dotted arc from the peer pill to the waiter pill, with its label and room above the pills', () => {
+      placeBoxes('data-activity-pill', gridBoxes([['waiter', 'peer', 'other']]))
+      renderPanel(project({ tasks: [waiter, peer, other] }))
+      expect(waitArc()?.getAttribute('data-kind')).toBe('wait')
+      expect(waitArc()?.getAttribute('stroke-dasharray')).toBe('0 8')
+      expect(waitArc()?.getAttribute('marker-end')).toMatch(/^url\(#activity-ring-arc-/)
+      const points = samplePath(waitArc()?.getAttribute('d') ?? '')
+      // From the top middle of the peer pill to the top middle of the waiter pill.
+      expect(points[0]?.x).toBe(234 + 110)
+      expect(points[points.length - 1]?.x).toBe(110)
+      expect(document.querySelector('[data-slot="activity-arc-label"][data-wait="wait:waiter:peer"]')?.textContent).toBe('Waiting · 3:12')
+    })
+
+    it('gives both pills the text form, and the waiter pill a link for the narrow layout', () => {
+      renderPanel(project({ tasks: [waiter, peer] }))
+      const text = (runId: string) => Array.from(pill(runId).querySelectorAll('[data-slot="activity-line-text"] li')).map((li) => li.textContent)
+      expect(text('waiter')).toEqual(['Waiting for a message from API contract review'])
+      expect(text('peer')).toEqual(['Schema migration waits for you to write'])
+      expect(within(pill('waiter')).getByRole('link', { name: '⋯ waits on API contract review' }).getAttribute('href')).toBe('/p/cezarion/tasks/peer')
+    })
+
+    it('outlines the linked pill while the pointer is on the other one', () => {
+      renderPanel(project({ tasks: [waiter, peer, other] }))
+      fireEvent.pointerEnter(pill('waiter'))
+      expect(pill('peer').getAttribute('data-linked')).toBe('true')
+      expect(pill('other').getAttribute('data-linked')).toBeNull()
+      expect(waitArc()?.getAttribute('data-active')).toBe('true')
+      fireEvent.pointerLeave(pill('waiter'))
+      expect(pill('peer').getAttribute('data-linked')).toBeNull()
     })
   })
 })
