@@ -19,8 +19,10 @@ a timing improvement for every case.
 
 The [workload](../../packages/web/scripts/benchmark-task-lists.ts) runs unchanged on
 baseline `bc5764da7e8817e219c0f5f1ff488ce042556f83` and branch
-`af998efd8f6d66bf7b7d0907f1e2920f8a3fe559`. Product source last changed at
-`8e84efc6b`; later commits change the measurement harness. Each build has 80 cases:
+`af998efd8f6d66bf7b7d0907f1e2920f8a3fe559`. That artifact's product source last changed at
+`8e84efc6b`; its later commits change the measurement harness. The subsequent review
+fix that keeps an inline rename draft above responsive rows is covered by functional
+tests and has not been resampled here. Each build has 80 cases:
 project/global × two viewports × two settings × active/archived × five repetitions.
 There are no omitted cases in the completed matrix. Global has summary and grouped
 settings; a detailed setting is N/A because it does not exist. Grouped renders cards

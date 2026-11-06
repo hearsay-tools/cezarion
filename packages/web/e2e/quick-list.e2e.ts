@@ -382,7 +382,7 @@ describe('tasks table overview', () => {
   beforeEach(() => {
     browser.setViewport(1440, 900)
     browser.goto(`${baseUrl}${scoped('/')}`)
-    browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+    browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)
     showResourceTable()
   })
 
@@ -424,7 +424,8 @@ describe('tasks table overview', () => {
     } finally {
       browser.setViewport(1440, 900)
       browser.goto(`${baseUrl}${scoped('/')}`)
-      browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+      browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)
+      showResourceTable()
     }
   })
 
@@ -516,12 +517,13 @@ describe('tasks table overview', () => {
     browser.waitForFunction(`location.pathname === '${scoped('/tasks/fix-done')}'`)
     expect(browser.url()).toContain(scoped('/tasks/fix-done'))
     browser.goto(`${baseUrl}${scoped('/')}`)
-    browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+    browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)
+    showResourceTable()
   })
 
   it('keeps task metadata AA-readable on normal and hovered rows with visible title focus', () => {
     browser.goto(`${baseUrl}${scoped('/')}`)
-    browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+    browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)
     showResourceTable()
     try {
       for (const variant of contrastQaVariants) {
@@ -744,11 +746,12 @@ describe('the tasks table under worst-case row content', () => {
     expect(response.ok).toBe(true)
     browser.setViewport(1440, 900)
     browser.goto(`${worstUrl}/p/${worstProject}/`)
-    browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)
     browser.evaluate(`localStorage.removeItem('cez-sidebar-width')`)
     browser.goto(`${worstUrl}/p/${worstProject}/`)
-    browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)
     showResourceTable()
+    browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
   })
 
   afterAll(async () => {
@@ -1018,8 +1021,9 @@ describe('the tasks table under worst-case row content', () => {
 
     browser.evaluate(`localStorage.setItem('cez-sidebar-width', '360')`)
     browser.goto(`${worstUrl}/p/${worstProject}/`)
-    browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)
     showResourceTable()
+    browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
     const resized = waitForSettledSample(browser, `({
       preference: localStorage.getItem('cez-sidebar-width'),
       sidebarWidth: document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width,

@@ -1,3 +1,4 @@
+import { TaskTitleEditorProvider, useTaskTitleEditor } from '@/lib/task-title-editor'
 import { useTaskListFocus } from '@/lib/use-task-list-focus'
 import { DESKTOP_MEDIA_QUERY, useIsDesktop } from '@/lib/use-desktop'
 import { useRunCacheWriter } from '@/api/use-run-cache-writer'
@@ -15,7 +16,7 @@ import type { ArchivedRunsResponse, RunSummary } from '@open-mercato/cezar-api-c
 import { CenteredState } from '@/components/centered-state'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { DirectionalUsage, directionalUsageLabel } from '@/components/directional-usage'
-import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
+import { TitleEditInput } from '@/components/editable-title'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Pill } from '@/components/pill'
 import { PinToggle } from '@/components/pin-toggle'
@@ -206,7 +207,7 @@ export function TasksOverview({
   // drop the task at the top of the active list by a click that looked like it did nothing.
   const pinToggle = view === 'archived' ? undefined : onTogglePin
   return (
-    <div {...listFocus} data-route="tasks" data-presentation={detailedTable ? 'resources' : 'summary'} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+    <TaskTitleEditorProvider runs={all} onRename={onRename}><div {...listFocus} data-route="tasks" data-presentation={detailedTable ? 'resources' : 'summary'} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
       {/* One set of search/view controls across breakpoints keeps query and selection intact.
           Mobile places search above the list filters; the shell already supplies its title. */}
       <header ref={headerRef} className="flex shrink-0 flex-col gap-[22px]">
@@ -288,7 +289,7 @@ export function TasksOverview({
         )}
         {view === 'archived' && archivedPages ? <ArchivedOlder pages={archivedPages} /> : null}
       </div>
-    </div>
+    </div></TaskTitleEditorProvider>
   )
 }
 /** Hands the search text to the page; the page calls `written` with each trimmed text its
@@ -1185,7 +1186,6 @@ function FoldedTd({ column }: { column: TaskColumnId }) {
 function TitleCell({
   run,
   to,
-  onRename,
   onTogglePin,
 }: {
   run: RunSummary
@@ -1194,7 +1194,7 @@ function TitleCell({
   onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
 }) {
   const title = runTitle(run)
-  const editor = useTitleEditor(title, (next) => onRename(run.id, next))
+  const editor = useTaskTitleEditor(run)
   // Read/unread (#unread-done-items, "Option B"): promote an unread done item (bright + semibold)
   // and dim a read one, matching the sidebar row exactly so the two surfaces read as one grammar.
   const unread = isUnread(run)

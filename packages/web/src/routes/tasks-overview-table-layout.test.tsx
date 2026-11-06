@@ -1201,3 +1201,20 @@ it('keeps expanded resources and their focused control across a breakpoint flip'
   setOverviewDesktop(false)
   expect(document.activeElement).toBe(screen.getByRole('link', { name: 'Open task: Keep resources' }))
 })
+
+it.each([false, true])('restores an unsaved title draft and editor focus after desktop to phone to desktop (detailed=%s)', (detailed) => {
+  setOverviewDesktop(true)
+  const { onRename } = renderOverview({ runs: [run({ id: 'draft-resize', title: 'Original title' })] }, detailed)
+  fireEvent.click(screen.getByRole('button', { name: 'Rename task' }))
+  fireEvent.change(screen.getByRole('textbox', { name: 'Task title' }), { target: { value: 'Unsaved title draft' } })
+  setOverviewDesktop(false)
+  expect(screen.queryByRole('textbox', { name: 'Task title' })).toBeNull()
+  expect(onRename).not.toHaveBeenCalled()
+  setOverviewDesktop(true)
+  const input = screen.getByRole('textbox', { name: 'Task title' }) as HTMLInputElement
+  expect(input.value).toBe('Unsaved title draft')
+  expect(document.activeElement).toBe(input)
+  expect(onRename).not.toHaveBeenCalled()
+  fireEvent.keyDown(input, { key: 'Enter' })
+  expect(onRename).toHaveBeenCalledExactlyOnceWith('draft-resize', 'Unsaved title draft')
+})

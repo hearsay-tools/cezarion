@@ -8,6 +8,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { beforeAll, afterAll, expect, it } from 'vitest'
 import { seedRuns, recordedRun } from './seed-runs'
 import { settleVisual } from './visual-ready'
+import { dismissWithEscape } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth, pollFor, pollJson } from './poll'
@@ -70,11 +71,18 @@ it('renders assigned task flows at 1440 Wide, 402 and 360 in both themes without
   }
 }, 180_000)
 it('persists column choices, filters projects, and expands mobile resources through real controls', async () => {
+  const reset = await fetch(`${base}/api/v1/workspace/ui-state`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ taskTable: { expandedColumns: { branch: false } } }),
+  })
+  expect(reset.ok).toBe(true)
   browser.goto(base + scoped('/')); prepare(1440, 'light')
   browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="task-cards"]') !== null`)
   browser.click('[data-slot="task-columns-trigger"]')
+  browser.waitForFunction(`document.querySelector('[data-column-toggle="branch"]')?.checked === false`)
   browser.click('[data-column-toggle="branch"]')
-  browser.press('Escape')
+  browser.waitForFunction(`document.querySelector('[data-column-toggle="branch"]')?.checked === true`)
+  dismissWithEscape(browser, { content: '[data-slot="popover-content"]', focus: '[data-slot="task-columns-trigger"]' })
   const state = await pollFor(async signal => {
     const state = await pollJson<{ taskTable?: { expandedColumns?: { branch?: boolean | undefined } } }>(`${base}/api/v1/workspace/ui-state`, signal)
     return state.taskTable?.expandedColumns?.branch === true ? state : undefined
@@ -82,8 +90,8 @@ it('persists column choices, filters projects, and expands mobile resources thro
   expect(state.taskTable?.expandedColumns?.branch).toBe(true)
   browser.goto(base + scoped('/')); prepare(360, 'dark')
   browser.waitForFunction(`document.querySelector('[data-slot="task-card"]') !== null`)
-  browser.click('[data-slot="task-card"]:first-child [data-slot="mobile-resources-toggle"]')
-  expect(browser.text('[data-slot="task-card"]:first-child')).toContain('Memory')
+  browser.click('[data-slot="task-card"][data-run-id="fixture-A"] [data-slot="mobile-resources-toggle"]')
+  expect(browser.text('[data-slot="task-card"][data-run-id="fixture-A"]')).toContain('Memory')
   browser.goto(base + '/tasks?project=missing&group=project')
   browser.waitForFunction(`document.body.textContent.includes('No matching tasks')`)
   browser.click('[data-action="clear-filters"]')
