@@ -58,7 +58,7 @@ type QueuedPatch =
 export interface RunsIndexSync {
   /** The stream attached: `ready` names its generation and last frame number. */
   ready(generation: string, seq: number): void
-  /** A new stream attachment: its generation is unknown until its `ready`. */
+  /** A new stream attachment, or a dropped one: its generation is unknown until a `ready`. */
   detach(): void
   /** One run frame of `project`. `gap` is true when the stream's seq fence saw lost frames. */
   run(project: string, event: WorkspaceRunEvent, gap?: boolean): void
@@ -118,9 +118,11 @@ function registryOf(queryClient: QueryClient): ReadonlySet<string> | undefined {
  * it (the merge has already asked for a reconciliation). Two sources answer independently (the
  * document's read and the shared worker's), so an older answer can land after a newer one:
  * - same generation, lower `eventSeq`;
- * - another generation than the stream's while the cache is of the stream's generation. Generations
- *   are opaque, so the stream decides: after a real restart its reconnect brings the new `ready`
- *   and a fenced read.
+ * - another generation than the stream's while the cache is of the stream's generation, and only
+ *   while a stream is attached (`stream` is cleared when the source opens anew or drops).
+ *   Generations are opaque, so an attached stream decides: after a real restart its reconnect
+ *   brings the new `ready` and a fenced read. With no stream attached, the newest snapshot wins
+ *   under the same-generation rule only, so a stream that never reopens cannot freeze the index.
  */
 function newerCached(current: RunsIndexResponse | undefined, snapshot: RunsIndexResponse, stream: string | undefined): RunsIndexResponse | undefined {
   if (!current || typeof current.eventSeq !== 'number' || typeof snapshot.eventSeq !== 'number') return undefined

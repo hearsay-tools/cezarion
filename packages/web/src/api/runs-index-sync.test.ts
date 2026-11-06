@@ -314,6 +314,23 @@ describe('runs index sync: fence matrix', () => {
     unsubscribe()
   })
 
+  it('D1, the original order: a g2 snapshot while the stream is g1 keeps the g1 cache, which takes the g1 patch; no g2 data gets it', async () => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
+    const { unsubscribe } = observe(() => g2())
+    const generations: Array<string | undefined> = []
+    const off = client.getQueryCache().subscribe(() => { generations.push(cached()?.generation) })
+    runFrame('a', summary('a2', '2026-01-02', { title: 'from g1' }))
+    // The query function answers g2 while the attached stream still says g1.
+    await sync.reconcile()
+    runAnimationFrames()
+    expect(cached()?.generation).toBe('g1')
+    expect(titles()?.[0]).toBe('from g1')
+    // No g2 data was ever cached, so none could take the g1 patch.
+    expect(generations.includes('g2')).toBe(false)
+    off()
+    unsubscribe()
+  })
+
   it('D1: a g1 patch queued before a g2 snapshot lands is not applied to it', async () => {
     client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
     const { unsubscribe } = observe(() => g2())

@@ -818,6 +818,9 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
       source.addEventListener('error', () => {
         // Any drop: events are not reaching the reducers until the next attachment ping.
         setWorkspaceLive(false)
+        // No stream is attached now, so it names no generation: a snapshot from a restarted
+        // server (the backstop, a poll) must not wait for a stream that may never reopen.
+        indexSync.detach()
         // An ordinary drop leaves the stream CONNECTING and the browser retries it on its own —
         // touching that would just race its backoff. CLOSED means it gave up for good, which is
         // what a restarting server produces (the request is answered with a non-2xx while it

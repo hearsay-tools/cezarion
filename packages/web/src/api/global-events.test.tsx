@@ -2010,6 +2010,16 @@ describe('useGlobalEvents — runs index patches (hearsay-tools/cezarion#2729)',
     expect(runsIndexSync(client).merge(stale).runs.map((row) => row.id)).toEqual(['o1', 'b1'])
   })
 
+  it('a dropped stream that never reopens does not freeze the index: a g2 snapshot is adopted', () => {
+    const { source } = mount()
+    source.emit('ready', streamReady('g1'))
+    // The stream errors and stays down (a proxy that holds SSE while HTTP works).
+    source.drop()
+    const g2 = { ...client.getQueryData<RunsIndexResponse>(workspaceQueryKeys.runsIndex)!, generation: 'g2', eventSeq: 4 }
+    // The backstop read answers from the restarted server.
+    expect(runsIndexSync(client).merge(g2)).toBe(g2)
+  })
+
   it('a new project reconciles the index after the hold', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
