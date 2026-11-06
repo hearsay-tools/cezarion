@@ -6,11 +6,11 @@
  *
  * Views: `closed` (the boot project's task list), `all-tasks` (the global Tasks page) and
  * `detail` (the delegation parent's task detail). Phases, in order, each its own window:
- * - `cold`: navigation and 8 s of bootstrap;
+ * - `cold`: navigation and 8 s of bootstrap, then until the cockpit settles (`settled`);
  * - `update`: one row's title changes once; 3 s, with the time until the title shows on the page;
  * - `sustained`: 5 token ticks per second for 60 s, round-robin over the parent, its workers and
  *   three `other` roots; an ordinary GET probe every second;
- * - `reconnect`: the server drops every connection; 8 s.
+ * - `reconnect`: the server drops every connection; 8 s, then until the fenced read has landed.
  *
  * Per window: `runs-index` and `/runs/:id` requests and body bytes, workspace SSE body bytes, all
  * bytes, `runs-index` request durations, probe p50/p95, server CPU, renderer task time and React
@@ -25,6 +25,7 @@ import { loadavg } from 'node:os'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { AgentBrowser } from '../e2e/agent-browser.ts'
 import { createTabFixture } from '../e2e/tab-fixture.ts'
+import { pollFor } from '../e2e/poll.ts'
 
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms)) // sampling, never readiness
 const ticks = (pid: number) => { try { const fields = readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1]!.split(' '); return Number(fields[11]) + Number(fields[12]) } catch { return 0 } }
@@ -53,7 +54,7 @@ const HOOK_SHIM = `(() => {
 const VIEWS = ['closed', 'all-tasks', 'detail'] as const
 type View = (typeof VIEWS)[number]
 
-interface RequestRow { url: string; at: number; startTs?: number; durationMs?: number; chunks: Array<[number, number]> }
+interface RequestRow { url: string; at: number; startTs?: number; durationMs?: number; ended?: boolean; chunks: Array<[number, number]> }
 
 export async function runIndexWorkload(options: {
   buildRoot: string; report: { cases: unknown[] }; save: () => void; views?: string[] | undefined; cpu?: string | undefined
@@ -90,7 +91,9 @@ export async function runIndexWorkload(options: {
           if (event.method === 'Network.loadingFinished') {
             const row = requests.get(key)
             if (row?.startTs !== undefined) row.durationMs = 1000 * (event.params.timestamp - row.startTs)
+            if (row) row.ended = true
           }
+          if (event.method === 'Network.loadingFailed') { const row = requests.get(key); if (row) row.ended = true }
         })
         await request('Target.setAutoAttach', { autoAttach: true, flatten: true, waitForDebuggerOnStart: true, filter: [{ type: 'shared_worker', exclude: false }, { exclude: true }] })
         const { targetId } = await request('Target.createTarget', { url: 'about:blank' })
@@ -112,6 +115,17 @@ export async function runIndexWorkload(options: {
         const otherRoots = state.indexRoots!.other!.map(runId => ({ projectId: 'other', runId }))
         const path = view === 'all-tasks' ? '/tasks' : view === 'detail' ? `/p/boot/tasks/${family.parent}` : '/p/boot'
 
+        /** The product's own settle signals: the workspace stream passed its attachment barrier
+         *  (`__cezLive`), nothing is in flight (`__cezIdle`), and an index read started since `since`
+         *  has landed. A slow bootstrap or reconnect then extends its phase instead of leaking its
+         *  index read into the next one. A cockpit that settled within the phase adds no time. */
+        const settled = async (since: number) => {
+          await pollFor(async () => {
+            const index = [...requests.values()].filter(row => row.url.includes('/workspace/runs-index') && row.at >= since)
+            const landed = index.some(row => row.durationMs !== undefined) && index.every(row => row.ended)
+            return landed && await evaluate('window.__cezLive === true && window.__cezIdle === true') ? true : undefined
+          }, () => `index workload (${view}): the cockpit did not settle`, { timeoutMs: 30_000, intervalMs: 100, tries: 300 })
+        }
         const phases: Record<string, unknown> = {}
         const measure = async (name: string, body: () => Promise<Record<string, unknown> | void>) => {
           const t0 = performance.now(), cpu0 = ticks(pid), task0 = await taskMs().catch(() => 0)
@@ -143,8 +157,10 @@ export async function runIndexWorkload(options: {
         }
 
         await measure('cold', async () => {
+          const since = performance.now()
           await request('Page.navigate', { url: `${fixture.origin}${path}` }, sessionId)
           await pause(8_000)
+          await settled(since)
           return { main: await evaluate('!!document.querySelector("[data-slot=main]")') }
         })
         await measure('update', async () => {
@@ -177,8 +193,10 @@ export async function runIndexWorkload(options: {
           return { ticks: ticked, probeP50Ms: round(quantile(probes, 0.5)), probeP95Ms: round(quantile(probes, 0.95)), probes: probes.length }
         })
         await measure('reconnect', async () => {
+          const since = performance.now()
           await fixture.control({ disconnect: true })
           await pause(8_000)
+          await settled(since)
           return { main: await evaluate('!!document.querySelector("[data-slot=main]")') }
         })
         const loadAfter = loadavg()

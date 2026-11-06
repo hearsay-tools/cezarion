@@ -63,7 +63,9 @@ export function useWorkspaceSignals(): WorkspaceSignals | null {
     const after = new Set(registry.split('\n'))
     const sync = runsIndexSync(queryClient)
     for (const id of before) if (!after.has(id)) sync.dropProject(id)
-    if ([...after].some((id) => !before.has(id))) void sync.reconcile({ hold: true })
+    const added = [...after].filter((id) => !before.has(id))
+    for (const id of added) sync.restoreProject(id)
+    if (added.length > 0) void sync.reconcile({ hold: true })
   }, [queryClient, registry])
 
   return React.useMemo(

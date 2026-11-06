@@ -165,6 +165,43 @@ describe('runs index sync: patches', () => {
   })
 })
 
+describe('runs index sync: review round 1', () => {
+  it('B1: a snapshot read before a project removal does not bring the project back', () => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, snapshot(SEED().runs, { truncated: ['a'], referenceStatuses: { a: { prs: {}, issues: {} } } as RunsIndexResponse['referenceStatuses'] }))
+    sync.dropProject('a')
+    expect(titles()).toEqual(['b1'])
+    // The query function or the shared live read answers with a snapshot taken before the removal.
+    const late = sync.merge(snapshot(SEED().runs, { truncated: ['a'], referenceStatuses: { a: { prs: {}, issues: {} } } as RunsIndexResponse['referenceStatuses'] }))
+    expect(late.runs.map((entry) => entry.projectId)).toEqual(['b'])
+    expect(late.truncated).toEqual([])
+    expect(late.referenceStatuses).toEqual({})
+    // Frames of the removed project do not bring it back either.
+    runFrame('a', summary('a9', '2026-01-09'))
+    runAnimationFrames()
+    expect(titles()).toEqual(['b1'])
+    // A snapshot without the project confirms the removal; a project added again comes back.
+    sync.merge(snapshot([row('b', 'b1', '2026-01-01')]))
+    sync.restoreProject('a')
+    expect(sync.merge(snapshot(SEED().runs)).runs.map((entry) => entry.id)).toEqual(['a2', 'b1'])
+  })
+
+  it('B1: a project added again before any confirming snapshot comes back', () => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
+    sync.dropProject('a')
+    sync.restoreProject('a')
+    expect(sync.merge(snapshot(SEED().runs)).runs.map((entry) => entry.id)).toEqual(['a2', 'b1'])
+  })
+
+  it('D1: a patch queued under one generation is not applied after a restart', () => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
+    runFrame('a', summary('a2', '2026-01-02', { title: 'from g1' }))
+    sync.ready('g2', 0)
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, snapshot([row('a', 'a2', '2026-01-02', { title: 'from g2' }), row('b', 'b1', '2026-01-01')], { generation: 'g2', eventSeq: 0 }))
+    runAnimationFrames()
+    expect(titles()).toEqual(['from g2', 'b1'])
+  })
+})
+
 describe('runs index sync: reconciliation', () => {
   it('runs at most one read at a time, plus one trailing read for triggers during it', async () => {
     client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())

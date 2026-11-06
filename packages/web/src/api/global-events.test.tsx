@@ -11,12 +11,13 @@ import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { toRunSummary } from '@open-mercato/cezar-api-client/contract/runs'
 import { createQueryClient } from './query-client'
+import { runsIndexSync } from './runs-index-sync'
 import { queryKeys, useHealth, useRunnerModels, useRun, useRuns, useProjectRuns, useProviderStatus, workspaceQueryKeys } from './queries'
 import { TaskQuickList } from '../components/task-quick-list'
 import { HandoffAction } from '../routes/task-thread/handoff-action'
 import { RunNotifications } from '../components/run-notifications'
 import { TasksOverview } from '../routes/tasks-overview'
-import type { ApiRun, ProviderStatusResponse, RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
+import type { ApiRun, ProviderStatusResponse, RunRecord, RunsIndexResponse, RunSummary } from '@open-mercato/cezar-api-client'
 
 // Reducer/lifecycle tests control named frames at the adapter seam. Actual ownership and
 // finite fallback are tested in live-coordinator and the browser suite.
@@ -1987,6 +1988,16 @@ describe('useGlobalEvents — runs index patches (hearsay-tools/cezarion#2729)',
     expect(index()?.referenceStatuses).toEqual({})
     act(() => void vi.advanceTimersByTime(60_000))
     expect(indexInvalidations(invalidate)).toBe(0)
+  })
+
+  it('a removed project stays out of a late snapshot; added again, it may return', () => {
+    const { source } = mount()
+    const stale = client.getQueryData<RunsIndexResponse>(workspaceQueryKeys.runsIndex)!
+    source.emit('project-removed', JSON.stringify({ id: 'other' }))
+    // A read that started before the removal answers afterwards.
+    expect(runsIndexSync(client).merge(stale).runs.map((row) => row.id)).toEqual(['b1'])
+    source.emit('project-added', JSON.stringify({ project: { id: 'other' } }))
+    expect(runsIndexSync(client).merge(stale).runs.map((row) => row.id)).toEqual(['o1', 'b1'])
   })
 
   it('a new project reconciles the index after the hold', () => {

@@ -743,7 +743,11 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           }
           // A new project may hold runs no frame named; a removed one leaves the index whole,
           // with no request.
-          if (name === 'project-added') void indexSync.reconcile({ hold: true })
+          if (name === 'project-added') {
+            const id = (payload as { project?: { id?: unknown } } | null)?.project?.id
+            if (typeof id === 'string' && id !== '') indexSync.restoreProject(id)
+            void indexSync.reconcile({ hold: true })
+          }
           if (name === 'project-removed') {
             const id = (payload as { id?: unknown } | null)?.id
             if (typeof id === 'string' && id !== '') indexSync.dropProject(id)

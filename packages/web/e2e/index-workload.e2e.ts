@@ -15,6 +15,9 @@ it.skipIf(process.platform !== 'linux')('keeps the runs-index workload reproduci
       // A loaded e2e host can need more than the report's 3 s window to paint the row.
       updateWindowMs: 15_000,
     })
+    // The cold and reconnect phases end only after the cockpit's own settle signals
+    // (`__cezLive`, `__cezIdle`, the index read landed), so the exact counts below do not depend on
+    // how fast this host bootstraps or reconnects.
     const { phases } = report.cases[0]!
     expect(phases.cold).toMatchObject({ main: true })
     // Another project's title change reaches the global Tasks page with no full index read.
