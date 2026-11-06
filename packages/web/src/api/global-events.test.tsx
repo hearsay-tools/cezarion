@@ -1187,9 +1187,9 @@ describe('useGlobalEvents — run events', () => {
     expect(indexWrites()).toHaveLength(1)
     expect(client.getQueryData<{ runs: RunSummary[] }>(workspaceQueryKeys.runsIndex)?.runs[0]?.status).toBe(RUN_STATUS.done)
     act(() => void vi.advanceTimersByTime(60_000))
-    const indexRefreshes = invalidate.mock.calls.filter(
-      (call) => (call[0] as { queryKey?: readonly unknown[] }).queryKey?.[1] === 'runs-index',
-    )
+    const indexRefreshes = invalidate.mock.calls.filter((call) => {
+      return (call[0] as { queryKey?: readonly unknown[] }).queryKey?.[1] === 'runs-index'
+    })
     expect(indexRefreshes).toHaveLength(0)
   })
 

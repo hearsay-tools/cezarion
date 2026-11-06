@@ -98,9 +98,13 @@ export async function runIndexWorkload(options: {
         await request('Network.enable', {}, sessionId); await request('Performance.enable', {}, sessionId); await request('Page.enable', {}, sessionId)
         await request('Page.addScriptToEvaluateOnNewDocument', { source: HOOK_SHIM }, sessionId)
         const { profileOut } = options
-        const evaluate = async (expression: string) => (await request('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, sessionId)).result.value
+        const evaluate = async (expression: string) => {
+          return (await request('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, sessionId)).result.value
+        }
         const taskMs = async () => Object.fromEntries((await request('Performance.getMetrics', {}, sessionId)).metrics.map((m: { name: string; value: number }) => [m.name, m.value])).TaskDuration as number
-        const takeCommits = async () => (await evaluate('window.__cezCommits ? window.__cezCommits.splice(0) : []')) as number[]
+        const takeCommits = async () => {
+          return (await evaluate('window.__cezCommits ? window.__cezCommits.splice(0) : []')) as number[]
+        }
 
         const state = await fixture.control()
         const family = state.family!
