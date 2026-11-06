@@ -9,40 +9,6 @@ Before adding a YAML, shell or Markdown reader, read [Script readers](../../../d
 
 ## Iterate
 
-<a id="squeal-wait-bound"></a>
-
-<!-- until: hearsay-tools/squeal#146 -->
-**A wait for one file's verdict has a bound.** Squeal's skill says to wait again
-when `squeal status --wait` returns on timeout. In this repo, stop waiting for a
-unit test file's verdict when either case holds:
-
-- Squeal reports the file unknown: for example, it timed out at the per-file
-  cap (`runner.timeoutMs` in `squeal.config.json`), or it was never queued.
-  Waiting again does not change an unknown result, and `squeal retry` runs the
-  file again under the same cap.
-- The file is still pending after the per-file cap plus five minutes, counted
-  from your first wait at the revision you will push.
-
-Then do these three things:
-
-1. Run the tests in that file that the change adds, changes or reads:
-   `npm test -- <file> -t '<name>'`. Check that each run reports passed tests,
-   not only skipped ones. Run the whole file (`npm test -- <file>`) only when no
-   test name covers the change, for example after an edit to a shared testkit.
-2. In the PR's Verification, record the file and its Squeal state (unknown and
-   its reason, or pending and for how long). Also record the load average
-   (`uptime`), the logical CPU count (`nproc`), and each command with its passed
-   and skipped counts.
-3. Let CI's four Vitest shards give the file's full verdict. A focused pass is
-   not a full pass, and the PR does not merge until the shards pass.
-
-A file that gets a verdict must pass: the bound covers a missing verdict, never
-a failure. The bound also covers a test file that Squeal re-runs only because
-the change edited a document it reads. For example, an edit to
-`AGENT_PROTOCOL.md` prose re-runs
-`packages/cezar/src/core/harness-parity.test.ts`, and the focused run is
-`npm test -- packages/cezar/src/core/harness-parity.test.ts -t "counted roster"`.
-
 For changed-test selection rules, run `npm run test:changed -- --help`.
 
 **Packaged CLI E2E runs by hand.** Run `npm run test:package -- <repo-root paths>`.
