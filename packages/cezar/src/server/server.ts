@@ -48,6 +48,7 @@ import { subscribeRunFeed } from './run-event-feed.ts';
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
 import { ARCHIVED_RUNS_PAGE_DEFAULT } from '@open-mercato/cezar-contract/run-limits';
 import { RUNS_SEARCH_PER_PROJECT_MAX, archivedRunsQuerySchema, runSummariesQuerySchema, runsSearchQuerySchema } from '@open-mercato/cezar-contract/runs';
+import { workspaceEventsQuerySchema, type RunsIndexResponse } from '@open-mercato/cezar-contract/workspace-events';
 import { automationListQuerySchema } from '@open-mercato/cezar-contract/automations';
 
 import { localTimeZone } from '@open-mercato/cezar-contract/zoned-time';
@@ -103,7 +104,6 @@ import {
   markAllReadRequestSchema,
   notifyRunInputSchema,
   type RunIndexEntry,
-  type RunsIndexResponse,
 } from '@open-mercato/cezar-contract/runs';
 import {
   githubSearchQuerySchema,
@@ -149,7 +149,7 @@ import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-mode
 import { PROVIDER_IDS, ProviderAuthService, type ProviderId } from '../core/provider-auth.ts';
 import { applyProviderEnablement } from '../core/provider-availability.ts';
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
-import { currentUsage, onUsage } from '../core/process-usage.ts';
+import { allUsage, currentUsage, onUsage } from '../core/process-usage.ts';
 import { WORKFLOWS_DIR, loadWorkflows } from '../workflows/load.ts';
 import {
   normalizeWorkflowDoc,
@@ -258,6 +258,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { mergeWriteWorkspaceUiState, readWorkspaceUiState } from '../workspace/ui-state.ts';
 import { checkoutRepo, type CloneRunner } from './checkout.ts';
 import { createProject, listGithubOwners, type CommandRunner } from './create-project.ts';
+import { createWorkspaceRunFeed } from './workspace-run-feed.ts';
 import { armPreview, ProjectContexts, projectWarmupEnabled, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
 
 import { readProjectUiState, readUiState, writeProjectUiState } from '../ui-state.ts';
@@ -3201,6 +3202,13 @@ export function createApp(deps: ServerDeps) {
     return usage ? { ...summary, usage } : summary;
   };
 
+  // One run feed for every workspace stream connection (hearsay-tools/cezarion#2730): one store
+  // subscription per project, one process-wide `seq`, each frame built once per mode.
+  const workspaceRunFeed = createWorkspaceRunFeed({
+    bootStore: bootContext.store, contexts, onWorkspaceEvent: (listener) => workspaceEvents.on(listener),
+    onUsage, allUsage, withLiveUsage,
+  });
+
   /**
    * Gate every run control by family ownership: refuse foreign or quarantined writers with 409;
    * adopt proven dead owners without resuming agents. Reads remain available. Stop carries its
@@ -4335,95 +4343,35 @@ export function createApp(deps: ServerDeps) {
 
   // ---- chained family: workspace SSE stream (workspace-level) ----
   const workspaceEventsRoutes = new Hono<ProjectApiEnv>()
-    .get('/workspace/events', (c) => {
+    // `?runs=summary` (hearsay-tools/cezarion#2730) carries list rows with a contiguous `seq`
+    // instead of full records; without it the stream stays byte-identical for older readers.
+    .get('/workspace/events', queryZodValidator(workspaceEventsQuerySchema), (c) => {
+      const mode = c.req.valid('query').runs === 'summary' ? 'summary' : 'full';
       return streamSSENoBuffer(c, async (stream) => {
-        // One detach bundle per attached project — the id guard makes a double
-        // attach (connect-time snapshot vs. the built hook) impossible.
-        const attached = new Map<string, { store: RunStore; detach: () => void }>();
-        const attach = (project: string, ctx: Pick<ProjectContext, 'store' | 'dataDir'>): void => {
-          if (attached.has(project)) return;
-          const { store } = ctx;
-          const onRun = (run: RunRecord) =>
-            void stream.writeSSE({
-              event: 'run',
-              data: JSON.stringify({ ...run, project }),
-            });
-          const onDeleted = (id: string) =>
-            void stream.writeSSE({
-              event: 'run-deleted',
-              data: JSON.stringify({ id, project }),
-            });
-          store.on('run', onRun);
-          store.on('deleted', onDeleted);
-          attached.set(project, {
-            store,
-            detach: () => {
-              store.off('run', onRun);
-              store.off('deleted', onDeleted);
-            },
-          });
-        };
+        // The boot context never lives in the lazy map: the feed keeps it under its registry id
+        // (`resolveBootProject`, NOT `bootContext.id`, which may be the reserved alias when
+        // registration was suppressed).
+        const bootProject = await resolveBootProject();
+        // Attach, relay and `ready` happen in one synchronous block, so no frame can slip
+        // between the feed's `seq` and this connection's `ready`.
+        const detach = workspaceRunFeed.connect(bootProject, mode, (event, data) => void stream.writeSSE({ event, data }));
 
-        // The boot context never lives in the lazy map — seed it under its
-        // registry id (`resolveBootProject`, NOT `bootContext.id`, which may be
-        // the reserved alias when registration was suppressed).
-        attach(await resolveBootProject(), bootContext);
-        // NB: snapshot + hook subscription happen in one sync block, so no
-        // context can slip between them.
-        for (const id of contexts.ids()) {
-          const ctx = contexts.peek(id);
-          if (ctx) attach(ctx.id, ctx);
-        }
-        const offBuilt = contexts.onContextBuilt((ctx) => attach(ctx.id, ctx));
-
-        // `usage` is FILTERED per project, never a stamped whole (spec "SSE
-        // streams"): the module-global sampler's snapshot is split by each
-        // attached project's owned runIds, one event per project that has live
-        // rows. No event for a row-less project — the workspace stream carries
-        // no empty-record clears (that is the per-project streams' contract).
-        const offUsage = onUsage((usage) => {
-          const rows = Object.entries(usage);
-          for (const [project, { store }] of attached) {
-            const owned: typeof usage = {};
-            for (const [runId, sample] of rows) {
-              if (store.getRun(runId)) owned[runId] = sample;
-            }
-            if (Object.keys(owned).length > 0) {
-              void stream.writeSSE({
-                event: 'usage',
-                data: JSON.stringify({ project, usage: owned }),
-              });
-            }
-          }
-        });
-
-        // Workspace-level events (project-added / project-removed /
-        // checkout-progress plus host-wide unstamped provider-status) — relayed
-        // verbatim under their own names. A removal also drops the project's
-        // attach entry: the id guard in `attach` would otherwise pin the
-        // DISPOSED context forever, so a project removed and re-added on the
-        // same slug would rebuild a fresh context whose events never reach this
-        // already-open stream.
+        // Workspace-level events (project-added / project-removed / checkout-progress plus
+        // host-wide unstamped provider-status) — relayed verbatim under their own names. The
+        // feed detaches a removed project's store itself.
         const offWorkspace = workspaceEvents.on((event, data) => {
-          if (event === 'project-removed') {
-            const removed = (data as { id?: string }).id;
-            if (removed !== undefined && attached.has(removed)) {
-              attached.get(removed)?.detach();
-              attached.delete(removed);
-            }
-          }
           void stream.writeSSE({ event, data: JSON.stringify(data) });
         });
 
         stream.onAbort(() => {
-          offBuilt();
-          offUsage();
+          detach();
           offWorkspace();
-          for (const { detach } of attached.values()) detach();
-          attached.clear();
         });
 
-        await stream.writeSSE({ event: 'ready', data: JSON.stringify({ generation: serverGeneration }) });
+        await stream.writeSSE({
+          event: 'ready',
+          data: JSON.stringify(mode === 'summary' ? { generation: serverGeneration, seq: workspaceRunFeed.seq() } : { generation: serverGeneration }),
+        });
 
         while (!stream.aborted) {
           await stream.writeSSE({ event: 'ping', data: '' });
@@ -5084,7 +5032,11 @@ export function createApp(deps: ServerDeps) {
       // never touches `gh` and never slows the index down; anything cold stays absent and the
       // lazy `/github/ref-status` route fills it in.
       const referenceStatuses: RunsIndexResponse['referenceStatuses'] = {};
-      for (const { project, store: owned, dataDir, handle } of await projectRunSources()) {
+      const sources = await projectRunSources();
+      // Read after the last await and before the synchronous reads below: every frame at or below
+      // it is in this snapshot, and a frame above it is newer (hearsay-tools/cezarion#2730).
+      const eventSeq = workspaceRunFeed.seq();
+      for (const { project, store: owned, dataDir, handle } of sources) {
         // Both sources answer the same window, newest first: every unarchived run, plus the
         // newest archived roots (#864). An owned project lays its held records over its rows; a
         // cold one reads its stored summaries, at most one archived root past the window.
@@ -5119,6 +5071,8 @@ export function createApp(deps: ServerDeps) {
         perProjectLimit: RUNS_INDEX_PER_PROJECT,
         truncated,
         referenceStatuses,
+        generation: serverGeneration,
+        eventSeq,
       };
       return c.json(body);
     })

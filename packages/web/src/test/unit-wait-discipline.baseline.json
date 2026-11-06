@@ -130,19 +130,7 @@
     {
       "file": "routes/task-thread/task-thread.test.tsx",
       "rule": "short-bound",
-      "site": "await waitFor(() => expect(queryClient.getQueryState(queryKeys.runs.detail('r1'))?.fetchStatus).toBe('idle'), { timeout: 250 })",
-      "count": 1
-    },
-    {
-      "file": "routes/task-thread/task-thread.test.tsx",
-      "rule": "short-bound",
       "site": "await waitFor(() => expect(requests).toHaveLength(2), { timeout: 2_000 })",
-      "count": 1
-    },
-    {
-      "file": "routes/task-thread/task-thread.test.tsx",
-      "rule": "short-bound",
-      "site": "await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Updated by stream'), { timeout: 250 })",
       "count": 1
     },
     {

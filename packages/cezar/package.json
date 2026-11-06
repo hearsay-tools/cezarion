@@ -33,6 +33,7 @@
     "bench:family-reconcile": "node --import tsx scripts/benchmark-family-reconcile.ts",
     "bench:run-store": "node --import tsx scripts/benchmark-run-store.ts",
     "bench:stuck-destroys": "node --import tsx scripts/benchmark-stuck-destroys.ts",
+    "bench:workspace-events": "node --import tsx scripts/benchmark-workspace-events.ts",
     "server-install": "tsx src/index.ts server-install",
     "server-deploy": "tsx src/index.ts server-deploy",
     "server-uninstall": "tsx src/index.ts server-uninstall",

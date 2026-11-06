@@ -9,6 +9,7 @@ import {
   WAIT_VIA,
 } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
+import { toRunSummary } from '@open-mercato/cezar-api-client/contract/runs'
 import { openHumanWait } from '@/test/run-summary-fixture'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
@@ -1362,16 +1363,20 @@ function stubWorkspaceRunEvents() {
   class FakeEventSource {
     private listeners = new Map<string, (event: MessageEvent<string>) => void>()
     constructor(url: string | URL, _options?: EventSourceInit) {
-      if (String(url).endsWith('/workspace/events')) sources.push(this)
+      if (String(url).includes('/workspace/events')) sources.push(this)
     }
     addEventListener(name: string, listener: (event: MessageEvent<string>) => void) { this.listeners.set(name, listener) }
     emit(name: string, payload: unknown) { this.listeners.get(name)?.({ data: JSON.stringify(payload) } as MessageEvent<string>) }
     close() {}
   }
   vi.stubGlobal('EventSource', FakeEventSource)
+  let seq = 0
   return {
     sources,
-    emitRun: (record: ApiRun) => sources[0]!.emit('run', { ...record, project: 'demo' }),
+    // The summary-mode frame (hearsay-tools/cezarion#2730): the list row, never the record.
+    emitRun: (record: ApiRun) => sources[0]!.emit('run-summary', {
+      project: 'demo', seq: ++seq, run: toRunSummary(record), relationships: JSON.stringify([record.status, record.delegation]),
+    }),
   }
 }
 
@@ -1380,7 +1385,7 @@ function seedBootProject(queryClient: ReturnType<typeof createQueryClient>) {
 }
 
 describe('TaskThreadRoute — in-flight detail cancellation (#483)', () => {
-  it('keeps a cached thread on screen during cancellation and recovers from the next GET', async () => {
+  it('keeps a cached thread and its in-flight GET through an event, then fetches once more', async () => {
     const requests = stubPendingDetailGets()
     const { sources, emitRun } = stubWorkspaceRunEvents()
     const queryClient = createQueryClient()
@@ -1392,20 +1397,21 @@ describe('TaskThreadRoute — in-flight detail cancellation (#483)', () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.runs.detail('r1') })
     await waitFor(() => expect(requests).toHaveLength(1))
     expect(sources).toHaveLength(1)
-    expect(requests[0]!.signal.aborted).toBe(false)
     await act(async () => emitRun(run('waiting', { titleSummary: 'Updated by stream' })))
-    expect(requests[0]!.signal.aborted).toBe(true)
-    expect(queryClient.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.titleSummary).toBe('Updated by stream')
-    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Updated by stream'), { timeout: 250 })
+    // The GET in flight is kept; a summary never replaces the record the thread shows.
+    expect(requests[0]!.signal.aborted).toBe(false)
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Do the thing')
     expect(screen.queryByText('Could not load this task')).toBeNull()
-    expect(requests).toHaveLength(1) // no GET replaces the event patch before the debounce
 
+    await act(async () => requests[0]!.reply(run('waiting', { titleSummary: 'Server before event' })))
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Server before event'))
+    // That GET started before the event, so one more follows it.
     await waitFor(() => expect(requests).toHaveLength(2))
     await act(async () => requests[1]!.reply(run('waiting', { titleSummary: 'Fresh server title' })))
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Fresh server title'))
   })
 
-  it('keeps an uncached initial load pending through cancellation until a real GET answers', async () => {
+  it('keeps an uncached initial load pending through an event until a real GET answers', async () => {
     const requests = stubPendingDetailGets()
     const { sources, emitRun } = stubWorkspaceRunEvents()
     const queryClient = createQueryClient()
@@ -1416,36 +1422,33 @@ describe('TaskThreadRoute — in-flight detail cancellation (#483)', () => {
     expect(sources).toHaveLength(1)
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Loading task…')
     await act(async () => emitRun(run('running', { titleSummary: 'Only a stream summary' })))
-    expect(requests[0]!.signal.aborted).toBe(true)
-    // Drain the cancellation and observer notification, not the 400ms authoritative refetch.
-    // An immediate assertion can race the cancelled query's pending → error notification.
-    await waitFor(() => expect(queryClient.getQueryState(queryKeys.runs.detail('r1'))?.fetchStatus).toBe('idle'), { timeout: 250 })
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    expect(requests[0]!.signal.aborted).toBe(false)
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Loading task…')
     expect(screen.queryByText('Could not load this task')).toBeNull()
-    expect(requests).toHaveLength(1) // the authoritative GET waits for the event debounce
 
-    await waitFor(() => expect(requests).toHaveLength(2))
-    await act(async () => requests[1]!.reply(run('running')))
+    await act(async () => requests[0]!.reply(run('running')))
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Do the thing'))
+    await waitFor(() => expect(requests).toHaveLength(2))
   })
 
   it('a worker status SSE event keeps its cached parent thread visible while refreshing its in-flight detail', async () => {
-    const requests = stubPendingDetailGets()
+    // A worker's slim delegation names its parent by UUID.
+    const parentId = '7d4b2f0e-3c1a-4e5b-9f6d-2a8c0b1e4d3f'
+    const requests = stubPendingDetailGets(parentId)
     const { sources, emitRun } = stubWorkspaceRunEvents()
     const queryClient = createQueryClient()
     seedBootProject(queryClient)
-    queryClient.setQueryData(queryKeys.runs.detail('r1'), run('waiting', { finishBlocked: 'worker pending' }))
-    renderRoute('r1', queryClient, true)
+    queryClient.setQueryData(queryKeys.runs.detail(parentId), run('waiting', { id: parentId, finishBlocked: 'worker pending' }))
+    renderRoute(parentId, queryClient, true)
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Do the thing'))
-    void queryClient.invalidateQueries({ queryKey: queryKeys.runs.detail('r1') })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.runs.detail(parentId) })
     await waitFor(() => expect(requests).toHaveLength(1))
     expect(sources).toHaveLength(1)
     await act(async () => {
       emitRun(run('done', {
         id: '0f1cbcbf-84b2-4978-8381-c9dfbe9339b5',
         delegation: {
-          role: 'worker', parentRunId: 'r1', permissions: [],
+          role: 'worker', parentRunId: parentId, permissions: [],
           workspace: {
             ownerRunId: '0f1cbcbf-84b2-4978-8381-c9dfbe9339b5',
             resourceId: 'a45eb6fd-be26-4ebc-9b96-8f1c4b7607cb',
@@ -1458,7 +1461,7 @@ describe('TaskThreadRoute — in-flight detail cancellation (#483)', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Do the thing')
     expect(screen.queryByText('Could not load this task')).toBeNull()
     await waitFor(() => expect(requests).toHaveLength(2), { timeout: 2_000 })
-    await act(async () => requests[1]!.reply(run('waiting', { titleSummary: 'Parent after worker' })))
+    await act(async () => requests[1]!.reply(run('waiting', { id: parentId, titleSummary: 'Parent after worker' })))
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Parent after worker'))
   })
 
