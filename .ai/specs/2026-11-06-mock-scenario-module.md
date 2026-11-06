@@ -144,9 +144,11 @@ export function play(scenario, encoder);
 ```
 
 - `context` carries `runner` (a `RUNNER_IDS` value), `lifecycle(call)` (the mock's
-  cezar tool call, as `mock-autonomous.mjs` receives it today), `session` (cross-turn
-  state; in memory, or Cursor print's state file) and `unsupported` (the scenario
-  names this wire cannot carry; see below).
+  cezar tool call, as `mock-autonomous.mjs` receives it today), and `toolPrompt(prompt)`,
+  `ciPrompt(prompt)` and `crash(prompt)` as mock-supplied wire boundaries. The module
+  knows no runner's wire config. It also carries `session` (cross-turn state; in memory,
+  or Cursor print's state file) and `unsupported` (the scenario names this wire cannot
+  carry; see below).
 - A scenario is `{ name, beforeFailure, steps }`. `beforeFailure` says whether the
   scenario runs before the mock's native failure control. The module owns the match
   order, including the substring order that keeps `mock:hold-cezar-done` from
@@ -163,6 +165,7 @@ A step is a plain object. The encoder has one method per step kind:
 | Step | The encoder emits |
 |---|---|
 | `open` | the native turn start. The encoder alone orders it against the mock's acknowledgement: OpenCode sends its HTTP acknowledgement after the SSE turn events in its delayed-ack cases (`autonomous-cap`, `f7-delay-ack`), and that order stays |
+| `effect(run)` | nothing; runs code at play time, with no encoder method. An asynchronous effect defers the next step; a synchronous effect does not |
 | `text(parts)` | one assistant message; `parts` are its deltas. A part may be a function of `lifecycle`, so a cezar tool call runs before the text goes out |
 | `reasoning(text)` | one reasoning or thinking block |
 | `toolStart(call)` / `toolEnd(call)` | a tool call and its result; `call` has `id`, `name`, `input`, `output`, `isError` |
@@ -204,6 +207,11 @@ difference, the slice that adopts the script picks one version by this rule:
 3. A test assertion never changes to fit a unified script. If a test pins two
    different versions on two runners, the scenario keeps a per-runner parameter,
    and the slice reports it.
+
+The timing parameters this rule's point 3 produced are Codex F11
+(`silent-tail-late-turn-start`: release before turn start, then the `.content`
+release before text) and Cursor F10 (`silent-tail-slow-done`: release the tail
+through the release file rather than a sleep). Both retain their pinned tests.
 
 Unification changes test-only fixture output, never what a user sees: shared
 scenarios start only from a `mock:` token, and the untokened reply stays
