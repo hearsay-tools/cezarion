@@ -123,14 +123,15 @@ it('orders same-clock writes and keeps a snapshot for repeated content', async (
   await mergeWriteAgentAccounts((store) => { store.marker = 'b'; });
   await mergeWriteAgentAccounts((store) => { store.marker = 'a'; });
   await mergeWriteAgentAccounts((store) => { store.marker = 'c'; });
+  await mergeWriteAgentAccounts((store) => { store.marker = 'd'; });
   const snapshots = listBackups('agent-accounts.json');
-  expect(snapshots).toHaveLength(3);
-  expect(snapshots.map((entry) => JSON.parse(readFileSync(entry.path, 'utf8')).marker)).toEqual(['a', 'b', 'a']);
-  expect(new Set(snapshots.map((entry) => entry.time)).size).toBe(3);
+  expect(snapshots).toHaveLength(4);
+  expect(snapshots.map((entry) => JSON.parse(readFileSync(entry.path, 'utf8')).marker)).toEqual(['c', 'a', 'b', 'a']);
+  expect(new Set(snapshots.map((entry) => entry.time)).size).toBe(4);
   vi.spyOn(console, 'log').mockImplementation(() => {});
   expect(await runBackupCommand(['restore', 'agent-accounts.json'], process.env)).toBe(0);
-  expect((await loadAgentAccounts()).marker).toBe('a');
-  expect(listBackups('agent-accounts.json')).toHaveLength(4);
+  expect((await loadAgentAccounts()).marker).toBe('c');
+  expect(listBackups('agent-accounts.json')).toHaveLength(5);
 });
 
 it('rejects a zone-less restore time without changing live JSON', async () => {
