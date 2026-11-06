@@ -69,7 +69,10 @@ tests continue to verify tool effects through the real workflow controller.
 A recipe ends on its last expected record. Child-after-park recipes release the
 park gate after the parent's turn end and consume the late child output.
 OpenCode delayed-ack recipes consume the HTTP acknowledgement after the SSE
-turn events. Stalled recipes stop after the native acknowledgement or pid file.
+turn events. Stalled recipes stop after the native acknowledgement, or after the pid file
+and every frame the mock sends before it stalls. Gated recipes release
+`input-ack.release` after the pid file, then consume the acknowledgement and
+opening frames.
 Terminating crash recipes record the leader's exit code or signal; clean crash
 diagnostics end on the native turn end. Held-pipe children keep their inherited
 stdio; only the mock's own writes and its leader exit enter that transcript.

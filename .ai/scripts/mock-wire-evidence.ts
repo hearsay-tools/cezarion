@@ -19,7 +19,7 @@ const shared = [
   'crash-stderr', 'crash-stderr-single', 'crash-stderr-pre-ack', 'crash-stderr-held-pipe', 'crash-stderr-clean',
   'deferred-turn-start', 'hold', 'hold-cezar-ask', 'hold-cezar-done', 'hold-gated',
   'multi-pr-refs', 'no-progress', 'no-progress-ignore-term', 'no-progress-held-pipe',
-  'no-progress-ack-only', 'no-progress-leftover', 'no-progress-input-closed',
+  'no-progress-ack-only', 'no-progress-leftover', 'no-progress-input-closed', 'no-progress-gated-ack',
   'silent-tail', 'silent-tail-again', 'silent-tail-ack-delay', 'silent-tail-no-reply',
   'silent-tail-late-reply', 'silent-tail-late-turn-start', 'silent-tail-slow-done',
   'tool-tail', 'turn-messages', 'ack-only', 'busy-progress', 'provider-error',
@@ -30,6 +30,7 @@ const counts: Partial<Record<RunnerId, number>> = {};
 
 function gap(runner: RunnerId, scenario: string): string | undefined {
   if (runner === 'cursor' && ['ack-only', 'resume-cezar-done', 'steer-tool', 'steer-late', 'subagent-after-park', 'no-progress-input-closed', 'silent-tail-late-turn-start'].includes(scenario)) return 'Cursor print has no persistent input, steering or child wire for this recipe.';
+  if (scenario === 'no-progress-gated-ack' && runner !== 'pi' && runner !== 'omp') return 'This baseline wire has no direct mock:gate-prompt-ack gate.';
   if (runner === 'pi' && scenario === 'subagent-after-park') return 'Pi has no child wire for this recipe.';
   if (runner === 'claude' && scenario === 'steer-late') return 'Claude has no direct mock:steer-late token.';
   if (scenario === 'silent-tail-ack-delay' && runner !== 'opencode') return 'f7-delay-ack is an OpenCode HTTP acknowledgement recipe.';
@@ -38,6 +39,7 @@ function gap(runner: RunnerId, scenario: string): string | undefined {
 
 function prompt(scenario: string, runner: RunnerId, park: string): string {
   if (['untokened', 'deferred-turn-start', 'silent-tail-ack-delay'].includes(scenario)) return 'Inspect the working tree.';
+  if (scenario === 'no-progress-gated-ack') return 'mock:no-progress mock:gate-prompt-ack';
   if (scenario === 'turn-messages') return `mock:turn-messages:${encoded}`;
   if (scenario === 'resume-cezar-done') return `${runner === 'codex' ? 'mock:native-codex-ask' : runner === 'opencode' ? 'mock:ask' : 'mock:cezar-ask'} mock:resume-cezar-done`;
   if (scenario === 'subagent-after-park') return `mock:subagent-after-park parity-release=${park}`;
@@ -64,10 +66,18 @@ function acknowledged(runner: RunnerId, file: string, offset = 0): boolean {
   });
 }
 
+function stallFramesRecorded(runner: RunnerId, file: string): boolean {
+  const wire = readFileSync(file, 'utf8');
+  if (runner === 'pi') return acknowledged(runner, file) && wire.includes('turn_start');
+  if (runner === 'omp') return acknowledged(runner, file) && wire.includes('message_end');
+  return acknowledged(runner, file);
+}
+
 function stopFixture(session: AgentSession, scenario: string, cwd: string) {
+  const stalledPid = scenario.startsWith('no-progress') && session.open ? session.pid : undefined;
   session.end();
-  if (scenario.startsWith('no-progress') && session.open && session.pid) {
-    try { process.kill(session.pid, 'SIGKILL'); } catch { /* already exited */ }
+  if (stalledPid) {
+    try { process.kill(stalledPid, 'SIGKILL'); } catch { /* already exited */ }
   }
   for (const name of ['leftover-group.pid', 'leftover-session.pid']) {
     const path = join(cwd, name);
@@ -117,6 +127,9 @@ async function driveRecipe(scenario: string, runner: RunnerId, session: AgentSes
   if (scenario.startsWith('no-progress')) {
     // bound: the fixture publishes its pid after admitting the opening prompt.
     await waitFor(() => existsSync(join(cwd, scenario.endsWith('input-closed') ? 'input-closed.pid' : 'watchdog.pid')), 5_000);
+    writeFileSync(join(cwd, 'input-ack.release'), 'release');
+    // bound: gated Pi/OMP publish their pid before the native ACK and opening frames.
+    await waitFor(() => stallFramesRecorded(runner, file), 5_000);
     return;
   }
   if (scenario === 'ack-only') {
