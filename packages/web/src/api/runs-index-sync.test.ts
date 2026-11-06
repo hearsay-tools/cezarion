@@ -318,7 +318,9 @@ describe('runs index sync: fence matrix', () => {
     client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
     const { unsubscribe } = observe(() => g2())
     runFrame('a', summary('a2', '2026-01-02', { title: 'from g1' }))
-    // The query function answers g2 before the frame's animation frame.
+    // The server restarted: the stream says g2, and the query function answers g2 before the
+    // frame's animation frame.
+    sync.ready('g2', 0)
     await sync.reconcile()
     runAnimationFrames()
     expect(cached()?.generation).toBe('g2')
@@ -330,8 +332,10 @@ describe('runs index sync: fence matrix', () => {
     client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
     const { unsubscribe } = observe(() => g2())
     g1Usage()
+    sync.ready('g2', 0)
     await sync.reconcile()
     runAnimationFrames()
+    expect(cached()?.generation).toBe('g2')
     expect(cached()?.runs.some((entry) => entry.usage)).toBe(false)
     unsubscribe()
   })
@@ -390,8 +394,8 @@ describe('runs index sync: fence matrix', () => {
     runFrame('a', summary('a2', '2026-01-02', { title: 'g2 seq 8' }))
     runAnimationFrames()
     expect(titles()).toEqual(['g2 seq 8', 'b1'])
-    // A late g1 read (another source) changes nothing and asks for one reconciliation at most.
-    expect(sync.merge(SEED()).runs[0]?.title).toBe('a2')
+    // A late g1 read (another source) changes nothing: the cached g2 data stays.
+    expect(sync.merge(SEED())).toBe(cached())
     unsubscribe()
   })
 
@@ -569,6 +573,42 @@ describe('runs index sync: write bound', () => {
     await vi.advanceTimersByTimeAsync(RUNS_INDEX_WRITE_INTERVAL_MS)
     expect(cached()?.runs[0]?.usage?.cpuPct).toBe(20)
     expect(minGap(writes())).toBeGreaterThanOrEqual(RUNS_INDEX_WRITE_INTERVAL_MS)
+  })
+})
+
+describe('runs index sync: a late, older snapshot keeps the newer cache (CodeRabbit, PR 2816)', () => {
+  it('an eventSeq 20 read arriving after the eventSeq 30 one keeps the cached rows and asks for one more read', async () => {
+    const newer = snapshot([row('a', 'a2', '2026-01-02', { title: 'at 30' }), row('b', 'b1', '2026-01-01')], { eventSeq: 30 })
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, sync.merge(newer))
+    const { queryFn, unsubscribe } = observe(() => newer)
+    const late = sync.merge(snapshot([row('a', 'a2', '2026-01-02', { title: 'at 20' }), row('b', 'b1', '2026-01-01')], { eventSeq: 20 }))
+    expect(late).toBe(cached())
+    expect(late.runs[0]?.title).toBe('at 30')
+    await vi.advanceTimersByTimeAsync(RUNS_INDEX_RECONCILE_HOLD_MS)
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    unsubscribe()
+  })
+
+  it('an old-generation read arriving after the stream\'s generation is cached keeps the cache and asks once', async () => {
+    sync.ready('g2', 0)
+    const current = snapshot([row('a', 'a2', '2026-01-02', { title: 'g2' }), row('b', 'b1', '2026-01-01')], { generation: 'g2', eventSeq: 3 })
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, sync.merge(current))
+    const { queryFn, unsubscribe } = observe(() => current)
+    expect(sync.merge(SEED())).toBe(cached())
+    expect(sync.merge(SEED())).toBe(cached())
+    await vi.advanceTimersByTimeAsync(RUNS_INDEX_RECONCILE_HOLD_MS * 2)
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    // A patch of the stream's generation still applies to the kept cache.
+    seq = 3
+    runFrame('a', summary('a2', '2026-01-02', { title: 'g2 frame' }))
+    runAnimationFrames()
+    expect(titles()?.[0]).toBe('g2 frame')
+    unsubscribe()
+  })
+
+  it('a cold cache takes the first snapshot as it is', () => {
+    const first = snapshot(SEED().runs, { eventSeq: 5 })
+    expect(sync.merge(first)).toEqual(first)
   })
 })
 

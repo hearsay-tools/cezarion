@@ -113,6 +113,21 @@ function registryOf(queryClient: QueryClient): ReadonlySet<string> | undefined {
   return projects ? new Set(projects.map((project) => project.id)) : undefined
 }
 
+/**
+ * The cached index when it is known to be newer than a late snapshot, which then must not replace
+ * it (the merge has already asked for a reconciliation). Two sources answer independently (the
+ * document's read and the shared worker's), so an older answer can land after a newer one:
+ * - same generation, lower `eventSeq`;
+ * - another generation than the stream's while the cache is of the stream's generation. Generations
+ *   are opaque, so the stream decides: after a real restart its reconnect brings the new `ready`
+ *   and a fenced read.
+ */
+function newerCached(current: RunsIndexResponse | undefined, snapshot: RunsIndexResponse, stream: string | undefined): RunsIndexResponse | undefined {
+  if (!current || typeof current.eventSeq !== 'number' || typeof snapshot.eventSeq !== 'number') return undefined
+  if (current.generation === snapshot.generation) return snapshot.eventSeq < current.eventSeq ? current : undefined
+  return stream !== undefined && current.generation === stream && snapshot.generation !== stream ? current : undefined
+}
+
 function toChange(project: string, event: WorkspaceRunEvent): IndexChange {
   return event.type === 'run-summary'
     ? { type: 'run', project, seq: event.seq, run: event.summary }
@@ -286,11 +301,12 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
       removed.delete(project)
     },
     merge(snapshot) {
+      const current = cached()
       const result = mergeIndexSnapshot(overlay, snapshot, registryOf(queryClient))
       for (const project of removed) result.index = dropIndexProject(result.index, project)
       // The snapshot is still being written; the next reconciliation must start after it.
       if (result.reconcile) queueMicrotask(() => { void reconcile({ hold: true }) })
-      return result.index
+      return newerCached(current, snapshot, overlay.stream) ?? result.index
     },
     reconcile,
     flush,
