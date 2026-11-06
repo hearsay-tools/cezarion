@@ -1551,7 +1551,8 @@ and the cells that need the card opt out. U5 ends a turn with no wait: one nudge
 no-wait turn end opens the `no-wait` wait, which reads Needs you and is answered by the user's
 reply, which restarts the budget. U5a answers the nudge with `cezar_ask` and parks on that question
 after one extra turn, the default dry-run path. U5c finishes a root parked on Cezar's no-wait wait,
-and pins that an agent question still blocks Finish. U5d pins that the no-wait wait raises no
+and pins that an agent question still blocks Finish of a root with workers; a root without
+workers finishes and closes it (hearsay-tools/cezarion#2784). U5d pins that the no-wait wait raises no
 question (its `askSeq` is its note, and no gate fact is pending), and that a timer the agent
 registers cancels it into `lastWaits` and parks the run as monitoring. U18 finishes a run parked
 on the agent's `cezar_ask` card, with its session open and with it closed: Finish records

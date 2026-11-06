@@ -37,7 +37,7 @@ export const WAIT_CRITERIA = [
   // hearsay-tools/cezarion#1234 phase 2b: the turn-end rule.
   { id: 'U5', scenario: 'baseline', name: 'a turn end with no wait gets one nudge, then a second no-wait turn end opens a no-wait human wait and reads needs you' },
   { id: 'U5a', scenario: 'baseline', name: 'a nudge the agent answers with cezar_ask parks on that question after one extra turn' },
-  { id: 'U5c', scenario: 'baseline', name: 'a root parked on its no-wait human wait is finished by the user, and an agent question still blocks it' },
+  { id: 'U5c', scenario: 'baseline', name: 'a root parked on its no-wait human wait is finished by the user, and an agent question still blocks a root with workers' },
   { id: 'U5d', scenario: 'baseline', name: 'the no-wait human wait raises no question, and the agent\'s own wait replaces it' },
   { id: 'U18', scenario: 'baseline', name: 'Finish on a run parked on an agent question closes the question without answering it' },
   { id: 'U17', scenario: 'turn-messages', name: 'a question in prose without a wait no longer parks the run by itself' },
