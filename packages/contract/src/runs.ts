@@ -11,6 +11,7 @@ import { ARCHIVED_RUNS_PAGE_MAX } from './run-limits.ts';
 import { workflowDefSchema, workflowStepDefSchema } from './workflows.ts';
 import { computeWaitingOn, hasResolvedWait, waitingOnSchema, waitSchema, waitRegistrationReceiptSchema, withRootLedger } from './waits.ts';
 import { handoffRecordsSchema } from './handoff.ts';
+import { completionControlsShape, taskAccessShape } from './task-options.ts';
 
 /**
  * The RUNS family of `/api/v1` — a task's record, its lifecycle mutations, and the artifacts
@@ -265,14 +266,7 @@ export const runRecordSchema = z.object({
   /** Autonomous mode (#autonomous): the run never parks at `waiting` or the terminal `review`
    *  gate. Absent = falsy = not autonomous. */
   autonomous: z.boolean().optional(),
-  /** Opt-in completion controls. Missing values are off. */
-  archiveWhenDone: z.boolean().optional(),
-  autoMergePr: z.boolean().optional(),
-  /** Task access (hearsay-tools/cezarion#2784): may this task's agents start Cezar workers and
-   *  resume them, and may they message peer tasks. New runs store an explicit value; a missing
-   *  value is on. Read them through `workersAllowed` / `messagingAllowed`. */
-  allowWorkers: z.boolean().optional(),
-  allowMessaging: z.boolean().optional(),
+  ...completionControlsShape, ...taskAccessShape,
   completionAction: completionActionSchema.optional(),
   archiveBlocker: z.object({
     message: z.string(), runId: z.string().optional(), pullRequestUrl: z.string().optional(),
@@ -423,10 +417,6 @@ export const runRecordSchema = z.object({
   handoffRecords: handoffRecordsSchema.optional(),
 });
 export type RunRecord = z.infer<typeof runRecordSchema>;
-
-/** Task access (hearsay-tools/cezarion#2784): a missing value is on, the default for new tasks. */
-export const workersAllowed = (run: Pick<RunRecord, 'allowWorkers'>): boolean => run.allowWorkers !== false;
-export const messagingAllowed = (run: Pick<RunRecord, 'allowMessaging'>): boolean => run.allowMessaging !== false;
 
 /**
  * What `GET /runs` and `GET /runs/:id` answer: the stored record plus host-derived fields.
@@ -926,11 +916,7 @@ export const createRunInputBaseSchema = z
     worktree: z.boolean().optional(),
     /** true → autonomous run: never parks at "waiting"; auto-continues until done. */
     autonomous: z.boolean().optional(),
-    archiveWhenDone: z.boolean().optional(),
-    autoMergePr: z.boolean().optional(),
-    /** Task access (hearsay-tools/cezarion#2784). Omit for on. */
-    allowWorkers: z.boolean().optional(),
-    allowMessaging: z.boolean().optional(),
+    ...completionControlsShape, ...taskAccessShape,
     /** Per-run system-prompt override. Wins over the config default; whitespace-only is absent. */
     systemPrompt: z
       .string()
@@ -990,10 +976,7 @@ export type MessageInput = z.input<typeof messageInputSchema>;
 export const patchRunInputSchema = z.object({
   title: z.string().trim().min(1).max(300).optional(),
   task: z.string().trim().min(1).max(100_000).optional(),
-  archiveWhenDone: z.boolean().optional(),
-  autoMergePr: z.boolean().optional(),
-  allowWorkers: z.boolean().optional(),
-  allowMessaging: z.boolean().optional(),
+  ...completionControlsShape, ...taskAccessShape,
 });
 export type PatchRunInput = z.input<typeof patchRunInputSchema>;
 

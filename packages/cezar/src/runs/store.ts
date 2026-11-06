@@ -2016,7 +2016,7 @@ export class RunStore extends EventEmitter {
     return run?.clientRequestId === clientRequestId ? run : undefined;
   }
 
-  createRun(input: {
+  createRun(input: Pick<RunRecord, 'allowWorkers' | 'allowMessaging'> & {
     title: string;
     systemPrompt?: string | undefined;
     workflowDef?: z.infer<typeof workflowDefSchema>;
@@ -2031,8 +2031,6 @@ export class RunStore extends EventEmitter {
     autonomous?: boolean | undefined;
     archiveWhenDone?: boolean | undefined;
     autoMergePr?: boolean | undefined;
-    allowWorkers?: boolean | undefined;
-    allowMessaging?: boolean | undefined;
     /** Task webhook opt-in (#589), set at creation so the first transition is already covered. */
     notify?: boolean | undefined;
     worktree?: false | undefined;
@@ -2077,9 +2075,7 @@ export class RunStore extends EventEmitter {
       agentProfile: input.agentProfile,
       autonomous: input.autonomous,
       archiveWhenDone: input.archiveWhenDone,
-      autoMergePr: input.autoMergePr,
-      ...(input.allowWorkers === undefined ? {} : { allowWorkers: input.allowWorkers }),
-      ...(input.allowMessaging === undefined ? {} : { allowMessaging: input.allowMessaging }),
+      autoMergePr: input.autoMergePr, allowWorkers: input.allowWorkers, allowMessaging: input.allowMessaging,
       ...(input.notify ? { notify: true } : {}),
       worktree: input.worktree,
       groupId: input.groupId,
@@ -2700,9 +2696,7 @@ export class RunStore extends EventEmitter {
     const run = this.record(id);
     if (!run) return undefined;
     const committed = (patch.status === 'done' && doneCommits(run)) || patch.handoffRecords !== undefined ||
-      patch.archiveWhenDone !== undefined || patch.autoMergePr !== undefined ||
-      // A disabled task access must be durable before the next delegated call reads it (hearsay-tools/cezarion#2784).
-      patch.allowWorkers !== undefined || patch.allowMessaging !== undefined;
+      [patch.archiveWhenDone, patch.autoMergePr, patch.allowWorkers, patch.allowMessaging].some(value => value !== undefined);
     return this.writeRun(id, run, patch, committed ? 'committed' : 'debounced');
   }
 

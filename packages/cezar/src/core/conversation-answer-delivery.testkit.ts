@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, beforeEach, expect, it as registerTest, describe, vi } from 'vitest';
+import { afterEach, expect, it as registerTest, describe, vi } from 'vitest';
 import type { ConversationMessage } from '@open-mercato/cezar-contract';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';

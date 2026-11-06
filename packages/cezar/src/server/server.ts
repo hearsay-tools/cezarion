@@ -3485,19 +3485,9 @@ export function createApp(deps: ServerDeps) {
           titleOrigin: 'user',
         });
       }
-      if (parsed.data.archiveWhenDone !== undefined || parsed.data.autoMergePr !== undefined) {
-        store.updateRun(id, {
-          ...(parsed.data.archiveWhenDone === undefined ? {} : { archiveWhenDone: parsed.data.archiveWhenDone }),
-          ...(parsed.data.autoMergePr === undefined ? {} : { autoMergePr: parsed.data.autoMergePr }),
-        });
-      }
-      if (parsed.data.allowWorkers !== undefined || parsed.data.allowMessaging !== undefined) {
-        // Task access (hearsay-tools/cezarion#2784): any status; the delegation service reads it per call.
-        store.updateRun(id, {
-          ...(parsed.data.allowWorkers === undefined ? {} : { allowWorkers: parsed.data.allowWorkers }),
-          ...(parsed.data.allowMessaging === undefined ? {} : { allowMessaging: parsed.data.allowMessaging }),
-        });
-      }
+      // Completion controls and task access (hearsay-tools/cezarion#2784) change at any status.
+      const { title: _title, task: _task, ...options } = parsed.data;
+      if (Object.values(options).some(value => value !== undefined)) store.updateRun(id, options);
       return c.json(store.getRun(id));
     })
 

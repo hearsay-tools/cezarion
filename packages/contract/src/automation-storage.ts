@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { completionControlsShape, taskAccessShape } from './task-options.ts';
 import { automationKindSchema, automationHistoryScanSchema } from './automations.ts';
 import { automationScheduleSchema, type AutomationSchedule } from './automation-schedule.ts';
 import { runnerSchema } from './health.ts';
@@ -42,10 +43,7 @@ export const storedAutomationTaskSchema = z
     variants: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
     worktree: z.boolean().optional(),
     autonomous: z.boolean().optional(),
-    archiveWhenDone: z.boolean().optional(),
-    autoMergePr: z.boolean().optional(),
-    allowWorkers: z.boolean().optional(),
-    allowMessaging: z.boolean().optional(),
+    ...completionControlsShape, ...taskAccessShape,
     systemPrompt: z.string().max(100_000).optional(),
   })
   .passthrough()

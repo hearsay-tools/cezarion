@@ -1,6 +1,6 @@
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { randomUUID } from 'node:crypto';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { RUNNER_IDS } from './agent-runner.ts';

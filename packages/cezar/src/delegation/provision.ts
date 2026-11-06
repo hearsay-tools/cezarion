@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { RunStore } from '../runs/store.ts';
 import { CredentialRegistry } from './credentials.ts';
-import { messagingAllowed, workersAllowed } from '@open-mercato/cezar-contract';
+import { messagingAllowed, workersAllowed } from '@open-mercato/cezar-contract/task-options';
 import { DelegationService, rootDelegation, type DelegationProject } from './service.ts';
 import { WORKERS_OFF } from './policy.ts';
 import { createDelegationRoutes } from './routes.ts';

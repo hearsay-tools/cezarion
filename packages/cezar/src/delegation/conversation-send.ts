@@ -1,6 +1,6 @@
 import type { AgentInput, ConversationMessage, ConversationSendRequest, ConversationState, RequestOutcome } from '@open-mercato/cezar-contract';
 import { MAX_CONVERSATION_REQUEST_SECONDS } from '@open-mercato/cezar-contract/conversations';
-import { messagingAllowed } from '@open-mercato/cezar-contract';
+import { messagingAllowed } from '@open-mercato/cezar-contract/task-options';
 import type { RunRecord } from '../runs/store.ts';
 import type { DelegationProject } from './service.ts';
 import { finishing, notDeliveredInstruction } from './conversations.ts';

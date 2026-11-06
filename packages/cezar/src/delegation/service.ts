@@ -58,7 +58,7 @@ import {
   type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract/delegation';
 import type { AgentInput } from '@open-mercato/cezar-contract';
-import { messagingAllowed } from '@open-mercato/cezar-contract';
+import { messagingAllowed } from '@open-mercato/cezar-contract/task-options';
 import { completionWaitEntry, hasWorkerDeadline, peerWaitView, workerCompletionWaitProjection, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import type { RunStore, RunRecord } from '../runs/store.ts';
 import { assertConversationIdFree, ConversationIdInUseError } from '../runs/conversation-identity.ts';

@@ -1,6 +1,6 @@
 import { delegationStateSchema } from '@open-mercato/cezar-contract/delegation';
 import type { DelegationErrorResponse, WorkerOperation, WorkerCollectedResult, ModelChoices } from '@open-mercato/cezar-contract';
-import { messagingAllowed, workersAllowed } from '@open-mercato/cezar-contract';
+import { messagingAllowed, workersAllowed } from '@open-mercato/cezar-contract/task-options';
 import type { RunRecord } from '../runs/store.ts';
 import { isAuthenticatedCaller, type Caller } from './credentials.ts';
 import { capacityError, workerCapacity } from './capacity.ts';
