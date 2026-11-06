@@ -39,6 +39,16 @@
       "packages/contract/src/**/*.ts",
       "packages/api-client/src/contract/**/*.ts"
     ],
+    "packages/cezar/src/lint/lint-ast-grep-1.test.ts": [
+      "sgconfig.yml",
+      ".ai/ast-grep/**",
+      "packages/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"
+    ],
+    "packages/cezar/src/lint/lint-ast-grep-2.test.ts": [
+      "sgconfig.yml",
+      ".ai/ast-grep/**",
+      "packages/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"
+    ],
     "packages/cezar/src/lint/lint-runner.test.ts": [
       ".env.example",
       "sgconfig.yml",

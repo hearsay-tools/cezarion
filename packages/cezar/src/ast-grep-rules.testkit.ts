@@ -115,9 +115,9 @@ const matchesSchema = z.array(
   }),
 );
 
-/** Every match of every rule in `sgconfig.yml`. Reads stdout only: the shim's warning is on stderr. */
-export async function scanRepository(): Promise<Site[]> {
-  const run = await runAstGrep(['scan', '--config', sgconfigPath, '--json=compact']);
+/** Matches from `sgconfig.yml`, optionally filtered by rule id. Reads stdout only. */
+export async function scanRepository(filter?: string): Promise<Site[]> {
+  const run = await runAstGrep(['scan', '--config', sgconfigPath, '--json=compact', ...(filter === undefined ? [] : ['--filter', filter])]);
   if (run.code !== 0) throw new Error(`ast-grep scan exited ${run.code}:\n${run.stderr}${run.stdout}`);
   const matches = matchesSchema.parse(run.stdout.trim() === '' ? [] : JSON.parse(run.stdout));
   return matches.map((match) => ({
