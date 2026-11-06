@@ -6,7 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 /**
  * Starts a process that outlives the call that started it, and later stops it
  * (hearsay-tools/cezarion#1717, hearsay-tools/cezarion#1815). It holds the Process exits cases
- * of .ai/skills/load-bearing-change § Case tables, so a caller that starts through it owns only its own handle and
+ * of .ai/specs/TEMPLATE.md § Case tables, so a caller that starts through it owns only its own handle and
  * the phases of its own start.
  *
  * A started process leads its own process group (on POSIX), and its start identity is recorded:
