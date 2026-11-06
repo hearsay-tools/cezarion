@@ -115,6 +115,7 @@ const sharedNames = ['autonomous', 'silent-tail', 'tool-tail', 'crash-stderr', '
   'cezar-done', 'cezar-ask', 'busy-progress', 'no-progress', 'hold-gated', 'hold', 'deferred-turn-start'];
 // Print has no persistent input, steering, child transcript or cezar-wait reply.
 const unsupported = ['ack-only', 'steer-tool', 'steer-late', 'subagent-after-park', 'cezar-wait'];
+let crashContinues = false;
 const session = {
   get resumeAfterAsk() { return origin === 'resume-cezar-done'; },
   set resumeAfterAsk(value) {
@@ -129,7 +130,7 @@ function selectScenario(name, text = prompt) {
     unsupported: [...unsupported, ...sharedNames.filter(candidate => candidate !== name)],
     toolPrompt: text => tools().then(module => module.toolPrompt('cursor', args, text)),
     ciPrompt: text => tools().then(module => module.ciPrompt('cursor', args, text)),
-    async crash(text) { (await import('./mock-runner-crash.mjs')).crashWithStderr(text, '{"type":"assistant",'); },
+    async crash(text) { crashContinues = (await import('./mock-runner-crash.mjs')).crashWithStderr(text, '{"type":"assistant",') === true; },
   });
 }
 // A missing scenario is synchronous. The player alone awaits asynchronous steps.
@@ -145,7 +146,7 @@ function dispatch(replies, index = 0) {
       if (selected.name === 'no-progress' || selected.name === 'silent-tail' && origin === 'silent-tail-no-reply' && prompt.includes(NO_WAIT_NUDGE_PREFIX)) {
         setInterval(() => {}, 1000); return new Promise(() => {});
       }
-      return outcome === 'continue' ? dispatch(replies, next) : undefined;
+      return outcome === 'continue' || selected.name === 'crash-stderr' && crashContinues ? dispatch(replies, next) : undefined;
     };
     const outcome = play(selected, encoder(selected));
     return outcome instanceof Promise ? outcome.then(finish) : finish(outcome);
@@ -155,7 +156,7 @@ function encoder(selected) {
   let text = '';
   return {
     open() {},
-    text(step) { const block = step.parts.join(''); text += block; assistant(block); },
+    text(step) { const block = step.parts.join(''); text = block; assistant(block); },
     reasoning(step) { frame({ type: 'assistant', session_id: id, message: { role: 'assistant', content: [{ type: 'thinking', thinking: step.text }] } }); },
     toolStart: ({ call }) => scenarioTool(call, false),
     toolEnd: ({ call }) => scenarioTool(call, true),
@@ -163,14 +164,18 @@ function encoder(selected) {
     readSteers() {},
     progress: () => assistant('working\n'),
     reply: () => defaultReply(),
-    end(step) { result(step.error === 'provider' ? 'RetriableError: provider unavailable' : text, step.error === 'provider'); },
+    end(step) {
+      const empty = selected.name === 'turn-messages' || ['silent-tail', 'tool-tail'].includes(selected.name) && !prompt.includes(NO_WAIT_NUDGE_PREFIX);
+      result(step.error === 'provider' ? 'RetriableError: provider unavailable' : empty ? '' : text, step.error === 'provider');
+    },
   };
 }
 function scenarioTool(call, completed) {
   const key = call.name === 'read' ? 'readToolCall' : 'shellToolCall';
-  const args = call.name === 'read' ? call.input : { command: call.input.command };
+  const args = call.input;
+  const success = call.name === 'read' ? { content: call.output } : { exitCode: call.isError ? 1 : 0, stdout: call.output, stderr: '' };
   frame({ type: 'tool_call', subtype: completed ? 'completed' : 'started', call_id: call.id, session_id: id,
-    tool_call: { [key]: { args, ...(completed ? { result: { success: { content: call.output } } } : {}) } } });
+    tool_call: { [key]: { args, ...(completed ? { result: { success } } : {}) } } });
 }
 // Delay admission through the shared script, but keep native init and modes in their slots.
 const deferred = selectScenario('deferred-turn-start');
