@@ -23,15 +23,15 @@ export interface OpenStep {
 }
 export interface TextStep {
   kind: 'text';
-  parts: (string | (() => string | void | Promise<string | void>))[];
-  prepare?: boolean;
+  parts: (string | (() => string | Promise<string>))[];
 }
 export interface ReasoningStep { kind: 'reasoning'; text: string; index?: number; complete?: boolean }
 export interface ToolStep { kind: 'toolStart' | 'toolEnd'; call: ToolCall }
 export interface ChildStep { kind: 'child'; id: string; phase: 'start' | 'end'; steps: Iterable<Step> }
-export interface ReadSteersStep { kind: 'readSteers'; late?: boolean }
+export interface ReadSteersStep { kind: 'readSteers'; late?: boolean; receive?: (texts: string[] | void) => void }
 export interface EndStep { kind: 'end'; error?: 'provider' }
 export type Step = OpenStep | TextStep | ReasoningStep | ToolStep | ChildStep | ReadSteersStep | EndStep
+  | { kind: 'effect'; run: () => void | Promise<unknown> }
   | { kind: 'progress' }
   | { kind: 'sleep'; ms: number }
   | { kind: 'release'; fallbackMs: number; suffix?: string }
@@ -52,7 +52,7 @@ export interface Encoder {
   toolEnd(step: ToolStep): void | Promise<void>;
   child(step: ChildStep, playChild: (encoder: Encoder) => PlaybackResult | Promise<PlaybackResult>): void | Promise<void>;
   progress(step: { kind: 'progress' }): void | Promise<void>;
-  readSteers(step: ReadSteersStep): void | Promise<void>;
+  readSteers(step: ReadSteersStep): string[] | void | Promise<string[] | void>;
   end(step: EndStep): void | Promise<void>;
   closeInput?: () => void;
 }

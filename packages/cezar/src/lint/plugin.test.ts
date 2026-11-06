@@ -50,6 +50,7 @@ const VIOLATIONS: Record<string, [string, string]> = {
   'design-guardian': ['packages/web/src/design-violation.tsx', 'const value = "h-screen";\n'],
   'contract-root-import': ['packages/cezar/src/a.ts', "import { runRecordSchema } from '@open-mercato/cezar-contract';\n"],
   'mock-lifecycle-boundary': ['packages/cezar/scripts/mock-boundary.mjs', "function watchdogStall() {}\n"],
+  'mock-scenario-boundary': ['packages/cezar/scripts/mock-scenario-violation.mjs', "import { play } from './mock-scenario.mjs';\nconst x = 'mock:hold';\n"],
   'native-mock-source': ['packages/cezar/test/b.test.ts', "const text = readFileSync(adapter.mockBin, 'utf8');\n"],
   'raw-query-setter': ['packages/web/src/c.tsx', "import { useSearchParams } from 'react-router';\nconst [p, setP] = useSearchParams();\n"],
   'run-fact-reader': ['packages/web/src/lib/d.ts', "const held = attention.label === 'usage limit';\n"],
@@ -59,6 +60,7 @@ const VIOLATIONS: Record<string, [string, string]> = {
 
 /** Each approved exception, by the rule it exercises. None may produce a finding. */
 const APPROVED: Record<string, string> = {
+  'packages/cezar/scripts/mock-scenario-approved.mjs': "import { play } from './mock-scenario.mjs';\nconst x = 'mock:backend-resume';\n",
   'packages/web/src/wait-approved.test.tsx': 'await sleep(5); // bound: a negative window\n',
   'packages/cezar/src/wait-approved.test.ts': 'await sleep(5); // bound: a negative window\n',
   'packages/web/src/routes/unknown-project.tsx': '<div className="bg-card-2"><span className="font-mono text-[11px] font-normal text-soft-foreground">old</span></div>',

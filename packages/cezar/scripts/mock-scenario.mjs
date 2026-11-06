@@ -6,7 +6,9 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const text = (...parts) => ({ kind: 'text', parts });
 const open = options => ({ kind: 'open', ...options });
 const end = options => ({ kind: 'end', ...options });
-const tools = () => import('./mock-ci-tool.mjs');
+function tools() {
+  return import('./mock-ci-tool.mjs');
+}
 const done = (context, message) => async () => message + await context.lifecycle((await tools()).DONE);
 const ask = (context, questions) => async () => 'Pick one.' + await context.lifecycle((await tools()).ask(questions));
 const QUESTIONS = [{ header: 'Library', question: 'Which test library?', multiSelect: false, options: [{ label: 'Vitest', description: 'Use the existing test runner' }, { label: 'Node test', description: 'Use node:test' }] }];
@@ -34,11 +36,17 @@ export function play(scenario, encoder) {
 }
 
 function perform(step, encoder) {
+  if (step.kind === 'effect') return step.run();
   if (step.kind === 'sleep') return sleep(step.ms);
   if (step.kind === 'release') return waitForRelease(step.fallbackMs, step.suffix);
   if (step.kind === 'park') return afterParityPark(step.prompt);
   if (step.kind === 'stall') return stall(step.prompt, { closeInput: encoder.closeInput });
   if (step.kind === 'text') return sendParts(step, encoder);
+  if (step.kind === 'readSteers') {
+    const steers = encoder.readSteers(step);
+    if (steers && typeof steers.then === 'function') return steers.then(value => step.receive?.(value));
+    return step.receive?.(steers);
+  }
   if (step.kind === 'child') return encoder.child(step, childEncoder => play({ steps: step.steps }, childEncoder));
   return encoder[step.kind](step);
 }
@@ -46,9 +54,9 @@ function perform(step, encoder) {
 function sendParts(step, encoder) {
   const parts = step.parts.map(part => typeof part === 'function' ? part() : part);
   if (parts.some(part => part && typeof part.then === 'function')) {
-    return Promise.all(parts).then(parts => step.prepare ? undefined : encoder.text({ ...step, parts }));
+    return Promise.all(parts).then(parts => encoder.text({ ...step, parts }));
   }
-  return step.prepare ? undefined : encoder.text({ ...step, parts });
+  return encoder.text({ ...step, parts });
 }
 
 const held = (reply, fallbackMs = 400) => [open(), { kind: 'release', fallbackMs }, text(reply), end()];
@@ -78,18 +86,23 @@ function* progress(prompt) {
 function* silentSteps(prompt, context) {
   // Loaded only for a selected scenario; ordinary dry-run dispatch stays synchronous.
   let silent;
-  yield textLoader(async () => { silent = await import('./mock-silent-tail.mjs'); silent.noteSilentTailPrompt(prompt); });
+  yield effect(async function loadSilent() {
+    silent = await import('./mock-silent-tail.mjs');
+    silent.noteSilentTailPrompt(prompt);
+  });
   if (silent.isFinalMessageNudge(prompt)) {
     const kind = silent.finalMessageNudgeKind();
     yield open({ ackOnly: true });
     if (kind === 'ack-only') return;
-    if (kind === 'late') yield { kind: 'release', fallbackMs: silent.LATE_REPLY_MS };
+    const lateStart = kind === 'late-turn-start' && context.runner === 'codex';
+    if (kind === 'late' || lateStart) yield { kind: 'release', fallbackMs: silent.LATE_REPLY_MS };
     yield open({ acknowledged: true });
+    if (lateStart) yield { kind: 'release', fallbackMs: silent.LATE_TURN_START_HOLD_MS, suffix: '.content' };
     if (kind === 'silent') yield { kind: 'reasoning', text: silent.SILENT_TAIL_REASONING };
     else {
       if (kind === 'slow-done') {
         yield text(silent.SLOW_DONE_PREFIX);
-        yield { kind: 'sleep', ms: silent.SLOW_DONE_TAIL_MS };
+        yield context.runner === 'cursor' ? { kind: 'release', fallbackMs: silent.SLOW_DONE_TAIL_MS } : { kind: 'sleep', ms: silent.SLOW_DONE_TAIL_MS };
       }
       yield text(() => silent.finalNudgeText(kind === 'slow-done' ? 'done' : kind, context.lifecycle));
     }
@@ -104,24 +117,28 @@ function* silentSteps(prompt, context) {
   yield end();
 }
 
-// A zero-part text step resolves scenario data without emitting a message.
-const textLoader = load => ({ kind: 'text', parts: [load], prepare: true });
+// Effects load optional content or update scenario state without touching the encoder.
+const effect = run => ({ kind: 'effect', run });
 
 function* multiPr(prompt, context) {
   let shared;
-  yield textLoader(async () => { shared = await import('./mock-multi-pr.mjs'); });
+  yield effect(async function loadMultiPr() {
+    shared = await import('./mock-multi-pr.mjs');
+  });
   yield open();
   yield* calls(tool('multi-read', 'read', { path: 'other.txt' }, shared.unrelatedPr));
   yield { kind: 'reasoning', text: shared.unrelatedPr, complete: true };
   let reply;
-  yield textLoader(async () => { reply = await shared.multiPrText(prompt, context.lifecycle); });
+  yield effect(async () => { reply = await shared.multiPrText(prompt, context.lifecycle); });
   yield text(reply.slice(0, 5), reply.slice(5));
   yield end();
 }
 
 function* turnMessages(prompt) {
   let messages;
-  yield textLoader(async () => { messages = (await import('./mock-turn-messages.mjs')).turnMessages(prompt); });
+  yield effect(async function loadMessages() {
+    messages = (await import('./mock-turn-messages.mjs')).turnMessages(prompt);
+  });
   yield open();
   for (const message of messages) yield text(message);
   yield end();
@@ -142,9 +159,11 @@ function* parkedChild(prompt, context) {
 function* defaultScenario(prompt, context, deferred) {
   const waiting = prompt.includes('mock:cezar-wait');
   let reply;
-  yield textLoader(async () => { reply = `Investigating: ${prompt}${waiting ? await context.lifecycle((await tools()).wait()) : ''}`; });
+  yield effect(async () => { reply = `Investigating: ${prompt}${waiting ? await context.lifecycle((await tools()).wait()) : ''}`; });
   yield open({ ackOnly: true, agentStart: deferred && prompt.includes(':late-ack') });
-  if (deferred) yield textLoader(async () => (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart());
+  if (deferred) yield effect(async function delayStart() {
+    await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
+  });
   yield open({ acknowledged: true, agentStarted: deferred && prompt.includes(':late-ack') });
   yield text(reply);
   yield* calls(tool('tool-1', 'read', { path: 'README.md' }, 'mock file'));
@@ -157,59 +176,75 @@ const has = (prompt, name) => prompt.includes(`mock:${name}`);
 
 function* autonomous(prompt, context) {
   let shared;
-  yield textLoader(async () => { shared = await import('./mock-autonomous.mjs'); });
+  yield effect(async function loadAutonomous() {
+    shared = await import('./mock-autonomous.mjs');
+  });
   yield open();
   yield text(() => shared.autonomousReply(prompt, context.lifecycle));
   yield end();
 }
 
 function earlyScenario(prompt, context) {
-  if (has(prompt, 'autonomous') || prompt.startsWith('Continue working autonomously until the task is fully complete.')) {
+  const matches = name => has(prompt, name) && !context.unsupported?.includes(name.replace(/:$/, ''));
+  if (matches('autonomous') || !context.unsupported?.includes('autonomous') && prompt.startsWith('Continue working autonomously until the task is fully complete.')) {
     return scenario('autonomous', autonomous(prompt, context), { early: true, beforeFailure: true });
   }
-  if (has(prompt, 'silent-tail') || has(prompt, 'tool-tail') || silentNudge(prompt)) {
-    return scenario(has(prompt, 'tool-tail') ? 'tool-tail' : 'silent-tail', silentSteps(prompt, context), { early: true, beforeFailure: true });
+  if (matches('silent-tail') || matches('tool-tail') || !context.unsupported?.includes('silent-tail') && silentNudge(prompt)) {
+    return scenario(matches('tool-tail') ? 'tool-tail' : 'silent-tail', silentSteps(prompt, context), { early: true, beforeFailure: true });
   }
-  if (has(prompt, 'crash-stderr')) {
-    return scenario('crash-stderr', [textLoader(async () => {
+  if (matches('crash-stderr')) {
+    return scenario('crash-stderr', [effect(async () => {
       const { crashWithStderr } = await import('./mock-runner-crash.mjs');
       crashWithStderr(prompt, context.session.malformedFrame);
-    })], { early: true, beforeFailure: true, result: has(prompt, 'crash-stderr-clean') ? 'continue' : 'handled' });
+    })], { early: true, beforeFailure: true, result: matches('crash-stderr-clean') ? 'continue' : 'handled' });
   }
+}
+
+function* steerTool(context) {
+  const call = tool('tool-steer', 'bash', { command: 'wait' }, 'waited');
+  let admitted = [];
+  yield open();
+  yield { kind: 'toolStart', call };
+  yield { kind: 'sleep', ms: Number(process.env.CEZ_MOCK_STEER_MS ?? 600) };
+  yield { kind: 'toolEnd', call };
+  yield { kind: 'readSteers', receive: texts => { admitted = texts ?? []; } };
+  // Both versions are pinned: Claude/Codex echo steers; pi/OMP finish in plain text.
+  const echoes = context.runner === 'claude' || context.runner === 'codex';
+  yield text(['steer tool done', ...(echoes ? admitted.map(value => `saw: ${value}`) : [])].join('\n'));
+  yield end();
 }
 
 function beforeFailureScenario(prompt, context) {
-  if (has(prompt, 'ack-only')) return scenario('ack-only', [open({ ackOnly: true })], { beforeFailure: true });
+  const matches = name => has(prompt, name) && !context.unsupported?.includes(name.replace(/:$/, ''));
+  if (matches('ack-only')) return scenario('ack-only', [open({ ackOnly: true })], { beforeFailure: true });
   for (const [name, method] of [['cezar-tool', 'toolPrompt'], ['ci-wait', 'ciPrompt']]) {
-    if (has(prompt, name)) return scenario(name, [open(), text(async () => (await tools())[method](context.runner, process.argv.slice(2), prompt)), end()], { beforeFailure: true });
+    if (matches(name)) return scenario(name, [open(), text(async () => (await tools())[method](context.runner, process.argv.slice(2), prompt)), end()], { beforeFailure: true });
   }
-  if (has(prompt, 'steer-tool')) {
-    const call = tool('tool-steer', 'bash', { command: 'wait' }, 'waited');
-    return scenario('steer-tool', [open(), { kind: 'toolStart', call }, { kind: 'sleep', ms: Number(process.env.CEZ_MOCK_STEER_MS ?? 600) }, { kind: 'toolEnd', call }, { kind: 'readSteers' }, text('steer tool done'), end()], { beforeFailure: true });
-  }
-  if (has(prompt, 'steer-late')) return scenario('steer-late', [open(), text('late window: final message already sent'), { kind: 'readSteers', late: true }, { kind: 'sleep', ms: 300 }, end()], { beforeFailure: true });
-  if (has(prompt, 'multi-pr-refs')) return scenario('multi-pr-refs', multiPr(prompt, context), { beforeFailure: true });
-  if (has(prompt, 'turn-messages:')) return scenario('turn-messages', turnMessages(prompt), { beforeFailure: true });
-  if (has(prompt, 'agent-echo')) return scenario('agent-echo', [open(), text(prompt), end()], { beforeFailure: true });
+  if (matches('steer-tool')) return scenario('steer-tool', steerTool(context), { beforeFailure: true });
+  if (matches('steer-late')) return scenario('steer-late', [open(), text('late window: final message already sent'), { kind: 'readSteers', late: true }, { kind: 'sleep', ms: 300 }, end()], { beforeFailure: true });
+  if (matches('multi-pr-refs')) return scenario('multi-pr-refs', multiPr(prompt, context), { beforeFailure: true });
+  if (matches('turn-messages:')) return scenario('turn-messages', turnMessages(prompt), { beforeFailure: true });
+  if (matches('agent-echo')) return scenario('agent-echo', [open(), text(prompt), end()], { beforeFailure: true });
 }
 
 function trailingScenario(prompt, context) {
-  if (has(prompt, 'provider-error') && !context.nativeFailureControl) return scenario('provider-error', [open(), end({ error: 'provider' })]);
-  if (has(prompt, 'hold-cezar-done')) return scenario('hold-cezar-done', held(done(context, 'parity hold-done: content after the pause')));
-  if (has(prompt, 'hold-cezar-ask')) return scenario('hold-cezar-ask', held(ask(context)));
-  if (has(prompt, 'cezar-done') || context.session.resumeAfterAsk && prompt.trim() === 'Library: Vitest') {
-    return scenario('cezar-done', [textLoader(() => { context.session.resumeAfterAsk = false; }), open(), text(done(context, 'parity done: the task is complete')), end()]);
+  const matches = name => has(prompt, name) && !context.unsupported?.includes(name.replace(/:$/, ''));
+  if (matches('provider-error') && !context.nativeFailureControl) return scenario('provider-error', [open(), end({ error: 'provider' })]);
+  if (matches('hold-cezar-done')) return scenario('hold-cezar-done', held(done(context, 'parity hold-done: content after the pause')));
+  if (matches('hold-cezar-ask')) return scenario('hold-cezar-ask', held(ask(context)));
+  if (matches('cezar-done') || !context.unsupported?.includes('cezar-done') && context.session.resumeAfterAsk && prompt.trim() === 'Library: Vitest') {
+    return scenario('cezar-done', [effect(() => { context.session.resumeAfterAsk = false; }), open(), text(done(context, 'parity done: the task is complete')), end()]);
   }
-  if (has(prompt, 'cezar-ask')) {
-    return scenario('cezar-ask', [textLoader(() => { context.session.resumeAfterAsk = has(prompt, 'resume-cezar-done'); }), open(), text(ask(context, QUESTIONS)), end()]);
+  if (matches('cezar-ask')) {
+    return scenario('cezar-ask', [effect(() => { context.session.resumeAfterAsk = matches('resume-cezar-done'); }), open(), text(ask(context, QUESTIONS)), end()]);
   }
-  if (has(prompt, 'busy-progress')) return scenario('busy-progress', busy(prompt, context));
-  if (has(prompt, 'no-progress')) return scenario('no-progress', progress(prompt));
-  if (has(prompt, 'hold-gated')) return scenario('hold-gated', hold(true));
-  if (has(prompt, 'hold')) return scenario('hold', hold(false));
-  if (has(prompt, 'subagent-after-park')) return scenario('subagent-after-park', parkedChild(prompt, context));
-  if (has(prompt, 'deferred-turn-start')) return scenario('deferred-turn-start', defaultScenario(prompt, context, true));
-  if (has(prompt, 'cezar-wait')) return scenario('cezar-wait', defaultScenario(prompt, context, false));
+  if (matches('busy-progress')) return scenario('busy-progress', busy(prompt, context));
+  if (matches('no-progress')) return scenario('no-progress', progress(prompt));
+  if (matches('hold-gated')) return scenario('hold-gated', hold(true));
+  if (matches('hold')) return scenario('hold', hold(false));
+  if (matches('subagent-after-park')) return scenario('subagent-after-park', parkedChild(prompt, context));
+  if (matches('deferred-turn-start')) return scenario('deferred-turn-start', defaultScenario(prompt, context, true));
+  if (matches('cezar-wait')) return scenario('cezar-wait', defaultScenario(prompt, context, false));
 }
 
 /** First match wins. A wire declares genuine gaps rather than implementing a partial script. */

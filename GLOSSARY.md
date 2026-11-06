@@ -97,3 +97,17 @@ hold the output pipe open in a child, or leave children behind. The mock writes
 soon as the file holds a whole pid.
 
 _Avoid_: hang, freeze
+
+## Mock scenario
+
+A shared script in `packages/cezar/scripts/mock-scenario.mjs` that selects what
+an offline agent does for a prompt. It defines text, tools, waits and turn end
+as steps. Selection order and the position of native failure control belong
+to the script. A scenario does not define native wire frames.
+
+## Wire encoder
+
+The part of a native runner mock that turns mock scenario steps into that
+runner's protocol frames. It keeps native ids, usage, acknowledgement, delivery
+control, failure control and steering admission. The real runner and mapper
+consume those frames in parity tests.
