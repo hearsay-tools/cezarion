@@ -35,8 +35,6 @@ process.env.CEZ_AUTONAME = '0';
 process.env.CEZ_PROJECT_WARMUP = '0';
 const ownHome = process.env.CEZ_HOME ? undefined : mkdtempSync(join(tmpdir(), 'cez-bench-home-'));
 if (ownHome) process.env.CEZ_HOME = ownHome;
-const { resolveHome } = await import('../src/home/resolve.ts');
-const home = resolveHome({ purpose: 'cli' });
 
 const { values } = parseArgs({ options: {
   messages: { type: 'string', default: '50,300,1000' },
@@ -53,6 +51,7 @@ if (sizes.some(size => !Number.isInteger(size) || size < 1) || !Number.isInteger
 
 const { RunStore } = await import('../src/runs/store.ts');
 const { RunManager } = await import('../src/workflows/run.ts');
+const home = (await import('../src/home/resolve.ts')).resolveHome({ purpose: 'cli' });
 
 const pad = 'x'.repeat(padBytes);
 let decodes = 0;

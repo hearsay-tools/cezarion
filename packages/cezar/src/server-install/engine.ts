@@ -238,13 +238,21 @@ async function runInstallStep(step: InstallStep, ctx: InstallContext, opts: RunO
   }
 }
 
-export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): Promise<RunResult> {
+/** Keep the install, uninstall and deploy context under the same whole-run lock. */
+async function withInstallContext(opts: RunOptions, run: (ctx: InstallContext) => Promise<RunResult>): Promise<RunResult> {
   const release = acquireLock(opts.instance, opts.home);
   try {
-    const state = loadServerState(opts.instance, opts.home);
+    return await run(buildContext(loadServerState(opts.instance, opts.home), opts));
+  } finally {
+    release();
+  }
+}
+
+export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): Promise<RunResult> {
+  return withInstallContext(opts, async ctx => {
+    const { state } = ctx;
     // buildContext reconciles dry-run records first, so a preview of platform A
     // never blocks a real install of platform B (the reset clears `platform`).
-    const ctx = buildContext(state, opts);
     const freshInstall = setupInstallRecord(state, strategy, opts);
 
     await strategy.preflight(ctx); // throws PreflightError to refuse politely
@@ -281,16 +289,12 @@ export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): 
     state.updatedAt = opts.now;
     await ctx.save();
     return { status: 'complete', state };
-  } finally {
-    release();
-  }
+  });
 }
 
 export async function runUninstall(strategy: PlatformStrategy, opts: RunOptions): Promise<RunResult> {
-  const release = acquireLock(opts.instance, opts.home);
-  try {
-    const state = loadServerState(opts.instance, opts.home);
-    const ctx = buildContext(state, opts);
+  return withInstallContext(opts, async ctx => {
+    const { state } = ctx;
     // Same guard as install/deploy: undoing with the wrong strategy would skip
     // the real artifacts and (before this guard existed) destroy their ledger.
     if (state.platform && state.platform !== strategy.id) {
@@ -364,9 +368,7 @@ export async function runUninstall(strategy: PlatformStrategy, opts: RunOptions)
     // kept, matching the legacy single-host behavior.
     if (ctx.instance !== 'default') deleteServerState(ctx.instance, ctx.home);
     return { status: 'complete', state };
-  } finally {
-    release();
-  }
+  });
 }
 
 /**
@@ -375,10 +377,8 @@ export async function runUninstall(strategy: PlatformStrategy, opts: RunOptions)
  * + re-verify); holds the single-writer lock for the whole run.
  */
 export async function runDeploy(strategy: PlatformStrategy, opts: RunOptions): Promise<RunResult> {
-  const release = acquireLock(opts.instance, opts.home);
-  try {
-    const state = loadServerState(opts.instance, opts.home);
-    const ctx = buildContext(state, opts);
+  return withInstallContext(opts, async ctx => {
+    const { state } = ctx;
     if (state.platform && state.platform !== strategy.id) {
       throw new PreflightError(
         `this host has a ${state.platform} install recorded — deploy it with --platform ${state.platform}`,
@@ -406,7 +406,5 @@ export async function runDeploy(strategy: PlatformStrategy, opts: RunOptions): P
     state.updatedAt = opts.now;
     await ctx.save();
     return { status: 'complete', state };
-  } finally {
-    release();
-  }
+  });
 }

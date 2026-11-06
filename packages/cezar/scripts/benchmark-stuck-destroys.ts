@@ -39,8 +39,6 @@ process.env.CEZ_AUTONAME = '0';
 // run creates is removed with the rest of its teardown.
 const ownHome = process.env.CEZ_HOME ? undefined : mkdtempSync(join(tmpdir(), 'cez-bench-home-'));
 if (ownHome) process.env.CEZ_HOME = ownHome;
-const { resolveHome } = await import('../src/home/resolve.ts');
-const home = resolveHome({ purpose: 'cli' });
 
 const { values } = parseArgs({ options: {
   workers: { type: 'string', default: '20' },
@@ -52,6 +50,7 @@ if (!Number.isInteger(workers) || workers < 0 || !(minutes > 0)) throw new Error
 
 const { RunStore } = await import('../src/runs/store.ts');
 const { RunManager } = await import('../src/workflows/run.ts');
+const home = (await import('../src/home/resolve.ts')).resolveHome({ purpose: 'cli' });
 const { DelegationService } = await import('../src/delegation/service.ts');
 const { planOwnedWorkspace, ensureOwnedWorkspace } = await import('../src/delegation/workspace.ts');
 const { WorkspaceSemaphore } = await import('../src/workspace/semaphore.ts');
