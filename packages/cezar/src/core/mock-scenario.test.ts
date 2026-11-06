@@ -1,3 +1,4 @@
+import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it, vi } from 'vitest';
 import { play, scenarioFor, type Encoder, type ScenarioContext, type Step } from '../../scripts/mock-scenario.mjs';
 
@@ -13,6 +14,7 @@ function encoder(events: string[]): Encoder {
     toolStart: step => { events.push(`start:${step.call.name}`); },
     toolEnd: step => { events.push(`end:${step.call.name}`); },
     child: (_step, playChild) => { playChild(encoder(events)); },
+    reply: step => { events.push(`reply:${step.prompt}`); },
     progress: () => { events.push('progress'); },
     readSteers: () => { events.push('steers'); },
     end: () => { events.push('end'); },
@@ -57,6 +59,39 @@ describe('shared mock scenario selection', () => {
       expect(boundary).toHaveBeenCalledWith(`mock:${token}`);
       expect(events).toEqual(['open', `${token === 'cezar-tool' ? 'tool' : 'ci'} boundary: mock:${token}`, 'end']);
     }
+  });
+
+  it('delegates the deferred reply to each native encoder after its start delay', async () => {
+    vi.useFakeTimers();
+    try {
+      const events: string[] = [];
+      const prompt = 'mock:deferred-turn-start';
+      let settled = false;
+      const result = Promise.resolve(play(scenarioFor(prompt, context())!, encoder(events))).then(() => { settled = true; });
+      expect(events).toEqual(['open']);
+      // bound: fake time advances the deferred delay after its optional module loads.
+      await vi.waitFor(() => expect(settled).toBe(true), { timeout: 3_000 });
+      await result;
+      expect(events).toEqual(['open', 'open', `reply:${prompt}`]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['pi', 'omp'] as const)('registers the %s lifecycle wait before deferred admission', async runner => {
+    vi.useFakeTimers();
+    try {
+      const events: string[] = [];
+      const state = context();
+      state.runner = runner;
+      state.lifecycle = vi.fn(async () => { events.push('wait'); return ' wait receipt'; });
+      const prompt = 'mock:deferred-turn-start mock:cezar-wait';
+      let settled = false;
+      const result = Promise.resolve(play(scenarioFor(prompt, state)!, encoder(events))).then(() => { settled = true; });
+      // bound: advance fake time after the optional deferred module has loaded.
+      await vi.waitFor(() => expect(settled).toBe(true), { timeout: 3_000 });
+      await result;
+      expect(state.lifecycle).toHaveBeenCalledExactlyOnceWith(['cezar_wait', { kind: WAIT_KIND.timer, seconds: 60, note: 'Re-check the downstream work.' }]);
+      expect(events).toEqual(['wait', 'open', 'open', `Investigating: ${prompt} wait receipt`, 'start:read', 'end:read', 'end']);
+    } finally { vi.useRealTimers(); }
   });
 
   it('delegates crash wire details to the supplied boundary', () => {
@@ -149,6 +184,27 @@ describe('shared mock scenario player', () => {
     const steps: Step[] = [{ kind: 'readSteers', receive: texts => { admitted = texts ?? []; } }, { kind: 'text', parts: [() => admitted.join(',')] }, { kind: 'end' }];
     expect(play({ steps }, wire)).toBe('handled');
     expect(events).toEqual(['first,second', 'end']);
+  });
+
+  it('uses a native steering hold when supplied', () => {
+    const events: string[] = [];
+    const wire = encoder(events);
+    wire.hold = step => { events.push(`hold:${step.ms}`); };
+    expect(play({ steps: [{ kind: 'hold', ms: 600 }, { kind: 'end' }] }, wire)).toBe('handled');
+    expect(events).toEqual(['hold:600', 'end']);
+  });
+
+  it('sleeps for a steering hold when the encoder has no native hold', async () => {
+    vi.useFakeTimers();
+    try {
+      const events: string[] = [];
+      const result = play({ steps: [{ kind: 'hold', ms: 600 }, { kind: 'end' }] }, encoder(events));
+      await vi.advanceTimersByTimeAsync(599);
+      expect(events).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      await result;
+      expect(events).toEqual(['end']);
+    } finally { vi.useRealTimers(); }
   });
 
   it('waits for sleep while keeping following frames in the same tick', async () => {

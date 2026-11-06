@@ -38,6 +38,7 @@ export function play(scenario, encoder) {
 function perform(step, encoder) {
   if (step.kind === 'effect') return step.run();
   if (step.kind === 'sleep') return sleep(step.ms);
+  if (step.kind === 'hold') return encoder.hold ? encoder.hold(step) : sleep(step.ms);
   if (step.kind === 'release') return waitForRelease(step.fallbackMs, step.suffix);
   if (step.kind === 'park') return afterParityPark(step.prompt);
   if (step.kind === 'stall') return stall(step.prompt, { closeInput: encoder.closeInput });
@@ -156,18 +157,30 @@ function* parkedChild(prompt, context) {
   yield { kind: 'child', id: 'ParkReviewer', phase: 'end', steps: [...calls(tool('toolu_park_read', 'read', { path: 'README.md' }, 'mock file')), text('Post-park child update processed.')] };
 }
 
-function* defaultScenario(prompt, context, deferred) {
-  const waiting = prompt.includes('mock:cezar-wait');
-  let reply;
-  yield effect(async () => { reply = `Investigating: ${prompt}${waiting ? await context.lifecycle((await tools()).wait()) : ''}`; });
-  yield open({ ackOnly: true, agentStart: deferred && prompt.includes(':late-ack') });
-  if (deferred) yield effect(async function delayStart() {
+function* deferredOpening(prompt) {
+  yield open({ ackOnly: true, agentStart: prompt.includes(':late-ack') });
+  yield effect(async function delayStart() {
     await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
   });
-  yield open({ acknowledged: true, agentStarted: deferred && prompt.includes(':late-ack') });
+  yield open({ acknowledged: true, agentStarted: prompt.includes(':late-ack') });
+}
+
+function* deferredReply(prompt, context) {
+  if (has(prompt, 'cezar-wait') && !context.unsupported?.includes('cezar-wait')) {
+    yield* waitReply(prompt, context, deferredOpening(prompt));
+  } else {
+    yield* deferredOpening(prompt);
+    yield { kind: 'reply', prompt };
+  }
+}
+
+/** Register the wait before admission; the supplied opening preserves native timing. */
+function* waitReply(prompt, context, opening) {
+  let reply;
+  yield effect(async () => { reply = `Investigating: ${prompt}${await context.lifecycle((await tools()).wait())}`; });
+  yield* opening;
   yield text(reply);
   yield* calls(tool('tool-1', 'read', { path: 'README.md' }, 'mock file'));
-  if (!waiting) yield text('Done with the first pass.');
   yield end();
 }
 
@@ -202,7 +215,7 @@ function* steerTool(context) {
   let admitted = [];
   yield open();
   yield { kind: 'toolStart', call };
-  yield { kind: 'sleep', ms: Number(process.env.CEZ_MOCK_STEER_MS ?? 600) };
+  yield { kind: 'hold', ms: Number(process.env.CEZ_MOCK_STEER_MS ?? 600) };
   yield { kind: 'toolEnd', call };
   yield { kind: 'readSteers', receive: texts => { admitted = texts ?? []; } };
   // Both versions are pinned: Claude/Codex echo steers; pi/OMP finish in plain text.
@@ -240,8 +253,8 @@ function trailingScenario(prompt, context) {
   if (matches('hold-gated')) return scenario('hold-gated', hold(true));
   if (matches('hold')) return scenario('hold', hold(false));
   if (matches('subagent-after-park')) return scenario('subagent-after-park', parkedChild(prompt, context));
-  if (matches('deferred-turn-start')) return scenario('deferred-turn-start', defaultScenario(prompt, context, true));
-  if (matches('cezar-wait')) return scenario('cezar-wait', defaultScenario(prompt, context, false));
+  if (matches('deferred-turn-start')) return scenario('deferred-turn-start', deferredReply(prompt, context));
+  if (matches('cezar-wait')) return scenario('cezar-wait', waitReply(prompt, context, [open({ ackOnly: true }), open({ acknowledged: true })]));
 }
 
 /** First match wins. A wire declares genuine gaps rather than implementing a partial script. */
