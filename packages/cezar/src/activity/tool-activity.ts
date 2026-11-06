@@ -86,8 +86,8 @@ export class ToolActivityTracker implements ToolActivitySource {
     this.record(undefined, runId, event, redact);
   }
 
-  /** Call `listener` after a tool call starts, or the latest one changes its title or status.
-   *  The activity topics listen while they have subscribers. Returns the release. */
+  /** Call `listener` after any change of the latest tool a read shows: a new call, its status, its
+   *  end or its title. The activity topics listen while they have subscribers. Returns the release. */
   onChange(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
@@ -100,11 +100,19 @@ export class ToolActivityTracker implements ToolActivitySource {
   private record(owner: FeedOwner | undefined, runId: string, event: UiEvent, redact: (text: string) => string): void {
     if (event.type !== 'item.started' && event.type !== 'item.updated' && event.type !== 'item.completed') return;
     if (event.item.kind !== 'tool') return;
-    const item = event.item;
+    // Every change of what read() shows replaces the latest tool object: a new call, a status, an
+    // end, a title (also of a completed or backgrounded call). One comparison signals them all.
+    const before = this.runs.get(runId)?.latest?.tool;
+    this.apply(owner, runId, event.type, event.item, redact);
+    if (this.runs.get(runId)?.latest?.tool !== before) this.changed();
+  }
+
+  private apply(owner: FeedOwner | undefined, runId: string, type: 'item.started' | 'item.updated' | 'item.completed', item: UiToolItem,
+    redact: (text: string) => string): void {
     const at = this.now();
     this.sweep(at);
     // Only the completion closes an item: an update to a terminal status may still be followed by it.
-    const closes = event.type === 'item.completed';
+    const closes = type === 'item.completed';
     const terminal = closes || TERMINAL.has(item.status);
     const run = this.runs.get(runId);
     if (run) run.lastEventAt = at;
@@ -115,7 +123,6 @@ export class ToolActivityTracker implements ToolActivitySource {
     if (run && repeated(run, item, redact)) return;
     if (!run?.open.has(item.id)) {
       this.started(runId, item, at, { terminal, closes, owner, title: toolTitle(item, redact) });
-      this.changed();
       return;
     }
     if (closes) {
@@ -129,7 +136,6 @@ export class ToolActivityTracker implements ToolActivitySource {
     latest.tool = terminal
       ? { ...latest.tool, ...title, status: item.status, endedAt: latest.tool.endedAt ?? iso(at) }
       : { ...latest.tool, ...title, status: item.status };
-    this.changed();
   }
 
   /**

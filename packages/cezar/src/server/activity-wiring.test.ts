@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActivitySnapshot } from '@open-mercato/cezar-contract';
-import { activityToolSchema } from '@open-mercato/cezar-contract/activity';
+import { ACTIVITY_RATE_SECONDS, activityToolSchema } from '@open-mercato/cezar-contract/activity';
 import { makePrWait, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { fakeStore, makeRoot, NOW } from '../activity/activity.testkit.ts';
 import { ACTIVITY_COALESCE_MS } from '../activity/publisher.ts';
@@ -89,6 +89,44 @@ describe('activity route wiring', () => {
     const card = frames[0]!.projects[0]!.tasks[0]!;
     expect(card.tool?.title).toBe('Ran three');
     expect(card.rate.at(-1)).toBe(3);
+    stop();
+  });
+
+  /** A started tool, then the ring drains to flat and the frames stop: no later tick rebuilds. */
+  async function drained(root: RunRecord) {
+    const wired = wire({ boot: [root] });
+    const subscribed = await wired.subscribe('boot');
+    wired.toolActivity.observe(root.id, { type: 'item.started', item: tool('spawn') }, (text) => text);
+    await vi.advanceTimersByTimeAsync((ACTIVITY_RATE_SECONDS + 2) * 1_000);
+    expect(subscribed.frames.at(-1)!.projects[0]!.tasks[0]!.rate.every((count) => count === 0)).toBe(true);
+    const settled = subscribed.frames.length;
+    await vi.advanceTimersByTimeAsync(5 * 1_000);
+    expect(subscribed.frames).toHaveLength(settled);
+    return { ...wired, ...subscribed, settled };
+  }
+
+  it('sends a background transition of the latest tool after the ring drained', async () => {
+    const root = makeRoot({ status: RUN_STATUS.running });
+    const { toolActivity, frames, settled, stop } = await drained(root);
+
+    toolActivity.observe(root.id, { type: 'item.updated', item: { ...tool('spawn'), background: true } }, (text) => text);
+    await vi.advanceTimersByTimeAsync(ACTIVITY_COALESCE_MS);
+    expect(frames).toHaveLength(settled + 1);
+    expect(frames.at(-1)!.projects[0]!.tasks[0]!.tool).toMatchObject({ status: TOOL_STATUS.completed, endedAt: expect.any(String) });
+    stop();
+  });
+
+  it('sends a new title on a repeated completion after the ring drained', async () => {
+    const root = makeRoot({ status: RUN_STATUS.running });
+    const { toolActivity, frames, stop } = await drained(root);
+    toolActivity.observe(root.id, { type: 'item.completed', item: { ...tool('spawn'), status: TOOL_STATUS.completed } }, (text) => text);
+    await vi.advanceTimersByTimeAsync(ACTIVITY_COALESCE_MS);
+    const ended = frames.length;
+
+    toolActivity.observe(root.id, { type: 'item.completed', item: { ...tool('spawn'), status: TOOL_STATUS.completed, title: 'Edited notes.md' } }, (text) => text);
+    await vi.advanceTimersByTimeAsync(ACTIVITY_COALESCE_MS);
+    expect(frames).toHaveLength(ended + 1);
+    expect(frames.at(-1)!.projects[0]!.tasks[0]!.tool?.title).toBe('Edited notes.md');
     stop();
   });
 
