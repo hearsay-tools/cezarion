@@ -54,7 +54,6 @@ const MESSAGE_ID = 'msg_mock_1';
 // hearsay-tools/cezarion#1265: the captured FrontmatterError text, verbatim,
 // for a skill whose frontmatter holds `foo: "unterminated`.
 const FRONTMATTER_ERROR = '/home/agent/.agents/skills/bad4/SKILL.md: Failed to parse YAML frontmatter: unexpected end of the stream within a double quoted scalar at line 6, column 1:\n    \n    ^';
-
 function sessionStorePath() {
   if (process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE) return process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE;
   // Keyed on the args file, not its directory: spec-support probes and D1 share a
@@ -286,7 +285,6 @@ async function dispatchReply(replies, body) {
 }
 
 const server = createServer(handleRequest);
-
 function handleRequest(req, res) { wireRecorder?.recordHttpResponse(req, res);
   const url = req.url ?? '';
   if (inputClosed && req.method === 'POST') { req.socket.destroy(); return; }
@@ -329,15 +327,14 @@ function handleRequest(req, res) { wireRecorder?.recordHttpResponse(req, res);
   req.on('data', (chunk) => (body += chunk));
   req.on('end', async () => { await handleRequestBody(req, res, url, body); });
 }
-
 async function handleSessionPrompt(req, res, url, body, received) {
   const sessionPrompt = /^\/session\/([^/]+)\/(prompt_async|message)$/.exec(url);
   SESSION_ID = sessionPrompt[1];
   recordSessionPrompt(body);
-  if (await preparePromptTurn(res, url, body, received)) return;
-  await streamPrompt(url, body);
+  const prepared = {};
+  if (await preparePromptTurn(res, url, body, received, prepared)) return;
+  await streamPrompt(url, body, prepared.silent);
 }
-
 async function handleRequestBody(req, res, url, body) {
   const prepared = prepareRequestBody(req, url, body);
   body = prepared.body;
@@ -346,7 +343,6 @@ async function handleRequestBody(req, res, url, body) {
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end('{}');
 }
-
 function prepareRequestBody(req, url, body) {
   if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify({ method: req.method, url, body: body ? JSON.parse(body) : undefined })}\n`);
   // The delivery control also reads the prompt Cezar sent, before a nudge's scripted answer replaces it.
@@ -356,7 +352,6 @@ function prepareRequestBody(req, url, body) {
 
   return { body, received };
 }
-
 function replyWithNewSession(req, res, url, body) {
   const parsed = body ? JSON.parse(body) : {};
   SESSION_ID = createSession(parsed);
@@ -368,7 +363,6 @@ function replyWithNewSession(req, res, url, body) {
   }));
   return;
 }
-
 function replyWithPatchedSession(req, res, url, body) {
   const sessionPatch = /^\/session\/([^/]+)$/.exec(url);
   const session = patchSession(sessionPatch[1], body ? JSON.parse(body) : {});
@@ -385,7 +379,6 @@ function replyWithPatchedSession(req, res, url, body) {
   }));
   return;
 }
-
 function replyWithSession(req, res, url, body) {
   const sessionGet = /^\/session\/([^/]+)$/.exec(url);
   const session = getSession(sessionGet[1]);
@@ -402,7 +395,6 @@ function replyWithSession(req, res, url, body) {
   }));
   return;
 }
-
 function replyToPermission(req, res, url, body) {
   const permissionReply = /^\/permission\/([^/]+)\/reply$/.exec(url);
   // The reply resumes the held turn, then its own session.idle ends it, as a question reply does.
@@ -428,7 +420,6 @@ function replyToPermission(req, res, url, body) {
   }, 30);
   return;
 }
-
 function replyToQuestion(req, res, url, body) {
   // Native question reply resumes the held turn, then its own session.idle
   // ends it (same SSE lifecycle shape as the baseline; never the HTTP ack).
@@ -447,7 +438,6 @@ function replyToQuestion(req, res, url, body) {
   else acknowledge();
   return;
 }
-
 
 async function replyWithSubagent(body) {
   // Wire shape from `__fixtures__/opencode/subtask-nested.ndjson`: a
@@ -497,7 +487,6 @@ async function replyWithSubagent(body) {
   }, 60);
   return;
 }
-
 async function replyWithSettledApproval(body) {
   // P3/P4: OpenCode settles the ask itself, or the turn ends around it, once the test releases it.
   const resolved = body.includes('mock:approval-resolved');
@@ -511,14 +500,12 @@ async function replyWithSettledApproval(body) {
   send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
   return;
 }
-
 async function replyWithFailedApprovalReply(body) {
   failPermissionReplies = 1;
   send({ type: 'message.updated', properties: { info: info({}) } });
   sendPermissionAsk('per_mock_1', 'bash', ['git status --short'], ['git status *']);
   return;
 }
-
 async function replyWithMalformedPermission(body) {
   // P6: `patterns` must be an array; cezar rejects the ask by its id.
   send({ type: 'message.updated', properties: { info: info({}) } });
@@ -529,14 +516,12 @@ async function replyWithMalformedPermission(body) {
   } });
   return;
 }
-
 async function replyWithClassifyingPermission(body) {
   classifyPending = true;
   send({ type: 'message.updated', properties: { info: info({}) } });
   sendPermissionAsk('per_mock_classify', 'bash', ['git status --short'], ['git status *']);
   return;
 }
-
 async function replyWithLatePermission(body) {
   // P8: the ask lands right after the idle, inside the runner's auto-end delay. As in real
   // OpenCode, it comes from a run the server started, which the answer resumes and its idle ends.
@@ -546,19 +531,16 @@ async function replyWithLatePermission(body) {
   sendPermissionAsk('per_mock_late', 'bash', ['git push'], ['git push *']);
   return;
 }
-
 async function replyWithDefaultPermission(body) {
   send({ type: 'message.updated', properties: { info: info({}) } });
   sendPermissionAsk('per_mock_default', 'external_directory', ['/outside/*'], ['/outside/*']);
   return;
 }
-
 async function replyWithApproval(body) {
   send({ type: 'message.updated', properties: { info: info({}) } });
   sendPermissionAsk('per_mock_1', 'bash', ['git status --short'], ['git status *']);
   return;
 }
-
 async function replyWithMalformedAsk(body) {
   // Malformed: `questions` is not an array, so the runner must REJECT the
   // native question and finish the turn rather than wait for an answer to
@@ -569,7 +551,6 @@ async function replyWithMalformedAsk(body) {
   setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 60);
   return;
 }
-
 async function replyWithAsk(body) {
   lateQuestionReply = body.includes('mock:ask-reply-late');
   answerDone = body.includes('mock:ask-reply-late-cezar-done') || body.includes('mock:resume-cezar-done');
@@ -607,7 +588,6 @@ async function replyWithSkillWarning(body) {
   // skill/index.ts:105-116 skips the skill.
   send({ type: 'session.error', properties: { error: { name: 'UnknownError', data: { message: FRONTMATTER_ERROR } } } });
 }
-
 function replyWithFatalControl(body) {
   const fatalControl = Object.entries({
     'mock:scoped-skill-failure': { sessionID: SESSION_ID, message: 'Failed to parse skill /skills/required/SKILL.md' },
@@ -624,37 +604,22 @@ function replyWithFatalControl(body) {
   }
   return false;
 }
-
 async function replyWithEarlyProviderError(body) {
   // #505 review: the provider rejects before any assistant message exists.
   send({ type: 'session.error', properties: { sessionID: SESSION_ID, error: { name: 'ProviderAuthError', data: { message: 'API key expired' } } } });
   setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
   return;
 }
-
 async function replyWithNativeFailure(body) {
   const selectedFailure = failureControl?.failureFor(body);
   const nativeFailure = selectedFailure instanceof Promise ? await selectedFailure : selectedFailure;
-  if (nativeFailure === 'provider') {
-    // The session-level error frame, wire shape copied verbatim from
-    // `__fixtures__/opencode/session-error.ndjson`. #53: a bare upstream
-    // rejection used to read like a missing executable, and the run parked
-    // as "Needs You" rather than failing (harness parity S7).
+  if (failureControl ? nativeFailure === 'provider' : Boolean(scenarioAt(body, 'provider-error', false))) {
     send({ type: 'message.updated', properties: { info: info({}) } });
-    send({ type: 'message.part.updated', properties: { part: {
-      id: 'prt_mock_perr', messageID: MESSAGE_ID, sessionID: SESSION_ID,
-      type: 'text', text: 'Starting the review',
-    } } });
-    send({ type: 'session.error', properties: { sessionID: SESSION_ID, error: {
-      name: 'ProviderAuthError',
-      data: { message: 'API key expired — run `opencode auth login`' },
-    } } });
-    setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
+    sendProviderFailure();
     return true;
   }
   return false;
 }
-
 function replyWithOrdinaryTurn() {
   send({ type: 'message.updated', properties: { info: info({}) } });
   send({
@@ -736,7 +701,6 @@ function replyWithOrdinaryTurn() {
   });
   return;
 }
-
 function recordSessionPrompt(body) {
   try {
     const text = body ? JSON.parse(body).parts?.map(part => part.text ?? '').join('\n') ?? '' : '';
@@ -745,7 +709,6 @@ function recordSessionPrompt(body) {
     // Keep the scripted turn even when the body is not JSON.
   }
 }
-
 function deliveryPromptText(body, received) {
   // A configured control matches the prompt's text parts, never their JSON encoding.
   let deliveryText = body;
@@ -754,7 +717,6 @@ function deliveryPromptText(body, received) {
   if (delivery) try { deliveryText = received === body ? textOf(body) : `${textOf(received)}\n${textOf(body)}`; } catch { /* not a prompt body */ }
   return deliveryText;
 }
-
 async function acknowledgeSteer(body, res, deliveryText) {
   const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');
   const userId = `msg_steer_user_${++steerSerial}`;
@@ -767,7 +729,6 @@ async function acknowledgeSteer(body, res, deliveryText) {
   send({ type: 'message.part.updated', properties: { part: { id: `prt_${userId}`, messageID: userId, sessionID: SESSION_ID, type: 'text', text } } });
   steers.push({ userId, text });
 }
-
 function acknowledgePrompt(res, body, deliveryText) {
   // `prompt_async` semantics: acknowledge now, stream the turn over SSE.
   res.writeHead(200, { 'content-type': 'application/json' });
@@ -783,12 +744,11 @@ function acknowledgePrompt(res, body, deliveryText) {
     if (delivery) delivery.ack(deliveryText, ack); else ack();
   }
 }
-
 function rejectsPrompt(body, deliveryText) {
   return delivery?.kind === 'reject' ? delivery.rejects(deliveryText) : body.includes('mock:reject-agent-post');
 }
 
-async function preparePromptTurn(res, url, body, received) {
+async function preparePromptTurn(res, url, body, received, prepared) {
   if (body.includes('mock:crash-stderr-pre-ack')) {
     const { crashWithStderr } = await import('./mock-runner-crash.mjs');
     crashWithStderr(body);
@@ -808,7 +768,13 @@ async function preparePromptTurn(res, url, body, received) {
   turnActive = true;
   acknowledgePrompt(res, body, deliveryText);
   if (delivery) await delivery.holdResponse(deliveryText);
-  if (scenarioFor(promptText(body), scenarioContext)?.name === 'autonomous' && body.includes('-cap')) autonomousCap = true;
+  if (await playSlot(['ack-only'], url, body)) return true;
+  if (scenarioAt(body, 'autonomous')?.variant) autonomousCap = true;
+  const silent = scenarioAt(body, 'silent-tail') ?? scenarioAt(body, 'tool-tail');
+  if (silent) {
+    prepared.silent = await prepareSilentScenario(silent, url, body);
+    if (!prepared.silent) return true;
+  }
   return false;
 }
 
@@ -960,27 +926,60 @@ function sendProviderFailure() {
   setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
 }
 
-async function dispatchNativeReply(body, scenario) {
-  if (body.includes('mock:subagent') && scenario?.name !== 'subagent-after-park') { await replyWithSubagent(body); return true; }
+/** Play only preparation before the first assistant opening; retain its remaining steps. */
+async function prepareSilentScenario(scenario, url, body) {
+  const iterator = scenario.steps[Symbol.iterator]();
+  let remaining;
+  function* preparation() {
+    for (let next = iterator.next(); !next.done; next = iterator.next()) {
+      if (next.value.kind === 'open' && !next.value.ackOnly) {
+        const first = next.value;
+        remaining = { ...scenario, steps: (function* () { yield first; yield* iterator; })() };
+        return;
+      }
+      yield next.value;
+    }
+  }
+  await play({ steps: preparation() }, scenarioEncoder(scenario, url, body));
+  return remaining;
+}
+/** Select a shared descriptor for one native dispatch slot, without copying token matches. */
+function scenarioAt(body, name, nativeFailureControl = Boolean(failureControl)) {
+  const unsupported = [...scenarioContext.unsupported];
+  for (;;) {
+    const selected = scenarioFor(promptText(body), { ...scenarioContext, unsupported, nativeFailureControl });
+    if (!selected || selected.name === name) return selected;
+    unsupported.push(selected.name);
+  }
+}
+async function playSlot(names, url, body) {
+  for (const name of names) {
+    const selected = scenarioAt(body, name);
+    if (selected && await play(selected, scenarioEncoder(selected, url, body)) === 'handled') return true;
+  }
+  return false;
+}
+async function dispatchNativeReply(body) {
   if (body.includes('mock:skill-warning')) await replyWithSkillWarning(body);
   if (replyWithFatalControl(body)) return true;
   if (body.includes('mock:provider-error-early')) { await replyWithEarlyProviderError(body); return true; }
-  if (await replyWithNativeFailure(body)) return true;
-  if (await dispatchReply(nativeReplies, body)) return true;
-  return false;
+  return replyWithNativeFailure(body);
 }
-
-async function streamPrompt(url, body) {
-  const prompt = promptText(body);
-  const scenario = scenarioFor(prompt, scenarioContext);
-  const encoder = scenarioEncoder(scenario, url, body);
-  if (scenario?.name === 'ack-only') { await play(scenario, encoder); return; }
-  // Deferred starts publish the native user message only after their delay.
-  if (scenario?.name !== 'deferred-turn-start') publishUser(url, body);
-  if (scenario?.early && await play(scenario, encoder) === 'handled') return;
-  if (scenario?.beforeFailure && !scenario.early && await play(scenario, encoder) === 'handled') return;
-  if (await dispatchNativeReply(body, scenario)) return;
-  if (scenario && !scenario.beforeFailure && await play(scenario, encoder) === 'handled') return;
+async function streamPrompt(url, body, silent) {
+  const deferred = scenarioAt(body, 'deferred-turn-start');
+  if (deferred) {
+    // This descriptor supplies the delay; native dispatch still decides the reply.
+    await play(deferred, { ...scenarioEncoder(deferred, url, body), open() {}, reply() {} });
+  }
+  publishUser(url, body);
+  if (await playSlot(['crash-stderr'], url, body)) return;
+  if (await playSlot(['steer-tool', 'steer-late', 'cezar-tool', 'ci-wait', 'multi-pr-refs', 'turn-messages', 'agent-echo', 'subagent-after-park'], url, body)) return;
+  if (body.includes('mock:subagent')) { await replyWithSubagent(body); return; }
+  if (await dispatchNativeReply(body)) return;
+  if (await playSlot(['autonomous'], url, body)) return;
+  if (silent && await play(silent, scenarioEncoder(silent, url, body)) === 'handled') return;
+  if (await dispatchReply(nativeReplies, body)) return;
+  if (await playSlot(['hold-cezar-done', 'cezar-done', 'hold-cezar-ask', 'cezar-ask', 'no-progress', 'busy-progress', 'hold-gated', 'hold'], url, body)) return;
   replyWithOrdinaryTurn();
 }
 
