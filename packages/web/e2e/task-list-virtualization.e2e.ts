@@ -22,6 +22,11 @@ it('bounds rows, preserves focused controls and expansion, and follows pathname 
   const row = `[data-slot="task-summary-row"][data-run-id="${first}"]`
   browser.click(`${row} button[aria-label^="Show resources"]`)
   browser.waitForFunction(`document.querySelector('${row} button[aria-expanded="true"]') !== null`)
+  // Keyboard traversal crosses the spanning preview into the next logical run.
+  const next = browser.waitForValue(`document.querySelectorAll('[data-slot="task-summary-row"]')[1]?.dataset.runId`) as string
+  browser.evaluate(`const detail=document.querySelector('${row}').nextElementSibling;const controls=detail.querySelectorAll('a[href],button:not([disabled]),[tabindex="0"]');controls[controls.length-1].focus()`)
+  browser.press('Tab')
+  expect(browser.waitForValue(`document.activeElement?.closest('[data-run-id]')?.dataset.runId`)).toBe(next)
   // Focus is pinned with its keyboard neighbours even when the viewport moves far away.
   browser.evaluate(`document.querySelector('${row} a').focus();document.querySelector('[data-slot="main"]').scrollTop=7000`)
   expect(browser.waitForValue(`document.activeElement?.closest('[data-run-id]')?.dataset.runId`)).toBe(first)
@@ -61,4 +66,12 @@ it.each([undefined, 'Tab task 130'])('keeps the first visible row anchored after
   const after = waitForSettledSample(browser, `(() => { const row=document.querySelector('[data-slot="task-summary-row"][data-run-id="${before.id}"]');return row ? {id:row.dataset.runId,top:row.getBoundingClientRect().top} : null })()`) as { id: string; top: number }
   expect(after.id).toBe(before.id)
   expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(2)
+})
+
+it('keeps global summary column headers accessible on phones', () => {
+  browser.setViewport(390, 844)
+  browser.goto(`${fixture.origin}/tasks?tasks=virtual`)
+  browser.waitForFunction(`document.querySelector('[data-slot="global-task-row"]') !== null`)
+  const headers = browser.waitForValue(`(() => { const table=document.querySelector('[data-slot="global-tasks-table"][role="table"]'); return [...table.querySelectorAll('[role="columnheader"]')].map(cell=>({name:cell.textContent,hidden:[cell,cell.parentElement].some(node=>getComputedStyle(node).display==='none'||getComputedStyle(node).visibility==='hidden')})) })()`)
+  expect(headers).toEqual(['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map(name => ({ name, hidden: false })))
 })
