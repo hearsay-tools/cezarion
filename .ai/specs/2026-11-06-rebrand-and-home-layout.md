@@ -134,8 +134,9 @@ Resolved once, at the process entry point, from the platform. No setting is requ
    processes that a cockpit serves this home (the migration reads it, step 2 in section 4).
    One home can serve several cockpits (server instances), so each one holds its own file,
    `cockpits/<pid>.lease`; a lease whose pid is gone is stale and is removed on read.
-   Every writer, the cockpit included, takes `write.lock` only for the read-modify-write of
-   one file, so CLI writers never wait on the cockpit's lifetime. This stops lost updates; the
+   Every reader and writer, the cockpit included, takes the `write.lock` of the root that holds
+   the file (`<config>/.locks/` for config files, `<state>/.locks/` for state files) only for
+   that one file's read or read-modify-write, so CLI writers never wait on the cockpit's lifetime. This stops lost updates; the
    marker stops tests.
 5. **Foreign and old code.** We cannot change what upstream or an old build does. After
    migration, their default (`~/.cezar`) is no longer the live home. The new build watches
