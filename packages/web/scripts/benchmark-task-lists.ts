@@ -14,6 +14,7 @@ import { build, loadConfigFromFile, mergeConfig } from 'vite'
 import { AgentBrowser } from '../e2e/agent-browser.ts'
 import { createTabFixture } from '../e2e/tab-fixture.ts'
 import { pollFor } from '../e2e/poll.ts'
+import { captureFixtureServer } from '../e2e/fixture-server.ts'
 
 const { values } = parseArgs({ options: { 'build-root': { type: 'string' }, build: { type: 'boolean' }, output: { type: 'string' }, quick: { type: 'boolean' }, 'prepare-only': { type: 'boolean' } } })
 const root = resolve(values['build-root'] ?? '.')
@@ -27,6 +28,21 @@ if (values.build) {
 if (values['prepare-only']) process.exit(0)
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms)) // fixed measurement window
 const percentile = (values: number[], p: number) => [...values].sort((a, b) => a - b)[Math.max(0, Math.ceil(values.length * p) - 1)] ?? null
+function hostMemory() {
+  return Object.fromEntries([...readFileSync('/proc/meminfo', 'utf8').matchAll(/^(MemTotal|MemAvailable|SwapTotal|SwapFree):\s+(\d+) kB/gm)].map(([, key, value]) => [key, Number(value) * 1024]))
+}
+function startMemoryProbe(serverPid: number, browserPids: Set<number>) {
+  const before = hostMemory()
+  let fixturePeakRssBytes = 0, chromePeakRssBytes = 0
+  const rss = (pid: number) => { try { return Number(/VmRSS:\s+(\d+)/.exec(readFileSync(`/proc/${pid}/status`, 'utf8'))?.[1] ?? 0) * 1024 } catch { return 0 } }
+  const sample = () => {
+    fixturePeakRssBytes = Math.max(fixturePeakRssBytes, rss(serverPid))
+    chromePeakRssBytes = Math.max(chromePeakRssBytes, [...browserPids].reduce((sum, pid) => sum + rss(pid), 0))
+  }
+  sample()
+  const timer = setInterval(sample, 250)
+  return () => { clearInterval(timer); sample(); return { hostBefore: before, hostAfter: hostMemory(), fixturePeakRssBytes, chromePeakRssBytes } }
+}
 const builtContent = createHash('sha256')
 function fingerprint(path: string) {
   for (const entry of readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -58,6 +74,13 @@ function casesFor(scope: 'project' | 'global') {
 }
 for (const scope of ['project', 'global'] as const) {
   const fixture = await createTabFixture(root, { serverPackage: 'packages/cezar', taskList: scope })
+  const serverState = captureFixtureServer(fixture.server)
+  fixture.server.once('exit', () => {
+    report.fixtureExits ??= []
+    report.fixtureExits.push({ scope, ...serverState() })
+    save()
+  })
+  let stopMemory: ReturnType<typeof startMemoryProbe> | undefined
   let browser: AgentBrowser | undefined
   try {
     browser = AgentBrowser.open(`task-lists-${process.pid}-${scope}`)
@@ -75,6 +98,7 @@ for (const scope of ['project', 'global'] as const) {
       const click = async (expression: string) => {
         const point = await evaluate(`(()=>{const e=${expression};if(!e)return null;e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
         if (!point) throw new Error(`Missing control: ${expression}`)
+        report.lastClick = { expected: expression, point }
         await page('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
         await page('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
       }
@@ -103,20 +127,27 @@ for (const scope of ['project', 'global'] as const) {
       }
       for (const testCase of casesFor(scope)) {
         const { repetition, width, height, setting, view } = testCase
+        report.pendingCase = { scope, ...testCase }; save()
+        console.log(`start ${scope} ${setting} ${view} ${repetition} ${width}x${height}`)
         const before = loadavg()
+        const browserPids = new Set<number>((await request('SystemInfo.getProcessInfo')).processInfo.map((process: { id: number }) => process.id))
+        stopMemory = startMemoryProbe(fixture.server.pid!, browserPids)
         await page('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
         await page('Page.navigate', { url: `${fixture.origin}${scope === 'project' ? '/p/boot/' : '/tasks'}${setting === 'grouped' ? '?group=project' : ''}` })
         await until(`document.querySelector('[data-slot="${scope === 'project' ? 'task-summary-row' : 'global-task-row'}"]')`)
+        await until(`window.__cezIdle === true && document.fonts.status === 'loaded'`)
         await evaluate('window.__taskListProbe.commits=[];window.__taskListProbe.longTasks=[];window.__taskListProbe.events=[]')
         const settingAt = performance.now()
         if (setting === 'detailed') {
           await click(button('Columns')); await click(button('Resource columns'))
           await page('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', windowsVirtualKeyCode: 27 })
           await page('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', windowsVirtualKeyCode: 27 })
+          await until(`!document.querySelector('[data-slot="popover-content"]') && document.activeElement?.matches('[data-slot="task-columns-trigger"]')`)
         }
         await page('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
         await frame()
         await until('window.__taskListProbe.root')
+        for (const process of (await request('SystemInfo.getProcessInfo')).processInfo) browserPids.add(process.id)
         await evaluate('window.__taskListProbe.commits=[]')
         const interactions: any[] = setting === 'detailed' ? [{ name: 'Resource columns setting', elapsedMs: performance.now() - settingAt }] : []
         if (view === 'archived') { const at = performance.now(); await loadAllArchived(); interactions.push({ name: 'Archived tab and paging', elapsedMs: performance.now() - at }) }
@@ -141,12 +172,17 @@ for (const scope of ['project', 'global'] as const) {
           interactions.push({ name: 'Search typing', elapsedMs: performance.now() - at })
         }
         Object.assign(sample, await evaluate('({longTasks:window.__taskListProbe.longTasks,eventTiming:window.__taskListProbe.events})'))
-        report.cases.push({ scope, ...testCase, loadBefore: before, loadAfter: loadavg(), updatesPublished, streamMs, ...sample, interactions, commitP50: percentile(sample.commits, .5), commitP95: percentile(sample.commits, .95), apiP50: percentile(api, .5), apiP95: percentile(api, .95), scrollFrameP50: percentile(frames, .5), scrollFrameP95: percentile(frames, .95), frames })
+        const memory = stopMemory(); stopMemory = undefined
+        report.cases.push({ memory, scope, ...testCase, loadBefore: before, loadAfter: loadavg(), updatesPublished, streamMs, ...sample, interactions, commitP50: percentile(sample.commits, .5), commitP95: percentile(sample.commits, .95), apiP50: percentile(api, .5), apiP95: percentile(api, .95), scrollFrameP50: percentile(frames, .5), scrollFrameP95: percentile(frames, .95), frames })
         save()
         console.log(`${scope} ${setting} ${view} ${repetition}: ${sample.mountedRows} rows, ${sample.fibers} fibers`)
       }
       await request('Target.closeTarget', { targetId })
     }, { requestTimeoutMs: 60_000 })
-  } finally { browser?.close(); await fixture.stop() }
+  } catch (error) {
+    report.failure = { error: String(error), memory: stopMemory?.(), server: serverState() }; stopMemory = undefined; save()
+    throw error
+  } finally { stopMemory?.(); browser?.close(); await fixture.stop() }
 }
+report.pendingCase = null
 save()
