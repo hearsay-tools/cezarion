@@ -154,12 +154,20 @@ function owesWorkerWake(run: AttentionInput): boolean {
 
 /** Worker waits in the list include Cezar's completion wait (hearsay-tools/cezarion#1301).
  * A worker waits outside itself on its parent (ring); a root waits on its own workers (robot). */
-function workerAttention(run: AttentionInput, waitingOn: Extract<WaitingOn, { kind: 'workers' }>): Attention {
+function workerAttention(run: Pick<AttentionInput, 'delegation'>, waitingOn: Extract<WaitingOn, { kind: 'workers' }>): Attention {
   const attention = attentionOfRung('waiting-on-workers');
   if (run.delegation?.role === 'worker') return { ...attention, shape: 'ring', label: 'waiting on parent reply' };
   if (waitingOn.replies) return { ...attention, label: waitingOn.peers ? 'waiting on replies' : 'waiting on worker replies' };
   const count = waitingOn.count;
   return { ...attention, label: count ? `waiting on ${count} worker${count === 1 ? '' : 's'}` : attention.label };
+}
+
+/** The worker-wait label the Activity row shows, over every open worker wait, each pending worker
+ *  counted once (hearsay-tools/cezarion#2588). The Workers panel reads the same label, so the two
+ *  never disagree. Undefined when the run's top open wait is not a worker wait. */
+export function workersWaitingLabel(run: Pick<AttentionInput, 'status' | 'autoResumeAt' | 'delegation' | 'waits' | 'waitingOn'>): string | undefined {
+  const waitingOn = resolveWaitingOn(run);
+  return waitingOn?.kind === 'workers' ? workerAttention(run, waitingOn).label : undefined;
 }
 
 /** A root waits on named peer tasks (hearsay-tools/cezarion#1995): the workers rung, never Needs

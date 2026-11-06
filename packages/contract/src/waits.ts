@@ -536,21 +536,22 @@ export function requestsToPeers(delegation: WaitingOnInput['delegation'], reques
   return !!requestIds?.some((id) => toPeers.has(id));
 }
 
-/** Ids a worker entry has not heard about yet, or requests without an outcome. */
-function workerEntryOwed(wait: WorkerWaitEntry): number {
+/** Ids a worker entry has not heard about yet, or requests without an outcome, each keyed by kind. */
+function workerEntryOwed(wait: WorkerWaitEntry): string[] {
   if (wait.requestIds) {
     const answered = new Set(wait.requestOutcomes?.map((outcome) => outcome.requestId));
-    return wait.requestIds.filter((id) => !answered.has(id)).length;
+    return wait.requestIds.filter((id) => !answered.has(id)).map((id) => `request:${id}`);
   }
   const reported = new Set(wait.outcomes?.map((outcome) => outcome.workerId));
-  return wait.workerIds?.filter((id) => !reported.has(id)).length ?? 0;
+  return (wait.workerIds ?? []).filter((id) => !reported.has(id)).map((id) => `worker:${id}`);
 }
 
-/** The count over every open worker entry; undefined when there is none. */
+/** The distinct workers and requests still owed over every open worker entry; undefined when there
+ *  is none. A worker in two open waits counts once (hearsay-tools/cezarion#2588). */
 function workersOwed(open: readonly Wait[]): number | undefined {
   const entries = open.filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker');
   if (!entries.length) return undefined;
-  return entries.reduce((sum, wait) => sum + workerEntryOwed(wait), 0);
+  return new Set(entries.flatMap(workerEntryOwed)).size;
 }
 
 function earliest<T extends PrWaitEntry | TimerWaitEntry | ProcessWaitEntry>(waits: readonly T[]): T | undefined {
