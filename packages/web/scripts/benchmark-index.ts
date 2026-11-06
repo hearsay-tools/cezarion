@@ -17,9 +17,8 @@
  * commits (count and `actualDuration` of each committed root, from a DevTools-hook shim; it reads
  * durations only from a `react-dom/profiling` build, `vite.profiling.config.ts`).
  *
- * `--profile-out PREFIX` and `--components-out PREFIX` write diagnostics of the sustained phase: a
- * renderer CPU profile, and per-component render counts and self time. They add overhead, so the
- * report's runs leave them off.
+ * `--profile-out PREFIX` writes a renderer CPU profile of the sustained phase. It adds overhead, so
+ * the report's runs leave it off.
  */
 import { execFileSync } from 'node:child_process'
 import { loadavg } from 'node:os'
@@ -47,22 +46,7 @@ const HOOK_SHIM = `(() => {
   const hook = { supportsFiber: true, renderers: new Map(), isDisabled: false,
     inject(renderer) { const id = this.renderers.size + 1; this.renderers.set(id, renderer); return id },
     onScheduleFiberRoot() {}, onCommitFiberUnmount() {}, onPostCommitFiberRoot() {}, checkDCE() {},
-    onCommitFiberRoot(_id, root) {
-      commits.push(typeof root.current.actualDuration === 'number' ? root.current.actualDuration : -1)
-      if (!window.__cezComponents) return
-      const stack = [root.current]
-      while (stack.length) {
-        const fiber = stack.pop()
-        if (fiber.child) stack.push(fiber.child)
-        if (fiber.sibling) stack.push(fiber.sibling)
-        if (!(fiber.flags & 1) || typeof fiber.type !== 'function') continue
-        let own = fiber.actualDuration
-        for (let child = fiber.child; child; child = child.sibling) own -= child.actualDuration
-        const name = fiber.type.displayName || fiber.type.name || 'anonymous'
-        const row = window.__cezComponents[name] || (window.__cezComponents[name] = [0, 0])
-        row[0] += 1; row[1] += own
-      }
-    } }
+    onCommitFiberRoot(_id, root) { commits.push(typeof root.current.actualDuration === 'number' ? root.current.actualDuration : -1) } }
   Object.defineProperty(window, '__REACT_DEVTOOLS_GLOBAL_HOOK__', { value: hook, configurable: true })
 })()`
 
@@ -74,8 +58,8 @@ interface RequestRow { url: string; at: number; startTs?: number; durationMs?: n
 export async function runIndexWorkload(options: {
   buildRoot: string; report: { cases: unknown[] }; save: () => void; views?: string[] | undefined; cpu?: string | undefined
   sustainedMs?: number | undefined
-  /** Diagnostics: a renderer CPU profile and per-component render counts of the sustained phase. */
-  profileOut?: string | undefined; componentsOut?: string | undefined
+  /** Diagnostics: a renderer CPU profile of the sustained phase. */
+  profileOut?: string | undefined
 }) {
   const views = (options.views?.length ? options.views : VIEWS) as View[]
   if (views.some(view => !VIEWS.includes(view))) throw new Error(`Use views from ${VIEWS.join(',')}`)
@@ -109,7 +93,7 @@ export async function runIndexWorkload(options: {
         const { sessionId } = await request('Target.attachToTarget', { targetId, flatten: true })
         await request('Network.enable', {}, sessionId); await request('Performance.enable', {}, sessionId); await request('Page.enable', {}, sessionId)
         await request('Page.addScriptToEvaluateOnNewDocument', { source: HOOK_SHIM }, sessionId)
-        const { componentsOut, profileOut } = options
+        const { profileOut } = options
         const evaluate = async (expression: string) => (await request('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, sessionId)).result.value
         const taskMs = async () => Object.fromEntries((await request('Performance.getMetrics', {}, sessionId)).metrics.map((m: { name: string; value: number }) => [m.name, m.value])).TaskDuration as number
         const takeCommits = async () => (await evaluate('window.__cezCommits ? window.__cezCommits.splice(0) : []')) as number[]
@@ -171,7 +155,6 @@ export async function runIndexWorkload(options: {
           const tickRuns = [family.parent, ...family.workers].map(runId => ({ projectId: 'boot', runId })).concat(otherRoots.slice(1, 4))
           const ticks0 = (await fixture.control({ tick: { rate: 5, runs: tickRuns } })).ticks
           const probes: number[] = []
-          if (componentsOut) await evaluate('window.__cezComponents = {}, true')
           if (profileOut) { await request('Profiler.enable', {}, sessionId); await request('Profiler.start', {}, sessionId) }
           const start = performance.now()
           while (performance.now() - start < sustainedMs) {
@@ -180,7 +163,6 @@ export async function runIndexWorkload(options: {
             await pause(Math.max(0, 1_000 - probe))
           }
           if (profileOut) writeFileSync(`${profileOut}.${view}.cpuprofile`, JSON.stringify((await request('Profiler.stop', {}, sessionId)).profile))
-          if (componentsOut) writeFileSync(`${componentsOut}.${view}.json`, JSON.stringify(await evaluate('window.__cezComponents')))
           const ticked = (await fixture.control({ tick: { rate: 0 } })).ticks - ticks0
           return { ticks: ticked, probeP50Ms: round(quantile(probes, 0.5)), probeP95Ms: round(quantile(probes, 0.95)), probes: probes.length }
         })

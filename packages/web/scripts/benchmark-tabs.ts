@@ -17,7 +17,7 @@ import { createTabFixture } from '../e2e/tab-fixture.ts'
 import { pollFor } from '../e2e/poll.ts'
 import { runIndexWorkload } from './benchmark-index.ts'
 
-const { values } = parseArgs({ options: { 'build-root': { type: 'string' }, output: { type: 'string' }, quick: { type: 'boolean' }, windows: { type: 'boolean' }, workload: { type: 'string' }, counts: { type: 'string' }, views: { type: 'string' }, cpu: { type: 'string' }, 'sustained-ms': { type: 'string' }, 'profile-out': { type: 'string' }, 'components-out': { type: 'string' } } })
+const { values } = parseArgs({ options: { 'build-root': { type: 'string' }, output: { type: 'string' }, quick: { type: 'boolean' }, windows: { type: 'boolean' }, workload: { type: 'string' }, counts: { type: 'string' }, views: { type: 'string' }, cpu: { type: 'string' }, 'sustained-ms': { type: 'string' }, 'profile-out': { type: 'string' } } })
 if (values.workload === 'reports') {
   const { benchmarkReports } = await import('./benchmark-reports')
   await benchmarkReports(resolve(values['build-root'] ?? '.'), resolve(values.output ?? 'docs/performance/report-shelf-refresh.raw.json'), !!values.quick)
@@ -45,7 +45,7 @@ mkdirSync(dirname(output), { recursive: true })
 const save = () => writeFileSync(output, JSON.stringify(report, null, 2))
 if (values.workload === 'index') {
   await runIndexWorkload({ buildRoot, report, save, views: values.views?.split(','), cpu: values.cpu, sustainedMs: values['sustained-ms'] ? Number(values['sustained-ms']) : undefined,
-    profileOut: values['profile-out'], componentsOut: values['components-out'] })
+    profileOut: values['profile-out'] })
   save()
   process.exit(0)
 }
