@@ -35,8 +35,10 @@ export interface ReadSteersStep { kind: 'readSteers'; late?: boolean; receive?: 
 export interface EndStep { kind: 'end'; error?: 'provider' }
 export type Step = OpenStep | TextStep | ReasoningStep | ToolStep | ChildStep | ReadSteersStep | EndStep
   | { kind: 'effect'; run: () => void | Promise<unknown> }
+  | { kind: 'reply'; prompt: string }
   | { kind: 'progress' }
   | { kind: 'sleep'; ms: number }
+  | { kind: 'hold'; ms: number }
   | { kind: 'release'; fallbackMs: number; suffix?: string }
   | { kind: 'park'; prompt: string }
   | { kind: 'stall'; prompt: string };
@@ -54,9 +56,13 @@ export interface Encoder {
   toolStart(step: ToolStep): void | Promise<void>;
   toolEnd(step: ToolStep): void | Promise<void>;
   child(step: ChildStep, playChild: (encoder: Encoder) => PlaybackResult | Promise<PlaybackResult>): void | Promise<void>;
+  /** This mock's own untokened reply, after open(), including its native turn end. */
+  reply(step: { kind: 'reply'; prompt: string }): void | Promise<void>;
   progress(step: { kind: 'progress' }): void | Promise<void>;
   readSteers(step: ReadSteersStep): string[] | void | Promise<string[] | void>;
   end(step: EndStep): void | Promise<void>;
+  /** A native steering hold; absent encoders sleep for ms. */
+  hold?(step: { kind: 'hold'; ms: number }): void | Promise<void>;
   closeInput?: () => void;
 }
 export function scenarioFor(prompt: string, context: ScenarioContext): Scenario | undefined;
