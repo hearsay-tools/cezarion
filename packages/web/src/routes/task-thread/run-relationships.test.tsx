@@ -165,6 +165,22 @@ it('shows a parent parked on Cezar\'s completion wait, which has no deadline', (
   expect(screen.queryByText(/Deadline:/)).toBeNull();
 });
 
+// hearsay-tools/cezarion#2588: waits [A, B] and [A] are two pending workers, as the Activity row says.
+it('counts each pending worker once across overlapping open waits', () => {
+  const otherWorker = '10000000-0000-4000-8000-000000000009'
+  const wait = (id: string, workerIds: string[], deadline: string) => ({
+    kind: WAIT_KIND.worker, id, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: at,
+    deadline, phase: WAIT_PHASE.open, turnId: 'turn-1', timeoutSeconds: 600, workerIds, revisions: [], outcomes: [],
+  })
+  setup({ ...root, status: RUN_STATUS.waiting, waits: [
+    wait('10000000-0000-4000-8000-000000000003', [workerId, otherWorker], '2026-09-06T00:10:00.000Z'),
+    wait('10000000-0000-4000-8000-000000000004', [workerId], '2026-09-06T00:20:00.000Z'),
+  ] })
+  // The newest wait's deadline stays the one the note names.
+  expect(screen.getByText(/^Waiting on 2 workers\. Deadline:/)).toBeTruthy()
+  expect(screen.getByText('2026-09-06T00:20:00.000Z')).toBeTruthy()
+})
+
 it('collapses worker navigation on phones and preserves its scoped links when reopened', async () => {
   vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} })))
   setup(root, async () => json({ workers: [worker] }))

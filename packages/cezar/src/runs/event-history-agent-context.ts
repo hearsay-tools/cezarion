@@ -9,6 +9,8 @@ interface ContextItem {
   first: RunHistoryEvent;
   latest: RunHistoryEvent;
   status?: string | undefined;
+  /** The runner left this agent running in the background: the subagent wait counts it. */
+  background?: true;
 }
 
 interface ContextToolItem {
@@ -16,6 +18,7 @@ interface ContextToolItem {
   toolKind?: unknown;
   parentItemId?: unknown;
   status?: unknown;
+  background?: unknown;
 }
 
 function contextToolItem(event: RunHistoryEvent): ContextToolItem | undefined {
@@ -56,8 +59,9 @@ export class AgentItemsContextTracker {
     const collection = isRoot ? this.roots : this.children;
     const existing = collection.get(key);
     const turn = this.boundaries.turn;
+    const background = item.background === true || existing?.background === true;
     const next: ContextItem = existing
-      ? { ...existing, latest: event, status: typeof item.status === 'string' ? item.status : existing.status }
+      ? { ...existing, latest: event, status: typeof item.status === 'string' ? item.status : existing.status, ...(background ? { background: true } : {}) }
       : {
           id: item.id,
           ...(parentId === undefined ? {} : { parentId }),
@@ -65,6 +69,7 @@ export class AgentItemsContextTracker {
           first: event,
           latest: event,
           ...(typeof item.status === 'string' ? { status: item.status } : {}),
+          ...(background ? { background: true } : {}),
         };
     collection.set(key, next);
     if (isRoot && !existing) {
@@ -88,15 +93,21 @@ export class AgentItemsContextTracker {
       }
     }
     const latestIds = this.rootsByTurn.get(latestRootTurn)!;
+    // The selector still shows a settled latest fan-out while an earlier background agent runs:
+    // it carries that agent to the anchor (hearsay-tools/cezarion#2588), so the anchor stays too.
+    const earlierBackground = rootTurns.some((turn) => turn < latestRootTurn && this.holdsRunningBackground(this.rootsByTurn.get(turn)!));
     if (
       this.boundaries.turn > latestRootTurn &&
+      !earlierBackground &&
       [...latestIds].every((id) => isSettledContextStatus(this.roots.get(id)?.status))
     ) {
       pruneThrough = latestRootTurn;
     }
     if (pruneThrough === undefined) return;
     for (const [candidateTurn, ids] of this.rootsByTurn) {
-      if (candidateTurn > pruneThrough) continue;
+      // A running background agent keeps its turn past the bound, as the Subagents section
+      // carries it (hearsay-tools/cezarion#2588): the subagent wait still counts it.
+      if (candidateTurn > pruneThrough || this.holdsRunningBackground(ids)) continue;
       for (const id of ids) this.roots.delete(id);
       this.rootsByTurn.delete(candidateTurn);
     }
@@ -106,6 +117,13 @@ export class AgentItemsContextTracker {
     }
     const earliest = Math.min(...[...this.roots.values()].map(({ first }) => first.seq), Number.MAX_SAFE_INTEGER);
     this.boundaries.pruneBefore(earliest);
+  }
+
+  private holdsRunningBackground(ids: ReadonlySet<string>): boolean {
+    return [...ids].some((id) => {
+      const root = this.roots.get(id);
+      return root?.background === true && !isSettledContextStatus(root.status);
+    });
   }
 
   private retainedRootIds(): Set<string> {

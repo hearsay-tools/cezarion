@@ -24,6 +24,7 @@ const noteRow: TranscriptRowModel = {
 const history = (overrides: Partial<RunHistoryState> = {}): RunHistoryState => ({
   visibleEvents: [{ seq: 500 } as RunEvent],
   currentEvents: [],
+  currentComplete: true,
   isPending: false,
   contextPending: false,
   fallback: false,

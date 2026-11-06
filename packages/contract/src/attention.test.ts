@@ -389,6 +389,40 @@ describe('computeWaitingOn and worker entries', () => {
     expect(computeWaitingOn({ waits: [{ ...waits[0]!, phase: WAIT_PHASE.resolved }] })).toBeUndefined();
   });
 
+  // hearsay-tools/cezarion#2588: a worker in two open waits is one pending worker.
+  it('counts each pending worker once across overlapping and disjoint waits', () => {
+    const [a, b] = ids(2);
+    const overlapping = [workerWait('88888888-8888-4888-8888-888888888881', [a!]), workerWait('88888888-8888-4888-8888-888888888882', [a!, b!])];
+    expect(computeWaitingOn({ waits: overlapping })).toEqual({ kind: 'workers', count: 2 });
+    expect(deriveAttention({ status: RUN_STATUS.waiting, delegation: { role: 'root' }, waits: overlapping } as AttentionInput).label).toBe('waiting on 2 workers');
+    expect(computeWaitingOn({ waits: [workerWait('88888888-8888-4888-8888-888888888881', [a!]), workerWait('88888888-8888-4888-8888-888888888882', [b!])] }))
+      .toEqual({ kind: 'workers', count: 2 });
+  });
+
+  it('a reported outcome removes only the worker it satisfies', () => {
+    const [a, b] = ids(2);
+    // A reported in the second wait; the first wait still owes A, so A still counts once, and B counts.
+    expect(computeWaitingOn({ waits: [workerWait('88888888-8888-4888-8888-888888888881', [a!]), workerWait('88888888-8888-4888-8888-888888888882', [a!, b!], [a!])] }))
+      .toEqual({ kind: 'workers', count: 2 });
+    expect(computeWaitingOn({ waits: [workerWait('88888888-8888-4888-8888-888888888881', [a!], [a!]), workerWait('88888888-8888-4888-8888-888888888882', [a!, b!], [a!])] }))
+      .toEqual({ kind: 'workers', count: 1 });
+  });
+
+  it('settled worker waits add no pending worker', () => {
+    const [a, b] = ids(2);
+    const open = workerWait('88888888-8888-4888-8888-888888888881', [a!]);
+    for (const phase of [WAIT_PHASE.resolved, WAIT_PHASE.delivered, WAIT_PHASE.cancelled]) {
+      expect(computeWaitingOn({ waits: [open, { ...workerWait('88888888-8888-4888-8888-888888888882', [a!, b!]), phase }] })).toEqual({ kind: 'workers', count: 1 });
+    }
+  });
+
+  it('counts each unanswered request once across request waits', () => {
+    const request = (id: string, requestIds: string[]): WorkerWaitEntry => ({ ...workerWait(id, ['99999999-9999-4999-8999-999999999990']), requestIds });
+    const [r1, r2] = ['77777777-7777-4777-8777-777777777771', '77777777-7777-4777-8777-777777777772'];
+    expect(computeWaitingOn({ waits: [request('88888888-8888-4888-8888-888888888881', [r1]), request('88888888-8888-4888-8888-888888888882', [r1, r2])] }))
+      .toEqual({ kind: 'workers', count: 2, replies: true });
+  });
+
   it('a worker entry outranks an open ci wait', () => {
     const [a] = ids(1);
     expect(computeWaitingOn({ waits: [ci, workerWait('88888888-8888-4888-8888-888888888881', [a!])] })).toEqual({ kind: 'workers', count: 1 });
@@ -535,6 +569,13 @@ describe('attention boundary cases', () => {
     expect(attention).toEqual({ rung: 'waiting-on-subagents', bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting for 1 subagent' });
     expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [subagents, workerEntry()] }).rung).toBe('waiting-on-workers');
     expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [makeSubagentWait({ phase: WAIT_PHASE.resolved })] }).rung).toBe('waiting-for-capacity');
+  });
+
+  // hearsay-tools/cezarion#2588: a child two open entries name is one running subagent.
+  it('counts each running subagent once across open subagent waits', () => {
+    const first = makeSubagentWait({ children: [{ id: 'a', status: SUBAGENT_STATUS.running }] });
+    const second = makeSubagentWait({ id: '66666666-6666-4666-8666-666666666662', children: [{ id: 'a', status: SUBAGENT_STATUS.running }, { id: 'b', status: SUBAGENT_STATUS.running }] });
+    expect(computeWaitingOn({ waits: [first, second] })).toEqual({ kind: 'subagents', count: 2 });
   });
 
   it.each([0, 1, 2])('labels %i peer tasks and preserves the webhook catch-all', count => {

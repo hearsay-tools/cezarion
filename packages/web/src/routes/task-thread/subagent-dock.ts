@@ -150,13 +150,19 @@ export function collectSubagents(turns: ThreadTurn[], runIsTerminal = false): Su
   //    a known mapper limitation) inject itself into every later fan-out, pin the dock open
   //    for the rest of the run, and hijack the collapsed head with its stale activity. Stop at
   //    the first earlier turn whose fan-out is entirely settled: that turn is history.
+  //  - **Except a running background agent** (hearsay-tools/cezarion#2588). The runner marks a
+  //    claude or codex agent it left running `background`, always reports its end, and the
+  //    subagent wait counts it. Its whole turn is carried past the bound, so the section and the
+  //    wait name the same running agents. A stranded opencode subtask is never background.
   const live = (item: UiToolItem): boolean => !runIsTerminal && !isSettled(item.status)
+  const liveBackground = (item: UiToolItem): boolean => live(item) && item.background === true
   const carried: UiToolItem[] = []
+  let bounded = false
   for (let i = anchorIndex - 1; i >= 0; i -= 1) {
     const turnRoots = turns[i]!.items.filter(isRootTaskItem)
     if (turnRoots.length === 0) continue // a steering turn carries no agents — look past it
-    if (!turnRoots.some(live)) break // a finished fan-out bounds the lookback
-    carried.unshift(...turnRoots)
+    if (!bounded && !turnRoots.some(live)) bounded = true // a finished fan-out bounds the lookback
+    if (!bounded || turnRoots.some(liveBackground)) carried.unshift(...turnRoots)
   }
   const roots = [...carried, ...turns[anchorIndex]!.items.filter(isRootTaskItem)]
   const isLatestTurn = anchorIndex === turns.length - 1

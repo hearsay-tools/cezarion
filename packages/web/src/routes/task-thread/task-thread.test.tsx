@@ -459,7 +459,7 @@ describe('ThreadView', () => {
       ],
     })
     const historyOf = (currentEvents: RunEvent[], over: Partial<import('@/api/run-history').RunHistoryState> = {}) => ({
-      visibleEvents: [askEvent], currentEvents, isPending: false, contextPending: false, fallback: false, hasOlder: false,
+      visibleEvents: [askEvent], currentEvents, currentComplete: true, isPending: false, contextPending: false, fallback: false, hasOlder: false,
       isFetchingOlder: false, olderError: undefined, loadOlder: async () => {}, jumpToLatest: async () => {}, retainedPages: 1, ...over,
     })
     const view = (thread: ApiRun, history: ReturnType<typeof historyOf>) => (
@@ -1647,7 +1647,7 @@ it.each([false, true].flatMap(fallback => (['pending', 'refused-human-attempt', 
     ...(mode === 'agent-input' ? [line(11, 'agent-input', { input: { text: 'worker finished' } })] : []),
     ...(mode === 'matched-answer' ? [line(12, 'human-input-delivered', { askSeq: 10 })] : []),
   ]
-  const history: import('@/api/run-history').RunHistoryState = { visibleEvents, currentEvents, isPending: false, contextPending: false, fallback, hasOlder: true, isFetchingOlder: false, olderError: undefined, loadOlder: async () => {}, jumpToLatest: async () => {}, retainedPages: 1 }
+  const history: import('@/api/run-history').RunHistoryState = { visibleEvents, currentEvents, currentComplete: true, isPending: false, contextPending: false, fallback, hasOlder: true, isFetchingOlder: false, olderError: undefined, loadOlder: async () => {}, jumpToLatest: async () => {}, retainedPages: 1 }
   const expectedPending = mode !== 'matched-answer' && mode !== 'old-history'
   // The record holds the human wait while the question is open, as the server writes it.
   renderView(<ThreadView run={run('waiting', onWorkerWait({ deadline: '2026-09-07T12:00:00.000Z' }, expectedPending ? 10 : undefined))} thread={reduceThread(visibleEvents)} currentThread={reduceThread(currentEvents)} history={history} />)
@@ -1680,7 +1680,7 @@ describe('the pending question (#1495)', () => {
   it('pins a pending ask whose turn is outside the loaded history', () => {
     const ask = askEvent(10, 'q1')
     const visibleEvents = [line(50, 'note', { message: 'later work' })]
-    const history: import('@/api/run-history').RunHistoryState = { visibleEvents, currentEvents: [ask, ...visibleEvents], isPending: false, contextPending: false, fallback: false, hasOlder: true, isFetchingOlder: false, olderError: undefined, loadOlder: async () => {}, jumpToLatest: async () => {}, retainedPages: 1 }
+    const history: import('@/api/run-history').RunHistoryState = { visibleEvents, currentEvents: [ask, ...visibleEvents], currentComplete: true, isPending: false, contextPending: false, fallback: false, hasOlder: true, isFetchingOlder: false, olderError: undefined, loadOlder: async () => {}, jumpToLatest: async () => {}, retainedPages: 1 }
     renderView(<ThreadView run={run('waiting')} thread={reduceThread(visibleEvents)} currentThread={reduceThread([ask, ...visibleEvents])} history={history} />)
     expect(document.querySelector('[data-slot="ask-card"][data-pinned="true"]')).not.toBeNull()
     expect(document.querySelector('[data-slot="ask-origin"]')).toBeNull()
