@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -48,7 +50,7 @@ describe('the repo branches API', () => {
 
   beforeEach(async () => {
     cezHome = mkdtempSync(join(tmpdir(), 'cez-branchapi-home-'));
-    process.env.CEZ_HOME = cezHome;
+    useTestHome(cezHome ? Home.sandbox(cezHome) : undefined);
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-branchapi-'));
     await git(repoRoot, 'init', '-q', '-b', 'main');
     await git(repoRoot, 'config', 'gc.auto', '0');
@@ -76,8 +78,8 @@ describe('the repo branches API', () => {
   afterEach(() => {
     manager.dispose();
     store.flush();
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
     else process.env.CEZ_DRY_RUN = savedDryRun;
     rmSync(repoRoot, { recursive: true, force: true });

@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,7 +29,7 @@ describe('GET /runs/:id/handoff', () => {
   beforeEach(async () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-handoff-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-handoff-repo-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     delete process.env.CEZ_SINGLE_PROJECT;
     clearProjectProbeCache();
     dataDir = join(repoRoot, '.ai/cezar');

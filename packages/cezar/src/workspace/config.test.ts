@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,14 +31,14 @@ describe('workspace config', () => {
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'cez-workspace-'));
-    process.env.CEZ_HOME = home; // paths.ts sends all workspace paths here
+    useTestHome(home ? Home.sandbox(home) : undefined); // paths.ts sends all workspace paths here
     delete process.env.CEZ_BROWSE_ROOT;
     delete process.env.CEZ_PROJECTS_DIR;
   });
 
   afterEach(() => {
-    if (originalHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = originalHome;
+    if (originalHome === undefined) useTestHome(undefined);
+    else useTestHome(originalHome ? Home.sandbox(originalHome) : undefined);
     if (originalBrowseRoot === undefined) delete process.env.CEZ_BROWSE_ROOT;
     else process.env.CEZ_BROWSE_ROOT = originalBrowseRoot;
     if (originalProjectsDir === undefined) delete process.env.CEZ_PROJECTS_DIR;

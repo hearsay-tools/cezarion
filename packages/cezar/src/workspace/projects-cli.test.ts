@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -23,7 +25,7 @@ describe('cezar projects CLI', () => {
   beforeEach(() => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-projects-cli-'));
     repos = mkdtempSync(join(realpathSync(tmpdir()), 'cez-projects-cli-repos-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     clearProjectProbeCache();
     const out: string[] = [];
     const err: string[] = [];
@@ -31,14 +33,14 @@ describe('cezar projects CLI', () => {
   });
 
   afterEach(() => {
-    if (originalHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = originalHome;
+    if (originalHome === undefined) useTestHome(undefined);
+    else useTestHome(originalHome ? Home.sandbox(originalHome) : undefined);
     rmSync(home, { recursive: true, force: true });
     rmSync(repos, { recursive: true, force: true });
   });
 
   const run = (...args: string[]): Promise<number> =>
-    runProjectsCommand(args, { home: testHome(), defaultRoot: repos, env: {}, io });
+    runProjectsCommand(args, { home: testHome({}), defaultRoot: repos, env: {}, io });
 
   const makeDir = (...segments: string[]): string => {
     const dir = join(repos, ...segments);
@@ -166,7 +168,7 @@ describe('cezar projects CLI', () => {
       const existing = await registerProject(makeRepo('existing'), undefined, testHome());
 
       expect(
-        await runProjectsCommand(['add', join(repos, 'does-not-exist')], { home: testHome(),
+        await runProjectsCommand(['add', join(repos, 'does-not-exist')], { home: testHome({ CEZ_SINGLE_PROJECT: '1' }),
           defaultRoot: repos,
           env: { CEZ_SINGLE_PROJECT: '1' },
           io,
@@ -182,7 +184,7 @@ describe('cezar projects CLI', () => {
         const existing = await registerProject(makeRepo('existing'), undefined, testHome());
 
         expect(
-          await runProjectsCommand([subcommand], { home: testHome(),
+          await runProjectsCommand([subcommand], { home: testHome({ CEZ_SINGLE_PROJECT: '1' }),
             defaultRoot: repos,
             env: { CEZ_SINGLE_PROJECT: '1' },
             io,
@@ -197,7 +199,7 @@ describe('cezar projects CLI', () => {
       const existing = await registerProject(makeRepo('existing'), undefined, testHome());
 
       expect(
-        await runProjectsCommand(['list'], { home: testHome(),
+        await runProjectsCommand(['list'], { home: testHome({ CEZ_SINGLE_PROJECT: '1' }),
           defaultRoot: repos,
           bootProjectId: existing.id,
           env: { CEZ_SINGLE_PROJECT: '1' },
@@ -208,7 +210,7 @@ describe('cezar projects CLI', () => {
 
       io.out.length = 0;
       expect(
-        await runProjectsCommand(['add', makeRepo('allowed')], { home: testHome(),
+        await runProjectsCommand(['add', makeRepo('allowed')], { home: testHome({ CEZ_SINGLE_PROJECT: 'true' }),
           defaultRoot: repos,
           env: { CEZ_SINGLE_PROJECT: 'true' },
           io,
@@ -221,7 +223,7 @@ describe('cezar projects CLI', () => {
       await registerProject(makeRepo('hidden'), undefined, testHome());
 
       expect(
-        await runProjectsCommand(['list'], { home: testHome(),
+        await runProjectsCommand(['list'], { home: testHome({ CEZ_SINGLE_PROJECT: '1' }),
           defaultRoot: repos,
           env: { CEZ_SINGLE_PROJECT: '1' },
           io,

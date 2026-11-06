@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,7 +23,7 @@ describe('run open-in target dispatch and refusals', () => {
 
   beforeEach(() => {
     root = mkdtempSync(join(realpathSync(tmpdir()), 'cez-open-targets-'));
-    vi.stubEnv('CEZ_HOME', join(root, 'home'));
+    useTestHome(join(root, 'home') ? Home.sandbox(join(root, 'home')) : undefined);
     vi.stubEnv('CEZ_REMOTE', '0');
     vi.stubEnv('CEZ_AGENT_MODELS_LOCKED', '1');
     store = RunStore.open(join(root, '.ai/cezar'));

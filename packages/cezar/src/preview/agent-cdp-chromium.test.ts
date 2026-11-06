@@ -78,7 +78,7 @@ describe('the agent drives the real preview browser (hearsay-tools/cezarion#784)
     const events: Array<Record<string, unknown>> = [];
     const store = { getRun: () => ({ id: 'run-1' }), appendEvent: (_runId: string, event: Record<string, unknown>) => { events.push(event); return event; } };
     const ctx: RunContext = { runId: 'run-1', title: 'Agent drives', worktreePath: dataDir, dataDir, store: store as unknown as RunContext['store'] };
-    const host = new PreviewHost({ home: testHome(), env: { ...process.env, CEZ_PREVIEW_NO_SANDBOX: '1' } });
+    const host = new PreviewHost({ home: testHome({ ...process.env, CEZ_PREVIEW_NO_SANDBOX: '1' }), env: { ...process.env, CEZ_PREVIEW_NO_SANDBOX: '1' } });
     cleanups.push(() => host.close());
     const socket = createPreviewCdpSocket({ host });
     cleanups.push(() => socket.close());

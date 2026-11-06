@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -26,7 +28,7 @@ describe('startServer cockpit address', () => {
     bootRoot = mkdtempSync(join(tmpdir(), 'cez-address-boot-'));
     otherRoot = mkdtempSync(join(tmpdir(), 'cez-address-other-'));
     mkdirSync(join(bootRoot, '.ai/cezar'), { recursive: true });
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
     delete process.env.CEZ_PROJECT_WARMUP;
     delete process.env.CEZ_SINGLE_PROJECT;

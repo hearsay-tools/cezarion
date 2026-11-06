@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -80,7 +82,7 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
     // `~/.cezar/agent-accounts.json`, so this suite must own one — without `CEZ_HOME` it would read the
     // developer's real workspace and its answers would depend on who ran it.
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-open-in-cli-home-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     delete process.env.CEZ_REMOTE;
     mockOpenInTerminal.mockClear();
@@ -91,8 +93,8 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
     for (const dir of [repoRoot, home]) rmSync(dir, { recursive: true, force: true });
     if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
     else process.env.CEZ_REMOTE = savedRemote;
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
   });
 
   const app = (options: { disabled?: ProviderId[]; disconnected?: ProviderId[] } = {}) =>

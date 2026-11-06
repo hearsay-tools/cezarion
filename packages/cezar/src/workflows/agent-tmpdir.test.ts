@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { agentEnv, agentEnvForStep } from './run/launch-context.ts';
@@ -51,7 +53,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-agent-tmpdir-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-agent-tmpdir-repo-'));
     dataDir = join(repoRoot, '.ai/cezar');
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     store = RunStore.open(dataDir);
     manager = createFixtureManager(store, repoRoot);
     await registerProject(repoRoot, undefined, testHome());
@@ -64,8 +66,8 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     for (const run of store.listRuns()) removeAgentTmpDir(dataDir, run.id);
     store.flush();
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
   });
 
   const newRun = () =>
@@ -288,7 +290,7 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
     // the shape Cezar's own nested task worktrees produce.
     repoRoot = join(realpathSync(tmpdir()), `cez-deep-tmp-${'r'.repeat(80)}`, 'repo');
     dataDir = join(repoRoot, '.ai/cezar');
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     store = RunStore.open(dataDir);
     manager = createFixtureManager(store, repoRoot);
     await registerProject(repoRoot, undefined, testHome());
@@ -301,8 +303,8 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
     for (const run of store.listRuns()) removeAgentTmpDir(dataDir, run.id);
     store.flush();
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
   });
 
   const newRun = () =>

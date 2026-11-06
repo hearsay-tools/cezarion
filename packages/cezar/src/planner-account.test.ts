@@ -1,3 +1,5 @@
+import { Home } from './home/home.ts';
+import { useTestHome } from './home/test-home.testkit.ts';
 import { testHome } from './home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,7 +23,7 @@ describe('planChain under an account cezar refuses to spawn (#1283)', () => {
   beforeEach(() => {
     home = realpathSync(mkdtempSync(join(tmpdir(), 'cez-planner-account-home-')));
     repoRoot = realpathSync(mkdtempSync(join(tmpdir(), 'cez-planner-account-repo-')));
-    vi.stubEnv('CEZ_HOME', home);
+    useTestHome(home ? Home.sandbox(home) : undefined);
     for (const key of ['OMP_PROFILE', 'PI_PROFILE', 'PI_CONFIG_DIR', 'PI_CODING_AGENT_DIR']) vi.stubEnv(key, undefined);
     // omp resolves a profile name under `$HOME/<PI_CONFIG_DIR or .omp>`.
     vi.stubEnv('HOME', join(home, 'user'));

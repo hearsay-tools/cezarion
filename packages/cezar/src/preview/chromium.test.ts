@@ -1,4 +1,5 @@
-import { testHome } from '../home/test-home.testkit.ts';
+import { resolveHome } from '../home/resolve.ts';
+const testHome = (env: NodeJS.ProcessEnv = process.env) => resolveHome({ purpose: 'cli', env });
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

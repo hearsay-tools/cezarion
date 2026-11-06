@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { ArchivePullRequestIdentity } from '@open-mercato/cezar-contract';
@@ -32,7 +34,7 @@ function dir() { const path = mkdtempSync(join(tmpdir(), 'cez-merge-boot-')); di
 it.each([{ single: false, repository: 'r' }, { single: true, repository: 'r' }, { single: false, repository: 'upstream' }])('uses the verified gh default repository without recovery: %j', async ({ single, repository }) => {
   vi.mocked(discoverRepoHandle).mockResolvedValue({ status: 'resolved', handle: { owner: 'o', name: repository } });
   vi.mocked(lookupMergedPullRequests).mockClear();
-  vi.stubEnv('CEZ_HOME', dir()); vi.stubEnv('CEZ_PROJECT_WARMUP', '0'); vi.stubEnv('CEZ_DRY_RUN', '1');
+  useTestHome(dir() ? Home.sandbox(dir()) : undefined); vi.stubEnv('CEZ_PROJECT_WARMUP', '0'); vi.stubEnv('CEZ_DRY_RUN', '1');
   vi.stubEnv('CEZ_ARCHIVE_ON_MERGE', '1'); vi.stubEnv('CEZ_SINGLE_PROJECT', single ? '1' : '0');
   const boot = dir(), cold = dir();
   for (const root of [boot, cold]) {

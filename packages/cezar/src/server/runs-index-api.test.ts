@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import {
   RUN_STATUS,
@@ -69,7 +71,7 @@ describe('workspace runs index API', () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-runs-index-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-runs-index-boot-'));
     otherRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-runs-index-other-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     clearProjectProbeCache();
@@ -78,8 +80,8 @@ describe('workspace runs index API', () => {
   afterEach(() => {
     store.flush();
     for (const dir of [home, repoRoot, otherRoot]) rmSync(dir, { recursive: true, force: true });
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
     else process.env.CEZ_DRY_RUN = savedDryRun;
   });

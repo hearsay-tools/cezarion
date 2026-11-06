@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -58,12 +60,12 @@ describe('the self-update API', () => {
     delete process.env.CEZ_REMOTE;
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-selfupdate-'));
     home = mkdtempSync(join(tmpdir(), 'cez-selfupdate-home-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     const stubFetch = (async () =>
       new Response(JSON.stringify(registryDocument), { status: 200 })) as unknown as typeof fetch;
-    const selfUpdate = new SelfUpdateService({ home: testHome(),
+    const selfUpdate = new SelfUpdateService({ home: testHome({ ...process.env, CEZ_HOME: home }),
       pkgName: '@wjarka/cezarion',
       version: RUNNING,
       entry: join(home, 'somewhere', 'dist', 'index.js'),
@@ -79,8 +81,8 @@ describe('the self-update API', () => {
     rmSync(home, { recursive: true, force: true });
     if (prevRemote === undefined) delete process.env.CEZ_REMOTE;
     else process.env.CEZ_REMOTE = prevRemote;
-    if (prevHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = prevHome;
+    if (prevHome === undefined) useTestHome(undefined);
+    else useTestHome(prevHome ? Home.sandbox(prevHome) : undefined);
   });
 
   const apply = (version: string) =>

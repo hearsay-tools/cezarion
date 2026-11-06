@@ -1,4 +1,7 @@
-import { testHome } from '../home/test-home.testkit.ts';
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { resolveHome } from '../home/resolve.ts';
+const testHome = (env: NodeJS.ProcessEnv = process.env) => resolveHome({ purpose: 'cli', env });
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -35,12 +38,12 @@ describe('cezar home write safety', () => {
     pinned = mkdtempSync(join(base, 'cez-home-safety-pinned-'));
     elsewhere = mkdtempSync(join(base, 'cez-home-safety-elsewhere-'));
     fakeUserHome = mkdtempSync(join(base, 'cez-home-safety-user-'));
-    process.env.CEZ_HOME = pinned;
+    useTestHome(pinned ? Home.sandbox(pinned) : undefined);
   });
 
   afterEach(() => {
-    if (originalCezHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = originalCezHome;
+    if (originalCezHome === undefined) useTestHome(undefined);
+    else useTestHome(originalCezHome ? Home.sandbox(originalCezHome) : undefined);
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
     vi.mocked(userInfo).mockRestore();
@@ -52,7 +55,7 @@ describe('cezar home write safety', () => {
       // Exactly what a test's afterEach does to an orphaned write: the pin is
       // gone by the time the write runs. The write must still land where the
       // read came from.
-      process.env.CEZ_HOME = elsewhere;
+      useTestHome(elsewhere ? Home.sandbox(elsewhere) : undefined);
       config.projects.push({
         id: 'shop',
         root: '/tmp/shop',
@@ -79,7 +82,7 @@ describe('cezar home write safety', () => {
         source: 'local',
       });
     }, testHome());
-    process.env.CEZ_HOME = pinned;
+    useTestHome(pinned ? Home.sandbox(pinned) : undefined);
     expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((p) => p.id)).toEqual(['shop']);
   });
 
@@ -87,7 +90,7 @@ describe('cezar home write safety', () => {
     // Model the account home without ever writing the host account's files.
     vi.mocked(userInfo).mockReturnValue({ ...userInfo(), homedir: fakeUserHome });
     process.env.HOME = fakeUserHome;
-    delete process.env.CEZ_HOME;
+    useTestHome(undefined);
     const target = workspaceConfigPath(undefined, testHome());
 
     expect(target).toBe(join(fakeUserHome, '.cezar', 'config.json'));
@@ -99,7 +102,7 @@ describe('cezar home write safety', () => {
     // Model the account home without ever writing the host account's files.
     vi.mocked(userInfo).mockReturnValue({ ...userInfo(), homedir: fakeUserHome });
     process.env.HOME = fakeUserHome;
-    delete process.env.CEZ_HOME;
+    useTestHome(undefined);
     const target = workspaceConfigPath(undefined, testHome());
     const existing = '{"projects":[{"id":"real","root":"/repos/real"}]}\n';
     mkdirSync(join(fakeUserHome, '.cezar'), { recursive: true });

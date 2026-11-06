@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -34,7 +36,7 @@ describe('workspace activity API', () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-activity-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-activity-boot-'));
     otherRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-activity-other-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     clearProjectProbeCache();

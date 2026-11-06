@@ -1,3 +1,5 @@
+import { Home } from '../../home/home.ts';
+import { useTestHome } from '../../home/test-home.testkit.ts';
 import { testHome } from '../../home/test-home.testkit.ts';
 // Load compile-only fixture functions so the quality report can measure their bodies.
 import '../launch-read-resolver.types.testkit.ts';
@@ -21,7 +23,7 @@ let context: RunModuleContext;
 let id: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'cez-launch-read-'));
-  vi.stubEnv('CEZ_HOME', join(root, 'home'));
+  useTestHome(join(root, 'home') ? Home.sandbox(join(root, 'home')) : undefined);
   vi.stubEnv('CEZ_AGENT_MODELS_LOCKED', '0');
   store = RunStore.open(root);
   context = { home: testHome(), store, dataDir: root, repoRoot: root, semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false };

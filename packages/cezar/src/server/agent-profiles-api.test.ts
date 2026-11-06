@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -36,7 +38,7 @@ describe('agent profiles API', () => {
   beforeEach(() => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-profiles-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-profiles-repo-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     delete process.env.CEZ_REMOTE;
     // Deterministic on any machine: no real agent CLIs are probed.
     process.env.CEZ_DRY_RUN = '1';

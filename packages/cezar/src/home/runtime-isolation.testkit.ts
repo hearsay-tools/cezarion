@@ -1,3 +1,5 @@
+import { Home } from './home.ts';
+import { useTestHome } from './test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,7 +18,7 @@ export function runtimeHomes() {
   const root = mkdtempSync(join(tmpdir(), 'cez-runtime-home-')); roots.push(root);
   const selected = resolveHome({ purpose: 'server', env: { CEZ_HOME: join(root, 'selected') } });
   const ambient = resolveHome({ purpose: 'server', env: { CEZ_HOME: join(root, 'ambient') } });
-  vi.stubEnv('CEZ_HOME', ambient.root);
+  useTestHome(ambient.root ? Home.sandbox(ambient.root) : undefined);
   vi.stubEnv('CEZ_AGENT_MODELS_LOCKED', '0');
   mkdirSync(join(root, 'selected-account'));
   mkdirSync(join(root, 'ambient-account'));

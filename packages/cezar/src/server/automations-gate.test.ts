@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -191,14 +193,14 @@ describe('automations gate (#801)', () => {
 
     beforeEach(() => {
       home = mkdtempSync(join(tmpdir(), 'cez-automations-gate-home-'));
-      process.env.CEZ_HOME = home;
+      useTestHome(home ? Home.sandbox(home) : undefined);
       process.env.CEZ_DRY_RUN = '1';
     });
 
     afterEach(() => {
       rmSync(home, { recursive: true, force: true });
-      if (savedHome === undefined) delete process.env.CEZ_HOME;
-      else process.env.CEZ_HOME = savedHome;
+      if (savedHome === undefined) useTestHome(undefined);
+      else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
       if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
       else process.env.CEZ_DRY_RUN = savedDryRun;
       vi.restoreAllMocks();

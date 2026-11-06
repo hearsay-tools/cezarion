@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
@@ -35,7 +37,7 @@ describe('RunManager agent-profile resolution', () => {
   beforeEach(async () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-profile-wiring-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-profile-wiring-repo-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     createFixtureManager(store, repoRoot);
     await registerProject(repoRoot, undefined, testHome());
@@ -45,8 +47,8 @@ describe('RunManager agent-profile resolution', () => {
     await drainFixtureManagers(repoRoot);
     store.flush();
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
   });
 
   const addAccount = async (id: string, provider: 'claude' | 'codex' | 'pi' | 'omp', dir: string) => {

@@ -88,7 +88,7 @@ describe('development channel', () => {
       })) as typeof fetch);
 
   const service = () =>
-    new SelfUpdateService({ home: testHome(),
+    new SelfUpdateService({ home: testHome(env),
       pkgName: '@wjarka/cezarion',
       version: '0.13.0',
       entry: join(home, 'versions', 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js'),
@@ -116,7 +116,7 @@ describe('development channel', () => {
   });
 
   it('lists no worktrees in hosted mode', async () => {
-    const svc = new SelfUpdateService({ home: testHome(),
+    const svc = new SelfUpdateService({ home: testHome(env),
       pkgName: '@wjarka/cezarion',
       version: '0.13.0',
       entry: '/x/dist/index.js',

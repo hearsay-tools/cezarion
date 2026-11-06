@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
@@ -44,7 +46,7 @@ describe('new-project routes', () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-create-api-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-create-boot-'));
     projectsDir = join(home, 'projects');
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     delete process.env.CEZ_REMOTE;
     delete process.env.CEZ_SINGLE_PROJECT;
     process.env.CEZ_DRY_RUN = '1';

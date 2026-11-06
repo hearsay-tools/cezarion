@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,7 +31,7 @@ describe('project context failures over HTTP and live feeds', () => {
     home = mkdtempSync(join(tmpdir(), 'cez-ctx-fail-home-'));
     bootRoot = mkdtempSync(join(tmpdir(), 'cez-ctx-fail-boot-'));
     otherRoot = mkdtempSync(join(tmpdir(), 'cez-ctx-fail-other-'));
-    vi.stubEnv('CEZ_HOME', home);
+    useTestHome(home ? Home.sandbox(home) : undefined);
     vi.stubEnv('CEZ_SINGLE_PROJECT', '0');
     vi.stubEnv('CEZ_DRY_RUN', '1');
     for (const root of [bootRoot, otherRoot]) mkdirSync(join(root, '.ai/cezar'), { recursive: true });

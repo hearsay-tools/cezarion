@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { testHome, useTestHome } from '../home/test-home.testkit.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -234,7 +236,7 @@ describe('DevServer', () => {
   });
 
   it.each(['0', '1'])('preview process strips the cockpit home with full-env=%s', async (full) => {
-    vi.stubEnv('CEZ_HOME', '/live/home');
+    useTestHome(Home.sandbox(testHome().root));
     vi.stubEnv('CEZ_AGENT_ENV_FULL', full);
     vi.stubEnv('CEZ_ENV_PASSTHROUGH', 'CEZ_HOME');
     try {

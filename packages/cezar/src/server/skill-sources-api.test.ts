@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -32,7 +34,7 @@ describe('the team skill sources API', () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-sources-'));
     homeRoot = mkdtempSync(join(tmpdir(), 'cez-sources-home-'));
     process.env.HOME = homeRoot;
-    process.env.CEZ_HOME = join(homeRoot, 'cezar-sandbox');
+    useTestHome(join(homeRoot, 'cezar-sandbox') ? Home.sandbox(join(homeRoot, 'cezar-sandbox')) : undefined);
     delete process.env.CEZ_REMOTE;
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     mkdirSync(join(homeRoot, 'cezar-sandbox'), { recursive: true });

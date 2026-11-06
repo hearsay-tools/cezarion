@@ -1,4 +1,6 @@
-import { testHome } from './home/test-home.testkit.ts';
+import { resolveHome } from './home/resolve.ts';
+const env: NodeJS.ProcessEnv = {};
+const testHome = () => resolveHome({ purpose: 'cli', env });
 import { afterEach, describe, expect, it } from 'vitest';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -16,44 +18,44 @@ import {
 } from './paths.ts';
 
 describe('paths', () => {
-  const original = process.env.CEZ_HOME;
+  const original = env.CEZ_HOME;
   afterEach(() => {
-    if (original === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = original;
+    if (original === undefined) delete env.CEZ_HOME;
+    else env.CEZ_HOME = original;
   });
 
   it('defaults the Home root to ~/.cezar', () => {
-    delete process.env.CEZ_HOME;
+    delete env.CEZ_HOME;
     expect(testHome().root).toBe(join(homedir(), '.cezar'));
   });
 
   it('honors the CEZ_HOME override', () => {
-    process.env.CEZ_HOME = '/tmp/cez-home-test';
+    env.CEZ_HOME = '/tmp/cez-home-test';
     expect(testHome().root).toBe('/tmp/cez-home-test');
     expect(serverStatePath(undefined, testHome())).toBe('/tmp/cez-home-test/server.json');
     expect(serverLockPath(undefined, testHome())).toBe('/tmp/cez-home-test/server.install.lock');
   });
 
   it('the default instance keeps the legacy un-suffixed paths', () => {
-    process.env.CEZ_HOME = '/tmp/cez-home-test';
+    env.CEZ_HOME = '/tmp/cez-home-test';
     expect(serverStatePath(DEFAULT_SERVER_INSTANCE, testHome())).toBe('/tmp/cez-home-test/server.json');
     expect(serverLockPath(DEFAULT_SERVER_INSTANCE, testHome())).toBe('/tmp/cez-home-test/server.install.lock');
   });
 
   it('workspace config/ui-state live directly under the cezar home', () => {
-    delete process.env.CEZ_HOME;
+    delete env.CEZ_HOME;
     expect(workspaceConfigPath(undefined, testHome())).toBe(join(homedir(), '.cezar', 'config.json'));
     expect(workspaceUiStatePath(testHome())).toBe(join(homedir(), '.cezar', 'ui-state.json'));
   });
 
   it('workspace paths honor the CEZ_HOME override', () => {
-    process.env.CEZ_HOME = '/tmp/cez-home-test';
+    env.CEZ_HOME = '/tmp/cez-home-test';
     expect(workspaceConfigPath(undefined, testHome())).toBe('/tmp/cez-home-test/config.json');
     expect(workspaceUiStatePath(testHome())).toBe('/tmp/cez-home-test/ui-state.json');
   });
 
   it('a named instance lives under server-instances/, keyed by slug', () => {
-    process.env.CEZ_HOME = '/tmp/cez-home-test';
+    env.CEZ_HOME = '/tmp/cez-home-test';
     expect(serverInstancesDir(testHome())).toBe('/tmp/cez-home-test/server-instances');
     expect(serverStatePath('shop-example-com', testHome())).toBe('/tmp/cez-home-test/server-instances/shop-example-com.json');
     expect(serverLockPath('shop-example-com', testHome())).toBe(
@@ -77,14 +79,14 @@ describe('instanceSlug', () => {
 });
 
 it('an EMPTY CEZ_HOME falls back to the default instead of a relative cwd path', () => {
-  const original = process.env.CEZ_HOME;
-  process.env.CEZ_HOME = '';
+  const original = env.CEZ_HOME;
+  env.CEZ_HOME = '';
   try {
     expect(testHome().root.startsWith('/')).toBe(true);
     expect(testHome().root.endsWith('/.cezar')).toBe(true);
   } finally {
-    if (original === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = original;
+    if (original === undefined) delete env.CEZ_HOME;
+    else env.CEZ_HOME = original;
   }
 });
 

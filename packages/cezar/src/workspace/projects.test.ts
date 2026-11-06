@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -46,13 +48,13 @@ describe('workspace projects', () => {
   beforeEach(() => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-workspace-'));
     repos = mkdtempSync(join(realpathSync(tmpdir()), 'cez-repos-'));
-    process.env.CEZ_HOME = home; // paths.ts sends all workspace paths here
+    useTestHome(home ? Home.sandbox(home) : undefined); // paths.ts sends all workspace paths here
     clearProjectProbeCache();
   });
 
   afterEach(() => {
-    if (originalHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = originalHome;
+    if (originalHome === undefined) useTestHome(undefined);
+    else useTestHome(originalHome ? Home.sandbox(originalHome) : undefined);
     rmSync(home, { recursive: true, force: true });
     rmSync(repos, { recursive: true, force: true });
   });

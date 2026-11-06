@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -43,7 +45,7 @@ describe('GET /api/v1/workspace/events', () => {
     home = mkdtempSync(join(tmpdir(), 'cez-wsev-home-'));
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-wsev-boot-'));
     otherRoot = mkdtempSync(join(tmpdir(), 'cez-wsev-other-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     delete process.env.CEZ_REMOTE;
     process.env.CEZ_DRY_RUN = '1';
     for (const root of [repoRoot, otherRoot]) {
@@ -72,8 +74,8 @@ describe('GET /api/v1/workspace/events', () => {
     contexts.disposeAll();
     store.flush();
     for (const dir of [home, repoRoot, otherRoot]) rmSync(dir, { recursive: true, force: true });
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
     else process.env.CEZ_REMOTE = savedRemote;
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;

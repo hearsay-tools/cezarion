@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,7 +34,7 @@ describe('project webhooks API', () => {
   beforeEach(async () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-webhooks-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-webhooks-repo-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     delete process.env.CEZ_DRY_RUN;
     delete process.env.CEZ_SINGLE_PROJECT;
     clearProjectProbeCache();

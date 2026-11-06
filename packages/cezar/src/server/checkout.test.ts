@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import {
@@ -420,7 +422,7 @@ describe('POST /api/v1/projects/checkout', () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-checkout-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-checkout-boot-'));
     checkoutRoot = join(home, 'cezar', 'projects');
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
     delete process.env.CEZ_PROJECTS_DIR;
     delete process.env.CEZ_REMOTE;
@@ -431,8 +433,8 @@ describe('POST /api/v1/projects/checkout', () => {
   afterEach(() => {
     store.flush();
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
     else process.env.CEZ_DRY_RUN = savedDryRun;
     if (savedProjectsDir === undefined) delete process.env.CEZ_PROJECTS_DIR;

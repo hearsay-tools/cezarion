@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -43,7 +45,7 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
     // `keep` now falls back to the workspace default, so pin CEZ_HOME at an
     // empty temp dir — the suite must never read the developer's real ~/.cezar.
     cezHome = mkdtempSync(join(tmpdir(), 'cez-wtapi-home-'));
-    process.env.CEZ_HOME = cezHome;
+    useTestHome(cezHome ? Home.sandbox(cezHome) : undefined);
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-wtapi-'));
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
     await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
@@ -62,8 +64,8 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
     await drainFixtureManagers(repoRoot);
     manager.dispose();
     store.flush();
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     rmSync(repoRoot, { recursive: true, force: true });
     rmSync(cezHome, { recursive: true, force: true });
   });

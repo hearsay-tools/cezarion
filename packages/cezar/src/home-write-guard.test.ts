@@ -1,4 +1,6 @@
-import { testHome } from './home/test-home.testkit.ts';
+import { useTestHome } from './home/test-home.testkit.ts';
+import { resolveHome } from './home/resolve.ts';
+const testHome = (env: NodeJS.ProcessEnv = process.env) => resolveHome({ purpose: 'cli', env });
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
@@ -26,7 +28,7 @@ afterEach(() => { vi.unstubAllEnvs(); vi.mocked(existsSync).mockRestore(); vi.cl
 describe('home write guard with HOME pinned to a sandbox', () => {
   it.each(['atomic JSON', 'agent accounts', 'remote settings', 'server state'])('blocks %s before any filesystem mutation', async (writer) => {
     vi.stubEnv('HOME', '/tmp/cez-guard-sandbox');
-    vi.stubEnv('CEZ_HOME', realHome);
+    useTestHome(testHome({ CEZ_HOME: realHome }));
     const write = () => {
       if (writer === 'atomic JSON') return atomicWriteJsonSync(join(realHome, 'config.json'), {});
       if (writer === 'agent accounts') return mergeWriteAgentAccounts(() => {}, testHome());
@@ -66,7 +68,7 @@ describe('home write guard with HOME pinned to a sandbox', () => {
   it('checks the install destination again after npm changes the home', async () => {
     const env = { CEZ_HOME: '/tmp/cez-guard-sandbox' };
     vi.mocked(existsSync).mockImplementation((path) => String(path).includes('.staging-'));
-    await expect(installFromRegistry('0.12.1', { home: testHome(), env, runNpm: async () => { env.CEZ_HOME = realHome; } }))
+    await expect(installFromRegistry('0.12.1', { home: { ...testHome(env), get versions() { return join(env.CEZ_HOME, 'versions'); } }, env, runNpm: async () => { env.CEZ_HOME = realHome; } }))
       .rejects.toThrow('refusing to write');
     expect(renameSync).not.toHaveBeenCalled();
     for (const [path] of vi.mocked(rmSync).mock.calls) expect(String(path)).not.toContain(realHome);

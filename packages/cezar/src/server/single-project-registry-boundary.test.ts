@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -42,7 +44,7 @@ describe('single-project registry boundary', () => {
     bootRoot = mkdtempSync(join(tmpdir(), 'cez-discovery-boot-'));
     otherRoot = mkdtempSync(join(tmpdir(), 'cez-discovery-other-'));
     mkdirSync(join(bootRoot, '.ai/cezar'), { recursive: true });
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
     // Warm-up would build the other project with no request; this test asks about the lookup only.
     process.env.CEZ_PROJECT_WARMUP = '0';

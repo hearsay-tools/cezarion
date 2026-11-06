@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -12,7 +14,7 @@ describe('managed update review regressions', () => {
   let home: string;
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'cezar-update-review-'));
-    vi.stubEnv('CEZ_HOME', home);
+    useTestHome(home ? Home.sandbox(home) : undefined);
     vi.useFakeTimers();
   });
   afterEach(() => {

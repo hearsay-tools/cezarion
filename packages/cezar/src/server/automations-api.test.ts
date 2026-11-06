@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { automationCheckSchema } from '@open-mercato/cezar-contract/automations';
@@ -59,7 +61,7 @@ describe('GitHub automation API', () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'cezar-automation-api-'));
     home = mkdtempSync(join(tmpdir(), 'cezar-automation-home-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_AUTOMATIONS = '1';
     mkdirSync(join(root, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(root, '.ai/cezar'));
@@ -68,7 +70,7 @@ describe('GitHub automation API', () => {
     store.flush();
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
-    delete process.env.CEZ_HOME;
+    useTestHome(undefined);
     if (savedAutomations === undefined) delete process.env.CEZ_AUTOMATIONS;
     else process.env.CEZ_AUTOMATIONS = savedAutomations;
   });

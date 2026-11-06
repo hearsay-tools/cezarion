@@ -65,10 +65,12 @@ async function crashAfterContinue(repoRoot: string, dataDir: string, runId: stri
     import { RunStore } from ${JSON.stringify(new URL('../runs/store.ts', import.meta.url).href)};
     import { RunManager } from ${JSON.stringify(new URL('./run.ts', import.meta.url).href)};
     import { WorkspaceSemaphore } from ${JSON.stringify(new URL('../workspace/semaphore.ts', import.meta.url).href)};
+    import { Home } from ${JSON.stringify(new URL('../home/home.ts', import.meta.url).href)};
+    const home = Home.sandbox(process.env.CEZ_HOME);
     const input = JSON.parse(process.argv[1]);
     const store = RunStore.open(input.dataDir, { keepLive: true });
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 } });
-    const manager = new RunManager(store, input.repoRoot, { semaphore });
+    const semaphore = new WorkspaceSemaphore({ home, initial: { maxParallel: 0 } });
+    const manager = new RunManager(store, input.repoRoot, { home, semaphore });
     const accepted = manager.continueRun(input.runId, { text: 'read my durable continuation brief', images: input.images }, input.mode === 'capacity');
     if (!accepted.ok) throw new Error(accepted.error);
     process.exit(0);

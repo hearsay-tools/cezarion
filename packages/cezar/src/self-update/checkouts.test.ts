@@ -216,7 +216,7 @@ describe('linked checkouts', () => {
     const [checkout] = await discoverCheckouts(env, testHome(env));
     expect(checkout?.stale).toBe(true);
     const build = vi.fn(async () => { writeFileSync(join(pkg, 'dist', 'index.js'), '// rebuilt dirty source'); });
-    const svc = new SelfUpdateService({ home: testHome(),
+    const svc = new SelfUpdateService({ home: testHome(env),
       pkgName: '@wjarka/cezarion', version: '0.13.0',
       entry: join(versionsDir(env, testHome(env)), 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js'),
       env, restart: () => {}, buildCheckout: build,
@@ -283,7 +283,7 @@ describe('linked checkouts', () => {
     expect(before.get(a)).toBe('0.13.0+main');
     expect(before.get(b)).toMatch(/^0\.13\.0\+main\.[0-9a-z]+$/);
 
-    const svc = new SelfUpdateService({ home: testHome(),
+    const svc = new SelfUpdateService({ home: testHome(env),
       pkgName: '@wjarka/cezarion',
       version: '0.13.0',
       entry: join(versionsDir(env, testHome(env)), 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js'),
@@ -319,7 +319,7 @@ describe('linked checkouts', () => {
 
     const built: string[] = [];
     let restarted = false;
-    const svc = new SelfUpdateService({ home: testHome(),
+    const svc = new SelfUpdateService({ home: testHome(env),
       pkgName: '@wjarka/cezarion',
       version: '0.13.0',
       entry: join(versionsDir(env, testHome(env)), 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js'),

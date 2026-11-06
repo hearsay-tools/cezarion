@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -16,10 +18,10 @@ let home: string;
 const originalHome = process.env.CEZ_HOME;
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'cez-backups-'));
-  process.env.CEZ_HOME = home;
+  useTestHome(home ? Home.sandbox(home) : undefined);
 });
 afterEach(() => {
-  process.env.CEZ_HOME = originalHome;
+  useTestHome(originalHome ? Home.sandbox(originalHome) : undefined);
   rmSync(home, { recursive: true, force: true });
   vi.useRealTimers();
   vi.restoreAllMocks();

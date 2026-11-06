@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,7 +12,7 @@ import { SelfUpdateService } from './service.ts';
 
 describe('managed install instructions', () => {
   let home: string;
-  beforeEach(() => { home = mkdtempSync(join(tmpdir(), 'cezar-cli-instructions-')); vi.stubEnv('CEZ_HOME', home); });
+  beforeEach(() => { home = mkdtempSync(join(tmpdir(), 'cezar-cli-instructions-')); useTestHome(home ? Home.sandbox(home) : undefined); });
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });
   it.each([true, false])('prints the actual home and installed launcher (on PATH: %s)', async onPath => {
     vi.stubEnv('PATH', onPath ? join(home, 'bin') : '');
@@ -29,7 +31,7 @@ describe('managed install instructions', () => {
 describe('managed version selection', () => {
   let home: string;
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), 'cezar-cli-select-')); vi.stubEnv('CEZ_HOME', home);
+    home = mkdtempSync(join(tmpdir(), 'cezar-cli-select-')); useTestHome(home ? Home.sandbox(home) : undefined);
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });

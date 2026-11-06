@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import {
   existsSync,
@@ -36,12 +38,12 @@ describe('agent accounts store', () => {
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'cez-accounts-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
   });
 
   afterEach(() => {
-    if (originalHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = originalHome;
+    if (originalHome === undefined) useTestHome(undefined);
+    else useTestHome(originalHome ? Home.sandbox(originalHome) : undefined);
     rmSync(home, { recursive: true, force: true });
     vi.restoreAllMocks();
   });

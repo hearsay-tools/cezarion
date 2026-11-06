@@ -639,8 +639,8 @@ function childTeamSkillCommit(home: string, repoRoot: string): string {
   const script = `
     process.env.HOME = ${JSON.stringify(home)};
     const { waitForTeamSkills } = await import(${JSON.stringify(SKILLS_REMOTE)});
-    const { resolveHome } = await import(${JSON.stringify(join(SRC_DIR, '../../src/home/resolve.ts'))});
-    const skills = await waitForTeamSkills(${JSON.stringify(repoRoot)}, resolveHome({ purpose: 'cli' }));
+    const { Home } = await import(${JSON.stringify(join(SRC_DIR, '../../src/home/home.ts'))});
+    const skills = await waitForTeamSkills(${JSON.stringify(repoRoot)}, Home.sandbox(process.env.CEZ_HOME));
     const greeter = skills.find((s) => s.name === 'greeter');
     process.stdout.write(greeter?.team?.commit ?? '');
   `;

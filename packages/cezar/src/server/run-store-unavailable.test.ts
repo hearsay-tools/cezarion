@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,7 +45,7 @@ describe('a project whose run store cannot be opened', () => {
     home = mkdtempSync(join(tmpdir(), 'cez-unavailable-home-'));
     bootRoot = mkdtempSync(join(tmpdir(), 'cez-unavailable-boot-'));
     otherRoot = mkdtempSync(join(tmpdir(), 'cez-unavailable-other-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
     delete process.env.CEZ_SINGLE_PROJECT;
     for (const root of [bootRoot, otherRoot]) mkdirSync(join(root, '.ai/cezar'), { recursive: true });

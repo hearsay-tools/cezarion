@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { request } from 'node:http';
@@ -44,7 +46,7 @@ const config = (values: object) => writeFileSync(join(root, '.ai/cezar/config.js
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'cez-launch-boundary-'));
   mkdirSync(join(root, '.ai/cezar'), { recursive: true });
-  vi.stubEnv('CEZ_HOME', join(root, 'home'));
+  useTestHome(join(root, 'home') ? Home.sandbox(join(root, 'home')) : undefined);
   vi.stubEnv('CEZ_AUTONAME', '0');
   vi.stubEnv('CEZ_DRY_RUN', '1');
   opened.length = 0;

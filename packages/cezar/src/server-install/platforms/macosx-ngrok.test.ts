@@ -1,3 +1,5 @@
+import { Home } from '../../home/home.ts';
+import { useTestHome } from '../../home/test-home.testkit.ts';
 import { testHome } from '../../home/test-home.testkit.ts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -17,11 +19,11 @@ describe('macosx-ngrok', () => {
   const original = process.env.CEZ_HOME;
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'cez-mac-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
   });
   afterEach(() => {
-    if (original === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = original;
+    if (original === undefined) useTestHome(undefined);
+    else useTestHome(original ? Home.sandbox(original) : undefined);
     rmSync(home, { recursive: true, force: true });
   });
 
@@ -87,11 +89,11 @@ describe('macosx-ngrok review fixes (PR #423)', () => {
   const original = process.env.CEZ_HOME;
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'cez-mac-fix-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
   });
   afterEach(() => {
-    if (original === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = original;
+    if (original === undefined) useTestHome(undefined);
+    else useTestHome(original ? Home.sandbox(original) : undefined);
     rmSync(home, { recursive: true, force: true });
   });
 

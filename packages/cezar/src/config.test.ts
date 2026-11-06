@@ -1,3 +1,5 @@
+import { Home } from './home/home.ts';
+import { useTestHome } from './home/test-home.testkit.ts';
 import { testHome } from './home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -168,12 +170,12 @@ describe('resolveWorktreeRetention', () => {
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     // Pinned so the suite never reads (or writes) the developer's real ~/.cezar.
     cezHome = mkdtempSync(join(tmpdir(), 'cez-home-'));
-    process.env.CEZ_HOME = cezHome;
+    useTestHome(cezHome ? Home.sandbox(cezHome) : undefined);
   });
 
   afterEach(() => {
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     rmSync(repoRoot, { recursive: true, force: true });
     rmSync(cezHome, { recursive: true, force: true });
   });
@@ -329,12 +331,12 @@ describe('loadConfig machine-wide agent defaults', () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-machine-defaults-'));
     cezHome = mkdtempSync(join(tmpdir(), 'cez-machine-home-'));
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
-    process.env.CEZ_HOME = cezHome;
+    useTestHome(cezHome ? Home.sandbox(cezHome) : undefined);
   });
 
   afterEach(() => {
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     for (const dir of [repoRoot, cezHome]) rmSync(dir, { recursive: true, force: true });
   });
 

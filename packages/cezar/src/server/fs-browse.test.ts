@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -38,7 +40,7 @@ describe('GET /api/v1/fs/browse (step 4.1)', () => {
     home = realpathSync(mkdtempSync(join(tmpdir(), 'cez-fs-browse-home-')));
     outside = realpathSync(mkdtempSync(join(tmpdir(), 'cez-fs-browse-outside-')));
     process.env.HOME = home;
-    process.env.CEZ_HOME = join(home, '.cezar');
+    useTestHome(join(home, '.cezar') ? Home.sandbox(join(home, '.cezar')) : undefined);
     delete process.env.CEZ_REMOTE; // local mode is the default under test
     delete process.env.CEZ_BROWSE_ROOT;
 

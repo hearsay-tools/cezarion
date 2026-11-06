@@ -36,7 +36,7 @@ describe('installing into the managed layout', () => {
 
   it('moves a finished install into place, writes its manifest and leaves no staging behind', async () => {
     const seen: string[][] = [];
-    const result = await installFromRegistry('0.12.1', { home: testHome(),
+    const result = await installFromRegistry('0.12.1', { home: testHome(env),
       env,
       runNpm: async (args, cwd, onLog) => {
         seen.push(args);
@@ -56,7 +56,7 @@ describe('installing into the managed layout', () => {
 
   it('leaves nothing behind when npm fails', async () => {
     await expect(
-      installFromRegistry('0.12.1', { home: testHome(),
+      installFromRegistry('0.12.1', { home: testHome(env),
         env,
         runNpm: async () => {
           throw new Error('npm install failed (exit 1): ETARGET');
@@ -69,15 +69,15 @@ describe('installing into the managed layout', () => {
   });
 
   it('refuses an install whose entry file never appeared', async () => {
-    await expect(installFromRegistry('0.12.1', { home: testHome(), env, runNpm: async () => {} })).rejects.toThrow('entry file is missing');
+    await expect(installFromRegistry('0.12.1', { home: testHome(env), env, runNpm: async () => {} })).rejects.toThrow('entry file is missing');
     expect(staged()).toEqual([]);
     expect(existsSync(versionDir('0.12.1', env, testHome(env)))).toBe(false);
   });
 
   it('answers an already installed version without running npm', async () => {
-    await installFromRegistry('0.12.1', { home: testHome(), env, runNpm: npmThatInstalls('first') });
+    await installFromRegistry('0.12.1', { home: testHome(env), env, runNpm: npmThatInstalls('first') });
     let ran = false;
-    await installFromRegistry('0.12.1', { home: testHome(),
+    await installFromRegistry('0.12.1', { home: testHome(env),
       env,
       runNpm: async () => {
         ran = true;
@@ -94,11 +94,11 @@ describe('installing into the managed layout', () => {
       const dir = args[args.indexOf('--pack-destination') + 1]!;
       writeFileSync(join(dir, 'fixture.tgz'), 'fixture');
     };
-    await installFromLocal(pkg, { home: testHome(), env, runNpm: async (args, cwd, log) => args[0] === 'pack' ? pack(args, cwd, log) : npmThatInstalls('original')(args, cwd, log) });
+    await installFromLocal(pkg, { home: testHome(env), env, runNpm: async (args, cwd, log) => args[0] === 'pack' ? pack(args, cwd, log) : npmThatInstalls('original')(args, cwd, log) });
     activate('0.12.1+local', env, testHome(env));
     const originalManifest = readManifest('0.12.1+local', env, testHome(env));
     let oldEntryWhileStaging = '';
-    const replacement = installFromLocal(pkg, { home: testHome(), env, runNpm: async (args, cwd, log) => {
+    const replacement = installFromLocal(pkg, { home: testHome(env), env, runNpm: async (args, cwd, log) => {
       if (args[0] === 'pack') return pack(args, cwd, log);
       oldEntryWhileStaging = existsSync(currentEntry(env, testHome(env))) ? readFileSync(currentEntry(env, testHome(env)), 'utf8') : 'missing';
       if (outcome === 'npm failure') throw new Error('ETARGET');
@@ -116,7 +116,7 @@ describe('installing into the managed layout', () => {
   it('never builds a path from an unsafe version id', async () => {
     let ran = false;
     await expect(
-      installFromRegistry('..', { home: testHome(),
+      installFromRegistry('..', { home: testHome(env),
         env,
         runNpm: async () => {
           ran = true;
@@ -173,7 +173,7 @@ describe('a read-only service', () => {
     try {
       const env = { ...process.env, CEZ_HOME: home };
       const entry = join(versionsDir(env, testHome(env)), 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js');
-      const base = { home: testHome(), pkgName: '@wjarka/cezarion', version: '0.12.0', entry, restart: () => {}, env };
+      const base = { home: testHome(env), pkgName: '@wjarka/cezarion', version: '0.12.0', entry, restart: () => {}, env };
       expect(new SelfUpdateService(base).capability().canSelfUpdate).toBe(true);
       const readOnly = new SelfUpdateService({ ...base, readOnly: true });
       expect(readOnly.capability()).toMatchObject({ canSelfUpdate: false });

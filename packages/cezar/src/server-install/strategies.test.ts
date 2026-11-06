@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -35,11 +37,11 @@ describe('ubuntu-vps dry-run', () => {
   const original = process.env.CEZ_HOME;
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'cez-ubuntu-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
   });
   afterEach(() => {
-    if (original === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = original;
+    if (original === undefined) useTestHome(undefined);
+    else useTestHome(original ? Home.sandbox(original) : undefined);
     rmSync(home, { recursive: true, force: true });
   });
 

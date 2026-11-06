@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,12 +31,12 @@ describe('agent profile resolution', () => {
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'cez-profiles-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
   });
 
   afterEach(() => {
-    if (originalHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = originalHome;
+    if (originalHome === undefined) useTestHome(undefined);
+    else useTestHome(originalHome ? Home.sandbox(originalHome) : undefined);
     rmSync(home, { recursive: true, force: true });
   });
 
@@ -181,7 +183,7 @@ describe('agent profile resolution', () => {
         selections: { '/tmp/projects/a': { pi: 'pi-work', omp: 'omp-work' } },
       });
       expect((await resolveProfileEnvForRoot('/tmp/projects/a', 'pi', undefined, undefined, testHome())).env).toEqual({ PI_CODING_AGENT_DIR: '/opt/pi-work/agent' });
-      expect((await resolveProfileEnvForRoot('/tmp/projects/a', 'omp', undefined, env, testHome(env))).env).toEqual({ OMP_PROFILE: 'work' });
+      expect((await resolveProfileEnvForRoot('/tmp/projects/a', 'omp', undefined, env, testHome())).env).toEqual({ OMP_PROFILE: 'work' });
       // The default account of either still adds nothing.
       expect((await resolveProfileEnvForRoot('/tmp/projects/b', 'pi', undefined, undefined, testHome())).env).toEqual({});
       expect((await resolveProfileEnvForRoot('/tmp/projects/b', 'omp', undefined, undefined, testHome())).env).toEqual({});
@@ -201,11 +203,11 @@ describe('agent profile resolution', () => {
         selections: { '/tmp/projects/a': { omp: 'omp-work' } },
       });
       const moved = { ...env, PI_CONFIG_DIR: '.omp-alt' } as NodeJS.ProcessEnv;
-      const refused = resolveProfileEnvForRoot('/tmp/projects/a', 'omp', undefined, moved, testHome(moved));
+      const refused = resolveProfileEnvForRoot('/tmp/projects/a', 'omp', undefined, moved, testHome());
       await expect(refused).rejects.toBeInstanceOf(AgentAccountUnavailableError);
       await expect(refused).rejects.toThrow('/home/u/.omp-alt/profiles');
       // A recorded profile on Continue is refused the same way; the default is never substituted.
-      await expect(resolveProfileEnvForRoot('/tmp/projects/b', 'omp', 'omp-work', moved, testHome(moved))).rejects.toThrow(AgentAccountUnavailableError);
+      await expect(resolveProfileEnvForRoot('/tmp/projects/b', 'omp', 'omp-work', moved, testHome())).rejects.toThrow(AgentAccountUnavailableError);
     });
   });
 

@@ -1,3 +1,5 @@
+import { Home } from './home/home.ts';
+import { useTestHome } from './home/test-home.testkit.ts';
 import { testHome } from './home/test-home.testkit.ts';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -94,7 +96,7 @@ describe('discoverSkills team-skill off-list', () => {
   let home: string;
   beforeEach(async () => {
     home = await mkdtemp(join(tmpdir(), 'cezar-skills-home-'));
-    vi.stubEnv('CEZ_HOME', home);
+    useTestHome(home ? Home.sandbox(home) : undefined);
     vi.spyOn(remote, 'getTeamSkillsCached').mockReturnValue([teamSkill('x', A), teamSkill('y', A)]);
   });
 

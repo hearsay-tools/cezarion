@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -28,7 +30,7 @@ describe('the ui-state API — skillUsage (#408)', () => {
   beforeEach(() => {
     // A home of its own: an inherited CEZ_HOME keeps a real workspace ui-state this must not touch.
     home = mkdtempSync(join(tmpdir(), 'cez-uistateapi-home-'));
-    vi.stubEnv('CEZ_HOME', home);
+    useTestHome(home ? Home.sandbox(home) : undefined);
     workspaceUiStatePath(testHome());
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-uistateapi-'));
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });

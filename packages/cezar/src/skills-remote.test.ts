@@ -1,3 +1,5 @@
+import { Home } from './home/home.ts';
+import { useTestHome } from './home/test-home.testkit.ts';
 import { testHome } from './home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
@@ -250,6 +252,7 @@ describe('materializeSkillToCache — the per-commit copy for runs without a tas
   async function greeterSource() {
     const home = scratch('cez-team-home-');
     vi.stubEnv('HOME', home);
+    useTestHome(Home.sandbox(home));
     const repo = `org-${randomUUID().slice(0, 8)}/skills`;
     const source = await seedTeamDirSkillClone(repo, 'greeter', {
       'SKILL.md': 'say hi v1\n',
@@ -351,7 +354,7 @@ describe('team skills from several sources (#1494)', () => {
   /** Two real sources both offering `shared`; A is listed twice (two refs), so its copies repeat. */
   async function twoSourceProject(uiState?: Record<string, unknown>): Promise<{ repoRoot: string; a: string; b: string }> {
     vi.stubEnv('HOME', scratch('cez-team-home-'));
-    vi.stubEnv('CEZ_HOME', scratch('cez-team-cezhome-'));
+    useTestHome(scratch('cez-team-cezhome-') ? Home.sandbox(scratch('cez-team-cezhome-')) : undefined);
     const repoRoot = scratch('cez-team-root-');
     const a = `org-${randomUUID().slice(0, 8)}/skills`;
     const b = `org-${randomUUID().slice(0, 8)}/skills`;

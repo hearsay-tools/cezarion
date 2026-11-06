@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -34,7 +36,7 @@ describe('the config API', () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-configapi-'));
     homeRoot = mkdtempSync(join(tmpdir(), 'cez-configapi-home-'));
     process.env.HOME = homeRoot;
-    process.env.CEZ_HOME = join(homeRoot, 'cezar-sandbox');
+    useTestHome(join(homeRoot, 'cezar-sandbox') ? Home.sandbox(join(homeRoot, 'cezar-sandbox')) : undefined);
     process.env.CODEX_HOME = join(homeRoot, '.codex');
     process.env.XDG_CONFIG_HOME = join(homeRoot, '.config');
     delete process.env.CEZ_AGENT_MODELS_LOCKED;
@@ -51,8 +53,8 @@ describe('the config API', () => {
     rmSync(homeRoot, { recursive: true, force: true });
     if (savedHome === undefined) delete process.env.HOME;
     else process.env.HOME = savedHome;
-    if (savedCezHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedCezHome;
+    if (savedCezHome === undefined) useTestHome(undefined);
+    else useTestHome(savedCezHome ? Home.sandbox(savedCezHome) : undefined);
     if (savedCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = savedCodexHome;
     if (savedXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
