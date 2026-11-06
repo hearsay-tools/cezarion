@@ -4,11 +4,10 @@ import { relative } from 'node:path';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import type { ContentBlock } from '../../core/agent-runner.ts';
 import { enqueueAgentInput } from '../../delegation/input.ts';
-import { discoverSkills, filterDisabledTeamSkills, filterDisabledTeamSources, readDisabledTeamSkills, type Skill } from '../../skills.ts';
-import { readDisabledSkillsReposSync } from '../../config.ts';
-import { getTeamSkillsCached, materializeSkillToCache, TEAM_SKILL_AGENT_DIRS } from '../../skills-remote.ts';
+import type { Skill } from '../../skills.ts';
+import { materializeSkillToCache, TEAM_SKILL_AGENT_DIRS } from '../../skills-remote.ts';
 import { MAX_SKILL_CLOSURE, namesSkillCommand, provisionSkills } from '../../skills-provision.ts';
-import { readProjectUiState, readProjectUiStateSync } from '../../ui-state.ts';
+import { atStepOpen, atTaskHead, atContinue, atLiveInput } from './launch-read-resolver.ts';
 import type { ActiveRun } from '../active-run.ts';
 import { leadingSlashSkillName } from './prompts.ts';
 import type { RunModuleContext } from './types.ts';
@@ -68,6 +67,9 @@ for (const type of [SkillTeamView, SkillView, SkillsGroup]) {
 }
 export function createSkillsGroup(): SkillsGroup { return new SkillsGroup(); }
 
+export type SkillReadPhase = 'step-open' | 'continue' | 'live-input';
+const skillReads = (phase: SkillReadPhase) => phase === 'continue' ? atContinue : phase === 'live-input' ? atLiveInput : atStepOpen;
+
 interface RunSkillsHost {
   builtinSkills(): Skill[];
   workerExecutionStopped(runId: string): boolean;
@@ -79,8 +81,8 @@ export class RunSkills {
   constructor(private readonly context: RunModuleContext, private readonly host: RunSkillsHost) {}
 
   /** Every skill lookup in this manager goes through here, so the built-ins reach all of them. */
-  discoverSkills(): Promise<Skill[]> {
-    return discoverSkills(this.context.repoRoot, { builtin: this.host.builtinSkills() });
+  discoverSkills(phase: 'task-head' | 'continue' = 'task-head'): Promise<Skill[]> {
+    return (phase === 'continue' ? atContinue : atTaskHead).registry(this.context.repoRoot, this.host.builtinSkills());
   }
 
   /**
@@ -93,7 +95,7 @@ export class RunSkills {
   async loadRunSkills(state: ActiveRun, onFailure: 'throw' | 'ignore'): Promise<void> {
     // Only a rejected discovery is a failure to ignore; a synchronous throw escaped the old
     // `.catch` too, and still fails the caller.
-    const discovery = this.discoverSkills();
+    const discovery = this.discoverSkills(onFailure === 'ignore' ? 'continue' : 'task-head');
     try {
       skillsWrites.catalog(state.skills, await discovery);
     } catch (error) {
@@ -110,10 +112,12 @@ export class RunSkills {
    */
   enabledSkills(
     state: ActiveRun,
-    disabled = readDisabledTeamSkills(readProjectUiStateSync(this.context.repoRoot)),
+    disabled?: ReturnType<typeof atStepOpen.disabledSkills>,
+    phase: SkillReadPhase = 'step-open',
   ): Skill[] {
-    const sources = filterDisabledTeamSources(state.skills.catalog ?? [], readDisabledSkillsReposSync(this.context.repoRoot));
-    return filterDisabledTeamSkills(sources, disabled);
+    const reads = skillReads(phase);
+    const off = disabled === undefined ? reads.disabledSkills(reads.projectUiStateSync(this.context.repoRoot)) : disabled;
+    return reads.enabledSkills(state, this.context.repoRoot, off);
   }
   /**
    * A live `/name` message already carries the skill's body, and `sendMessage` answers
@@ -129,7 +133,7 @@ export class RunSkills {
     if (!name) return;
     const session = state.liveSession.session;
     skillsWrites.provisioning(state.skills, (async () => {
-      const { filesDir, installed } = await this.provisionRunSkills(runId, state, { slash: name });
+      const { filesDir, installed } = await this.provisionRunSkills(runId, state, { slash: name }, 'live-input');
       const dir = filesDir.get(name);
       if (installed.length === 0 && !dir) return;
       if (state.liveSession.cancelled || !this.host.isCurrentState(runId, state) || state.liveSession.session !== session) return;
@@ -174,6 +178,7 @@ export class RunSkills {
     runId: string,
     state: ActiveRun,
     wanted: { stepSkill?: string | undefined; slash?: string | undefined; prompt?: string },
+    phase: SkillReadPhase = 'step-open',
   ): Promise<{ notes: string[]; filesDir: Map<string, string>; installed: string[] }> {
     const notes: string[] = [];
     const filesDir = new Map<string, string>();
@@ -183,8 +188,9 @@ export class RunSkills {
     const stopped = () => Boolean(state.liveSession.cancelled) || this.host.workerExecutionStopped(runId);
     // The off-list as it is now, applied to every input: the saved registry predates a switch
     // made during the run, so it is filtered as well as the fresh team list.
-    const disabled = readDisabledTeamSkills(await readProjectUiState(this.context.repoRoot));
-    const registry = this.enabledSkills(state, disabled);
+    const reads = skillReads(phase);
+    const disabled = reads.disabledSkills(await reads.projectUiState(this.context.repoRoot));
+    const registry = this.enabledSkills(state, disabled, phase);
     // A skill the prompt names as `/name` is a root after the selected ones, so a capped closure
     // never leaves it out (hearsay-tools/cezarion#1672). It installs only in the task worktree, like a companion.
     const named = registry.filter((skill) => namesSkillCommand(wanted.prompt ?? '', skill.name)).map((skill) => skill.name);
@@ -202,8 +208,8 @@ export class RunSkills {
       for (const skill of teamRoots) await cacheCopy(skill);
       return { notes, filesDir, installed: [] };
     }
-    const team = filterDisabledTeamSources(getTeamSkillsCached(this.context.repoRoot), readDisabledSkillsReposSync(this.context.repoRoot));
-    const catalog = [...registry, ...filterDisabledTeamSkills(team, disabled)];
+    const team = reads.teamSkills(this.context.repoRoot);
+    const catalog = [...registry, ...reads.filterSkills(team, disabled)];
     const result = await provisionSkills(state.liveSession.cwd, roots, catalog, { cancelled: stopped });
     if (stopped()) return { notes, filesDir, installed: [] };
     for (const skill of teamRoots) {

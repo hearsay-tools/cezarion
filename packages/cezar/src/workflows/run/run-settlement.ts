@@ -12,8 +12,7 @@ import type { ActiveRun } from '../active-run.ts';
 import type { WorkflowDef, WorkflowStepDef } from '../types.ts';
 import type { ContinuationClose, SessionTurn, StepLoop, RunModuleContext } from './types.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
-import { queuedRecoveryInput } from '../run-scheduling.ts';
-import { loadConfig } from '../../config.ts';
+import { atTaskHead, atContinue, narrowReviewConfig } from './launch-read-resolver.ts';
 import { worktreeDiff, type AutosaveReason } from '../../git-worktree.ts';
 import { reviewGateEnabled } from '../../runs/review-gate.ts';
 import { settlesAsDone } from './steps.ts';
@@ -139,7 +138,7 @@ export class RunSettlement {
   /** A resumed earlier step that closed without a done stays open: its workflow step, not the Continue's own. */
   async settleIncompleteContinuation(runId: string, stepId: string): Promise<void> {
     const resumed = this.context.store.getRun(runId);
-    const source = resumed ? resumed.workflowDef?.steps[this.waitingWorkflowStepIndex(resumed)] : undefined;
+    const source = resumed ? atContinue.resumedStep(resumed, () => this.waitingWorkflowStepIndex(resumed)) : undefined;
     await this.settleIncompleteStep(runId, source?.id ?? stepId);
   }
 
@@ -208,8 +207,8 @@ export class RunSettlement {
     this.context.store.appendEvent(runId, { type: 'step-end', stepId, status: 'done' });
     const completed = this.context.store.getRun(runId);
     const waitingIndex = completed ? this.waitingWorkflowStepIndex(completed) : -1;
-    if (completed?.workflowDef && waitingIndex >= 0) {
-      return this.settleResumedWorkflowStep(runId, state, stepId, completed, completed.workflowDef, waitingIndex, close);
+    if (completed && atContinue.storedWorkflow(completed) && waitingIndex >= 0) {
+      return this.settleResumedWorkflowStep(runId, state, stepId, completed, atContinue.storedWorkflow(completed)!, waitingIndex, close);
     }
     return this.succeedContinuation(runId);
   }
@@ -225,7 +224,7 @@ export class RunSettlement {
     waitingIndex: number,
     close: ContinuationClose,
   ): Promise<void> | undefined {
-    const waitingStep = workflow.steps[waitingIndex]!;
+    const waitingStep = atContinue.workflowStep(workflow, waitingIndex)!;
     // The continuation succeeded, not the failed attempt it recovered.
     if (waitingStep.id !== completed.workflowResumeStepId) {
       this.context.store.updateStep(runId, waitingStep.id, { status: 'done', finishedAt: new Date().toISOString() });
@@ -234,12 +233,8 @@ export class RunSettlement {
     // Finish accepts this resumed step before the async settlement gate,
     // but must not launch the remaining workflow. A later cancellation
     // may cancel still-live steps, never this completed one (R30).
-    if (!state.liveSession.finishRequested && waitingIndex < workflow.steps.length - 1) {
-      close.resumeWorkflow = {
-        workflow,
-        startAt: waitingIndex + 1,
-        input: queuedRecoveryInput(completed),
-      };
+    if (!state.liveSession.finishRequested && waitingIndex < atContinue.workflowLength(workflow) - 1) {
+      close.resumeWorkflow = atTaskHead.resumedPayload(workflow, waitingIndex + 1, atTaskHead.recoveryInput(completed));
       this.host.move(runId, 'requeue', { workflowResumeStepId: undefined });
       // The workflow remainder is a crash boundary. Persist it before the
       // finally block awaits worktree autosave and installs its in-memory job.
@@ -395,7 +390,7 @@ export class RunSettlement {
       : await worktreeDiff(worktreePath, run.baseBranch ?? 'HEAD');
     if (durableRootFinish && diff.startsWith('(diff failed')) throw new Error('parent finish diff unavailable');
     const hasDiff = diff.trim().length > 0 && !diff.startsWith('(diff failed');
-    const config = await loadConfig(this.context.repoRoot);
+    const config = await narrowReviewConfig(this.context.repoRoot);
     return hasDiff && reviewGateEnabled(config) && run.autonomous !== true;
   }
 

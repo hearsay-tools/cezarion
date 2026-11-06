@@ -114,7 +114,7 @@ export interface SessionHelperHost {
   move(runId: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>, call?: ExitCall): RunRecord | undefined;
   workerExecutionStopped(runId: string): boolean;
   executionBlockedByRootFinish(run: RunRecord): boolean;
-  agentEnvForStep(runId: string, backend: RunnerId, options: { recordedProfileId?: string | undefined; stepId?: string | undefined }): Promise<StepProfile>;
+  agentEnvForStep(runId: string, backend: RunnerId, options: { recordedProfileId?: string | undefined; stepId?: string | undefined; phase?: 'step-open' | 'continue' }): Promise<StepProfile>;
   sessionContextFor(runId: string, state: ActiveRun, stepId: string, openingPrompt: string): SessionContext;
   automationsPart(): string | undefined;
   flushAgentInputs(runId: string): boolean;
@@ -168,7 +168,7 @@ export function markTurnBoundary(context: RunModuleContext, host: SessionHelperH
 export async function stepProfileFor(context: RunModuleContext, host: SessionHelperHost,
   runId: string,
   stepBackend: RunnerId,
-  options: { recordedProfileId?: string | undefined; stepId?: string | undefined },
+  options: { recordedProfileId?: string | undefined; stepId?: string | undefined; phase?: 'step-open' | 'continue' },
 ): Promise<StepProfile | string> {
   try {
     return await host.agentEnvForStep(runId, stepBackend, options);

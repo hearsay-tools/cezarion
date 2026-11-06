@@ -1,3 +1,4 @@
+import { atContinue } from './launch-read-resolver.ts';
 import { randomUUID } from 'node:crypto';
 import type { HumanWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
@@ -392,7 +393,7 @@ export class RunRecovery {
     const resumed = this.host.continueRun(
       run.id,
       {
-        text: run.continuationMessage?.text ?? this.restartContinuationPrompt,
+        text: atContinue.prompt(run, this.restartContinuationPrompt),
       },
       true,
     );

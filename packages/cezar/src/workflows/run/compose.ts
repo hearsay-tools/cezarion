@@ -144,7 +144,7 @@ export interface FacadeHost {
   canProceedWithRun(runId: string, run: RunRecord | undefined): run is RunRecord;
   ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
   executionBlockedByRootFinish(run: RunRecord): boolean;
-  agentEnvForStep(runId: string, backend: RunnerId, options?: { recordedProfileId?: string | undefined; stepId?: string | undefined }): Promise<{ env: Record<string, string>; profileId: string; accountBinding?: WorkerAccountBinding | undefined }>;
+  agentEnvForStep(runId: string, backend: RunnerId, options?: { recordedProfileId?: string | undefined; stepId?: string | undefined; phase?: 'step-open' | 'continue' }): Promise<{ env: Record<string, string>; profileId: string; accountBinding?: WorkerAccountBinding | undefined }>;
   cockpit?: { origin: string; projectId: string } | undefined;
   settledTurnOutcome(runId: string, entry: 'turn-end' | 'ack' | 'ready' | 'gate' | 'reply-timer', outcome: TurnEndOutcome): TurnEndOutcome | undefined;
   settleOrphanedWorkerExecution(runId: string, opts?: { admitting?: boolean; fresh?: boolean; cwds?: CwdSource }): boolean;

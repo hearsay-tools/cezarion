@@ -744,7 +744,7 @@ export class InputDelivery {
 
     // Send paths beside image blocks: backends that drop images still receive usable files.
     const blocks = contentBlocksOf(content);
-    const expanded = userAuthored ? expandRegistrySlashSkill(blocks, this.host.runSkills.enabledSkills(state)) : blocks;
+    const expanded = userAuthored ? expandRegistrySlashSkill(blocks, this.host.runSkills.enabledSkills(state, undefined, 'live-input')) : blocks;
     const attached: ContentBlock[] = persisted.length
       ? [...expanded, pastedAttachmentsNote(persisted)]
       : expanded.length ? expanded : [{ type: 'text', text: 'The user attached a document, but it could not be saved. Ask them to attach it again before discussing its contents.' }];

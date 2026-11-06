@@ -22,14 +22,14 @@ import type { RunSettlement } from './run-settlement.ts';
 import type { SessionTurn, ContinuationSessionLaunch, ContinuationClose, LaunchDelegation, LaunchCiTools } from './types.ts';
 import type { AgentSession, RunnerId } from '../../core/agent-runner.ts';
 import type { WorkerStepIdentity } from '../../delegation/execution-identity.ts';
-import { continuationDefStep } from '../../delegation/execution-identity.ts';
 import { seedHandoffFile } from '../../handoff.ts';
-import { loadConfig } from '../../config.ts';
+import { atContinue } from './launch-read-resolver.ts';
+import type { CezConfig } from '../../config.ts';
 import type { ActiveRun } from '../active-run.ts';
 import { openWaits } from '../waits.ts';
 import type { RunOutcome } from '../../runs/outcome-commit.ts';
 import type { UiEventSink } from '../../runs/ui-event-sink.ts';
-import { stepToolGrant, toolGrantLists, type WorkflowStepDef } from '../types.ts';
+import { toolGrantLists, type WorkflowStepDef } from '../types.ts';
 import type { Skill } from '../../skills.ts';
 import { waitForCachedTeamSkills, waitForTeamSkills } from '../../skills-remote.ts';
 import { continuationModel, continuationEffort } from './launch-settings.ts';
@@ -61,7 +61,7 @@ export interface ContinuationSessionHost {
   pump(): Promise<void>;
   isSyntheticContinuation(run: RunRecord, step: StepState): boolean;
   makeUiSink(runId: string, stepId: string): UiEventSink;
-  prepareWorktree(runId: string, state: ActiveRun, config: Awaited<ReturnType<typeof loadConfig>>['worktreeSetup'], emit: (event: { type: string; [key: string]: unknown }) => void, reason: 'rematerialized' | 'resume'): Promise<string | undefined>;
+  prepareWorktree(runId: string, state: ActiveRun, config: CezConfig['worktreeSetup'], emit: (event: { type: string; [key: string]: unknown }) => void, reason: 'rematerialized' | 'resume'): Promise<string | undefined>;
   workerStep(runId: string, stepId: string | undefined): WorkerStepIdentity | undefined;
   latchAgentInputError(runId: string, state: ActiveRun, session: AgentSession, message: string): void;
   reconcileWorkerWaits(): void;
@@ -178,7 +178,7 @@ export class ContinuationSession {
     return this.host.prepareWorktree(
       runId,
       state,
-      (await loadConfig(this.context.repoRoot)).worktreeSetup,
+      atContinue.worktreeSetup(await atContinue.config(this.context.repoRoot)),
       (event) => this.context.store.appendEvent(runId, event),
       rematerialized ? 'rematerialized' : 'resume',
     );
@@ -266,12 +266,10 @@ export class ContinuationSession {
     // Resuming reattaches to a session that lives inside ONE account's config dir, so the
     // continuation must run under the account that created it — not whatever the project has
     // been switched to since. The owning step is the one carrying this session id.
-    const owningStep = sessionId === undefined
-      ? undefined
-      : record?.steps.find((s) => s.sessionId === sessionId);
+    const owningStep = atContinue.owningStep(record, sessionId);
     // An owned worker's turn runs under the identity pinned for the step it extends (#452).
-    const toolsStep = continuationDefStep(this.context.store, record, sessionId);
-    const stepIdentity = this.host.workerStep(runId, toolsStep?.id);
+    const toolsStep = atContinue.definitionStep(this.context.store, record, sessionId);
+    const stepIdentity = this.host.workerStep(runId, atContinue.definitionId(toolsStep));
     // The owning step also names the session's tools: resolve `allowedTools`/`bashAllowlist`
     // from the persisted `workflowDef` exactly as the first spawn did (`runAgentStep`).
     // Rebuilding with the bare DEFAULT_ALLOWED_TOOLS silently revoked every per-step grant
@@ -282,7 +280,7 @@ export class ContinuationSession {
     // owning session) both extend the run's tail, so they resolve from the definition's last
     // agent step. A legacy record without `workflowDef` (#367), or a session no step owns,
     // keeps today's defaults.
-    const toolGrant = stepToolGrant(stepIdentity?.grants, toolsStep, backend);
+    const toolGrant = atContinue.toolGrant(stepIdentity, toolsStep, backend);
     const model = await continuationModel(this.context.store, this.context.repoRoot, runId, state, record, toolsStep, stepIdentity, backend);
     if (typeof model === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, model); return undefined; }
     const effort = continuationEffort(this.context.repoRoot, record, toolsStep, stepIdentity);
@@ -292,13 +290,14 @@ export class ContinuationSession {
     // returns nothing is worse than a turn that refuses to start and says why. So does an account
     // that would open another folder than the one its session lives in (#1283).
     const profile = await sessionEvents.stepProfileFor(this.context, this.sharedHost, runId, backend, {
-      recordedProfileId: owningStep?.profileId,
-      stepId: toolsStep?.id,
+      recordedProfileId: atContinue.recordedProfile(owningStep),
+      phase: 'continue',
+      stepId: atContinue.definitionId(toolsStep),
     });
     if (typeof profile === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, profile); return undefined; }
     return {
       owningStep, toolsStep, toolGrant, backendModel: model.backendModel, effort: effort.effort, profile,
-      extraSystemPrompt: record?.systemPrompt,
+      extraSystemPrompt: atContinue.extraSystemPrompt(record),
     };
   }
 
@@ -343,7 +342,7 @@ export class ContinuationSession {
     toolsStep: WorkflowStepDef | undefined,
     skipSkillOnResume: boolean,
   ): Promise<ContinuationSkills> | undefined {
-    const continuedSkillName = toolsStep?.skill;
+    const continuedSkillName = atContinue.skill(toolsStep);
     // The continued step's skill and a leading `/name` in this prompt both get their companions;
     // upstream rebuilt only the slash name, so an ordinary Continue lost the step skill's (#1408).
     const continuationSlash = leadingSlashSkillName(prompt);
@@ -363,13 +362,13 @@ export class ContinuationSession {
     let fallbackSkillPrompt: string | undefined;
     let files = new Map<string, string>();
     if (continuedSkillName) {
-      let skill = this.runSkills.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
+      let skill = this.runSkills.enabledSkills(state, undefined, 'continue').find((candidate) => candidate.name === continuedSkillName);
       if (!skill) skill = await this.awaitContinuedSkill(state, continuedSkillName);
       if (skill) {
         // Reinstall the skill and its companions — into a #483 rematerialized
         // worktree, or a team skill's cache copy when the worktree is gone — before
         // the playbook, which names a cache copy's directory (#1024, #1408). No note on Continue.
-        files = (await this.runSkills.provisionRunSkills(runId, state, { stepSkill: skill.name, slash: continuationSlash })).filesDir;
+        files = (await this.runSkills.provisionRunSkills(runId, state, { stepSkill: skill.name, slash: continuationSlash }, 'continue')).filesDir;
         const playbook = skillSystemPrompt(skill, files.get(skill.name));
         if (skipSkillOnResume) fallbackSkillPrompt = playbook;
         else skillPrompt = playbook;
@@ -380,8 +379,8 @@ export class ContinuationSession {
         });
       }
     }
-    if (!continuedSkillName || !this.runSkills.enabledSkills(state).some((candidate) => candidate.name === continuedSkillName)) {
-      if (continuationSlash) files = (await this.runSkills.provisionRunSkills(runId, state, { slash: continuationSlash })).filesDir;
+    if (!continuedSkillName || !this.runSkills.enabledSkills(state, undefined, 'continue').some((candidate) => candidate.name === continuedSkillName)) {
+      if (continuationSlash) files = (await this.runSkills.provisionRunSkills(runId, state, { slash: continuationSlash }, 'continue')).filesDir;
     }
     return { skillPrompt, fallbackSkillPrompt, files };
   }
@@ -404,7 +403,7 @@ export class ContinuationSession {
         }, () => undefined);
       });
       await this.runSkills.loadRunSkills(state, 'ignore');
-      return this.runSkills.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
+      return this.runSkills.enabledSkills(state, undefined, 'continue').find((candidate) => candidate.name === continuedSkillName);
     } catch {
       // Best-effort — a slow or failing team-skills load must not fail Continue.
       return undefined;
@@ -433,7 +432,7 @@ export class ContinuationSession {
       state.liveSession.cancel();
       this.settleContinuationPrelaunchCancel(runId, stepId, state);
     } else {
-      this.host.holdContinuationForRootFinish(runId, { ...held, lineJoinedAt: Date.now() }, state);
+      this.host.holdContinuationForRootFinish(runId, atContinue.rejoinLine(held), state);
     }
   }
 
@@ -543,7 +542,7 @@ export class ContinuationSession {
     try {
       // Provisioning determines the actual capability, including a fresh session after recovery.
       const resumed = sessionEvents.launchOpening(this.context, this.sharedHost, runId, state, launch.stepId, {
-        body: expandRegistrySlashSkillText(launch.prompt, this.runSkills.enabledSkills(state), skills.files) +
+        body: expandRegistrySlashSkillText(launch.prompt, this.runSkills.enabledSkills(state, undefined, 'continue'), skills.files) +
           (launch.setupNote ? `\n\n${launch.setupNote}` : ''),
         ciTools,
         checkpoint: opening.checkpoint,

@@ -1,3 +1,4 @@
+import { atStepOpen } from './launch-read-resolver.ts';
 import type { StepState } from '../../runs/store.ts';
 import type { WorkflowDef, WorkflowStepDef } from '../types.ts';
 
@@ -30,14 +31,14 @@ type CheckStepOutcome = { kind: 'done'; nextIndex: number } |
 
 /** A check consumes its own retry budget, including across a recovered workflow remainder. */
 export function checkStepOutcome(workflow: WorkflowDef, index: number, record: StepState | undefined, ok: boolean): CheckStepOutcome {
-  const step = workflow.steps[index] as WorkflowStepDef;
+  const step = atStepOpen.workflowStep(workflow, index) as WorkflowStepDef;
   if (ok) return { kind: 'done', nextIndex: index + 1 };
   // Retry consumption is distinct from executions: another check may loop
   // back through this step after it already passed. Persist only the times
   // this check itself invoked onFail so max remains bounded across restarts.
   const used = record?.retriesUsed ?? 0;
   if (step.onFail && used < step.onFail.max) {
-    const retryIndex = workflow.steps.findIndex((s) => s.id === step.onFail?.retry);
+    const retryIndex = atStepOpen.retryIndex(workflow, step);
     return { kind: 'retry', retryIndex, used,
       note: `check failed — retrying from "${step.onFail.retry}" (attempt ${used + 1}/${step.onFail.max})` };
   }

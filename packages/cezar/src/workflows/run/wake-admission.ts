@@ -6,8 +6,8 @@ import type { RunOutcome } from '../../runs/outcome-commit.ts';
 import { rootsAwaitingPeer } from '../../delegation/conversations.ts';
 import { hasLiveInboxClaim } from '../../delegation/input.ts';
 import { parseUsageLimit } from '../../core/usage-limit.ts';
-import { accountHeldFor, sessionlessWakePrompt } from '../run-scheduling.ts';
-import { executionAccount } from '../execution-account.ts';
+import { sessionlessWakePrompt } from '../run-scheduling.ts';
+import { atTaskHead } from './launch-read-resolver.ts';
 import { chargesBudgetMessage, isMonitoringTimer, openWaits, resolvedWaits, waitInputId, waitResultText } from '../waits.ts';
 import { runsAwaitingPeer } from '../wait-scope.ts';
 import type { RunExitId, ExitCall, RunPatch } from '../../runs/run-exits.ts';
@@ -271,7 +271,7 @@ export class WakeAdmission {
   wakeHeld(run: RunRecord): boolean {
     const holds = this.context.semaphore.accountHolds();
     if (!holds.deadline.size && !holds.inFlight.size) return false;
-    return accountHeldFor(this.withExecutionAccount(run), holds, run.runner ?? 'claude');
+    return atTaskHead.heldFor(this.withExecutionAccount(run), holds, atTaskHead.recordedRunner(run) ?? 'claude');
   }
 
   /** The run with the account its next turn runs on (`executionAccount`): a live session's step
@@ -279,7 +279,7 @@ export class WakeAdmission {
    *  read it, so a mixed-runner step is held by the account it ran on (hearsay-tools/cezarion#1236). */
   withExecutionAccount<T extends RunRecord>(run: T): T {
     const live = this.host.active.get(run.id)?.liveSession.delegationSettings;
-    return { ...run, ...executionAccount(run, this.host.line.continuation(run.id), live) };
+    return { ...run, ...atTaskHead.accountFor(run, this.host.line.continuation(run.id), live) };
   }
 
   /** A worker wait the store upgraded from the old engine as already settled may have had no wake input
