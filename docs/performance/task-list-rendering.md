@@ -202,3 +202,11 @@ taskset -c 23 node --import tsx packages/web/scripts/benchmark-task-lists.ts --o
 Use an unused CPU allowed by the host. Run with no local tests or other browser
 workloads. `--quick` is a diagnostic mode and is not used for these results.
 The normal product build should be restored after measurement.
+
+The CI workload smoke test calls the exported runner in process with three active
+and five archived tasks per project, two global projects, both viewports and one
+repetition. It checks 16 combinations, row counts, visible representations and
+clean fixture exits. It uses short observation windows and the e2e build mirror;
+it is correctness evidence, not a performance sample. The measured production
+matrix above used the harness at `af998efd8`, before this test-only runner refactor.
+Normal CLI defaults and fixture sizes remain the full workload described above.

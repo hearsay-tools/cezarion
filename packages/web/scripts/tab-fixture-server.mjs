@@ -7,7 +7,8 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 
 // serverPackage: a cezar package directory holding dist/ and web/dist/ (the e2e mirror for the
 // specs, packages/cezar for the production-build benchmark).
-const [root, serverPackage = resolve('.ai/qa/build/cezar'), authMode, taskList] = process.argv.slice(2)
+const [root, serverPackage = resolve('.ai/qa/build/cezar'), authMode, taskList, sizesJson] = process.argv.slice(2)
+const sizes = sizesJson ? JSON.parse(sizesJson) : undefined
 const load = file => import(pathToFileURL(resolve(serverPackage, 'dist', file)).href)
 const { RunStore } = await load('runs/store.js')
 const { UiEventSink } = await load('runs/ui-event-sink.js')
@@ -17,7 +18,7 @@ const { ProjectContexts } = await load('server/project-context.js')
 const other = join(root, 'other')
 mkdirSync(other, { recursive: true })
 const projectDefinitions = taskList === 'project' ? [{ id: 'boot', root, name: 'Boot' }] : taskList === 'global'
-  ? Array.from({ length: 10 }, (_, i) => ({ id: i === 0 ? 'boot' : `project-${i}`, root: i === 0 ? root : join(root, `project-${i}`), name: `Project ${i}` }))
+  ? Array.from({ length: sizes?.projects ?? 10 }, (_, i) => ({ id: i === 0 ? 'boot' : `project-${i}`, root: i === 0 ? root : join(root, `project-${i}`), name: `Project ${i}` }))
   : [{ id: 'boot', root, name: 'Boot' }, { id: 'other', root: other, name: 'Other' }]
 for (const project of projectDefinitions) mkdirSync(project.root, { recursive: true })
 const projects = projectDefinitions.map(p => ({ ...p, addedAt: new Date().toISOString(), lastOpenedAt: new Date().toISOString(), source: 'local', status: 'not-git' }))
@@ -25,8 +26,8 @@ mkdirSync(process.env.CEZ_HOME, { recursive: true })
 writeFileSync(join(process.env.CEZ_HOME, 'config.json'), JSON.stringify({ projects }))
 const seed = dir => {
   const store = RunStore.open(join(dir, '.ai/cezar'))
-  const active = taskList === 'project' ? 300 : taskList === 'global' ? 30 : 10
-  const archived = taskList === 'project' ? 1000 : taskList === 'global' ? 200 : 0
+  const active = sizes?.active ?? (taskList === 'project' ? 300 : taskList === 'global' ? 30 : 10)
+  const archived = sizes?.archived ?? (taskList === 'project' ? 1000 : taskList === 'global' ? 200 : 0)
   for (let i = 0; i < active + archived; i++) {
     const run = store.createRun({ title: `Tab task ${i}`, task: `Tab task ${i}`, workflow: 'quick-task', steps: [] })
     store.updateRun(run.id, taskList ? { status: i < active ? 'running' : 'done', archived: i >= active, inputTokens: 12345, outputTokens: 678, costUsd: 0.12, ...(i >= active ? { finishedAt: new Date().toISOString() } : {}) } : { status: 'done' })
