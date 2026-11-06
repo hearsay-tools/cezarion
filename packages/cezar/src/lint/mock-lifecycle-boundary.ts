@@ -2,7 +2,8 @@ import { blankOnce, lineAt, type SourceRule } from './source-rule.ts';
 
 const NAMES = '(?:watchdogStall|watchdogWritePid|waitForMockRelease|waitForRelease)';
 const DEFINITION = new RegExp(`\\b(?:function\\s*\\*?\\s*|(?:const|let|var)\\s+)${NAMES}\\b`, 'g');
-const PID_LITERAL = /(['"`])watchdog\.pid\1/g;
+// A template substitution may supply a separator or suffix: refuse that uncertain path too.
+const PID_LITERAL = /(['"`])(?:[^'"`\n]*(?:[/\\]|}))?watchdog\.pid(?=\1|[/\\]|\$\{)/g;
 
 /** Stall ordering and readiness belong to the lifecycle module, never its callers. */
 export const mockLifecycleBoundary: SourceRule = {

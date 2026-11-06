@@ -9,7 +9,10 @@ describe('mock lifecycle boundary', () => {
         expect(rule.check(file, sample)).toHaveLength(1);
       }
     });
-  it.each(["'watchdog.pid'", '"watchdog.pid"', '`watchdog.pid`'])(
+  it.each(["'watchdog.pid'", '"watchdog.pid"', '`watchdog.pid`',
+    "'./watchdog.pid'", '"/tmp/x/watchdog.pid"', '`${dir}/watchdog.pid`',
+    '`${dir}watchdog.pid`', '`./watchdog.pid${suffix}`',
+  ])(
     'refuses the readiness literal %s', sample => {
       expect(rule.check(file, `writeFileSync(${sample}, pid);`)).toHaveLength(1);
     });
@@ -17,6 +20,9 @@ describe('mock lifecycle boundary', () => {
     "// function watchdogStall() {} 'watchdog.pid'",
     '/* const waitForRelease = () => {}; "watchdog.pid" */',
     'const sample = "function watchdogStall() {}";',
+    "// write('./watchdog.pid');\nwrite('ordinary.pid');",
+    'const sample = "write(\'./watchdog.pid\');";',
+    "write('./watchdog.pid.backup');",
     "import { stall, waitForRelease } from './mock-lifecycle.mjs';",
     'stall(prompt); waitForRelease(400);',
   ])('allows comments, samples and imports: %s', sample => {
