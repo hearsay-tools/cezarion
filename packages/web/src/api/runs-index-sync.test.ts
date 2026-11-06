@@ -4,7 +4,7 @@ import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factori
 import type { RunIndexEntry, RunsIndexResponse, RunSummary } from '@open-mercato/cezar-api-client'
 
 import { createQueryClient } from './query-client'
-import { createRunsIndexSync, RUNS_INDEX_QUERY_KEY, RUNS_INDEX_RECONCILE_HOLD_MS, RUNS_INDEX_WRITE_INTERVAL_MS, type RunsIndexSync } from './runs-index-sync'
+import { mergeRunsIndexRead, runsIndexSync, RUNS_INDEX_QUERY_KEY, RUNS_INDEX_RECONCILE_HOLD_MS, RUNS_INDEX_WRITE_INTERVAL_MS, type RunsIndexSync } from './runs-index-sync'
 
 function summary(id: string, createdAt: string, over: Partial<RunSummary> = {}): RunSummary {
   return { id, title: id, status: RUN_STATUS.running, createdAt, archived: false, workflow: 'quick-task', workflowLabel: 'Quick task', tokensUsed: 0, ...over } as RunSummary
@@ -60,7 +60,8 @@ beforeEach(() => {
   vi.stubGlobal('requestAnimationFrame', vi.fn((callback: () => void) => { frames.push(callback); return frames.length }))
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
   client = createQueryClient()
-  sync = createRunsIndexSync(client)
+  // The client's own sync, so the shared read's merge hook (`mergeRunsIndexRead`) reaches it too.
+  sync = runsIndexSync(client)
   sync.ready('g1', 10)
 })
 
@@ -179,8 +180,7 @@ describe('runs index sync: review round 1', () => {
     runFrame('a', summary('a9', '2026-01-09'))
     runAnimationFrames()
     expect(titles()).toEqual(['b1'])
-    // A snapshot without the project confirms the removal; a project added again comes back.
-    sync.merge(snapshot([row('b', 'b1', '2026-01-01')]))
+    // Only an explicit add lifts the fence.
     sync.restoreProject('a')
     expect(sync.merge(snapshot(SEED().runs)).runs.map((entry) => entry.id)).toEqual(['a2', 'b1'])
   })
@@ -199,6 +199,121 @@ describe('runs index sync: review round 1', () => {
     client.setQueryData(RUNS_INDEX_QUERY_KEY, snapshot([row('a', 'a2', '2026-01-02', { title: 'from g2' }), row('b', 'b1', '2026-01-01')], { generation: 'g2', eventSeq: 0 }))
     runAnimationFrames()
     expect(titles()).toEqual(['from g2', 'b1'])
+  })
+})
+
+/**
+ * Every input of the sync against both fences (review round 2). Nothing may cross:
+ *
+ * | input                  | generation fence                         | removed-project fence              |
+ * |------------------------|------------------------------------------|------------------------------------|
+ * | run                    | queued g1 frame skipped after ready(g2)  | ignored after dropProject          |
+ * | usage                  | queued g1 tick skipped after ready(g2)   | ignored after dropProject          |
+ * | flush (queued patches) | both patch kinds tagged                  | queued before the drop: skipped    |
+ * | merge: query function  | g1 overlay reset by ready(g2)            | stripped                           |
+ * | merge: shared read     | same path (mergeRunsIndexRead)           | stripped, also out of order        |
+ * | reconcile              | through merge                            | through merge                      |
+ * | ready / detach         | ready resets; detach keeps tags          | fence survives both                |
+ * | dropProject / restore  | not generation-scoped                    | only restoreProject lifts it       |
+ */
+describe('runs index sync: fence matrix', () => {
+  const g2 = () => snapshot([row('a', 'a2', '2026-01-02', { title: 'from g2' }), row('b', 'b1', '2026-01-01')], { generation: 'g2', eventSeq: 0 })
+  const sample = { cpuPct: 99, rssBytes: 1, procCount: 1 }
+  const g1Run = () => runFrame('a', summary('a2', '2026-01-02', { title: 'from g1' }))
+  const g1Usage = () => sync.usage('a', { a2: sample })
+  const restart = (via: 'ready' | 'detach+ready') => {
+    if (via === 'detach+ready') sync.detach()
+    sync.ready('g2', 0)
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, g2())
+  }
+
+  it.each([
+    ['run', 'ready', g1Run],
+    ['run', 'detach+ready', g1Run],
+    ['usage', 'ready', g1Usage],
+    ['usage', 'detach+ready', g1Usage],
+  ] as const)('generation fence: a queued g1 %s does not cross %s into a g2 snapshot (flush)', (_input, via, queueOld) => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
+    queueOld()
+    restart(via)
+    runAnimationFrames()
+    expect(cached()?.runs[0]).toEqual(row('a', 'a2', '2026-01-02', { title: 'from g2' }))
+  })
+
+  it.each([
+    ['merge: query function', (value: RunsIndexResponse) => sync.merge(value)],
+    ['merge: shared read', (value: RunsIndexResponse) => mergeRunsIndexRead(value, client) as RunsIndexResponse],
+  ] as const)('generation fence: a g1 overlay frame does not cross ready(g2) into %s', (_input, merge) => {
+    g1Run()
+    sync.ready('g2', 0)
+    expect(merge(g2()).runs[0]?.title).toBe('from g2')
+  })
+
+  it('generation fence: a g1 overlay frame does not cross ready(g2) into a reconciliation', async () => {
+    const { unsubscribe } = observe(() => g2())
+    await vi.advanceTimersByTimeAsync(0)
+    g1Run()
+    sync.ready('g2', 0)
+    await sync.reconcile()
+    expect(titles()).toEqual(['from g2', 'b1'])
+    unsubscribe()
+  })
+
+  const withA = () => snapshot(SEED().runs, { truncated: ['a'], referenceStatuses: { a: { prs: {}, issues: {} } } as RunsIndexResponse['referenceStatuses'] })
+  const withoutA = () => snapshot([row('b', 'b1', '2026-01-01')])
+  const expectNoA = (value: RunsIndexResponse | undefined) => {
+    expect(value?.runs.map((entry) => entry.projectId)).toEqual(['b'])
+    expect(value?.truncated).toEqual([])
+    expect(value?.referenceStatuses).toEqual({})
+  }
+
+  it.each([
+    ['run after the drop', () => { sync.dropProject('a'); runFrame('a', summary('a9', '2026-01-09')) }],
+    ['usage after the drop', () => { sync.dropProject('a'); g1Usage() }],
+    ['run queued before the drop', () => { runFrame('a', summary('a9', '2026-01-09')); sync.dropProject('a') }],
+    ['usage queued before the drop', () => { g1Usage(); sync.dropProject('a') }],
+  ] as const)('removed-project fence: %s does not reach the cache (flush)', (_input, drive) => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, withA())
+    drive()
+    runAnimationFrames()
+    expectNoA(cached())
+    expect(cached()?.runs.some((entry) => entry.usage)).toBe(false)
+  })
+
+  it.each([
+    ['merge: query function', [withA]],
+    ['merge: shared read', [withA]],
+    ['the B1 order: shared read without a, then an older one with a', [withoutA, withA]],
+    ['the B1 order across sources: query function without a, shared read with a', [withoutA, withA]],
+    ['a snapshot after ready(g3)', [withA]],
+    ['a snapshot after detach', [withA]],
+  ] as const)('removed-project fence: %s', (input, answers) => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, withA())
+    sync.dropProject('a')
+    if (input.includes('ready(g3)')) sync.ready('g3', 0)
+    if (input.includes('detach')) sync.detach()
+    let last: RunsIndexResponse | undefined
+    answers.forEach((answer, index) => {
+      const viaQueryFunction = input === 'merge: query function' || (input.includes('across sources') && index === 0)
+      last = viaQueryFunction ? sync.merge(answer()) : mergeRunsIndexRead(answer(), client) as RunsIndexResponse
+    })
+    expectNoA(last)
+  })
+
+  it('removed-project fence: a reconciliation that answers with the project', async () => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, withA())
+    const { unsubscribe } = observe(() => withA())
+    sync.dropProject('a')
+    await sync.reconcile()
+    expectNoA(cached())
+    unsubscribe()
+  })
+
+  it('removed-project fence: only restoreProject lifts it', () => {
+    sync.dropProject('a')
+    expectNoA(sync.merge(withoutA()) && sync.merge(withA()))
+    sync.restoreProject('a')
+    expect(sync.merge(withA()).runs.map((entry) => entry.id)).toEqual(['a2', 'b1'])
   })
 })
 

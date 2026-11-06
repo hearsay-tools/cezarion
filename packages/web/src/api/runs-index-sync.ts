@@ -52,7 +52,7 @@ export const RUNS_INDEX_WRITE_INTERVAL_MS = 250
 type QueuedPatch =
   /** `generation`: the stream generation the frame came from. A patch never crosses a restart. */
   | { type: 'change'; change: IndexChange; generation: string | undefined }
-  | { type: 'usage'; project: string; usage: Readonly<Record<string, ProcessUsage>> }
+  | { type: 'usage'; project: string; usage: Readonly<Record<string, ProcessUsage>>; generation: string | undefined }
 
 export interface RunsIndexSync {
   /** The stream attached: `ready` names its generation and last frame number. */
@@ -63,8 +63,8 @@ export interface RunsIndexSync {
   run(project: string, event: WorkspaceRunEvent, gap?: boolean): void
   /** One project's usage tick. */
   usage(project: string, usage: Readonly<Record<string, ProcessUsage>>): void
-  /** The project left the registry: drop its rows now, with no request. Until a snapshot without
-   *  the project arrives, or the project is added again, no snapshot or frame brings it back. */
+  /** The project left the registry: drop its rows now, with no request. Until the project is
+   *  added again (`restoreProject`), no snapshot, from any source, and no frame brings it back. */
   dropProject(project: string): void
   /** The project was added (again): its rows may enter the index. */
   restoreProject(project: string): void
@@ -120,7 +120,15 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
   let inFlight: Promise<void> | undefined
   let trailing = false
   let lastWrite = -Infinity
-  /** Removed projects whose rows a snapshot read before the removal may still hold. */
+  /**
+   * Two fences hold every input. Generation: a queued patch (`run`, `usage`) applies only under
+   * the stream generation it came from; `ready` with another generation resets the overlay, so
+   * `merge` (query function, shared read, reconciliation) never lays an old frame over a new
+   * snapshot. Removed project: `run` and `usage` are ignored, `flush` skips queued patches, and
+   * `merge` strips the project from every snapshot; only `restoreProject` lifts it, because the
+   * document read and the shared read are independent sources that can answer out of order.
+   * `detach` and `reconcile` pass through these same paths.
+   */
   const removed = new Set<string>()
   const write = (next: RunsIndexResponse): void => {
     lastWrite = Date.now()
@@ -178,12 +186,13 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
     let next = data
     let needsReconcile = false
     for (const patch of patches) {
+      // A frame from another server generation says nothing about this snapshot's rows.
+      if (patch.generation !== overlay.generation) continue
       if (patch.type === 'usage') {
-        next = applyIndexUsage(next, patch.project, patch.usage)
+        if (!removed.has(patch.project)) next = applyIndexUsage(next, patch.project, patch.usage)
         continue
       }
-      // A frame from another server generation says nothing about this snapshot's rows.
-      if (patch.generation !== overlay.generation || removed.has(patch.change.project)) continue
+      if (removed.has(patch.change.project)) continue
       if (fenced !== undefined && patch.change.seq <= fenced) continue
       const result = applyIndexChange(next, patch.change, registry)
       next = result.index
@@ -222,7 +231,7 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
     },
     usage(project, usage) {
       if (removed.has(project)) return
-      queue.push({ type: 'usage', project, usage })
+      queue.push({ type: 'usage', project, usage, generation: overlay.generation })
       schedule()
     },
     dropProject(project) {
@@ -239,12 +248,7 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
     },
     merge(snapshot) {
       const result = mergeIndexSnapshot(overlay, snapshot, registryOf(queryClient))
-      for (const project of removed) {
-        const without = dropIndexProject(result.index, project)
-        // A snapshot without the project confirms the removal; one read before it still holds it.
-        if (without === result.index) removed.delete(project)
-        else result.index = without
-      }
+      for (const project of removed) result.index = dropIndexProject(result.index, project)
       // The snapshot is still being written; the next reconciliation must start after it.
       if (result.reconcile) queueMicrotask(() => { void reconcile({ hold: true }) })
       return result.index
