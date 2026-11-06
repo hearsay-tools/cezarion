@@ -149,10 +149,10 @@ describe('health topic + cache (live-server path)', () => {
     return ((await res.json()) as { defaultRunner?: string }).defaultRunner;
   };
 
-  it('registers the health, Cursor models and activity topics', () => {
+  it('registers the health, Cursor models, activity and reports topics', () => {
     const { topics, families } = build();
     expect([...topics.keys()]).toEqual(['health', 'models:cursor', 'activity:workspace']);
-    expect(families).toEqual(['activity:project:']);
+    expect(families).toEqual(['reports:project:', 'activity:project:']);
   });
 
   it('pre-warms the cache at boot so the first GET is already warm', async () => {
