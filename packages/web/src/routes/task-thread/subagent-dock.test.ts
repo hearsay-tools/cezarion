@@ -195,6 +195,21 @@ describe('collectSubagents — Q6 visibility', () => {
     expect(subagentCounts(agents)).toEqual({ done: 1, total: 3 })
   })
 
+  it('reads the same agents from the full history and from the compact context', () => {
+    const long = task('long', 'running', { background: true })
+    const now = task('now', 'completed', { background: true })
+    const full = collectSubagents([
+      turn('turn-1', [long]),
+      turn('turn-2', [task('old', 'completed', { background: true })]),
+      turn('turn-3', [now]),
+      turn('turn-4', []),
+    ])
+    // The context drops the settled fan-out between them and keeps both agents' turns.
+    const compact = collectSubagents([turn('turn-1', [long]), turn('turn-3', [now]), turn('turn-4', [])])
+    expect(full.map((agent) => agent.id)).toEqual(['long', 'now'])
+    expect(compact).toEqual(full)
+  })
+
   it('looks past a steering turn that carries no agents at all', () => {
     const agents = collectSubagents([
       turn('turn-1', [task('a', 'running')]),

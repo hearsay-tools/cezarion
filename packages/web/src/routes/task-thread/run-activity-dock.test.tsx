@@ -184,6 +184,13 @@ describe('RunActivityDock — subagent counts agree with the subagent wait', () 
     expect(section('subagents')).toBeNull()
   })
 
+  it('claims neither "All complete" nor "Incomplete" for a done run while its agents load', () => {
+    const done = run({ status: RUN_STATUS.done, steps: steps.map((step) => ({ ...step, status: STEP_STATUS.done })) })
+    renderDock(done, [agentEvents[0]!], [], 'ok', {}, { currentComplete: false })
+    expect(statusText()).not.toBe('All complete')
+    expect(statusText()).not.toBe('Incomplete')
+  })
+
   it('updates the waiting count and the completion total together when an agent ends', () => {
     const ended = [...agentEvents, line(9, 'item.completed', { item: { ...(agentEvents[0] as unknown as { item: object }).item, status: 'completed' } })]
     const children = titles.map((_, index) => ({ id: `agent_${index}`, status: index === 0 ? TOOL_STATUS.completed : TOOL_STATUS.running }))

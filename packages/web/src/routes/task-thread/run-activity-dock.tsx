@@ -211,7 +211,7 @@ function useSessionActivity(run: ApiRun, currentThread: ThreadState, currentComp
   const planCountsValue = planCounts(planEntries)
   return {
     line,
-    ...activityStatus(run, line, workers, agentCounts, planCountsValue),
+    ...activityStatus(run, line, workers, currentComplete ? agentCounts : undefined, planCountsValue),
     ...usageValues(run, metrics),
     conflicts,
     waitReferences: ciWaitReferences(run),
@@ -225,7 +225,10 @@ function useSessionActivity(run: ApiRun, currentThread: ThreadState, currentComp
 
 type Counts = { done: number; total: number }
 
-function activityStatus(run: ApiRun, line: RunStatusLine, workers: WorkersVerdict, agentCounts: Counts, plan: Counts) {
+/** `agentCounts` is undefined while the thread's current state is still loading: nothing about
+ *  the agents is known yet, so the run is neither "All complete" nor "Incomplete"
+ *  (hearsay-tools/cezarion#2588). */
+function activityStatus(run: ApiRun, line: RunStatusLine, workers: WorkersVerdict, agentCounts: Counts | undefined, plan: Counts) {
   // Complete means SUCCEEDED, not merely settled: a failed or cancelled step keeps the green
   // summary away, matching `subagentCounts` (which counts only `completed`) and the danger X
   // the rail shows one click below. `skipped` stays complete — it never ran and never failed.
@@ -239,6 +242,7 @@ function activityStatus(run: ApiRun, line: RunStatusLine, workers: WorkersVerdic
     run.status === 'done' &&
     workflowSucceeded &&
     workers === 'complete' &&
+    agentCounts !== undefined &&
     agentCounts.done === agentCounts.total &&
     plan.done === plan.total
   // Withholding the green line is only half the job: a run that is OVER must never be
@@ -248,7 +252,7 @@ function activityStatus(run: ApiRun, line: RunStatusLine, workers: WorkersVerdic
   // and `Incomplete`, a terminal word. A lookup that FAILED says what it cannot see instead.
   const statusText = allComplete
     ? 'All complete'
-    : run.status !== 'done'
+    : run.status !== 'done' || agentCounts === undefined
       ? line.label
       : workers === 'unknown'
         ? 'Workers unavailable'

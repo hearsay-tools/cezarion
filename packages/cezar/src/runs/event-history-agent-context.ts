@@ -93,8 +93,12 @@ export class AgentItemsContextTracker {
       }
     }
     const latestIds = this.rootsByTurn.get(latestRootTurn)!;
+    // The selector still shows a settled latest fan-out while an earlier background agent runs:
+    // it carries that agent to the anchor (hearsay-tools/cezarion#2588), so the anchor stays too.
+    const earlierBackground = rootTurns.some((turn) => turn < latestRootTurn && this.holdsRunningBackground(this.rootsByTurn.get(turn)!));
     if (
       this.boundaries.turn > latestRootTurn &&
+      !earlierBackground &&
       [...latestIds].every((id) => isSettledContextStatus(this.roots.get(id)?.status))
     ) {
       pruneThrough = latestRootTurn;
