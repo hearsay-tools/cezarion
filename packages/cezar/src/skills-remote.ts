@@ -845,7 +845,9 @@ async function loadTeamSkills(
   const generation = postFetchListsByRoot.get(teamCacheKey(repoRoot, home)) ?? 0;
   // True once another load has published a post-fetch list since this one
   // started: its snapshot may predate that list, so it must not win (#859).
-  const superseded = () => (postFetchListsByRoot.get(teamCacheKey(repoRoot, home)) ?? 0) !== generation;
+  const superseded = () => {
+    return (postFetchListsByRoot.get(teamCacheKey(repoRoot, home)) ?? 0) !== generation;
+  };
   if (mode === 'passive') {
     snapshotStamps = sources.map((src) => readLastFetchAt(bareDirFor(src.repo, home)));
     cached = await Promise.all(sources.map((src) => listRemoteSkills(src, home).catch(() => undefined)));

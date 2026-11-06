@@ -89,8 +89,9 @@ describe('discoverSkills team-skill off-list', () => {
     return repoRoot;
   }
 
-  const teamNames = async (repoRoot: string) =>
-    (await discoverSkills(repoRoot, undefined, testHome())).filter((skill) => skill.source === 'team').map((skill) => skill.name);
+  const teamNames = async (repoRoot: string) => {
+    return (await discoverSkills(repoRoot, undefined, testHome())).filter((skill) => skill.source === 'team').map((skill) => skill.name);
+  };
 
   // A home of its own: an inherited CEZ_HOME keeps a real workspace ui-state this must not touch.
   let home: string;
@@ -126,8 +127,9 @@ describe('discoverSkills team-skill off-list', () => {
 
   it('switching one source off lets the same name from another source win', async () => {
     vi.spyOn(remote, 'getTeamSkillsCached').mockReturnValue([teamSkill('x', A), teamSkill('x', B)]);
-    const catalog = async (uiState?: Record<string, unknown>) =>
-      (await discoverSkills(await project(uiState), undefined, testHome())).filter((skill) => skill.name === 'x');
+    const catalog = async (uiState?: Record<string, unknown>) => {
+      return (await discoverSkills(await project(uiState), undefined, testHome())).filter((skill) => skill.name === 'x');
+    };
     expect((await catalog()).map((s) => s.team?.repo)).toEqual([A]);
     expect((await catalog({ disabledTeamSkills: [{ repo: A, name: 'x' }] })).map((s) => s.team?.repo)).toEqual([B]);
   });

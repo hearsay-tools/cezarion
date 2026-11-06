@@ -13,7 +13,9 @@ export const SUBCOMMAND_NAMES = ['backup', 'discover', 'artifact', 'task', 'auto
 /** The runner for `name`, or nothing when `name` is not a subcommand. */
 export async function loadSubcommand(name: string | undefined, home: (env: NodeJS.ProcessEnv) => Home = env => resolveHome({ purpose: 'cli', env })): Promise<SubcommandRunner | undefined> {
   switch (name) {
-    case 'backup': return async (argv, env) => (await import('./workspace/backup-cli.ts')).runBackupCommand(argv, env, home(env));
+    case 'backup': return async (argv, env) => {
+      return (await import('./workspace/backup-cli.ts')).runBackupCommand(argv, env, home(env));
+    };
     case 'discover': return (await import('./discovery/cli.ts')).runDiscoverCommand;
     case 'artifact': return (await import('./artifacts/cli.ts')).runArtifactCommand;
     case 'task': return (await import('./task-cli/cli.ts')).runTaskCommand;
@@ -21,7 +23,9 @@ export async function loadSubcommand(name: string | undefined, home: (env: NodeJ
     case 'webhook': return (await import('./webhooks/cli.ts')).runWebhookCommand;
     case 'message': return (await import('./delegation/cli.ts')).runMessageCommand;
     case 'worker': return (await import('./delegation/cli.ts')).runWorkerCommand;
-    case 'remote-settings': return async (argv, env) => (await import('./remote-settings-cli.ts')).runRemoteSettingsCommand(argv, env, undefined, home(env));
+    case 'remote-settings': return async (argv, env) => {
+      return (await import('./remote-settings-cli.ts')).runRemoteSettingsCommand(argv, env, undefined, home(env));
+    };
     default: return undefined;
   }
 }
