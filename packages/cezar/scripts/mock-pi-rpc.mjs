@@ -29,7 +29,15 @@ let activeTurn = null;
 let steeringMode = 'one-at-a-time';
 // The prompt a queued handler is running; pi records it as the turn's user message.
 let currentPrompt;
-const scenarioContext = { runner: 'pi', lifecycle, session: { malformedFrame: '{"type":"tool_execution_update","toolCallId":"truncated' }, unsupported: ['subagent-after-park'], nativeFailureControl: Boolean(failureControl) };
+const scenarioContext = {
+  runner: 'pi', lifecycle, session: {}, unsupported: ['subagent-after-park'], nativeFailureControl: Boolean(failureControl),
+  toolPrompt: async prompt => (await tools()).toolPrompt('pi', process.argv.slice(2), prompt),
+  ciPrompt: async prompt => (await tools()).ciPrompt('pi', process.argv.slice(2), prompt),
+  async crash(prompt) {
+    const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+    crashWithStderr(prompt, '{"type":"tool_execution_update","toolCallId":"truncated');
+  },
+};
 const deferredStart = message => scenarioFor(message, scenarioContext)?.name === 'deferred-turn-start';
 const sendNow = (value) => {
   if (value?.type === 'turn_start' && !activeTurn) {

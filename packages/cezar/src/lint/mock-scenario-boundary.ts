@@ -12,21 +12,63 @@ function importsScenario(source: string, code: string): boolean {
   return [...source.matchAll(IMPORT)].some(match => code[match.index] === source[match.index]);
 }
 
-/** Use retained delimiters to read literal contents while ignoring comment samples. */
-function literals(source: string, code: string): Array<{ offset: number; value: string; regex: boolean }> {
-  const found = [];
+interface Literal { offset: number; value: string; regex: boolean }
+
+/** Blanked code retains braces, including nested template substitutions, but no comment braces. */
+function afterSubstitution(code: string, start: number): number {
+  let depth = 1;
+  let i = start;
+  for (; i < code.length && depth; i++) {
+    if (code[i] === '{') depth++;
+    else if (code[i] === '}') depth--;
+  }
+  return i;
+}
+
+function templateParts(source: string, code: string, start: number): { parts: Literal[]; end: number } {
+  const parts: Literal[] = [];
+  let segment = start + 1;
+  let i = segment;
+  for (; i < source.length; i++) {
+    if (source[i] === '\\') { i++; continue; }
+    if (source[i] === '`') break;
+    if (code.slice(i, i + 2) !== '${') continue;
+    parts.push({ offset: segment, value: source.slice(segment, i), regex: false });
+    i = afterSubstitution(code, i + 2);
+    segment = i;
+    i--;
+  }
+  parts.push({ offset: segment, value: source.slice(segment, i), regex: false });
+  return { parts, end: i };
+}
+
+function literalEnd(source: string, start: number, delimiter: string): number {
+  if (delimiter === '/') return regexEnd(source, start);
+  let i = start + 1;
+  for (; i < source.length; i++) {
+    if (source[i] === '\\') i++;
+    else if (source[i] === delimiter || source[i] === '\n') break;
+  }
+  return source[i] === delimiter ? i : -1;
+}
+
+/** Template text and substitution code stay separate; comments in either code scope stay ignored. */
+function literals(source: string, code: string): Literal[] {
+  const found: Literal[] = [];
+  const templateEnds = new Set<number>();
   for (let i = 0; i < source.length; i++) {
     const delimiter = source[i]!;
-    if (!['\'', '"', '`', '/'].includes(delimiter) || code[i] !== delimiter) continue;
-    let j = delimiter === '/' ? regexEnd(source, i) : i + 1;
-    if (j < 0) continue;
-    for (; delimiter !== '/' && j < source.length; j++) {
-      if (source[j] === '\\') j++;
-      else if (source[j] === delimiter || delimiter !== '`' && source[j] === '\n') break;
+    if (!['\'', '"', '`', '/'].includes(delimiter) || code[i] !== delimiter || templateEnds.has(i)) continue;
+    if (delimiter === '`') {
+      const template = templateParts(source, code, i);
+      templateEnds.add(template.end);
+      found.push(...template.parts);
+      continue;
     }
-    if (source[j] !== delimiter) continue;
-    found.push({ offset: i, value: source.slice(i + 1, j), regex: delimiter === '/' });
-    i = j;
+    const end = literalEnd(source, i, delimiter);
+    if (end < 0) continue;
+    found.push({ offset: i, value: source.slice(i + 1, end), regex: delimiter === '/' });
+    i = end;
   }
   return found;
 }

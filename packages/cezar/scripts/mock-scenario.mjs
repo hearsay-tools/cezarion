@@ -193,10 +193,7 @@ function earlyScenario(prompt, context) {
     return scenario(matches('tool-tail') ? 'tool-tail' : 'silent-tail', silentSteps(prompt, context), { early: true, beforeFailure: true });
   }
   if (matches('crash-stderr')) {
-    return scenario('crash-stderr', [effect(async () => {
-      const { crashWithStderr } = await import('./mock-runner-crash.mjs');
-      crashWithStderr(prompt, context.session.malformedFrame);
-    })], { early: true, beforeFailure: true, result: matches('crash-stderr-clean') ? 'continue' : 'handled' });
+    return scenario('crash-stderr', [effect(() => context.crash(prompt))], { early: true, beforeFailure: true, result: matches('crash-stderr-clean') ? 'continue' : 'handled' });
   }
 }
 
@@ -218,7 +215,7 @@ function beforeFailureScenario(prompt, context) {
   const matches = name => has(prompt, name) && !context.unsupported?.includes(name.replace(/:$/, ''));
   if (matches('ack-only')) return scenario('ack-only', [open({ ackOnly: true })], { beforeFailure: true });
   for (const [name, method] of [['cezar-tool', 'toolPrompt'], ['ci-wait', 'ciPrompt']]) {
-    if (matches(name)) return scenario(name, [open(), text(async () => (await tools())[method](context.runner, process.argv.slice(2), prompt)), end()], { beforeFailure: true });
+    if (matches(name)) return scenario(name, [open(), text(() => context[method](prompt)), end()], { beforeFailure: true });
   }
   if (matches('steer-tool')) return scenario('steer-tool', steerTool(context), { beforeFailure: true });
   if (matches('steer-late')) return scenario('steer-late', [open(), text('late window: final message already sent'), { kind: 'readSteers', late: true }, { kind: 'sleep', ms: 300 }, end()], { beforeFailure: true });

@@ -3,7 +3,10 @@ export type Lifecycle = (call: [string, Record<string, unknown>]) => Promise<str
 export interface ScenarioContext {
   runner: 'claude' | 'codex' | 'opencode' | 'pi' | 'omp' | 'cursor';
   lifecycle: Lifecycle;
-  session: { resumeAfterAsk?: boolean; malformedFrame?: string };
+  toolPrompt(prompt: string): Promise<string>;
+  ciPrompt(prompt: string): Promise<string>;
+  crash(prompt: string): void | Promise<void>;
+  session: { resumeAfterAsk?: boolean };
   unsupported?: readonly string[];
   nativeFailureControl?: boolean;
 }

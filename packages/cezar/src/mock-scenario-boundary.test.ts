@@ -13,6 +13,8 @@ describe('shared scenario boundary', () => {
     '/prefix[/]mock:hold/.test(prompt);',
     "const x = 'prefix mock:silent-tail-late-reply suffix';",
     'const x = `prefix ${name} mock:agent-echo`;',
+    'const x = `${"mock:hold"}`;',
+    'const x = `${`mock:hold`}`;',
     "const x = 'mock:turn-messages:';", "const x = 'mock:gate-prompt-ack';",
   ])('refuses an adopted encoder literal: %s', sample => {
     expect(rule.check(file, adopted + sample)).toEqual([{ line: 2, message: expect.stringContaining('mock-scenario.mjs') }]);
@@ -21,6 +23,9 @@ describe('shared scenario boundary', () => {
   it.each([
     "// 'mock:hold'\nconst x = 'ordinary';",
     '/* /mock:no-progress/ */',
+    'const x = `${/* mock:hold */ name}`;',
+    'const x = `${// mock:hold\nname}`;',
+    'const x = `${{ name: /* mock:hold */ value }.name}`;',
     "const x = 'mock:backend-resume';",
     "const x = 'mock:holden';",
     "const x = 'mock:cezar-tools';",

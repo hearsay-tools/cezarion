@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { play, scenarioFor, type Encoder, type ScenarioContext, type Step } from '../../scripts/mock-scenario.mjs';
 
 function context(unsupported: string[] = []): ScenarioContext {
-  return { runner: 'pi', lifecycle: async () => '', session: {}, unsupported };
+  return { runner: 'pi', lifecycle: async () => '', toolPrompt: async () => '', ciPrompt: async () => '', crash: () => {}, session: {}, unsupported };
 }
 
 function encoder(events: string[]): Encoder {
@@ -44,6 +44,26 @@ describe('shared mock scenario selection', () => {
     ['Continue working autonomously until the task is fully complete.', 'autonomous'],
   ])('selects the shared script for %s', (prompt, name) => {
     expect(scenarioFor(prompt, context())?.name).toBe(name);
+  });
+
+  it.each(['codex', 'opencode'] as const)('uses the %s tool boundary without knowing its wire configuration', async runner => {
+    const state = context();
+    state.runner = runner;
+    state.toolPrompt = vi.fn(async prompt => `tool boundary: ${prompt}`);
+    state.ciPrompt = vi.fn(async prompt => `ci boundary: ${prompt}`);
+    for (const [token, boundary] of [['cezar-tool', state.toolPrompt], ['ci-wait', state.ciPrompt]] as const) {
+      const events: string[] = [];
+      await play(scenarioFor(`mock:${token}`, state)!, encoder(events));
+      expect(boundary).toHaveBeenCalledWith(`mock:${token}`);
+      expect(events).toEqual(['open', `${token === 'cezar-tool' ? 'tool' : 'ci'} boundary: mock:${token}`, 'end']);
+    }
+  });
+
+  it('delegates crash wire details to the supplied boundary', () => {
+    const state = context();
+    state.crash = vi.fn();
+    expect(play(scenarioFor('mock:crash-stderr-clean', state)!, encoder([]))).toBe('continue');
+    expect(state.crash).toHaveBeenCalledWith('mock:crash-stderr-clean');
   });
 
   it('declares unsupported scripts and leaves untokened prompts alone', () => {
