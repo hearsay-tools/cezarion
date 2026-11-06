@@ -508,20 +508,22 @@ async function respondScenarios(command, message, ack) {
   if (early?.early && await play(early, encoder) !== 'continue') return;
   const scenario = scenarioFor(message, { ...scenarioContext, unsupported: early?.early ? [early.name] : [] });
   if (scenario && (scenario.beforeFailure || beforeNativeFailure.has(scenario.name))) return play(scenario, encoder);
-  // A shared script owns delayed opening; native fallback opens immediately.
-  if (!scenario || scenario.name === 'provider-error') {
-    const opening = encoder.open({});
-    if (opening instanceof Promise) await opening;
+  // Deferred scripts delay their opening, then enter the same admitted native path.
+  if (scenario?.name === 'deferred-turn-start') {
+    encoder.reply = () => respondNativeTurn(command, message, undefined, encoder);
+    return play(scenario, encoder);
   }
+  const opening = encoder.open({});
+  if (opening instanceof Promise) await opening;
+  return respondNativeTurn(command, message, scenario, encoder);
+}
+
+async function respondNativeTurn(command, message, scenario, encoder) {
   const native = promptScenarios.find(scenario => scenario.matches(message));
   if (native) return native.respond(command, message);
   const selectedFailure = failureControl?.failureFor(message);
   const nativeFailure = selectedFailure instanceof Promise ? await selectedFailure : selectedFailure;
-  if (nativeFailure === 'provider') {
-    const opening = encoder.open({});
-    if (opening instanceof Promise) await opening;
-    return providerError();
-  }
+  if (nativeFailure === 'provider') return providerError();
   if (message.includes('mock:no-settle')) return respondNoSettle(command, message);
   if (scenario) return play(scenario, encoder);
   return respondDefault(command, message);
