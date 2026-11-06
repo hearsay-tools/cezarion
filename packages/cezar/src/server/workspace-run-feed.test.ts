@@ -47,7 +47,7 @@ function harness() {
     return { frames, detach, ready: feed.seq() };
   };
   return {
-    feed, boot, open, usageListeners,
+    feed, boot, open, usageListeners, builtListeners, busListeners,
     build(id: string): FakeStore {
       const store = new FakeStore();
       built.set(id, store);
@@ -142,16 +142,27 @@ describe('workspace run feed (hearsay-tools/cezarion#2730)', () => {
     ]);
   });
 
-  it('holds the module-global usage subscription only while a connection is open', () => {
+  it('holds every subscription only while a connection is open, and keeps numbering after a gap', () => {
     const h = harness();
-    expect(h.usageListeners.size).toBe(0);
+    const other = h.build('other');
+    const held = () => [h.boot.listenerCount('run'), h.boot.listenerCount('deleted'), other.listenerCount('run'), h.usageListeners.size, h.builtListeners.size, h.busListeners.size];
+    expect(held()).toEqual([0, 0, 0, 0, 0, 0]);
     const a = h.open('summary');
     const b = h.open('full');
-    expect(h.usageListeners.size).toBe(1);
+    expect(held()).toEqual([1, 1, 1, 1, 1, 1]);
+    h.boot.put(record('a'));
     a.detach();
-    expect(h.usageListeners.size).toBe(1);
+    expect(held()).toEqual([1, 1, 1, 1, 1, 1]);
     b.detach();
-    expect(h.usageListeners.size).toBe(0);
+    b.detach();
+    // The last tab is gone: the server holds no listener for it (tab-coordination e2e).
+    expect(held()).toEqual([0, 0, 0, 0, 0, 0]);
+    // Unheard while closed, so unnumbered; numbers never repeat within a generation.
+    h.boot.put(record('b'));
+    const c = h.open('summary');
+    expect(c.ready).toBe(1);
+    other.put(record('c'));
+    expect(JSON.parse(c.frames[0]!.data)).toMatchObject({ project: 'other', seq: 2 });
   });
 
   it('detaches a removed project and attaches its rebuilt store under the same id', () => {

@@ -15,7 +15,8 @@ import type { ProjectContext } from './project-context.ts';
  * Attachment follows the rules the stream had per connection: the boot store under the registry
  * id the connection resolved, every context already built, and each context built later. A
  * removed project is detached, so a project removed and re-added on the same slug attaches its
- * fresh context instead of the disposed one.
+ * fresh context instead of the disposed one. When the last connection closes, the feed releases
+ * every subscription, as the per-connection stream did, and attaches again on the next one.
  */
 export type WorkspaceRunFeedMode = 'full' | 'summary';
 
@@ -48,7 +49,8 @@ export interface WorkspaceRunFeedDeps {
 }
 
 export interface WorkspaceRunFeed {
-  /** The last `seq` assigned. `/workspace/runs-index` answers it as `eventSeq`. */
+  /** The last `seq` assigned. `/workspace/runs-index` answers it as `eventSeq`. The feed numbers
+   *  only the events it hears while a connection is open; with none, it holds no subscription. */
   seq(): number;
   /**
    * Attach one connection, synchronously, so the caller can write `ready` with `seq()` before any
@@ -86,9 +88,9 @@ export function createWorkspaceRunFeed(deps: WorkspaceRunFeedDeps): WorkspaceRun
   /** Projects whose last usage frame carried rows. Summary mode clears each one once. */
   let liveProjects = new Set<string>();
   let bootAttachedAs: string | undefined;
-  let started = false;
-  /** The sampler is module-global: hold its subscription only while a connection reads it. */
-  let offUsage: (() => void) | undefined;
+  /** Every subscription the feed holds while a connection is open: store listeners stay with
+   *  `attached`; these are the context hook, the bus and the module-global usage sampler. */
+  let subscriptions: Array<() => void> | undefined;
   let seq = 0;
 
   const ownedUsage = (store: FeedStore, usage: Record<string, ProcessUsage>): Record<string, ProcessUsage> => {
@@ -172,17 +174,31 @@ export function createWorkspaceRunFeed(deps: WorkspaceRunFeedDeps): WorkspaceRun
   };
 
   const start = (): void => {
-    started = true;
     for (const id of deps.contexts.ids()) {
       const ctx = deps.contexts.peek(id);
       if (ctx) attach(ctx.id, ctx.store);
     }
-    deps.contexts.onContextBuilt((ctx) => attach(ctx.id, ctx.store));
-    deps.onWorkspaceEvent((event, data) => {
-      if (event !== 'project-removed') return;
-      const removed = (data as { id?: unknown } | null)?.id;
-      if (typeof removed === 'string') detach(removed);
-    });
+    subscriptions = [
+      deps.contexts.onContextBuilt((ctx) => attach(ctx.id, ctx.store)),
+      deps.onWorkspaceEvent((event, data) => {
+        if (event !== 'project-removed') return;
+        const removed = (data as { id?: unknown } | null)?.id;
+        if (typeof removed === 'string') detach(removed);
+      }),
+      deps.onUsage(onUsageTick),
+    ];
+  };
+
+  /** The last connection closed: hold nothing, as the per-connection stream held nothing. The
+   *  `seq` keeps its value, so numbers never repeat within a generation. */
+  const stop = (): void => {
+    for (const off of subscriptions ?? []) off();
+    subscriptions = undefined;
+    for (const project of [...attached.keys()]) {
+      attached.get(project)?.detach();
+      attached.delete(project);
+    }
+    bootAttachedAs = undefined;
   };
 
   /** The boot store lives under the registry id its connection resolved, and under one id only. */
@@ -199,15 +215,12 @@ export function createWorkspaceRunFeed(deps: WorkspaceRunFeedDeps): WorkspaceRun
     connect(bootProject, mode, write) {
       // Boot first, as the stream always attached it, then every context already built.
       attachBoot(bootProject);
-      if (!started) start();
+      if (subscriptions === undefined) start();
       const connection = { mode, write };
       connections.add(connection);
-      offUsage ??= deps.onUsage(onUsageTick);
       return () => {
-        connections.delete(connection);
-        if (connections.size > 0) return;
-        offUsage?.();
-        offUsage = undefined;
+        if (!connections.delete(connection) || connections.size > 0) return;
+        stop();
       };
     },
   };
