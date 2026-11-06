@@ -4,6 +4,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, expect, test, vi } from 'vitest';
 import { RUNNER_IDS, type AgentEvent, type AgentSession, type RunnerId } from '../../packages/cezar/src/core/agent-runner.ts';
 import { createRunner } from '../../packages/cezar/src/core/runner-factory.ts';
@@ -68,7 +69,10 @@ function acknowledged(runner: RunnerId, file: string, offset = 0): boolean {
 
 function stallFramesRecorded(runner: RunnerId, file: string): boolean {
   const wire = readFileSync(file, 'utf8');
-  if (runner === 'pi') return acknowledged(runner, file) && wire.includes('turn_start');
+  if (runner === 'pi') return acknowledged(runner, file) && wire.split('\n').some(line => {
+    if (!line) return false;
+    try { const frame = JSON.parse(JSON.parse(line).data); return frame.type === 'message_end' && frame.message?.role === 'user'; } catch { return false; }
+  });
   if (runner === 'omp') return acknowledged(runner, file) && wire.includes('message_end');
   return acknowledged(runner, file);
 }
@@ -110,6 +114,13 @@ async function send(session: AgentSession, text: string) {
   await waitFor(() => session.sendMessage([{ type: 'text', text }]), 5_000);
 }
 
+async function sendSteer(session: AgentSession) {
+  let accepted: false | Promise<void> = false;
+  // bound: the opening native ACK must clear before the runner admits agent input.
+  await waitFor(() => (accepted = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo Evidence steer.' }], ['wire-steer'])) !== false, 5_000);
+  if (accepted) await accepted;
+}
+
 async function followTurn(session: AgentSession, events: AgentEvent[], text: string) {
   const before = turns(events);
   await send(session, text);
@@ -140,7 +151,7 @@ async function driveRecipe(scenario: string, runner: RunnerId, session: AgentSes
   if (scenario === 'steer-tool' || scenario === 'steer-late') {
     // bound: inject only after the tool starts or the last assistant message arrives.
     await waitFor(() => events.some(event => event.type === (scenario === 'steer-tool' ? 'tool-call' : 'text')), 5_000);
-    await send(session, 'Evidence steer.');
+    await sendSteer(session);
   }
   if (scenario === 'resume-cezar-done' && (runner === 'codex' || runner === 'opencode')) {
     // bound: native questions hold their turn open until the human answer.
@@ -160,6 +171,14 @@ async function driveRecipe(scenario: string, runner: RunnerId, session: AgentSes
   }
   // bound: normal recipe turns include at most the mock's 3-second progress fixture.
   await waitFor(() => turns(events) > 0 || failed(events), 8_000);
+  if (scenario === 'steer-late' && runner === 'pi') {
+    // bound: Pi runs the unread steer in the next turn, which must also settle.
+    await waitFor(() => turns(events) >= 2, 5_000);
+  }
+  if (scenario === 'steer-late' && runner === 'opencode') {
+    // bound: the runner's quiet grace proves no follow-on native turn will read this steer.
+    await waitFor(() => events.some(event => event.type === 'input-unconsumed'), 5_000);
+  }
   await driveFollowups(scenario, runner, session, events, activity, file);
 }
 
@@ -178,9 +197,9 @@ async function driveFollowups(scenario: string, runner: RunnerId, session: Agent
       await waitFor(() => acknowledged(runner, file, offset), 5_000);
     } else await followTurn(session, events, FINAL);
   }
-  if (runner === 'opencode' && (scenario === 'autonomous-cap' || scenario === 'silent-tail-ack-delay')) {
+  if (runner === 'opencode' && (scenario === 'autonomous-cap' || scenario === 'autonomous-cezar-ask-cap' || scenario === 'silent-tail-ack-delay')) {
     // bound: preserve the delayed HTTP ACK (100/250 ms) after SSE turn-end before teardown.
-    await waitFor(() => readFileSync(file, 'utf8').split('\n').filter(line => line.includes('http-response') && line.includes('POST') && (line.includes('/message') || line.includes('/prompt_async'))).length >= (scenario === 'autonomous-cap' ? 2 : 3), 5_000);
+    await waitFor(() => readFileSync(file, 'utf8').split('\n').filter(line => line.includes('http-response') && line.includes('POST') && (line.includes('/message') || line.includes('/prompt_async'))).length >= (scenario === 'silent-tail-ack-delay' ? 3 : 2), 5_000);
   }
 }
 
@@ -203,7 +222,7 @@ async function recordRecipe(runner: RunnerId, scenario: string) {
       cwd, userPrompt: prompt(scenario, runner, join(cwd, 'park')), toolGrant: { kind: 'unset' },
       sessionId: PINNED_SESSION_ID, timeoutMs: 0,
       // The real tool transport returns a stable unavailable receipt without a controller.
-      cezarTools: { name: 'cezar_ci_evidence', command: process.execPath, args: [new URL('../../packages/cezar/scripts/mock-wire-tools.mjs', import.meta.url).pathname] },
+      cezarTools: { name: 'cezar_ci_evidence', command: process.execPath, args: [fileURLToPath(new URL('../../packages/cezar/scripts/mock-wire-tools.mjs', import.meta.url))] },
       env: { CEZ_MOCK_WIRE_FILE: file, CEZ_MOCK_NOTES: '0', CEZ_MOCK_RELEASE_FILE: join(cwd, 'release'),
         CEZ_MOCK_STEER_LINES: scenario === 'steer-tool' ? '1' : '0',
         CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_TOOL_SOCKET: '', CEZ_TOOL_TOKEN: '',
