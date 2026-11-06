@@ -48,7 +48,7 @@ a0b806246 (hearsay-tools/cezarion#1662), 26e62e6f0 (hearsay-tools/cezarion#2446)
 463a5bf01 (hearsay-tools/cezarion#1240), faa0c92ab (hearsay-tools/cezarion#1262),
 1091b54f2 (hearsay-tools/cezarion#933). The review's "37 of 70 changed no runner"
 depends on how a runner change is counted; with "touched a `src/core` runner,
-transport or mapper file" the count is 29 of 70. The conclusion is the same: most
+transport or mapper file" the count is 29 of 70. Either way, many
 mock edits do not follow a runner change.
 
 ### Scenario inventory
@@ -213,7 +213,8 @@ byte-identical.
      raw writes of `mock-runner-crash.mjs` (`writeSync`) and child output in
      held-pipe mode, and for OpenCode the SSE events and every HTTP response
      (status, body), such as `acknowledgePrompt`. Each record names its channel.
-     Normalize ids, uuids, timestamps, temp paths and pids.
+     Normalize ids, uuids, timestamps, temp paths, pids and allocated ports
+     (the OpenCode mock prints its listen port on stdout).
    - **Recipes.** The evidence script owns one recipe per shared scenario. It does
      not rely on the `HARNESS_ADAPTERS` prompts: the catalog has no `agent-echo`,
      `ack-only` or `deferred-turn-start` entry, maps `cezar-ask` to
