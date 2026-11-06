@@ -127,9 +127,11 @@ export async function oxlintProblems(cwd: string, paths: string[], config = '.ox
  * `AST_GREP_RULES_UPDATE=1`, a rule without a baseline gets its first one and every other baseline
  * is lowered to today's matches; update mode never adds a match to a baseline.
  */
-export async function astGrepProblems(update = process.env.AST_GREP_RULES_UPDATE === '1'): Promise<string[]> {
-  const sites = await scanRepository();
-  return ruleIds().flatMap((rule) => {
+export async function astGrepProblems(update = process.env.AST_GREP_RULES_UPDATE === '1', rules = ruleIds()): Promise<string[]> {
+  if (rules.length === 0) return [];
+  const filter = `^(${rules.map(rule => rule.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`;
+  const sites = await scanRepository(filter);
+  return rules.flatMap((rule) => {
     const mine = sites.filter((s) => s.rule === rule);
     if (update) updateBaseline(rule, tally(mine));
     const { added, stale } = compareToBaseline(tally(mine), readBaseline(rule));
@@ -208,10 +210,18 @@ export async function lintWithoutOxlint(): Promise<string[]> {
   return lintProblems(false);
 }
 
+export function waitProblems(): string[] {
+  return [...serverWaitProblems(), ...unitWaitProblems()];
+}
+
+export function repositoryProblems(): string[] {
+  return [...staleEntries(), ...fileLengthProblems(), ...guardianCssProblems()];
+}
+
 async function lintProblems(withOxlint: boolean): Promise<string[]> {
-  const waits = [...serverWaitProblems(), ...unitWaitProblems()];
+  const waits = waitProblems();
   const [oxlint, astGrep] = await Promise.all([withOxlint ? oxlintProblems(repoRoot, LINT_PATHS) : [], astGrepProblems()]);
-  return [...waits, ...oxlint, ...astGrep, ...staleEntries(), ...fileLengthProblems(), ...guardianCssProblems()];
+  return [...waits, ...oxlint, ...astGrep, ...repositoryProblems()];
 }
 
 if (import.meta.main) {
