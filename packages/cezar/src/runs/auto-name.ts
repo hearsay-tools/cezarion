@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { z } from 'zod';
 import { loadConfig } from '../config.ts';
 import { createRunner } from '../core/runner-factory.ts';
@@ -150,15 +151,15 @@ export function postValidateTitle(title: string, refNumber?: number): string {
  * the heuristic title. `namerModel` is a Claude alias, so it is passed only
  * when the namer runs on Claude (the `plannerModel` precedent).
  */
-export async function generateRunName(repoRoot: string, ctx: NamerContext): Promise<NameResult | null> {
+export async function generateRunName(repoRoot: string, ctx: NamerContext, home?: Home): Promise<NameResult | null> {
   try {
-    const config = await loadConfig(repoRoot);
+    const config = await loadConfig(repoRoot, home);
     const runner = createRunner(config.defaultRunner);
     const model = config.defaultRunner === 'claude' ? config.namerModel : undefined;
     // Name under the project's own agent account (spec 2026-07-29-agent-profiles) — naming is
     // a model call like any other, and billing it to the personal subscription for a work
     // project is the exact confusion accounts exist to remove.
-    const { env: profileEnv } = await resolveProfileEnvForRoot(repoRoot, config.defaultRunner);
+    const { env: profileEnv } = await resolveProfileEnvForRoot(repoRoot, config.defaultRunner, undefined, process.env, home);
     for (let attempt = 0; attempt < 2; attempt++) {
       const result = await runner.run({
         systemPrompt: NAMER_SYSTEM_PROMPT,

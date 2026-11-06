@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -449,7 +450,7 @@ export class TaskWebhooks {
   private markReady!: () => void;
   private readonly ready = new Promise<void>((done) => { this.markReady = done; });
 
-  constructor(private readonly options: { fetch?: typeof fetch | undefined; origin?: string } = {}) {
+  constructor(private readonly options: { fetch?: typeof fetch | undefined; origin?: string; home?: Home | undefined } = {}) {
     if (options.origin !== undefined) this.setOrigin(options.origin);
   }
 
@@ -469,7 +470,7 @@ export class TaskWebhooks {
     const existing = this.hooks.get(project.store);
     if (existing) return existing;
     const hook = new TaskWebhook(project.store, {
-      resolveProject: () => registryWebhooks(project.id, project.root),
+      resolveProject: () => registryWebhooks(project.id, project.root, this.options.home),
       origin: () => this.origin,
       ready: () => this.ready,
       dataDir: join(project.root, '.ai/cezar'),
@@ -485,14 +486,14 @@ export class TaskWebhooks {
 }
 
 /** The registry entry this project is, read per delivery so a settings change applies at once. */
-async function registryWebhooks(id: string, root: string): Promise<{ id: string; webhooks: TaskWebhookTarget[] } | undefined> {
-  const entry = await registryEntry(id, root);
+async function registryWebhooks(id: string, root: string, home?: Home): Promise<{ id: string; webhooks: TaskWebhookTarget[] } | undefined> {
+  const entry = await registryEntry(id, root, home);
   return entry ? { id: entry.id, webhooks: taskWebhooks(entry) } : undefined;
 }
 
 /** `id` may be the reserved `default` alias, which resolves to the registry entry holding `root`. */
-export async function registryEntry(id: string, root: string): Promise<WorkspaceProject | undefined> {
-  const projects = (await loadWorkspaceConfig()).projects;
+export async function registryEntry(id: string, root: string, home?: Home): Promise<WorkspaceProject | undefined> {
+  const projects = (await loadWorkspaceConfig(home?.workspaceConfig)).projects;
   const real = id === 'default' ? await realpath(root).catch(() => root) : root;
   return id === 'default'
     ? projects.find((project) => project.root === real || project.root === root)

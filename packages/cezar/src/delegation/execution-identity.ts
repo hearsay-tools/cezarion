@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { createHash } from 'node:crypto';
 import { workerInputRecipeSchema, type WorkerInputRecipe } from '@open-mercato/cezar-contract/delegation';
 import { basename, dirname, isAbsolute, join } from 'node:path';
@@ -165,13 +166,13 @@ export function workerWorkflowHash(workflow: WorkflowDef): string {
  * `stepId`, the step's own pinned entry is checked too (#452): its account must still be
  * available and its model/effort must clear the lock, exactly as the run-level fields must.
  */
-export function workerIdentity(store: RunStore, repoRoot: string, runId: string, stepId?: string) {
+export function workerIdentity(store: RunStore, repoRoot: string, runId: string, stepId?: string, home?: Home) {
   const run = store.getRun(runId);
   if (run?.delegation?.role !== 'worker') return undefined;
   const identity = store.readWorkerIdentity(runId);
   if (!identity) throw new WorkerIdentityError('Worker execution identity evidence is unavailable');
   if (identity.kind === 'internal') return undefined;
-  validateWorkerIdentity(repoRoot, run, identity, run.delegation.context);
+  validateWorkerIdentity(repoRoot, run, identity, run.delegation.context, home);
   // Availability is checked for the account about to be USED: the selected step's entry when
   // there is one, and the single run-level account only for a legacy identity that has no
   // per-step list. A per-step identity checked without a step (the evidence-only calls in
@@ -179,7 +180,7 @@ export function workerIdentity(store: RunStore, repoRoot: string, runId: string,
   // step and binds that account — so a first-step login removed after its step finished never
   // stops a later step, a Continue or a recovery whose own account is intact (#465).
   const step = stepId === undefined ? undefined : workerStepIdentity(identity, stepId);
-  if (step && agentModelsLocked(repoRoot) && (step.model !== undefined || step.effort !== undefined)) {
+  if (step && agentModelsLocked(repoRoot, process.env, home) && (step.model !== undefined || step.effort !== undefined)) {
     throw new WorkerIdentityError(`Accepted worker settings cannot run: ${AGENT_MODELS_LOCKED_ERROR}`);
   }
   const account = step?.account ?? (identity.steps === undefined ? identity.account : undefined);
@@ -187,12 +188,12 @@ export function workerIdentity(store: RunStore, repoRoot: string, runId: string,
   return identity;
 }
 
-function validateWorkerIdentity(repoRoot: string, run: RunRecord, identity: AcceptedWorkerIdentity, context: WorkerInputRecipe | undefined): void {
+function validateWorkerIdentity(repoRoot: string, run: RunRecord, identity: AcceptedWorkerIdentity, context: WorkerInputRecipe | undefined, home?: Home): void {
   if (identity.contextHash !== undefined && (!context || workerContextHash(context) !== identity.contextHash)) {
     throw new WorkerIdentityError('Accepted worker context recipe is unavailable or changed');
   }
   ownedWorkflow(run, identity);
-  if (agentModelsLocked(repoRoot) && (identity.model !== undefined || identity.effort !== undefined)) {
+  if (agentModelsLocked(repoRoot, process.env, home) && (identity.model !== undefined || identity.effort !== undefined)) {
     throw new WorkerIdentityError(`Accepted worker settings cannot run: ${AGENT_MODELS_LOCKED_ERROR}`);
   }
   if (run.runner !== identity.account.provider || run.agentProfile !== identity.account.profileId ||

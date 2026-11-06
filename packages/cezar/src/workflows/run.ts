@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { atContinue, atStepOpen, atTaskHead, bindLaunchSource } from './run/launch-read-resolver.ts';
 import { composeRunModules, type RunModules } from './run/compose.ts';
 import { UNREAD_INPUT_GRACE_MS, QUEUE_WATCHDOG_MS, REPO_REDISCOVERY_MS } from './run/constants.ts';
@@ -159,7 +160,7 @@ export class RunManager {
   constructor(
     store: RunStore,
     repoRoot: string,
-    options: { work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined; toolActivity?: ToolActivityTracker | undefined } = {},
+    options: { home?: Home | undefined; work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined; toolActivity?: ToolActivityTracker | undefined } = {},
   ) {
     this.#store = store;
     this.#repoRoot = repoRoot;
@@ -168,9 +169,9 @@ export class RunManager {
     this.#cezarPort = options.cezarPort;
     /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
     const unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
-    this.#semaphore = options.semaphore ?? new WorkspaceSemaphore();
+    this.#semaphore = options.semaphore ?? new WorkspaceSemaphore({ home: options.home });
     this.#toolActivity = options.toolActivity?.attach(store);
-    this.#context = { store, repoRoot, dataDir: this.#dataDir, semaphore: this.#semaphore, disposed: () => this.#disposed, work: options.work ?? new TrackedWork(), sweepBranches: options.sweepBranches, toolActivity: this.#toolActivity };
+    this.#context = { home: options.home, store, repoRoot, dataDir: this.#dataDir, semaphore: this.#semaphore, disposed: () => this.#disposed, work: options.work ?? new TrackedWork(), sweepBranches: options.sweepBranches, toolActivity: this.#toolActivity };
     const facade = this;
     this.#modules = composeRunModules(this.#context, {
       unreadInputGraceMs: () => unreadInputGraceMs,
@@ -365,7 +366,7 @@ export class RunManager {
    * running on another login is a billing boundary crossed without anyone choosing it.
    */
   async selectDelegationExecutionSettings(runId: string, selection: { backend?: RunnerId | undefined; model?: string | undefined; effort?: string | undefined; agentProfile?: string }, validateModel?: (settings: DelegationExecutionSettings) => Promise<void>): Promise<DelegationExecutionSettings> {
-    return selectDelegationExecutionSettings(this.#repoRoot, this.delegationExecutionSettings(runId), selection, validateModel);
+    return selectDelegationExecutionSettings(this.#repoRoot, this.delegationExecutionSettings(runId), selection, validateModel, this.#context.home);
   }
 
   /**
@@ -622,7 +623,7 @@ export class RunManager {
     // repoRoot fallback; owned workers must never adopt/recreate an unverified resource.
     if (this.#workerExecutionStopped(runId)) { this.#modules.line.unmarkStarting(runId); return; }
     if (this.#modules.runFinish.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() })) return;
-    atContinue.verifyIdentity(this.#store, this.#repoRoot, runId);
+    atContinue.verifyIdentity(this.#store, this.#repoRoot, runId, this.#context.home);
     const record = this.#store.getRun(runId);
     const workspace = await this.#modules.continuationSession.continuationWorkspace(runId, stepId, record);
     if (!workspace) return;
@@ -643,7 +644,7 @@ export class RunManager {
 
   async #execute(runId: string, workflow: WorkflowDef, input: StartRunInput, startAt = 0): Promise<void> {
     if (this.#workerExecutionStopped(runId)) { this.#modules.line.unmarkStarting(runId); return; }
-    atTaskHead.verifyIdentity(this.#store, this.#repoRoot, runId);
+    atTaskHead.verifyIdentity(this.#store, this.#repoRoot, runId, this.#context.home);
     const state = createActiveRun({
       cwd: this.#repoRoot,
       pendingHumanAsk: this.#hasPendingHumanAsk(runId),

@@ -669,7 +669,7 @@ async function probeWritableDir(dir: string, create: boolean): Promise<string | 
     return err instanceof Error ? err.message : String(err);
   }
 }
-
+function writeErrorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 // The return type is INFERRED on purpose: it is the chained app type built at the bottom of
 // this function, and `AppType` (src/server/app-type.ts) is `ReturnType<typeof createApp>`.
 // Annotating it `Hono` here would erase every route from the type and leave the typed client
@@ -690,7 +690,7 @@ export function createApp(deps: ServerDeps) {
   const { providerStatus, providerActionError, invalidateHostModels } =
     createProviderStatus({ modelCatalog, providerAuth, workspaceConfig });
 
-  const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot, bootProjectId, bindHost });
+  const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot, bootProjectId, bindHost, home: deps.home });
   const { resolveBootProject } = workspaceProjects;
   // Health's workspace garnish: id+name ONLY — never `root` (#431, see the
   // health route). Reads only the registry file; no per-root status probes,
@@ -700,7 +700,7 @@ export function createApp(deps: ServerDeps) {
     bootProject: string;
   }> => {
     try {
-      const registry = (await loadWorkspaceConfig()).projects;
+      const registry = (await loadWorkspaceConfig(deps.home?.workspaceConfig)).projects;
       const bootProject = await resolveBootProject(registry);
       const visible = await workspaceProjects.visibleProjects(registry, bootProject);
       return {
@@ -761,7 +761,7 @@ export function createApp(deps: ServerDeps) {
   const providerRuntimeAuth = deps.providerRuntimeAuth
     ?? new ProviderRuntimeAuthObserver(providerAuth, (status) => {
       workspaceEvents.emit('provider-status', status);
-    });
+    }, undefined, deps.home);
 
   watchProviderRuntimeAuth(providerRuntimeAuth, bootContext, contexts);
 
@@ -807,7 +807,7 @@ export function createApp(deps: ServerDeps) {
     const resolved = await workspaceProjects.resolveProjectId(raw);
     if ('error' in resolved) return { ...resolved, status: 404 };
     const { id } = resolved;
-    const known = await loadWorkspaceConfig().then((config) => config.projects.some((p) => p.id === id), () => false);
+    const known = await loadWorkspaceConfig(deps.home?.workspaceConfig).then((config) => config.projects.some((p) => p.id === id), () => false);
     if (!known) return { error: `unknown project: ${id}`, status: 404 };
     let updated: WorkspaceProject | undefined;
     let outcome: WebhookEdit | undefined;
@@ -819,7 +819,7 @@ export function createApp(deps: ServerDeps) {
         if ('error' in outcome) return;
         setProjectWebhooks(entry, outcome.webhooks);
         updated = entry;
-      });
+      }, deps.home);
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err), status: 500 };
     }
@@ -1062,7 +1062,7 @@ export function createApp(deps: ServerDeps) {
     const [checks, repo, config, workspace] = await Promise.all([
       readBackendChecks(),
       getRepoInfo(bootRoot),
-      loadConfig(bootRoot),
+      loadConfig(bootRoot, deps.home),
       workspaceSummary(),
     ]);
     // Additive fields only below — the pre-forge shape is the most
@@ -1257,7 +1257,7 @@ export function createApp(deps: ServerDeps) {
   const warmAgentKnowledge = async (): Promise<void> => {
     await providerAuth.status().catch(() => {});
     if (!capabilities().localHandoff) return;
-    const store = await loadAgentAccounts().catch(() => defaultAgentAccountStore());
+    const store = await loadAgentAccounts(deps.home).catch(() => defaultAgentAccountStore());
     for (const account of listAgentProfiles(store, PROVIDER_IDS)) {
       if (account.isDefault) continue; // covered by `status()` above
       // Probing it would sign in or report on another folder (#1283); its status route says why.
@@ -1302,7 +1302,7 @@ export function createApp(deps: ServerDeps) {
     }
     let accounts: readonly AgentAccount[];
     try {
-      accounts = (await loadAgentAccounts()).accounts;
+      accounts = (await loadAgentAccounts(deps.home)).accounts;
     } catch {
       return { error: `unknown ${provider} account: ${profileId}` };
     }
@@ -1343,7 +1343,7 @@ export function createApp(deps: ServerDeps) {
   /** A registered project's realpath'd root, or null when the id is unknown. */
   const projectRootFor = async (projectId: string): Promise<string | null> => {
     try {
-      return (await loadWorkspaceConfig()).projects.find((p) => p.id === projectId)?.root ?? null;
+      return (await loadWorkspaceConfig(deps.home?.workspaceConfig)).projects.find((p) => p.id === projectId)?.root ?? null;
     } catch {
       return null;
     }
@@ -1570,7 +1570,7 @@ export function createApp(deps: ServerDeps) {
       return provider ? defaultAgentProfile(provider) : null;
     }
     try {
-      const stored = (await loadAgentAccounts()).accounts.find((a) => a.id === id);
+      const stored = (await loadAgentAccounts(deps.home)).accounts.find((a) => a.id === id);
       return stored ? resolveStoredProfile(stored) : null;
     } catch {
       return null;
@@ -1627,7 +1627,7 @@ export function createApp(deps: ServerDeps) {
       let store = defaultAgentAccountStore();
       if (editable) {
         try {
-          store = await loadAgentAccounts();
+          store = await loadAgentAccounts(deps.home);
         } catch {
           // an unreadable home degrades to "no extra accounts", never a failed request
         }
@@ -1664,7 +1664,7 @@ export function createApp(deps: ServerDeps) {
       // schema's id dedupe is what keeps resolution deterministic.
       let existing: readonly AgentAccount[] = [];
       try {
-        existing = (await loadAgentAccounts()).accounts;
+        existing = (await loadAgentAccounts(deps.home)).accounts;
       } catch {
         // unreadable store — the merge-write below reports the real failure
       }
@@ -1683,7 +1683,7 @@ export function createApp(deps: ServerDeps) {
             addedAt: new Date().toISOString(),
           };
           store.accounts.push(created);
-        });
+        }, deps.home);
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
       }
@@ -1717,7 +1717,7 @@ export function createApp(deps: ServerDeps) {
         // 404 WITHOUT rewriting the config, and the duplicate check needs async `realpath`.
         let existing: readonly AgentAccount[] = [];
         try {
-          existing = (await loadAgentAccounts()).accounts;
+          existing = (await loadAgentAccounts(deps.home)).accounts;
         } catch {
           // unreadable store — treated as unknown, like DELETE and PATCH /projects
         }
@@ -1740,9 +1740,9 @@ export function createApp(deps: ServerDeps) {
             if (label !== undefined) entry.label = label.trim() || entry.id;
             if (configDir !== undefined) entry.configDir = configDir;
             updated = entry;
-          });
+          }, deps.home);
         } catch (err) {
-          return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+          return c.json({ error: writeErrorMessage(err) }, 500);
         }
         if (!updated) return c.json({ error: `unknown account: ${id}` }, 404);
         // The dir may have moved under a cached probe — drop THIS account's answer so the response
@@ -1930,7 +1930,7 @@ export function createApp(deps: ServerDeps) {
             if (root === null) current.defaults = selection;
             else if (Object.keys(selection).length === 0) delete current.selections[root];
             else current.selections[root] = selection;
-          });
+          }, deps.home);
         } catch (err) {
           return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
         }
@@ -1965,7 +1965,7 @@ export function createApp(deps: ServerDeps) {
               }
               if (Object.keys(selection).length === 0) delete store.selections[root];
             }
-          });
+          }, deps.home);
         } catch (err) {
           return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
         }
@@ -1988,7 +1988,7 @@ export function createApp(deps: ServerDeps) {
    *  that must keep answering. */
   const workspaceProjectsDir = async (): Promise<string> => {
     try {
-      return (await loadWorkspaceConfig()).projectsDir;
+      return (await loadWorkspaceConfig(deps.home?.workspaceConfig)).projectsDir;
     } catch {
       return defaultWorkspaceConfig().projectsDir;
     }
@@ -1996,7 +1996,7 @@ export function createApp(deps: ServerDeps) {
 
   const workspaceBrowseRoot = async (): Promise<string> => {
     try {
-      return (await loadWorkspaceConfig()).browseRoot;
+      return (await loadWorkspaceConfig(deps.home?.workspaceConfig)).browseRoot;
     } catch {
       return defaultWorkspaceConfig().browseRoot;
     }
@@ -2008,7 +2008,7 @@ export function createApp(deps: ServerDeps) {
       let projects: ProjectListEntry[] = [];
       let projectsDir = defaultWorkspaceConfig().projectsDir;
       try {
-        projectsDir = (await loadWorkspaceConfig()).projectsDir;
+        projectsDir = (await loadWorkspaceConfig(deps.home?.workspaceConfig)).projectsDir;
         projects = await workspaceProjects.listVisibleProjects();
       } catch {
         // unreadable workspace — degrade to the empty registry + defaults
@@ -2043,7 +2043,7 @@ export function createApp(deps: ServerDeps) {
 
       let entry: WorkspaceProject | undefined;
       try {
-        entry = (await loadWorkspaceConfig()).projects.find((p) => p.id === id);
+        entry = (await loadWorkspaceConfig(deps.home?.workspaceConfig)).projects.find((p) => p.id === id);
       } catch {
         // unreadable workspace — there is nothing to remove, and saying so is
         // more useful than a 500 the user cannot act on
@@ -2079,7 +2079,7 @@ export function createApp(deps: ServerDeps) {
 
       let removed: boolean;
       try {
-        removed = await removeProject(id);
+        removed = await removeProject(id, deps.home);
       } catch (err) {
         // e.g. a read-only home — nothing was persisted (atomic tmp+rename).
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
@@ -2128,7 +2128,7 @@ export function createApp(deps: ServerDeps) {
       // write failure as a 500 where the honest answer is 404.
       let known = false;
       try {
-        known = (await loadWorkspaceConfig()).projects.some((p) => p.id === id);
+        known = (await loadWorkspaceConfig(deps.home?.workspaceConfig)).projects.some((p) => p.id === id);
       } catch {
         // unreadable workspace — treat as unknown; the read-only case answers 404,
         // not a 500 the caller cannot act on (same reasoning as DELETE).
@@ -2165,10 +2165,10 @@ export function createApp(deps: ServerDeps) {
             applyTaskWebhookInput(entry, webhook);
           }
           updated = entry;
-        });
+        }, deps.home);
       } catch (err) {
         // e.g. a read-only home — nothing was persisted (atomic tmp+rename).
-        return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+        return c.json({ error: writeErrorMessage(err) }, 500);
       }
       // Raced with a concurrent removal between the read and the write.
       if (!updated) return c.json({ error: `unknown project: ${id}` }, 404);
@@ -2484,13 +2484,13 @@ export function createApp(deps: ServerDeps) {
     const real = await realpath(requested).catch(() => requested);
     let known = false;
     try {
-      known = (await loadWorkspaceConfig()).projects.some((p) => p.root === real);
+      known = (await loadWorkspaceConfig(deps.home?.workspaceConfig)).projects.some((p) => p.root === real);
     } catch {
       // unreadable workspace — treat as unknown; the write below will fail loudly
     }
     let project: ProjectListEntry;
     try {
-      const entry = await registerProject(requested, source);
+      const entry = await registerProject(requested, source, deps.home);
       project = toProjectListEntry(entry, await probeProjectStatus(entry.root));
     } catch (err) {
       // e.g. a read-only home — nothing was persisted (atomic tmp+rename).
@@ -2620,7 +2620,7 @@ export function createApp(deps: ServerDeps) {
   });
   // ---- chained family: workspace settings + GUI prefs (workspace-level) ----
   const workspaceConfigRoutes = new Hono<ProjectApiEnv>()
-    .get('/workspace/config', async (c) => c.json(workspaceConfigBody(await loadWorkspaceConfig())))
+    .get('/workspace/config', async (c) => c.json(workspaceConfigBody(await loadWorkspaceConfig(deps.home?.workspaceConfig))))
 
     .put('/workspace/config', jsonZodValidator(() => workspaceConfigUpdateSchema), async (c) => {
       const parsed = { data: c.req.valid('json') };
@@ -2696,7 +2696,7 @@ export function createApp(deps: ServerDeps) {
             if (Object.keys(models).length === 0) delete config.agentDefaults.models;
             else config.agentDefaults.models = models;
           }
-        });
+        }, deps.home);
       } catch (err) {
         // e.g. a read-only home — nothing was persisted (atomic tmp+rename).
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
@@ -2711,7 +2711,7 @@ export function createApp(deps: ServerDeps) {
     // Global GUI state (`~/.cezar/ui-state.json`) — same parse/key-cap/shallow-
     // merge semantics as the per-repo /api/v1/ui-state route below (the shared half
     // is `uiStateBodySchema`), but backed by the workspace file.
-    .get('/workspace/ui-state', async (c) => c.json(await readWorkspaceUiState()))
+    .get('/workspace/ui-state', async (c) => c.json(await readWorkspaceUiState(deps.home?.workspaceUiState)))
 
     // The tighter body cap rides on `use` rather than inline on the route: `bodyLimit` is typed
     // as a bare MiddlewareHandler, and passing one to `.put()` collapses the route's schema, so
@@ -2727,7 +2727,7 @@ export function createApp(deps: ServerDeps) {
           await mergeWriteWorkspaceUiState((state) => ({
             ...state,
             ...parsed.data,
-          })),
+          }), deps.home),
         );
       } catch (err) {
         // A read-only home degrades to an unsaved pref, never a crash.
@@ -2912,9 +2912,9 @@ export function createApp(deps: ServerDeps) {
     .post('/plan', jsonZodValidator(planSchema), async (c) => {
       const { root: repoRoot } = c.get('project');
       const parsed = { data: c.req.valid('json') };
-      const blocked = await providerActionError([(await loadConfig(repoRoot)).defaultRunner]);
+      const blocked = await providerActionError([(await loadConfig(repoRoot, deps.home)).defaultRunner]);
       if (blocked) return c.json({ error: blocked }, 409);
-      return c.json(await planChain(repoRoot, parsed.data.task, builtinSkillsOf(c.get('project').manager)));
+      return c.json(await planChain(repoRoot, parsed.data.task, builtinSkillsOf(c.get('project').manager), deps.home));
     });
 
   // ---- GitHub automations --------------------------------------------------
@@ -2983,7 +2983,7 @@ export function createApp(deps: ServerDeps) {
   };
 
   /** The automations family's behavior, shared with the session tools (#1465). */
-  const automationService = createAutomationService({
+  const automationService = createAutomationService({ home: deps.home,
     timeZone: localTimeZone,
     discovery: { models: modelCatalog, providers: () => providerStatus() },
     scheduleHandle: (project) => scheduleHandle(project as ProjectContext),
@@ -3392,12 +3392,12 @@ export function createApp(deps: ServerDeps) {
         if (replay && 'error' in replay) return c.json({ error: replay.error }, replay.status);
         if (replay) return c.json(replay.run, 200 as const);
       }
-      const locked = modelLockRefusal(repoRoot, body);
+      const locked = modelLockRefusal(repoRoot, body, deps.home);
       if (locked) return c.json({ error: locked.error }, locked.status);
       const resolved = await resolveStartWorkflow(repoRoot, body);
       if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
       const { workflow } = resolved;
-      const runner = body.runner ?? (await loadConfig(repoRoot)).defaultRunner;
+      const runner = body.runner ?? (await loadConfig(repoRoot, deps.home)).defaultRunner;
       const blocked = await providerGateRefusal(providerActionError, workflow, runner);
       if (blocked) return c.json({ error: blocked.error }, blocked.status);
       const badProfile = await agentProfileRefusal(resolveWorkspaceProfile, runner, body.agentProfile);
@@ -3647,7 +3647,7 @@ export function createApp(deps: ServerDeps) {
       // run's current backend, and a runner/model override reopens on that engine (#401).
       const parsed = { data: c.req.valid('json') };
       if (
-        agentModelsLocked(repoRoot) &&
+        agentModelsLocked(repoRoot, process.env, deps.home) &&
         (parsed.data.model?.trim() || parsed.data.effort?.trim())
       ) {
         return c.json({ error: AGENT_MODELS_LOCKED_ERROR }, 409);
@@ -3657,7 +3657,7 @@ export function createApp(deps: ServerDeps) {
       // and execution use the same provider even when the record inherited config.
       const untouched = isUntouchedCancelledRun(run);
       const originalProvider = untouched
-        ? run.runner ?? (await loadConfig(repoRoot)).defaultRunner
+        ? run.runner ?? (await loadConfig(repoRoot, deps.home)).defaultRunner
         : providerForExistingRun(run);
       const provider = parsed.data.runner ?? originalProvider;
       const required = untouched
@@ -3755,7 +3755,7 @@ export function createApp(deps: ServerDeps) {
       }
       const cliRunner = agentCliRunner(target);
       if (cliRunner) {
-        return openRunCli(c, run, cliRunner, dir, repoRoot, {
+        return openRunCli(c, run, cliRunner, dir, repoRoot, { home: deps.home,
           providerActionError, resumeCommand, handoffEnv, handoffFallbackCommand, openTerminal,
         });
       }
@@ -4172,7 +4172,7 @@ export function createApp(deps: ServerDeps) {
       const { root: repoRoot, store } = c.get('project');
       // The keep-limit the panel reports is the one the enforcer will actually
       // apply — inherited from the workspace default when this repo sets none.
-      const keep = await resolveWorktreeRetention(repoRoot);
+      const keep = await resolveWorktreeRetention(repoRoot, deps.home);
       const withWorktree = store.listRunsWithWorktree();
       // Listing is on-disk dirs only; parent liveness for #575 reads the store by id
       // so a live `worktree: false` parent is not treated as gone (#570 honesty).
@@ -4204,7 +4204,7 @@ export function createApp(deps: ServerDeps) {
       // The body is validated (an empty or `{}` one is accepted) but carries nothing this
       // handler reads; retention is best-effort, so 200 always.
       const { manager } = c.get('project');
-      const reclaimed = await reclaimWorktrees(repoRoot, store, await resolveWorktreeRetention(repoRoot), {
+      const reclaimed = await reclaimWorktrees(repoRoot, store, await resolveWorktreeRetention(repoRoot, deps.home), {
         claim: (run) => manager.claimWorktreeReclaim(run.id),
         previewHost: deps.previewHost,
       });
@@ -4581,7 +4581,7 @@ export function createApp(deps: ServerDeps) {
     number: z.coerce.number().int().positive(),
   });
   const branchForge = deps.branchForge ?? createGithubBranchForge({ forgeFactory: deps.forgeFactory });
-  const branchClassifyInput = (project: ClassifyProject) => classifyInputFor(project, branchForge);
+  const branchClassifyInput = (project: ClassifyProject) => classifyInputFor({ ...project, home: deps.home }, branchForge);
   // ---- chained family: repo / git (project-scoped) ----
   const repoRoutes = new Hono<ProjectApiEnv>()
     .get('/repo', async (c) => {
@@ -4600,7 +4600,7 @@ export function createApp(deps: ServerDeps) {
         getStatus(info.root),
         getLogWithParents(info.root),
         getBranches(info.root),
-        loadConfig(repoRoot),
+        loadConfig(repoRoot, deps.home),
       ]);
       const [tracking, sources] = await Promise.all([
         getTracking(info.root, config.baseBranch ?? info.branch),
@@ -4721,7 +4721,7 @@ export function createApp(deps: ServerDeps) {
       const { root, store, manager } = c.get('project');
       const info = await getRepoInfo(root);
       if (!info) return c.json({ error: 'not a git repository' }, 409);
-      const config = await loadConfig(root);
+      const config = await loadConfig(root, deps.home);
       const result = await pullRepoCheckout(info.root, c.req.valid('json'), config.baseBranch,
         // Every id, not the live set: the manager may still hold a run whose record already
         // settled (a worker's execution winding down). Ids only, nothing decoded.
@@ -4753,10 +4753,10 @@ export function createApp(deps: ServerDeps) {
   // The Settings → Agents knobs in one read (R6 Step 1.5) — an ADDITIVE
   // sibling of PUT /api/config below; /api/health keeps its protected shape.
   const configAnswer = async (repoRoot: string, config: CezConfig) => {
-    const archive = resolveArchiveOnMerge(config, await loadWorkspaceConfig());
+    const archive = resolveArchiveOnMerge(config, await loadWorkspaceConfig(deps.home?.workspaceConfig));
     const nativeModels = await readAgentModelDefaults(repoRoot);
     const setup = resolveWorktreeSetup(config.worktreeSetup);
-    const modelsLocked = agentModelsLocked(repoRoot);
+    const modelsLocked = agentModelsLocked(repoRoot, process.env, deps.home);
     return {
       archiveOnMerge: config.archiveOnMerge ?? null,
       effectiveArchiveOnMerge: archive.enabled,
@@ -4790,13 +4790,13 @@ export function createApp(deps: ServerDeps) {
   const configRoutes = new Hono<ProjectApiEnv>()
     .get('/config', async (c) => {
       const repoRoot = c.get('project').root;
-      return c.json(await configAnswer(repoRoot, await loadConfig(repoRoot)));
+      return c.json(await configAnswer(repoRoot, await loadConfig(repoRoot, deps.home)));
     })
 
     .put('/config', jsonZodValidator(() => setConfigSchema), async (c) => {
       const { root: repoRoot, dataDir } = c.get('project');
       const parsed = { data: c.req.valid('json') };
-      if (agentModelsLocked(repoRoot) && parsed.data.defaultModels !== undefined) {
+      if (agentModelsLocked(repoRoot, process.env, deps.home) && parsed.data.defaultModels !== undefined) {
         return c.json({ error: AGENT_MODELS_LOCKED_ERROR }, 409);
       }
       // Setup commands run on the host (#917): settings administration, like Agent config writes
@@ -4809,7 +4809,7 @@ export function createApp(deps: ServerDeps) {
       if (refused !== undefined) return c.json({ error: refused }, 409);
       if (parsed.data.archiveOnMerge !== undefined) deps.archiveOnMergeChanged?.();
       // Pre-R6 answer shape ({baseBranch, defaultRunner}) + additive R6 fields.
-      return c.json(await configAnswer(repoRoot, await loadConfig(repoRoot)));
+      return c.json(await configAnswer(repoRoot, await loadConfig(repoRoot, deps.home)));
     });
 
   // ---- chained family: agent-config (project-scoped) -----------------------
@@ -4886,14 +4886,14 @@ export function createApp(deps: ServerDeps) {
   const agentWebhooksRoutes = new Hono<ProjectApiEnv>()
     .get('/agent-webhooks', async (c) => {
       const project = c.get('project');
-      const body: AgentWebhooksResponse = { webhooks: agentWebhooks(await registryEntry(project.id, project.root).catch(() => undefined)) };
+      const body: AgentWebhooksResponse = { webhooks: agentWebhooks(await registryEntry(project.id, project.root, deps.home).catch(() => undefined)) };
       return c.json(body);
     })
 
     .post('/agent-webhooks/:webhook', paramZodValidator(agentWebhookParamsSchema.pick({ webhook: true })), jsonZodValidator(sendAgentReportInputSchema), async (c) => {
       const project = c.get('project');
       const { webhook: ref } = c.req.valid('param');
-      const entry = await registryEntry(project.id, project.root).catch(() => undefined);
+      const entry = await registryEntry(project.id, project.root, deps.home).catch(() => undefined);
       const webhook = agentWebhook(entry, ref);
       if (!entry || !webhook) return c.json({ error: `no webhook named "${ref}" is open to agents in this project — run \`cez webhook list\`` }, 404);
       const outcome = await sendAgentReport({
@@ -5176,7 +5176,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   // `cezar_preview_serve` refuses the cockpit's own port: the one the listener BOUND (`--port 0`).
   let listeningPort: number | undefined;
   const cezarPort = deps.cezarPort ?? (() => listeningPort);
-  const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot: deps.repoRoot, bootProjectId: deps.bootProjectId, bindHost: deps.bindHost });
+  const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot: deps.repoRoot, bootProjectId: deps.bootProjectId, bindHost: deps.bindHost, home: deps.home });
   // Every registry reader below sees what createApp sees: single-project mode hides other projects.
   const visibleProjects = () => workspaceProjects.listVisibleProjects();
   const automationCoordinator = new AutomationCoordinator({ listProjects: visibleProjects });
@@ -5202,7 +5202,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       const boot = { id: bootProjectId, root: deps.repoRoot, status: 'ok' as const };
       return [boot, ...(await visibleProjects()).filter(project => project.id !== bootProjectId && project.root !== deps.repoRoot)];
     },
-    enabled: async project => resolveArchiveOnMerge(await loadConfig(project.root), await loadWorkspaceConfig()).enabled,
+    enabled: async project => resolveArchiveOnMerge(await loadConfig(project.root, deps.home), await loadWorkspaceConfig(deps.home?.workspaceConfig)).enabled,
     repository: async project => {
       const repository = await resolveForgeRoot(project.root, deps.forgeFactory).discoverRepository();
       return repository.status === 'resolved' ? forgeRepositoryUrl('github', repository.handle.owner, repository.handle.name) : undefined;

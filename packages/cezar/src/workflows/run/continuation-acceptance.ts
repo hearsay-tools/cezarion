@@ -80,7 +80,7 @@ export class ContinuationAcceptance {
       ciStepIndex: run => workflowPosition.ciWorkflowResumeStepIndex(run),
       untouched: run => this.host.isUntouchedCancelledRun(run),
       sessionId: step => workflowPosition.resumableSessionId(this.context.store, runId, step),
-    }, this.routedQuestionRefusal).prepare();
+    }, this.routedQuestionRefusal, this.context.home).prepare();
     if (!admitted.ok) return admitted;
     return this.acceptContinuation(runId, opts, deferForCapacity, conversation, admitted);
   }

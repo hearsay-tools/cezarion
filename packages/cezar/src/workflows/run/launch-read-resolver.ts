@@ -1,4 +1,5 @@
 /** Owns launch source selection. Call each narrow operation at its original phase boundary. */
+import type { Home } from '../../home/home.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { isImageAttachmentName } from '@open-mercato/cezar-contract/attachments';
 import { delegationStateSchema } from '@open-mercato/cezar-contract/delegation';
@@ -35,11 +36,11 @@ import type { QueuedRevivalHost } from './queued-revival.ts';
 import type { ContinuationOpening, Execution, PendingContinuation, RunModuleContext, StartRunInput, StepModel } from './types.ts';
 
 // This view adds no promise continuation before the caller's original post-config gate.
-function readLaunchConfig(repoRoot: string): Promise<LaunchConfig> {
-  return loadConfig(repoRoot) as unknown as Promise<LaunchConfig>;
+function readLaunchConfig(repoRoot: string, home?: Home): Promise<LaunchConfig> {
+  return loadConfig(repoRoot, home) as unknown as Promise<LaunchConfig>;
 }
 
-type LaunchContext = Pick<RunModuleContext, 'store' | 'repoRoot' | 'dataDir'>;
+type LaunchContext = Pick<RunModuleContext, 'store' | 'repoRoot' | 'dataDir' | 'home'>;
 
 async function configuredModelProvider(
   backend: RunnerId,
@@ -71,6 +72,7 @@ async function continuationModel(
   toolsStep: WorkflowStepDef | undefined,
   stepIdentity: WorkerStepIdentity | undefined,
   backend: RunnerId,
+  home?: Home,
 ): Promise<{ backendModel: string | undefined } | string> {
   // The owning step's authored `model` wins over the run-level pin, exactly as the first
   // spawn resolved `step.model ?? input.model`: a catalog worker keeps the
@@ -79,7 +81,7 @@ async function continuationModel(
   try {
     const normalized = await resolveLaunchModel(
       backend,
-      agentModelsLocked(repoRoot) ? undefined : stepIdentity ? stepIdentity.model : toolsStep?.model ?? record?.model,
+      agentModelsLocked(repoRoot, process.env, home) ? undefined : stepIdentity ? stepIdentity.model : toolsStep?.model ?? record?.model,
       state.liveSession.cwd,
     );
     store.updateRun(runId, {
@@ -100,9 +102,10 @@ function continuationEffort(
   record: RunRecord | undefined,
   toolsStep: WorkflowStepDef | undefined,
   stepIdentity: WorkerStepIdentity | undefined,
+  home?: Home,
 ): { effort: string | undefined } | string {
   try {
-    const modelsLocked = agentModelsLocked(repoRoot);
+    const modelsLocked = agentModelsLocked(repoRoot, process.env, home);
     const authoredStepEffort = toolsStep?.effort !== undefined;
     if (modelsLocked && toolsStep?.effort?.trim()) throw new Error(AGENT_MODELS_LOCKED_ERROR);
     const stepEffort = parseDelegationEffort(toolsStep?.effort);
@@ -138,12 +141,12 @@ function continuationRunner(
  * beside the free-text `model`. Best-effort here (a per-step `runner`/`model`
  * can still override it); the authoritative fail-loud gate is at spawn.
  */
-async function taskModelIdentity(repoRoot: string, taskBackend: RunnerId, source: SourceInput): Promise<string | undefined> {
+async function taskModelIdentity(repoRoot: string, taskBackend: RunnerId, source: SourceInput, home?: Home): Promise<string | undefined> {
   const input = sourceInput(source);
   try {
     const normalized = await resolveLaunchModel(
       taskBackend,
-      agentModelsLocked(repoRoot) ? undefined : input.model,
+      agentModelsLocked(repoRoot, process.env, home) ? undefined : input.model,
       repoRoot,
     );
     return normalized ? formatModelIdentity(normalized.identity) : undefined;
@@ -169,10 +172,11 @@ async function stepModel(
   source: SourceInput,
   stepBackend: RunnerId,
   stepIdentity: WorkerStepIdentity | undefined,
+  home?: Home,
 ): Promise<StepModel | string> {
   const input = sourceInput(source);
   try {
-    const modelsLocked = agentModelsLocked(repoRoot);
+    const modelsLocked = agentModelsLocked(repoRoot, process.env, home);
     if (modelsLocked && step.effort?.trim()) return AGENT_MODELS_LOCKED_ERROR;
     const effectiveEffort = stepEffort(store, runId, step, input, stepIdentity, modelsLocked);
     const normalized = await resolveLaunchModel(
@@ -435,7 +439,7 @@ function openingInputs(store: RunStore, dataDir: string, execution: Execution): 
 }
 
 async function agentEnvForStep(
-  { store, repoRoot }: LaunchContext,
+  { store, repoRoot, home }: LaunchContext,
   host: LaunchContextHost,
   runId: string,
   backend: RunnerId,
@@ -453,7 +457,7 @@ async function agentEnvForStep(
   const run = store.getRun(runId);
   const profileId = options.recordedProfileId
     ?? (backend === (run?.runner ?? 'claude') ? run?.agentProfile : undefined);
-  const resolved = await resolveProfileEnvForRoot(repoRoot, backend, profileId);
+  const resolved = await resolveProfileEnvForRoot(repoRoot, backend, profileId, process.env, home);
   const env = { ...host.agentEnv(runId), ...resolved.env };
   return {
     env,
@@ -462,8 +466,8 @@ async function agentEnvForStep(
   };
 }
 
-function workerStep({ store, repoRoot }: LaunchContext, runId: string, stepId: string | undefined): WorkerStepIdentity | undefined {
-  const identity = workerIdentity(store, repoRoot, runId, stepId);
+function workerStep({ store, repoRoot, home }: LaunchContext, runId: string, stepId: string | undefined): WorkerStepIdentity | undefined {
+  const identity = workerIdentity(store, repoRoot, runId, stepId, home);
   if (!identity) return undefined;
   return stepId === undefined
     ? { account: identity.account, grants: identity.grants, ...(identity.model === undefined ? {} : { model: identity.model }), ...(identity.effort === undefined ? {} : { effort: identity.effort }) }
@@ -471,8 +475,8 @@ function workerStep({ store, repoRoot }: LaunchContext, runId: string, stepId: s
 }
 
 /** Non-launch readers receive only the setting their operation consumes. */
-export function narrowTitleConfig(repoRoot: string): Promise<Pick<CezConfig, 'liveTitleUpdates'>> { return loadConfig(repoRoot); }
-export function narrowReviewConfig(repoRoot: string): Promise<Pick<CezConfig, 'reviewGate'>> { return loadConfig(repoRoot); }
+export function narrowTitleConfig(repoRoot: string, home?: Home): Promise<Pick<CezConfig, 'liveTitleUpdates'>> { return loadConfig(repoRoot, home); }
+export function narrowReviewConfig(repoRoot: string, home?: Home): Promise<Pick<CezConfig, 'reviewGate'>> { return loadConfig(repoRoot, home); }
 function continuationWorktreeSetup(handle: LaunchConfig): unknown {
   return configValue(handle).worktreeSetup;
 }
@@ -543,8 +547,8 @@ function acceptedRunFields(input: StartRunInput, workflow: WorkflowDef, effectiv
     };
 }
 
-function acceptInput(repoRoot: string, input: StartRunInput): StartRunInput {
-  return agentModelsLocked(repoRoot) ? { ...input, model: undefined, effort: undefined } : input;
+function acceptInput(repoRoot: string, input: StartRunInput, home?: Home): StartRunInput {
+  return agentModelsLocked(repoRoot, process.env, home) ? { ...input, model: undefined, effort: undefined } : input;
 }
 
 function discoverRunSkills(repoRoot: string, builtin: Skill[]): Promise<Skill[]> {
@@ -683,8 +687,8 @@ function isSyntheticContinuation(run: RunRecord, step: StepState): boolean {
       step.kind === 'agent' && step.name === 'Continue')) && /^continue-\d+$/.test(step.id);
 }
 
-function verifyWorkerIdentity(store: RunStore, repoRoot: string, runId: string): void {
-  workerIdentity(store, repoRoot, runId);
+function verifyWorkerIdentity(store: RunStore, repoRoot: string, runId: string, home?: Home): void {
+  workerIdentity(store, repoRoot, runId, undefined, home);
 }
 function inputAutonomous(input: StartRunInput): boolean { return input.autonomous === true; }
 
@@ -696,7 +700,7 @@ function ownedJob(context: RunModuleContext, host: { historyDeletionPending(runI
     }
     // Accepted permissions are private immutable evidence. Only explicit internal
     // primitive records retain the public-definition compatibility path.
-    const grants = workerIdentity(context.store, context.repoRoot, run.id)?.grants
+    const grants = workerIdentity(context.store, context.repoRoot, run.id, undefined, context.home)?.grants
       ?? run.workflowDef?.steps.find(step => step.id === QUICK_TASK_WORKFLOW.steps[0]!.id);
     return {
       workflow: ownedWorkflow(run, context.store.readWorkerIdentity(run.id)) ?? { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!,

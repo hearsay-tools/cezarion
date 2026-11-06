@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { realpathSync } from 'node:fs';
 import { readdir, realpath } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -119,10 +120,11 @@ export async function resolveProfileEnvForRoot(
   provider: ProviderId,
   profileId?: string,
   env: NodeJS.ProcessEnv = process.env,
+  home?: Home,
 ): Promise<{ profile: ResolvedAgentProfile; env: Record<string, string> }> {
   let store: AgentAccountStore;
   try {
-    store = await loadAgentAccounts();
+    store = await loadAgentAccounts(home);
   } catch {
     return { profile: defaultAgentProfile(provider, env), env: {} };
   }
@@ -170,11 +172,12 @@ export type RuntimeAuthVerificationTarget =
 export async function resolveRuntimeAuthVerificationTarget(
   provider: ProviderId,
   profileId: string | undefined,
+  home?: Home,
 ): Promise<RuntimeAuthVerificationTarget | null> {
   if (profileId === undefined || profileId === DEFAULT_AGENT_ACCOUNT_ID) return { kind: 'default' };
   let store: AgentAccountStore;
   try {
-    store = await loadAgentAccounts();
+    store = await loadAgentAccounts(home);
   } catch {
     return null;
   }

@@ -36,15 +36,16 @@ type HostServices = { [K in HostServiceKey]: Exclude<ServerDeps[K], undefined> }
  * built only when its dependency is absent (`??` short-circuits), in the order below, so a test
  * that injects a service never pays for the real one.
  */
-export function resolveServerDeps(deps: Pick<ServerDeps, HostServiceKey>, bootRoot: string): HostServices {
+export function resolveServerDeps(deps: Pick<ServerDeps, HostServiceKey> & Pick<ServerDeps, 'home'>, bootRoot: string): HostServices {
+  const home = deps.home;
   return {
     // One adapter per contract-advertised runner; the map is typed over `modelDiscoveryRunnerSchema`
     // so a runner added to the contract without an adapter fails typecheck (AGENT_PROTOCOL.md §10).
     modelCatalog: deps.modelCatalog ?? new RunnerModelCatalog({ adapters: hostModelCatalogAdapters(bootRoot) }),
     providerAuth: deps.providerAuth ?? new ProviderAuthService(),
     workspaceConfig: deps.workspaceConfig ?? {
-      load: loadWorkspaceConfig,
-      mergeWrite: mergeWriteWorkspaceConfig,
+      load: home ? (path = home.workspaceConfig) => loadWorkspaceConfig(path) : loadWorkspaceConfig,
+      mergeWrite: home ? (mutate, selected = home) => mergeWriteWorkspaceConfig(mutate, selected) : mergeWriteWorkspaceConfig,
     },
     openTerminal: deps.openTerminal ?? openInTerminal,
     openFile: deps.openFile ?? openFileInDefaultApp,

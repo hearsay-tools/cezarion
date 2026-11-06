@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
 import type { ActiveRun } from '../workflows/active-run.ts';
 import type { DelegationExecutionSettings } from '../workflows/run/types.ts';
@@ -18,12 +19,12 @@ export function delegationExecutionSettings(state: Pick<ActiveRun, 'liveSession'
   return structuredClone(state.liveSession.delegationSettings);
 }
 
-export async function selectDelegationExecutionSettings(repoRoot: string, parent: DelegationExecutionSettings, selection: { backend?: RunnerId | undefined; model?: string | undefined; effort?: string | undefined; agentProfile?: string }, validateModel?: (settings: DelegationExecutionSettings) => Promise<void>): Promise<DelegationExecutionSettings> {
+export async function selectDelegationExecutionSettings(repoRoot: string, parent: DelegationExecutionSettings, selection: { backend?: RunnerId | undefined; model?: string | undefined; effort?: string | undefined; agentProfile?: string }, validateModel?: (settings: DelegationExecutionSettings) => Promise<void>, home?: Home): Promise<DelegationExecutionSettings> {
   const runner = selection.backend ?? parent.runner;
   const sameBackend = runner === parent.runner;
   try {
-    const { effortPin, locked } = refuseModelLock(repoRoot, parent, selection, sameBackend);
-    const { accountBinding, env } = await bindAccount(repoRoot, parent, selection, runner, sameBackend);
+    const { effortPin, locked } = refuseModelLock(repoRoot, parent, selection, sameBackend, home);
+    const { accountBinding, env } = await bindAccount(repoRoot, parent, selection, runner, sameBackend, home);
     return await chooseModel(repoRoot, parent, selection, runner, sameBackend, effortPin, locked, accountBinding, env, validateModel);
   } catch (error) {
     if (error instanceof DelegationPolicyError) throw error;
@@ -31,20 +32,20 @@ export async function selectDelegationExecutionSettings(repoRoot: string, parent
   }
 }
 
-function refuseModelLock(repoRoot: string, parent: DelegationExecutionSettings, selection: ExecutionSelection, sameBackend: boolean) {
+function refuseModelLock(repoRoot: string, parent: DelegationExecutionSettings, selection: ExecutionSelection, sameBackend: boolean, home?: Home) {
   const effortPin = parseDelegationEffort(selection.effort);
-  const locked = agentModelsLocked(repoRoot);
+  const locked = agentModelsLocked(repoRoot, process.env, home);
   if (locked && (selection.model !== undefined || effortPin !== undefined || (sameBackend && (parent.model !== undefined || parent.effort !== undefined)))) {
     throw new Error(AGENT_MODELS_LOCKED_ERROR);
   }
   return { effortPin, locked };
 }
 
-async function bindAccount(repoRoot: string, parent: DelegationExecutionSettings, selection: ExecutionSelection, runner: RunnerId, sameBackend: boolean) {
+async function bindAccount(repoRoot: string, parent: DelegationExecutionSettings, selection: ExecutionSelection, runner: RunnerId, sameBackend: boolean, home?: Home) {
   let accountBinding = parent.accountBinding;
   let env = buildChildEnv({ backend: runner });
   if (!sameBackend || selection.agentProfile !== undefined) {
-    const resolved = await resolveProfileEnvForRoot(repoRoot, runner, selection.agentProfile);
+    const resolved = await resolveProfileEnvForRoot(repoRoot, runner, selection.agentProfile, process.env, home);
     if (selection.agentProfile !== undefined && resolved.profile.id !== selection.agentProfile) {
       throw new Error(`Unknown ${runner} account "${selection.agentProfile}"`);
     }

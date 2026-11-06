@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -25,6 +25,9 @@ function checkout(root: string, branch: string): string {
   execFileSync('git', ['init', '-q', '-b', branch], { cwd: root });
   execFileSync('git', ['add', '.'], { cwd: root });
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'fixture'], { cwd: root });
+  // The fixture represents a build after HEAD, even when the commit crosses a clock second.
+  const builtAt = new Date();
+  utimesSync(join(root, 'dist', 'index.js'), builtAt, builtAt);
   return realpathSync(root);
 }
 
@@ -68,7 +71,8 @@ it('applies a same-id linked checkout from the injected Home', async () => {
   vi.useFakeTimers();
   const job = service(selected).apply('1.2.3+main');
   // bound: checkout discovery uses bounded git children; wait for the product's job state.
-  await vi.waitFor(() => expect(job.status).toBe('restarting'), { timeout: 20_000 });
+  await vi.waitFor(() => expect(job.status).not.toBe('running'), { timeout: 20_000 });
+  expect(job.status, job.log.join('\n')).toBe('restarting');
   expect(readManifest('1.2.3+main', process.env, selected)?.checkout).toBe(selectedLink);
   expect(readFileSync(currentEntry(process.env, selected), 'utf8')).toBe(selectedLink);
   expect(readManifest('1.2.3+main', process.env, ambient)?.checkout).toBe(ambientLink);

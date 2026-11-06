@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import type { ForgeFactory } from './forge/index.ts';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -73,6 +74,7 @@ export interface ProjectContextDeps {
   afterRecover?: (project: Pick<ProjectContext, 'id' | 'root' | 'store' | 'manager'>) => void;
   /** Registry lookup — the workspace `listProjects()` in production. */
   listProjects: () => Promise<readonly ProjectContextSource[]>;
+  home?: Home | undefined;
   /** Resolve the one automation store owned by this project. Production
    *  injects the workspace automation coordinator's cached store so API
    *  mutations and scheduler reads share the same in-memory state. */
@@ -196,7 +198,7 @@ export class ProjectContexts {
   private readonly buildingManagers = new Map<string, RunManager>();
 
   constructor(private readonly deps: ProjectContextDeps) {
-    this.semaphore = deps.semaphore ?? new WorkspaceSemaphore();
+    this.semaphore = deps.semaphore ?? new WorkspaceSemaphore({ home: deps.home });
   }
 
   /** The built context for `projectId`, building it on first access.
@@ -442,8 +444,9 @@ export class ProjectContexts {
     this.notifyStoreCreated(store);
     armPreview(store, dataDir, this.deps.preview);
     const manager: RunManager = new RunManager(store, project.root, {
+      home: this.deps.home,
       semaphore: this.semaphore, preview: this.deps.preview, cezarPort: this.deps.cezarPort, toolActivity: this.deps.toolActivity,
-      sweepBranches: (keep) => void sweepMergedBranches({ root: project.root, store, manager }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
+      sweepBranches: (keep) => void sweepMergedBranches({ root: project.root, store, manager, home: this.deps.home }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
     });
     this.buildingManagers.set(projectId, manager);
     try {
@@ -457,13 +460,13 @@ export class ProjectContexts {
         await pruneOrphans(project.root, new Set(store.listRunIds())).catch(
           () => [] as string[],
         );
-        const keep = await resolveWorktreeRetention(project.root).catch(
+        const keep = await resolveWorktreeRetention(project.root, this.deps.home).catch(
           () => DEFAULT_WORKTREE_RETENTION,
         );
         await reclaimWorktrees(project.root, store, keep, { previewHost: this.deps.preview }).catch(() => [] as string[]);
         // In the background: the sweep may ask GitHub (hearsay-tools/cezarion#2268). Never over a
         // store that could not open: its runs are unknown, and every branch would look ownerless.
-        if (!store.unavailable) void sweepMergedBranches({ root: project.root, store, manager }, { keep });
+        if (!store.unavailable) void sweepMergedBranches({ root: project.root, store, manager, home: this.deps.home }, { keep });
       }
       await manager.recover();
       // Archived transcripts left plain (or both-present after a crash) — fire-and-forget,

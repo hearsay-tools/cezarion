@@ -43,8 +43,13 @@ its legacy root. Existing callers and test expectations remain valid. Optional
 `Home` parameters retain the existing env-object and explicit-path APIs while
 entry points pass their resolved object. Other ambient readers remain on the shim;
 P1a-2 (hearsay-tools/cezarion#2810) migrates them and removes it. The PR inventories
-those callers. HomeStore, install markers, test migration and the desktop Rust home
-are separate slices.
+those callers. P1a-2a threads the same object through runtime config, accounts,
+model policy, workflow launch and Continue, delegation, planner/namer calls,
+webhooks, provider runtime auth, discovery, the semaphore and lazy project contexts.
+The runtime APIs still accept an omitted Home during this transition; P1a-2b
+removes that fallback with the remaining skills, installer and remote readers.
+HomeStore, install markers, test migration and the desktop Rust home are separate
+slices.
 
 Backups still derive their write directory from the file being replaced. An
 explicit backup-list root still selects that root's `backups/` directory. Home

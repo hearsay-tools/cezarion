@@ -86,7 +86,7 @@ export class RunSettlement {
 
   private async enforceRetentionWork(): Promise<void> {
     try {
-      const keep = await resolveWorktreeRetention(this.context.repoRoot);
+      const keep = await resolveWorktreeRetention(this.context.repoRoot, this.context.home);
       await reclaimWorktrees(this.context.repoRoot, this.context.store, keep, { claim: (run) => this.host.claimWorktreeReclaim(run.id), previewHost: this.host.preview });
       if (!this.context.store.unavailable) this.context.sweepBranches?.(keep);
     } catch {
@@ -390,7 +390,7 @@ export class RunSettlement {
       : await worktreeDiff(worktreePath, run.baseBranch ?? 'HEAD');
     if (durableRootFinish && diff.startsWith('(diff failed')) throw new Error('parent finish diff unavailable');
     const hasDiff = diff.trim().length > 0 && !diff.startsWith('(diff failed');
-    const config = await narrowReviewConfig(this.context.repoRoot);
+    const config = await narrowReviewConfig(this.context.repoRoot, this.context.home);
     return hasDiff && reviewGateEnabled(config) && run.autonomous !== true;
   }
 

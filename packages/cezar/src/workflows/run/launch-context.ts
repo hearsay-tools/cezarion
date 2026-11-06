@@ -16,7 +16,7 @@ import type { ActiveRun } from '../active-run.ts';
 import { leadingSlashSkillName } from './prompts.ts';
 import type { RunModuleContext } from './types.ts';
 
-type LaunchContext = Pick<RunModuleContext, 'store' | 'repoRoot' | 'dataDir'>;
+type LaunchContext = Pick<RunModuleContext, 'store' | 'repoRoot' | 'dataDir' | 'home'>;
 type CockpitAddress = { origin: string; projectId: string } | undefined;
 
 export interface LaunchSettingsHost {
@@ -74,9 +74,9 @@ export function automationsPart(cockpit: CockpitAddress): string | undefined {
 /** The "Project webhooks" part (#1576): the webhooks this project exposes to agents, read from
  *  the registry when a session starts. Needs a cockpit to send through; nothing exposed, or an
  *  unreadable registry, adds nothing. */
-export async function agentWebhooksPart({ repoRoot }: LaunchContext, cockpit: CockpitAddress): Promise<string | undefined> {
+export async function agentWebhooksPart({ repoRoot, home }: LaunchContext, cockpit: CockpitAddress): Promise<string | undefined> {
   if (!cockpit) return undefined;
-  const entry = await registryEntry(cockpit.projectId, repoRoot).catch(() => undefined);
+  const entry = await registryEntry(cockpit.projectId, repoRoot, home).catch(() => undefined);
   return agentWebhooksPrompt(webhookCliCommand(), agentWebhooks(entry));
 }
 

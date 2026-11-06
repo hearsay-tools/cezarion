@@ -54,7 +54,7 @@ export class TurnBookkeeper {
         const skills = await this.host.discoverSkills().catch(() => [] as Skill[]);
         skillDescription = skills.find((s) => s.name === skillName)?.description;
       }
-      const result = await generateRunName(this.context.repoRoot, { task, skillName, skillDescription, ...live });
+      const result = await generateRunName(this.context.repoRoot, { task, skillName, skillDescription, ...live }, this.context.home);
       if (!result || this.host.isDisposedDelegatedRun(runId)) return;
       const run = this.context.store.getRun(runId);
       // Marker-owned state outranks the namer (spec 2026-07-18-task-ref-markers):
@@ -162,7 +162,7 @@ export class TurnBookkeeper {
   async maybeRefreshTitle(runId: string, turnText: string): Promise<void> {
     if (!autoNamingActive()) return;
     if (!turnText.trim()) return;
-    const config = await narrowTitleConfig(this.context.repoRoot);
+    const config = await narrowTitleConfig(this.context.repoRoot, this.context.home);
     if (!liveTitleUpdatesEnabled(config)) return;
     const run = this.context.store.getRun(runId);
     if (!run || run.titleOrigin === 'user' || run.titleOrigin === 'marker') return;

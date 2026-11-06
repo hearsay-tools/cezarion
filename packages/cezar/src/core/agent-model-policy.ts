@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -19,10 +20,11 @@ const modelPolicyConfigSchema = z.object({
 export function agentModelsLocked(
   repoRoot?: string,
   env: NodeJS.ProcessEnv = process.env,
+  home?: Home,
 ): boolean {
   if (env[AGENT_MODELS_LOCKED_ENV] === '1') return true;
   const paths = [
-    workspaceConfigPath(env),
+    workspaceConfigPath(env, home),
     ...(repoRoot ? [join(repoRoot, '.ai', 'cezar', 'config.json')] : []),
   ];
   for (const path of paths) {

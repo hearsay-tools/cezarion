@@ -236,7 +236,7 @@ async function main(): Promise<void> {
 async function initWorkspace(repoRoot: string, home: Home): Promise<string | undefined> {
   try {
     await runMigrations({ bootRepoRoot: repoRoot, home });
-    if (await shouldRegisterProject(repoRoot)) return (await registerProject(repoRoot)).id;
+    if (await shouldRegisterProject(repoRoot)) return (await registerProject(repoRoot, 'local', home)).id;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[cez] workspace registry unavailable (${message}) — continuing without it`);
@@ -265,14 +265,14 @@ async function serveCommand(
   // the boot manager and every lazily-built project context count their runs
   // against the same `resources.maxParallel`. The boot refresh() below is the
   // cache hook's first call; PUT /api/workspace/config (step 2.7) re-fires it.
-  const semaphore = new WorkspaceSemaphore();
+  const semaphore = new WorkspaceSemaphore({ home });
   await semaphore.refresh();
   // keepLive + recover() (#367): runs that were queued/running/waiting when
   // the previous process exited are re-queued or resumed instead of failed.
   const store = openBootStore(repoRoot);
   // Before recovery (#589): the runs recovery re-queues, resumes or fails are exactly the
   // transitions an opted-in bot is waiting for. Deliveries wait until startServer knows its port.
-  const taskWebhooks = new TaskWebhooks();
+  const taskWebhooks = new TaskWebhooks({ home });
   taskWebhooks.attach({ id: bootProjectId ?? 'default', root: repoRoot, store });
   // ONE preview host for the whole process (#781), like the semaphore: ports are host-global, so
   // `port_held` must see every project's servers. Off unless `CEZ_PREVIEW=1`.
@@ -290,24 +290,24 @@ async function serveCommand(
   // across projects, and the activity route reads every project's runs from it.
   const toolActivity = new ToolActivityTracker();
   const manager: RunManager = new RunManager(store, repoRoot, {
-    semaphore, preview: previewHost, cezarPort, cockpit, toolActivity,
-    sweepBranches: (keep) => void sweepMergedBranches({ root: repoRoot, store, manager }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
+    home, semaphore, preview: previewHost, cezarPort, cockpit, toolActivity,
+    sweepBranches: (keep) => void sweepMergedBranches({ root: repoRoot, store, manager, home }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
   });
   const delegation = await DelegationController.start();
   delegation.attachProject({ id: bootProjectId ?? 'default', root: repoRoot, store, manager });
   const providerAuth = new ProviderAuthService();
-  const discovery = createHostDiscovery(repoRoot, providerAuth);
+  const discovery = createHostDiscovery(repoRoot, providerAuth, home);
   delegation.service.setDiscovery(discovery);
   const workspaceEvents = new WorkspaceEventBus();
   const providerRuntimeAuth = new ProviderRuntimeAuthObserver(providerAuth, (status) => {
     workspaceEvents.emit('provider-status', status);
-  });
+  }, undefined, home);
   const version = readOwnVersion();
 
   const checks = await detectEnvironment();
   const repo = await getRepoInfo(repoRoot);
 
-  await reconcileServeWorktrees(repoRoot, repo, store, manager, previewHost);
+  await reconcileServeWorktrees(repoRoot, repo, store, manager, previewHost, undefined, home);
 
   await recoverServeProject(store, manager, providerRuntimeAuth, delegation, bootProjectId);
 
@@ -498,12 +498,12 @@ async function runHeadless(
   const providerAuth = new ProviderAuthService();
   const requiredProviders = providersRequiredByWorkflow(
     workflow,
-    (await loadConfig(repoRoot)).defaultRunner,
+    (await loadConfig(repoRoot, home)).defaultRunner,
   );
   if (requiredProviders.length > 0 && !providerAuthChecksDisabled()) {
     const [discovered, workspace] = await Promise.all([
       providerAuth.status(),
-      loadWorkspaceConfig(),
+      loadWorkspaceConfig(home.workspaceConfig),
     ]);
     const blocked = unavailableProviderMessage(
       requiredProviders,
@@ -527,7 +527,7 @@ async function runHeadless(
     return;
   }
   const delegation = await DelegationController.start();
-  delegation.service.setDiscovery(createHostDiscovery(repoRoot, providerAuth));
+  delegation.service.setDiscovery(createHostDiscovery(repoRoot, providerAuth, home));
   // Agent sessions lead their own process groups (hearsay-tools/cezarion#890): pass Ctrl-C and
   // SIGTERM on, then end by the same signal, as this process did before it had a handler.
   const forward = (signal: NodeJS.Signals) => {
@@ -544,13 +544,13 @@ async function runHeadless(
   try {
     // Headless tasks still appear in the cockpit later, so persist the same
     // task-local recovery event when a credential expires after the preflight.
-    const providerRuntimeAuth = new ProviderRuntimeAuthObserver(providerAuth, () => {});
+    const providerRuntimeAuth = new ProviderRuntimeAuthObserver(providerAuth, () => {}, undefined, home);
     providerRuntimeAuth.watch(store);
     // Headless runs enforce the same workspace-level cap/memory limit (step
     // 2.5) — one refreshed semaphore, even with just one manager in play.
-    const semaphore = new WorkspaceSemaphore();
+    const semaphore = new WorkspaceSemaphore({ home });
     await semaphore.refresh();
-    const manager = new RunManager(store, repoRoot, { semaphore });
+    const manager = new RunManager(store, repoRoot, { home, semaphore });
     delegation.attachProject({ id: 'headless', root: repoRoot, store, manager });
 
     store.on('event', ({ event }) => {

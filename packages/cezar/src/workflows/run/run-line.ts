@@ -257,7 +257,7 @@ export class RunLine {
         const anyHold = holds.deadline.size > 0 || holds.inFlight.size > 0;
         // Only pay for the config read when something is actually held: a queued record may name
         // no runner, and then the account it would use is the configured default.
-        const defaultRunner = anyHold ? atTaskHead.defaultRunner(await atTaskHead.config(this.context.repoRoot)) : undefined;
+        const defaultRunner = anyHold ? atTaskHead.defaultRunner(await atTaskHead.config(this.context.repoRoot, this.context.home)) : undefined;
         if (defaultRunner !== undefined) this.configuredDefaultRunner = defaultRunner;
         while (this.entries().length > 0) {
           // Recovery may have begun while this pump awaited repository/config discovery.

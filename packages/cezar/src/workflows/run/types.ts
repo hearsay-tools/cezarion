@@ -1,3 +1,4 @@
+import type { Home } from '../../home/home.ts';
 import type { TrackedWork } from './tracked-work.ts';
 import type { HumanWaitEntry } from '@open-mercato/cezar-contract/waits';
 import type { AskRequest } from '../../core/ask.ts';
@@ -215,6 +216,7 @@ export type AutomationToolService = {
 
 /** Shared dependencies for state-owning run modules. */
 export interface RunModuleContext {
+  home?: Home | undefined;
   readonly work: TrackedWork;
   store: import('../../runs/store.ts').RunStore;
   repoRoot: string;
