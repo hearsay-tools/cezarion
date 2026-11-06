@@ -8,10 +8,10 @@ import { useProjectOrder } from '@/lib/use-project-order'
 
 import { ActivityHeader, ScopeSwitch, SummaryChips } from './activity-header'
 import { summarize } from './activity-model'
-import { useServerNow } from './activity-route'
 import { groupProjects, inRailOrder } from './global-model'
 import { IdleLine, ProjectPanel } from './global-panel'
 import { useActivityMotion } from './use-activity-motion'
+import { useServerNow } from './use-server-now'
 import './activity-motion.css'
 
 /**

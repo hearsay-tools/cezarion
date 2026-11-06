@@ -1,12 +1,13 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { act, cleanup, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { activityQueryKey } from '@/api/activity-live'
 import { createQueryClient } from '@/api/query-client'
 import { jsonResponse } from '@/test/fetch-routes'
 
-import { ACTIVITY_WAIT_KIND, RUN_STATUS, iso, project, request, run, snapshot, worker } from './activity.testkit'
+import { ACTIVITY_WAIT_KIND, NOW, RUN_STATUS, iso, project, request, run, snapshot, worker } from './activity.testkit'
 import { ProjectActivityRoute } from './activity-route'
 
 const fetchMock = vi.fn<typeof fetch>()
@@ -21,15 +22,19 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function renderRoute() {
+function renderRoute(client = createQueryClient()) {
   return render(
-    <QueryClientProvider client={createQueryClient()}>
+    <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/p/cezarion/activity']}>
         <ProjectActivityRoute />
       </MemoryRouter>
     </QueryClientProvider>,
   )
 }
+
+const CLOCK = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
+/** The header clock's time, "HH:MM:SS". */
+const clockText = () => /\d{2}:\d{2}:\d{2}/.exec(document.querySelector('[data-slot="activity-clock"]')?.textContent ?? '')?.[0]
 
 const chip = (label: string) => document.querySelector(`[data-chip="${label}"]`)?.textContent
 
@@ -68,6 +73,21 @@ describe('ProjectActivityRoute', () => {
     const alert = await screen.findByRole('alert', {}, { timeout: 3_000 })
     expect(alert.textContent).toContain('Could not load activity')
     expect(within(alert).getByRole('button', { name: 'Retry' })).toBeTruthy()
+  })
+
+  it('keeps the clock at the current time for a project the first read finds removed, until a real snapshot replaces it', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ error: 'unknown project: default' }, 404))
+    const client = createQueryClient()
+    renderRoute(client)
+    expect(await screen.findByText('unknown project: default')).toBeTruthy()
+    const clockNear = (at: number) => [-1_000, 0, 1_000].map((d) => CLOCK.format(at + d))
+    expect(clockNear(Date.now())).toContain(clockText())
+
+    fetchMock.mockImplementation(async () => jsonResponse(snapshot(project({ tasks: [run({ runId: 'a', title: 'Porting upstream SSE' })] }))))
+    await act(async () => { await client.refetchQueries({ queryKey: activityQueryKey({ kind: 'project', projectId: 'default' }) }) })
+    expect(await screen.findByText('Porting upstream SSE')).toBeTruthy()
+    expect(screen.queryByText('unknown project: default')).toBeNull()
+    expect(clockNear(NOW)).toContain(clockText())
   })
 
   it('shows a project the read finds removed as unavailable, as the topic does', async () => {

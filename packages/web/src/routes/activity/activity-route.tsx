@@ -4,27 +4,19 @@ import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { useActivityLive } from '@/api/activity-live'
 import { Button } from '@/components/ui/button'
 import { useActiveProjectId } from '@/lib/project-router'
-import { useNow } from '@/lib/use-now'
 
 import { ActivityBoard } from './activity-board'
 import { ActivityHeader, ScopeSwitch, SummaryChips } from './activity-header'
 import { ActivityLoading } from './activity-loading'
 import { projectNotice, summarize } from './activity-model'
 import { useActivityMotion } from './use-activity-motion'
+import { useServerNow } from './use-server-now'
 import './activity-motion.css'
 
 /**
  * `/p/:projectId/activity` (spec 2026-11-05-live-activity-view, "Project view"): the live
  * snapshot (`useActivityLive`: the topic, or the 5 s re-read without topics) and its motion.
  */
-
-/** The server's clock, ticked once a second on the client. The offset is the server's
- *  `generatedAt` minus the time the client received it. */
-export function useServerNow(generatedAt: string | undefined, receivedAt: number): number {
-  const now = useNow(1000)
-  const at = generatedAt === undefined ? Number.NaN : Date.parse(generatedAt)
-  return Number.isNaN(at) || receivedAt === 0 ? now : now + (at - receivedAt)
-}
 
 export function ProjectActivityRoute() {
   const scopeId = queryScope()

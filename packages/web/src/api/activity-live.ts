@@ -45,6 +45,18 @@ export function newerActivity(cached: ActivitySnapshot | undefined, fetched: Act
   return cached !== undefined && Date.parse(fetched.generatedAt) < Date.parse(cached.generatedAt) ? cached : fetched
 }
 
+/**
+ * The `generatedAt` of a snapshot the client built with no server snapshot behind it: older than
+ * any snapshot the server builds, so the next one replaces it (`newerActivity`). It is not a server
+ * time: a view's clock never follows it (`isServerTime`).
+ */
+export const NO_SERVER_TIME = new Date(0).toISOString()
+
+/** True when `generatedAt` is a time the server stamped: a valid date, never `NO_SERVER_TIME`. */
+export function isServerTime(generatedAt: string | undefined): generatedAt is string {
+  return generatedAt !== undefined && generatedAt !== NO_SERVER_TIME && !Number.isNaN(Date.parse(generatedAt))
+}
+
 /** The answers a project route gives for a project it cannot serve: removed, its folder gone,
  *  or its store unavailable. The view shows the project as unavailable, as the topic does. */
 const UNAVAILABLE_STATUSES = new Set([404, 409, 503])
@@ -57,7 +69,7 @@ const UNAVAILABLE_STATUSES = new Set([404, 409, 503])
 export function unavailableActivity(cached: ActivitySnapshot | undefined, projectId: string, status: 404 | 409 | 503, error: string): ActivitySnapshot {
   const name = cached?.projects.find((project) => project.projectId === projectId)?.name ?? projectId
   return {
-    generatedAt: cached?.generatedAt ?? new Date(0).toISOString(),
+    generatedAt: cached?.generatedAt ?? NO_SERVER_TIME,
     projects: [{ projectId, name, loaded: true, unavailable: { status, error }, inReview: 0, tasks: [], requests: [], closed: [] }],
   }
 }
