@@ -54,6 +54,19 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
     entry.readyGeneration = workspaceGeneration
     deliver(doc, entry, { event: 'ready', data: JSON.stringify({ generation: workspaceGeneration, seq }), id: '' })
   }
+  /** One workspace-lane frame: note the barrier ping, the generation and the seq, then deliver it
+   *  after the `ready` each entry still lacks. A numbered frame's own seq is counted by
+   *  `observeWorkspace`, so a `ready` sent before it names the frame before. */
+  const deliverWorkspaceFrame = (frame: LiveFrame) => {
+    if ('event' in frame && frame.event === 'ping') workspaceReady = true
+    const seqBefore = workspaceSeq
+    const readyGeneration = observeWorkspace(frame)
+    for (const { doc, entry } of held('workspace')) {
+      if (readyGeneration !== undefined) entry.readyGeneration = readyGeneration
+      else workspaceReadyFor(doc, entry, seqBefore)
+      deliver(doc, entry, frame)
+    }
+  }
   /** Track the workspace stream's own `ready` and numbered frames. */
   const observeWorkspace = (frame: LiveFrame): string | undefined => {
     if (!('data' in frame) || !['ready', 'run-summary', 'run-deleted'].includes(frame.event)) return undefined
@@ -134,14 +147,9 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
       if ('data' in frame && frame.event === 'ready') {
         try { const data = JSON.parse(frame.data) as { generation?: unknown }; if (typeof data.generation === 'string') onGeneration(data.generation) } catch { /* ignore malformed control */ }
       }
-      if (kind === 'workspace' && 'event' in frame && frame.event === 'ping') workspaceReady = true
-      // A numbered frame's own seq is counted below; a `ready` sent before it names the one before.
-      const seqBefore = workspaceSeq
-      const readyGeneration = kind === 'workspace' ? observeWorkspace(frame) : undefined
-      for (const { doc, entry } of held(kind === 'workspace' ? 'workspace' : 'run')) {
+      if (kind === 'workspace') { deliverWorkspaceFrame(frame); return }
+      for (const { doc, entry } of held('run')) {
         if (entry.demand.kind === 'run' && 'type' in frame && 'runId' in frame && runKey(frame) !== runKey(entry.demand)) continue
-        if (readyGeneration !== undefined) entry.readyGeneration = readyGeneration
-        else if (kind === 'workspace') workspaceReadyFor(doc, entry, seqBefore)
         deliver(doc, entry, frame)
       }
     }, controller.signal).catch(failure).finally(() => {
@@ -238,6 +246,23 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
     try { doc.port.close() } catch { /* already detached */ }
     schedule()
   }
+  const newEntry = (item: { id: string; demand: LiveDemand }): Entry => {
+    const afterSeq = item.demand.kind === 'run' ? item.demand.afterSeq : 0
+    return { ...item, sent: afterSeq, ack: afterSeq, unacked: [], bytes: 0, paused: false }
+  }
+  /** What a late subscriber is owed at once: the latest topic value, or the workspace `ready`
+   *  (the generation and the last frame already delivered) and then the barrier ping, which still
+   *  marks the attachment live (#795). */
+  const greetNewEntry = (doc: DocumentPort, entry: Entry) => {
+    const demand = entry.demand
+    if (demand.kind === 'topic' && topicValues.has(demand.topic)) {
+      send(doc, { type: 'value', version: LIVE_PROTOCOL, epoch: doc.epoch, id: entry.id, value: topicValues.get(demand.topic) })
+    }
+    if (demand.kind === 'workspace' && workspaceReady) {
+      workspaceReadyFor(doc, entry)
+      deliver(doc, entry, { event: 'ping', data: '', id: '' })
+    }
+  }
   const attach = (port: LivePort) => {
     if (disposed || documents.size >= 128) { port.close(); return () => {} }
     const doc: DocumentPort = { port, id: '', epoch: -1, seenAt: Date.now(), entries: new Map() }
@@ -255,18 +280,9 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
         const next = new Map<string, Entry>()
         for (const item of message.entries) {
           const old = epochChanged ? undefined : doc.entries.get(item.id)
-          const entry: Entry = old ?? { ...item, sent: item.demand.kind === 'run' ? item.demand.afterSeq : 0, ack: item.demand.kind === 'run' ? item.demand.afterSeq : 0, unacked: [], bytes: 0, paused: false }
+          const entry: Entry = old ?? newEntry(item)
           next.set(item.id, entry)
-          if (!old && item.demand.kind === 'topic' && topicValues.has(item.demand.topic)) {
-            send(doc, { type: 'value', version: LIVE_PROTOCOL, epoch: doc.epoch, id: entry.id, value: topicValues.get(item.demand.topic) })
-          }
-          if (!old && item.demand.kind === 'workspace' && workspaceReady) {
-            // The `ready` names the generation and the last frame already delivered; the ping
-            // that follows still marks the attachment live (#795).
-            workspaceReadyFor(doc, entry)
-            deliver(doc, entry, { event: 'ping', data: '', id: '' })
-          }
-
+          if (!old) greetNewEntry(doc, entry)
         }
         doc.entries = next
         if (!next.size) { release(doc); return }
