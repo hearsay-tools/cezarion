@@ -1,0 +1,299 @@
+{
+  "fixture": {
+    "active": 0,
+    "archived": 300,
+    "projects": 1
+  },
+  "beforeSource": "50e7844b1",
+  "afterSource": "6608d3696026bcf9fac60bbae0b684861bf8aa31",
+  "method": "Scroll selected list boundary or project paging footer to viewport end; compare immediate bottom with same geometry stable for 200ms. Before uses profiling build; after uses e2e mirror. Heights, not timings.",
+  "records": [
+    {
+      "build": "before",
+      "presentation": "summary",
+      "before": {
+        "bottom": 900,
+        "height": 44,
+        "rows": [
+          103
+        ],
+        "top": 856
+      },
+      "after": {
+        "bottom": 1970,
+        "height": 44,
+        "rows": [
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          103
+        ],
+        "top": 1926
+      }
+    },
+    {
+      "build": "before",
+      "presentation": "detailed",
+      "before": {
+        "bottom": 899.59375,
+        "height": 44,
+        "rows": [
+          50
+        ],
+        "top": 855.59375
+      },
+      "after": {
+        "bottom": 1079.59375,
+        "height": 44,
+        "rows": [
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50
+        ],
+        "top": 1035.59375
+      }
+    },
+    {
+      "build": "before",
+      "presentation": "phone",
+      "before": {
+        "bottom": 584.796875,
+        "height": 44,
+        "rows": [
+          157.796875
+        ],
+        "top": 540.796875
+      },
+      "after": {
+        "bottom": 1794.375,
+        "height": 44,
+        "rows": [
+          177.796875,
+          177.796875,
+          177.796875,
+          177.796875,
+          177.796875,
+          177.796875
+        ],
+        "top": 1750.375
+      }
+    },
+    {
+      "build": "before",
+      "presentation": "global",
+      "before": {
+        "bottom": 899.5,
+        "height": 8074.5,
+        "rows": [
+          114.5
+        ],
+        "top": -7175
+      },
+      "after": {
+        "bottom": 2389,
+        "height": 22900,
+        "rows": [
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5
+        ],
+        "top": -20511
+      }
+    },
+    {
+      "build": "after",
+      "presentation": "summary",
+      "before": {
+        "bottom": 900,
+        "height": 44,
+        "rows": [
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          103
+        ],
+        "top": 856
+      },
+      "after": {
+        "bottom": 899,
+        "height": 44,
+        "rows": [
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          103,
+          102
+        ],
+        "top": 855
+      }
+    },
+    {
+      "build": "after",
+      "presentation": "detailed",
+      "before": {
+        "bottom": 899.59375,
+        "height": 44,
+        "rows": [
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50
+        ],
+        "top": 855.59375
+      },
+      "after": {
+        "bottom": 899.59375,
+        "height": 44,
+        "rows": [
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50,
+          50
+        ],
+        "top": 855.59375
+      }
+    },
+    {
+      "build": "after",
+      "presentation": "phone",
+      "before": {
+        "bottom": 585.1875,
+        "height": 44,
+        "rows": [
+          157.796875,
+          177.796875,
+          177.796875,
+          177.796875
+        ],
+        "top": 541.1875
+      },
+      "after": {
+        "bottom": 553.578125,
+        "height": 44,
+        "rows": [
+          177.796875,
+          177.796875,
+          146.796875
+        ],
+        "top": 509.578125
+      }
+    },
+    {
+      "build": "after",
+      "presentation": "global",
+      "before": {
+        "bottom": 900,
+        "height": 22995,
+        "rows": [
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5
+        ],
+        "top": -22095
+      },
+      "after": {
+        "bottom": 896,
+        "height": 22991,
+        "rows": [
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5,
+          114.5
+        ],
+        "top": -22095
+      }
+    }
+  ]
+}

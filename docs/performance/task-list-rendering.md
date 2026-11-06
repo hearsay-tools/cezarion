@@ -246,10 +246,12 @@ Normal CLI defaults and fixture sizes remain the full workload described above.
 
 ## S3b: virtual groups and memoized rows
 
-Large-list A timings were measured at `5a32a5816`. Later commits only remove work
-on those paths: unchanged observer callbacks bail out, focus no longer reruns route
-derivations, and owner lookup no longer mounts every row before virtualization.
-The A timings are not final-source numbers.
+Large-list A timings were measured at `5a32a5816`. Later commits remove work on
+those paths: unchanged observer callbacks bail out,
+focus no longer reruns route derivations, and owner lookup no longer mounts every
+row before virtualization. They also add row-size hints and bounded initialization.
+The A timings are not final-source numbers. The mount-count and small-list checks
+below were repeated at final source `6608d3696`.
 
 Large global groups do less scroll work with virtualization. In paired runs on the
 same branch, global frame p95 falls in all five pairs at both widths. The median
@@ -264,11 +266,14 @@ cost from virtualization.
 
 Acceptance criterion 6 is met by lower **scroll work** (global paired frame p95
 improves 5/5 at both viewports) and lower **update work** (the small global list
-renders/event falls 4.3 → 0.4). It does not show a universal timing improvement,
+renders/event falls 3.5 → 0.4 in the final-source recheck). It does not show a
+universal timing improvement,
 an optimal crossover near 100 rows, or Phase 2's commit-time acceptance. Phase 2
 must compare global Tasks React commit time on main against `0320d57fb` under its
 S5 index workload. The global desktop commit regression above remains explicit
 input to that separate check.
+The final small-list Event Timing p95 rises from 80 to 96 ms, even though its
+row-render work and commit p95 fall. Timing gains do not hold for every measure.
 
 ### Method and noise reference
 
@@ -372,17 +377,35 @@ a reduction greater than 1 ms to avoid rounding ties.
 
 ### Small global group under summary events
 
-Both modes mount 50 rows. Memoization reduces measured row renders/event from 4.3
-to 0.4 (about 90%). Commit p95 falls from 35.2 to 24.3 ms; p50 remains 0.1 ms.
-This work-count result supports the row memoization requirement below the virtual
-threshold. The timing comparison is sequential across builds and remains subject
-to host noise. The independent row render-count regression test proves an unchanged
-summary skips rendering when another run changes.
+Both modes mount 50 rows. The final-source repeat uses five runs per build at
+`6608d3696026bcf9fac60bbae0b684861bf8aa31` and baseline `fdf9cf7dd`.
+Row renders per published event fall from 3.51 to 0.39 (89%). Commit p95 falls
+from 25.8 to 16.7 ms; p50 stays 0.1 ms. Event Timing p95 rises from 80 to 96 ms.
+The row-count result supports memoization below the virtual threshold. These
+sequential cross-build timings remain subject to host noise. The independent
+render-count test also proves that an unchanged summary skips rendering.
 
 | Build | Mounted rows | DOM nodes | Fibers | Commit p50 | Commit p95 | Frame p95 | Rows/event |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| baseline-small | 50.0 | 1497.0 | 2674.0 | 0.1 | 35.2 | 50.0 | 4.3 |
-| branch-small | 50.0 | 1600.0 | 2881.0 | 0.1 | 24.3 | 50.0 | 0.4 |
+| final-baseline-small | 50 | 1497 | 2674 | 0.1 | 25.8 | 33.4 | 3.51 |
+| final-branch-small | 50 | 1600 | 2882 | 0.1 | 16.7 | 33.4 | 0.39 |
+
+| Build | API p50 | API p95 | Long tasks | Event p95 | Search elapsed | Expand elapsed |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| final-baseline-small | 3.5 | 12.3 | 0 | 80 | 307.2 | 295.4 |
+| final-branch-small | 3.2 | 10.0 | 0 | 96 | 301.2 | 325.3 |
+
+The active C cases do not click Archived. Elapsed interactions include the new
+200 ms geometry settlement; they are not comparable to the A interaction times.
+The final harness SHA256 is
+`9b1786ddffc8e773fde1fcfa914a5317684c47077c8f247cb8d16f49aef48951`.
+All final source trees were clean. Branch and baseline build hashes are
+`73dd4af7440a7ff8ca30600f8d4bf9bd46746daa3bffa45ed25f4baac474c019`
+and `a960638d2507fa30dfedd9e5517a5ce3cd8551ef9aec25dd03a635263210335e`
+respectively. The final indexes retain both hashes and all host samples.
+Load1 ranges were 13.39–14.07 for branch C, 14.00–15.04 for baseline C,
+and 14.40–23.07 for the mount recheck. The original C samples remain in the
+original 85-run raw data; this table replaces their final-source claim.
 
 ### API, long tasks and interactions
 
@@ -429,7 +452,72 @@ unmounted offscreen rows above the threshold, as approved in decision D5.
 Raw data: [branch pairs](task-list-rendering/s3b/branch/index.json),
 [baseline large](task-list-rendering/s3b/baseline/index.json),
 [branch small](task-list-rendering/s3b/branch-small/index.json), and
-[baseline small](task-list-rendering/s3b/baseline-small/index.json).
+[baseline small](task-list-rendering/s3b/baseline-small/index.json). Final-source
+rechecks: [mounts](task-list-rendering/s3b/final-mount/index.json),
+[branch C](task-list-rendering/s3b/final-branch-small/index.json), and
+[baseline C](task-list-rendering/s3b/final-baseline-small/index.json).
 Each index points to one compact file per case/repetition. The largest case is
 10,312 bytes. Long tasks and Event Timing use the same lossless name dictionary
 encoding as S3a; all samples were round-trip checked against the original output.
+
+### Final mount and initialization checks
+
+The unchanged case matrix ran once per flat/virtual case at final source
+`6608d3696` with `--quick`: ten cases, used only to recheck mounted work.
+Its shorter stream is not a five-run timing study. Threshold 100 stays conservative;
+these samples do not establish an optimal crossover. The original paired A runs
+remain the timing/noise reference at their recorded source.
+
+| Case | Flat rows | Virtual rows | Flat DOM | Virtual DOM | Flat fibers | Virtual fibers |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| project 1440 summary | 1000 | 13 | 23407 | 721 | 38023 | 1535 |
+| project 1440 detailed | 1000 | 26 | 31459 | 1293 | 62293 | 2936 |
+| project 360 cards | 1000 | 6 | 14385 | 477 | 25998 | 1165 |
+| global 1440 summary | 2000 | 10 | 44513 | 745 | 67252 | 1607 |
+| global 360 summary | 2000 | 3 | 44498 | 569 | 67235 | 1345 |
+
+Owner lookup resolves in a layout effect. It does not first mount the full group.
+A bounded first row remains mounted until viewport measurement, then normal focus
+and rename pinning takes over. An intermediate `ssrCount=1` implementation froze
+virtua's initial range until the first scroll; it was removed before push.
+At scroll position zero, the 1440×900 global list now mounts 10 rows and shows four,
+covering the viewport, compared with one mounted/visible row and 230 px of blank
+space in the rejected intermediate build. The original PR head mounted 20 and
+showed four. At 360×640 the respective mounted counts are 3, 1 and 6; visible count
+is zero in all three because the existing header extends below the initial viewport.
+The two-width regression requires enough mounted rows to cover available list space
+without a scroll. Raw geometry is in the three `global-top-*.json` files.
+
+### Footer size correction and failed attempts
+
+The same 300-archive fixture measured each paging footer (or global group end)
+immediately after scrolling to the end and again after 200 ms of stable geometry.
+The project page initially loads 200 rows. Before uses source `50e7844b1`; after
+uses `6608d3696`. These are geometry checks, not timing comparisons. The raw file
+is [footer-size-hints.json](task-list-rendering/s3b/footer-size-hints.json).
+
+| Presentation | Size hint | Before delta | Final delta | Browser bound |
+| --- | ---: | ---: | ---: | ---: |
+| project summary | 103 px | +1070 px | −1 px | 2 px |
+| project detailed | 50 px | +180 px | 0 px | 2 px |
+| phone cards | 178 px | +1209.58 px | −31.61 px | 34 px |
+| global summary | 115 px | +1489.5 px | −4 px | 8 px |
+
+Virtua measures actual row sizes; hints only estimate unmeasured rows. The summary
+last border accounts for 1 px. Phone last-card padding and fractional heights account
+for about 32 px; global fractional heights account for 4 px. These fixture-based
+bounds allow small rounding variation. Wrapped titles, expanded previews and other
+variable content can still cause larger corrections; this is a known limitation.
+The browser checks also perform a settled pointer click that loads the remaining
+project archive page.
+
+Two early rechecks stopped at 200 loaded detailed rows after an unsettled footer
+click. A diagnostic captured y=841.59, then found the footer center at y=1011.59;
+the stale point hit the virtual list. The harness now retains the selected control
+and waits for query idle, fonts, stable geometry and a valid hit target for 200 ms.
+A later helper attempt chased the first mounted resource control as overscan changed;
+another returned a DOM node through CDP's scalar channel. Both helper faults were
+fixed before the final runs. Intermediate results, including the rejected one-row
+mount sample, do not contribute to the final tables. The final 20 cases completed
+with the same updated harness on both builds. The historical A raw files and hash
+remain unchanged.
