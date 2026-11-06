@@ -103,6 +103,26 @@ describe('a stub near the viewport edge', () => {
   })
 })
 
+describe('labels of several stubs at the bottom edge', () => {
+  it.each([2, 3])('stay inside a 600 px viewport and apart, with %i stubs in one gap', (count) => {
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(600)
+    const senders = Array.from({ length: count }, (_, i) => run({ runId: `s${i}`, title: `Sender ${i}` }))
+    const away = Array.from({ length: count }, (_, i) => run({ runId: `r${i}`, title: `Far task ${i}` }))
+    const requests = senders.map((sender, i) => request({ senderRunId: sender.runId, recipientRunId: `r${i}` }))
+    const boxes: Record<string, Box> = {}
+    senders.forEach((sender, i) => { boxes[sender.runId] = { x: col(0), y: 560 - i * 130, w: 300, h: 120 } })
+    away.forEach((task, i) => { boxes[task.runId] = { x: col(1), y: 2_000 + i * 200, w: 300, h: 120 } })
+    renderBoard(project({ tasks: [...senders, ...away], requests }), boxes)
+    const placed = requests.map((peer) => labelBox(label(peer.requestId)!, PEER_LABEL))
+    expect(placed).toHaveLength(count)
+    for (const box of placed) {
+      expect(box.y).toBeGreaterThanOrEqual(0)
+      expect(box.y + box.h).toBeLessThanOrEqual(600)
+    }
+    for (const [i, a] of placed.entries()) for (const b of placed.slice(i + 1)) expect(overlaps(a, b)).toBe(false)
+  })
+})
+
 describe('peer labels', () => {
   it('fit the 96 px column gap and never cover a card', () => {
     const boxes: Record<string, Box> = {

@@ -2,8 +2,9 @@ import type { ActivityRequest } from '@open-mercato/cezar-api-client/contract/ac
 
 import { recipientName, senderName, type RunEntry } from './activity-model'
 import { COLUMN_GAP } from './layout'
-import { clampInto, facingSide, familyPath, peerPath, relativeBox, stubPath, type Box, type Point } from './line-geometry'
-import { laneOffsets, separateLabels, type Rect } from './line-route'
+import { facingSide, familyPath, peerPath, relativeBox, stubPath, type Box, type Point } from './line-geometry'
+import { stackLabels } from './label-stack'
+import { laneOffsets, type Rect } from './line-route'
 import { endsOnScreen, isOnScreen } from './line-viewport'
 
 /** The size a peer label takes: two compact lines and the window bar, narrow enough for the
@@ -98,19 +99,12 @@ export function measureLines(
       : familyLine(request, cards, anchors, index, lane, frame.view)
     if (line) lines.push(line)
   }
-  // Only peer lines carry a label. Each sits in a column gap: moving one down keeps it there.
+  // Only peer lines carry a label. Each sits in a column gap, where the labels of one gap stack
+  // apart and inside the viewport.
   const gaps = gapCentres(cards, frame.width)
   const peerLabels = lines.filter((line) => line.kind === 'peer').map((line) => ({ id: line.requestId, at: fitLabel(line.label, gaps) }))
-  const labels = separateLabels(peerLabels, PEER_LABEL, 'y')
-  return lines.map((line) => ({ ...line, label: insideView(labels.get(line.requestId) ?? line.label, frame.view) }))
-}
-
-/** A label kept inside the visible part of the graph, so a label pushed past another never
- *  leaves the screen. */
-function insideView(label: Point, view: Rect | undefined): Point {
-  if (!view) return label
-  const half = PEER_LABEL.h / 2
-  return { x: label.x, y: clampInto(label.y, view.y0 + half, view.y1 - half) }
+  const labels = stackLabels(peerLabels, PEER_LABEL, frame.view)
+  return lines.map((line) => ({ ...line, label: labels.get(line.requestId) ?? line.label }))
 }
 
 /** Equal line sets draw the same picture; the measure skips a state update for them. */
