@@ -262,6 +262,11 @@ async function respondDefault(command) {
   send({ type: 'turn_end', message: {}, toolResults: [] });
   send({ type: 'agent_end', messages: [], willRetry: false });
   send({ type: 'agent_settled' });
+  sendBackendResume(command);
+}
+
+/** Runner-only activity may resume a turn after either default reply path parks. */
+function sendBackendResume(command) {
   if (command.message.includes('mock:backend-resume-text')) {
     setTimeout(() => {
       send({
@@ -331,7 +336,7 @@ function recordPrompt(command) {
 }
 
 /** Pi alone owns acknowledgements, native ids, usage and steering admission. */
-function scenarioEncoder(command) {
+function scenarioEncoder(command, scenario) {
   return {
     closeInput: () => closeSync(0),
     open(step) {
@@ -356,7 +361,10 @@ function scenarioEncoder(command) {
     readSteers(step) { if (step.late) activeTurn.late = true; },
     end(step) {
       if (step.error === 'provider') sendProviderError();
-      else sendTurnEnd();
+      else {
+        sendTurnEnd();
+        if (scenario.name === 'cezar-wait' || scenario.name === 'deferred-turn-start') sendBackendResume(command);
+      }
     },
   };
 }
@@ -365,14 +373,14 @@ async function handlePromptCommand(command) {
   const early = scenarioFor(command.message, scenarioContext);
   if (early?.early) {
     if (early.name === 'autonomous' && process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: rawMessage(command), imageCount: 0 })}\n`);
-    if (await play(early, scenarioEncoder(command)) !== 'continue') return;
+    if (await play(early, scenarioEncoder(command, early)) !== 'continue') return;
   }
   recordPrompt(command);
   command.message = answerNudge(command.message);
   const scenario = scenarioFor(command.message, { ...scenarioContext, unsupported: [...scenarioContext.unsupported, ...(early?.early ? [early.name] : [])] });
-  if (scenario?.beforeFailure) return play(scenario, scenarioEncoder(command));
+  if (scenario?.beforeFailure) return play(scenario, scenarioEncoder(command, scenario));
   if (failureControl && (await failureControl.failureFor(command.message)) === 'provider') return respondProviderError(command);
-  if (scenario) return play(scenario, scenarioEncoder(command));
+  if (scenario) return play(scenario, scenarioEncoder(command, scenario));
   return respondDefault(command);
 }
 
