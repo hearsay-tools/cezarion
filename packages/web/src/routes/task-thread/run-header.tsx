@@ -16,7 +16,7 @@ import {
   useRuns,
 } from '@/api/queries'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
-import { messagingAllowed, workersAllowed } from '@open-mercato/cezar-api-client/contract/runs'
+import { messagingAllowed, workersAllowed } from '@open-mercato/cezar-api-client/contract/task-options'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
 import { Pill } from '@/components/pill'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
