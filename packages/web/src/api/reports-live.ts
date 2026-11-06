@@ -48,7 +48,7 @@ export class ReportsFence {
       return q.trim() === '' ? this.patch(page, metadata) : page
     }
   }
-  receive(frame: ReportsFrame): void {
+  receive(frame: ReportsFrame, reconnect = false): void {
     const old = this.state
     if (!old && frame.type === 'snapshot') {
       this.state = frame
@@ -56,8 +56,12 @@ export class ReportsFence {
       return
     }
     const change = compareState(old, frame)
-    if (!change) return
-    const { content, metadata, reset } = change
+    if (!change) {
+      if (reconnect && frame.type === 'snapshot') { this.content++; this.invalidate(true) }
+      return
+    }
+    const { metadata, reset } = change
+    const content = change.content || (reconnect && frame.type === 'snapshot')
     this.state = frame
     if (reset) this.patches.clear()
     if (metadata) this.metadata++
@@ -95,7 +99,7 @@ export function useReportsLive(project: string): ReportsFence {
   useEffect(() => {
     const offTopic = subscribeTopic(`reports:project:${project}`, value => {
       const parsed = reportsFrameSchema.safeParse(value)
-      if (parsed.success) fence.receive(parsed.data)
+      if (parsed.success) fence.receive(parsed.data, parsed.data.type === 'snapshot')
     })
     let offRead: (() => void) | undefined
     const follow = () => {

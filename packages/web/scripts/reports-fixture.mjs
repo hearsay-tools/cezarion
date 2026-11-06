@@ -13,7 +13,7 @@ export function createReportFixture({ stores, projects, root, publishArtifact, a
       for (const [projectId, target] of stores) {
         for (let i = 0; i < (projectId === 'boot' ? 65 : 5); i++) {
           const run = target.createRun({ title: `Report source ${projectId} ${i}`, task: 'Reports workload', workflow: 'quick-task', steps: [] })
-          target.updateRun(run.id, { status: projectId === 'boot' && i < 60 ? 'done' : 'running' })
+          target.updateRun(run.id, { status: 'running' })
           if (projectId === 'boot' && i < 60) {
             for (let n = 0; n < 2; n++) {
               const artifact = await publishArtifact(artifactDirectory(join(projects.find(p => p.id === projectId).root, '.ai/cezar'), run.id), run.id, source)

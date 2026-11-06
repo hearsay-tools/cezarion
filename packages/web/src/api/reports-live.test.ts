@@ -106,3 +106,13 @@ it('reconciles every page when content changes after an earlier page of a shelf 
   expect(observer.getCurrentResult().data?.pages.map(p => p.reports[0]?.taskTitle)).toEqual(['New', 'New'])
   off(); client.clear()
 })
+it('checks settled external edits on topic reconnect even with equal counters, without turning unchanged twin polls into list reads', () => {
+  const client = new QueryClient(), fence = new ReportsFence(client, 'P')
+  const invalidate = vi.spyOn(client, 'invalidateQueries')
+  fence.receive(snapshot)
+  fence.receive(snapshot)
+  expect(invalidate).not.toHaveBeenCalled()
+  fence.receive(snapshot, true)
+  expect(invalidate).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ['P', 'reports'], refetchType: 'active' }), { cancelRefetch: false })
+  client.clear()
+})
