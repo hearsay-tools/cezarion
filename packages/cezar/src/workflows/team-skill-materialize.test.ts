@@ -1,4 +1,5 @@
-import { testHome } from '../home/test-home.testkit.ts';
+import { Home } from '../home/home.ts';
+import { testHome, useTestHome } from '../home/test-home.testkit.ts';
 /**
  * #1024: a team directory skill must never be copied into the main checkout. A
  * run without its own task worktree gets a per-commit copy under the cache, and
@@ -57,6 +58,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     home = mkdtempSync(join(tmpdir(), 'cez-team-dir-home-'));
     cleanup.push(home);
     vi.stubEnv('HOME', home);
+    useTestHome(Home.sandbox(home));
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-team-dir-root-'));
     await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
     await execFileAsync('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
