@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { ActivitySnapshot } from '@open-mercato/cezar-api-client'
+import { activitySnapshotSchema, type ActivitySnapshot } from '@open-mercato/cezar-api-client/contract/activity'
 import { liveRefetchInterval } from '@/lib/live-refetch'
 import { ApiError, cez, init, unwrap, type ReadOptions } from './client'
 import { liveTransport, onLiveTransport } from './live-coordinator'
@@ -24,14 +24,37 @@ export const activityTopic = (scope: ActivityScope): string =>
 export const activityPath = (scope: ActivityScope): string =>
   scope.kind === 'project' ? `/api/v1/workspace/activity?project=${encodeURIComponent(scope.projectId)}` : '/api/v1/workspace/activity'
 
+/** The error a snapshot that fails the contract becomes. The view draws lines between the ids it
+ *  finds in a snapshot, so a malformed one, read or pushed, is an error it shows, never a crash. */
+export const UNEXPECTED_ACTIVITY = 'the cezar server answered /workspace/activity with an unexpected body'
+
+/** A read or pushed snapshot, checked against the contract. */
+export function parseActivity(value: unknown): ActivitySnapshot {
+  const parsed = activitySnapshotSchema.safeParse(value)
+  if (!parsed.success) throw new ApiError(200, UNEXPECTED_ACTIVITY)
+  return parsed.data
+}
+
 export async function getActivity(scope: ActivityScope, opts?: ReadOptions): Promise<ActivitySnapshot> {
   const query = scope.kind === 'project' ? { project: scope.projectId } : {}
-  return unwrap(await cez.api.v1.workspace.activity.$get({ query }, init(opts)), '/workspace/activity')
+  return parseActivity(await unwrap(await cez.api.v1.workspace.activity.$get({ query }, init(opts)), '/workspace/activity'))
 }
 
 /** A snapshot, read or pushed, never replaces a cached one the server built later. */
 export function newerActivity(cached: ActivitySnapshot | undefined, fetched: ActivitySnapshot): ActivitySnapshot {
   return cached !== undefined && Date.parse(fetched.generatedAt) < Date.parse(cached.generatedAt) ? cached : fetched
+}
+
+/**
+ * The `generatedAt` of a snapshot the client built with no server snapshot behind it: older than
+ * any snapshot the server builds, so the next one replaces it (`newerActivity`). It is not a server
+ * time: a view's clock never follows it (`isServerTime`).
+ */
+export const NO_SERVER_TIME = new Date(0).toISOString()
+
+/** True when `generatedAt` is a time the server stamped: a valid date, never `NO_SERVER_TIME`. */
+export function isServerTime(generatedAt: string | undefined): generatedAt is string {
+  return generatedAt !== undefined && generatedAt !== NO_SERVER_TIME && !Number.isNaN(Date.parse(generatedAt))
 }
 
 /** The answers a project route gives for a project it cannot serve: removed, its folder gone,
@@ -46,7 +69,7 @@ const UNAVAILABLE_STATUSES = new Set([404, 409, 503])
 export function unavailableActivity(cached: ActivitySnapshot | undefined, projectId: string, status: 404 | 409 | 503, error: string): ActivitySnapshot {
   const name = cached?.projects.find((project) => project.projectId === projectId)?.name ?? projectId
   return {
-    generatedAt: cached?.generatedAt ?? new Date(0).toISOString(),
+    generatedAt: cached?.generatedAt ?? NO_SERVER_TIME,
     projects: [{ projectId, name, loaded: true, unavailable: { status, error }, inReview: 0, tasks: [], requests: [], closed: [] }],
   }
 }
@@ -91,17 +114,6 @@ export function useActivityLive(scope: ActivityScope) {
   })
   useEffect(() => {
     let active = true
-    // A pending HTTP read is cancelled first, so its older answer cannot land on top of this one.
-    // Topic frames and HTTP answers alike never replace a snapshot the server built later: a
-    // delayed frame stays behind a newer read. Removal and unavailable frames carry the server's
-    // current clock, so they still win.
-    const fold = (value: unknown) => {
-      void client.cancelQueries({ queryKey: key, exact: true }).then(() => {
-        if (!active) return
-        const next = value as ActivitySnapshot
-        client.setQueryData<ActivitySnapshot>(key, (cached) => newerActivity(cached, next))
-      })
-    }
     // A refused scoped read shows the project unavailable; any other failure is the query's
     // error, and the last good snapshot stays.
     const failed = (error: ApiError) => {
@@ -114,6 +126,23 @@ export function useActivityLive(scope: ActivityScope) {
         }
         const query = client.getQueryCache().find<ActivitySnapshot>({ queryKey: key, exact: true })
         query?.setState({ status: 'error', error, errorUpdatedAt: Date.now(), errorUpdateCount: query.state.errorUpdateCount + 1, fetchStatus: 'idle' })
+      })
+    }
+    // A pending HTTP read is cancelled first, so its older answer cannot land on top of this one.
+    // Topic frames and HTTP answers alike never replace a snapshot the server built later: a
+    // delayed frame stays behind a newer read. Removal and unavailable frames carry the server's
+    // current clock, so they still win.
+    const fold = (value: unknown) => {
+      let next: ActivitySnapshot
+      try {
+        next = parseActivity(value)
+      } catch (error) {
+        failed(error as ApiError)
+        return
+      }
+      void client.cancelQueries({ queryKey: key, exact: true }).then(() => {
+        if (!active) return
+        client.setQueryData<ActivitySnapshot>(key, (cached) => newerActivity(cached, next))
       })
     }
     const releaseTopic = subscribeTopic(activityTopic(stable), fold)

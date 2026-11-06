@@ -159,7 +159,10 @@ the project view. The summary chips count every project.
 - **Hidden tab**: the view stops its animations and releases its topic subscription
   (`live-visibility`), and reconciles from a fresh snapshot when it becomes visible.
 - **Performance**: animations use only `transform` and `opacity` (the pulse is a
-  scaled pseudo-element, not an animated `box-shadow`). Line geometry is recomputed on
+  scaled pseudo-element, not an animated `box-shadow`). The one exception is the march:
+  open line, stub and arc dashes animate `stroke-dashoffset` in CSS only, because no
+  transform moves dashes along a curve; it pauses on a hidden tab and is static with
+  reduced motion. Line geometry is recomputed on
   layout change (`ResizeObserver`), not on every frame. A `requestAnimationFrame` loop
   runs only while a comet is in flight.
 - **Access**: each card is a link to its task. Each card has a text form of its lines:

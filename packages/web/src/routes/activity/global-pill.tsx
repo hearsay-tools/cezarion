@@ -3,8 +3,9 @@ import { Link } from 'react-router'
 
 import { cn } from '@/lib/utils'
 
-import { LineText } from './activity-card'
+import { CardEffects, LineText } from './activity-card'
 import { lineTexts, recipientName, sentPeerRequests, type RunEntry } from './activity-model'
+import { EMPTY_MOTION, type MotionState } from './activity-motion'
 import { RunShape, ToneWord } from './activity-tone'
 import { isLiveStatus, rootNow, type NowContext } from './now-box'
 import { Heartbeat } from './now-box-view'
@@ -25,6 +26,7 @@ interface PillProps {
   requests: readonly ActivityRequest[]
   index: ReadonlyMap<string, RunEntry>
   ctx: NowContext
+  motion?: MotionState
 }
 
 function WorkerDots({ task }: { task: ActivityRun }) {
@@ -39,7 +41,7 @@ function WorkerDots({ task }: { task: ActivityRun }) {
 }
 
 /** Below `md` the arcs are hidden; the sender pill names each peer it waits on instead. */
-function PeerLinks({ projectId, task, requests, index }: Omit<PillProps, 'ctx'>) {
+function PeerLinks({ projectId, task, requests, index }: Omit<PillProps, 'ctx' | 'motion'>) {
   const sent = sentPeerRequests(task.runId, requests)
   if (sent.length === 0) return null
   return (
@@ -55,14 +57,15 @@ function PeerLinks({ projectId, task, requests, index }: Omit<PillProps, 'ctx'>)
   )
 }
 
-export function ActivityPill({ projectId, task, requests, index, ctx }: PillProps) {
+export function ActivityPill({ projectId, task, requests, index, ctx, motion = EMPTY_MOTION }: PillProps) {
   const box = rootNow(task, ctx)
   return (
     <li
       data-activity-pill={task.runId}
       data-rung={task.rung}
-      className={cn('relative min-w-0 rounded-[10px] border bg-card-2 px-2.5 py-2', box.action ? 'border-pending' : 'border-border')}
+      className={cn('relative min-w-0 rounded-[10px] border bg-card-2 px-2.5 py-2', box.action ? 'border-pending' : 'border-border', task.runId in motion.entering && 'activity-card-enter')}
     >
+      <CardEffects task={task} motion={motion} glow={box.action !== undefined} />
       <div className="flex items-center gap-[7px]">
         <RunShape run={task} role="root" />
         <h3 className="min-w-0 flex-1 truncate text-[12.5px] font-medium">

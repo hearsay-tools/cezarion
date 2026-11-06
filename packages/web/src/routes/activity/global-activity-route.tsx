@@ -1,6 +1,6 @@
 import * as React from 'react'
 
-import { useActivity } from '@/api/activity'
+import { useActivityLive } from '@/api/activity-live'
 import { useHealth, useProjects } from '@/api/queries'
 import { Button } from '@/components/ui/button'
 import { orderProjects } from '@/lib/project-order'
@@ -8,15 +8,20 @@ import { useProjectOrder } from '@/lib/use-project-order'
 
 import { ActivityHeader, ScopeSwitch, SummaryChips } from './activity-header'
 import { summarize } from './activity-model'
-import { useServerNow } from './activity-route'
 import { groupProjects, inRailOrder } from './global-model'
 import { IdleLine, ProjectPanel } from './global-panel'
+import { useActivityMotion } from './use-activity-motion'
+import { useServerNow } from './use-server-now'
+import './activity-motion.css'
 
 /**
  * `/activity`, the global activity view (spec 2026-11-05-live-activity-view, "Global view"),
  * static: one panel for each project with active work or with a notice, in project-rail order,
- * and the loaded idle projects in one line at the bottom. Slice S6 adds motion and the live read.
+ * and the loaded idle projects in one line at the bottom. It reads the live workspace snapshot
+ * (`useActivityLive`) and plays the same motion on the pills and arcs as the project view.
  */
+
+const WORKSPACE = { kind: 'workspace' } as const
 
 /** The project ids in the order the rail shows them, once the registry has answered. */
 function useRailIds(): string[] | undefined {
@@ -26,7 +31,7 @@ function useRailIds(): string[] | undefined {
 }
 
 export function GlobalActivityRoute() {
-  const activity = useActivity('all')
+  const activity = useActivityLive(WORKSPACE)
   const projects = useProjects()
   const health = useHealth()
   const railIds = useRailIds()
@@ -34,16 +39,17 @@ export function GlobalActivityRoute() {
   const boot = projects.data?.bootProject ?? health.data?.bootProject ?? null
   const snapshot = activity.data?.projects
   const groups = React.useMemo(() => groupProjects(inRailOrder(snapshot ?? [], railIds)), [snapshot, railIds])
+  const { motion, paused, reduced } = useActivityMotion(activity.data, 'workspace')
 
   return (
-    <div data-route="activity-global" className="flex min-h-full w-full flex-col gap-4 px-[18px] py-6 md:px-7">
-      <ActivityHeader name="All projects" generatedAt={activity.data?.generatedAt}>
+    <div data-route="activity-global" data-activity-paused={paused ? 'true' : undefined} className="flex min-h-full w-full flex-col gap-4 px-[18px] py-6 md:px-7">
+      <ActivityHeader name="All projects" now={activity.data ? now : undefined} stale={activity.isError}>
         <ScopeSwitch scope="all" projectId={boot} />
       </ActivityHeader>
-      {snapshot ? <SummaryChips summary={summarize(snapshot)} tasksTo="/tasks" /> : null}
+      {snapshot ? <SummaryChips summary={summarize(snapshot)} tasksTo="/tasks" bumps={motion.bumps} /> : null}
       {/* The header and the scope switch stay while the snapshot loads: the user can switch away. */}
       {activity.isPending ? <p data-slot="activity-loading" role="status" className="text-xs text-muted-foreground">Loading activity…</p> : null}
-      {activity.isError ? (
+      {activity.isError && !snapshot ? (
         <div role="alert" className="flex items-center gap-3 text-[13px] text-muted-foreground">
           Could not load activity: {activity.error.message}
           <Button size="sm" variant="outline" onClick={() => void activity.refetch()} className="max-md:min-h-11">Retry</Button>
@@ -53,7 +59,7 @@ export function GlobalActivityRoute() {
         <p data-slot="activity-empty" className="py-6 text-[13px] text-muted-foreground">No projects to show.</p>
       ) : null}
       <div data-slot="activity-panels" className="flex flex-col gap-3.5">
-        {groups.panels.map((project) => <ProjectPanel key={project.projectId} project={project} now={now} />)}
+        {groups.panels.map((project) => <ProjectPanel key={project.projectId} project={project} now={now} motion={motion} paused={paused || reduced} />)}
       </div>
       <IdleLine projects={groups.idle} belowPanels={groups.panels.length > 0} />
     </div>

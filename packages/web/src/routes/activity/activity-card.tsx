@@ -6,7 +6,8 @@ import { cn } from '@/lib/utils'
 
 import { since, span } from './activity-format'
 import { askOf, finishedText, foldedWorkers, lineTexts, recipientName, sentPeerRequests, type RunEntry } from './activity-model'
-import { RunShape, TONE_INK } from './activity-tone'
+import { EMPTY_MOTION, passedChecks, type MotionState } from './activity-motion'
+import { RunShape, TONE_BORDER, TONE_FILL, TONE_INK } from './activity-tone'
 import { isLiveStatus, rootNow, workerLine, type NowContext } from './now-box'
 import { Heartbeat, NowBoxView } from './now-box-view'
 
@@ -26,6 +27,10 @@ export interface CardProps {
   dense: boolean
   /** One column: peer lines become "→ <task>" links on the sender card. */
   narrow: boolean
+  motion?: MotionState
+  /** A card that left the view, drawn while it collapses: no line ends at it, and it is hidden
+   *  from assistive technology and from the keyboard. */
+  ghost?: boolean
 }
 
 const taskPath = (runId: string) => `/tasks/${encodeURIComponent(runId)}`
@@ -45,16 +50,33 @@ export function LineText({ texts }: { texts: string[] }) {
   )
 }
 
-function WorkerRow({ worker, parentId, requests, index, ctx }: { worker: ActivityWorker; parentId: string; requests: readonly ActivityRequest[]; index: ReadonlyMap<string, RunEntry>; ctx: NowContext }) {
+interface WorkerRowProps {
+  worker: ActivityWorker
+  parentId: string
+  requests: readonly ActivityRequest[]
+  index: ReadonlyMap<string, RunEntry>
+  ctx: NowContext
+  motion: MotionState
+}
+
+function WorkerRow({ worker, parentId, requests, index, ctx, motion }: WorkerRowProps) {
   const ask = askOf(worker.runId, parentId, requests)
   const line = workerLine(worker, ctx, ask?.text)
+  const hold = motion.workerHold[worker.runId]
   return (
     <li
       data-slot="activity-worker"
       data-run={worker.runId}
       data-asks={line.asks ? 'true' : undefined}
-      className={cn('relative grid grid-cols-[14px_minmax(0,1fr)] items-start gap-x-2 rounded-lg py-[5px] before:absolute before:top-[13px] before:-left-3.5 before:w-2.5 before:border-t before:border-border', line.asks && '-mx-1.5 bg-message-inbound-bg px-1.5')}
+      data-hold={hold?.phase}
+      className={cn(
+        'relative grid grid-cols-[14px_minmax(0,1fr)] items-start gap-x-2 rounded-lg py-[5px] before:absolute before:top-[13px] before:-left-3.5 before:w-2.5 before:border-t before:border-border',
+        line.asks && '-mx-1.5 bg-message-inbound-bg px-1.5',
+        worker.runId in motion.workerEnter && 'activity-row-enter',
+        hold?.phase === 'fold' && 'activity-row-fold',
+      )}
     >
+      {hold ? <span key={hold.key} aria-hidden="true" className={cn('activity-row-flash', TONE_FILL[hold.tone])} /> : null}
       <span className="mt-[3px]"><RunShape run={worker} role="worker" /></span>
       <span className="min-w-0 truncate text-[12.5px] font-medium">
         <Link to={taskPath(worker.runId)} className="relative z-[1] hover:underline focus-visible:outline-2 focus-visible:outline-ring max-md:inline-flex max-md:min-h-11 max-md:items-center">{worker.title}</Link>
@@ -77,16 +99,18 @@ function WorkerDots({ workers }: { workers: readonly ActivityWorker[] }) {
   )
 }
 
-function Workers({ task, requests, index, ctx, dense }: Omit<CardProps, 'narrow'>) {
-  // Settled done, failed and cancelled workers fold into the count; review workers stay a row.
-  const rows = task.workers.filter((worker) => isLiveStatus(worker.status) || worker.status === 'review')
-  const finished = finishedText(foldedWorkers(task))
+function Workers({ task, requests, index, ctx, dense, motion }: Omit<CardProps, 'narrow' | 'motion'> & { motion: MotionState }) {
+  // Settled done, failed and cancelled workers fold into the count; review workers stay a row. A
+  // worker that just settled stays a row while it flashes, then folds.
+  const held = (runId: string) => runId in motion.workerHold
+  const rows = task.workers.filter((worker) => isLiveStatus(worker.status) || worker.status === 'review' || held(worker.runId))
+  const finished = finishedText(foldedWorkers(task, held))
   return (
     <>
       {rows.length > 0 && dense ? <WorkerDots workers={rows} /> : null}
       {rows.length > 0 && !dense ? (
         <ul data-slot="activity-workers" className="mt-2 ml-1 border-l border-border pl-3.5">
-          {rows.map((worker) => <WorkerRow key={worker.runId} worker={worker} parentId={task.runId} requests={requests} index={index} ctx={ctx} />)}
+          {rows.map((worker) => <WorkerRow key={worker.runId} worker={worker} parentId={task.runId} requests={requests} index={index} ctx={ctx} motion={motion} />)}
         </ul>
       ) : null}
       {finished ? <p data-slot="activity-finished" className="mt-1.5 ml-[18px] text-[11px] text-muted-foreground">{finished}</p> : null}
@@ -110,14 +134,36 @@ function PeerLinks({ task, requests, index }: Pick<CardProps, 'task' | 'requests
   )
 }
 
-export function ActivityCard({ task, requests, index, ctx, dense, narrow }: CardProps) {
+/** The card's entry and its collapse. */
+function cardMotion(task: ActivityRun, motion: MotionState, ghost: boolean): string | undefined {
+  if (ghost) return 'activity-card-leave'
+  return task.runId in motion.entering ? 'activity-card-enter' : undefined
+}
+
+/** The glow and the flash of a card or a pill: layers over its border. */
+export function CardEffects({ task, motion, glow }: { task: ActivityRun; motion: MotionState; glow: boolean }) {
+  const flash = motion.flash[task.runId]
+  return (
+    <>
+      {glow ? <span aria-hidden="true" className="activity-glow" /> : null}
+      {flash ? <span key={flash.key} data-slot="activity-flash" data-tone={flash.tone} aria-hidden="true" className={cn('activity-flash', TONE_BORDER[flash.tone])} /> : null}
+    </>
+  )
+}
+
+export function ActivityCard({ task, requests, index, ctx, dense, narrow, motion = EMPTY_MOTION, ghost = false }: CardProps) {
   const box = rootNow(task, ctx)
+  // A ghost is not a line end: the lines measure only `data-activity-card`.
+  const identity = ghost ? { 'data-activity-ghost': task.runId, inert: true, 'aria-hidden': true } : { 'data-activity-card': task.runId }
+  const now = { sweep: task.rung === 'running' && isLiveStatus(task.status), slideKey: motion.slides[task.runId]?.key, passed: passedChecks(motion, task.runId) }
   return (
     <article
-      data-activity-card={task.runId}
+      {...identity}
+      data-flip={task.runId}
       data-rung={task.rung}
-      className={cn('relative min-w-0 rounded-xl border bg-card px-3.5 py-3', box.action ? 'border-pending' : 'border-border')}
+      className={cn('relative min-w-0 rounded-xl border bg-card px-3.5 py-3', box.action ? 'border-pending' : 'border-border', cardMotion(task, motion, ghost))}
     >
+      <CardEffects task={task} motion={motion} glow={box.action !== undefined && !ghost} />
       <header className="flex items-center gap-2">
         <RunShape run={task} role="root" />
         <h3 className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">
@@ -129,7 +175,7 @@ export function ActivityCard({ task, requests, index, ctx, dense, narrow }: Card
       </header>
       <p className="mt-0.5 mb-2 ml-5 truncate text-[11.5px] text-muted-foreground">{metaLine(task, ctx.now)}</p>
       <LineText texts={lineTexts(task.runId, requests, index)} />
-      <NowBoxView box={box} now={ctx.now} dense={dense} />
+      <NowBoxView box={box} now={ctx.now} dense={dense} motion={now} />
       {box.action ? (
         <div className="mt-2 flex gap-1.5">
           <Button asChild size="sm" variant={box.action === 'answer' ? 'primary' : 'outline'} className="relative z-[1] max-md:min-h-11">
@@ -138,7 +184,7 @@ export function ActivityCard({ task, requests, index, ctx, dense, narrow }: Card
         </div>
       ) : null}
       {narrow ? <PeerLinks task={task} requests={requests} index={index} /> : null}
-      <Workers task={task} requests={requests} index={index} ctx={ctx} dense={dense} />
+      <Workers task={task} requests={requests} index={index} ctx={ctx} dense={dense} motion={motion} />
     </article>
   )
 }

@@ -1,0 +1,143 @@
+import { act, cleanup, render } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ActivityProject, ActivitySnapshot } from '@open-mercato/cezar-api-client/contract/activity'
+
+import { NOW, iso, project, request, run } from './activity.testkit'
+import { ActivityBoard } from './activity-board'
+import { EMPTY_MOTION, MOTION_MS } from './activity-motion'
+import type { Box } from './line-geometry'
+import { placeBoxes, samplePath } from './line-layout.testkit'
+import { useActivityMotion } from './use-activity-motion'
+import { REDUCED_MOTION_QUERY } from './use-reduced-motion'
+
+/**
+ * The board driven by the real motion hook, snapshot after snapshot: the transitions the pure
+ * tests cannot see (a ghost's place, FLIP and the lines, a motion preference that changes while
+ * motion runs).
+ */
+
+/** A FLIP animation the test finishes or that the view cancels. */
+class FakeAnimation extends EventTarget {
+  cancel = vi.fn(() => this.dispatchEvent(new Event('cancel')))
+  finish() {
+    this.dispatchEvent(new Event('finish'))
+  }
+}
+
+let animations: FakeAnimation[] = []
+let reduced = false
+const mediaListeners = new Set<() => void>()
+const frames = { request: vi.fn((_callback: FrameRequestCallback) => 7), cancel: vi.fn() }
+
+beforeEach(() => {
+  animations = []
+  reduced = false
+  mediaListeners.clear()
+  Object.defineProperty(HTMLElement.prototype, 'animate', {
+    configurable: true,
+    value: vi.fn(() => {
+      const animation = new FakeAnimation()
+      animations.push(animation)
+      return animation
+    }),
+  })
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query === REDUCED_MOTION_QUERY && reduced,
+    addEventListener: (_type: string, listener: () => void) => mediaListeners.add(listener),
+    removeEventListener: (_type: string, listener: () => void) => mediaListeners.delete(listener),
+  }))
+  frames.request.mockClear()
+  frames.cancel.mockClear()
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+})
+
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  delete (HTMLElement.prototype as { animate?: unknown }).animate
+})
+
+const at = (offsetMs: number, value: Partial<ActivityProject>): ActivitySnapshot => ({ generatedAt: iso(offsetMs), projects: [project(value)] })
+
+function LiveBoard({ snapshot }: { snapshot: ActivitySnapshot }) {
+  const { motion, feed, reduced: still, paused } = useActivityMotion(snapshot, 'cezarion')
+  return <ActivityBoard project={snapshot.projects[0]!} now={NOW} watchingSince={iso(-60_000)} motion={motion} feed={feed} still={still} paused={paused} />
+}
+
+function renderLive(first: ActivitySnapshot, width: number) {
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(width)
+  const view = render(<MemoryRouter><LiveBoard snapshot={first} /></MemoryRouter>)
+  return { rerender: (next: ActivitySnapshot) => view.rerender(<MemoryRouter><LiveBoard snapshot={next} /></MemoryRouter>) }
+}
+
+const A = run({ runId: 'a', title: 'Porting upstream SSE' })
+const B = run({ runId: 'b', title: 'Fixing flaky shard 3' })
+const C = run({ runId: 'c', title: 'Update waits docs' })
+const D = run({ runId: 'd', title: 'Coordinating digest' })
+const column = () => Array.from(document.querySelectorAll('[data-slot="activity-column"]')[0]?.children ?? []).map((el) => el.getAttribute('data-activity-card') ?? `ghost:${el.getAttribute('data-activity-ghost')}`)
+
+describe('the live board', () => {
+  it('collapses a card that left in its own slot, never at the end of its column', () => {
+    const live = renderLive(at(0, { tasks: [A, B, C] }), 500)
+    expect(column()).toEqual(['a', 'b', 'c'])
+    live.rerender(at(1_000, { tasks: [A, C] }))
+    expect(column()).toEqual(['a', 'ghost:b', 'c'])
+  })
+
+  it('measures the lines again when FLIP settles, so a line never stays where a card was mid-flight', () => {
+    const boxes: Record<string, Box> = { a: { x: 0, y: 0, w: 300, h: 120 }, b: { x: 396, y: 0, w: 300, h: 120 }, c: { x: 792, y: 0, w: 300, h: 120 }, d: { x: 0, y: 200, w: 300, h: 120 } }
+    placeBoxes('data-activity-card', boxes)
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0)
+      return 1
+    })
+    const peer = request({ senderRunId: 'd', recipientRunId: 'b' })
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1092)
+    const view = render(<MemoryRouter><ActivityBoard project={project({ tasks: [A, B, C, D], requests: [peer] })} now={NOW} watchingSince={iso(-60_000)} motion={EMPTY_MOTION} /></MemoryRouter>)
+    const start = () => samplePath(document.querySelector(`path[data-request="${peer.requestId}"]`)?.getAttribute('d') ?? '')[0]
+    expect(start()).toEqual({ x: 300, y: 222 })
+
+    // A leaves: D moves up into its place, and FLIP plays it from where it was.
+    boxes.d!.y = 0
+    view.rerender(<MemoryRouter><ActivityBoard project={project({ tasks: [B, C, D], requests: [peer] })} now={NOW} watchingSince={iso(-60_000)} motion={EMPTY_MOTION} /></MemoryRouter>)
+    expect(animations).toHaveLength(1)
+    // A measure taken mid-flight reads the transformed card.
+    boxes.d!.y = 120
+    act(() => { window.dispatchEvent(new Event('scroll')) })
+    expect(start()).toEqual({ x: 300, y: 142 })
+    // The transform ends, which no resize reports; the settled layout is measured again.
+    boxes.d!.y = 0
+    act(() => { animations[0]!.finish() })
+    expect(start()).toEqual({ x: 300, y: 22 })
+  })
+
+  it('stops the comet loop, cancels FLIP and ends every motion at once when reduced motion turns on', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', frames.request)
+    vi.stubGlobal('cancelAnimationFrame', frames.cancel)
+    const boxes: Record<string, Box> = { a: { x: 0, y: 0, w: 300, h: 120 }, b: { x: 396, y: 0, w: 300, h: 120 }, c: { x: 792, y: 0, w: 300, h: 120 }, d: { x: 0, y: 200, w: 300, h: 120 } }
+    placeBoxes('data-activity-card', boxes)
+    const peer = request({ senderRunId: 'b', recipientRunId: 'c' })
+    const live = renderLive(at(0, { tasks: [A, B, C, D] }), 1092)
+    live.rerender(at(1_000, { tasks: [B, C, D], requests: [peer] }))
+    // The request opened: its comet flies and its line fades in. A is a ghost.
+    expect(frames.request).toHaveBeenCalled()
+    expect(document.querySelector(`path[data-request="${peer.requestId}"]`)?.classList.contains('activity-line-in')).toBe(true)
+    // The ghost goes: D moves up with FLIP while the comet still flies.
+    boxes.d!.y = 0
+    act(() => { vi.advanceTimersByTime(MOTION_MS.cardLeave) })
+    expect(animations).toHaveLength(1)
+    expect(MOTION_MS.cardLeave).toBeLessThan(MOTION_MS.comet)
+
+    reduced = true
+    act(() => { for (const listener of mediaListeners) listener() })
+    expect(frames.cancel).toHaveBeenCalledWith(7)
+    expect(animations[0]!.cancel).toHaveBeenCalled()
+    expect(document.querySelector(`path[data-request="${peer.requestId}"]`)?.classList.contains('activity-line-in')).toBe(false)
+    // No timer of the dropped motion fires later.
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
