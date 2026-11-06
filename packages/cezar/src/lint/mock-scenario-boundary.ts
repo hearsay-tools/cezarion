@@ -84,14 +84,23 @@ function literals(source: string, code: string): Literal[] {
   return found;
 }
 
+function sharedToken(file: string, token: string): boolean {
+  if (NATIVE_TOKENS.has(token) || FILE_NATIVE_TOKENS[file]?.includes(token)) return false;
+  return SHARED.some(name => token === name || token.startsWith(`${name}-`));
+}
+
 function namesShared(file: string, value: string, regex: boolean): boolean {
   for (const match of value.matchAll(TOKEN)) {
-    const token = match[1]!;
-    if (NATIVE_TOKENS.has(token) || FILE_NATIVE_TOKENS[file]?.includes(token)) continue;
-    if (SHARED.some(name => token === name || token.startsWith(`${name}-`))) return true;
+    if (sharedToken(file, match[1]!)) return true;
   }
-  // A regex may group alternatives after the shared prefix: /mock:(hold|no-progress)/.
-  return regex && /mock:\((?:\?:)?/.test(value) && SHARED.some(name => new RegExp(`\\b${name}\\b`).test(value));
+  if (!regex) return false;
+  // Apply exemptions to individual grouped alternatives, never to the whole expression.
+  for (const group of value.matchAll(/mock:\((?:\?:)?([^)]*)\)/g)) {
+    for (const token of group[1]!.match(/[a-z0-9-]+/g) ?? []) {
+      if (sharedToken(file, token)) return true;
+    }
+  }
+  return false;
 }
 
 export const mockScenarioBoundary: SourceRule = {
