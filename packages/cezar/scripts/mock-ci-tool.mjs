@@ -109,6 +109,13 @@ export async function ciPrompt(backend, wire, text) {
   return JSON.stringify(result.response);
 }
 
+const CEZAR_TOOL_NAME = /cezar-tool\s+([a-z_]+)/;
+
+/** The native approval gate needs the first tool's name before executing the prompt. */
+export function cezarToolName(text) {
+  return new RegExp(`mock:${CEZAR_TOOL_NAME.source}`).exec(text)?.[1];
+}
+
 // `mock:cezar-tool <name> <base64-json-args>` calls any cezar tool with those arguments
 // (hearsay-tools/cezarion#1233). Base64, standard or URL-safe, survives every wire's escaping.
 // Several calls run in order within one turn; `"wait_id": "last"` names the wait the previous
@@ -116,7 +123,7 @@ export async function ciPrompt(backend, wire, text) {
 // them holds the turn there until that file exists, so a test can act between two calls, or
 // between the last call and the turn end (hearsay-tools/cezarion#2397).
 export async function toolPrompt(backend, wire, text) {
-  const steps = [...text.matchAll(/mock:(?:cezar-tool\s+([a-z_]+)\s+([A-Za-z0-9+/=_-]+)|gate\s+([A-Za-z0-9+/=_-]+))/g)];
+  const steps = [...text.matchAll(new RegExp(`mock:(?:${CEZAR_TOOL_NAME.source}\\s+([A-Za-z0-9+/=_-]+)|gate\\s+([A-Za-z0-9+/=_-]+))`, 'g'))];
   if (!steps.some(step => step[1])) throw new Error('mock:cezar-tool needs a tool name and base64 JSON arguments');
   const responses = [];
   let last;

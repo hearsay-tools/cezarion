@@ -92,7 +92,7 @@ async function lifecycle([name, args]) {
 const scenarioContext = {
   runner: 'codex', lifecycle, session: {}, unsupported: ['cezar-wait'], nativeFailureControl: Boolean(failureControl),
   async toolPrompt(prompt) {
-    const tool = /cezar-tool\s+([a-z_]+)/.exec(prompt)?.[1] ?? 'cezar_wait';
+    const tool = (await tools()).cezarToolName(prompt) ?? 'cezar_wait';
     return await mcpToolGate(tool) ? (await tools()).toolPrompt('codex', ciWire, prompt) : 'user rejected MCP tool call';
   },
   async ciPrompt(prompt) {
