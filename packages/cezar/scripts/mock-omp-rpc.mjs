@@ -131,6 +131,7 @@ const scenarioContext = {
   },
 };
 const deferredStart = message => scenarioFor(message, scenarioContext)?.name === 'deferred-turn-start';
+const isSteer = command => command.type === 'prompt' && command.streamingBehavior === 'steer';
 // OMP's tool-approval error with no interactive UI (v18.4.11 tool wrapper, `runner.hasUI()` false).
 const NO_UI_APPROVAL_ERROR = 'Tool "bash" requires approval but no interactive UI available.\nOptions:\n  1. Set tools.approvalMode: yolo in /settings\n  2. Add tools.approval.bash: allow to config\n  3. Use an interactive UI to approve the tool call';
 /** The turn in flight: steers admitted into it are read before it ends (#505). */
@@ -231,7 +232,7 @@ rl.on('line', (line) => {
   // hearsay-tools/cezarion#1112: a late-ack steer is admitted after the turn's last model call.
   // OMP acknowledges it now and, never settling with a queued message, reads it in a further
   // run before `session_settled` (the endTurn `late` path).
-  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && deferredStart(command.message) && command.message.includes(':late-ack')) {
+  if (isSteer(command) && deferredStart(command.message) && command.message.includes(':late-ack')) {
     const admit = () => {
       if (!activeTurn) { setTimeout(admit, 5); return; }
       record({ userText: rawMessage(command), imageCount: (command.images ?? []).length, streamingBehavior: 'steer' });
@@ -244,7 +245,7 @@ rl.on('line', (line) => {
   }
   // hearsay-tools/cezarion#1112: a deferred-start steer is not admitted into the running turn;
   // OMP acknowledges it as its next prompt once that turn settles, with no turn open.
-  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn &&
+  if (isSteer(command) && activeTurn &&
     !deferredStart(command.message)) {
     record({ userText: rawMessage(command), imageCount: (command.images ?? []).length, streamingBehavior: 'steer' });
     // Steers OMP never hands to the running agent: none of them may end its turn.
