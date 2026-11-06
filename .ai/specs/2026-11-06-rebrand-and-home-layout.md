@@ -195,15 +195,34 @@ zero accounts, the cockpit shows a banner with a one-click restore of the newest
 
 ## 6. Delivery
 
-| Phase | PRs | Needs the name? |
-| --- | --- | --- |
-| **P0 Stop the bleed** | (a) `buildChildEnv` never forwards `CEZ_HOME`; the launcher stops writing a default `CEZ_HOME`. (b) Guard compares against `os.userInfo().homedir` (passwd, not `$HOME`), runs for every env object and under `node:test` too; node:test suites load the sandbox setup. (c) Rotating backups for `config.json` and `agent-accounts.json`. (d) Issue to `apptension/toolkit-dev`: audit-agent-readiness probes run foreign suites with a scrubbed env and a temp `HOME`. Ops: drop `CEZ_HOME` from apptension-host's hand-written unit (`~/.config/systemd/user/cezar.service`). | no |
-| **P1 Home object and layout** | `resolveHome`, `Home` passed down, XDG/macOS/Windows layout behind the current names, marker, `HomeStore`, lease, backups for all registry files, test lint. ADR superseding the "literal `~/.cezar`" rule in `paths.ts`. | layout dir name only |
-| **P2 Migration** | `migrateLegacyHome`, canary, server migrate with rollback, launchd label move. | yes |
-| **P3 Rename surface** | npm package and aliases, CLI bins, `SKEIN_*` with `CEZ_*` fallback through one env helper, docs, repo rename, display names, systemd and nginx names. Several mechanical PRs, one per surface. | yes |
-| **P4 Per-project dir** | dual read of `.ai/cezar/` and `.ai/skein/`; `skein migrate-project` (refuses while a task is live; moves the dir; runs `git worktree repair`). | yes |
-| **P5 Window end** | remove aliases and fallbacks. | yes |
+### One release, landed dark
 
-All phases ship in one release (owner decision). Phases stay separate PRs for review; they land on
-an integration branch `rebrand` and merge into `main` together, so no release carries half of it.
-Every phase updates `BACKWARD_COMPATIBILITY.md`, `.env.example` and the area docs it touches.
+The owner wants every phase to reach users together. Two facts shape how:
+
+- Stable `latest` releases are manual (`release.yml`), but every green push to `main`
+  publishes the `dev` dist-tag, and hosts such as apptension-host run `dev` builds. So
+  `main` is close to live.
+- A long-lived integration branch would collect weeks of conflicts with a busy `main`, and
+  the campaign skill requires slices that land on `main` one by one.
+
+So each slice lands on `main` and keeps shipped behavior unchanged, except for safety fixes
+that users cannot see. The new layout, the migration and the new names stay off behind one
+code constant, `SKEIN_SWITCH` in `packages/cezar/src/home/switch.ts` (not an env var; no
+setting). Tests run both states. One **switch PR** turns it on; that PR and the stable
+release are the single user-visible change.
+
+| Phase | Slices (one PR each unless noted) | Visible before the switch? |
+| --- | --- | --- |
+| **P0 Safety** | (a) `buildChildEnv` never forwards `CEZ_HOME` (or any later home variable); the launcher stops writing a default `CEZ_HOME`. (b) The guard compares against `os.userInfo().homedir` (passwd, not `$HOME`), runs for every env object, and covers `node:test`; `test:unit` and `test:package` load the sandbox setup. (c) Rotating backups for `config.json` and `agent-accounts.json`. (d) Issue to `apptension/toolkit-dev`: audit-agent-readiness probes run foreign suites with a scrubbed env and a temp `HOME`. | No: backups appear in the state dir only |
+| **P1 Home object** | (a) `Home` type and `resolveHome` (legacy layout while the switch is off), passed down from entry points; no ambient `cezarHomeDir()`. (b) `HomeStore` writer with `install.json` marker (written into the legacy home too), test-runner refusal and lease. (c) Backups and restore command for every registry-type file; shrink banner. (d) Lint: test code writes only through `Home.sandbox`. ADR superseding the "literal `~/.cezar`" rule. | No (backup restore command is new) |
+| **P2 Layout and migration** | (a) XDG / macOS / Windows / `SKEIN_HOME` resolver. (b) `migrateLegacyHome` with backup, `MOVED.json`, canary. (c) Server migration for systemd units and nginx sites, with rollback. (d) launchd label move. All behind the switch. | No |
+| **P3 Name surfaces** | (a) One env helper: `SKEIN_*` first, `CEZ_*` fallback (additive). (b) `skein` bin added beside `cezarion` and `cez` (additive). (c) Package `@hearsay-tools/skein` prepared; publish waits for the switch. (d) Desktop and mobile new IDs and the bridge build, behind the switch. (e) Docs and display names, merged with the switch PR. | Additive names only |
+| **P4 Project dir** | Dual read of `.ai/cezar/` and `.ai/skein/` (additive); `skein migrate-project` (refuses while a task is live; moves the dir; runs `git worktree repair`). | Command only |
+| **Switch** | Turn `SKEIN_SWITCH` on; deprecation notices start; docs land. Then owner actions: stable release, npm publish and deprecate, repo rename, store listings, apptension-host server migration. | Yes: the release |
+| **P5 Window end** | Remove aliases and `CEZ_*` fallbacks, two minor releases or 60 days after the release. | Yes |
+
+Dependencies: P1(a) before every other P1, P2 and P3(a); P2(a) before P2(b–d); P2(b) before
+P2(c); P1(b) before P2(b). P0 and P3(a–b) run in parallel with P1. The switch needs every
+phase accepted on `main`.
+
+Every slice updates `BACKWARD_COMPATIBILITY.md`, `.env.example` and the area docs it touches.
