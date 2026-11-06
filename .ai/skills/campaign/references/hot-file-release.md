@@ -26,7 +26,7 @@ release condition passes, even if there is no patch overlap.
 ## Compare actual patches
 
 1. For each captured head, inspect its complete branch delta with
-   `git diff --name-status -z --no-renames <merge-base> <head>`, where
+   `git diff --no-relative --name-status -z --no-renames <merge-base> <head>`, where
    `<merge-base>` is `git merge-base <base> <head>`. Treat paths as NUL-delimited
    data, not shell words or newline-delimited names. Confirm Git commands
    succeeded; empty output from a failed command is not an empty patch.
@@ -34,7 +34,11 @@ release condition passes, even if there is no patch overlap.
    `base`: both branches already contain the captured current main. Otherwise
    a main-side rename can map an old path onto a peer's new path; the original
    path sets do not prove independence. Renames appear as deletion plus addition
-   with `--no-renames`, so both paths participate.
+   with `--no-renames`, so both paths participate. Paths overlap if equal or if
+   one is an ancestor of the other at a `/` component boundary: `widget` and
+   `widget/index.ts` overlap, while `widget` and `widgets.ts` do not. Apply this
+   rule to original and normalized path sets; a file/directory collision cannot
+   receive automatic disjoint-path release.
 3. For any pair not cleared by that shortcut, normalize both complete patches
    onto the same current-main base before deciding even path independence. Make disposable local clones outside worker worktrees, with no checkout
    hooks, and import the captured commits from the local repository. Check out
@@ -44,10 +48,12 @@ release condition passes, even if there is no patch overlap.
    history or failed comparison retains the hold; preserve the worker's original
    branch and record the failure before removing only the disposable copies.
 4. In each successful trial, inspect
-   `git diff --no-ext-diff --no-textconv --no-renames --unified=0 <base> <trial-head>`.
+   `git diff --no-relative --no-ext-diff --no-textconv --no-renames --unified=0 <base> <trial-head>`.
    Use the **old-side** hunk coordinates: both diffs now describe the same base.
    Recompute the NUL-delimited changed path sets against `base` using the trial
-   heads. Only these normalized paths can clear a previously stale pair as
+   heads and the same `--no-relative --name-status -z --no-renames` flags. Check
+   ancestor/descendant collisions as well as equal paths. Only these normalized
+   paths can clear a previously stale pair as
    disjoint. Preserve both the original and normalized path evidence.
    Check name/status as well. Shared creation/deletion, rename-related paths,
    binary changes, mode/type changes or other whole-file operations require
@@ -105,7 +111,8 @@ release. Older ledger entries without comparison evidence remain unverified.
 
 | Complete patches on the same base | Patch decision (semantic checks still apply) |
 |---|---|
-| No shared changed path on current main | Release |
+| No equal or ancestor/descendant changed path on current main | Release |
+| One patch adds file `widget`, another adds `widget/index.ts` | Hold for explicit file/directory collision resolution |
 | Original paths disjoint but either branch predates main | Normalize first; a main-side rename may make them overlap |
 | Same short file: replace line 10 vs line 20 | Release; no distance threshold |
 | Both consume line 10 | Release the eligible predecessor; hold its successor |
