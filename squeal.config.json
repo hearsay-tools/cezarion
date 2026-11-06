@@ -22,6 +22,14 @@
     "exclude": []
   },
   "checks": [
+    {
+      "name": "browser",
+      "runner": "vitest",
+      "project": "e2e",
+      "tests": ["packages/web/e2e/*.e2e.ts"],
+      "at": "manual",
+      "limits": { "maxParallel": 1, "maxWorkers": 1, "priority": "low" }
+    },
     { "name": "lint", "lint": true, "at": "stop" }
   ],
   "complexity": {
