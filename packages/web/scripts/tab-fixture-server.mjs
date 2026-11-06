@@ -9,7 +9,10 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 
 // serverPackage: a cezar package directory holding dist/ and web/dist/ (the e2e mirror for the
 // specs, packages/cezar for the production-build benchmark).
-const [root, serverPackage = resolve('.ai/qa/build/cezar'), authMode, taskList, sizesJson] = process.argv.slice(2)
+// `--index` seeds the runs-index workload (hearsay-tools/cezarion#2729) instead of the task-list runs.
+const args = process.argv.slice(2)
+const indexSeed = args.includes('--index')
+const [root, serverPackage = resolve('.ai/qa/build/cezar'), authMode, taskList, sizesJson] = args.filter(arg => !arg.startsWith('--'))
 const sizes = sizesJson ? JSON.parse(sizesJson) : undefined
 const load = file => import(pathToFileURL(resolve(serverPackage, 'dist', file)).href)
 const { publishArtifact, artifactDirectory } = await load('artifacts/store.js')
@@ -27,8 +30,30 @@ for (const project of projectDefinitions) mkdirSync(project.root, { recursive: t
 const projects = projectDefinitions.map(p => ({ ...p, addedAt: new Date().toISOString(), lastOpenedAt: new Date().toISOString(), source: 'local', status: 'not-git' }))
 mkdirSync(process.env.CEZ_HOME, { recursive: true })
 writeFileSync(join(process.env.CEZ_HOME, 'config.json'), JSON.stringify({ projects }))
-const seed = dir => {
+/** The index workload: 808 index roots in two truncated projects (each window holds 200 archived
+ *  roots of 210), plus one running delegation parent in `boot` with four running workers. */
+const seedIndex = (store, projectId) => {
+  for (let i = 0; i < 210; i++) store.setArchived(store.createRun({ title: `Archived ${projectId} ${i}`, task: 'archived', workflow: 'quick-task', steps: [] }).id, true)
+  for (let i = 0; i < (projectId === 'boot' ? 203 : 204); i++) {
+    const run = store.createRun({ title: `Index ${projectId} ${i}`, task: 'index', workflow: 'quick-task', steps: [] })
+    store.updateRun(run.id, { status: 'done' })
+  }
+  if (projectId !== 'boot') return
+  const parent = store.createRun({ title: 'Delegation parent', task: 'parent', workflow: 'quick-task', steps: [] })
+  const workers = Array.from({ length: 4 }, (_, i) => {
+    const worker = store.createRun({ title: `Worker ${i}`, task: 'worker', workflow: 'quick-task', steps: [] })
+    store.updateRun(worker.id, { status: 'running', delegation: { role: 'worker', parentRunId: parent.id, permissions: [],
+      workspace: { ownerRunId: worker.id, resourceId: `resource-${i}`, kind: 'owned-isolated', path: `/tmp/worker-${i}`, branch: `cez/worker-${i}`, baselineSha: 'a'.repeat(40) } } })
+    return worker
+  })
+  store.updateRun(parent.id, { status: 'running', delegation: { role: 'root', permissions: [],
+    receipts: workers.map((worker, i) => ({ requestId: `request-${i}`, workerId: worker.id, requestHash: 'b'.repeat(64) })) } })
+  family = { parent: parent.id, workers: workers.map(worker => worker.id) }
+}
+let family
+const seed = (dir, projectId) => {
   const store = RunStore.open(join(dir, '.ai/cezar'))
+  if (indexSeed) { seedIndex(store, projectId); store.flush(); return store }
   const active = sizes?.active ?? (taskList === 'project' ? 300 : taskList === 'global' ? 30 : 10)
   const archived = sizes?.archived ?? (taskList === 'project' ? 1000 : taskList === 'global' ? 200 : 0)
   for (let i = 0; i < active + archived; i++) {
@@ -38,15 +63,27 @@ const seed = dir => {
   }
   return store
 }
-const store = seed(root)
-for (const project of projects.slice(1)) { const extra = seed(project.root); extra.close() }
+const store = seed(root, 'boot')
+for (const project of projects.slice(1)) { const extra = seed(project.root, project.id); extra.close() }
 const manager = new RunManager(store, root)
 const contexts = new ProjectContexts({ listProjects: async () => projects })
 const stores = new Map([['boot', store]])
 for (const project of projects.slice(1)) stores.set(project.id, (await contexts.context(project.id)).store)
 const runs = [...stores].flatMap(([projectId, value]) => value.listRunIds().map(runId => ({ projectId, runId })))
-let timer, published = 0, proxy
+let timer, published = 0, proxy, ticker, ticks = 0
 const reports = createReportFixture({ stores, projects, root, publishArtifact, artifactDirectory })
+/** Index workload: one-off row updates, and token ticks at `rate` per second round-robin. */
+const indexCommand = command => {
+  for (const update of command.update ?? []) stores.get(update.projectId)?.updateRun(update.runId, update.patch)
+  if (command.tick === undefined) return
+  clearInterval(ticker)
+  const targets = command.tick.runs ?? []
+  if (command.tick.rate > 0 && targets.length) ticker = setInterval(() => {
+    const run = targets[ticks % targets.length]
+    ticks += 1
+    stores.get(run.projectId)?.updateRun(run.runId, { tokensUsed: ticks, currentStepId: `tick-${ticks % 3}` })
+  }, 1000 / command.tick.rate)
+}
 const control = createServer(async (req, res) => {
   let body = ''
   for await (const part of req) { body += part; if (body.length > 16_384) { res.writeHead(413).end(); return } }
@@ -79,10 +116,11 @@ const control = createServer(async (req, res) => {
       sink.flushAll() // Keep the item unfinished: disk replay has no generated text.
     }
     if (command.disconnect) server.closeAllConnections()
+    indexCommand(command)
     if (command.publish) for (const run of command.runs ?? runs) stores.get(run.projectId)?.appendEvent(run.runId, { type: 'item.completed', item: { kind: 'message', id: `publish-${++published}`, role: 'assistant', text: command.publish } })
   }
   res.setHeader('content-type', 'application/json')
-  res.end(JSON.stringify({ runs, published, ...reports.state(), reportIo, listeners: [...stores].map(([projectId, value]) => ({ projectId, event: value.listenerCount('event'), run: value.listenerCount('run'), deleted: value.listenerCount('deleted') })) }))
+  res.end(JSON.stringify({ runs, published, ticks, family, ...reports.state(), reportIo, listeners: [...stores].map(([projectId, value]) => ({ projectId, event: value.listenerCount('event'), run: value.listenerCount('run'), deleted: value.listenerCount('deleted') })) }))
 })
 control.listen(0, '127.0.0.1', () => console.log(`control → http://127.0.0.1:${control.address().port}`))
 const server = startServer({ repoRoot: root, store, manager, contexts, version: 'tab-fixture', bootProjectId: 'boot' }, 0)
@@ -103,7 +141,7 @@ server.once('listening', () => {
   proxy.listen(0, '127.0.0.1', () => console.log(`cockpit → http://127.0.0.1:${proxy.address().port}`))
 })
 process.once('SIGTERM', async () => {
-  clearInterval(timer)
+  clearInterval(timer); clearInterval(ticker)
   reports.stop()
   proxy?.closeAllConnections(); proxy?.close()
   server.closeAllConnections(); server.close(); control.closeAllConnections(); control.close()

@@ -1,6 +1,9 @@
 /** Production-build benchmark for hearsay-tools/cezarion#924.
  * node --import tsx packages/web/scripts/benchmark-tabs.ts --build-root DIR --output FILE
  * --quick selects 1/10 distinct-task cases with 1s warmup/3s sampling for harness smoke only.
+ * --workload index runs the runs-index workload (benchmark-index.ts, hearsay-tools/cezarion#2729);
+ * --views closed,all-tasks,detail, --cpu N (taskset for the cockpit server) and --sustained-ms
+ * apply to it only.
  * All browser protocol work goes through the repository's agent-browser provider seam.
  */
 import { cpus, totalmem, release, platform } from 'node:os'
@@ -12,8 +15,9 @@ import { parseArgs } from 'node:util'
 import { AgentBrowser } from '../e2e/agent-browser.ts'
 import { createTabFixture } from '../e2e/tab-fixture.ts'
 import { pollFor } from '../e2e/poll.ts'
+import { runIndexWorkload } from './benchmark-index.ts'
 
-const { values } = parseArgs({ options: { 'build-root': { type: 'string' }, output: { type: 'string' }, quick: { type: 'boolean' }, windows: { type: 'boolean' }, workload: { type: 'string' }, counts: { type: 'string' } } })
+const { values } = parseArgs({ options: { 'build-root': { type: 'string' }, output: { type: 'string' }, quick: { type: 'boolean' }, windows: { type: 'boolean' }, workload: { type: 'string' }, counts: { type: 'string' }, views: { type: 'string' }, cpu: { type: 'string' }, 'sustained-ms': { type: 'string' }, 'profile-out': { type: 'string' }, 'components-out': { type: 'string' } } })
 if (values.workload === 'reports') {
   const { benchmarkReports } = await import('./benchmark-reports')
   await benchmarkReports(resolve(values['build-root'] ?? '.'), resolve(values.output ?? 'docs/performance/report-shelf-refresh.raw.json'), !!values.quick)
@@ -39,6 +43,12 @@ const report: any = { buildRoot, builtContentSha256: buildHash.digest('hex'), sa
   host: { platform: platform(), release: release(), cpu: cpus()[0]?.model, cores: cpus().length, ramBytes: totalmem() }, warmupMs, sampleMs, streamRatePerRun: 20, cases: [] }
 mkdirSync(dirname(output), { recursive: true })
 const save = () => writeFileSync(output, JSON.stringify(report, null, 2))
+if (values.workload === 'index') {
+  await runIndexWorkload({ buildRoot, report, save, views: values.views?.split(','), cpu: values.cpu, sustainedMs: values['sustained-ms'] ? Number(values['sustained-ms']) : undefined,
+    profileOut: values['profile-out'], componentsOut: values['components-out'] })
+  save()
+  process.exit(0)
+}
 const workloads = values.workload ? [values.workload] : values.quick ? ['distinct'] : ['overview', 'repeated', 'distinct']
 const counts = values.counts ? values.counts.split(',').map(Number) : values.quick ? [1, 10] : [1, 3, 6, 10]
 if (workloads.some(value => !['overview', 'repeated', 'distinct'].includes(value)) || counts.some(value => ![1, 3, 6, 10].includes(value))) throw new Error('Use overview/repeated/distinct and counts from 1,3,6,10')
