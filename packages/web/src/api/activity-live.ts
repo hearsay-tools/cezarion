@@ -29,7 +29,7 @@ export async function getActivity(scope: ActivityScope, opts?: ReadOptions): Pro
   return unwrap(await cez.api.v1.workspace.activity.$get({ query }, init(opts)), '/workspace/activity')
 }
 
-/** An HTTP snapshot never replaces a cached one the server built later. */
+/** A snapshot, read or pushed, never replaces a cached one the server built later. */
 export function newerActivity(cached: ActivitySnapshot | undefined, fetched: ActivitySnapshot): ActivitySnapshot {
   return cached !== undefined && Date.parse(fetched.generatedAt) < Date.parse(cached.generatedAt) ? cached : fetched
 }
@@ -92,11 +92,14 @@ export function useActivityLive(scope: ActivityScope) {
   useEffect(() => {
     let active = true
     // A pending HTTP read is cancelled first, so its older answer cannot land on top of this one.
-    const fold = (value: unknown, http: boolean) => {
+    // Topic frames and HTTP answers alike never replace a snapshot the server built later: a
+    // delayed frame stays behind a newer read. Removal and unavailable frames carry the server's
+    // current clock, so they still win.
+    const fold = (value: unknown) => {
       void client.cancelQueries({ queryKey: key, exact: true }).then(() => {
         if (!active) return
         const next = value as ActivitySnapshot
-        client.setQueryData<ActivitySnapshot>(key, (cached) => (http ? newerActivity(cached, next) : next))
+        client.setQueryData<ActivitySnapshot>(key, (cached) => newerActivity(cached, next))
       })
     }
     // A refused scoped read shows the project unavailable; any other failure is the query's
@@ -113,14 +116,14 @@ export function useActivityLive(scope: ActivityScope) {
         query?.setState({ status: 'error', error, errorUpdatedAt: Date.now(), errorUpdateCount: query.state.errorUpdateCount + 1, fetchStatus: 'idle' })
       })
     }
-    const releaseTopic = subscribeTopic(activityTopic(stable), (value) => fold(value, false))
+    const releaseTopic = subscribeTopic(activityTopic(stable), fold)
     const intervalMs = liveRefetchInterval<number | false>(ACTIVITY_READ_MS)
     let releaseRead: (() => void) | undefined
     const follow = () => {
       const finite = liveTransport() === 'finite' && intervalMs !== false
       if (finite && !releaseRead) {
         releaseRead = subscribeLiveRead({ path: activityPath(stable), intervalMs }, (value, error) => {
-          if (error === undefined) fold(value, true)
+          if (error === undefined) fold(value)
           else failed(readFailure(value, error))
         })
       } else if (!finite && releaseRead) {

@@ -99,6 +99,24 @@ describe('useActivityLive', () => {
     expect(title()).toBe('pushed')
   })
 
+  it('never lets a delayed older topic frame replace a newer snapshot', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(snapshot('read', '2026-11-05T00:00:05.000Z')))))
+    configureLiveSession({ local: true, bootProject: 'boot', apiBase: '' })
+    const { title } = mount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(title()).toBe('read')
+    const worker = Worker.all[0]!
+    const sync = synced(worker)
+    const push = async (value: unknown) => act(async () => {
+      worker.port.onmessage?.({ data: { type: 'value', version: LIVE_PROTOCOL, epoch: sync.epoch, id: sync.entries[0]!.id, value } })
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    await push(snapshot('delayed', '2026-11-05T00:00:03.000Z')) // built before the read answered
+    expect(title()).toBe('read')
+    await push(snapshot('newer', '2026-11-05T00:00:06.000Z'))
+    expect(title()).toBe('newer')
+  })
+
   it('never lets an older HTTP answer replace a newer cached snapshot', async () => {
     configureLiveSession({ local: true, bootProject: 'boot', apiBase: '' })
     const { client, title } = mount()
