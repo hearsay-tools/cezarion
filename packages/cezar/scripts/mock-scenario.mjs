@@ -197,10 +197,15 @@ function* autonomous(prompt, context) {
   yield end();
 }
 
+function autonomousVariant(prompt) {
+  if (has(prompt, 'autonomous-cezar-ask-cap')) return 'cezar-ask-cap';
+  if (has(prompt, 'autonomous-cap')) return 'cap';
+}
+
 function earlyScenario(prompt, context) {
   const matches = name => has(prompt, name) && !context.unsupported?.includes(name.replace(/:$/, ''));
   if (matches('autonomous') || !context.unsupported?.includes('autonomous') && prompt.startsWith('Continue working autonomously until the task is fully complete.')) {
-    return scenario('autonomous', autonomous(prompt, context), { early: true, beforeFailure: true });
+    return scenario('autonomous', autonomous(prompt, context), { early: true, beforeFailure: true, variant: autonomousVariant(prompt) });
   }
   if (matches('silent-tail') || matches('tool-tail') || !context.unsupported?.includes('silent-tail') && silentNudge(prompt)) {
     return scenario(matches('tool-tail') ? 'tool-tail' : 'silent-tail', silentSteps(prompt, context), { early: true, beforeFailure: true });

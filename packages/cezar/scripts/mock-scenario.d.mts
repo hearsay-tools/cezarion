@@ -43,6 +43,7 @@ export type Step = OpenStep | TextStep | ReasoningStep | ToolStep | ChildStep | 
   | { kind: 'park'; prompt: string }
   | { kind: 'stall'; prompt: string };
 export interface Scenario {
+  variant?: 'cap' | 'cezar-ask-cap';
   name: string;
   beforeFailure: boolean;
   early?: boolean;

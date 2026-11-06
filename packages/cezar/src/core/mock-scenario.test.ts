@@ -61,6 +61,16 @@ describe('shared mock scenario selection', () => {
     }
   });
 
+  it.each([
+    ['mock:autonomous', undefined],
+    ['mock:autonomous-cap', 'cap'],
+    ['mock:autonomous-cezar-ask-cap', 'cezar-ask-cap'],
+    ['mock:autonomous-cap mock:autonomous-cezar-ask-cap', 'cezar-ask-cap'],
+    ['mock:autonomous unrelated-cap', undefined],
+  ])('reports the autonomous variant for %s', (prompt, variant) => {
+    expect(scenarioFor(prompt, context())?.variant).toBe(variant);
+  });
+
   it('delegates the deferred reply to each native encoder after its start delay', async () => {
     vi.useFakeTimers();
     try {
