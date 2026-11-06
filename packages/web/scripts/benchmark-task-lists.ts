@@ -37,7 +37,7 @@ function fingerprint(path: string) {
 }
 fingerprint(resolve(root, 'packages/cezar/dist'))
 fingerprint(resolve(root, 'packages/cezar/web/dist'))
-const report: any = { revision: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), productionProfilingBuild: true, builtContentSha256: builtContent.digest('hex'), sourceDirty: !!execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(), quick: !!values.quick, host: { cpu: cpus()[0]?.model, affinity: readFileSync('/proc/self/status', 'utf8').match(/Cpus_allowed_list:\s*(.*)/)?.[1] }, cases: [] }
+const report: any = { revision: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), productionProfilingBuild: true, workloadSha256: createHash('sha256').update(readFileSync(new URL(import.meta.url))).digest('hex'), builtContentSha256: builtContent.digest('hex'), sourceDirty: !!execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(), quick: !!values.quick, host: { cpu: cpus()[0]?.model, affinity: readFileSync('/proc/self/status', 'utf8').match(/Cpus_allowed_list:\s*(.*)/)?.[1] }, cases: [] }
 mkdirSync(dirname(output), { recursive: true })
 const save = () => writeFileSync(output, JSON.stringify(report, null, 2))
 // React's profiling build records actualDuration when a DevTools consumer is installed before boot.
@@ -107,6 +107,7 @@ for (const scope of ['project', 'global'] as const) {
         await page('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
         await page('Page.navigate', { url: `${fixture.origin}${scope === 'project' ? '/p/boot/' : '/tasks'}${setting === 'grouped' ? '?group=project' : ''}` })
         await until(`document.querySelector('[data-slot="${scope === 'project' ? 'task-summary-row' : 'global-task-row'}"]')`)
+        await evaluate('window.__taskListProbe.commits=[];window.__taskListProbe.longTasks=[];window.__taskListProbe.events=[]')
         const settingAt = performance.now()
         if (setting === 'detailed') {
           await click(button('Columns')); await click(button('Resource columns'))
@@ -116,7 +117,7 @@ for (const scope of ['project', 'global'] as const) {
         await page('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
         await frame()
         await until('window.__taskListProbe.root')
-        await evaluate('window.__taskListProbe.commits=[];window.__taskListProbe.longTasks=[];window.__taskListProbe.events=[]')
+        await evaluate('window.__taskListProbe.commits=[]')
         const interactions: any[] = setting === 'detailed' ? [{ name: 'Resource columns setting', elapsedMs: performance.now() - settingAt }] : []
         if (view === 'archived') { const at = performance.now(); await loadAllArchived(); interactions.push({ name: 'Archived tab and paging', elapsedMs: performance.now() - at }) }
         const streamAt = performance.now()
@@ -145,7 +146,7 @@ for (const scope of ['project', 'global'] as const) {
         console.log(`${scope} ${setting} ${view} ${repetition}: ${sample.mountedRows} rows, ${sample.fibers} fibers`)
       }
       await request('Target.closeTarget', { targetId })
-    })
+    }, { requestTimeoutMs: 60_000 })
   } finally { browser?.close(); await fixture.stop() }
 }
 save()
