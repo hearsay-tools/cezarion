@@ -39,8 +39,9 @@ below is the campaign-specific override to that workflow.
 Implement <repository-qualified issue> from approved plan <path/comment and
 revision>. Read <shared epic decisions> and <relevant area rules/ADRs> first.
 Coordinator: <run id>. Merge authority: <owner's words, or "The owner merges">.
-PR-opening gate: <coordinator actual-overlap release check, or none>. When gated,
-report a complete committed head and readiness evidence; request release and
+PR-opening gate: coordinator actual-overlap release check for every ready branch,
+even without a predicted hot file. Report a complete committed head and readiness
+evidence; request release and
 open only after an explicit reply for that head. A changed head or base
 invalidates release: request a fresh check under campaign/references/hot-file-release.md.
 

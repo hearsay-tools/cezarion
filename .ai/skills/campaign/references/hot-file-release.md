@@ -9,12 +9,13 @@ PR, never merging it.
 
 ## Capture complete evidence
 
-On a gated worker's ready request, fetch origin/main and record its full SHA
+On every worker's ready request, fetch origin/main and record its full SHA
 as `base`. Capture the candidate's committed head and every other outstanding
 campaign branch/PR head whose work could interact. Include branches not yet
 released, not just the original blocker. Require each worker's confirmation
 that its patch is complete, its worktree clean and its readiness evidence
-current. A partial diff, missing branch, dirty tree or missing confirmation
+current. Predicted hot files are estimates, never a condition for checking:
+older briefs with a `none` gate still require coordinator release. A partial diff, missing branch, dirty tree or missing confirmation
 cannot clear a hold. Record the owner, next action and matching worker/request,
 PR or human wake; unrelated eligible work can continue.
 
