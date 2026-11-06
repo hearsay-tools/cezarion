@@ -30,7 +30,7 @@ beforeAll(async () => {
   writeFileSync(join(bin, 'gh'), `#!/usr/bin/env node
 const { appendFileSync } = require('node:fs');
 const args = process.argv.slice(2);
-appendFileSync(${JSON.stringify(ghCalls)}, JSON.stringify(args) + '\n');
+appendFileSync(${JSON.stringify(ghCalls)}, JSON.stringify(args) + '\\n');
 if (args[0] === 'api' && args.includes('/search/issues')) process.stdout.write('{"items":[]}');
 else { process.stderr.write('Unexpected fixture gh command'); process.exitCode = 1; }
 `, { mode: 0o755 })
