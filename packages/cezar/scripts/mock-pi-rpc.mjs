@@ -1,60 +1,17 @@
 #!/usr/bin/env node
+import { stall, waitForRelease } from './mock-lifecycle.mjs';
+import { closeSync } from 'node:fs';
 // Load only when configured: ordinary mock turns retain their event-loop ordering.
 const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
   : (await import('./mock-failure-control.mjs')).readFailureControl();
 const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
   : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['reject', 'hold-ack', 'hold-response']);
-// Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
-import { spawn as watchdogSpawn } from 'node:child_process';
-import { closeSync as watchdogCloseInput, renameSync as watchdogRename, writeFileSync as watchdogWrite, existsSync as promptAckReleased } from 'node:fs';
-// Publish a pid atomically (temporary sibling, then rename): a test reading it sees no
-// file or a whole pid, never the empty file whose Number() is 0 (hearsay-tools/cezarion#953).
-function watchdogWritePid(file, pid) { const tmp = `${file}.${process.pid}.tmp`; watchdogWrite(tmp, pid); watchdogRename(tmp, file); }
-function watchdogStall(prompt) {
-  if (!prompt.includes('mock:no-progress')) return false;
-  if (prompt.includes('input-closed')) {
-    watchdogCloseInput(0);
-    watchdogWritePid('input-closed.pid', String(process.pid));
-    // The S29 acknowledgement gate keeps the native pipe closed while the test
-    // releases the initial prompt ACK. All other fixtures retain their exit.
-    setTimeout(() => process.exit(0), prompt.includes('mock:gate-prompt-ack') ? 15_000 : 300);
-  }
-  if (prompt.includes('ignore-term')) {
-    process.removeAllListeners('SIGTERM');
-    process.on('SIGTERM', () => {});
-    // Test-cleanup backstop, deliberately longer than the asserted teardown bound.
-    setTimeout(() => process.exit(0), 12_000);
-  }
-  if (prompt.includes('held-pipe')) {
-    watchdogSpawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', process.stdout, process.stderr] });
-  }
-  if (prompt.includes('leftover')) {
-    // hearsay-tools/cezarion#890: one child stays in the session's process group and ignores
-    // SIGTERM; one leaves the group with setsid. Both exit on their own as a cleanup backstop.
-    const leftover = (file) => `process.on('SIGTERM',()=>{}); const fs = require('fs'); fs.writeFileSync(${JSON.stringify(`${file}.tmp`)}, String(process.pid)); fs.renameSync(${JSON.stringify(`${file}.tmp`)}, ${JSON.stringify(file)}); setTimeout(()=>{},20000)`;
-    watchdogSpawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
-    watchdogSpawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
-  }
-  // Publish readiness after mode setup: another process may signal us as soon as it sees it.
-  watchdogWritePid('watchdog.pid', String(process.pid));
-  return true;
-}
-
 import readline from 'node:readline';
-import { appendFileSync, existsSync as mockReleaseExists } from 'node:fs';
+import { appendFileSync, existsSync as promptAckReleased } from 'node:fs';
 import { rawMessage, stripCommandMessage } from './mock-session-context.mjs';
-// Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
 const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-async function waitForMockRelease(fallbackMs) {
-  const file = process.env.CEZ_MOCK_RELEASE_FILE;
-  if (!file) { if (fallbackMs) await sleep(fallbackMs); return; }
-  const deadline = Date.now() + 15_000;
-  while (!mockReleaseExists(file)) {
-    if (Date.now() > deadline) throw new Error('CEZ_MOCK_RELEASE_FILE was not created');
-    await sleep(10);
-  }
-}
+
 if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(process.argv.slice(2))}\n`);
 
 // Pi handles SIGTERM and reports 128 + signal, rather than a null exit code.
@@ -364,7 +321,7 @@ async function respondHeld(command, reply) {
   send({ id: command.id, type: 'response', command: 'prompt', success: true });
   send({ type: 'agent_start' });
   send({ type: 'turn_start' });
-  await waitForMockRelease(400);
+  await waitForRelease(400);
   sendText([await reply()]);
   sendTurnEnd();
 }
@@ -396,12 +353,12 @@ async function respondAsk(command) {
 async function respondProgress(command) {
   const gated = command.message.includes('mock:gate-prompt-ack');
   if (gated) {
-    watchdogStall(command.message);
+    stall(command.message, { closeInput: () => closeSync(0) });
     while (!promptAckReleased('input-ack.release')) await sleep(10);
   }
   send({ id: command.id, type: 'response', command: 'prompt', success: true });
   send({ type: 'agent_start' }); send({ type: 'turn_start' });
-  if (!gated) watchdogStall(command.message);
+  if (!gated) stall(command.message, { closeInput: () => closeSync(0) });
   if (command.message.includes('mock:busy-progress')) {
     return respondBusyProgress();
   }
@@ -417,7 +374,7 @@ async function respondHoldGated(command) {
   send({ id: command.id, type: 'response', command: 'prompt', success: true });
   send({ type: 'agent_start' });
   send({ type: 'turn_start' });
-  await waitForMockRelease(250);
+  await waitForRelease(250);
   sendText(['parity hold-gated: content after the pause']);
   await sleep(250);
   sendTurnEnd();
@@ -558,7 +515,7 @@ async function respondFinalNudge(command, silent) {
   send({ id: command.id, type: 'response', command: 'prompt', success: true });
   const kind = silent.finalMessageNudgeKind();
   if (kind === 'ack-only') return;
-  if (kind === 'late') await waitForMockRelease(silent.LATE_REPLY_MS);
+  if (kind === 'late') await waitForRelease(silent.LATE_REPLY_MS);
   send({ type: 'agent_start' });
   send({ type: 'turn_start' });
   return finishFinalNudge(silent, kind);

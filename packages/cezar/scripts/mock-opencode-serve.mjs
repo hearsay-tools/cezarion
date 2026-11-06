@@ -1,44 +1,11 @@
 #!/usr/bin/env node
+import { stall, waitForRelease } from './mock-lifecycle.mjs';
 // Load only when configured: ordinary mock turns retain their event-loop ordering.
 const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
   : (await import('./mock-failure-control.mjs')).readFailureControl();
 const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
   : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['reject', 'hold-ack', 'hold-response']);
-// Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
-import { spawn as watchdogSpawn } from 'node:child_process';
-import { renameSync as watchdogRename, writeFileSync as watchdogWrite } from 'node:fs';
-// Publish a pid atomically (temporary sibling, then rename): a test reading it sees no
-// file or a whole pid, never the empty file whose Number() is 0 (hearsay-tools/cezarion#953).
-function watchdogWritePid(file, pid) { const tmp = `${file}.${process.pid}.tmp`; watchdogWrite(tmp, pid); watchdogRename(tmp, file); }
 let inputClosed = false;
-function watchdogStall(prompt) {
-  if (!prompt.includes('mock:no-progress')) return false;
-  if (prompt.includes('input-closed')) {
-    inputClosed = true;
-    watchdogWritePid('input-closed.pid', String(process.pid));
-    setTimeout(() => process.exit(0), 300);
-  }
-  if (prompt.includes('ignore-term')) {
-    process.removeAllListeners('SIGTERM');
-    process.on('SIGTERM', () => {});
-    // Test-cleanup backstop, deliberately longer than the asserted teardown bound.
-    setTimeout(() => process.exit(0), 12_000);
-  }
-  if (prompt.includes('held-pipe')) {
-    watchdogSpawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', process.stdout, process.stderr] });
-  }
-  if (prompt.includes('leftover')) {
-    // hearsay-tools/cezarion#890: one child stays in the session's process group and ignores
-    // SIGTERM; one leaves the group with setsid. Both exit on their own as a cleanup backstop.
-    const leftover = (file) => `process.on('SIGTERM',()=>{}); const fs = require('fs'); fs.writeFileSync(${JSON.stringify(`${file}.tmp`)}, String(process.pid)); fs.renameSync(${JSON.stringify(`${file}.tmp`)}, ${JSON.stringify(file)}); setTimeout(()=>{},20000)`;
-    watchdogSpawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
-    watchdogSpawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
-  }
-  // Publish readiness after mode setup: another process may signal us as soon as it sees it.
-  watchdogWritePid('watchdog.pid', String(process.pid));
-  return true;
-}
-
 // Bundled dry-run mock of `opencode serve` — speaks just enough of the HTTP+SSE
 // API (§4 of agent-event-protocols.md) for the runner wiring test in
 // `opencode-ui-mapper.test.ts`: POST /session, GET /event (SSE bus), one
@@ -49,7 +16,6 @@ function watchdogStall(prompt) {
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync as sessionStoreExists, mkdirSync, readFileSync, writeFileSync as sessionStoreWrite } from 'node:fs';
 import { createServer } from 'node:http';
-// Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
 const { answerNudgeBody, silentNudge } = await import('./mock-nudge.mjs');
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -81,15 +47,6 @@ async function afterParityPark(prompt) {
   const gate = /parity-release=([^\s"\\]+)/.exec(prompt)?.[1];
   if (!gate) throw new Error('post-park scenario requires a release path');
   while (!parityGateFs.existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
-}
-async function waitForMockRelease(fallbackMs) {
-  const file = process.env.CEZ_MOCK_RELEASE_FILE;
-  if (!file) { if (fallbackMs) await new Promise(r => setTimeout(r, fallbackMs)); return; }
-  const deadline = Date.now() + 15_000;
-  while (!parityGateFs.existsSync(file)) {
-    if (Date.now() > deadline) throw new Error('CEZ_MOCK_RELEASE_FILE was not created');
-    await new Promise(r => setTimeout(r, 10));
-  }
 }
 
 const args = process.argv.slice(2);
@@ -341,7 +298,7 @@ const lateReplies = [
   [body => body.includes('mock:cezar-done'), replyWithDone],
   [body => body.includes('mock:hold-cezar-ask'), replyWithHeldAsk],
   [body => body.includes('mock:cezar-ask'), body => replyWithHeldAsk(body, 0)],
-  [body => watchdogStall(body), acknowledgeWatchdog],
+  [body => stall(body, { closeInput: () => { inputClosed = true; } }), acknowledgeWatchdog],
   [body => body.includes('mock:busy-progress'), replyWithBusyProgress],
   [body => body.includes('mock:hold-gated'), replyWithGatedHold],
   [body => body.includes('mock:hold'), replyWithHold],
@@ -711,7 +668,7 @@ async function replyWithSettledApproval(body) {
   const resolved = body.includes('mock:approval-resolved');
   send({ type: 'message.updated', properties: { info: info({}) } });
   sendPermissionAsk('per_mock_1', 'bash', ['git status --short'], ['git status *']);
-  await waitForMockRelease();
+  await waitForRelease();
   pendingPermissionAsks.delete('per_mock_1');
   if (resolved) send({ type: 'permission.replied', properties: { sessionID: SESSION_ID, requestID: 'per_mock_1', reply: 'once' } });
   textPart('prt_approval_settled', await finishText(resolved ? 'Native approval settled without a cockpit answer.'
@@ -817,7 +774,7 @@ function sendUsageThenIdle() {
 async function replyWithHeldDone(body) {
   // Pause, then cezar_done, so a mid-turn sendMessage can queue behind the
   // running turn and race the close (#486).
-  await waitForMockRelease(400);
+  await waitForRelease(400);
   const text = await finishText('parity hold-done: content after the pause');
   sendTextTurn('prt_mock_hold_done', text);
   return;
@@ -835,7 +792,7 @@ async function replyWithHeldAsk(body, hold = 250) {
   // Portable cezar_ask after a pause, so a mid-turn sendMessage can queue
   // and then race the park (run.ts must discard that waiter). `mock:cezar-ask`
   // is the same ask without the pause (the native ask is `mock:ask`).
-  if (hold) await waitForMockRelease(hold);
+  if (hold) await waitForRelease(hold);
   const ask = 'Pick one.' + await lifecycle((await tools()).ask([{ header: 'Library', question: 'Which date library should I standardize on?',
     options: [{ label: 'date-fns', description: 'Tree-shakeable, functional' }, { label: 'Luxon', description: 'Immutable, tz-aware' }] }]));
   sendTextTurn('prt_mock_hold_ask', ask);
@@ -858,7 +815,7 @@ async function replyWithBusyProgress(body) {
 }
 
 async function replyWithGatedHold(body) {
-  await waitForMockRelease(250);
+  await waitForRelease(250);
   const gated = 'parity hold-gated: content after the pause';
   send({ type: 'message.updated', properties: { info: info({}) } });
   send({ type: 'message.part.updated', properties: { part: {
@@ -1095,7 +1052,7 @@ async function prepareSilentTail(body) {
     beats.unref?.();
     return true;
   }
-  if (silent.isLateNudge(prompt)) await waitForMockRelease(silent.LATE_REPLY_MS);
+  if (silent.isLateNudge(prompt)) await waitForRelease(silent.LATE_REPLY_MS);
   return false;
 }
 
