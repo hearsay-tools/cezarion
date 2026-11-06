@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createLiveCoordinator, onLiveReconcile } from './live-coordinator'
-import { LIVE_PROTOCOL } from './live-protocol'
+import { LIVE_PROTOCOL, LIVE_WORKER_NAME } from './live-protocol'
 
 class Worker {
   static all: Worker[] = []
@@ -111,6 +111,21 @@ describe('worker recovery boundaries', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(Worker.all[0]!.port.close).toHaveBeenCalled()
     expect(fetch).toHaveBeenCalledWith('/api/v1/workspace/run-event-batches', expect.objectContaining({ credentials: 'include' }))
+  })
+  it('does not attach a workspace demand to a worker that announces protocol 2 (hearsay-tools/cezarion#2729)', async () => {
+    // An older open tab keeps a version-2 worker alive across an upgrade. That worker never sends
+    // a late subscriber the stream's ready, so a new document must not take frames from it.
+    expect(LIVE_PROTOCOL).toBe(3)
+    expect(LIVE_WORKER_NAME).toBe('cezar-live-v3')
+    const frame = vi.fn()
+    coordinator.configure(local)
+    coordinator.subscribe({ kind: 'workspace' }, { frame })
+    const worker = Worker.all[0]!
+    worker.reply({ type: 'hello', version: 2 })
+    worker.reply({ type: 'frame', version: 2, epoch: 1, id: '1', frame: { event: 'run-summary', data: '{}', id: '' } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(worker.port.close).toHaveBeenCalled()
+    expect(frame).not.toHaveBeenCalled()
   })
   it('clears shared delivery and uses document authentication after an authorization failure', async () => {
     const frame = vi.fn()

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createLiveOwner, type LivePort, type LiveOwnerDeps } from './live-owner'
 import { LIVE_PROTOCOL } from './live-protocol'
+import { createWorkspaceSeqFence } from './events'
 
 class Port implements LivePort {
   onmessage: ((event: { data: unknown }) => void) | null = null
@@ -180,6 +181,34 @@ describe('shared live ownership', () => {
       const rejoined = port.frames.slice(before).filter(frame => frame.type === 'frame').map(frame => frame.frame)
       expect(rejoined[0]).toEqual(ready('g2', 1))
       expect(rejoined[1]).toMatchObject({ event: 'ping' })
+      owner.dispose()
+    })
+
+    it('a demand change (new epoch) in the same generation sends no ready, so a frame dropped under the old epoch still shows as a gap', async () => {
+      const owner = createLiveOwner(deps)
+      const port = new Port(); owner.attach(port); port.sync('a', [workspace], 1)
+      await vi.advanceTimersByTimeAsync(0)
+      streams[0]!.frame(ready('g1', 10))
+      streams[0]!.frame({ event: 'ping', data: '', id: '' })
+      // The document has already moved to epoch 2 (a demand change), so it drops seq 11.
+      streams[0]!.frame(summary(11))
+      port.sync('a', [workspace, run()], 2)
+      await vi.advanceTimersByTimeAsync(0)
+      streams[0]!.frame(summary(12))
+      // The document's own fence over the frames it accepts. It moved to epoch 2 just before seq 11
+      // arrived, so from then on it drops every epoch-1 message.
+      const fence = createWorkspaceSeqFence()
+      const gaps: boolean[] = []
+      let documentEpoch = 1
+      for (const message of port.frames) {
+        if (message.type !== 'frame' || !message.frame.data) continue
+        const data = JSON.parse(message.frame.data) as { seq: number }
+        if (message.frame.event === 'run-summary' && data.seq === 11) documentEpoch = 2
+        if (message.epoch !== documentEpoch) continue
+        if (message.frame.event === 'ready') fence.ready(data.seq)
+        else gaps.push(fence.frame(data.seq))
+      }
+      expect(gaps).toEqual([true])
       owner.dispose()
     })
 
