@@ -31,12 +31,10 @@ afterAll(async () => {
 })
 
 it('hides automations and refuses its API only with the explicit opt-out', async () => {
-  browser.goto(`${base}/p/${project}/`)
-  browser.waitForFunction(`document.querySelector('[data-slot="sidebar"]') !== null`)
-  expect(browser.count('[data-slot="sidebar"] a[href$="/automations"]')).toBe(0)
   browser.goto(`${base}/p/${project}/automations`)
   browser.waitForFunction(`document.body.textContent.includes('Automations are off')`)
   expect(browser.text('main')).toContain('Unset CEZ_AUTOMATIONS')
+  expect(browser.count('[data-slot="sidebar"] a[href$="/automations"]')).toBe(0)
   const refused = await fetch(`${base}/api/v1/automations`)
   expect(refused.status).toBe(409)
   expect(((await refused.json()) as { error: string }).error).toContain('unset CEZ_AUTOMATIONS')

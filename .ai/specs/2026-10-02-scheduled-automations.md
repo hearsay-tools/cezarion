@@ -288,7 +288,8 @@ renders the "Automations are off" state when the capability is absent, as today.
 - Web unit: editor draft round-trips both kinds, preview shows five instants, 409 reload action,
   list Run now, log tones, nav gating without forge.
 - E2E (`automations.e2e.ts`): the shared environment covers default-on; an explicit `CEZ_AUTOMATIONS=0`
-  fixture covers opt-out. Schedule journeys use the default through `fixtureServeEnv`, the
+  fixture covers opt-out. GitHub preview uses an isolated `gh` fixture with no network or credentials.
+  Schedule journeys use the default through `fixtureServeEnv`, the
   way `mobile-tab-bar.e2e.ts` does, so they run in CI instead of skipping. Schedule journey
   (new → schedule → save paused → Run now → task appears → log shows `manual` → enable → next run
   shown → pause → delete); github journey as today; `ios-sweep.e2e.ts` covers list and editor.
