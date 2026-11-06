@@ -25,7 +25,7 @@ import { openInTerminal } from './open-in-terminal.ts';
 import type { ProjectContext, ProjectContexts } from './project-context.ts';
 import { unavailableProviderMessage } from './provider-action-gate.ts';
 import type { ProviderRuntimeAuthObserver } from './provider-auth-runtime.ts';
-import type { ServerDeps } from './server.ts';
+import type { ServerDeps, WorkspaceEventBus } from './server.ts';
 
 /** The host-wide services `createApp` always has: the injected one, or the real default. */
 type HostServiceKey = 'modelCatalog' | 'providerAuth' | 'workspaceConfig' | 'openTerminal' | 'openFile' | 'openApp';
@@ -91,6 +91,11 @@ export function createProviderStatus(services: Pick<HostServices, 'modelCatalog'
     return unavailableProviderMessage(required, await providerStatus({ refresh: true }));
   };
   return { providerStatus, providerActionError, invalidateHostModels };
+}
+
+export function emitProviderRow(workspaceEvents: WorkspaceEventBus, providers: ProviderStatusResponse['providers'], id: ProviderId): void {
+  const row = providers.find(provider => provider.provider === id);
+  if (row) workspaceEvents.emit('provider-status', row);
 }
 
 /**

@@ -288,6 +288,7 @@ import {
   attachProjectWebhooks,
   createBootContext,
   createProviderStatus,
+  emitProviderRow,
   resolveServerDeps,
   watchProviderRuntimeAuth,
 } from './server-deps.ts';
@@ -690,10 +691,6 @@ export function createApp(deps: ServerDeps) {
   const { providerStatus, providerActionError, invalidateHostModels } =
     createProviderStatus({ modelCatalog, providerAuth, workspaceConfig });
 
-  const emitProviderRow = (providers: Awaited<ReturnType<typeof providerStatus>>['providers'], id: ProviderId) => {
-    const row = providers.find(provider => provider.provider === id);
-    if (row) workspaceEvents.emit('provider-status', row);
-  };
   const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot, bootProjectId, bindHost, home: deps.home });
   const { resolveBootProject } = workspaceProjects;
   // Health's workspace garnish: id+name ONLY — never `root` (#431, see the
@@ -1390,7 +1387,7 @@ export function createApp(deps: ServerDeps) {
           await providerAuth.status(),
           workspace.disabledProviders,
         );
-        emitProviderRow(result.providers, provider.data);
+        emitProviderRow(workspaceEvents, result.providers, provider.data);
         return c.json(result);
       },
     )
@@ -1407,7 +1404,7 @@ export function createApp(deps: ServerDeps) {
         }
         invalidateHostModels(provider.data);
         const result = await providerStatus({ refresh: true });
-        emitProviderRow(result.providers, provider.data);
+        emitProviderRow(workspaceEvents, result.providers, provider.data);
         return c.json(result);
       },
     )
