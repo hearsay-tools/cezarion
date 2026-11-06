@@ -4,6 +4,7 @@ import type { ActivitySnapshot } from '@open-mercato/cezar-contract';
 import { ACTIVITY_RATE_SECONDS, activityToolSchema } from '@open-mercato/cezar-contract/activity';
 import { makePrWait, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { fakeStore, makeRoot, NOW } from '../activity/activity.testkit.ts';
+import { ActivityDemand } from '../activity/demand.ts';
 import { ACTIVITY_COALESCE_MS } from '../activity/publisher.ts';
 import { ToolActivityTracker } from '../activity/tool-activity.ts';
 import { CiProgressRegistry } from '../ci-wait/progress.ts';
@@ -43,6 +44,14 @@ function wire(options: { boot: RunRecord[]; docs?: RunRecord[] }) {
   const topics = new Map<string, TopicPublisher>();
   const families = new Map<string, TopicFamilyResolver>();
   const closeListeners = new Set<() => void>();
+  // While held, every source read waits: a test can close the server in the middle of one.
+  let gate: Promise<void> | undefined;
+  const hold = () => {
+    let release!: () => void;
+    gate = new Promise<void>((resolve) => { release = resolve; });
+    return () => { gate = undefined; release(); };
+  };
+  const demand = new ActivityDemand();
   const hub: SocketHub = {
     registerTopic: (name, publisher) => { topics.set(name, publisher); },
     registerTopicFamily: (prefix, resolve) => { families.set(prefix, resolve); },
@@ -50,11 +59,12 @@ function wire(options: { boot: RunRecord[]; docs?: RunRecord[] }) {
     close: () => { for (const listener of closeListeners) listener(); },
     onClose: (listener) => { closeListeners.add(listener); return () => closeListeners.delete(listener); },
   };
-  createActivityRoutes({
+  const app = createActivityRoutes({
+    demand,
     bootContext: boot,
     contexts: { peek: (id) => (id === 'docs' ? docs : undefined) },
     workspaceProjects: {
-      listVisibleProjects: async () => [{ id: 'boot', name: 'Boot' }, { id: 'docs', name: 'Docs' }] as never,
+      listVisibleProjects: async () => { await gate; return [{ id: 'boot', name: 'Boot' }, { id: 'docs', name: 'Docs' }] as never; },
       resolveBootProject: async () => 'boot',
       projectFailure: () => ({ error: 'unavailable', status: 503 }),
       resolveLiveProject: async (id: string) => {
@@ -74,7 +84,7 @@ function wire(options: { boot: RunRecord[]; docs?: RunRecord[] }) {
     await publisher.snapshot();
     return { frames, stop };
   };
-  return { registries, toolActivity, hub, subscribe };
+  return { registries, toolActivity, hub, subscribe, families, hold, demand, app };
 }
 
 describe('activity route wiring', () => {
@@ -176,5 +186,37 @@ describe('activity route wiring', () => {
     expect(boot.frames).toEqual([]); // nor wakes a publisher
     boot.stop();
     docs.stop();
+  });
+
+  it('plugs nothing for a first read that finishes after the server closed', async () => {
+    const wait = makePrWait();
+    const { registries, hub, families, hold } = wire({ boot: [makeRoot({ status: RUN_STATUS.waiting, waits: [wait] })] });
+    registries.boot.publish(wait.id, [{ name: 'build', state: 'PENDING', link: '', bucket: 'pending' }]);
+    const publisher = (await families.get(ACTIVITY_PROJECT_TOPIC_PREFIX)!('boot'))!;
+    const frames: ActivitySnapshot[] = [];
+    const stop = publisher.start((data) => frames.push(data as ActivitySnapshot));
+
+    const release = hold();
+    const reading = publisher.snapshot();
+    hub.close();
+    release();
+    await reading;
+    // The subscriber holds demand for the project, but the registry never got it.
+    expect(registries.boot.wanted(wait.id)).toBe(false);
+    registries.boot.publish(wait.id, [{ name: 'build', state: 'SUCCESS', link: '', bucket: 'pass' }]);
+    await vi.advanceTimersByTimeAsync(ACTIVITY_COALESCE_MS);
+    expect(frames).toEqual([]);
+    stop();
+  });
+
+  it('marks no demand for an HTTP read that answers after the server closed', async () => {
+    const { hub, hold, demand, app } = wire({ boot: [makeRoot({ status: RUN_STATUS.running })] });
+    const release = hold();
+    const answer = app.request('/workspace/activity?project=boot');
+    await vi.advanceTimersByTimeAsync(0);
+    hub.close();
+    release();
+    expect((await answer).status).toBe(200);
+    expect(demand.has('boot')).toBe(false);
   });
 });

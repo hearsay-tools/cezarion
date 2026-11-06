@@ -44,9 +44,11 @@ export interface ActivityRouteDeps extends Omit<ActivitySourceDeps, 'ciOf'>, Act
  * progress). A project's registry is its own manager's, which need not be the boot manager's (each
  * workspace semaphore has its own). The first read of a project plugs its registry in once: the
  * registry gets the process's one activity demand, and its changes wake the topics' publishers.
- * `release` undoes every plug; the server's close path calls it.
+ * `release` undoes every plug; the server's close path calls it. After it, a read that was still
+ * in flight then plugs nothing: no demand or listener outlives the server.
  */
 export function ciProgressPlugs(demand: ActivityDemand) {
+  let closed = false;
   const plugged = new WeakSet<CiProgressRegistry>();
   const releases: Array<() => void> = [];
   const listeners = new Set<() => void>();
@@ -59,15 +61,18 @@ export function ciProgressPlugs(demand: ActivityDemand) {
   const progressOf = (project: LoadedProject): CiProgressSource | undefined => {
     // A manager test double may carry no registry.
     const registry: CiProgressRegistry | undefined = project.manager.ciProgress;
-    if (registry && !plugged.has(registry)) {
+    if (registry && !closed && !plugged.has(registry)) {
       plugged.add(registry);
       releases.push(registry.useDemand(demand));
       releases.push(registry.onChange(() => { for (const listener of [...listeners]) listener(); }));
     }
     return registry;
   };
-  const release = () => { for (const undo of releases.splice(0)) undo(); };
-  return { progressOf, changes, release };
+  const release = () => {
+    closed = true;
+    for (const undo of releases.splice(0)) undo();
+  };
+  return { progressOf, changes, release, closed: () => closed };
 }
 
 /**
@@ -109,7 +114,8 @@ export function createActivityRoutes(routeDeps: ActivityRouteDeps) {
   }
   const snapshot = (projects: ActivityProjectSource[]): ActivitySnapshot => {
     const body = buildActivitySnapshot(projects, deps);
-    for (const project of body.projects) if (project.loaded && !project.unavailable) demand.markRead(project.projectId);
+    // A read that answers after the server closed marks no demand.
+    if (!ci.closed()) for (const project of body.projects) if (project.loaded && !project.unavailable) demand.markRead(project.projectId);
     return body;
   };
   return new Hono().get('/workspace/activity', queryZodValidator(activityQuerySchema), async (c) => {
