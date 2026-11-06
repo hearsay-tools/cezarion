@@ -50,9 +50,12 @@ const BENCH_ENV = ['CEZ_DRY_RUN', 'CEZ_AUTONAME', 'CEZ_PROJECT_WARMUP', 'CEZ_REM
 /** One run of the workload with these CLI arguments; returns the result the CLI prints. */
 export async function runWorkspaceEventsBenchmark(argv: string[]): Promise<unknown> {
   const savedEnv = Object.fromEntries(BENCH_ENV.map((name) => [name, process.env[name]]));
+  // What the run opened, newest last: released whether it finishes or throws.
+  const cleanups: Array<() => unknown> = [];
   try {
-    return await benchmark(argv);
+    return await benchmark(argv, cleanups);
   } finally {
+    for (const cleanup of cleanups.reverse()) await Promise.resolve().then(cleanup).catch(() => undefined);
     for (const name of BENCH_ENV) {
       if (savedEnv[name] === undefined) delete process.env[name];
       else process.env[name] = savedEnv[name];
@@ -60,13 +63,14 @@ export async function runWorkspaceEventsBenchmark(argv: string[]): Promise<unkno
   }
 }
 
-async function benchmark(argv: string[]): Promise<unknown> {
+async function benchmark(argv: string[], cleanups: Array<() => unknown>): Promise<unknown> {
   process.env.CEZ_DRY_RUN = '1';
   process.env.CEZ_AUTONAME = '0';
   process.env.CEZ_PROJECT_WARMUP = '0';
   delete process.env.CEZ_REMOTE;
   const home = mkdtempSync(join(tmpdir(), 'cez-bench-wsev-home-'));
   const repoRoot = mkdtempSync(join(tmpdir(), 'cez-bench-wsev-repo-'));
+  cleanups.push(() => { for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true }); });
   process.env.CEZ_HOME = home;
   mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
 
@@ -104,6 +108,7 @@ async function benchmark(argv: string[]): Promise<unknown> {
   clearProjectProbeCache();
   const store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
   const contexts = new ProjectContexts({ listProjects });
+  cleanups.push(() => { contexts.disposeAll(); store.flush(); });
   await registerProject(repoRoot);
   const app = createApp({
     repoRoot, store, version: '0.0.0-bench', contexts, workspaceEvents: new WorkspaceEventBus(),
@@ -234,6 +239,8 @@ async function benchmark(argv: string[]): Promise<unknown> {
     const detailLatency: number[] = [], detailBytes: number[] = [];
     let policy: ReturnType<typeof detailPolicy> | undefined;
     const streams: Array<{ close: () => Promise<void> }> = [];
+    let probing = true;
+    cleanups.push(() => { probing = false; policy?.stop(); return Promise.all(streams.map((stream) => stream.close())); });
     if (url) {
       for (let i = 0; i < connectionCount; i++) {
         streams.push(await openStream(url, i > 0 ? () => undefined : (frame) => {
@@ -248,7 +255,6 @@ async function benchmark(argv: string[]): Promise<unknown> {
       if (detailOpen) policy = detailPolicy(url.includes('runs=summary') && summarySchema ? 'summary' : 'full', fetches, detailLatency, detailBytes);
     }
     const indexLatency: number[] = [];
-    let probing = true;
     const prober = (async () => {
       while (probing) {
         const started = performance.now();
@@ -318,11 +324,6 @@ async function benchmark(argv: string[]): Promise<unknown> {
     sizes, phases,
   });
   if (values.out) writeFileSync(values.out, `${JSON.stringify(result, null, 2)}\n`);
-
-
-  contexts.disposeAll();
-  store.flush();
-  for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
   return result;
 }
 

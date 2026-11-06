@@ -1,3 +1,5 @@
+import { readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { runWorkspaceEventsBenchmark } from '../../scripts/benchmark-workspace-events.ts';
 
@@ -35,4 +37,14 @@ describe('bench:workspace-events', () => {
     expect(phase('summary/detail-open').detailFetches.count).toBeGreaterThan(0);
     expect(phase('summary/detail-open').totalBytes).toBeGreaterThan(phase('summary/detail-closed').totalBytes);
   }, 60_000); // bound: one in-process app paces 100 updates at 400/s and waits 600 ms per phase
+
+  it('removes its temporary state and restores the environment when a run fails', async () => {
+    const leftovers = () => readdirSync(tmpdir()).filter((name) => name.startsWith('cez-bench-wsev-'));
+    const before = leftovers();
+    const home = process.env.CEZ_HOME;
+    // Refused after the run created its directories.
+    await expect(runWorkspaceEventsBenchmark(['--children', '0'])).rejects.toThrow('--children');
+    expect(leftovers()).toEqual(before);
+    expect(process.env.CEZ_HOME).toBe(home);
+  });
 });

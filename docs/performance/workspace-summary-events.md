@@ -19,7 +19,7 @@ The workload is [`bench:workspace-events`](../../packages/cezar/scripts/benchmar
 
 The baseline is `bc5764da7`. The branch is `cez/5c375ae8`, at the S1 commits. The same script ran unchanged on both. The baseline ignores `?runs=summary`, so its `summary` phases repeat its full stream. The cockpit's before/after comparison is therefore baseline `full` against branch `summary`.
 
-There were 5 runs per side and per connection count, interleaved by side. Each run was pinned to one CPU with `taskset -c 11`. The tables report the median of the five runs. Squeal was stopped in this worktree during the runs.
+There were 5 runs per side and per connection count, interleaved by side. Each run was pinned to one CPU with `taskset -c 11`. Each table cell is the median of that one field over the five runs. A row can therefore combine fields from different runs, and it does not describe one run; read the raw files for whole runs. Squeal was stopped in this worktree during the runs.
 
 Host: Linux 6.8.0-147-generic, AMD Ryzen 9 5950X, 24 reported CPU cores, Node v24.22.1. This development host is shared and was heavily loaded. The one-minute `loadavg` was between 19.9 and 93.1 across the phases; the raw files record it before and after each phase. Byte and fetch counts are deterministic. Timing numbers are noisy at this load.
 
