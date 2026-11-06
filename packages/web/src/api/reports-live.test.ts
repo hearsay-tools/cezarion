@@ -126,3 +126,30 @@ it('reconciles a first snapshot that arrives after the initial list response alr
   expect(client.getQueryState(['P', 'reports', ''])?.isInvalidated).toBe(true)
   client.clear()
 })
+
+it('replays metadata for page one when page two of an unfiltered refetch finishes, without another list read', async () => {
+  const client = new QueryClient(), fence = new ReportsFence(client, 'P')
+  fence.receive(snapshot)
+  const secondStarted = deferred<void>(), second = deferred<ReportsResponse>()
+  const fetch = vi.fn(async (cursor: string | undefined) => {
+    if (cursor === 'second') { secondStarted.resolve(); return second.promise }
+    return page()
+  })
+  const observer = new InfiniteQueryObserver(client, {
+    queryKey: ['P', 'reports', ''], staleTime: Infinity,
+    initialPageParam: undefined as string | undefined,
+    initialData: { pages: [page(), page()], pageParams: [undefined, 'second'] },
+    getNextPageParam: (_last, pages) => pages.length === 1 ? 'second' : undefined,
+    queryFn: ({ pageParam }) => fence.read('', () => fetch(pageParam)),
+  })
+  const off = observer.subscribe(() => {})
+  const reading = observer.refetch()
+  await secondStarted.promise
+  fence.receive(metadata())
+  expect(observer.getCurrentResult().data?.pages[0]?.reports[0]?.taskTitle).toBe('New')
+  second.resolve(page())
+  await reading
+  expect(observer.getCurrentResult().data?.pages[0]?.reports[0]).toMatchObject({ taskTitle: 'New', taskStatus: 'done' })
+  expect(fetch).toHaveBeenCalledTimes(2)
+  off(); client.clear()
+})

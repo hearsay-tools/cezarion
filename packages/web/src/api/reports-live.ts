@@ -24,9 +24,21 @@ export class ReportsFence {
   private metadata = 0
   private patches = new Map<string, { value: ReportsMetadata; version: number }>()
   private trailing = new Set<Query>()
+  private flights = new Map<Query, number>()
   constructor(private client: QueryClient, private project: string) {
     client.getQueryCache().subscribe(event => {
-      if (event.type === 'removed') { this.trailing.delete(event.query); return }
+      if (event.type === 'removed') { this.trailing.delete(event.query); this.flights.delete(event.query); return }
+      if (event.query.queryKey[0] !== project || event.query.queryKey[1] !== 'reports') return
+      if (event.type === 'updated' && event.action.type === 'fetch') this.flights.set(event.query, this.metadata)
+      if (event.query.state.fetchStatus === 'idle' && this.flights.has(event.query)) {
+        const since = this.flights.get(event.query)!
+        this.flights.delete(event.query)
+        // A later page can settle after metadata patched an already-completed earlier page.
+        // Replay only patches received during this entire fetch, keeping later reads authoritative.
+        if (since !== this.metadata && String(event.query.queryKey[2] ?? '').trim() === '') {
+          this.client.setQueryData<Shelf>(event.query.queryKey, cached => cached && ({ ...cached, pages: cached.pages.map(page => this.patch(page, since)) }))
+        }
+      }
       if (!this.trailing.has(event.query) || event.query.state.fetchStatus !== 'idle') return
       this.trailing.delete(event.query)
       // Infinite queries may already have read earlier pages when this event arrived. Reconcile
