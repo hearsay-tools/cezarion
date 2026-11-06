@@ -96,7 +96,7 @@ it('persists column choices, filters projects, and expands mobile resources thro
   browser.waitForFunction(`(() => { const e = document.querySelector('${toggle}'); const r = e.getBoundingClientRect(); return e.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) })()`)
   browser.click(toggle)
   expect(browser.waitForValue(`document.querySelector('[data-slot="task-card"][data-run-id="fixture-A"]')?.textContent.includes('Memory')`)).toBe(true)
-  browser.screenshotElement('[data-slot="task-card"][data-run-id="fixture-B"] [data-slot="mobile-resources-toggle"]', join(artifacts, 'last-mobile-resources-clear.png'))
+  browser.screenshotElement('[data-slot="task-card"][data-run-id="fixture-B"]', join(artifacts, 'last-mobile-card-clear.png'))
   browser.goto(base + '/tasks?project=missing&group=project')
   browser.waitForFunction(`document.body.textContent.includes('No matching tasks')`)
   browser.click('[data-action="clear-filters"]')
