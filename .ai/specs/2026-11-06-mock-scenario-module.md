@@ -214,7 +214,11 @@ release before text) and Cursor F10 (`silent-tail-slow-done`: release the tail
 through the release file rather than a sleep). Cursor also keeps the `cezar-done`
 text `Done.` plus the unchanged lifecycle note, pinned by
 `packages/cezar/test/e2e/cursor-print.test.ts:43`; other runners keep the shared
-completion text. All retain their pinned tests.
+completion text. Cursor F3 (`silent-tail-again`) keeps its reasoning in the
+README read-tool result, with no thinking frames on the opening or nudge turn;
+`packages/cezar/src/core/workflow-final-message-cells.testkit.ts:319` pins that
+tool output in fresh and continued runs. Other runners keep the shared thinking
+script. All retain their pinned tests.
 
 Unification changes test-only fixture output, never what a user sees: shared
 scenarios start only from a `mock:` token, and the untokened reply stays
