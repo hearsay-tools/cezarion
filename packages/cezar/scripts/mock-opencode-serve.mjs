@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { loadControls } from './mock-controls.mjs';
-import { stall, waitForRelease } from './mock-lifecycle.mjs';
+import { waitForRelease } from './mock-lifecycle.mjs';
+import { scenarioFor, play } from './mock-scenario.mjs';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync as sessionStoreExists, mkdirSync, readFileSync, writeFileSync as sessionStoreWrite } from 'node:fs';
 import { createServer } from 'node:http';
@@ -17,7 +18,7 @@ let inputClosed = false;
 // response resolves immediately — every part and the closing `session.idle`
 // arrive over SSE afterwards, so a correct stream (v1 and v2 alike) must
 // take its turn-end from `session.idle`, never from the HTTP response.
-const { answerNudgeBody, silentNudge } = await import('./mock-nudge.mjs');
+const { answerNudgeBody } = await import('./mock-nudge.mjs');
 // #872: the first N starts die before listening, the way opencode 1.18.33 did
 // when started within ~2 s of SIGTERM to the previous server on the same DB.
 // Starts are counted across processes in a file, so start N+1 listens normally.
@@ -38,13 +39,6 @@ if (failStarts > 0) {
 
 if (process.env.CEZ_MOCK_ARGS_FILE && process.env.OPENCODE_CONFIG_CONTENT) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, JSON.stringify({ type: 'runtime-config', config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT) }) + '\n');
 if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}')); }
-
-// #401: let the test observe the actual monitoring park before releasing late wire frames.
-async function afterParityPark(prompt) {
-  const gate = /parity-release=([^\s"\\]+)/.exec(prompt)?.[1];
-  if (!gate) throw new Error('post-park scenario requires a release path');
-  while (!parityGateFs.existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
-}
 
 const args = process.argv.slice(2);
 const arg = (flag, fallback) => {
@@ -268,20 +262,7 @@ const bodyRoutes = [
   [(req, url) => req.method === 'POST' && url === '/session', replyWithNewSession],
   [matchesSessionPrompt, handleSessionPrompt],
 ];
-const earlyReplies = [
-  [body => body.includes('mock:steer-tool'), replyWithSteerTool],
-  [body => body.includes('mock:steer-late'), replyWithLateSteer],
-  [body => body.includes('mock:cezar-tool'), replyWithCezarTool],
-  [body => body.includes('mock:ci-wait'), replyWithCiWait],
-  [body => body.includes('mock:multi-pr-refs'), replyWithMultiplePrs],
-  [body => body.includes('mock:turn-messages:'), replyWithTurnMessages],
-  [body => body.includes('mock:agent-echo'), replyWithEcho],
-  [body => body.includes('mock:subagent-after-park'), replyWithParkedSubagent],
-  [body => body.includes('mock:subagent'), replyWithSubagent],
-];
-const lateReplies = [
-  [body => body.includes('mock:autonomous') || body.includes('Continue working autonomously until the task is fully complete.'), replyAutonomously],
-  [body => body.includes('mock:silent-tail') || body.includes('mock:tool-tail') || silentNudge(body), replyWithSilentTail],
+const nativeReplies = [
   [body => body.includes('mock:approval-resolved') || body.includes('mock:approval-turn-end'), replyWithSettledApproval],
   [body => body.includes('mock:approval-reply-fails'), replyWithFailedApprovalReply],
   [body => body.includes('mock:permission-malformed'), replyWithMalformedPermission],
@@ -291,14 +272,6 @@ const lateReplies = [
   [body => body.includes('mock:approval'), replyWithApproval],
   [body => body.includes('mock:ask-bad'), replyWithMalformedAsk],
   [body => body.includes('mock:ask'), replyWithAsk],
-  [body => body.includes('mock:hold-cezar-done'), replyWithHeldDone],
-  [body => body.includes('mock:cezar-done'), replyWithDone],
-  [body => body.includes('mock:hold-cezar-ask'), replyWithHeldAsk],
-  [body => body.includes('mock:cezar-ask'), body => replyWithHeldAsk(body, 0)],
-  [body => stall(body, { closeInput: () => { inputClosed = true; } }), acknowledgeWatchdog],
-  [body => body.includes('mock:busy-progress'), replyWithBusyProgress],
-  [body => body.includes('mock:hold-gated'), replyWithGatedHold],
-  [body => body.includes('mock:hold'), replyWithHold],
 ];
 function matchesSessionPrompt(req, url) {
   const match = req.method === 'POST' && /^\/session\/([^/]+)\/(prompt_async|message)$/.exec(url);
@@ -474,94 +447,6 @@ function replyToQuestion(req, res, url, body) {
   return;
 }
 
-async function replyWithSteerTool(body) {
-  send({ type: 'message.updated', properties: { info: info({}) } });
-  send({ type: 'message.part.updated', properties: { part: { id: 'prt_steer_tool', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool', callID: 'call_steer', tool: 'bash', state: { status: 'running', input: { command: 'wait' } } } } });
-  await sleep(Number(process.env.CEZ_MOCK_STEER_MS ?? 600));
-  send({ type: 'message.part.updated', properties: { part: { id: 'prt_steer_tool', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool', callID: 'call_steer', tool: 'bash', state: { status: 'completed', input: { command: 'wait' }, output: 'waited' } } } });
-  send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
-  return;
-}
-
-async function replyWithLateSteer(body) {
-  send({ type: 'message.updated', properties: { info: info({}) } });
-  send({ type: 'message.part.updated', properties: { part: { id: 'prt_steer_late', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: 'late window: final message already sent', time: { start: 1760000000000, end: 1760000000001 } } } });
-  turnLate = true;
-  await sleep(300);
-  send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
-  return;
-}
-
-// The raw body is enough to spot a `mock:` marker — the prompt text is
-// inside it whatever part shape the runner used to wrap it.
-async function replyWithCezarTool(body) {
-  const { toolPrompt } = await import('./mock-ci-tool.mjs');
-  const text = await toolPrompt('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}'), body);
-  // A completed assistant message, as on the other runners' wires, so its text (an ask line
-  // after the calls, say) reaches the turn end.
-  send({ type: 'message.updated', properties: { info: info({}) } });
-  send({ type: 'message.part.updated', properties: { part: { id: 'tool-result', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text, time: { start: 1, end: 2 } } } });
-  send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
-  return;
-}
-
-async function replyWithCiWait(body) {
-  const { ciPrompt } = await import('./mock-ci-tool.mjs');
-  const text = await ciPrompt('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}'), body);
-  send({ type: 'message.part.updated', properties: { part: { id: 'ci-result', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text } } });
-  send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
-  return;
-}
-
-async function replyWithMultiplePrs(body) {
-  const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
-  const text = await multiPrText(JSON.parse(body).parts.map(part => part.text ?? '').join('\n'), lifecycle);
-  send({ type: 'message.updated', properties: { info: info({}) } });
-  send({ type: 'message.part.updated', properties: { part: { id: 'multi-reasoning', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'reasoning', text: unrelatedPr } } });
-  send({ type: 'message.part.updated', properties: { part: { id: 'multi-tool', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool', tool: 'read', callID: 'multi-read', state: { status: 'completed', input: { filePath: 'other.txt' }, output: unrelatedPr, time: { start: 1, end: 2 } } } } });
-  for (const upto of [5, text.length]) send({ type: 'message.part.updated', properties: { part: { id: 'multi-message', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: text.slice(0, upto), ...(upto === text.length ? { time: { start: 1, end: 2 } } : {}) } } });
-  send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
-  return;
-}
-
-async function replyWithTurnMessages(body) {
-  const { turnMessages } = await import('./mock-turn-messages.mjs');
-  send({ type: 'message.updated', properties: { info: info({}) } });
-  for (const text of turnMessages(JSON.parse(body).parts.map(part => part.text ?? '').join('\n'))) {
-    send({ type: 'message.part.updated', properties: { part: { id: `prt_multi_${++echoSerial}`, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text, time: { start: 1, end: 2 } } } });
-  }
-  send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
-  return;
-}
-
-async function replyWithEcho(body) {
-  send({ type: 'message.updated', properties: { info: info({}) } });
-  send({ type: 'message.part.updated', properties: { part: {
-    id: `prt_echo_${++echoSerial}`, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text',
-    text: JSON.parse(body).parts.map(part => part.text ?? '').join('\n'),
-  } } });
-  send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
-  return;
-}
-
-// SSE child attribution from __fixtures__/opencode/subtask-nested.ndjson.
-async function replyWithParkedSubagent(body) {
-  send({ type: 'message.updated', properties: { info: info({}) } });
-  send({ type: 'message.part.updated', properties: { part: { id: 'park-task', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'subtask', prompt: 'Review', description: 'Review', agent: 'general' } } });
-  send({ type: 'message.updated', properties: { info: { ...info({}), id: 'park-child-msg', sessionID: 'park-child', parentID: SESSION_ID, mode: 'subagent' } } });
-  send({ type: 'message.part.updated', properties: { part: { id: 'early-child', messageID: 'park-child-msg', sessionID: 'park-child', type: 'text', text: 'Child review started.', time: { start: 1, end: 2 } } } });
-  const watching = 'Watching the child.' + await lifecycle((await tools()).wait());
-  send({ type: 'message.part.updated', properties: { part: { id: 'park-parent', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: watching, time: { start: 1, end: 2 } } } });
-  send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
-  await afterParityPark(body);
-  send({ type: 'message.part.updated', properties: { part: { id: 'late-read', messageID: 'park-child-msg', sessionID: 'park-child', type: 'tool', tool: 'read', state: { status: 'running', input: { path: 'README.md' } } } } });
-  send({ type: 'message.part.updated', properties: { part: { id: 'late-read', messageID: 'park-child-msg', sessionID: 'park-child', type: 'tool', tool: 'read', state: { status: 'completed', input: { path: 'README.md' }, output: 'Read the file.' } } } });
-  send({ type: 'message.part.updated', properties: { part: { id: 'late-child-text', messageID: 'park-child-msg', sessionID: 'park-child', type: 'text', text: 'Late child text.', time: { start: 3, end: 4 } } } });
-  // Closed child scopes are ignored. This passive usage snapshot proves the
-  // preceding SSE frames have reached the runner before the test observes it.
-  send({ type: 'message.updated', properties: { info: info({ tokens: { input: 424240, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } }) } });
-  return;
-}
 
 async function replyWithSubagent(body) {
   // Wire shape from `__fixtures__/opencode/subtask-nested.ndjson`: a
@@ -609,54 +494,6 @@ async function replyWithSubagent(body) {
     } } });
     sendUsageThenIdle();
   }, 60);
-  return;
-}
-
-async function replyAutonomously(body) {
-  const { autonomousReply } = await import('./mock-autonomous.mjs');
-  send({ type: 'message.updated', properties: { info: info({}) } });
-  send({ type: 'message.part.updated', properties: { part: { id: `autonomous-${++autonomousTurn}`, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: await autonomousReply(JSON.parse(body).parts.map(part => part.text ?? '').join('\n'), lifecycle), time: { start: 1, end: 2 } } } });
-  send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
-  return;
-}
-
-async function replyWithSilentTail(body) {
-  const silent = await import('./mock-silent-tail.mjs');
-  const prompt = (() => { try { return JSON.parse(body).parts.map(part => part.text ?? '').join('\n'); } catch { return body; } })();
-  silent.noteSilentTailPrompt(prompt);
-  if (silent.isFinalMessageNudge(prompt)) { await replyWithFinalNudge(silent); return; }
-  if (silent.isSilentTailScenario(prompt)) {
-    send({ type: 'message.updated', properties: { info: info({}) } });
-    send({ type: 'message.part.updated', properties: { part: { id: 'silent-open', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: silent.SILENT_TAIL_OPENING, time: { start: 1, end: 2 } } } });
-    send({ type: 'message.part.updated', properties: { part: { id: 'silent-gh', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool', callID: 'call_silent_gh', tool: 'bash', state: { status: 'completed', input: { command: 'gh issue create' }, output: 'created', time: { start: 1, end: 2 } } } } });
-    send({ type: 'message.part.updated', properties: { part: { id: 'silent-rsn', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'reasoning', text: silent.SILENT_TAIL_REASONING, time: { start: 1, end: 2 } } } });
-    send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
-    return;
-  }
-  if (silent.isToolTailScenario(prompt)) {
-    send({ type: 'message.updated', properties: { info: info({}) } });
-    send({ type: 'message.part.updated', properties: { part: { id: 'tool-tail-open', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: silent.TOOL_TAIL_OPENING, time: { start: 1, end: 2 } } } });
-    send({ type: 'message.part.updated', properties: { part: { id: 'tool-tail-git', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool', callID: 'call_tool_tail', tool: 'bash', state: { status: 'completed', input: { command: 'git status --short' }, output: ' M src/example.ts', time: { start: 1, end: 2 } } } } });
-    send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
-    return;
-  }
-  return false;
-}
-
-async function replyWithFinalNudge(silent) {
-  const kind = silent.finalMessageNudgeKind();
-  send({ type: 'message.updated', properties: { info: info({}) } });
-  if (kind === 'silent') {
-    send({ type: 'message.part.updated', properties: { part: { id: 'silent-nudge-rsn', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'reasoning', text: silent.SILENT_TAIL_REASONING, time: { start: 1, end: 2 } } } });
-  } else {
-    if (kind === 'slow-done') {
-      send({ type: 'message.part.updated', properties: { part: { id: 'silent-nudge-prefix', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: silent.SLOW_DONE_PREFIX, time: { start: 1, end: 2 } } } });
-      await silent.sleep(silent.SLOW_DONE_TAIL_MS);
-    }
-    const text = await silent.finalNudgeText(kind, lifecycle);
-    send({ type: 'message.part.updated', properties: { part: { id: 'silent-nudge-done', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text, time: { start: 1, end: 2 } } } });
-  }
-  send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
   return;
 }
 
@@ -750,16 +587,6 @@ async function replyWithAsk(body) {
   return;
 }
 
-/** One timed text part, its usage, then the session goes idle. */
-function sendTextTurn(partId, text) {
-  send({ type: 'message.updated', properties: { info: info({}) } });
-  send({ type: 'message.part.updated', properties: { part: {
-    id: partId, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text,
-    time: { start: 1760000000500, end: 1760000000600 },
-  } } });
-  sendUsageThenIdle();
-}
-
 /** The turn's usage, then the session goes idle. */
 function sendUsageThenIdle() {
   send({ type: 'message.updated', properties: { info: info({
@@ -767,77 +594,6 @@ function sendUsageThenIdle() {
   }) } });
   setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
 }
-
-async function replyWithHeldDone(body) {
-  // Pause, then cezar_done, so a mid-turn sendMessage can queue behind the
-  // running turn and race the close (#486).
-  await waitForRelease(400);
-  const text = await finishText('parity hold-done: content after the pause');
-  sendTextTurn('prt_mock_hold_done', text);
-  return;
-}
-
-async function replyWithDone(body) {
-  // Calls cezar_done so the run reaches cezar's review gate; a turn-end with
-  // no tool call correctly parks as `waiting` instead (harness parity R1).
-  const text = await finishText('parity done: the task is complete');
-  sendTextTurn('prt_mock_done', text);
-  return;
-}
-
-async function replyWithHeldAsk(body, hold = 250) {
-  // Portable cezar_ask after a pause, so a mid-turn sendMessage can queue
-  // and then race the park (run.ts must discard that waiter). `mock:cezar-ask`
-  // is the same ask without the pause (the native ask is `mock:ask`).
-  if (hold) await waitForRelease(hold);
-  const ask = 'Pick one.' + await lifecycle((await tools()).ask([{ header: 'Library', question: 'Which date library should I standardize on?',
-    options: [{ label: 'date-fns', description: 'Tree-shakeable, functional' }, { label: 'Luxon', description: 'Immutable, tz-aware' }] }]));
-  sendTextTurn('prt_mock_hold_ask', ask);
-  return;
-}
-
-async function replyWithBusyProgress(body) {
-  let ticks = 0;
-  const timer = setInterval(async () => {
-    send({ type: 'server.heartbeat', properties: {} });
-    if (++ticks === 24) {
-      clearInterval(timer);
-      send({ type: 'message.updated', properties: { info: info({}) } });
-      textPart('prt_busy_done', await finishText('busy complete'));
-      send({ type: 'message.updated', properties: { info: info({ cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } } }) } });
-      send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
-    }
-  }, 100);
-  return;
-}
-
-async function replyWithGatedHold(body) {
-  await waitForRelease(250);
-  const gated = 'parity hold-gated: content after the pause';
-  send({ type: 'message.updated', properties: { info: info({}) } });
-  send({ type: 'message.part.updated', properties: { part: {
-    id: 'prt_mock_hold_gated', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: gated,
-  } } });
-  sendUsageThenIdle();
-  return;
-}
-
-async function replyWithHold(body) {
-  // The response above is the ack (this is the #4 wire: `prompt_async`
-  // resolves immediately, the turn arrives over SSE afterwards). Holding
-  // the content behind it is what makes harness parity S2 meaningful.
-  setTimeout(() => {
-    const held = 'parity hold: content after the pause';
-    send({ type: 'message.updated', properties: { info: info({}) } });
-    send({ type: 'message.part.updated', properties: { part: {
-      id: 'prt_mock_hold', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: held,
-    } } });
-    sendUsageThenIdle();
-  }, 250);
-  return;
-}
-
-function acknowledgeWatchdog() {}
 
 // #723: native GET /skill diagnostic captured on 1.18.33; upstream
 // packages/opencode/src/skill/index.ts:96-111 skips the unreadable skill.
@@ -878,7 +634,7 @@ async function replyWithEarlyProviderError(body) {
 async function replyWithNativeFailure(body) {
   const selectedFailure = failureControl?.failureFor(body);
   const nativeFailure = selectedFailure instanceof Promise ? await selectedFailure : selectedFailure;
-  if (failureControl ? nativeFailure === 'provider' : body.includes('mock:provider-error')) {
+  if (nativeFailure === 'provider') {
     // The session-level error frame, wire shape copied verbatim from
     // `__fixtures__/opencode/session-error.ndjson`. #53: a bare upstream
     // rejection used to read like a missing executable, and the run parked
@@ -980,14 +736,6 @@ function replyWithOrdinaryTurn() {
   return;
 }
 
-async function crashAfterAcknowledgement(body) {
-  if (!body.includes('mock:crash-stderr')) return false;
-  const { crashWithStderr } = await import('./mock-runner-crash.mjs');
-  if (body.includes('mock:crash-stderr-clean')) crashWithStderr(body);
-  else { setTimeout(() => crashWithStderr(body), 30); return true; }
-  return false;
-}
-
 function recordSessionPrompt(body) {
   try {
     const text = body ? JSON.parse(body).parts?.map(part => part.text ?? '').join('\n') ?? '' : '';
@@ -1035,24 +783,6 @@ function acknowledgePrompt(res, body, deliveryText) {
   }
 }
 
-function needsSilentPreparation(body) {
-  return body.includes('mock:silent-tail') || silentNudge(body);
-}
-
-async function prepareSilentTail(body) {
-  if (!needsSilentPreparation(body)) return false;
-  const silent = await import('./mock-silent-tail.mjs');
-  const prompt = (() => { try { return JSON.parse(body).parts.map(part => part.text ?? '').join('\n'); } catch { return body; } })();
-  silent.noteSilentTailPrompt(prompt);
-  if (silent.isAckOnlyNudge(prompt)) {
-    const beats = setInterval(() => { if (sse) sse.write(': heartbeat\n\n'); }, 50);
-    beats.unref?.();
-    return true;
-  }
-  if (silent.isLateNudge(prompt)) await waitForRelease(silent.LATE_REPLY_MS);
-  return false;
-}
-
 function rejectsPrompt(body, deliveryText) {
   return delivery?.kind === 'reject' ? delivery.rejects(deliveryText) : body.includes('mock:reject-agent-post');
 }
@@ -1077,34 +807,165 @@ async function preparePromptTurn(res, url, body, received) {
   turnActive = true;
   acknowledgePrompt(res, body, deliveryText);
   if (delivery) await delivery.holdResponse(deliveryText);
-  // `mock:ack-only` → prompt_async is acknowledged and the session stays busy on heartbeats
-  // with no turn until the next prompt, which it then runs (hearsay-tools/cezarion#1301).
-  if (body.includes('mock:ack-only')) {
-    heldBeats = setInterval(() => { if (sse) sse.write(': heartbeat\n\n'); }, 50);
-    heldBeats.unref?.();
-    return true;
-  }
-  if (body.includes('mock:autonomous-cap') || body.includes('mock:autonomous-cezar-ask-cap')) autonomousCap = true;
-  if (await prepareSilentTail(body)) return true;
+  if (scenarioFor(promptText(body), scenarioContext)?.name === 'autonomous' && body.includes('-cap')) autonomousCap = true;
   return false;
 }
 
+const scenarioContext = {
+  runner: 'opencode', lifecycle, session: {}, nativeFailureControl: Boolean(failureControl),
+  // This token previously fell through to the ordinary reply; monitoring uses cezar-tool.
+  unsupported: ['cezar-wait'],
+  toolPrompt: async prompt => (await tools()).toolPrompt('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}'), prompt),
+  ciPrompt: async prompt => (await tools()).ciPrompt('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}'), prompt),
+  async crash(prompt) {
+    const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+    if (prompt.includes('-clean')) crashWithStderr(prompt);
+    else await new Promise(() => { setTimeout(() => crashWithStderr(prompt), 30); });
+  },
+};
+function promptText(body) {
+  try { return JSON.parse(body).parts.map(part => part.text ?? '').join('\n'); }
+  catch { return body; }
+}
+function publishUser(url, body) {
+  if (!url.endsWith('/prompt_async')) return;
+  currentUserId = `msg_user_${++steerSerial}`;
+  send({ type: 'message.updated', properties: { info: { id: currentUserId, sessionID: SESSION_ID, role: 'user', time: { created: Date.now() } } } });
+  send({ type: 'message.part.updated', properties: { part: { id: `prt_${currentUserId}`, messageID: currentUserId, sessionID: SESSION_ID, type: 'text', text: promptText(body) } } });
+}
+function heartbeatHold() {
+  heldBeats = setInterval(() => { if (sse) sse.write(': heartbeat\n\n'); }, 50);
+  heldBeats.unref?.();
+}
+const TEXT_IDS = {
+  'cezar-tool': 'tool-result', 'ci-wait': 'ci-result', 'multi-pr-refs': 'multi-message',
+  'hold-cezar-done': 'prt_mock_hold_done', 'cezar-done': 'prt_mock_done',
+  'hold-cezar-ask': 'prt_mock_hold_ask', 'cezar-ask': 'prt_mock_hold_ask',
+  'hold-gated': 'prt_mock_hold_gated', hold: 'prt_mock_hold', 'busy-progress': 'prt_busy_done',
+  'steer-late': 'prt_steer_late', 'subagent-after-park': 'park-parent',
+};
+/** Wire ids, SSE framing, usage, idle scheduling and steering remain native. */
+function scenarioEncoder(scenario, url, body) {
+  const name = scenario?.name;
+  let textIndex = 0;
+  let opened = false;
+  const encoder = {
+    closeInput: () => { inputClosed = true; },
+    open(step) {
+      if (step.ackOnly) {
+        if (name === 'ack-only') heartbeatHold();
+        return;
+      }
+      if (name === 'deferred-turn-start') { publishUser(url, body); return; }
+      if (opened) return;
+      opened = true;
+      if (!['ci-wait', 'no-progress', 'busy-progress'].includes(name)) send({ type: 'message.updated', properties: { info: info({}) } });
+    },
+    reply: () => replyWithOrdinaryTurn(),
+    text(step) {
+      if (name === 'busy-progress') send({ type: 'message.updated', properties: { info: info({}) } });
+      const id = scenarioTextId(name, textIndex++);
+      const timed = !['agent-echo', 'ci-wait', 'hold', 'hold-gated'].includes(name);
+      let text = '';
+      for (const [index, part] of step.parts.entries()) {
+        text += part;
+        send({ type: 'message.part.updated', properties: { part: {
+          id, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text,
+          ...(timed && index === step.parts.length - 1 ? { time: scenarioTextTime(name) } : {}),
+        } } });
+      }
+    },
+    reasoning(step) {
+      send({ type: 'message.part.updated', properties: { part: {
+        id: name === 'multi-pr-refs' ? 'multi-reasoning' : 'silent-rsn',
+        messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'reasoning', text: step.text,
+        ...(name === 'multi-pr-refs' ? {} : { time: { start: 1, end: 2 } }),
+      } } });
+    },
+    toolStart({ call }) {
+      // These native fixtures report completed snapshots, not a running transition.
+      if (['multi-pr-refs', 'silent-tail', 'tool-tail'].includes(name)) return;
+      if (name === 'subagent-after-park' && call.name === 'task') {
+        send({ type: 'message.part.updated', properties: { part: { id: 'park-task', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'subtask', prompt: 'Review', description: 'Review', agent: 'general' } } });
+        return;
+      }
+      scenarioToolPart(name, call, 'running');
+    },
+    toolEnd({ call }) {
+      if (name === 'subagent-after-park' && call.name === 'task') return;
+      scenarioToolPart(name, call, 'completed');
+    },
+    child: (step, playChild) => playScenarioChild(step, playChild, encoder),
+    progress: () => send({ type: 'server.heartbeat', properties: {} }),
+    readSteers(step) { if (step.late) turnLate = true; },
+    end(step) {
+      if (step.error === 'provider') { sendProviderFailure(); return; }
+      if (['hold', 'hold-gated', 'hold-cezar-ask', 'hold-cezar-done', 'cezar-ask', 'cezar-done'].includes(name)) sendUsageThenIdle();
+      else send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+    },
+  };
+  return encoder;
+}
+function scenarioTextTime(name) {
+  if (['cezar-ask', 'cezar-done', 'hold-cezar-ask', 'hold-cezar-done'].includes(name)) return { start: 1760000000500, end: 1760000000600 };
+  if (name === 'steer-late') return { start: 1760000000000, end: 1760000000001 };
+  return { start: 1, end: 2 };
+}
+function scenarioTextId(name, index) {
+  if (name === 'turn-messages') return `prt_multi_${++echoSerial}`;
+  if (name === 'agent-echo') return `prt_echo_${++echoSerial}`;
+  if (name === 'autonomous') return `autonomous-${++autonomousTurn}`;
+  if (name === 'silent-tail') return ['silent-open', 'silent-nudge-done'][index] ?? `silent-text-${index}`;
+  if (name === 'tool-tail') return 'tool-tail-open';
+  return TEXT_IDS[name] ?? `prt_scenario_${index}`;
+}
+function scenarioToolPart(name, call, status) {
+  const ids = {
+    'multi-pr-refs': ['multi-tool', 'multi-read'], 'silent-tail': ['silent-gh', 'call_silent_gh'],
+    'tool-tail': ['tool-tail-git', 'call_tool_tail'], 'steer-tool': ['prt_steer_tool', 'call_steer'],
+  };
+  const [id, callID] = ids[name] ?? [call.id, call.id];
+  send({ type: 'message.part.updated', properties: { part: {
+    id, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool', tool: call.name, callID,
+    state: { status, input: name === 'multi-pr-refs' ? { filePath: call.input.path } : call.input, ...(status === 'completed' ? { output: call.output } : {}),
+      ...(['multi-pr-refs', 'silent-tail', 'tool-tail'].includes(name) ? { time: { start: 1, end: 2 } } : {}) },
+  } } });
+}
+function playScenarioChild(step, playChild, encoder) {
+  if (step.phase === 'start') send({ type: 'message.updated', properties: { info: { ...info({}), id: 'park-child-msg', sessionID: 'park-child', parentID: SESSION_ID, mode: 'subagent' } } });
+  const part = value => send({ type: 'message.part.updated', properties: { part: { messageID: 'park-child-msg', sessionID: 'park-child', ...value } } });
+  const result = playChild({ ...encoder,
+    text: value => part({ id: step.phase === 'start' ? 'early-child' : 'late-child-text', type: 'text', text: value.parts.join(''), time: step.phase === 'start' ? { start: 1, end: 2 } : { start: 3, end: 4 } }),
+    toolStart: ({ call }) => part({ id: 'late-read', type: 'tool', tool: call.name, state: { status: 'running', input: call.input } }),
+    toolEnd: ({ call }) => part({ id: 'late-read', type: 'tool', tool: call.name, state: { status: 'completed', input: call.input, output: call.output } }),
+  });
+  // Barrier snapshot proves late child frames reached the real runner after park.
+  const barrier = () => { if (step.phase === 'end') send({ type: 'message.updated', properties: { info: info({ tokens: { input: 424240, output: 2, reasoning: 0, cache: { read: 0, write: 0 } } }) } }); };
+  if (result instanceof Promise) return result.then(barrier);
+  barrier();
+}
+function sendProviderFailure() {
+  send({ type: 'message.part.updated', properties: { part: { id: 'prt_mock_perr', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: 'Starting the review' } } });
+  send({ type: 'session.error', properties: { sessionID: SESSION_ID, error: { name: 'ProviderAuthError', data: { message: 'API key expired — run `opencode auth login`' } } } });
+  setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
+}
+
 async function streamPrompt(url, body) {
-  // hearsay-tools/cezarion#1112: the acknowledged prompt streams its turn late.
-  if (body.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
-  if (url.endsWith('/prompt_async')) {
-    currentUserId = `msg_user_${++steerSerial}`;
-    const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');
-    send({ type: 'message.updated', properties: { info: { id: currentUserId, sessionID: SESSION_ID, role: 'user', time: { created: Date.now() } } } });
-    send({ type: 'message.part.updated', properties: { part: { id: `prt_${currentUserId}`, messageID: currentUserId, sessionID: SESSION_ID, type: 'text', text } } });
-  }
-  if (await crashAfterAcknowledgement(body)) return;
-  if (await dispatchReply(earlyReplies, body)) return;
+  const prompt = promptText(body);
+  const scenario = scenarioFor(prompt, scenarioContext);
+  const encoder = scenarioEncoder(scenario, url, body);
+  if (scenario?.name === 'ack-only') { await play(scenario, encoder); return; }
+  // Deferred starts publish the native user message only after their delay.
+  if (scenario?.name !== 'deferred-turn-start') publishUser(url, body);
+  if (scenario?.early && await play(scenario, encoder) === 'handled') return;
+  if (scenario?.beforeFailure && !scenario.early && await play(scenario, encoder) === 'handled') return;
+  if (body.includes('mock:subagent') && scenario?.name !== 'subagent-after-park') { await replyWithSubagent(body); return; }
   if (body.includes('mock:skill-warning')) await replyWithSkillWarning(body);
   if (replyWithFatalControl(body)) return;
   if (body.includes('mock:provider-error-early')) { await replyWithEarlyProviderError(body); return; }
   if (await replyWithNativeFailure(body)) return;
-  if (await dispatchReply(lateReplies, body)) return;
+  if (await dispatchReply(nativeReplies, body)) return;
+  if (scenario && !scenario.beforeFailure && await play(scenario, encoder) === 'handled') return;
   replyWithOrdinaryTurn();
 }
 
