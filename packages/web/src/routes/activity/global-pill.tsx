@@ -4,11 +4,12 @@ import { Link } from 'react-router'
 import { cn } from '@/lib/utils'
 
 import { CardEffects, LineText, hoverHandlers } from './activity-card'
-import { lineTexts, nameOf, recipientName, sentPeerRequests, sentPeerWaits, type PeerWait, type RunEntry } from './activity-model'
+import { lineTexts, type PeerWait, type RunEntry } from './activity-model'
 import { EMPTY_MOTION, type MotionState } from './activity-motion'
 import { RunShape, ToneWord } from './activity-tone'
 import { isLiveStatus, rootNow, type NowContext } from './now-box'
 import { Heartbeat } from './now-box-view'
+import { PeerLinks } from './peer-links'
 import type { OnHover } from './use-wait-highlight'
 
 /**
@@ -49,28 +50,6 @@ function WorkerDots({ task }: { task: ActivityRun }) {
   )
 }
 
-/** Below `md` the arcs are hidden; the sender pill names each peer it asked, and the waiter pill
- *  each peer it waits on, instead. */
-function PeerLinks({ projectId, task, requests, waits, index }: Pick<PillProps, 'projectId' | 'task' | 'requests' | 'index'> & { waits: readonly PeerWait[] }) {
-  const sent = sentPeerRequests(task.runId, requests)
-  const waiting = sentPeerWaits(task.runId, waits)
-  if (sent.length === 0 && waiting.length === 0) return null
-  return (
-    <ul data-slot="activity-peer-links" className="mt-1 ml-[19px] flex flex-col md:hidden">
-      {sent.map((request) => (
-        <li key={request.requestId}>
-          <Link to={projectTaskPath(projectId, request.recipientRunId)} className={PEER_LINK}>→ {recipientName(index, request)}</Link>
-        </li>
-      ))}
-      {waiting.map((wait) => (
-        <li key={wait.id}>
-          <Link to={projectTaskPath(projectId, wait.peerRunId)} className={PEER_LINK}>⋯ waits on {nameOf(index, wait.peerRunId)}</Link>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
 export function ActivityPill({ projectId, task, requests, waits = NO_WAITS, index, ctx, motion = EMPTY_MOTION, linked = false, onHover }: PillProps) {
   const box = rootNow(task, ctx)
   return (
@@ -106,7 +85,8 @@ export function ActivityPill({ projectId, task, requests, waits = NO_WAITS, inde
       </p>
       <LineText texts={lineTexts(task.runId, requests, index, waits)} />
       <WorkerDots task={task} />
-      <PeerLinks projectId={projectId} task={task} requests={requests} waits={waits} index={index} />
+      {/* Below `md` the arcs are hidden; the pill names each peer it asked or waits on instead. */}
+      <PeerLinks runId={task.runId} requests={requests} waits={waits} index={index} link={Link} pathOf={(runId) => projectTaskPath(projectId, runId)} className="mt-1 ml-[19px] flex flex-col md:hidden" linkClassName={PEER_LINK} />
     </li>
   )
 }

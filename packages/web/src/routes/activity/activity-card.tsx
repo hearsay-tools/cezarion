@@ -6,10 +6,11 @@ import { Link } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
 
 import { since, span } from './activity-format'
-import { askOf, finishedText, foldedWorkers, lineTexts, nameOf, recipientName, sentPeerRequests, sentPeerWaits, type PeerWait, type RunEntry } from './activity-model'
+import { askOf, finishedText, foldedWorkers, lineTexts, type PeerWait, type RunEntry } from './activity-model'
 import { EMPTY_MOTION, passedChecks, type MotionState } from './activity-motion'
 import { RunShape, TONE_BORDER, TONE_FILL, TONE_INK } from './activity-tone'
 import { isLiveStatus, rootNow, workerLine, type NowContext } from './now-box'
+import { PeerLinks } from './peer-links'
 import type { OnHover } from './use-wait-highlight'
 import { Heartbeat, NowBoxView } from './now-box-view'
 
@@ -129,26 +130,6 @@ function Workers({ task, requests, index, ctx, dense, motion }: Omit<CardProps, 
 
 const PEER_LINK = 'relative z-[1] text-[12px] text-message-peer-accent hover:underline focus-visible:outline-2 focus-visible:outline-ring max-md:inline-flex max-md:min-h-11 max-md:items-center'
 
-function PeerLinks({ task, requests, waits, index }: Pick<CardProps, 'task' | 'requests' | 'index'> & { waits: readonly PeerWait[] }) {
-  const sent = sentPeerRequests(task.runId, requests)
-  const waiting = sentPeerWaits(task.runId, waits)
-  if (sent.length === 0 && waiting.length === 0) return null
-  return (
-    <ul data-slot="activity-peer-links" className="mt-2 flex flex-col gap-1">
-      {sent.map((request) => (
-        <li key={request.requestId}>
-          <Link to={taskPath(request.recipientRunId)} className={PEER_LINK}>→ {recipientName(index, request)}</Link>
-        </li>
-      ))}
-      {waiting.map((wait) => (
-        <li key={wait.id}>
-          <Link to={taskPath(wait.peerRunId)} className={PEER_LINK}>⋯ waits on {nameOf(index, wait.peerRunId)}</Link>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
 /** Pointer and focus handlers that report the card to the board's wait highlight. Focus moving
  *  between two elements of one card keeps the card. */
 export function hoverHandlers(runId: string, onHover: CardProps['onHover']): HTMLAttributes<HTMLElement> {
@@ -221,7 +202,7 @@ export function ActivityCard({ task, requests, waits = NO_WAITS, index, ctx, den
           </Button>
         </div>
       ) : null}
-      {narrow ? <PeerLinks task={task} requests={requests} waits={waits} index={index} /> : null}
+      {narrow ? <PeerLinks runId={task.runId} requests={requests} waits={waits} index={index} link={Link} pathOf={taskPath} className="mt-2 flex flex-col gap-1" linkClassName={PEER_LINK} /> : null}
       <Workers task={task} requests={requests} index={index} ctx={ctx} dense={dense} motion={motion} />
     </article>
   )
