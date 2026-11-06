@@ -1,5 +1,5 @@
-import { homedir } from 'node:os';
-import { dirname, join, sep } from 'node:path';
+import { homedir, userInfo } from 'node:os';
+import { dirname, join, resolve, sep } from 'node:path';
 import type { AgentHomePaths } from './agent-config/catalog.ts';
 import { isOmpProfileName } from './core/agent-profiles.ts';
 
@@ -21,26 +21,20 @@ export function cezarHomeDir(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
- * The last line of defence for the developer's own `~/.cezar` while the suite
- * runs. Every workspace test pins `CEZ_HOME` to a temp dir, but the pin lives
- * in `process.env` — a single global for the whole worker. A test that ends
- * before its write does (a timeout is enough) has its `afterEach` drop the pin
- * while the write is still in flight, and the write then resolves the REAL
- * home and replaces the developer's project registry with the fixture's.
- *
- * So writers into the cezar home ask here first: under vitest, a write whose
- * destination is the real `~/.cezar` is always a leaked test, never intent —
- * fail it loudly instead of rewriting a file the suite does not own. Outside
- * vitest this is a no-op, and an explicitly pinned `CEZ_HOME` (the temp dir the
- * test meant to use) never matches the real home, so honest tests are unaffected.
+ * Test writers must never reach the account's real cezar home. HOME can be a
+ * sandbox, so read the account home from the OS. Runner detection belongs to
+ * the process: a caller's custom env must not disable this guard.
  */
-export function assertCezarHomeWriteIsSandboxed(path: string, env: NodeJS.ProcessEnv = process.env): void {
-  if (!env.VITEST) return;
-  const realHome = join(homedir(), '.cezar');
-  if (path !== realHome && !path.startsWith(realHome + sep)) return;
+export function assertCezarHomeWriteIsSandboxed(path: string, _env: NodeJS.ProcessEnv = process.env): void {
+  const testing = process.env.VITEST || process.env.NODE_TEST_CONTEXT || process.env.JEST_WORKER_ID
+    || Object.keys(process.env).some((key) => key.startsWith('STRYKER_'));
+  if (!testing) return;
+  const realHome = join(userInfo().homedir, '.cezar');
+  const destination = resolve(path);
+  if (destination !== realHome && !destination.startsWith(realHome + sep)) return;
   throw new Error(
     `[cez] refusing to write ${path} from a test run — CEZ_HOME is not pinned to a sandbox. ` +
-      'Pin it (the vitest setup file does this by default) so the suite never touches the real cezar home.',
+      'Pin it to a test sandbox so the suite never touches the real cezar home.',
   );
 }
 

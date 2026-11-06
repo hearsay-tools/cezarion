@@ -57,7 +57,8 @@ const FIXTURE_BROWSER = '9.9.9';
 /** The fixture's tracked inputs: the repo's own file with the given settings changed. */
 function writeInputs(root: string, change: { agentBrowserVersion?: string; serverEnv?: string[] }): void {
   const inputs = JSON.parse(readFileSync(join(repoRoot, '.ai/scripts/test-env.inputs.json'), 'utf8'));
-  if (change.agentBrowserVersion) inputs.browser.agentBrowserVersion = change.agentBrowserVersion;
+  // Keep the fixture browser when changing server inputs; never depend on a host download cache.
+  inputs.browser.agentBrowserVersion = change.agentBrowserVersion ?? FIXTURE_BROWSER;
   if (change.serverEnv) inputs.server.env = change.serverEnv;
   writeFileSync(join(root, '.ai/scripts/test-env.inputs.json'), JSON.stringify(inputs, null, 2) + '\n');
 }

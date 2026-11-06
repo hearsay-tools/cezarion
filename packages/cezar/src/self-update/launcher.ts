@@ -11,6 +11,8 @@ import { appendFileSync, chmodSync, mkdirSync, readFileSync, writeFileSync } fro
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
+
 import { binDir, CURRENT_LINK, PACKAGE_NAME, versionsDir } from './layout.ts';
 
 const PATH_MARKER = '# cezar managed install';
@@ -63,6 +65,8 @@ function windowsLauncher(env: NodeJS.ProcessEnv): string {
 /** Write `cezar` and `cez` launchers. Returns the bin directory. Untested on Windows (PoC). */
 export function writeLaunchers(env: NodeJS.ProcessEnv = process.env): string {
   const dir = binDir(env);
+  assertCezarHomeWriteIsSandboxed(dir, env);
+  assertCezarHomeWriteIsSandboxed(versionsDir(env), env);
   mkdirSync(dir, { recursive: true });
   mkdirSync(versionsDir(env), { recursive: true });
   for (const name of ['cezarion', 'cez']) {
