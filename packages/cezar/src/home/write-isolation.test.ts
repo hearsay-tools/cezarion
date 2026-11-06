@@ -27,13 +27,12 @@ it.each(['config.json', 'agent-accounts.json'] as const)('restores %s only in th
   const ambientPath = join(ambient.root, file);
   const snapshot = file === 'config.json' ? { extra: 'snapshot' } : { accounts: [], selections: {}, extra: 'snapshot' };
   atomicWriteJsonSync(selectedPath, snapshot);
-  vi.stubEnv('CEZ_HOME', selected.root);
-  if (file === 'config.json') await mergeWriteWorkspaceConfig(value => { value.extra = 'replaced'; });
-  else await mergeWriteAgentAccounts(value => { value.extra = 'replaced'; });
   atomicWriteJsonSync(ambientPath, { ...snapshot, extra: 'ambient' });
   const before = readFileSync(ambientPath, 'utf8');
   const ambientFiles = readdirSync(ambient.root);
   vi.stubEnv('CEZ_HOME', ambient.root);
+  if (file === 'config.json') await mergeWriteWorkspaceConfig(value => { value.extra = 'replaced'; }, selected);
+  else await mergeWriteAgentAccounts(value => { value.extra = 'replaced'; }, selected);
 
   await restoreBackup(file, undefined, selected);
 
