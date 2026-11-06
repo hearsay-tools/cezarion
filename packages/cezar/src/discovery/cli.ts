@@ -38,6 +38,20 @@ headless runs. It never falls back to another cockpit on authentication failure.
 Outside a session, it finds an existing cockpit; it never starts one.
 Catalogs describe host default accounts, not every named account or spawn policy.`;
 
+/** Discovery through the session's own controller. A failure never escapes to another cockpit. */
+async function sessionDiscovery(env: NodeJS.ProcessEnv, request: z.infer<typeof discoveryRequestSchema>, schema: z.ZodType, print: (value: unknown) => void): Promise<number> {
+  try {
+    const endpoint = delegationEndpoint(env.CEZ_DELEGATION_URL);
+    const token = z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(env.CEZ_DELEGATION_TOKEN);
+    const response = await fetch(`${endpoint.href}/discover`, { method: 'POST', redirect: 'error', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(request), signal: AbortSignal.timeout(45_000) });
+    const data = await boundedJson(response);
+    if (!response.ok) { print(delegationErrorResponseSchema.parse(data)); return 2; }
+    print(schema.parse(data)); return 0;
+  } catch {
+    throw new TaskCliError(2, { code: 'unavailable_transport', error: 'Discovery session is unavailable or returned an invalid response.' });
+  }
+}
+
 export async function runDiscoverCommand(argv: string[], env: NodeJS.ProcessEnv = process.env, io: DiscoveryIo = { stdout: line => console.log(line) }): Promise<number> {
   const print = (value: unknown) => {
     let line = JSON.stringify(value);
@@ -57,17 +71,11 @@ export async function runDiscoverCommand(argv: string[], env: NodeJS.ProcessEnv 
     // Even a partial/expired session must not silently escape its controller or scope.
     if (env.CEZ_DELEGATION_URL !== undefined || env.CEZ_DELEGATION_TOKEN !== undefined) {
       if (values.url !== undefined || values.repo !== undefined) throw new TaskCliError(64, { code: 'invalid_input', error: 'A delegation session uses its own controller; --url and --repo are unavailable.' });
-      try {
-        const endpoint = delegationEndpoint(env.CEZ_DELEGATION_URL);
-        const token = z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(env.CEZ_DELEGATION_TOKEN);
-        const response = await fetch(`${endpoint.href}/discover`, { method: 'POST', redirect: 'error', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(request), signal: AbortSignal.timeout(45_000) });
-        const data = await boundedJson(response);
-        if (!response.ok) { print(delegationErrorResponseSchema.parse(data)); return 2; }
-        print(schema.parse(data)); return 0;
-      } catch {
-        throw new TaskCliError(2, { code: 'unavailable_transport', error: 'Discovery session is unavailable or returned an invalid response.' });
-      }
+      return await sessionDiscovery(env, request, schema, print);
     }
+    // hearsay-tools/cezarion#2784: inside a task, discovery follows its workers setting. A task
+    // with no credential (both settings off, or no listener) does not fall back to the cockpit.
+    if (env.CEZ_TASK_ID) throw new TaskCliError(2, { code: 'incompatible_state', error: 'Runner and model discovery is unavailable in this task: Cezar workers are off for it, or the delegation listener is unavailable. A human can turn workers on in the task menu.' });
     const cockpit = await (io.discover ?? discoverCockpit)({ repoDir: values.repo ?? process.cwd(), ...(values.url ?? env.CEZ_URL ? { url: values.url ?? env.CEZ_URL } : {}) });
     const response = await fetchJson(`${cockpit.origin}/api/v1/${request.kind === 'runners' ? 'providers/status' : `models?runner=${encodeURIComponent(request.runner)}`}`);
     if (response.status !== 200) refuse(response);

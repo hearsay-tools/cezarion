@@ -83,6 +83,13 @@ describe('cez discover', () => {
     expect(await run(args)).toBe(64);
     expect(last().code).toBe('invalid_input');
   });
+  // hearsay-tools/cezarion#2784: a task session without a credential does not fall back to the public cockpit.
+  it('refuses public discovery inside a task that has no delegation credential', async () => {
+    const discover = vi.fn(async () => ({ origin, projectId: 'default', api: `${origin}/api/v1` }));
+    expect(await runDiscoverCommand(['runners'], { CEZ_TASK_ID: 'task' }, { stdout: line => output.push(line), discover })).toBe(2);
+    expect(last()).toMatchObject({ code: 'incompatible_state', error: expect.stringContaining('Cezar workers are off for it') });
+    expect(discover).not.toHaveBeenCalled();
+  });
   it('prints help without a controller or catalog', async () => {
     expect(await run(['--help'], { CEZ_DELEGATION_TOKEN: 'bad' })).toBe(0);
     expect(output.join('\n')).toContain('models --runner');
