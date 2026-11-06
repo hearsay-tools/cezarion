@@ -242,9 +242,12 @@ zero accounts, the cockpit shows a banner with a one-click restore of the newest
 `config.json.bak` (ADR 0010) becomes the newest entry of this set.
 
 A test or stray process can also write a live file directly, past `HomeStore`. So
-`HomeStore` keeps a version log per file in `backups/<file>/`: every version it wrote, by
-content hash, plus a `HEAD` record that names the committed version. One write, all under
-`write.lock`:
+`HomeStore` keeps a version log per file beside the file's own dir (`<config>/.versions/<file>/`
+for config files, `<state>/.versions/<file>/` for state files, so processes that share the
+file share its log): every version it wrote, by content hash, plus a `HEAD` record that names
+the committed version; "absent" is a valid `HEAD` for a file that does not exist yet, and the
+first write creates file and log through the same steps. Reads and writes both run under
+`write.lock`, so a read never sees a new `HEAD` with an old file. One write:
 
 1. Re-read the live file. If its hash is not `HEAD`, an outside write happened since the last
    read: stop and flag it (below) instead of overwriting it.
