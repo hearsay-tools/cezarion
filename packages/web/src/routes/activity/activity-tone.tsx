@@ -18,8 +18,11 @@ import {
 } from 'lucide-react'
 import type { ActivityRun, ActivityWorker } from '@open-mercato/cezar-api-client/contract/activity'
 
+import type { ComponentProps } from 'react'
+
 import { StatusDot } from '@/components/status-dot'
 import { attentionOfRung, type AttentionShape, type AttentionTone } from '@/lib/attention'
+import { cn } from '@/lib/utils'
 
 import type { NowIcon } from './now-box'
 
@@ -35,6 +38,30 @@ export const TONE_INK: Record<AttentionTone, string> = {
   info: 'text-info',
   running: 'text-status-running',
   neutral: 'text-muted-foreground',
+}
+
+/**
+ * Small text in a tone's readable ink, the verb of a now box or a pill. Each tone's ink is a
+ * literal branch, and the word carries its own card-2 surface (both callers sit on card-2), so
+ * the cez/card-2-contrast lint checks every branch as small text on card-2 right here.
+ */
+export function ToneWord({ tone, className, children, ...props }: ComponentProps<'span'> & { tone: AttentionTone }) {
+  return (
+    <span
+      {...props}
+      className={cn('bg-card-2', {
+        'text-success': tone === 'success',
+        'text-signal-word-amber': tone === 'pending',
+        'text-signal-word-red': tone === 'danger',
+        'text-accent-text': tone === 'accent',
+        'text-info': tone === 'info',
+        'text-status-running': tone === 'running',
+        'text-muted-foreground': tone === 'neutral',
+      }, className)}
+    >
+      {children}
+    </span>
+  )
 }
 
 export const NOW_ICON: Record<NowIcon, LucideIcon> = {
