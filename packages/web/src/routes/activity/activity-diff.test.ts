@@ -57,7 +57,7 @@ describe('diffActivity', () => {
   })
 
   it('slides the main line in at a new tool call', () => {
-    const tool = (title: string, startedAt: string) => ({ ...A, tool: { title, toolKind: 'edit', status: TOOL_STATUS.running, startedAt } })
+    const tool = (title: string, startedAt: string) => ({ ...A, tool: { title, toolKind: 'edit' as const, status: TOOL_STATUS.running, startedAt } })
     expect(between({ tasks: [tool('Edit a.ts', iso(-2_000))] }, { tasks: [tool('Edit b.ts', iso(-500))] })).toEqual([{ kind: 'tool-started', projectId: 'cezarion', runId: 'a' }])
     expect(between({ tasks: [tool('Edit a.ts', iso(-2_000))] }, { tasks: [tool('Edit a.ts', iso(-2_000))] })).toEqual([])
   })

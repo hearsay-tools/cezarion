@@ -44,12 +44,16 @@ function useStablePlacement(ids: readonly string[], count: number, weight: (id: 
 
 /** What the motion still draws of a project: cards that left and requests that closed, while
  *  they collapse or fade. Each is left out once the snapshot has it again. */
-export function ghostsOf(project: ActivityProject, motion: MotionState): { cards: ActivityRun[]; requests: ActivityRequest[] } {
+export function ghostsOf(project: ActivityProject, motion: MotionState): { cards: ActivityRun[]; requests: ActivityRequest[]; folding: ActivityRequest[] } {
   const tasks = new Set(project.tasks.map((task) => task.runId))
   const open = new Set(project.requests.map((request) => request.requestId))
+  const closing = Object.values(motion.closing).filter((ghost) => ghost.projectId === project.projectId && !open.has(ghost.request.requestId))
   return {
     cards: Object.values(motion.leaving).filter((ghost) => ghost.projectId === project.projectId && !tasks.has(ghost.task.runId)).map((ghost) => ghost.task),
-    requests: Object.values(motion.closing).filter((ghost) => ghost.projectId === project.projectId && !open.has(ghost.request.requestId)).map((ghost) => ghost.request),
+    requests: closing.map((ghost) => ghost.request),
+    // The rail entry folds while the reply comet travels, or while a closure without a reply
+    // fades; it leaves no gap while the line still says "Replied".
+    folding: closing.filter((ghost) => ghost.phase === 'reply' || !ghost.replied).map((ghost) => ghost.request),
   }
 }
 
@@ -107,7 +111,7 @@ export function ActivityBoard({ project, now, watchingSince, motion = EMPTY_MOTI
           <ActivityLines requests={drawnRequests} index={index} peers={!narrow} layoutKey={layoutKey} now={now} motion={motion} paused={paused} />
         </div>
       </div>
-      <ActivityRail requests={project.requests} closing={ghosts.requests} index={index} now={now} watchingSince={watchingSince} feed={feed} motion={motion} />
+      <ActivityRail requests={project.requests} closing={ghosts.folding} index={index} now={now} watchingSince={watchingSince} feed={feed} motion={motion} />
     </div>
   )
 }

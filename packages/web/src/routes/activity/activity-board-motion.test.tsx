@@ -71,7 +71,15 @@ describe('the board in motion', () => {
     expect(document.querySelector('[data-bucket="pending"]')?.classList.contains('activity-breathe-fast')).toBe(true)
   })
 
-  it('draws a closed request while it plays its reply, and folds its rail entry', () => {
+  it('folds the rail entry of a closed request while the reply comet travels back', () => {
+    const peer = request({ senderRunId: 'a', recipientRunId: 'b' })
+    renderBoard(project({ tasks: [A, B] }), motionOf({ kind: 'request-closed', projectId, request: peer, status: 'replied' }))
+    expect(document.querySelector(`path[data-request="${peer.requestId}"]`)?.getAttribute('data-phase')).toBe('reply')
+    expect(document.querySelector('[data-slot="activity-request-closing"]')?.classList.contains('activity-row-fold')).toBe(true)
+    expect(document.querySelectorAll('[data-slot="activity-request"]')).toHaveLength(0)
+  })
+
+  it('then draws the line solid with "Replied", and the rail has let the entry go', () => {
     const peer = request({ senderRunId: 'a', recipientRunId: 'b' })
     let motion = motionOf({ kind: 'request-closed', projectId, request: peer, status: 'replied' })
     motion = { ...motion, closing: { [peer.requestId]: { ...motion.closing[peer.requestId]!, phase: 'replied' } } }
@@ -80,8 +88,8 @@ describe('the board in motion', () => {
     expect(path?.getAttribute('data-phase')).toBe('replied')
     expect(path?.hasAttribute('stroke-dasharray')).toBe(false)
     expect(document.querySelector('[data-slot="activity-line-label"]')?.textContent).toMatch(/^Replied/)
-    expect(document.querySelector('[data-slot="activity-request-closing"]')?.classList.contains('activity-row-fold')).toBe(true)
-    expect(document.querySelectorAll('[data-slot="activity-request"]')).toHaveLength(0)
+    expect(document.querySelector('[data-slot="activity-request-closing"]')).toBeNull()
+    expect(screen.getByText('No task waits for a reply.')).toBeTruthy()
   })
 
   it('marches open lines and fades a new one in behind its comet', () => {
