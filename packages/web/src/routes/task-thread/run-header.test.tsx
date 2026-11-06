@@ -1283,7 +1283,9 @@ describe('task access settings (hearsay-tools/cezarion#2784)', () => {
     renderHeader(run(status), undefined, 'session', 'sample')
     const workers = actionBar().getByRole('menuitemcheckbox', { name: 'Allow cezar workers' })
     expect(workers.getAttribute('aria-describedby')).toBeTruthy()
-    expect(document.getElementById(workers.getAttribute('aria-describedby')!)?.textContent).toContain('separate paid agent session')
+    const described = workers.getAttribute('aria-describedby')!.split(' ').map(id => document.getElementById(id)?.textContent ?? '').join(' ')
+    expect(described).toContain('separate paid agent session')
+    expect(described).toContain('reaches a running agent at its next session')
     fireEvent.click(workers)
     await waitFor(() => expect(sent.find(request => request.method === 'PATCH')).toMatchObject({
       path: '/api/v1/p/sample/runs/r1', body: { allowWorkers: false },

@@ -176,6 +176,7 @@ describe('session provisioning', () => {
       expect(session).toMatchObject({ restrictCrossSessionMessaging: true, env: { CEZ_DELEGATION_URL: 'http://127.0.0.1:12345/api/v1/delegation' } });
       expect(session.env).not.toHaveProperty('CEZ_DELEGATION_TOKEN');
       expect(session.instructions).toContain('Cezar workers and task messaging are off for this task');
+      expect(session.instructions).toContain('they reach you at your next session');
       expect(session.instructions).not.toMatch(/index\.[jt]s' message/);
       expect(f.store.getRun(run.id)?.delegation).toBeUndefined();
     });

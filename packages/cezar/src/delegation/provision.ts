@@ -61,7 +61,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
   // back to the cockpit, as it does for any partial credential.
   if (!worker && !workersOn && !messagingOn && !owned) {
     return { restrictCrossSessionMessaging: true, env: { CEZ_DELEGATION_URL: options.url }, revoke: () => {},
-      instructions: `Cezar workers and task messaging are off for this task; a human can turn them on in the task menu. ${subagentOnly}` };
+      instructions: `Cezar workers and task messaging are off for this task; a human can turn them on in the task menu, and they reach you at your next session. ${subagentOnly}` };
   }
   // Root authority is durable before a token exists. The switches never edit it: they are read per call.
   if (!run.delegation) options.store.commitDelegation([{ id: run.id, delegation: rootDelegation() }]);
