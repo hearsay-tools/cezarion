@@ -7,7 +7,8 @@
 
 ## TLDR
 
-Automations in the fork react to GitHub events only, behind `CEZ_AUTOMATIONS=1`. This stage adds a
+Automations originally reacted to GitHub events only. They are now on by default unless
+`CEZ_AUTOMATIONS=0` (owner decision, 2026-11-06). This stage adds a
 second trigger kind, **a schedule** (every day, weekdays, one weekday a week, every N hours, in the
 server's time zone), evaluated by the existing workspace timer through a new schedule runner: one
 durable receipt per occurrence, at most one catch-up of a missed occurrence, auto-pause after three
@@ -21,11 +22,27 @@ Owner decisions (2026-10-02): the work ships as **three PRs**; this ticket is st
 day calendars, statistics) are filed as follow-up issues. Dollar figures follow
 `capabilities.costMetrics` wherever they appear (stage 3).
 
+## Default-on amendment (2026-11-06)
+
+The owner requested opt-out instead of opt-in. Only exact `CEZ_AUTOMATIONS=0`
+disables the surface, API, scheduler and agent schedule tools. Restart after a change.
+New definitions stay paused. Existing enabled definitions resume on upgrade unless opted out.
+Definitions, receipts, cursors and paused states are retained. No data migration is needed.
+The controller sends an explicit `0` or `1` to agent adapters; allowlists forward both.
+The earlier opt-in guarantee is replaced by the explicit opt-out and per-definition enablement.
+
+| Environment | Capability, API and schedule tools | Scheduler |
+|---|---|---|
+| Unset, empty, `1`, other values | Available | Starts; only enabled definitions can launch tasks |
+| Exact `0` | Hidden/refused (`409` for automation API) | Does not start; saved definitions retained |
+| Switch `0` to unset and restart | Available again | Resumes eligible enabled definitions using existing receipts and catch-up bounds |
+| No enabled definitions | Available | No task launches |
+
 ## What this stage keeps from the fork, and what it declines from upstream
 
 | Topic | Fork (this spec) | Upstream #985 |
 |---|---|---|
-| Gating | `capabilities.automations = CEZ_AUTOMATIONS === '1'`, unchanged. No breaking-change path. | Default-on (`!== '0'`). |
+| Gating | `capabilities.automations = CEZ_AUTOMATIONS !== '0'` (amended 2026-11-06); exact `0` disables. | Default-on (`!== '0'`). |
 | Nav / route gate | Follow `capabilities.automations` alone; the forge no longer gates the item. Deep-link copy: "Automations are off". | Same change. |
 | Lease | The hearsay-tools/cezarion#651 store lease (reclaim guard, identity checks) stays. The schedule runner takes it and checks `isCurrent()` before reserving. A held or lost lease logs `skipped` and retries through the existing workspace floor; it never advances the shared `nextRunAt`. | open-mercato/cezar#985 advanced the loser's `nextRunAt`; open-mercato/cezar#1099 replaced the lock with `proper-lockfile`. Neither adopted. |
 | `setState` | Read-modify-write against a fresh disk read, function form. | Same. |
@@ -176,7 +193,7 @@ automation" (receipts and cursors are kind-specific). The `changedLabels` rule s
 
 ## API
 
-All under the automations family, behind the origin guard and the `CEZ_AUTOMATIONS=1` gate,
+All under the automations family, behind the origin guard and the `CEZ_AUTOMATIONS !== '0'` gate,
 mounted at both scope spellings.
 
 - `GET /automations` → `{ available, reason?, scheduler, timeZone, automations[] }`; each entry
@@ -270,8 +287,9 @@ renders the "Automations are off" state when the capability is absent, as today.
 - Contract parity, route parity, versioned surface, BC inventory.
 - Web unit: editor draft round-trips both kinds, preview shows five instants, 409 reload action,
   list Run now, log tones, nav gating without forge.
-- E2E (`automations.e2e.ts`): the opted-out case stays on the shared environment; the enabled
-  journeys spawn their own fixture server with `CEZ_AUTOMATIONS=1` through `fixtureServeEnv`, the
+- E2E (`automations.e2e.ts`): the shared environment covers default-on; an explicit `CEZ_AUTOMATIONS=0`
+  fixture covers opt-out. GitHub preview uses an isolated `gh` fixture with no network or credentials.
+  Schedule journeys use the default through `fixtureServeEnv`, the
   way `mobile-tab-bar.e2e.ts` does, so they run in CI instead of skipping. Schedule journey
   (new → schedule → save paused → Run now → task appears → log shows `manual` → enable → next run
   shown → pause → delete); github journey as today; `ios-sweep.e2e.ts` covers list and editor.
@@ -294,7 +312,7 @@ Shipped after this stage. The decisions, so the code's comments have a record to
   address first; only an explicit `--url`, `--repo` or `CEZ_URL` runs discovery. With none of them
   it exits 2 and its message never suggests starting `cez`. `add` builds the same body as `create`;
   both create paused unless `--enable`. No dispatch flags.
-- **Gate.** One predicate, `CEZ_AUTOMATIONS=1` AND an address, decides both the short system-prompt
+- **Gate.** One predicate, `CEZ_AUTOMATIONS !== '0'` AND an address, decides both the short system-prompt
   part (`automations/prompts.ts`, composed at both session construction sites) and the built-in
   `create-cezarion-automation` skill (`automations/builtin-skill.ts`, `source: 'builtin'`), which
   `discoverSkills` appends after the sorted catalog so a repo skill of the same name hides it. Every
@@ -321,7 +339,7 @@ is the "cockpit attached" signal that gates the prompt part and the built-in ski
 run` injects nothing and composes nothing. Stage 3: built-in and cross-project templates
 (`GET /workspace/automation-templates`), week and day calendars, next-runs rail, this-week stats
 strip and per-row 7-day tallies (cost following `costMetrics`), owned workers nested in the log.
-Also not done: default-on, `task.dispatch`, PR-review triggers (upstream #1016 / upstream #1056), Jira/Linear
+Also not done: `task.dispatch`, PR-review triggers (upstream #1016 / upstream #1056), Jira/Linear
 (upstream #1045), full cron expressions, automations while the server is stopped.
 
 ## One-time schedules (hearsay-tools/cezarion#1465)
@@ -427,7 +445,7 @@ after it, `late`.
 | Paused | Cancel | Human or agent | Archived (`cancelled`) |
 | Paused | Delete | Human (cockpit, CLI, API) | Definition removed with a tombstone, as today |
 | Paused | — | — | **No automatic exit.** A paused one-time schedule waits for a person or agent, like a paused recurring one. The list shows it as Paused with its due time |
-| Waiting | Due time reached, `now - at <= SCHEDULE_GRACE_MS` | Workspace automation timer (`scheduler.ts`), on by default when `CEZ_AUTOMATIONS=1` | Launches (`schedule`); success Archived, failure Failed |
+| Waiting | Due time reached, `now - at <= SCHEDULE_GRACE_MS` | Workspace automation timer (`scheduler.ts`), on unless `CEZ_AUTOMATIONS=0` | Launches (`schedule`); success Archived, failure Failed |
 | Waiting | Cezarion starts after `at`, before the cutoff (or no cutoff) | The same timer, at boot or wake | Launches late (`late`, log says how late); success Archived, failure Failed |
 | Waiting | Cezarion starts after the cutoff | The same timer | Nothing launches. Log row `missed`; state Missed |
 | Waiting | Lease held by another cockpit | Timer | Logs `skipped`, retries at the workspace floor (existing `ScheduleLeaseHeldError` path). The winner's receipt turns the retry into the archive-invariant path |

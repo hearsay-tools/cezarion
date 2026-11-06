@@ -349,7 +349,7 @@ export interface WorkspaceAutomationSchedulerOptions {
 }
 
 /**
- * One workspace timer, running only while the scheduler is started (automations are opt-in) and at
+ * One workspace timer, running only while the scheduler is started (unless opted out) and at
  * least one project is registered with the coordinator. With nothing enabled it is an idle wake
  * at the cap, even before any project has a definitions file: every wake goes through
  * `reschedule`, whose coordinator refresh re-reads a store another cockpit changed and opens a

@@ -30,7 +30,7 @@ function handlers(overrides: Partial<CezarToolHandlers> = {}): CezarToolHandlers
 }
 const coded = (code: string) => async (): Promise<never> => { throw Object.assign(new Error('secret-sensitive'), { code }); };
 const controllers: CiToolController[] = [];
-afterEach(async () => { await Promise.all(controllers.splice(0).map(controller => controller.close())); });
+afterEach(async () => { vi.unstubAllEnvs(); await Promise.all(controllers.splice(0).map(controller => controller.close())); });
 async function controller() { const value = await CiToolController.start(); controllers.push(value); return value; }
 // One connection per call, as client.ts does (hearsay-tools/cezarion#1484): the server closes a
 // connection after it refuses an oversized body, and a pooled keep-alive socket then resets the next call.
@@ -42,6 +42,19 @@ function raw(env: Record<string,string>, body: string, token = env.CEZ_TOOL_TOKE
   });
 }
 describe('private CI controller', () => {
+  it.each([undefined, '0', '1'])('passes an explicit automation state to its MCP adapter: %j', async (value) => {
+    vi.stubEnv('CEZ_AUTOMATIONS', value);
+    const session = (await controller()).provision(handlers());
+    expect(session.env.CEZ_AUTOMATIONS).toBe(value === '0' ? '0' : '1');
+    const client = new Client({ name: 'automation-state-test', version: '1' });
+    try {
+      await client.connect(new StdioClientTransport({ ...session.descriptor, env: session.env, stderr: 'pipe' }));
+      const names = (await client.listTools()).tools.map(tool => tool.name);
+      expect(names.includes('cezar_schedule_task')).toBe(value !== '0');
+      expect(names.includes('cezar_scheduled_tasks')).toBe(value !== '0');
+    } finally { await client.close(); }
+  });
+
   it('has a private IPC endpoint, secret-free descriptor, and removes resources on close', async () => {
     const owner = await controller(); const session = owner.provision(handlers());
     expect(JSON.stringify(session.descriptor)).not.toContain(session.env.CEZ_TOOL_TOKEN);
@@ -119,7 +132,7 @@ describe('private CI controller', () => {
     const client = new Client({ name: 'owner-death-test', version: '1' });
     try {
       await client.connect(new StdioClientTransport({ ...session.descriptor, env: session.env, stderr: 'pipe' }));
-      expect((await client.listTools()).tools).toHaveLength(4);
+      expect((await client.listTools()).tools).toHaveLength(6);
       const closed = new Promise<void>(resolve => { client.onclose = resolve; });
       child.kill('SIGKILL');
       await closed;
@@ -134,7 +147,7 @@ describe('private CI controller', () => {
     try {
       await client.connect(transport);
       const listed = await client.listTools();
-      expect(listed.tools.map(tool => tool.name)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+      expect(listed.tools.map(tool => tool.name)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
       for (const tool of listed.tools) expect(tool.inputSchema.additionalProperties).toBe(false);
       expect(register).not.toHaveBeenCalled();
       // hearsay-tools/cezarion#1236: the removed alias is an unknown tool.

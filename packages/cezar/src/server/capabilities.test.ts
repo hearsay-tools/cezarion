@@ -223,23 +223,16 @@ describe('resolveCapabilities — singleProject', () => {
   );
 });
 
-describe('resolveCapabilities — automations (#801)', () => {
-  it('is OFF by default — GitHub automations are opt-in', () => {
-    expect(resolveCapabilities({}).automations).toBe(false);
+describe('resolveCapabilities — automations', () => {
+  it.each([undefined, '', '1', 'true', 'yes', 'on', 'false'])('is on unless explicitly disabled: %j', (value) => {
+    expect(resolveCapabilities(value === undefined ? {} : { CEZ_AUTOMATIONS: value }).automations).toBe(true);
   });
 
-  it('is on with CEZ_AUTOMATIONS=1', () => {
-    expect(resolveCapabilities({ CEZ_AUTOMATIONS: '1' }).automations).toBe(true);
+  it('is off only with CEZ_AUTOMATIONS=0', () => {
+    expect(resolveCapabilities({ CEZ_AUTOMATIONS: '0' }).automations).toBe(false);
   });
 
-  it.each(['0', 'true', 'yes', '', 'on'])(
-    'stays off for CEZ_AUTOMATIONS=%j — only an exact "1" opts in',
-    (value) => {
-      expect(resolveCapabilities({ CEZ_AUTOMATIONS: value }).automations).toBe(false);
-    },
-  );
-
-  // The three opt-in capabilities are independent switches; turning one on must never
+  // The capabilities are independent switches; turning one on must never
   // imply another, or a user enabling automations would silently get the inbox too.
   it('does not turn on any other opt-in capability', () => {
     expect(resolveCapabilities({ CEZ_AUTOMATIONS: '1' })).toMatchObject({

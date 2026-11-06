@@ -56,8 +56,8 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
     delete process.env.CEZ_REMOTE;
     delete process.env.CEZ_FOLLOWUPS;
     delete process.env.CEZ_SINGLE_PROJECT;
-    // #801: automations are opt-in, and this suite compares the REAL answers of every mirrored
-    // route. Left off, the whole `/automations*` family would answer an identical 409 under all
+    // #801: automations can be disabled, and this suite compares the REAL answers of every mirrored
+    // route. If disabled, the whole `/automations*` family would answer an identical 409 under all
     // three spellings — parity would pass while testing nothing about those routes.
     process.env.CEZ_AUTOMATIONS = '1';
     // Deterministic on any machine: no network, no real agent CLIs.

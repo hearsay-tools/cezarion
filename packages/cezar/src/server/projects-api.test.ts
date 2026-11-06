@@ -789,7 +789,7 @@ describe('workspace projects API', () => {
         settingsAdmin: true,
         remoteSettingsAdmin: false,
         singleProject: false,
-        automations: false,
+        automations: true,
         preview: false,
         voice: false,
         tokenMetrics: true,

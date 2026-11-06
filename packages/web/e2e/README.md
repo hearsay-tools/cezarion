@@ -256,7 +256,7 @@ npm run test:e2e -- inbox.e2e.ts --server-env=CEZ_FOLLOWUPS=1
 ```
 
 No ambient `CEZ_*` variable reaches an e2e cockpit (hearsay-tools/cezarion#1045), so a run from
-an agent's shell, which inherits the live cockpit's `CEZ_PREVIEW=1` and `CEZ_AUTOMATIONS=1`,
+an agent's shell, which inherits the live cockpit's `CEZ_PREVIEW=1` and `CEZ_AUTOMATIONS=0`,
 boots what CI boots. The shared server takes opt-ins only from `--server-env=CEZ_NAME=value`,
 and a running server booted with a different set is replaced rather than reused. A spec that
 boots its own server passes its flags in `fixtureServeEnv(root, { … })`.

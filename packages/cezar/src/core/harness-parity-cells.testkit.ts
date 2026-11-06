@@ -2520,8 +2520,8 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
   // and Cursor forwarded env, OpenCode's runtime config, Pi's extension and tool
   // admission), and each mock lists the tools through the real bundled adapter.
   // `cezar_preview_serve` and `cezar_preview_stop` are listed under `CEZ_PREVIEW=1` exactly, and
-  // `cezar_schedule_task` and `cezar_scheduled_tasks` under `CEZ_AUTOMATIONS=1` (hearsay-tools/cezarion#1465).
-  // Each cell turns both opt-ins on or off together; tools.ts's unit tests pin each flag alone.
+  // `cezar_schedule_task` and `cezar_scheduled_tasks` unless `CEZ_AUTOMATIONS=0` (hearsay-tools/cezarion#1465).
+  // Exercise the default and both explicit automation states on every native wire.
   describeRunners('tools', 'harness parity — cezarTools list behind CEZ_PREVIEW', () => {
     const wait = { id: '11111111-1111-4111-8111-111111111111', generation: 'gen', turnId: 'turn', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'registered' as const };
     // hearsay-tools/cezarion#1305: pi also runs the default list, which admits the tools through no allowlist.
@@ -2529,10 +2529,10 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       { label: '', toolGrant: explicitToolGrant(['Read']) },
       ...(backend === 'pi' ? [{ label: ' on the default tool list', toolGrant: { kind: 'step-default', tools: allowedToolsForStep(undefined, 'pi') } as ToolGrant }] : []),
     ];
-    for (const backend of runners) for (const enabled of [true, false]) for (const { label, toolGrant } of lists(backend)) {
-      it(`${backend} R35 ${enabled ? 'exposes' : 'hides'} preview serve and stop with CEZ_PREVIEW ${enabled ? 'on' : 'off'} and the schedule tools with CEZ_AUTOMATIONS ${enabled ? 'on' : 'off'}${label}`, async () => {
-        vi.stubEnv('CEZ_PREVIEW', enabled ? '1' : '');
-        vi.stubEnv('CEZ_AUTOMATIONS', enabled ? '1' : '');
+    for (const backend of runners) for (const value of [undefined, '1', '0']) for (const { label, toolGrant } of lists(backend)) {
+      it(`${backend} R35 lists tools with CEZ_AUTOMATIONS ${value ?? 'unset'}${label}`, async () => {
+        vi.stubEnv('CEZ_PREVIEW', value === '1' ? '1' : '');
+        vi.stubEnv('CEZ_AUTOMATIONS', value);
         const { CiToolController } = await import('../ci-wait/controller.ts');
         const controller = await CiToolController.start();
         const dir = mkdtempSync(join(tmpdir(), 'cez-tools-list-'));
@@ -2541,7 +2541,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
           const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, toolGrant, env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
           expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
           const waits = ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'];
-          const expected = enabled ? [...waits, 'cezar_preview_serve', 'cezar_preview_stop', 'cezar_schedule_task', 'cezar_scheduled_tasks'] : waits;
+          const expected = [...waits, ...(value === '1' ? ['cezar_preview_serve', 'cezar_preview_stop'] : []), ...(value !== '0' ? ['cezar_schedule_task', 'cezar_scheduled_tasks'] : [])];
           expect(JSON.parse(readFileSync(join(dir, 'result'), 'utf8')).names).toEqual(expected);
           const argv: string[] = JSON.parse(readFileSync(join(dir, 'wire'), 'utf8').trim().split('\n')[0]!);
           if (backend === 'claude') {

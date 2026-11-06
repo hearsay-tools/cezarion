@@ -1,13 +1,18 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setImmediate } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutomationStore } from '../automations/store.ts';
 import { WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
-import { sweepRegisteredPreviewLeftovers } from './project-context.ts';
+import { ProjectContexts, sweepRegisteredPreviewLeftovers } from './project-context.ts';
+import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
+import { CompletionActionCoordinator } from './completion-actions.ts';
 import { createApp, startServer, type ServerDeps } from './server.ts';
+import * as git from './git.ts';
+import { createWorkspaceProjects } from './workspace-projects.ts';
 
 // The post-listen chain reads the registry, then sweeps preview leftovers, then decides on the
 // warm-up: the sweep call is the test's signal that the chain reached that decision.
@@ -18,7 +23,7 @@ vi.mock('./project-context.ts', async (original) => {
 import { apiRequest } from './loopback-request.testkit.ts';
 
 /**
- * GitHub automations are opt-in (#801): `CEZ_AUTOMATIONS=1` turns them on, off is the default.
+ * Automations are on by default: only `CEZ_AUTOMATIONS=0` turns them off.
  * Off, every route of the family answers `409` naming the flag — defense in depth behind the
  * cockpit's nav gate, so a bookmarked deep link or a script cannot drive a feature the operator
  * switched off.
@@ -55,7 +60,7 @@ describe('automations gate (#801)', () => {
     // must never destroy it.
     const seed = AutomationStore.open(dataDir);
     automationId = seed.create(DEFINITION).id;
-    delete process.env.CEZ_AUTOMATIONS;
+    process.env.CEZ_AUTOMATIONS = '0';
     delete process.env.CEZ_REMOTE;
   });
 
@@ -77,7 +82,7 @@ describe('automations gate (#801)', () => {
     body: JSON.stringify(body),
   });
 
-  describe('off (the default)', () => {
+  describe('off (CEZ_AUTOMATIONS=0)', () => {
     /** Every route of the feature. */
     const routes = (id: string): Array<[label: string, path: string, init?: RequestInit]> => [
       ['GET /automations', '/api/v1/automations'],
@@ -140,9 +145,9 @@ describe('automations gate (#801)', () => {
     });
   });
 
-  describe('on (CEZ_AUTOMATIONS=1)', () => {
+  describe('on (the default)', () => {
     beforeEach(() => {
-      process.env.CEZ_AUTOMATIONS = '1';
+      delete process.env.CEZ_AUTOMATIONS;
     });
 
     it('serves the real definitions', async () => {
@@ -218,7 +223,7 @@ describe('automations gate (#801)', () => {
       );
       try {
         await new Promise<void>((resolve) => server.once('listening', () => resolve()));
-        if (process.env.CEZ_AUTOMATIONS === '1') {
+        if (process.env.CEZ_AUTOMATIONS !== '0') {
           await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), {
             timeout: WARMUP_MS,
             interval: 10,
@@ -232,17 +237,61 @@ describe('automations gate (#801)', () => {
       } finally {
         server.close();
       }
-      expect(started).toHaveBeenCalledTimes(process.env.CEZ_AUTOMATIONS === '1' ? 1 : 0);
+      expect(started).toHaveBeenCalledTimes(process.env.CEZ_AUTOMATIONS !== '0' ? 1 : 0);
     };
 
     it('never starts polling while the flag is off', async () => {
       await boot();
     }, WARMUP_MS + 5_000);
 
-    it('starts once the flag is on, so the gate is the only thing holding it back', async () => {
-      process.env.CEZ_AUTOMATIONS = '1';
+    it('starts by default without an environment flag', async () => {
+      delete process.env.CEZ_AUTOMATIONS;
       await boot();
     }, WARMUP_MS + 5_000);
+
+    it.each(['project discovery', 'Git inspection'] as const)('does not restart after closing during %s', async (stage) => {
+      delete process.env.CEZ_AUTOMATIONS;
+      const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start').mockResolvedValue();
+      // Only automation startup may inspect the secondary project. Health uses the boot root.
+      vi.spyOn(ProjectContexts.prototype, 'warmAll').mockResolvedValue([]);
+      vi.spyOn(ArchiveOnMergeCoordinator.prototype, 'start').mockImplementation(() => {});
+      vi.spyOn(CompletionActionCoordinator.prototype, 'start').mockImplementation(() => {});
+      const automationRoot = join(repoRoot, 'automation-only');
+      mkdirSync(automationRoot);
+      let entered!: () => void;
+      let release!: () => void;
+      const reached = new Promise<void>((resolve) => { entered = resolve; });
+      const pending = new Promise<void>((resolve) => { release = resolve; });
+      const workspace = createWorkspaceProjects({ bootRoot: repoRoot });
+      vi.spyOn(workspace, 'listVisibleProjects').mockImplementation(async () => {
+        if (stage === 'project discovery') {
+          entered();
+          await pending;
+        }
+        return [{ id: 'automation-only', name: 'Automation only', root: automationRoot,
+          addedAt: '', lastOpenedAt: '', source: 'local' as const, status: 'ok' as const }];
+      });
+      vi.spyOn(git, 'getRepoInfo').mockImplementation(async (root) => {
+        if (stage === 'Git inspection' && root === automationRoot) {
+          entered();
+          await pending;
+        }
+        return null;
+      });
+      const server = startServer({ repoRoot, store, workspaceProjects: workspace,
+        manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' }, 0);
+      try {
+        await reached;
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        release();
+        // One real event-loop turn drains the released startup chain; these probes do no I/O.
+        await setImmediate();
+        expect(started).not.toHaveBeenCalled();
+      } finally {
+        release();
+        if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
 
     it('starts even when the post-listen chain outlasts a 50ms guess', async () => {
       process.env.CEZ_AUTOMATIONS = '1';

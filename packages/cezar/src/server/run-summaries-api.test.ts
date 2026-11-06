@@ -176,7 +176,7 @@ describe('run summaries API', () => {
         expect(await search('dependency')).toEqual(['nightly']);
         expect(await search('bump nightly')).toEqual(['nightly']);
         expect(await search('dependency missing')).toEqual([]);
-        delete process.env.CEZ_AUTOMATIONS;
+        process.env.CEZ_AUTOMATIONS = '0';
         expect(await search('dependency')).toEqual([]);
         expect(await search('auto-7f3')).toEqual(['nightly']);
       } finally {

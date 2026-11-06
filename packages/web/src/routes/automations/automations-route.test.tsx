@@ -26,7 +26,7 @@ it.each(['list', 'new', 'edit', 'log'] as const)('keeps %s gated, and says how t
   const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
   mount(mode, { capabilities: { automations: false } })
   expect(screen.getByText('Automations are off')).not.toBeNull()
-  expect(screen.getByText(/CEZ_AUTOMATIONS=1/)).not.toBeNull()
+  expect(screen.getByText(/Unset CEZ_AUTOMATIONS/)).not.toBeNull()
   expect(screen.queryByRole('button', { name: /^Save/ })).toBeNull()
   expect(fetch).not.toHaveBeenCalled()
 })

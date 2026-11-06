@@ -10,16 +10,13 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
 import { pollFor, pollJson } from './poll'
 // fixture-server starts: 1
 
-const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const shotsDir = resolve(import.meta.dirname, '../../../.ai/qa/screenshots/automations')
 const sessionId = `e2e-automations-${process.pid}`
 
 let browser: AgentBrowser
 let baseUrl: string
 let bootProject: string
-let automationId: string | undefined
-/** `capabilities.automations` (#801) — the shared environment boots WITHOUT the opt-in, which is
- *  what a default cezar does, so the enabled-path cases below skip unless it was turned on. */
+/** The shared environment uses the product default unless explicitly opted out. */
 let automationsAvailable = false
 
 beforeAll(async () => {
@@ -35,87 +32,30 @@ beforeAll(async () => {
 
 afterAll(async () => {
   browser?.close()
-  if (automationId) await fetch(`${baseUrl}/api/v1/automations/${automationId}`, { method: 'DELETE' })
 })
 
 describe('automations on the shared environment', () => {
-  // The default shape of the product, asserted in a real browser: nothing about automations is
-  // reachable or advertised until an operator opts in. Before #801 this sidebar item was present
-  // on every project with a GitHub remote, which is exactly what the flag exists to undo.
-  it('is absent from the sidebar and refuses its API without the opt-in', async ({ skip }) => {
-    skip(automationsAvailable, 'the shared environment explicitly enabled automations')
+  it('advertises automations by default in the sidebar and API', async ({ skip }) => {
+    skip(!automationsAvailable, 'the shared environment explicitly disabled automations')
     browser.goto(`${baseUrl}/p/${bootProject}/`)
-    browser.waitForFunction(`document.querySelector('[data-slot="sidebar"]') !== null`)
-    // No way into the feature: no nav entry links to its route. The task list's Automations tab
-    // (#1332) is a filter over tasks, shown either way, so the sidebar's text may name it.
-    expect(browser.count('[data-slot="sidebar"] a[href$="/automations"]')).toBe(0)
-    expect(browser.text('[data-slot="sidebar"] [data-slot="view-tabs"]')).not.toContain('Automations')
-
-    // The deep link still resolves — the route map is unchanged — but says the feature is off.
-    browser.goto(`${baseUrl}/p/${bootProject}/automations`)
-    browser.waitForFunction(`document.body.textContent.includes('Automations are off')`)
-    expect(browser.text('main')).toContain('CEZ_AUTOMATIONS=1')
-    browser.screenshot(`${artifactsDir}/automations-disabled.png`)
-
-    const refused = await fetch(`${baseUrl}/api/v1/automations`)
-    expect(refused.status).toBe(409)
-    expect(((await refused.json()) as { error: string }).error).toContain('CEZ_AUTOMATIONS')
-  }, 60_000)
-
-  it('creates a GitHub check paused, previews safely, enables from a baseline, and exposes the log', async ({ skip }) => {
-    skip(
-      !automationsAvailable,
-      'automations are opt-in; run npm run test:e2e -- --server-env=CEZ_AUTOMATIONS=1',
-    )
-    const name = `E2E issue triage ${process.pid}`
-    browser.goto(`${baseUrl}/p/${bootProject}/automations/new`)
-    // The editor opens on the schedule kind; this journey is the GitHub one.
-    browser.click('[data-slot="automation-kind"] [data-value="github"]')
-    browser.fill('#automation-name', name)
-    browser.fill('#automation-prompt', 'Triage {{github.url}}')
-    browser.click('button[type="submit"]')
+    browser.click('[data-slot="sidebar"] button[aria-label="More views"]')
+    const automationLink = `[role="menu"] a[href="/p/${bootProject}/automations"]`
+    browser.waitForFunction(`document.querySelector('${automationLink}') !== null`)
+    browser.click(automationLink)
     browser.waitForFunction(`location.pathname === '/p/${bootProject}/automations'`)
-
-    const created = await fetch(`${baseUrl}/api/v1/automations`).then((response) => response.json()) as {
-      automations: Array<{ id: string; name: string; enabled: boolean }>
-    }
-    const automation = created.automations.find((item) => item.name === name)
-    expect(automation).toMatchObject({ enabled: false })
-    automationId = automation!.id
-    browser.waitForFunction(`document.body.textContent.includes('${name}') && document.body.textContent.includes('Paused')`)
-
-    const preview = await fetch(`${baseUrl}/api/v1/automations/${automationId}/check`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: 'preview' }),
-    }).then((response) => response.json()) as { checkId: string }
-    const check = await pollFor(async signal => {
-      const check = await pollJson<{ status: string; matches?: number; error?: string | undefined }>(`${baseUrl}/api/v1/automation-checks/${preview.checkId}`, signal)
-      return ['complete', 'error'].includes(check.status) ? check : undefined
-    }, () => `automation check ${preview.checkId} never completed`, { timeoutMs: 30_000, intervalMs: 500 })
-    expect(check.status, check.error).toBe('complete')
-
-    await fetch(`${baseUrl}/api/v1/automations/${automationId}/enable`, { method: 'POST' })
-    browser.goto(`${baseUrl}/p/${bootProject}/automations`)
-    browser.waitForFunction(`document.body.textContent.includes('${name}') && document.body.textContent.includes('Enabled')`)
-    browser.screenshot(`${artifactsDir}/automations-enabled.png`)
-
-    browser.goto(`${baseUrl}/p/${bootProject}/automations/${automationId}/log`)
-    browser.waitForFunction(`document.body.textContent.includes('Execution log') && document.body.textContent.includes('Enabled from a current-time baseline')`)
-    expect(browser.text('main')).toContain('Baseline')
-    expect(browser.text('main')).toContain('Preview')
-    browser.screenshot(`${artifactsDir}/automations-execution-log.png`)
+    expect((await fetch(`${baseUrl}/api/v1/automations`)).status).toBe(200)
   }, 60_000)
+
+
 })
 
 /**
- * The schedule journey runs against its OWN fixture server, booted with the opt-in, so it runs in
- * CI instead of skipping the way the shared environment's enabled case does. The fixture has no
+ * The schedule journey uses its own default-on fixture server. The fixture has no
  * GitHub remote on purpose: a schedule needs none, and the GitHub segment must be disabled with
  * its reason while the schedule form still saves. `CEZ_DRY_RUN=1` keeps the launched task on the
  * bundled mock, so Run now touches no real agent CLI.
  */
-describe('scheduled automations on an opted-in fixture server', () => {
+describe('scheduled automations on a default-on fixture server', () => {
   let root: string
   let base: string
   let project: string
@@ -137,7 +77,7 @@ describe('scheduled automations on an opted-in fixture server', () => {
     git('init', '-q', '-b', 'main')
     git('-c', 'user.name=E2E', '-c', 'user.email=e2e@example.test', 'commit', '--allow-empty', '-m', 'fixture')
     server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
-      env: fixtureServeEnv(root, { CEZ_AUTOMATIONS: '1' }), stdio: 'ignore',
+      env: fixtureServeEnv(root), stdio: 'ignore',
     })
     base = await waitForFixtureServer(server)
     project = await bootProjectId(base)

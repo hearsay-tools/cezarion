@@ -9,6 +9,13 @@
 
 Add a project-scoped **Automations** page directly below GitHub in the sidebar. Users define bounded, polling-based GitHub triggers and pair them with the same prompt, workflow, skill, model, runner, worktree, and autonomy controls used by New task; matching issues or pull requests enqueue ordinary cezar tasks, while a durable execution log makes every decision debuggable.
 
+## Current feature gate (2026-11-06)
+
+Automations are on by default. Only exact `CEZ_AUTOMATIONS=0` disables them; restart
+after changing it. This supersedes the historical opt-in amendment below. New definitions
+remain paused, and existing enabled definitions resume unless opted out. See the
+[scheduled automations amendment](2026-10-02-scheduled-automations.md#default-on-amendment-2026-11-06).
+
 ## Optional existing matches (hearsay-tools/cezarion#1150)
 
 The default remains future-only at enablement. A per-poll **Include existing items** switch,

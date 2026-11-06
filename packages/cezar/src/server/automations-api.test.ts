@@ -51,8 +51,8 @@ describe('GitHub automation API', () => {
   let root: string;
   let home: string;
   let store: RunStore;
-  // #801 turned the whole family into an opt-in capability. This suite is about what the routes
-  // DO, so it opts in explicitly; what they answer while the flag is off is `automations-gate.test.ts`.
+  // The automation family can be disabled. This suite exercises enabled routes
+  // with an explicit flag; what they answer while the flag is off is `automations-gate.test.ts`.
   const savedAutomations = process.env.CEZ_AUTOMATIONS;
 
   beforeEach(() => {

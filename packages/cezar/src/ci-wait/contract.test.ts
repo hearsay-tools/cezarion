@@ -255,9 +255,10 @@ it('advertises every cezar tool input as one flat object', () => {
   expect(scheduled.required).toEqual(['action']);
 });
 
-it('forwards CEZ_AUTOMATIONS to the adapter only under the opt-in', () => {
+it('forwards CEZ_AUTOMATIONS including the explicit opt-out to adapters', () => {
   expect(cezarToolEnvNames({ CEZ_AUTOMATIONS: '1' })).toContain('CEZ_AUTOMATIONS');
-  expect(cezarToolEnvNames({})).not.toContain('CEZ_AUTOMATIONS');
+  expect(cezarToolEnvNames({})).toContain('CEZ_AUTOMATIONS');
+  expect(cezarToolEnvNames({ CEZ_AUTOMATIONS: '0' })).toContain('CEZ_AUTOMATIONS');
 });
 
 it('tells the agent when to enable a scheduled task and which ones to change', () => {
