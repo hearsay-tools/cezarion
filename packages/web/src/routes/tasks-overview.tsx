@@ -1,3 +1,4 @@
+import { useTaskListExpansion } from '@/lib/use-task-list-expansion'
 import { taskListRowIndexes, taskResourceGrid } from '@/lib/task-list-render'
 import { TaskListItems, TaskListScrollAnchor } from '@/components/task-list-items'
 import { TaskTitleEditorProvider, useTaskTitleEditor } from '@/lib/task-title-editor'
@@ -188,12 +189,7 @@ export function TasksOverview({
   const [detailedTable, setDetailedTable] = React.useState(false)
   const desktop = useIsDesktop()
   const listFocus = useTaskListFocusState(`${desktop}:${detailedTable}`, runs)
-  const [expandedRuns, setExpandedRuns] = React.useState<Set<string>>(() => new Set())
-  const toggleExpandedRun = React.useCallback((id: string) => setExpandedRuns((current) => {
-    const next = new Set(current)
-    if (next.has(id)) next.delete(id); else next.add(id)
-    return next
-  }), [])
+  const { expandedRuns, toggleExpandedRun } = useTaskListExpansion()
   const headerRef = React.useRef<HTMLElement>(null)
   const all = runs ?? []
   const derived = useProjectTaskGroups({ all, view, query, origin, archivedPages, archivedTotal, automationName })

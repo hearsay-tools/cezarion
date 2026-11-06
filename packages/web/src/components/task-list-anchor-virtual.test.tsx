@@ -13,6 +13,12 @@ function resize() {
   for (const [callback, elements] of observers) callback([...elements].filter(element => element.isConnected).map(target => ({ target, contentRect: { width: 1000, height: size(target) } }) as unknown as ResizeObserverEntry), {} as ResizeObserver)
 }
 function setupGeometry() {
+  const offsets = new WeakMap<Element, number>()
+  vi.spyOn(Element.prototype, 'scrollTop', 'get').mockImplementation(function (this: Element) { return offsets.get(this) ?? 0 })
+  vi.spyOn(Element.prototype, 'scrollTop', 'set').mockImplementation(function (this: Element, value) {
+    offsets.set(this, value)
+    queueMicrotask(() => this.dispatchEvent(new Event('scroll')))
+  })
   vi.stubGlobal('ResizeObserver', class {
     private elements = new Set<HTMLElement>()
     constructor(private callback: ResizeObserverCallback) { observers.set(callback, this.elements) }

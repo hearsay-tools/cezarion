@@ -1,3 +1,4 @@
+import { useTaskListExpansion } from '@/lib/use-task-list-expansion'
 import { taskListRowIndexes } from '@/lib/task-list-render'
 import { GlobalTasksEmptyState, GlobalTasksLoadError, OtherProjects, TruncatedNotice } from './global-tasks-states'
 import { TaskListItems, TaskListScrollAnchor } from '@/components/task-list-items'
@@ -191,12 +192,7 @@ function useIndexedRunMutation<V extends { task: GlobalTask }>({
 }
 
 export function GlobalTasksRoute() {
-  const [expandedRuns, setExpandedRuns] = React.useState<Set<string>>(() => new Set())
-  const toggleExpandedRun = React.useCallback((id: string) => setExpandedRuns((current) => {
-    const next = new Set(current)
-    if (next.has(id)) next.delete(id); else next.add(id)
-    return next
-  }), [])
+  const { expandedRuns, toggleExpandedRun } = useTaskListExpansion()
   const projects = useProjects()
   // The same host gate the per-project table honours: `CEZ_HIDE_COST` and friends turn these
   // columns off everywhere, and a cross-project view is not an exception.
