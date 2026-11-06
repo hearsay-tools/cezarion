@@ -1,3 +1,4 @@
+import { atContinue, atStepOpen, atTaskHead, bindLaunchSource } from './run/launch-read-resolver.ts';
 import { composeRunModules, type RunModules } from './run/compose.ts';
 import { UNREAD_INPUT_GRACE_MS, QUEUE_WATCHDOG_MS, REPO_REDISCOVERY_MS } from './run/constants.ts';
 export { IDLE_TIMEOUT_MS, UNREAD_INPUT_GRACE_MS, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE, QUEUE_WATCHDOG_MS } from './run/constants.ts';
@@ -36,7 +37,7 @@ import { type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../ci-wait/controller.ts';
-import { workerIdentity, type WorkerAccountBinding } from '../delegation/execution-identity.ts';
+import type { WorkerAccountBinding } from '../delegation/execution-identity.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { join } from 'node:path';
 import { onUsage, type ProcessUsage } from '../core/process-usage.ts';
@@ -296,11 +297,11 @@ export class RunManager {
   private agentEnvForStep(
     runId: string,
     backend: RunnerId,
-    options: { recordedProfileId?: string | undefined; stepId?: string | undefined } = {},
+    options: { recordedProfileId?: string | undefined; stepId?: string | undefined; phase?: 'step-open' | 'continue' } = {},
   ): Promise<{ env: Record<string, string>; profileId: string; accountBinding?: WorkerAccountBinding | undefined }> {
     return launchContext.agentEnvForStep(this.context, {
       agentEnv: (id) => this.agentEnv(id),
-      workerStep: (id, stepId) => launchContext.workerStep(this.context, id, stepId),
+      workerStep: (id, stepId) => (options.phase === 'continue' ? atContinue : atStepOpen).workerStep(this.context, id, stepId),
     }, runId, backend, options);
   }
 
@@ -614,7 +615,7 @@ export class RunManager {
     // repoRoot fallback; owned workers must never adopt/recreate an unverified resource.
     if (this.workerExecutionStopped(runId)) { this.modules.line.unmarkStarting(runId); return; }
     if (this.modules.runFinish.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() })) return;
-    workerIdentity(this.store, this.repoRoot, runId);
+    atContinue.verifyIdentity(this.store, this.repoRoot, runId);
     const record = this.store.getRun(runId);
     const workspace = await this.modules.continuationSession.continuationWorkspace(runId, stepId, record);
     if (!workspace) return;
@@ -635,17 +636,17 @@ export class RunManager {
 
   private async execute(runId: string, workflow: WorkflowDef, input: StartRunInput, startAt = 0): Promise<void> {
     if (this.workerExecutionStopped(runId)) { this.modules.line.unmarkStarting(runId); return; }
-    workerIdentity(this.store, this.repoRoot, runId);
+    atTaskHead.verifyIdentity(this.store, this.repoRoot, runId);
     const state = createActiveRun({
       cwd: this.repoRoot,
       pendingHumanAsk: this.hasPendingHumanAsk(runId),
-      autonomous: input.autonomous === true,
+      autonomous: atTaskHead.autonomous(input),
     });
     this.activate(runId, state);
     this.modules.line.unmarkStarting(runId);
     const emit = (event: { type: string; stepId?: string; [k: string]: unknown }) =>
       this.store.appendEvent(runId, event);
-    const execution: Execution = { runId, workflow, input, startAt, state, emit };
+    const execution: Execution = atTaskHead.executionPayload(runId, workflow, { input: bindLaunchSource(input), startAt, state, emit });
 
     const launch = await this.modules.stepLoop.startExecution(execution);
     if (!launch) return;
@@ -683,7 +684,7 @@ export class RunManager {
     if (seeded) seedHandoffFile(this.dataDir, seeded);
     // Worktree setup (#917): before the first step, so the agent starts in a prepared tree. Its
     // note rides the first agent step's opening message only, like the task's attachments.
-    const setupNote = await this.modules.stepLoop.prepareWorktree(runId, state, launch.config.worktreeSetup, emit, 'start');
+    const setupNote = await this.modules.stepLoop.prepareWorktree(runId, state, atTaskHead.worktreeSetup(launch.config), emit, 'start');
 
     // Every entry path loads the registry — `runContinuation` loads its own, and the one that
     // skipped this leaked raw `/skill` text to the backend (open-mercato/cezar#811). A failed discovery fails the run.

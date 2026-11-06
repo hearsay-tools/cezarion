@@ -1,3 +1,5 @@
+import type { LaunchSource } from './launch-read-resolver.ts';
+import { atStepOpen } from './launch-read-resolver.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -10,8 +12,8 @@ import type { RunRecord } from '../../runs/store.ts';
 import type { UiEventSink } from '../../runs/ui-event-sink.ts';
 import type { ActiveRun } from '../active-run.ts';
 import { pastedAttachmentsText, type PersistedAttachment } from '../pasted-content.ts';
-import { stepToolGrant, toolGrantLists, type WorkflowStepDef } from '../types.ts';
-import { agentDirectories, applyTemplate, composeSystemPrompt, expandRegistrySlashSkillText, leadingSlashSkillName, skillSystemPrompt } from './prompts.ts';
+import { toolGrantLists, type WorkflowStepDef } from '../types.ts';
+import { agentDirectories, composeSystemPrompt, expandRegistrySlashSkillText, leadingSlashSkillName, skillSystemPrompt } from './prompts.ts';
 import { stepModel } from './launch-settings.ts';
 import { stepScope } from './steps.ts';
 import { isDisposedDelegatedRun } from './run-guards.ts';
@@ -21,7 +23,7 @@ import * as inputReceipts from './input-receipts.ts';
 import type { RunLine } from './run-line.ts';
 import type { RunSkills } from './run-skills.ts';
 import type { HumanWaits } from './human-waits.ts';
-import type { ExecutionEmit, RunModuleContext, SessionTurn, StartRunInput, StepSessionLaunch, LaunchDelegation, LaunchCiTools } from './types.ts';
+import type { ExecutionEmit, RunModuleContext, SessionTurn, StepSessionLaunch, LaunchDelegation, LaunchCiTools } from './types.ts';
 
 export interface StepSessionHost {
   workerExecutionStopped(runId: string): boolean;
@@ -52,7 +54,7 @@ export class StepSession {
     runId: string,
     state: ActiveRun,
     step: WorkflowStepDef,
-    input: StartRunInput,
+    input: LaunchSource,
     checkFailure: string | null,
     /** The step after this one, which this step's done starts; undefined for the last step. */
     nextStep: WorkflowStepDef | undefined,
@@ -73,7 +75,7 @@ export class StepSession {
     const opening = await this.stepOpening(runId, state, step, input, emit, { checkFailure, images, chainNote, attachments, openingNote });
 
     const sessionId = randomUUID();
-    const backend = step.runner ?? taskBackend;
+    const backend = atStepOpen.runner(step, taskBackend);
     this.context.store.updateStep(runId, step.id, { sessionId, backend });
 
     const stepRecord = this.context.store.getRun(runId)?.steps.find((s) => s.id === step.id);
@@ -85,7 +87,7 @@ export class StepSession {
       acknowledge: () => true,
     });
 
-    const stepBackend = step.runner ?? taskBackend;
+    const stepBackend = atStepOpen.runner(step, taskBackend);
     // An owned worker's step runs under what its identity pinned for it (#452): model, effort,
     // account and grants alike. The bound `workflowDef` carries the same values; the private
     // evidence is the authority.
@@ -101,7 +103,7 @@ export class StepSession {
     if (state.liveSession.cancelled || (beforeSpawn && this.host.executionBlockedByRootFinish(beforeSpawn))) return null;
     this.context.store.updateStep(runId, step.id, { profileId: stepProfile.profileId });
 
-    const toolGrant = stepToolGrant(stepIdentity?.grants, step, stepBackend);
+    const toolGrant = atStepOpen.toolGrant(stepIdentity, step, stepBackend);
     // Workers inherit only the extra prompt, never the parent's selected skill (#778).
     state.liveSession.captureDelegationSettings({ cwd: state.liveSession.cwd, runner: stepBackend, model: model.backendModel,
       effort: model.effectiveEffort,
@@ -125,12 +127,12 @@ export class StepSession {
     if (launch.toolsError !== undefined) return launch.toolsError;
     state.inputState.declareDelivery(inputDeliveryOf(runner)); state.inputState.resetUnreadInputs(); state.inputState.resetEarlyConsumption();
     const launchOpening = sessionEvents.launchOpening(this.context, this.sharedHost, runId, state, step.id, { body: opening.userPrompt, ciTools });
-    const session = this.startStepSession(runId, state, runner, {
-      step, sessionId, images, opening: launchOpening, skillPrompt: opening.skillPrompt, extraSystemPrompt,
+    const session = this.startStepSession(runId, state, runner, atStepOpen.sessionPayload(step, {
+      sessionId, images, opening: launchOpening, skillPrompt: opening.skillPrompt, extraSystemPrompt,
       toolGrant, profile: stepProfile, model, delegation, webhooksPart, ciTools,
-    }, onEvent, turn, sink);
+    }), onEvent, turn, sink);
     if (typeof session === 'string') return session;
-    return this.awaitStepSession(runId, state, session, { stepId: step.id, nextStep, sink, turn, startTokens, delegation, ciTools });
+    return this.awaitStepSession(runId, state, session, atStepOpen.sessionWaitPayload(step.id, nextStep, { sink, turn, startTokens, delegation, ciTools }));
   }
 
   /** A fresh step's opening message, before the open-waits footer and the session-start context,
@@ -139,7 +141,7 @@ export class StepSession {
     runId: string,
     state: ActiveRun,
     step: WorkflowStepDef,
-    input: StartRunInput,
+    input: LaunchSource,
     emit: ExecutionEmit,
     parts: {
       checkFailure: string | null;
@@ -150,15 +152,15 @@ export class StepSession {
     },
   ): Promise<{ userPrompt: string; skillPrompt: string | undefined }> {
     let skillPrompt: string | undefined;
-    const rawPrompt = applyTemplate(step.prompt ?? '{{task}}', input.task);
+    const rawPrompt = atStepOpen.prompt(step, input);
     // The selected skill, a leading `/name`, every skill the prompt names as `/name`, and their
     // companions go where the agent looks (#1408, #1672).
     const provisioned = await this.runSkills.provisionRunSkills(runId, state, {
-      stepSkill: step.skill, slash: leadingSlashSkillName(rawPrompt), prompt: rawPrompt,
+      stepSkill: atStepOpen.skill(step), slash: leadingSlashSkillName(rawPrompt), prompt: rawPrompt,
     });
     for (const message of provisioned.notes) emit({ type: 'note', stepId: step.id, message });
-    if (step.skill) {
-      const skill = this.runSkills.enabledSkills(state).find((s) => s.name === step.skill);
+    if (atStepOpen.skill(step)) {
+      const skill = this.runSkills.enabledSkills(state).find((s) => s.name === atStepOpen.skill(step));
       if (skill) {
         // The body alone often does not identify the selected skill. Keep its
         // name and catalog description in the normalized runner payload so a
@@ -170,7 +172,7 @@ export class StepSession {
         emit({
           type: 'note',
           stepId: step.id,
-          message: `skill "${step.skill}" not found in .ai/cezar/skills, .ai/skills or the team skills repo — running with the plain prompt`,
+          message: `skill "${atStepOpen.skill(step)}" not found in .ai/cezar/skills, .ai/skills or the team skills repo — running with the plain prompt`,
         });
       }
     }

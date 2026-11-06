@@ -1,17 +1,15 @@
+import { atTaskHead, atStepOpen, type LaunchSource } from './launch-read-resolver.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { RunnerId } from '../../core/agent-runner.ts';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { WorkflowDef } from '../types.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
-import { accountHeldFor } from '../run-scheduling.ts';
-import { loadConfig } from '../../config.ts';
 import { getHeadCommit, getRepoInfo } from '../../server/git.ts';
 import { seedAgentConfigLocalLayer } from '../../agent-config/seed.ts';
 import { AgentTempDirError, agentTmpEnv } from '../../runs/agent-tmpdir.ts';
 import { resolveWorktreeSetup, runWorktreeSetup, worktreeSetupAgentNote, worktreeSetupEndNote, worktreeSetupEnv, worktreeSetupRecordError, worktreeSetupStartNote, type WorktreeSetupOutcome } from '../../worktree-setup.ts';
 import { taskModelIdentity } from './launch-settings.ts';
-import { resolveExtraSystemPrompt } from './prompts.ts';
 import { executionBaseRef, openExecutionWorktree, executionSeedFiles } from './run-workspace.ts';
 import { clearAutosaveTimer } from './input-timers.ts';
 import type { RunLine } from './run-line.ts';
@@ -21,7 +19,7 @@ import type { Execution, ExecutionLaunch, RunModuleContext, StartRunInput } from
 import type { ContentBlock } from '../../core/agent-runner.ts';
 import type { StepState } from '../../runs/store.ts';
 import type { WorkflowStepDef } from '../types.ts';
-import { chainStepNote, stepKind } from '../types.ts';
+import { stepKind } from '../types.ts';
 import type { PersistedAttachment } from '../pasted-content.ts';
 import { openWaits } from '../waits.ts';
 import { runGroupedCommand } from '../grouped-command.ts';
@@ -59,16 +57,18 @@ export class StepLoop {
    * back to the queue first.
    */
   async startExecution(execution: Execution): Promise<ExecutionLaunch | undefined> {
-    const { runId, workflow, input, startAt, state, emit } = execution;
+    const { runId, startAt, state, emit } = execution;
+    const workflow = atTaskHead.executionWorkflow(execution);
+    const input = atTaskHead.executionInput(execution);
     // Resolve the agent backend for this run: the task choice (GUI) wins over
     // the config default. Per-step `runner` can still override it at the step.
-    const config = await loadConfig(this.context.repoRoot);
+    const config = await atTaskHead.config(this.context.repoRoot);
     if (state.liveSession.cancelled || this.context.store.getRun(runId)?.stopping) {
       this.host.move(runId, 'cancel');
       this.host.dropActive(runId);
       return undefined;
     }
-    const taskBackend: RunnerId = input.runner ?? config.defaultRunner;
+    const taskBackend: RunnerId = atTaskHead.runner(input, config);
     // The account may have gone into a usage-limit hold since this run was dequeued — the queue
     // gate cannot be the only one, because dequeue is not the moment of no return. Nothing has
     // happened yet here, so the run goes back to the queue untouched (spec
@@ -76,9 +76,7 @@ export class StepLoop {
     if (this.requeueWhileHeld(runId, workflow, input, taskBackend, undefined, startAt)) return undefined;
     // Extra system prompt (R2 2.3): POST override > config default; echoed on
     // the record so the UI/API can show what the run actually used.
-    const extraSystemPrompt = this.context.store.getRun(runId)?.delegation?.role === 'worker'
-      ? input.systemPrompt
-      : resolveExtraSystemPrompt(input.systemPrompt, config.systemPrompt);
+    const extraSystemPrompt = atTaskHead.systemPrompt(this.context.store, runId, input, config);
     const modelIdentity = await taskModelIdentity(this.context.repoRoot, taskBackend, input);
     if (state.liveSession.cancelled) {
       this.host.move(runId, 'cancel');
@@ -97,7 +95,7 @@ export class StepLoop {
       systemPrompt: extraSystemPrompt,
       modelIdentity,
     });
-    emit({ type: 'lifecycle', message: `run started — workflow "${workflow.name}" (runner: ${taskBackend})` });
+    emit({ type: 'lifecycle', message: `run started — workflow "${atTaskHead.workflowName(workflow)}" (runner: ${taskBackend})` });
     return { config, taskBackend, extraSystemPrompt, ownedRun, owned };
   }
 
@@ -109,9 +107,10 @@ export class StepLoop {
    * False when the run stopped here.
    */
   async prepareExecutionWorktree(execution: Execution, launch: ExecutionLaunch): Promise<boolean> {
-    const { runId, input, emit } = execution;
+    const { runId, emit } = execution;
+    const input = atTaskHead.executionInput(execution);
     const repo = await getRepoInfo(this.context.repoRoot);
-    if (repo && input.worktree === false && !launch.owned) {
+    if (repo && atTaskHead.worktree(input) === false && !launch.owned) {
       // Composer opt-out: run in the repo working tree, no branch/worktree. The
       // repository-root lease serializes these runs by default; the explicit
       // CEZ_DISABLE_REPO_LOCK=1 escape hatch allows unsafe overlap.
@@ -123,7 +122,7 @@ export class StepLoop {
     } else if (repo || launch.owned) {
       emit({
         type: 'note',
-        message: `worktree on — using an isolated task worktree (${input.worktree === true ? 'explicit request' : 'default'})`,
+        message: `worktree on — using an isolated task worktree (${atTaskHead.worktree(input) === true ? 'explicit request' : 'default'})`,
       });
       const base = await executionBaseRef(this.context.store, this.context.repoRoot, execution, repo, launch);
       return this.createExecutionWorktree(execution, launch, base);
@@ -260,7 +259,7 @@ export class StepLoop {
   requeueWhileHeld(
     runId: string,
     workflow: WorkflowDef,
-    input: StartRunInput,
+    input: StartRunInput | LaunchSource,
     runner: RunnerId,
     state?: ActiveRun,
     startAt?: number,
@@ -274,10 +273,10 @@ export class StepLoop {
     // `dropActive` retires the entry on every terminal path, so the set still cleans itself up.
     const finishHeld = this.host.executionBlockedByRootFinish(run);
     if (!finishHeld && (this.line.isForced(runId) ||
-      !accountHeldFor({ ...run, runner }, this.context.semaphore.accountHolds(), runner))) return false;
+      !atTaskHead.heldAccount(run, runner, () => this.context.semaphore.accountHolds()))) return false;
     state?.liveSession.releaseRepoRoot?.();
     if (state) { state.liveSession.clearRepoRootRelease(); clearAutosaveTimer(state); }
-    this.line.enqueueJob(runId, { workflow, input, startAt });
+    this.line.enqueueJob(runId, atTaskHead.requeueJob(workflow, input, startAt));
     this.host.move(runId, 'requeue', startAt !== undefined && startAt > 0 ? {} : { startedAt: undefined });
     this.context.store.appendEvent(runId, {
       type: 'note',
@@ -296,16 +295,18 @@ export class StepLoop {
     launch: ExecutionLaunch,
     opening: { attachments: PersistedAttachment[]; images: ContentBlock[] | undefined; setupNote: string | undefined },
   ): Promise<StepLoopOutcome | undefined> {
-    const { runId, workflow, input, startAt, state, emit } = execution;
+    const { runId, startAt, state, emit } = execution;
+    const workflow = atTaskHead.executionWorkflow(execution);
+    const input = atTaskHead.executionInput(execution);
     const loop: StepLoopOutcome = { checkFailure: null, runError: null, deliveryCapped: false };
     let startImages = opening.images;
     let startAttachments = opening.attachments;
     let startSetupNote = opening.setupNote;
 
     let i = startAt;
-    while (i < workflow.steps.length) {
+    while (i < atStepOpen.workflowLength(workflow)) {
       if (state.liveSession.cancelled || this.host.workerExecutionStopped(runId)) { state.liveSession.cancel(); break; }
-      const step = workflow.steps[i] as WorkflowStepDef;
+      const step = atStepOpen.workflowStep(workflow, i) as WorkflowStepDef;
       const kind = stepKind(step);
       const record = this.context.store.getRun(runId)?.steps.find((s) => s.id === step.id);
       const iteration = (record?.iterations ?? 0) + 1;
@@ -322,7 +323,7 @@ export class StepLoop {
       if (kind === 'agent') {
         // Every agent step's session stays open after its turn until a done, finish, idle or cancel
         // closes it. Only a done completes a step that is not the last (hearsay-tools/cezarion#1620).
-        const nextStep = workflow.steps[i + 1];
+        const nextStep = atStepOpen.workflowStep(workflow, i + 1);
         const attemptStartedAt = Date.now();
         const failure = await this.stepSession.runAgentStep(
           runId,
@@ -335,7 +336,7 @@ export class StepLoop {
           startImages,
           launch.taskBackend,
           launch.extraSystemPrompt,
-          chainStepNote(workflow.steps, i),
+          atStepOpen.workflowChainNote(workflow, i),
           startAttachments,
           startSetupNote,
         );
@@ -343,7 +344,7 @@ export class StepLoop {
         startAttachments = [];
         startSetupNote = undefined;
         loop.checkFailure = null;
-        const after = this.nextAfterAgentStep(execution, launch, loop, { index: i, step, nextStep, failure, startedAt: attemptStartedAt });
+        const after = this.nextAfterAgentStep(execution, launch, loop, atStepOpen.afterStepPayload(i, step, nextStep, { failure, startedAt: attemptStartedAt }));
         if (after === 'handed-off') return undefined;
         if (after === 'settle') break;
         i++;
@@ -370,7 +371,9 @@ export class StepLoop {
     loop: StepLoopOutcome,
     attempt: { index: number; step: WorkflowStepDef; nextStep: WorkflowStepDef | undefined; failure: string | null; startedAt: number },
   ): 'next' | 'settle' | 'handed-off' {
-    const { runId, workflow, input, state, emit } = execution;
+    const { runId, state, emit } = execution;
+    const workflow = atTaskHead.executionWorkflow(execution);
+    const input = atTaskHead.executionInput(execution);
     const { step, failure } = attempt;
     // Stale setup cannot finalize a replacement owner. Disposal also clears
     // active, but must still honor a previously accepted Stop/Finish intent.
@@ -455,8 +458,9 @@ export class StepLoop {
     check: { ok: boolean; output: string },
     loop: StepLoopOutcome,
   ): number | undefined {
-    const { runId, workflow, emit } = execution;
-    const step = workflow.steps[index] as WorkflowStepDef;
+    const { runId, emit } = execution;
+    const workflow = atTaskHead.executionWorkflow(execution);
+    const step = atStepOpen.workflowStep(workflow, index) as WorkflowStepDef;
     const outcome = stepDecisions.checkStepOutcome(workflow, index, record, check.ok);
     if (outcome.kind === 'done') {
       this.finishStep(runId, step.id, 'done', undefined, emit);
@@ -473,7 +477,7 @@ export class StepLoop {
       });
       // Steps we're about to re-run go back to pending so the GUI rail
       // reads top-to-bottom truthfully.
-      for (const s of workflow.steps.slice(outcome.retryIndex, index + 1)) {
+      for (const s of atStepOpen.workflowSlice(workflow, outcome.retryIndex, index + 1)) {
         this.context.store.updateStep(runId, s.id, { status: 'pending' });
       }
       this.context.store.updateStep(runId, step.id, { retriesUsed: outcome.used + 1 });

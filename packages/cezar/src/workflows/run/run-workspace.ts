@@ -1,3 +1,4 @@
+import { atTaskHead } from './launch-read-resolver.ts';
 import { createWorktree, resolveBaseRef } from '../../git-worktree.ts';
 import { getRepoInfo } from '../../server/git.ts';
 import { ensureOwnedWorkspace, verifyOwnedWorkspace } from '../../delegation/workspace.ts';
@@ -50,7 +51,7 @@ export async function executionBaseRef(
   const { runId, emit } = execution;
   const recorded = launch.owned?.baselineSha ?? store.getRun(runId)?.baseBranch;
   let base = recorded ?? repo?.branch ?? 'HEAD';
-  const configured = recorded ? undefined : launch.config.baseBranch;
+  const configured = recorded ? undefined : atTaskHead.baseBranch(launch.config);
   if (configured) {
     const resolved = await resolveBaseRef(repoRoot, configured);
     if (resolved) {

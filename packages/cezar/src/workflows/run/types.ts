@@ -5,7 +5,7 @@ import type { UiEventSink } from '../../runs/ui-event-sink.ts';
 import type { ScheduleTaskAnswer, ScheduleTaskRequest, ScheduledTasksAnswer, ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
 import type { ContentBlock, RunnerId, ToolGrant } from '../../core/agent-runner.ts';
 import type { CiToolSession } from '../../ci-wait/controller.ts';
-import type { loadConfig } from '../../config.ts';
+import type { LaunchConfig, LaunchSource } from './launch-read-resolver.ts';
 import type { WorkerAccountBinding } from '../../delegation/execution-identity.ts';
 import type { DelegationSession } from '../../delegation/provision.ts';
 import type { RunRecord } from '../../runs/store.ts';
@@ -83,11 +83,11 @@ export interface PendingContinuation {
 export type ExecutionEmit = (event: { type: string; stepId?: string; [k: string]: unknown }) => void;
 
 /** One `execute` call: what its phases share. */
-export type Execution = { runId: string; workflow: WorkflowDef; input: StartRunInput; startAt: number; state: ActiveRun; emit: ExecutionEmit };
+export type Execution = { runId: string; workflow: WorkflowDef; input: LaunchSource; startAt: number; state: ActiveRun; emit: ExecutionEmit };
 
 /** What `startExecution` resolved before the first step. */
 export type ExecutionLaunch = {
-  config: Awaited<ReturnType<typeof loadConfig>>;
+  config: LaunchConfig;
   taskBackend: RunnerId;
   extraSystemPrompt: string | undefined;
   /** The run record as it was before `startExecution` recorded the start. */

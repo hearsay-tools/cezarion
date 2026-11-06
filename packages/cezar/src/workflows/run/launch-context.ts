@@ -1,11 +1,9 @@
+import { atStepOpen, atContinue } from './launch-read-resolver.ts';
 import type { DelegationProvisioner } from '../../delegation/provision.ts';
-import type { RunnerId } from '../../core/agent-runner.ts';
-import { buildChildEnv } from '../../core/agent-env.ts';
 import { provisionArtifactDirectory } from '../../artifacts/lifecycle.ts';
 import { handoffPath, refreshHandoffRecords } from '../../handoff.ts';
 import { agentTmpEnv } from '../../runs/agent-tmpdir.ts';
-import { workerIdentity, workerStepIdentity, boundWorkerAccountEnv, captureWorkerAccount, WorkerIdentityError, type WorkerAccountBinding, type WorkerStepIdentity } from '../../delegation/execution-identity.ts';
-import { resolveProfileEnvForRoot } from '../../workspace/agent-profiles.ts';
+import type { WorkerStepIdentity } from '../../delegation/execution-identity.ts';
 import { resolveCapabilities } from '../../server/capabilities.ts';
 import { automationCliCommand, automationsPrompt } from '../../automations/prompts.ts';
 import { createAutomationSkill } from '../../automations/builtin-skill.ts';
@@ -53,32 +51,9 @@ export function agentEnv({ dataDir }: LaunchContext, cockpit: CockpitAddress, ru
   };
 }
 
-export async function agentEnvForStep(
-  { store, repoRoot }: LaunchContext,
-  host: LaunchContextHost,
-  runId: string,
-  backend: RunnerId,
-  options: { recordedProfileId?: string | undefined; stepId?: string | undefined } = {},
-): Promise<{ env: Record<string, string>; profileId: string; accountBinding?: WorkerAccountBinding | undefined }> {
-  // An owned worker binds the account its identity pinned for THIS step (#452); a legacy identity
-  // answers every step with its single run-level account, so the one-provider rule still holds there.
-  const step = host.workerStep(runId, options.stepId);
-  if (step) {
-    if (backend !== step.account.provider) throw new WorkerIdentityError('Accepted worker provider identity cannot change');
-    const env = host.agentEnv(runId);
-    return { env: { ...env, ...boundWorkerAccountEnv(step.account, buildChildEnv({ backend, extraEnv: env })) },
-      profileId: step.account.profileId, accountBinding: step.account };
-  }
-  const run = store.getRun(runId);
-  const profileId = options.recordedProfileId
-    ?? (backend === (run?.runner ?? 'claude') ? run?.agentProfile : undefined);
-  const resolved = await resolveProfileEnvForRoot(repoRoot, backend, profileId);
-  const env = { ...host.agentEnv(runId), ...resolved.env };
-  return {
-    env,
-    profileId: resolved.profile.id,
-    accountBinding: process.env.CEZ_DELEGATION === '1' ? captureWorkerAccount(resolved.profile, buildChildEnv({ backend, extraEnv: env })) : undefined,
-  };
+export function agentEnvForStep(...args: Parameters<typeof atStepOpen.agentEnvForStep>): ReturnType<typeof atStepOpen.agentEnvForStep> {
+  const reads = args[4]?.phase === 'continue' ? atContinue : atStepOpen;
+  return reads.agentEnvForStep(...args);
 }
 
 /** Automations on AND a cockpit attached: the one predicate behind the prompt part and the built-in skill. */
@@ -127,7 +102,7 @@ export function sessionContextFor({ store, repoRoot, dataDir }: LaunchContext, r
       role,
       handoffPath: handoff,
       variables: {
-        ...(run ? { task: run.task, 'workflow.name': run.workflow } : {}),
+        ...(run ? atStepOpen.contextVariables(run) : {}),
         'run.id': runId,
         role,
         'step.id': stepId,
@@ -141,13 +116,7 @@ export function sessionContextFor({ store, repoRoot, dataDir }: LaunchContext, r
 }
 
 /** The pinned identity one agent step of an owned worker runs under; undefined for ordinary and internal runs. */
-export function workerStep({ store, repoRoot }: LaunchContext, runId: string, stepId: string | undefined): WorkerStepIdentity | undefined {
-  const identity = workerIdentity(store, repoRoot, runId, stepId);
-  if (!identity) return undefined;
-  return stepId === undefined
-    ? { account: identity.account, grants: identity.grants, ...(identity.model === undefined ? {} : { model: identity.model }), ...(identity.effort === undefined ? {} : { effort: identity.effort }) }
-    : workerStepIdentity(identity, stepId);
-}
+export const workerStep = atStepOpen.workerStep;
 
 export function setCockpitAddress(host: LaunchSettingsHost, address: CockpitAddress): void {
   host.setCockpit(address ? { ...address } : undefined);

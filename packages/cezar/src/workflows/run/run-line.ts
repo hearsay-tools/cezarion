@@ -1,11 +1,10 @@
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import type { RunnerId } from '../../core/agent-runner.ts';
-import { loadConfig } from '../../config.ts';
+import { atTaskHead } from './launch-read-resolver.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import { getRepoInfo } from '../../server/git.ts';
 import type { AccountHolds } from '../../workspace/semaphore.ts';
 import { nextLineEntry } from '../line-order.ts';
-import { accountHeldFor } from '../run-scheduling.ts';
 import { executionBlockedByRootFinish, historyDeletionPending } from './run-guards.ts';
 import type { RunModuleContext } from './types.ts';
 import type { WorkflowDef } from '../types.ts';
@@ -47,7 +46,7 @@ export function oldestEligibleWakeAt(entries: Iterable<string>, reads: {
     // them must not win the slot for its project's unstarted work. A runnerless record runs on
     // the configured default, which only `pump()` reads (async); until it has, such a wake is
     // not advertised while anything is held.
-    const runnerless = holds.deadline.size + holds.inFlight.size > 0 && reads.getRun(id)?.runner === undefined;
+    const runnerless = holds.deadline.size + holds.inFlight.size > 0 && atTaskHead.runnerless(reads, id);
     if (runnerless && configuredDefaultRunner === undefined) continue;
     if (!reads.canLeaveLine(id, holds, configuredDefaultRunner ?? 'claude')) continue;
     oldest = at;
@@ -179,7 +178,7 @@ export class RunLine {
     if (!queued || historyDeletionPending(this.context.store, id)) return true;
     if (this.host.admitted(id) && !this.host.activeHas(id)) return false;
     if (executionBlockedByRootFinish(this.context.store, queued)) return false;
-    return !accountHeldFor(this.host.withExecutionAccount(queued), holds, fallbackRunner);
+    return !atTaskHead.heldFor(this.host.withExecutionAccount(queued), holds, fallbackRunner);
   }
 
   /**
@@ -258,7 +257,7 @@ export class RunLine {
         const anyHold = holds.deadline.size > 0 || holds.inFlight.size > 0;
         // Only pay for the config read when something is actually held: a queued record may name
         // no runner, and then the account it would use is the configured default.
-        const defaultRunner = anyHold ? (await loadConfig(this.context.repoRoot)).defaultRunner : undefined;
+        const defaultRunner = anyHold ? atTaskHead.defaultRunner(await atTaskHead.config(this.context.repoRoot)) : undefined;
         if (defaultRunner !== undefined) this.configuredDefaultRunner = defaultRunner;
         while (this.entries().length > 0) {
           // Recovery may have begun while this pump awaited repository/config discovery.

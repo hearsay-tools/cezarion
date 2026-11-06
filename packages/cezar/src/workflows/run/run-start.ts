@@ -1,16 +1,12 @@
-import { agentModelsLocked } from '../../core/agent-model-policy.ts';
-import { delegationStateSchema } from '@open-mercato/cezar-contract/delegation';
-import { workerIdentity, ownedWorkflow } from '../../delegation/execution-identity.ts';
+import { atTaskHead } from './launch-read-resolver.ts';
 import { DelegationPolicyError } from '../../delegation/policy.ts';
-import { makeRunTitle } from '../../runs/run-title.ts';
 import { extractTaskRefs, refineTaskRefs } from '../../runs/task-refs.ts';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import type { RunnerId, ContentBlock } from '../../core/agent-runner.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { PastedContent, PersistedAttachment } from '../pasted-content.ts';
-import { queuedRecoveryInput } from '../run-scheduling.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
-import { QUICK_TASK_WORKFLOW, stepKind, type WorkflowDef } from '../types.ts';
+import type { WorkflowDef } from '../types.ts';
 import { clearIdleTimer, clearAutosaveTimer } from './input-timers.ts';
 import type { PendingJob, RunLine } from './run-line.ts';
 import type { RunModuleContext, StartRunInput, PendingContinuation } from './types.ts';
@@ -62,58 +58,29 @@ export class RunStart {
   ): RunRecord {
     // Sanitize at the manager boundary so CLI runs, workflows, and
     // direct callers cannot bypass the HTTP policy.
-    const effectiveInput = agentModelsLocked(this.context.repoRoot)
-      ? { ...input, model: undefined, effort: undefined }
-      : input;
-    const run = this.context.store.createRun({
-      title: makeRunTitle(input.task, workflow),
-      workflow: workflow.name,
-      task: input.task,
-      systemPrompt: input.systemPrompt,
-      model: effectiveInput.model,
-      effort: effectiveInput.effort,
-      runner: input.runner,
-      // The composer's per-task account (spec 2026-07-29-agent-profiles). Persisted at creation
-      // so a queued run picks it up at dequeue and every later resume reads the same answer.
-      agentProfile: input.agentProfile,
-      // Persist autonomy on the record (#489) so the terminal review gate
-      // (`settleSuccess`) can honor it — mid-run
-      // auto-nudge reads `input.autonomous` (`execute`), but the record is the
-      // only source those after-the-fact consumers have.
-      autonomous: input.autonomous === true,
-      archiveWhenDone: input.archiveWhenDone,
-      autoMergePr: input.autoMergePr,
-      notify: input.notify === true,
-      // Persist the explicit opt-out so queued-run restart recovery and the
-      // session Git routes can distinguish it from a removed isolated worktree.
-      worktree: input.worktree === false ? false : undefined,
-      clientRequestId: clientRequest?.id,
-      clientRequestHash: clientRequest?.hash,
-      automation: input.automation,
-      automationTrigger: input.automationTrigger,
-      steps: workflow.steps.map((s) => ({ id: s.id, name: s.name ?? s.id, kind: stepKind(s) })),
-    });
+    const effectiveInput = atTaskHead.acceptInput(this.context.repoRoot, input);
+    const run = this.context.store.createRun(atTaskHead.acceptedRunFields(input, workflow, effectiveInput, clientRequest));
     // The row exists from here on. A later write that throws still queues the job, so the caller
     // that sees the throw finds a run that starts now, not one only a restart would start (#1465).
     try {
       // Persist the full definition so a queued run survives a restart (#367) —
       // ad-hoc "(planned)" chains exist nowhere else to re-resolve from.
-      this.context.store.updateRun(run.id, { workflowDef: workflow });
+      this.context.store.updateRun(run.id, atTaskHead.acceptedWorkflowFields(workflow));
       // Initial pasted attachments must be visible while the run is still queued (#612),
       // and must survive a restart before a slot opens. Persist them before the job
       // enters `pendingJobs`; `hydrateQueuedInput` reconstructs their content blocks
       // from these URLs when a recovered run eventually starts — and for a file (#950)
       // this write is the ONLY copy, since it never had a block to be rebuilt from.
-      if (input.images?.length) {
-        const persisted = this.attachments.persistPastedAttachments(run.id, input.images);
+      if (atTaskHead.images(input)?.length) {
+        const persisted = this.attachments.persistPastedAttachments(run.id, atTaskHead.images(input)!);
         if (persisted.length) {
           this.context.store.updateRun(run.id, { taskImages: persisted.map((saved) => saved.url) });
         }
       }
       // Step-0 reference extraction (task auto-naming spec): the regex layer's
       // numbers persist immediately; the namer may add the kind it verified later.
-      const skillHint = workflow.steps.find((s) => stepKind(s) === 'agent' && s.skill)?.skill?.trim();
-      const refs = refineTaskRefs(extractTaskRefs(input.task), skillHint);
+      const skillHint = atTaskHead.skillHint(workflow);
+      const refs = refineTaskRefs(extractTaskRefs(atTaskHead.task(input)), skillHint);
       if (refs.prNumber !== undefined || refs.issueNumber !== undefined) {
         this.context.store.updateRun(run.id, {
           ...(refs.prNumber !== undefined ? { prNumber: refs.prNumber } : {}),
@@ -123,9 +90,9 @@ export class RunStart {
       // Fire-and-forget LLM naming (task auto-naming spec): the heuristic title
       // above shows instantly; the namer's short title replaces it when (and if)
       // the model answers. Never awaited, never fails the run.
-      void this.turnBookkeeper.autoNameRun(run.id, skillHint, input.task);
+      void this.turnBookkeeper.autoNameRun(run.id, skillHint, atTaskHead.task(input));
     } finally {
-      this.line.enqueueJob(run.id, { workflow, input: effectiveInput });
+      this.line.enqueueJob(run.id, atTaskHead.queuedPayload(workflow, effectiveInput));
       void this.line.pump();
     }
     return run;
@@ -142,22 +109,7 @@ export class RunStart {
   }
 
   ownedJob(run: RunRecord): { workflow: WorkflowDef; input: StartRunInput } {
-    const delegation = delegationStateSchema.safeParse(run.delegation);
-    if (this.host.historyDeletionPending(run.id) || run.status !== 'queued' || !delegation.success || delegation.data.role !== 'worker' ||
-        delegation.data.workspace.ownerRunId !== run.id || delegation.data.destroy) {
-      throw new DelegationPolicyError('incompatible_state', 'Run is not an executable owned creation');
-    }
-    // Accepted permissions are private immutable evidence. Only explicit internal
-    // primitive records retain the public-definition compatibility path.
-    const grants = workerIdentity(this.context.store, this.context.repoRoot, run.id)?.grants
-      ?? run.workflowDef?.steps.find(step => step.id === QUICK_TASK_WORKFLOW.steps[0]!.id);
-    return {
-      workflow: ownedWorkflow(run, this.context.store.readWorkerIdentity(run.id)) ?? { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!,
-        ...(grants?.allowedTools === undefined ? {} : { allowedTools: [...grants.allowedTools] }),
-        ...(grants?.bashAllowlist === undefined ? {} : { bashAllowlist: [...grants.bashAllowlist] }),
-      }] },
-      input: { ...queuedRecoveryInput(run), worktree: true },
-    };
+    return atTaskHead.ownedJob(this.context, this.host, run);
   }
 
   /** Read and hydrate mutable queued input in the same synchronous tick as dequeue. */
@@ -185,8 +137,8 @@ export class RunStart {
     // in the same synchronous tick as the `pendingJobs.delete` above, so no
     // handler can observe a half-dequeued run.
     void (async () => {
-      const input = this.queuedInput.hydrateQueuedInput(runId, job.input);
-      await this.context.work.track('execute', this.host.execute(runId, job.workflow, input, job.startAt));
+      const input = this.queuedInput.hydrateQueuedInput(runId, atTaskHead.jobInput(job));
+      await this.context.work.track('execute', this.host.execute(runId, atTaskHead.jobWorkflow(job), input, job.startAt));
     })().catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
       this.host.move(runId, 'fail-crash', { error: `engine crashed: ${message}` });

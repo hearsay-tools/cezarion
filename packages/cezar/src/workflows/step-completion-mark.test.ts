@@ -1,3 +1,4 @@
+import { bindLaunchSource } from './run/launch-read-resolver.ts';
 import { transitionTurnBoundary } from './run/turn-boundary.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -94,7 +95,7 @@ describe('step completion mark at settlement callers', () => {
     transitionTurnBoundary(state, { kind: 'done-step-consumed', phase: 'completed', session: state.liveSession.session, stepId: completed ? step.id : 'other' });
     active.set(runId, state);
     const execution: Execution = { runId, state, workflow: { name: 'chain', source: 'file', steps: [step, next] },
-      input: { task: 'work' }, startAt: 0, emit: vi.fn() };
+      input: bindLaunchSource({ task: 'work' }), startAt: 0, emit: vi.fn() };
     const launch = { taskBackend: 'codex' } as ExecutionLaunch;
     const loop: LoopOutcome = { checkFailure: null, runError: null, deliveryCapped: false };
     const result = stepLoop.nextAfterAgentStep(execution, launch, loop,

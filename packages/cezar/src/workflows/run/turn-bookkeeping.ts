@@ -1,12 +1,12 @@
 import { existsSync } from 'node:fs';
-import { loadConfig } from '../../config.ts';
+import { namingTask, namingSkillHint, narrowTitleConfig } from './launch-read-resolver.ts';
 import { worktreeShortstat } from '../../git-worktree.ts';
 import { autoNamingActive, generateRunName, liveTitleUpdatesEnabled, postValidateTitle } from '../../runs/auto-name.ts';
 import { extractTaskRefs } from '../../runs/task-refs.ts';
 import { parseTaskMarkers } from '../../runs/task-markers.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import type { Skill } from '../../skills.ts';
-import { stepKind, type WorkflowDef } from '../types.ts';
+import type { WorkflowDef } from '../types.ts';
 import type { RunModuleContext } from './types.ts';
 
 interface TurnBookkeeperHost {
@@ -139,7 +139,7 @@ export class TurnBookkeeper {
     }
     if (markers.title && run.titleOrigin !== 'user') {
       const current = this.context.store.getRun(runId);
-      const promptRefs = extractTaskRefs(run.task);
+      const promptRefs = extractTaskRefs(namingTask(run));
       const promptIssue = promptRefs.issueNumber ?? (promptRefs.prNumber === undefined ? promptRefs.ambiguousNumber : undefined);
       const refNumber = promptRefs.prNumber === undefined && promptIssue !== undefined && promptIssue === current?.issueNumber
         ? current.issueNumber : current?.prNumber ?? current?.issueNumber;
@@ -162,7 +162,7 @@ export class TurnBookkeeper {
   async maybeRefreshTitle(runId: string, turnText: string): Promise<void> {
     if (!autoNamingActive()) return;
     if (!turnText.trim()) return;
-    const config = await loadConfig(this.context.repoRoot);
+    const config = await narrowTitleConfig(this.context.repoRoot);
     if (!liveTitleUpdatesEnabled(config)) return;
     const run = this.context.store.getRun(runId);
     if (!run || run.titleOrigin === 'user' || run.titleOrigin === 'marker') return;
@@ -171,8 +171,8 @@ export class TurnBookkeeper {
     if (this.lastNamerKey.get(runId) === key) return;
     this.lastNamerKey.set(runId, key);
     const workflow = await this.host.reviveWorkflow(run);
-    const skillName = workflow?.steps.find((s) => stepKind(s) === 'agent' && s.skill)?.skill?.trim();
-    void this.autoNameRun(runId, skillName, run.task, { turnText, diffStat: statText });
+    const skillName = namingSkillHint(workflow);
+    void this.autoNameRun(runId, skillName, namingTask(run), { turnText, diffStat: statText });
   }
 
 }

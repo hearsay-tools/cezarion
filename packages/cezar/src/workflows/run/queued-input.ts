@@ -1,14 +1,13 @@
+import { atTaskHead, atContinue, atLiveInput } from './launch-read-resolver.ts';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { isImageAttachmentName } from '@open-mercato/cezar-contract/attachments';
 import type { ContentBlock } from '../../core/agent-runner.ts';
 import type { QueuedMessage, RunRecord } from '../../runs/store.ts';
 import { extractTaskRefs, refineTaskRefs } from '../../runs/task-refs.ts';
 import { makeRunTitle } from '../../runs/run-title.ts';
-import { resolveAttachmentPath } from '../attachment-path.ts';
-import { mediaTypeFor, type PastedContent, type PersistedAttachment } from '../pasted-content.ts';
-import { stepKind, type WorkflowDef } from '../types.ts';
+import { type PastedContent, type PersistedAttachment } from '../pasted-content.ts';
+import type { WorkflowDef } from '../types.ts';
 import type { PendingContinuation, RunModuleContext, StartRunInput } from './types.ts';
 
 interface PersistedAttachments { blocks: ContentBlock[]; attachments: PersistedAttachment[] }
@@ -21,15 +20,6 @@ interface QueuedInputHost {
   persistPastedAttachments(runId: string, content: readonly PastedContent[]): PersistedAttachment[];
   toQueuedMessage(runId: string, content: PastedContent[]): QueuedMessage;
   sendMessage(runId: string, content: PastedContent[], messageId?: string): boolean;
-}
-
-function foldQueuedTask(task: string, stack: QueuedMessage[]): string {
-  return [task, ...stack.map(message => message.text)]
-    .map(part => part.trim()).filter(part => part.length > 0).join('\n\n');
-}
-
-function queuedContinuationPrompt(openingPrompt: string, amendedTask: string): string {
-  return amendedTask ? `${openingPrompt}\n\nCurrent task and queued updates:\n\n${amendedTask}` : openingPrompt;
 }
 
 function buildQueuedMessage(content: PastedContent[], images: string[], id: string, createdAt: string): QueuedMessage {
@@ -66,30 +56,7 @@ export class QueuedInput {
    * RunRecord.task; task and stack stay separate.
    */
   hydrateQueuedInput(runId: string, input: StartRunInput): StartRunInput {
-    const run = this.context.store.getRun(runId);
-    if (!run) return input;
-    const stack = run.queuedMessages ?? [];
-
-    const task = foldQueuedTask(run.task, stack);
-
-    // Keep the original in-memory blocks for a live process (including the
-    // best-effort case where persistence failed). Recovery has no such copy,
-    // so rebuild it from the durable task-image URLs.
-    const images = input.images?.length
-      ? input.images
-      : this.readPersistedAttachments(runId, run.taskImages ?? [], 'task').blocks;
-    const stackedImages = this.readPersistedAttachments(
-      runId,
-      stack.flatMap((m) => m.images ?? []),
-      'queued',
-    ).blocks;
-
-    return {
-      ...input,
-      task,
-      ...(images.length ? { images } : { images: undefined }),
-      ...(stackedImages.length ? { stackedImages } : { stackedImages: undefined }),
-    };
+    return atTaskHead.hydrateQueuedInput(this.context, (...args) => this.readPersistedAttachments(...args), runId, input);
   }
 
   /** Apply edits and messages made while a restart continuation waits for
@@ -103,25 +70,7 @@ export class QueuedInput {
     persistedImages: ContentBlock[];
     persistedAttachments: PersistedAttachment[];
   } {
-    const run = this.context.store.getRun(runId);
-    if (!run) {
-      return { ...continuation, persistedImages: [], persistedAttachments: [] };
-    }
-    const stack = run.queuedMessages ?? [];
-    const amendedTask = foldQueuedTask(run.task, stack);
-    const openingPrompt = run.continuationMessage?.text ?? continuation.prompt;
-    const prompt = queuedContinuationPrompt(openingPrompt, amendedTask);
-    const persisted = this.readPersistedAttachments(
-      runId,
-      stack.flatMap((message) => message.images ?? []),
-      'queued',
-    );
-    return {
-      ...continuation,
-      prompt,
-      persistedImages: persisted.blocks,
-      persistedAttachments: persisted.attachments,
-    };
+    return atContinue.hydrateQueuedContinuation(this.context, (...args) => this.readPersistedAttachments(...args), runId, continuation);
   }
 
   /**
@@ -138,34 +87,7 @@ export class QueuedInput {
     urls: string[],
     kind: 'task' | 'queued' | 'continuation',
   ): PersistedAttachments {
-    const blocks: ContentBlock[] = [];
-    const attachments: PersistedAttachment[] = [];
-    for (const url of urls) {
-      const name = url.split('/').pop();
-      if (!name || name.includes('..') || name.includes('/') || name.includes('\\')) continue;
-      const path = resolveAttachmentPath(this.context.dataDir, runId, name);
-      try {
-        if (!path) throw new Error('missing or unsafe attachment');
-        if (isImageAttachmentName(name)) {
-          const data = readFileSync(path);
-          blocks.push({
-            type: 'image',
-            source: { type: 'base64', media_type: mediaTypeFor(name), data: data.toString('base64') },
-          });
-        } else if (!existsSync(path)) {
-          throw new Error('missing');
-        }
-        attachments.push({ name, url, path });
-      } catch {
-        // Degrade, never fail the boot (AGENTS.md): the user deleted `.ai/cezar/`
-        // or the file is unreadable — start with the text and say which attachment went.
-        this.context.store.appendEvent(runId, {
-          type: 'note',
-          message: `${kind} attachment ${name} could not be read — starting without it`,
-        });
-      }
-    }
-    return { blocks, attachments };
+    return atTaskHead.attachments(this.context, runId, urls, kind);
   }
 
   /**
@@ -198,7 +120,7 @@ export class QueuedInput {
     // Human input cancels no wait in the list (hearsay-tools/cezarion#1233, #1235): beside a wait
     // the message is accepted durably and opens the wake's continuation.
     if (run.waits?.length) this.context.store.commitHumanMessageBesideWaits(runId, message);
-    else this.context.store.updateRun(runId, { queuedMessages: [...(run.queuedMessages ?? []), message] });
+    else this.context.store.updateRun(runId, { queuedMessages: [...(atLiveInput.queuedMessages(run) ?? []), message] });
     return message;
   }
 
@@ -210,7 +132,7 @@ export class QueuedInput {
   ): QueuedMessage | null {
     if (!this.isQueued(runId)) return null;
     const run = this.context.store.getRun(runId);
-    const stack = run?.queuedMessages;
+    const stack = atLiveInput.queuedMessages(run);
     if (!stack) return null;
     const at = stack.findIndex((m) => m.id === msgId);
     if (at < 0) return null;
@@ -229,7 +151,7 @@ export class QueuedInput {
   removeQueuedMessage(runId: string, msgId: string): boolean {
     if (!this.isQueued(runId)) return false;
     const run = this.context.store.getRun(runId);
-    const stack = run?.queuedMessages;
+    const stack = atLiveInput.queuedMessages(run);
     if (!stack) return false;
     const target = stack.find((m) => m.id === msgId);
     if (!target) return false;
@@ -248,7 +170,7 @@ export class QueuedInput {
     if (!candidates.length) return;
     const run = this.context.store.getRun(runId);
     const referenced = new Set([
-      ...(run?.taskImages ?? []),
+      ...(atLiveInput.taskAttachmentUrls(run) ?? []),
       ...stack.flatMap((m) => m.images ?? []),
     ]);
     for (const url of candidates) {
@@ -274,7 +196,7 @@ export class QueuedInput {
     const run = this.context.store.getRun(runId);
     if (!run) return false;
     const workflow = this.host.job(runId)?.workflow;
-    const skillHint = workflow?.steps.find((s) => stepKind(s) === 'agent' && s.skill)?.skill?.trim();
+    const skillHint = workflow ? atTaskHead.skillHint(workflow) : undefined;
     const refs = refineTaskRefs(extractTaskRefs(task), skillHint);
     // Hand-edited titles always win (#389): `user` beats the heuristic, and a
     // `marker` title the agent declared beats it too.
@@ -336,7 +258,7 @@ export class QueuedInput {
       const state = this.host.activeGet(runId);
       // A queue entry the delivery's checkpoint left in place stays buffered (`deliverMessage`).
       if (state?.inputState.agentInputError || !this.host.sendMessage(runId, entry.content, entry.messageId) ||
-        (entry.messageId && this.context.store.getRun(runId)?.queuedMessages?.some(message => message.id === entry.messageId))) unsent.push(entry);
+        (entry.messageId && atLiveInput.queuedMessages(this.context.store.getRun(runId))?.some(message => message.id === entry.messageId))) unsent.push(entry);
     }
     if (unsent.length) this.deferredMessages.set(runId, unsent);
     else this.deferredMessages.delete(runId);

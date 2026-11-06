@@ -1,11 +1,11 @@
+import { atContinue, atTaskHead } from './launch-read-resolver.ts';
 import type { RunnerId } from '../../core/agent-runner.ts';
-import { continuationDefStep, type WorkerStepIdentity } from '../../delegation/execution-identity.ts';
+import type { WorkerStepIdentity } from '../../delegation/execution-identity.ts';
 import type { RunOutcome } from '../../runs/outcome-commit.ts';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord, RunStore, StepState } from '../../runs/store.ts';
 import * as continuation from '../continuation-admission.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
-import { queuedRecoveryInput } from '../run-scheduling.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
 import { contentBlocksOf, type PastedContent } from '../pasted-content.ts';
 import type { WorkflowDef } from '../types.ts';
@@ -70,7 +70,7 @@ export class ContinuationAcceptance {
       run: () => this.context.store.getRun(runId),
       historyDeletionPending: () => historyDeletionPending(this.context.store, runId),
       parentStatus: parentId => this.context.store.getRun(parentId)?.status,
-      identity: (run, session) => this.host.workerStep(runId, continuationDefStep(this.context.store, run, session)?.id),
+      identity: (run, session) => this.host.workerStep(runId, atContinue.definitionId(atContinue.definitionStep(this.context.store, run, session))),
       beforeFinalStep: run => workflowPosition.waitingBeforeFinalWorkflowStep(run, (record, step) => this.host.isSyntheticContinuation(record, step), record => this.waitingWorkflowStepIndex(record)),
       waitingStepIndex: run => this.waitingWorkflowStepIndex(run),
       pendingFallback: () => this.workerQuestions.pendingWorkerFallback(runId),
@@ -104,7 +104,7 @@ export class ContinuationAcceptance {
       job = current.delegation?.role === 'worker'
         // A projection of the job the line will start, not a status write.
         ? this.host.ownedJob({ ...current, status: 'queued' })
-        : { workflow: current.workflowDef!, input: queuedRecoveryInput(current) };
+        : { workflow: atContinue.storedWorkflow(current)!, input: atTaskHead.recoveryInput(current) };
       this.workerExecutions.beginWorkerExecution(runId, false);
     } catch (error) { return { ok: false, error: this.host.admissionError(error, 'original execution checkpoint unavailable') }; }
     if (supersedes) this.workerQuestions.supersedeWorkerFallback(runId);
@@ -133,7 +133,7 @@ export class ContinuationAcceptance {
     const continuationStep = continuation.nextStep(run);
     const stepId = continuationStep.id;
     if (run.delegation?.role !== 'worker') this.context.store.addStep(runId, continuationStep);
-    const recovered = deferForCapacity && !conversation && !opts.answerInputId ? run.continuationMessage : undefined;
+    const recovered = deferForCapacity && !conversation && !opts.answerInputId ? atContinue.checkpoint(run) : undefined;
     const message = recovered ?? this.queuedInput.toQueuedMessage(runId, continuation.content(opts));
     const { prompt, resumeContext } = continuation.opening(message, recovered, deferForCapacity, conversation, opts,
       this.restartContinuationPrompt, failure);
