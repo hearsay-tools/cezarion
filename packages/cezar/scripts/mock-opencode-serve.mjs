@@ -9,10 +9,6 @@ import { dirname, join } from 'node:path';
 import * as parityGateFs from 'node:fs';
 import { withoutSessionContextBody } from './mock-session-context.mjs';
 const { failureControl, delivery } = await loadControls({ delivery: ['reject', 'hold-ack', 'hold-response'] });
-// No import or await on the ordinary mock path.
-const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
-  : await import('./mock-wire-recorder.mjs');
-wireRecorder?.installWireRecorder();
 let inputClosed = false;
 // Bundled dry-run mock of `opencode serve` — speaks just enough of the HTTP+SSE
 // API (§4 of agent-event-protocols.md) for the runner wiring test in
@@ -26,6 +22,7 @@ const { answerNudgeBody, silentNudge } = await import('./mock-nudge.mjs');
 // #872: the first N starts die before listening, the way opencode 1.18.33 did
 // when started within ~2 s of SIGTERM to the previous server on the same DB.
 // Starts are counted across processes in a file, so start N+1 listens normally.
+const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined : await import('./mock-wire-recorder.mjs'); wireRecorder?.installWireRecorder();
 const failStarts = Number(process.env.CEZ_MOCK_OPENCODE_SERVE_FAIL_STARTS ?? 0);
 if (failStarts > 0) {
   const counter = process.env.CEZ_MOCK_OPENCODE_SERVE_FAIL_FILE

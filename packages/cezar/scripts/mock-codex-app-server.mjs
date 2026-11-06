@@ -7,10 +7,6 @@ import { appendFileSync } from 'node:fs';
 import * as parityGateFs from 'node:fs';
 import { withoutSessionContextParts } from './mock-session-context.mjs';
 const { failureControl, delivery } = await loadControls({ delivery: ['reject', 'hold-ack', 'hold-response'] });
-// No import or await on the ordinary mock path.
-const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
-  : await import('./mock-wire-recorder.mjs');
-wireRecorder?.installWireRecorder();
 // Bundled dry-run mock of `codex app-server` — speaks just enough JSON-RPC 2.0
 // JSONL (§3 of agent-event-protocols.md) for the runner wiring test in
 // `codex-ui-mapper.test.ts`: initialize/thread/turn handshake, one scripted
@@ -30,6 +26,10 @@ async function afterParityPark(prompt) {
   while (!parityGateFs.existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
 }
 
+// No import or await on the ordinary mock path.
+const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
+  : await import('./mock-wire-recorder.mjs');
+wireRecorder?.installWireRecorder();
 const write = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 // #505: like the real app-server, any active main-thread turn accepts `turn/steer`.
 // Steers accepted by an ordinary scripted turn are read just before it completes:

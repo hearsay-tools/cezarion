@@ -5,10 +5,6 @@ import readline from 'node:readline';
 import { appendFileSync, closeSync, existsSync } from 'node:fs';
 import { rawMessage, stripCommandMessage } from './mock-session-context.mjs';
 const { failureControl, delivery } = await loadControls({ delivery: ['reject', 'hold-ack', 'hold-response'] });
-// No import or await on the ordinary mock path.
-const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
-  : await import('./mock-wire-recorder.mjs');
-wireRecorder?.installWireRecorder();
 // Offline OMP (Oh My Pi) `--mode rpc` mock in OMP's own wire shape (v18.4.11, #595): the `ready`
 // frame, id-echoed responses, `prompt_result`, `session_settled`. Startup argv and model errors
 // are copied from the real binary (2026-10-05).
@@ -32,6 +28,10 @@ function startupError(code, message) {
   process.exit(code);
 }
 
+// No import or await on the ordinary mock path.
+const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
+  : await import('./mock-wire-recorder.mjs');
+wireRecorder?.installWireRecorder();
 const flags = new Map();
 const extensions = [];
 // An older or different omp build without some flag: CEZ_MOCK_OMP_UNKNOWN_FLAGS=--add-dir.

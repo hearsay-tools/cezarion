@@ -4,16 +4,16 @@ import { stall, waitForRelease } from './mock-lifecycle.mjs';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-// No import or await on the ordinary mock path.
-const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
-  : await import('./mock-wire-recorder.mjs');
-wireRecorder?.installWireRecorder();
 // Print acknowledges an input on its first model work and cannot refuse one, so a held
 // acknowledgement and a held response both hold that first model work.
 const { failureControl, delivery } = await loadControls({ delivery: ['hold-ack', 'hold-response'] });
 const { answerNudge, NO_WAIT_NUDGE_PREFIX } = await import('./mock-nudge.mjs');
 
 const args = process.argv.slice(2);
+// No import or await on the ordinary mock path.
+const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
+  : await import('./mock-wire-recorder.mjs');
+wireRecorder?.installWireRecorder();
 if (args.includes('--version')) { process.stdout.write('2026.10.01-e373342\n'); process.exit(0); }
 if (args.includes('__cezar_probe_invalid__')) {
   process.stderr.write('Invalid --allowed-tools value(s): __cezar_probe_invalid__. Expected one of: '+

@@ -2,10 +2,6 @@
 import { loadControls } from './mock-controls.mjs';
 import { stall, waitForRelease } from './mock-lifecycle.mjs';
 import { closeSync } from 'node:fs';
-// No import or await on the ordinary mock path.
-const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
-  : await import('./mock-wire-recorder.mjs');
-wireRecorder?.installWireRecorder();
 import readline from 'node:readline';
 import { appendFileSync, existsSync as promptAckReleased } from 'node:fs';
 import { rawMessage, stripCommandMessage } from './mock-session-context.mjs';
@@ -20,6 +16,10 @@ process.on('SIGTERM', () => process.exit(143));
 
 if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('pi', process.argv.slice(2)); }
 const sessionId = '00000000-0000-4000-8000-0000000000pi';
+// No import or await on the ordinary mock path.
+const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
+  : await import('./mock-wire-recorder.mjs');
+wireRecorder?.installWireRecorder();
 const write = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 // #505: like pi 0.87, a prompt with streamingBehavior 'steer' joins the running
 // turn. Steers accepted by a scripted turn are read just before it settles: a user
