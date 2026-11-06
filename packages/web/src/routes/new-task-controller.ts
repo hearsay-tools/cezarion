@@ -542,6 +542,8 @@ export function useNewTaskSubmit(input: {
         autonomous: input.runMode.autonomous,
         archiveWhenDone: draft.archiveWhenDone,
         autoMergePr: draft.autoMergePr,
+        allowWorkers: draft.allowWorkers,
+        allowMessaging: draft.allowMessaging,
       }),
       input.notifyOn,
     ))
@@ -569,6 +571,8 @@ export function useNewTaskSubmit(input: {
           images: plan.images,
           archiveWhenDone: draft.archiveWhenDone,
           autoMergePr: draft.autoMergePr,
+          allowWorkers: draft.allowWorkers,
+          allowMessaging: draft.allowMessaging,
         }),
         input.notifyOn,
       ))

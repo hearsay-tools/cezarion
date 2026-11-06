@@ -213,6 +213,39 @@ it.each([{ width: 360, theme: 'light' }, { width: 360, theme: 'dark' }, { width:
   browser.screenshot(resolve(artifacts, `task-${theme}-${width}.png`), { viewport: true })
 }, 120_000)
 
+it.each(['light', 'dark'])('creates a task with workers off, then turns workers back on for an existing task in %s (hearsay-tools/cezarion#2784)', theme => {
+  browser.setViewport(360, 640)
+  open('new', theme)
+  browser.evaluate(`localStorage.removeItem('cez-new-task-draft')`)
+  open('new', theme)
+  const access = '[data-slot="task-access-controls"] [role="switch"]'
+  const accessChecked = () => browser.evaluate(`[...document.querySelectorAll('${access}')].map(el => el.getAttribute('aria-checked'))`)
+  browser.waitForFunction(`document.querySelectorAll('${access}').length === 2`)
+  expect(accessChecked()).toEqual(['true', 'true'])
+  focusWithKeyboard(browser, '[data-slot="task-access-workers"] [role="switch"]')
+  expect(waitForSettledSample(browser, `getComputedStyle(document.activeElement).outlineStyle !== 'none'`)).toBe(true)
+  browser.press('Space')
+  expect(accessChecked()).toEqual(['false', 'true'])
+  assertLayout()
+  browser.screenshotElement('[data-slot="task-access-controls"]', resolve(artifacts, `task-access-new-${theme}-360.png`))
+  browser.fill('textarea[aria-label="Describe a task for the agent"]', 'Ship it')
+  browser.click('button[aria-label="Start task"]')
+  const body = browser.waitForValue(`window.requests.find(request => request.method === 'POST' && request.path.endsWith('/runs'))?.body`) as Record<string, unknown>
+  expect(body).toMatchObject({ allowWorkers: false })
+  expect(body).not.toHaveProperty('allowMessaging')
+  open('task', theme)
+  browser.waitForFunction(`typeof window.setRun === 'function'`)
+  browser.evaluate(`window.setRun(current => ({ ...current, allowWorkers: false }))`)
+  browser.click('button[aria-label="Run actions"]')
+  const workers = '[data-slot="run-actions-menu"] [data-slot="allow-workers"]'
+  browser.waitForFunction(`document.querySelector('${workers}')?.getAttribute('aria-checked') === 'false'`)
+  expect(browser.evaluate(`document.querySelector('[data-slot="run-actions-menu"] [data-slot="allow-messaging"]').getAttribute('aria-checked')`)).toBe('true')
+  assertLayout()
+  browser.screenshot(resolve(artifacts, `task-access-menu-${theme}-360.png`), { viewport: true })
+  browser.click(workers)
+  browser.waitForFunction(`window.requests.some(request => request.method === 'PATCH' && request.body.allowWorkers === true)`)
+}, 120_000)
+
 it.each(['light', 'dark'])('updates completion status and keeps archive blockers keyboard accessible on a phone in %s', theme => {
   browser.setViewport(360, 640)
   open('task', theme)

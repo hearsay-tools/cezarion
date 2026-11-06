@@ -96,8 +96,10 @@ export function buildPlannedRunBody(opts: {
   images: readonly AttachmentInput[]
   archiveWhenDone?: boolean
   autoMergePr?: boolean
+  allowWorkers?: boolean
+  allowMessaging?: boolean
 }): CreateRunInput {
-  const { task, steps, model, modelsLocked, effort, runner, runnerExplicit, defaultRunner, images, archiveWhenDone, autoMergePr } =
+  const { task, steps, model, modelsLocked, effort, runner, runnerExplicit, defaultRunner, images, archiveWhenDone, autoMergePr, allowWorkers, allowMessaging } =
     opts
   return {
     task,
@@ -108,5 +110,7 @@ export function buildPlannedRunBody(opts: {
     images: images.length > 0 ? [...images] : undefined,
     ...(archiveWhenDone ? { archiveWhenDone: true } : {}),
     ...(autoMergePr ? { autoMergePr: true } : {}),
+    ...(allowWorkers === false ? { allowWorkers: false } : {}),
+    ...(allowMessaging === false ? { allowMessaging: false } : {}),
   }
 }

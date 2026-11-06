@@ -102,7 +102,7 @@ describe('submit', () => {
     // lands in its errored state immediately and the test stays deterministic.
     writeDraft({
       text: '', source: { source: 'skill', ref: 'om-fix' }, runner: null, agentProfile: null, model: null, effort: null,
-      retiredVariants: false, planFirst: false, worktree: null, autonomous: null, archiveWhenDone: false, autoMergePr: false,
+      retiredVariants: false, planFirst: false, worktree: null, autonomous: null, archiveWhenDone: false, autoMergePr: false, allowWorkers: true, allowMessaging: true,
     })
     serve({ createRun: { id: 'run-9' }, uiStateStatus: 404 })
     renderNewTask()
@@ -891,7 +891,7 @@ describe('the plan flow', () => {
 
   it('▶ Start posts the EDITED steps inline — the exact wire payload — and navigates', async () => {
     serve({ createRun: { id: 'planned-1' } })
-    writeDraft({ ...readDraft(), archiveWhenDone: true, autoMergePr: true })
+    writeDraft({ ...readDraft(), archiveWhenDone: true, autoMergePr: true, allowMessaging: false })
     renderNewTask()
     await planTask('Tighten the flaky suite')
 
@@ -906,6 +906,7 @@ describe('the plan flow', () => {
       task: 'Tighten the flaky suite',
       archiveWhenDone: true,
       autoMergePr: true,
+      allowMessaging: false,
       steps: [
         { id: 'review', name: 'Review', skill: 'om-fix', prompt: 'Review the changes for {{task}}' },
         { id: 'implement', name: 'Implement', prompt: '{{task}}' },

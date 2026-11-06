@@ -14,6 +14,19 @@ describe('fromDefinition', () => {
     expect(toCreateBody(draft).task).toMatchObject({ archiveWhenDone: true, autoMergePr: true })
     expect(toUpdateBody({ ...draft, archiveWhenDone: false, autoMergePr: false }, 2).task).toMatchObject({ archiveWhenDone: false, autoMergePr: false, effort: 'high' })
   })
+  it('reads absent task access as on and sends only an explicit off on create (hearsay-tools/cezarion#2784)', () => {
+    expect(fromDefinition()).toMatchObject({ allowWorkers: true, allowMessaging: true })
+    const legacy = fromDefinition({ task: { prompt: 'Ship' } })
+    expect(legacy).toMatchObject({ allowWorkers: true, allowMessaging: true })
+    expect(toCreateBody(legacy).task).not.toHaveProperty('allowWorkers')
+    expect(toCreateBody(legacy).task).not.toHaveProperty('allowMessaging')
+    const off = fromDefinition({ task: { prompt: 'Ship', allowWorkers: false, allowMessaging: false } })
+    expect(off).toMatchObject({ allowWorkers: false, allowMessaging: false })
+    expect(off.taskExtra).not.toHaveProperty('allowWorkers')
+    expect(toCreateBody(off).task).toMatchObject({ allowWorkers: false, allowMessaging: false })
+    expect(toUpdateBody({ ...off, allowWorkers: true }, 2).task).toMatchObject({ allowWorkers: true, allowMessaging: false })
+  })
+
   it('starts a new draft as a paused daily 04:00 schedule that runs autonomously', () => {
     expect(fromDefinition()).toMatchObject({
       name: '',

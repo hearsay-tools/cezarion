@@ -26,6 +26,12 @@ it('retains completion choices when starting an approved plan', () => {
   expect(buildPlannedRunBody({ ...input, archiveWhenDone: true, autoMergePr: true })).toMatchObject({ archiveWhenDone: true, autoMergePr: true })
 })
 
+it('retains task access choices when starting an approved plan', () => {
+  const input = { task: 'Ship', steps: STEPS, model: '', runner: 'claude' as const, images: [] }
+  expect(buildPlannedRunBody({ ...input, allowWorkers: true, allowMessaging: true })).not.toHaveProperty('allowWorkers')
+  expect(buildPlannedRunBody({ ...input, allowWorkers: false, allowMessaging: false })).toMatchObject({ allowWorkers: false, allowMessaging: false })
+})
+
 describe('removeStep', () => {
   it.each([
     { name: 'first', index: 0, expected: ['verify', 'review'] },
