@@ -75,7 +75,9 @@ A regression test must fail without the fix: require
 may stay; say which is which.
 
 A change to a shared name, value or default finds and updates every reader, or
-states why a reader stays. For saved data and user-facing messages, search both
+states why a reader stays. Find every construction site of a shared in-memory
+object by grepping its type, not its field, and give it one factory where a new
+required field fails to compile. For saved data and user-facing messages, search both
 the old and new form. Follow [saved-format compatibility](BACKWARD_COMPATIBILITY.md).
 
 Changes to a run state or how a run leaves an existing state (an exit trigger or
