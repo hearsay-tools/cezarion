@@ -6,7 +6,8 @@ import { readSse } from './sse-reader'
 const topicSocket = createTopicSocket()
 const owner = createLiveOwner({
   async stream(kind, runs, frame, signal) {
-    const response = await fetch(kind === 'workspace' ? '/api/v1/workspace/events' : '/api/v1/workspace/run-events', {
+    // The workspace lane reads list rows (hearsay-tools/cezarion#2730); `LIVE_WORKER_NAME` changed with it.
+    const response = await fetch(kind === 'workspace' ? '/api/v1/workspace/events?runs=summary' : '/api/v1/workspace/run-events', {
       credentials: 'include', signal,
       ...(kind === 'runs' ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ runs }) } : {}),
     })

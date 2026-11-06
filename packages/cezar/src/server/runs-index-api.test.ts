@@ -11,7 +11,8 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { runsIndexResponseSchema, runsSearchResponseSchema, type RunsIndexResponse } from '@open-mercato/cezar-contract/runs';
+import { runsSearchResponseSchema } from '@open-mercato/cezar-contract/runs';
+import { runsIndexResponseSchema, type RunsIndexResponse } from '@open-mercato/cezar-contract/workspace-events';
 import { setRunStatus, readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
 import { resolveForgeRoot } from './forge/index.ts';
 const resolveRepoHandle = vi.fn();
@@ -99,7 +100,7 @@ describe('workspace runs index API', () => {
 
   it('answers an empty index for an empty registry — never a 404', async () => {
     const body = await getIndex();
-    expect(body).toEqual({ runs: [], perProjectLimit: 200, truncated: [], referenceStatuses: {} });
+    expect(body).toEqual({ runs: [], perProjectLimit: 200, truncated: [], referenceStatuses: {}, generation: expect.any(String), eventSeq: 0 });
   });
 
   it('merges the boot project’s live store with a cold project read off disk, newest first', async () => {

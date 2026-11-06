@@ -681,21 +681,6 @@ export const archivedRunsResponseSchema = z.object({
 });
 export type ArchivedRunsResponse = z.infer<typeof archivedRunsResponseSchema>;
 
-export const runsIndexResponseSchema = z.object({
-  /** Newest first, across every registered project: each project's window (#864) — every
-   *  unarchived root run, plus its newest `perProjectLimit` archived root runs. Owned workers are
-   *  never included. Older archived runs are
-   *  reached through `GET /workspace/runs-search`. */
-  runs: z.array(runIndexEntrySchema),
-  /** Additive: absent statuses mean "nothing warm", never "nothing to show". */
-  referenceStatuses: referenceStatusesByProjectSchema,
-  /** How many archived root runs each project contributes at most. Unarchived roots are never cut. */
-  perProjectLimit: z.number(),
-  /** Ids of the projects that had more archived root runs than `perProjectLimit`. */
-  truncated: z.array(z.string()),
-});
-export type RunsIndexResponse = z.infer<typeof runsIndexResponseSchema>;
-
 /** The most matches `GET /workspace/runs-search` answers per project (#864), and its default. */
 export const RUNS_SEARCH_PER_PROJECT_MAX = 50;
 

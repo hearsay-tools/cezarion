@@ -1,4 +1,10 @@
-import { toRunSummary, type ApiRun, type ProcessUsage, type RunRecord, type RunSummary } from '@open-mercato/cezar-api-client/contract/runs'
+import type { ProcessUsage, RunRecord, RunSummary } from '@open-mercato/cezar-api-client/contract/runs'
+import {
+  workspaceReadyEventSchema,
+  workspaceRunDeletedEventSchema,
+  workspaceRunSummaryEventSchema,
+  workspaceUsageEventSchema,
+} from '@open-mercato/cezar-api-client/contract/workspace-events'
 
 /**
  * Parse workspace frames and patch existing query caches. HTTP snapshots remain authoritative;
@@ -47,22 +53,32 @@ export function parseGlobalEvent(name: string, data: string): GlobalEvent | null
 }
 
 /**
- * One message from `GET /api/workspace/events` (multi-project spec, step 2.8): the same events
- * as the legacy stream, each stamped with the owning project — additively where the legacy
- * payload is an object (`run` grows a `project` key, `run-deleted` is `{id, project}`), wrapped
- * where it is not (`usage` → `{project, usage}`). This parser
- * unwraps the envelope back to today's `GlobalEvent` so the reducers below never learn the wire
- * changed; the caller dispatches or drops on `project` (null only for the unstamped `ping`).
- *
- * A stamped event with no usable `project` is dropped whole: without the stamp there is no way
- * to know whose caches it belongs in, and guessing is exactly the cross-project bleed the
- * envelope exists to prevent. Workspace-only event names (`project-added`, `checkout-progress`)
- * are not parsed here — no listener subscribes to them yet.
+ * One message from `GET /api/v1/workspace/events?runs=summary` (hearsay-tools/cezarion#2730).
+ * Run changes arrive as list rows, never full records: a summary cannot stand in for the record a
+ * detail view holds. `run-summary` and `run-deleted` carry the stream's `seq`; `ready` names the
+ * generation and the last `seq` before this connection.
+ */
+export type WorkspaceEvent =
+  | { type: 'run-summary'; summary: RunSummary; seq: number; relationships: string }
+  | { type: 'run-deleted'; id: string; seq: number }
+  | { type: 'usage'; usage: Record<string, ProcessUsage> }
+  | { type: 'ready'; generation: string; seq: number }
+  | { type: 'ping' }
+
+/** The run frames that patch caches. */
+export type WorkspaceRunEvent = Extract<WorkspaceEvent, { type: 'run-summary' | 'run-deleted' }>
+
+/**
+ * Parse one summary-mode workspace frame and its project stamp (null for the unstamped `ping`
+ * and `ready`). Every payload is validated against the contract. A frame that does not parse, or
+ * that has no usable `project`, is dropped whole: without the stamp there is no way to know whose
+ * caches it belongs in. Workspace-only event names (`project-added`, `checkout-progress`) are not
+ * parsed here.
  */
 export function parseWorkspaceEvent(
   name: string,
   data: string,
-): { project: string | null; event: GlobalEvent } | null {
+): { project: string | null; event: WorkspaceEvent } | null {
   if (name === 'ping') return { project: null, event: { type: 'ping' } }
 
   let payload: unknown
@@ -71,26 +87,56 @@ export function parseWorkspaceEvent(
   } catch {
     return null
   }
-  if (!isRecord(payload)) return null
-  const project = payload.project
-  if (typeof project !== 'string' || project === '') return null
 
   switch (name) {
-    case 'run': {
-      // Strip the stamp: the reducers (and the cache) must see today's bare RunRecord.
-      const { project: _stamp, ...run } = payload
-      return isRunRecord(run) ? { project, event: { type: 'run', run } } : null
+    case 'run-summary': {
+      const frame = workspaceRunSummaryEventSchema.safeParse(payload)
+      return frame.success
+        ? { project: frame.data.project, event: { type: 'run-summary', summary: frame.data.run, seq: frame.data.seq, relationships: frame.data.relationships } }
+        : null
     }
     case 'run-deleted': {
-      const id = payload.id
-      return typeof id === 'string' && id ? { project, event: { type: 'run-deleted', id } } : null
+      const frame = workspaceRunDeletedEventSchema.safeParse(payload)
+      return frame.success ? { project: frame.data.project, event: { type: 'run-deleted', id: frame.data.id, seq: frame.data.seq } } : null
     }
-    case 'usage':
-      return isRecord(payload.usage)
-        ? { project, event: { type: 'usage', usage: payload.usage as Record<string, ProcessUsage> } }
-        : null
+    case 'usage': {
+      const frame = workspaceUsageEventSchema.safeParse(payload)
+      return frame.success ? { project: frame.data.project, event: { type: 'usage', usage: frame.data.usage } } : null
+    }
+    case 'ready': {
+      const frame = workspaceReadyEventSchema.safeParse(payload)
+      return frame.success ? { project: null, event: { type: 'ready', generation: frame.data.generation, seq: frame.data.seq } } : null
+    }
     default:
       return null
+  }
+}
+
+/**
+ * The `seq` fence of one workspace connection (hearsay-tools/cezarion#2730). Within one connection
+ * and generation the numbers are contiguous; a jump means lost frames. `ready` and a reopened
+ * connection set a new baseline, so a new generation is a reset, not a gap. Without a baseline
+ * (a document that joined a shared feed after its `ready`), the first numbered frame sets it.
+ */
+export function createWorkspaceSeqFence(): {
+  ready: (seq: number) => void
+  /** True when the frame proves that frames before it were lost. */
+  frame: (seq: number) => boolean
+  reset: () => void
+} {
+  let last: number | undefined
+  return {
+    ready(seq) {
+      last = seq
+    },
+    frame(seq) {
+      const gap = last !== undefined && seq !== last + 1
+      last = seq
+      return gap
+    },
+    reset() {
+      last = undefined
+    },
   }
 }
 
@@ -107,37 +153,34 @@ function isRunRecord(value: unknown): value is RunRecord {
 // ---- reducers ----------------------------------------------------------------------------
 
 /**
- * Fold a `run` event into the cached run list.
+ * Fold a `run-summary` frame into the cached run list.
  *
  * `undefined` in → `undefined` out: the list query has not fetched, so there is nothing to patch
- * and `[run]` would be a lie. TanStack's `setQueryData` reads an `undefined` return as "leave it
- * alone", which is exactly the intent.
+ * and `[summary]` would be a lie. TanStack's `setQueryData` reads an `undefined` return as "leave
+ * it alone", which is exactly the intent.
  *
  * An existing row is replaced in place — the same run arriving 50 times during its life must stay
  * one row, at its position, rather than churning the list order under the reader's cursor. A new
  * one is inserted by `createdAt` descending, matching `store.listRuns()`'s order, so a run that
  * appears mid-session lands where a refetch would have put it.
  *
- * The list holds summaries (#817), and the stream carries the full record, so every row written
- * here goes through `toRunSummary`, the same projection `GET /run-summaries` uses. A list row
- * never holds a field its route would not have sent.
+ * The frame's row is the one `GET /run-summaries` answers (`toRunSummary` with the live usage
+ * sample laid over it), so it replaces the cached row whole: its `usage` is as current as the
+ * route's, and an absent one means the run has no live sample.
  */
-export function applyRunEvent(list: RunSummary[] | undefined, run: RunRecord): RunSummary[] | undefined {
+export function applyRunSummary(list: RunSummary[] | undefined, summary: RunSummary): RunSummary[] | undefined {
   if (!list) return undefined
 
-  const index = list.findIndex((r) => r.id === run.id)
+  const index = list.findIndex((r) => r.id === summary.id)
   if (index >= 0) {
     const next = [...list]
-    next[index] = mergeSummary(list[index], run)
+    next[index] = summary
     return next
   }
 
-  // `?? ''` because only `id` is validated on the way in: a record missing `createdAt` must sort
-  // last, not throw and take the stream's message loop with it.
-  const createdAt = run.createdAt ?? ''
-  const at = list.findIndex((r) => (r.createdAt ?? '').localeCompare(createdAt) < 0)
+  const at = list.findIndex((r) => (r.createdAt ?? '').localeCompare(summary.createdAt) < 0)
   const next = [...list]
-  next.splice(at < 0 ? list.length : at, 0, toRunSummary(run))
+  next.splice(at < 0 ? list.length : at, 0, summary)
   return next
 }
 
@@ -147,23 +190,6 @@ export function applyRunDeleted<T extends { id: string }>(list: T[] | undefined,
   if (!list) return undefined
   const next = list.filter((r) => r.id !== id)
   return next.length === list.length ? list : next
-}
-
-/**
- * The stream's record over the cached one.
- *
- * `usage` is carried over rather than dropped: the global `run` event is a bare `RunRecord`, while
- * `GET /api/runs` answers with the live sample attached (`withUsage`). An absent field on the wire
- * means "this message doesn't carry it", not "there is none" — overwriting would blink the sample
- * out on every status change. Freshness for it comes from the `usage` ticks either way.
- */
-export function mergeRun(previous: ApiRun | undefined, run: RunRecord): ApiRun {
-  return previous?.usage ? { ...run, usage: previous.usage } : run
-}
-
-/** `mergeRun` for a list row: the same `usage` carry-over, then the summary projection. */
-export function mergeSummary(previous: RunSummary | undefined, run: RunRecord): RunSummary {
-  return toRunSummary(previous?.usage ? { ...run, usage: previous.usage } : run)
 }
 
 // ---- live usage --------------------------------------------------------------------------

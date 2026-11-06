@@ -1,16 +1,17 @@
-import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 // @vitest-environment node
 
 import { describe, expect, it, vi } from 'vitest'
 
 import {
   applyRunDeleted,
-  applyRunEvent,
+  applyRunSummary,
   createUsageStore,
-  mergeRun,
+  createWorkspaceSeqFence,
   parseGlobalEvent,
   parseWorkspaceEvent,
   type GlobalEvent,
+  type WorkspaceEvent,
 } from './events'
 import { toRunSummary, type ApiRun, type RunRecord, type RunSummary } from '@open-mercato/cezar-api-client/contract/runs'
 
@@ -65,32 +66,35 @@ describe('parseGlobalEvent', () => {
 })
 
 describe('parseWorkspaceEvent', () => {
-  // The workspace stream's stamped envelopes (step 2.8) → today's GlobalEvent + the owner.
-  // The reducers must never learn the wire changed: every unwrapped event below is exactly
-  // the shape parseGlobalEvent produced from the legacy stream.
-  const cases: Array<[string, string, { project: string | null; event: GlobalEvent } | null]> = [
+  // The summary-mode workspace stream (hearsay-tools/cezarion#2730): every payload is validated
+  // against the contract and unwrapped to a typed event plus its owner.
+  const frame = (over: Record<string, unknown> = {}) => JSON.stringify({ project: 'a', seq: 4, run: summary('r1'), relationships: 'd1', ...over })
+  const cases: Array<[string, string, { project: string | null; event: WorkspaceEvent } | null]> = [
     ['ping', '', { project: null, event: { type: 'ping' } }],
-    // `run` grows a project key riding ON the record — the parser strips it back off.
-    ['run', JSON.stringify({ ...run('r1'), project: 'a' }), { project: 'a', event: { type: 'run', run: run('r1') } }],
-    ['run-deleted', '{"id":"r1","project":"a"}', { project: 'a', event: { type: 'run-deleted', id: 'r1' } }],
-    // Array/record payloads have nowhere to carry a stamp, so they arrive wrapped.
-    ['todos', '{"project":"a","items":[]}', null],
+    ['run-summary', frame(), { project: 'a', event: { type: 'run-summary', summary: summary('r1'), seq: 4, relationships: 'd1' } }],
+    ['run-deleted', '{"project":"a","seq":5,"id":"r1"}', { project: 'a', event: { type: 'run-deleted', id: 'r1', seq: 5 } }],
+    ['ready', '{"generation":"g","seq":0}', { project: null, event: { type: 'ready', generation: 'g', seq: 0 } }],
     [
       'usage',
       JSON.stringify({ project: 'a', usage: { r1: SAMPLE } }),
       { project: 'a', event: { type: 'usage', usage: { r1: SAMPLE } } },
     ],
+    // The empty tick that clears a project whose last live row stopped.
+    ['usage', '{"project":"a","usage":{}}', { project: 'a', event: { type: 'usage', usage: {} } }],
+    // A full record is not a summary-mode frame: the cockpit never reads the legacy shape.
+    ['run', JSON.stringify({ ...run('r1'), project: 'a' }), null],
     // No stamp, no owner, no way to route it — dropped whole rather than guessed at.
-    ['run', JSON.stringify(run('r1')), null],
-    ['run', JSON.stringify({ ...run('r1'), project: '' }), null],
-    ['run-deleted', '{"id":"r1"}', null],
-    ['todos', '{"items":[]}', null],
+    ['run-summary', frame({ project: undefined }), null],
+    ['run-summary', frame({ project: '' }), null],
+    ['run-deleted', '{"id":"r1","project":"a"}', null],
     ['usage', JSON.stringify({ r1: SAMPLE }), null],
-    // And the same garbage tolerance as the legacy parser: one bad frame costs one frame.
-    ['run', 'not json', null],
-    ['run', '{"project":"a"}', null],
-    ['run-deleted', '{"project":"a","id":""}', null],
-    ['todos', '{"project":"a","items":{"not":"an array"}}', null],
+    // Whatever the contract refuses costs one frame.
+    ['run-summary', 'not json', null],
+    ['run-summary', frame({ seq: 0 }), null],
+    ['run-summary', frame({ relationships: undefined }), null],
+    ['run-summary', frame({ run: { id: 'r1' } }), null],
+    ['run-deleted', '{"project":"a","seq":5,"id":""}', null],
+    ['ready', '{"generation":"g"}', null],
     ['usage', '{"project":"a","usage":[]}', null],
     ['project-added', '{"project":"a"}', null],
   ]
@@ -98,59 +102,94 @@ describe('parseWorkspaceEvent', () => {
   it.each(cases)('%s + %j → %j', (name, data, expected) => {
     expect(parseWorkspaceEvent(name, data)).toEqual(expected)
   })
+
+  it('keeps no field the row schema does not name', () => {
+    const parsed = parseWorkspaceEvent('run-summary', frame({ run: { ...run('r1'), ...summary('r1') } }))
+    expect(parsed?.event.type === 'run-summary' && parsed.event.summary).not.toHaveProperty('task')
+  })
 })
 
-describe('applyRunEvent', () => {
+describe('createWorkspaceSeqFence', () => {
+  it('accepts contiguous frames after ready and flags a jump once', () => {
+    const fence = createWorkspaceSeqFence()
+    fence.ready(7)
+    expect([8, 9].map(fence.frame)).toEqual([false, false])
+    expect(fence.frame(12)).toBe(true)
+    expect(fence.frame(13)).toBe(false)
+  })
+
+  it('takes the first frame as the baseline when it saw no ready', () => {
+    const fence = createWorkspaceSeqFence()
+    expect([41, 42].map(fence.frame)).toEqual([false, false])
+  })
+
+  it('treats a new generation as a reset, not a gap', () => {
+    const fence = createWorkspaceSeqFence()
+    fence.ready(5)
+    fence.frame(6)
+    // The server restarted: its numbers start again.
+    fence.ready(0)
+    expect(fence.frame(1)).toBe(false)
+  })
+
+  it('takes a new baseline after a reopened connection', () => {
+    const fence = createWorkspaceSeqFence()
+    fence.ready(1)
+    fence.frame(2)
+    fence.reset()
+    expect(fence.frame(30)).toBe(false)
+  })
+
+  it('flags a repeated or older number', () => {
+    const fence = createWorkspaceSeqFence()
+    fence.ready(3)
+    fence.frame(4)
+    expect(fence.frame(4)).toBe(true)
+  })
+})
+
+describe('applyRunSummary', () => {
   it('leaves an unfetched list alone rather than inventing one', () => {
     // A one-run "list" assembled from whichever event happened to arrive is not the run list.
     // `undefined` is what setQueryData reads as "don't touch it".
-    expect(applyRunEvent(undefined, run('r1'))).toBeUndefined()
+    expect(applyRunSummary(undefined, summary('r1'))).toBeUndefined()
   })
 
   it('upserts a run the list has never seen', () => {
-    const next = applyRunEvent([], run('r1'))
-    expect(next).toEqual([summary('r1')])
-  })
-
-  it('patches the list with a summary, never the streamed record (#817)', () => {
-    const next = applyRunEvent([], run('r1', {
-      workflow: '(planned)',
-      systemPrompt: 'be brief',
-      steps: [{ id: 'a', name: 'Fix bug', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0 }],
-    }))
-    const row = next?.[0] as Record<string, unknown> | undefined
-    for (const key of ['task', 'steps', 'systemPrompt']) expect(row).not.toHaveProperty(key)
-    expect(row?.workflowLabel).toBe('Fix bug')
+    expect(applyRunSummary([], summary('r1'))).toEqual([summary('r1')])
   })
 
   it('carries a streamed automation task\'s origin, so the sidebar files it under Automations (#1332)', () => {
-    const next = applyRunEvent([summary('manual')], run('nightly', {
+    const next = applyRunSummary([summary('manual')], summary('nightly', {
       automationTrigger: { automationId: 'auto-1', automationRevision: 1, receiptId: 'r', trigger: 'schedule', occurrenceAt: '2026-07-14T09:00:00.000Z' },
     }))
     expect(next?.find((row) => row.id === 'nightly')).toHaveProperty('automationId', 'auto-1')
     expect(next?.find((row) => row.id === 'manual')).not.toHaveProperty('automationId')
   })
 
-  it('keeps the cached live usage when the streamed record carries none', () => {
-    const next = applyRunEvent([{ ...summary('r1'), usage: SAMPLE }], run('r1', { status: RUN_STATUS.review }))
-    expect(next?.[0]?.usage).toEqual(SAMPLE)
-    expect(next?.[0]?.status).toBe('review')
+  it('takes the frame\'s live usage, and drops a sample the frame no longer carries', () => {
+    const live = applyRunSummary([summary('r1')], { ...summary('r1'), usage: SAMPLE })
+    expect(live?.[0]?.usage).toEqual(SAMPLE)
+    const stopped = applyRunSummary(live, summary('r1', { status: RUN_STATUS.review }))
+    expect(stopped?.[0]?.usage).toBeUndefined()
+    expect(stopped?.[0]?.status).toBe('review')
   })
 
-  it('updates an existing run in place — one run stays one row', () => {
+  it('updates title, status, references, tokens and archive in place — one run stays one row', () => {
     const list: RunSummary[] = [summary('r1', { status: RUN_STATUS.queued }), summary('r2')]
-    const next = applyRunEvent(list, run('r1', { status: RUN_STATUS.done, tokensUsed: 99 }))
+    const next = applyRunSummary(list, summary('r1', {
+      status: RUN_STATUS.done, tokensUsed: 99, titleSummary: 'Renamed', prNumber: 12, issueNumber: 7, archived: true,
+    }))
 
     expect(next).toHaveLength(2)
     expect(next?.map((r) => r.id)).toEqual(['r1', 'r2'])
-    expect(next?.[0]?.status).toBe('done')
-    expect(next?.[0]?.tokensUsed).toBe(99)
+    expect(next?.[0]).toMatchObject({ status: RUN_STATUS.done, tokensUsed: 99, titleSummary: 'Renamed', prNumber: 12, issueNumber: 7, archived: true })
   })
 
   it('does not duplicate a row however many events one run emits', () => {
     let list: RunSummary[] | undefined = []
     for (const status of ['queued', 'running', 'review', 'done'] as const) {
-      list = applyRunEvent(list, run('r1', { status }))
+      list = applyRunSummary(list, summary('r1', { status }))
     }
     expect(list).toHaveLength(1)
     expect(list?.[0]?.status).toBe('done')
@@ -162,40 +201,25 @@ describe('applyRunEvent', () => {
       summary('oldest', { createdAt: '2026-07-14T08:00:00.000Z' }),
     ]
 
-    const middle = applyRunEvent(list, run('middle', { createdAt: '2026-07-14T10:00:00.000Z' }))
+    const middle = applyRunSummary(list, summary('middle', { createdAt: '2026-07-14T10:00:00.000Z' }))
     expect(middle?.map((r) => r.id)).toEqual(['newest', 'middle', 'oldest'])
 
     // A run started right now — the common case — goes to the top.
-    const top = applyRunEvent(list, run('now', { createdAt: '2026-07-14T13:00:00.000Z' }))
+    const top = applyRunSummary(list, summary('now', { createdAt: '2026-07-14T13:00:00.000Z' }))
     expect(top?.map((r) => r.id)).toEqual(['now', 'newest', 'oldest'])
 
     // And one older than everything goes to the bottom rather than off the end.
-    const bottom = applyRunEvent(list, run('ancient', { createdAt: '2020-01-01T00:00:00.000Z' }))
+    const bottom = applyRunSummary(list, summary('ancient', { createdAt: '2020-01-01T00:00:00.000Z' }))
     expect(bottom?.map((r) => r.id)).toEqual(['newest', 'oldest', 'ancient'])
   })
 
   it('never mutates the list it was given', () => {
     const list: RunSummary[] = [summary('r1', { status: RUN_STATUS.queued })]
     const frozen = Object.freeze([...list])
-    applyRunEvent(frozen as RunSummary[], run('r1', { status: RUN_STATUS.done }))
-    applyRunEvent(frozen as RunSummary[], run('r2'))
+    applyRunSummary(frozen as RunSummary[], summary('r1', { status: RUN_STATUS.done }))
+    applyRunSummary(frozen as RunSummary[], summary('r2'))
     expect(list[0]?.status).toBe('queued')
     expect(frozen).toHaveLength(1)
-  })
-
-  it('keeps the usage the GET attached — the stream record simply has no such field', () => {
-    const list: RunSummary[] = [{ ...summary('r1'), usage: SAMPLE }]
-    const next = applyRunEvent(list, run('r1', { status: RUN_STATUS.done }))
-    expect(next?.[0]?.usage).toEqual(SAMPLE)
-    expect(next?.[0]?.status).toBe('done')
-  })
-})
-
-describe('mergeRun', () => {
-  it('carries usage over, and invents none when there was none', () => {
-    expect(mergeRun({ ...run('r1'), usage: SAMPLE }, run('r1', { status: RUN_STATUS.done })).usage).toEqual(SAMPLE)
-    expect(mergeRun(run('r1'), run('r1')).usage).toBeUndefined()
-    expect(mergeRun(undefined, run('r1')).usage).toBeUndefined()
   })
 })
 

@@ -408,6 +408,73 @@ describe('GET /api/v1/workspace/events', () => {
     ]);
   });
 
+  it('without ?runs=summary stays byte-identical: full records, unnumbered deletions, no clearing usage (hearsay-tools/cezarion#2730)', async () => {
+    const other = await buildOtherContext();
+    // The frames the stream wrote before the shared feed, built from the same store events.
+    const expected: string[] = [];
+    const record = (project: string) => (run: unknown) => expected.push(`event: run\ndata: ${JSON.stringify({ ...(run as object), project })}\n\n`);
+    const deleted = (project: string) => (id: string) => expected.push(`event: run-deleted\ndata: ${JSON.stringify({ id, project })}\n\n`);
+    store.on('run', record(bootId));
+    store.on('deleted', deleted(bootId));
+    other.store.on('run', record(other.id));
+    other.store.on('deleted', deleted(other.id));
+
+    const ws = await openStream('/api/v1/workspace/events');
+    const head = await ws.readUntil('event: ping');
+    const generation = payloadsOf<{ generation: string }>(head, 'ready')[0]?.generation;
+    expect(head).toBe(`event: ready\ndata: ${JSON.stringify({ generation })}\n\nevent: ping\ndata: \n\n`);
+
+    const bootRun = store.createRun({ title: 'boot', workflow: 'quick-task', task: 'b', steps: [] });
+    const otherRun = other.store.createRun({ title: 'other', workflow: 'quick-task', task: 'o', steps: [] });
+    store.updateRun(bootRun.id, { title: 'renamed' });
+    other.store.deleteRun(otherRun.id);
+    emitUsageForTest({ [bootRun.id]: { cpuPct: 1, rssBytes: 2, procCount: 3 } });
+    expected.push(`event: usage\ndata: ${JSON.stringify({ project: bootId, usage: { [bootRun.id]: { cpuPct: 1, rssBytes: 2, procCount: 3 } } })}\n\n`);
+    // The project's last live row stopped: the legacy stream sends no clearing frame.
+    emitUsageForTest({});
+    bus.emit('project-added', { project: { id: 'newbie', name: 'newbie' } });
+    expected.push(`event: project-added\ndata: ${JSON.stringify({ project: { id: 'newbie', name: 'newbie' } })}\n\n`);
+
+    const body = await ws.readUntil('event: project-added');
+    expect(body.slice(head.length)).toBe(expected.join(''));
+    expect(body).not.toContain('"seq"');
+  });
+
+  it('?runs=summary sends index rows numbered from ready, and the index names the same generation and seq (hearsay-tools/cezarion#2730)', async () => {
+    const other = await buildOtherContext();
+    const ws = await openStream('/api/v1/workspace/events?runs=summary');
+    const head = await ws.readUntil('event: ping');
+    const ready = payloadsOf<{ generation: string; seq: number }>(head, 'ready')[0];
+    expect(ready).toEqual({ generation: expect.any(String), seq: expect.any(Number) });
+
+    const bootRun = store.createRun({ title: 'boot', workflow: 'quick-task', task: 'secret prompt', steps: [] });
+    const otherRun = other.store.createRun({ title: 'other', workflow: 'quick-task', task: 'o', steps: [] });
+    other.store.deleteRun(otherRun.id);
+    const body = await ws.readUntil('event: run-deleted');
+    expect(body).not.toContain('event: run\n');
+    expect(body).not.toContain('secret prompt');
+
+    const summaries = payloadsOf<{ project: string; seq: number; run: { id: string }; relationships: string }>(body, 'run-summary');
+    const deletions = payloadsOf<{ project: string; seq: number; id: string }>(body, 'run-deleted');
+    expect(summaries.map((frame) => [frame.project, frame.run.id, frame.seq])).toEqual([
+      [bootId, bootRun.id, ready!.seq + 1], [other.id, otherRun.id, ready!.seq + 2],
+    ]);
+    expect(deletions).toEqual([{ project: other.id, seq: ready!.seq + 3, id: otherRun.id }]);
+
+    // The frame's row is the row the index answers for the same run.
+    const index = await (await apiRequest(app, '/api/v1/workspace/runs-index')).json() as {
+      runs: Array<{ projectId: string; id: string }>; generation: string; eventSeq: number;
+    };
+    expect(index.generation).toBe(ready!.generation);
+    expect(index.eventSeq).toBe(ready!.seq + 3);
+    const { projectId: _project, ...row } = index.runs.find((run) => run.id === bootRun.id)!;
+    expect(summaries[0]!.run).toEqual(row);
+  });
+
+  it('refuses an unknown stream mode', async () => {
+    expect((await apiRequest(app, '/api/v1/workspace/events?runs=full')).status).toBe(400);
+  });
+
   it('relays workspace-level bus events under their own names (projects, checkout, provider status)', async () => {
     const ws = await openStream('/api/v1/workspace/events');
     await ws.readUntil('event: ping');
