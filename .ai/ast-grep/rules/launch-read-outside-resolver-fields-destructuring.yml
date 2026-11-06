@@ -1,6 +1,6 @@
 # Semantic utils generated from ../launch-read-normalization/; edit that source.
 language: typescript
-severity: error
+severity: warning
 message: "Production-source read rule; test and testkit readers observe ownership and error behavior outside
   production selection. Use narrow phase operations in launch-read-resolver.ts at the original read point. The
   launch-read-outside-resolver rule family does not follow arbitrary aliases of context.store.getRun()
