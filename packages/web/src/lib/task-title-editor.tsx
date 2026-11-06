@@ -69,7 +69,8 @@ export function useTaskTitleEditor(run: RunSummary): TitleEditor {
 }
 
 const noSelection = () => null
-const noSubscription = () => () => {}
+function noSubscription() { return noUnsubscribe }
+function noUnsubscribe() { return undefined }
 /** Lists pin an active draft independently of keyboard focus. No provider on global rows. */
 export function useTaskEditingRunId(): string | null {
   const store = useContext(TaskTitleEditingContext)

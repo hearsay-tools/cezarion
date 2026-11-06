@@ -17,7 +17,7 @@ function setupGeometry() {
     private elements = new Set<HTMLElement>()
     constructor(private callback: ResizeObserverCallback) { observers.set(callback, this.elements) }
     observe(element: HTMLElement) {
-      Object.defineProperty(element, 'offsetParent', { configurable: true, get: () => document.body })
+      Object.defineProperty(element, 'offsetParent', { configurable: true, get: () => { return document.body } })
       this.elements.add(element)
       queueMicrotask(() => { if (element.isConnected) this.callback([{ target: element, contentRect: { width: 1000, height: size(element) } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver) })
     }

@@ -97,6 +97,22 @@ function insertTask(command) {
   const run = target.createRun({ title, task: title, workflow: 'quick-task', steps: [] })
   target.updateRun(run.id, { status: 'running', ...(before ? { createdAt: new Date(Date.parse(before.createdAt) + 500).toISOString() } : {}) })
 }
+function startStreams(command) {
+  if (command.streaming) {
+    const selected = command.runs ?? runs
+    for (const run of selected) stores.get(run.projectId)?.updateRun(run.runId, { status: 'running' })
+    timer = setInterval(() => {
+      for (const run of selected) stores.get(run.projectId)?.appendEvent(run.runId, { type: 'item.completed', item: { kind: 'message', id: `stream-${++published}`, role: 'assistant', text: `stream-${published}` } })
+    }, 50)
+  }
+  if (command.summaryStreaming) {
+    const selected = [...stores].flatMap(([projectId, target]) => target.listRunIds().slice(0, 30).map(runId => ({ projectId, runId })))
+    if (selected.length) timer = setInterval(() => {
+      const run = selected[published++ % selected.length]
+      stores.get(run.projectId).updateRun(run.runId, { costUsd: published / 1000 })
+    }, 50)
+  }
+}
 const control = createServer(async (req, res) => {
   let body = ''
   for await (const part of req) { body += part; if (body.length > 16_384) { res.writeHead(413).end(); return } }
@@ -105,20 +121,7 @@ const control = createServer(async (req, res) => {
     clearInterval(timer)
     await reports.handle(command)
     insertTask(command.insertTask)
-    if (command.streaming) {
-      const selected = command.runs ?? runs
-      for (const run of selected) stores.get(run.projectId)?.updateRun(run.runId, { status: 'running' })
-      timer = setInterval(() => {
-        for (const run of selected) stores.get(run.projectId)?.appendEvent(run.runId, { type: 'item.completed', item: { kind: 'message', id: `stream-${++published}`, role: 'assistant', text: `stream-${published}` } })
-      }, 50)
-    }
-    if (command.summaryStreaming) {
-      const selected = [...stores].flatMap(([projectId, target]) => target.listRunIds().slice(0, 30).map(runId => ({ projectId, runId })))
-      if (selected.length) timer = setInterval(() => {
-        const run = selected[published++ % selected.length]
-        stores.get(run.projectId).updateRun(run.runId, { costUsd: published / 1000 })
-      }, 50)
-    }
+    startStreams(command)
     if (command.ephemeral) for (const run of command.runs ?? runs) {
       const target = stores.get(run.projectId)
       target.updateRun(run.runId, { status: 'running' })
