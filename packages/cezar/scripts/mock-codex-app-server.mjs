@@ -140,6 +140,7 @@ function nativeSpawn(id, threadId) {
 function scenarioEncoder(msg, prompt, scenario, alreadyOpened = false) {
   const name = scenario?.name;
   let opened = alreadyOpened;
+  if (name === 'steer-tool' || name === 'steer-late') steerTurn = { id: 'turn_mock_1', steered: [] };
   let message = 0;
   const messages = [];
   let pendingTool;
@@ -151,7 +152,6 @@ function scenarioEncoder(msg, prompt, scenario, alreadyOpened = false) {
       if (step.ackOnly) { if (name === 'ack-only') heldTurn = true; return; }
       if (opened) return;
       opened = true;
-      if (name === 'steer-tool' || name === 'steer-late') steerTurn = { id: 'turn_mock_1', steered: [] };
       if (!prompt.includes('mock:no-progress-ack-only')) emit({ method: 'turn/started', params: { turn: { id: 'turn_mock_1', status: 'inProgress', items: [] } } });
       const content = () => emitOpeningInput(msg, prompt);
       const hold = delivery?.holdResponse(prompt);
@@ -256,11 +256,16 @@ const messageReplies = [
   [msg => msg.method === 'thread/start' || msg.method === 'thread/resume', handleThread],
   [msg => msg.method === 'turn/start', handleTurnStart],
 ];
-const nativeEarlyReplies = [
+const turnReplies = [
+  'autonomous', 'silent-tail', 'tool-tail',
   [turnText => turnText.includes('mock:hook-after-park'), replyWithParkedHook],
+  'subagent-after-park',
   [turnText => turnText.includes('mock:subagent-background'), async turnText => (await import('./mock-codex-subagents.mjs')).replyWithBackgroundSubagents(turnText, { emit, afterParityPark })],
+  'multi-pr-refs', 'turn-messages', 'cezar-tool', 'ci-wait', 'steer-tool', 'steer-late',
   [turnText => ['mock:steer-race', 'mock:steer-strand'].find(marker => turnText.includes(marker)), replyWithSteering],
+  'agent-echo',
   [turnText => turnText.includes('mock:ask-bad'), replyWithMalformedAsk],
+  'hold-cezar-done', 'hold-cezar-ask', 'cezar-done', 'cezar-ask', 'no-progress', 'busy-progress', 'hold-gated', 'hold',
   [turnText => turnText.includes('mock:stream-retry'), replyWithStreamRetry],
 ];
 // These scenarios follow native failure selection, as in the original line handler.
@@ -657,42 +662,60 @@ async function handleNativeFailure(turnText, msg, scenario, encoder) {
   return dispatchScenario(lateReplies, turnText, msg, replyWithOrdinaryTurn);
 }
 
+/** Selection belongs to the module; Codex keeps its native interleaving and modifiers. */
+function promptScenarios(prompt) {
+  const selected = new Map();
+  const unsupported = [...scenarioContext.unsupported];
+  for (let scenario = scenarioFor(prompt, { ...scenarioContext, unsupported }); scenario;
+    scenario = scenarioFor(prompt, { ...scenarioContext, unsupported })) {
+    selected.set(scenario.name, scenario);
+    unsupported.push(scenario.name);
+  }
+  return selected;
+}
+
 async function handleTurnStart(msg) {
   const prompt = openingPromptText(msg);
   if (delivery?.rejects(prompt)) { emit({ id: msg.id, error: { code: -32603, message: 'owned turn rejected' } }); return; }
-  const early = scenarioFor(prompt, scenarioContext);
-  if (early?.name === 'crash-stderr' && prompt.includes('-pre-ack')) return play(early, scenarioEncoder(msg, prompt, early));
+  const crash = promptScenarios(prompt).get('crash-stderr');
+  if (crash && prompt.includes('-pre-ack')) return play(crash, scenarioEncoder(msg, prompt, crash));
   if (rejectedPermissionOverride) permissionWarning();
   activeTurnId = 'turn_mock_1';
   acknowledgeTurnStart(msg, prompt);
   const turnText = nudgedTurnText(msg);
-  const scenario = scenarioFor(turnText, scenarioContext);
-  const encoder = scenarioEncoder(msg, turnText, scenario);
-  if (scenario?.early) {
-    if (scenario.name === 'crash-stderr') {
-      const opening = encoder.open({ kind: 'open' });
-      if (opening) await opening;
-    }
-    if (await play(scenario, encoder) !== 'continue') return;
-    const next = scenarioFor(turnText, { ...scenarioContext, unsupported: [...scenarioContext.unsupported, scenario.name] });
-    return dispatchSharedTurn(msg, turnText, next, true);
+  const scenarios = promptScenarios(turnText);
+  const ackOnly = scenarios.get('ack-only');
+  if (ackOnly) return play(ackOnly, scenarioEncoder(msg, turnText, ackOnly));
+  const deferred = scenarios.get('deferred-turn-start');
+  if (deferred) {
+    const encoder = scenarioEncoder(msg, turnText, deferred);
+    encoder.reply = () => dispatchOpenedTurn(msg, turnText, scenarios);
+    return play(deferred, encoder);
   }
-  return dispatchSharedTurn(msg, turnText, scenario);
+  if (!crash) {
+    const early = scenarios.get('autonomous') ?? scenarios.get('silent-tail') ?? scenarios.get('tool-tail');
+    if (early) return play(early, scenarioEncoder(msg, turnText, early));
+  }
+  const opening = scenarioEncoder(msg, turnText).open({ kind: 'open' });
+  if (opening) await opening;
+  return dispatchOpenedTurn(msg, turnText, scenarios);
 }
 
-async function dispatchSharedTurn(msg, turnText, scenario, alreadyOpened = false) {
-  const encoder = scenarioEncoder(msg, turnText, scenario, alreadyOpened);
-  // Deferred start and ack-only scripts own when the native turn opens.
-  if (scenario?.name === 'deferred-turn-start' || scenario?.name === 'ack-only') return play(scenario, encoder);
-  const opening = encoder.open({ kind: 'open' });
-  if (opening) await opening;
-  for (const [matches, reply] of nativeEarlyReplies) {
-    const match = matches(turnText);
-    if (match) return reply(turnText, msg, match);
+async function dispatchOpenedTurn(msg, prompt, scenarios) {
+  const crash = scenarios.get('crash-stderr');
+  if (crash && await play(crash, scenarioEncoder(msg, prompt, crash, true)) !== 'continue') return;
+  for (const route of turnReplies) {
+    if (typeof route === 'string') {
+      const scenario = scenarios.get(route);
+      if (scenario) return play(scenario, scenarioEncoder(msg, prompt, scenario, true));
+    } else {
+      const [matches, reply] = route;
+      const match = matches(prompt);
+      if (match) return reply(prompt, msg, match);
+    }
   }
-  // These scripts preceded native failure selection on Codex's original wire.
-  if (scenario && scenario.name !== 'provider-error') return play(scenario, encoder);
-  return handleNativeFailure(turnText, msg, scenario, encoder);
+  const failure = scenarios.get('provider-error');
+  return handleNativeFailure(prompt, msg, failure, scenarioEncoder(msg, prompt, failure, true));
 }
 
 function openingPromptText(msg) {
