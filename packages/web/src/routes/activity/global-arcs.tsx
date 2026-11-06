@@ -3,6 +3,7 @@ import type { ActivityRequest } from '@open-mercato/cezar-api-client/contract/ac
 
 import { counter, since } from './activity-format'
 import { arcPath, relativeBox, type Box, type Point } from './line-geometry'
+import { laneOffsets, separateLabels } from './line-route'
 import { useOverlayMeasure } from './use-overlay-measure'
 
 /**
@@ -36,17 +37,20 @@ function pillBoxes(host: HTMLElement): Map<string, Box> {
 export function measureArcs(host: HTMLElement, arcs: readonly ActivityRequest[]): ArcShape[] {
   const pills = pillBoxes(host)
   const all = [...pills.values()]
+  const lanes = laneOffsets(arcs)
   const shapes: ArcShape[] = []
   for (const request of arcs) {
     const from = pills.get(request.senderRunId)
     const to = pills.get(request.recipientRunId)
-    if (from && to) shapes.push({ requestId: request.requestId, ...arcPath(from, to, all) })
+    if (from && to) shapes.push({ requestId: request.requestId, ...arcPath(from, to, all, lanes.get(request.requestId)) })
   }
-  return shapes
+  // Labels sit above a row or in a row gap: moving one sideways keeps it off the pills.
+  const labels = separateLabels(shapes.map((shape) => ({ id: shape.requestId, at: shape.label })), ARC_LABEL, 'x')
+  return shapes.map((shape) => ({ ...shape, label: labels.get(shape.requestId) ?? shape.label }))
 }
 
 export function sameArcs(a: readonly ArcShape[], b: readonly ArcShape[]): boolean {
-  return a.length === b.length && a.every((arc, i) => arc.requestId === b[i]?.requestId && arc.d === b[i]?.d)
+  return a.length === b.length && a.every((arc, i) => arc.requestId === b[i]?.requestId && arc.d === b[i]?.d && arc.label.x === b[i]?.label.x && arc.label.y === b[i]?.label.y)
 }
 
 export function ActivityArcs({ arcs, layoutKey, now }: { arcs: readonly ActivityRequest[]; layoutKey: string; now: number }) {

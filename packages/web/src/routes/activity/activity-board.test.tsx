@@ -5,7 +5,8 @@ import type { ActivityProject } from '@open-mercato/cezar-api-client/contract/ac
 
 import { ACTIVITY_WAIT_KIND, NOW, RUN_STATUS, TOOL_STATUS, iso, project, request, run, worker } from './activity.testkit'
 import { ActivityBoard } from './activity-board'
-import { inside, placeBoxes, samplePath } from './line-layout.testkit'
+import { PEER_LABEL } from './line-measure'
+import { inside, labelBox, overlaps, placeBoxes, samplePath } from './line-layout.testkit'
 
 afterEach(() => {
   cleanup()
@@ -94,6 +95,17 @@ describe('ActivityBoard', () => {
     expect(samplePath(d).filter((p) => inside(p, middle))).toEqual([])
     // The channel runs below the middle card, never above the graph's top edge.
     expect(Math.min(...samplePath(d).map((p) => p.y))).toBeGreaterThanOrEqual(0)
+  })
+
+  it('gives reciprocal peer requests their own lane, with labels that do not overlap', () => {
+    setGraphWidth(1200)
+    placeBoxes('data-activity-card', { 'task-a': { x: 0, y: 0, w: 300, h: 160 }, 'task-b': { x: 396, y: 0, w: 300, h: 160 } })
+    const BACK = request({ senderRunId: 'task-b', recipientRunId: 'task-a' })
+    renderBoard(project({ tasks: [A, B], requests: [PEER, BACK] }))
+    const path = (id: string) => document.querySelector(`path[data-request="${id}"]`)?.getAttribute('d')
+    expect(path(PEER.requestId)).not.toBe(path(BACK.requestId))
+    const label = (id: string) => labelBox(document.querySelector(`[data-slot="activity-line-label"][data-request="${id}"]`) as Element, PEER_LABEL)
+    expect(overlaps(label(PEER.requestId), label(BACK.requestId))).toBe(false)
   })
 
   it('turns peer lines into "→ <task>" links on the sender card in one column', () => {

@@ -114,16 +114,16 @@ function columnGapX(grid: Grid, from: number, to: number): number {
  * row gap next to the recipient, and into the recipient. The label sits on the first leg in the
  * row gap, which no pill reaches into.
  */
-export function gridDetour(from: Box, to: Box, pills: readonly Box[]): { points: Point[]; label: Point } {
+export function gridDetour(from: Box, to: Box, pills: readonly Box[], lane = 0): { points: Point[]; label: Point } {
   const grid = gridOf(pills)
   const rs = indexOf(grid.rows, (row) => row.top, from.y)
   const rr = indexOf(grid.rows, (row) => row.top, to.y)
   const down = rr > rs
-  const ax = from.x + from.w / 2
-  const bx = to.x + to.w / 2
-  const y1 = down ? rowGapAfter(grid, rs) : rowGapAfter(grid, rs - 1)
-  const y2 = down ? rowGapAfter(grid, rr - 1) : rowGapAfter(grid, rr)
-  const gx = columnGapX(grid, indexOf(grid.cols, (col) => col.left, from.x), indexOf(grid.cols, (col) => col.left, to.x))
+  const ax = from.x + from.w / 2 + lane
+  const bx = to.x + to.w / 2 + lane
+  const y1 = (down ? rowGapAfter(grid, rs) : rowGapAfter(grid, rs - 1)) + lane / 2
+  const y2 = (down ? rowGapAfter(grid, rr - 1) : rowGapAfter(grid, rr)) + lane / 2
+  const gx = columnGapX(grid, indexOf(grid.cols, (col) => col.left, from.x), indexOf(grid.cols, (col) => col.left, to.x)) + lane / 2
   const start = { x: ax, y: down ? from.y + from.h + 1 : from.y - 1 }
   const end = { x: bx, y: down ? to.y - 3 : to.y + to.h + 3 }
   return { points: [start, { x: ax, y: y1 }, { x: gx, y: y1 }, { x: gx, y: y2 }, { x: bx, y: y2 }, end], label: { x: (ax + gx) / 2, y: y1 } }
@@ -148,12 +148,53 @@ function channelY(between: readonly Box[], want: number, ends: readonly number[]
  * of the sender's facing edge into the column gap, along it to a height that is free in every
  * column between, across those columns, along the recipient's column gap, and into its edge.
  */
-export function channelDetour(a: Point, b: Point, gap: number, cards: readonly Box[]): { points: Point[]; label: Point } {
+export function channelDetour(a: Point, b: Point, gap: number, cards: readonly Box[], lane = 0): { points: Point[]; label: Point } {
   const dir = b.x > a.x ? 1 : -1
-  const g1 = a.x + (dir * gap) / 2
-  const g2 = b.x - (dir * gap) / 2
+  const g1 = a.x + (dir * gap) / 2 + lane
+  const g2 = b.x - (dir * gap) / 2 + lane
   const between = cards.filter((card) => card.x + card.w > Math.min(g1, g2) && card.x < Math.max(g1, g2))
-  const cy = channelY(between, (a.y + b.y) / 2, [a.y, b.y])
+  // The lane shift stays inside the channel's clearance.
+  const cy = channelY(between, (a.y + b.y) / 2, [a.y, b.y]) + (lane === 0 ? 0 : Math.sign(lane) * Math.min(Math.abs(lane), CHANNEL_CLEARANCE - 6))
   const label = cy !== a.y ? { x: g1, y: (a.y + cy) / 2 } : { x: g2, y: (cy + b.y) / 2 }
   return { points: [a, { x: g1, y: a.y }, { x: g1, y: cy }, { x: g2, y: cy }, { x: g2, y: b.y }, { x: b.x - dir * 2, y: b.y }], label }
+}
+
+/** How far apart two lines between the same pair of tasks run. */
+export const LANE_GAP = 12
+
+/**
+ * One lane for each request between the same two tasks, in either direction: offsets that
+ * centre the lanes on the pair's single line, `LANE_GAP` apart. A lone request gets 0.
+ */
+export function laneOffsets(requests: readonly { requestId: string; senderRunId: string; recipientRunId: string }[]): Map<string, number> {
+  const pairs = new Map<string, string[]>()
+  for (const request of requests) {
+    const key = [request.senderRunId, request.recipientRunId].sort().join('\n')
+    pairs.set(key, [...(pairs.get(key) ?? []), request.requestId])
+  }
+  const lanes = new Map<string, number>()
+  for (const ids of pairs.values()) ids.forEach((id, i) => lanes.set(id, (i - (ids.length - 1) / 2) * LANE_GAP))
+  return lanes
+}
+
+/**
+ * Keep labels from covering each other. Each label, in order, moves along `axis` past any label
+ * already placed that it would overlap. The global view moves labels sideways (they sit in row
+ * gaps); the project view moves them down (they sit in column gaps).
+ */
+export function separateLabels(labels: readonly { id: string; at: Point }[], size: { w: number; h: number }, axis: 'x' | 'y', pad = 4): Map<string, Point> {
+  const placed: Point[] = []
+  const out = new Map<string, Point>()
+  for (const { id, at } of labels) {
+    const p = { ...at }
+    for (let guard = 0; guard <= placed.length; guard++) {
+      const hit = placed.find((q) => Math.abs(p.x - q.x) < size.w + pad && Math.abs(p.y - q.y) < size.h + pad)
+      if (!hit) break
+      if (axis === 'x') p.x = hit.x + size.w + pad
+      else p.y = hit.y + size.h + pad
+    }
+    placed.push(p)
+    out.set(id, p)
+  }
+  return out
 }

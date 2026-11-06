@@ -86,5 +86,25 @@ describe('ProjectPanel', () => {
       const label = labelBox(labelOf(down.requestId), ARC_LABEL)
       expect(Object.values(boxes).filter((box) => overlaps(label, box))).toEqual([])
     })
+
+    it('gives reciprocal requests their own lane, with labels that do not overlap', () => {
+      placeBoxes('data-activity-pill', boxes)
+      const there = request({ senderRunId: 'a', recipientRunId: 'b' })
+      const back = request({ senderRunId: 'b', recipientRunId: 'a' })
+      renderPanel(project({ tasks, requests: [there, back] }))
+      expect(arcOf(there.requestId)).not.toBe('')
+      expect(arcOf(back.requestId)).not.toBe('')
+      expect(arcOf(there.requestId)).not.toBe(arcOf(back.requestId))
+      expect(overlaps(labelBox(labelOf(there.requestId), ARC_LABEL), labelBox(labelOf(back.requestId), ARC_LABEL))).toBe(false)
+    })
+
+    it('nudges apart the labels of two arcs that land on the same spot', () => {
+      const row = gridBoxes([['p', 'q', 'r', 's', 't']])
+      placeBoxes('data-activity-pill', row)
+      const wide = request({ senderRunId: 'p', recipientRunId: 't' })
+      const narrow = request({ senderRunId: 'q', recipientRunId: 's' })
+      renderPanel(project({ tasks: ['p', 'q', 'r', 's', 't'].map((id) => run({ runId: id })), requests: [wide, narrow] }))
+      expect(overlaps(labelBox(labelOf(wide.requestId), ARC_LABEL), labelBox(labelOf(narrow.requestId), ARC_LABEL))).toBe(false)
+    })
   })
 })
