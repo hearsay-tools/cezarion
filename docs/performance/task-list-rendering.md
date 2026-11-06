@@ -246,6 +246,8 @@ Normal CLI defaults and fixture sizes remain the full workload described above.
 
 ## S3b: virtual groups and memoized rows
 
+The PR was rebased onto `f7edfaf48679278a7c2763a0249f4aad5d1be6f5`, which includes Phase 2 S5. The fixture conflict keeps S5 index updates/ticks and S3b insertion/summary-streaming behavior. The task-list benchmark does not send index commands or use the index seed, so the resolution does not change its measured workload. Published measurements remain historical runs on the source hashes shown below; they do not measure the rebased S5 index path.
+
 Large-list A timings were measured at `5a32a5816`. Later commits remove work on
 those paths: unchanged observer callbacks bail out,
 focus no longer reruns route derivations, and owner lookup no longer mounts every
