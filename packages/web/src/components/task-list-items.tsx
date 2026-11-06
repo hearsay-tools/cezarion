@@ -122,6 +122,9 @@ export class TaskListScrollAnchor extends Component<{
   private root = { current: null as HTMLDivElement | null }
   private anchor: { key: string; top: number; offset: number } | null = null
   private pendingAnchor = false
+  private pendingRestores = 0
+  private pendingSince = 0
+  private lastRetryOffset: number | undefined
   private finishUpdate: (() => void) | undefined
   private stopObserving: (() => void) | undefined
   override componentDidMount() {
@@ -136,9 +139,9 @@ export class TaskListScrollAnchor extends Component<{
     const settle = () => {
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => {
-        if (this.pendingAnchor && this.anchor && !this.anchorSettled(owner, this.anchor) && this.restore(this.anchor)) {
-          settle()
-          return
+        if (this.pendingAnchor && this.anchor && !this.anchorSettled(owner, this.anchor) && owner.scrollTop !== this.lastRetryOffset) {
+          this.lastRetryOffset = owner.scrollTop
+          if (this.restore(this.anchor)) { settle(); return }
         }
         this.pendingAnchor = false
         capture()
@@ -188,7 +191,10 @@ export class TaskListScrollAnchor extends Component<{
     if (this.props.shifting) return null
     if (previous.revision === this.props.revision && previous.visibilityRevision === this.props.visibilityRevision) return null
     const snapshot = this.capture(previous.keys)
-    if (!this.props.keys) { this.anchor = snapshot; this.pendingAnchor = true }
+    if (!this.props.keys) {
+      this.anchor = snapshot; this.pendingAnchor = true
+      this.pendingRestores = 0; this.pendingSince = performance.now(); this.lastRetryOffset = undefined
+    }
     return snapshot
   }
   override componentDidUpdate(_previous: Readonly<typeof this.props>, _state: object, snapshot: { key: string; top: number; offset: number } | null) {
@@ -198,6 +204,14 @@ export class TaskListScrollAnchor extends Component<{
     if (!this.props.keys && this.pendingAnchor) this.finishUpdate?.()
   }
   private restore(snapshot: { key: string; top: number; offset: number } | null) {
+    // Async virtualizer corrections may need a retry, but an unreachable target must release.
+    if (this.pendingAnchor && (this.pendingRestores++ >= 10 || performance.now() - this.pendingSince >= 1000)) {
+      this.pendingAnchor = false
+      return false
+    }
+    return this.restorePosition(snapshot)
+  }
+  private restorePosition(snapshot: { key: string; top: number; offset: number } | null) {
     if (!snapshot) return false
     const owner = this.props.scroll?.current ?? this.root.current?.closest<HTMLElement>('[data-slot="main"]')
     const next = [...(this.root.current?.querySelectorAll<HTMLElement>('[data-task-item]') ?? [])].find((element) => element.dataset.taskItem === snapshot.key)

@@ -165,3 +165,93 @@ it('restores the same logical virtual key when browser clamping unmounts its DOM
   expect(document.querySelector('[data-task-item="anchor"]')).toBeNull()
   expect(owner.scrollTop).toBe(400)
 })
+
+it.each((['flat', 'virtual'] as const).flatMap(rendering =>
+  (['top', 'bottom'] as const).flatMap(edge => (['clamped', 'oscillating'] as const).map(mode => [rendering, edge, mode] as const)),
+))('stops unreachable %s anchor retries at the %s when corrections are %s', (rendering, edge, mode) => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  const frames = new Map<number, FrameRequestCallback>()
+  let frameId = 0
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++frameId, callback); return frameId })
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id))
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const owner = this.closest<HTMLElement>('[data-slot="main"]')
+    const height = Number(owner?.querySelector<HTMLElement>('[data-height]')?.dataset.height ?? 0)
+    const inList = this.dataset.taskItem || this.dataset.slot === 'task-list-items'
+    const top = inList ? height - (owner?.scrollTop ?? 0) : 0
+    return { top, bottom: top + 60, height: 60, width: 1000 } as DOMRect
+  })
+  const list = (folded: boolean) => <MemoryRouter initialEntries={['/?tasks=virtual']}><div data-slot="main"><TaskListFocusBoundary layout="same" revision="same" visibilityRevision={String(folded)}>
+    <span data-height={folded ? (edge === 'top' ? 0 : 1000) : (edge === 'top' ? 2420 : 2400)} />
+    {rendering === 'virtual' ? <TaskListItems items={['anchor']} itemKey={key => key}>{key => <button>{key}</button>}</TaskListItems>
+      : <section data-slot="task-list-items"><div data-task-item="anchor">Anchor run</div></section>}
+  </TaskListFocusBoundary></div></MemoryRouter>
+  const view = render(list(false))
+  const owner = document.querySelector<HTMLElement>('[data-slot="main"]')!
+  let offset = 2400
+  let maximum = 2500
+  let corrections = 0
+  const writes = vi.fn((value: number) => {
+    offset = Math.min(maximum, Math.max(0, value))
+    if (mode === 'oscillating') offset += (corrections++ % 2) * (edge === 'top' ? 1 : -1)
+  })
+  Object.defineProperty(owner, 'scrollTop', { configurable: true, get: () => offset, set: writes })
+  owner.dispatchEvent(new Event('scroll'))
+  maximum = 900
+  view.rerender(list(true))
+  // Flush frames deterministically: unreachable targets must not create an endless retry loop.
+  for (let tick = 0; tick < 40 && frames.size; tick++) {
+    const batch = [...frames.values()]
+    frames.clear()
+    batch.forEach(callback => callback(tick * 16))
+  }
+  expect(owner.scrollTop).toBeGreaterThanOrEqual(edge === 'top' ? 0 : 899)
+  expect(owner.scrollTop).toBeLessThanOrEqual(edge === 'top' ? 1 : 900)
+  expect(frames.size).toBe(0)
+  expect(writes.mock.calls.length).toBeLessThanOrEqual(12)
+})
+
+it('releases and captures after a preview below the visible row collapses at the bottom', () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  const frames = new Map<number, FrameRequestCallback>()
+  let frameId = 0
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++frameId, callback); return frameId })
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id))
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const owner = this.closest<HTMLElement>('[data-slot="main"]')
+    const top = this.dataset.taskItem ? 2400 - (owner?.scrollTop ?? 0) : 0
+    return { top, bottom: top + (this.dataset.taskItem ? 60 : 300), height: 300, width: 1000 } as DOMRect
+  })
+  const capture = vi.spyOn(TaskListScrollAnchor.prototype as unknown as { capture: () => unknown }, 'capture')
+  class Rows extends Component<{ expanded: boolean }> {
+    override componentDidUpdate() {
+      const owner = document.querySelector<HTMLElement>('[data-slot="main"]')!
+      owner.scrollTop = Math.min(owner.scrollTop, owner.scrollHeight - owner.clientHeight)
+      owner.dispatchEvent(new Event('scroll'))
+    }
+    override render() { return <section data-slot="task-list-items">
+      <div data-task-item="anchor">Visible row near the bottom</div>
+      <div data-preview-height={this.props.expanded ? 300 : 0}>Expanded preview below the anchor</div>
+    </section> }
+  }
+  const list = (expanded: boolean) => <div data-slot="main"><TaskListFocusBoundary layout="same" revision="same" visibilityRevision={String(expanded)}><Rows expanded={expanded} /></TaskListFocusBoundary></div>
+  const view = render(list(true))
+  const owner = document.querySelector<HTMLElement>('[data-slot="main"]')!
+  let offset = 2400
+  Object.defineProperties(owner, {
+    clientHeight: { configurable: true, value: 300 },
+    scrollHeight: { configurable: true, get: () => 2500 + Number(owner.querySelector<HTMLElement>('[data-preview-height]')!.dataset.previewHeight) },
+    scrollTop: { configurable: true, get: () => offset, set: (value: number) => { offset = Math.min(owner.scrollHeight - owner.clientHeight, Math.max(0, value)) } },
+  })
+  owner.dispatchEvent(new Event('scroll'))
+  view.rerender(list(false))
+  capture.mockClear()
+  for (let tick = 0; tick < 40 && frames.size; tick++) {
+    const batch = [...frames.values()]
+    frames.clear()
+    batch.forEach(callback => callback(tick * 16))
+  }
+  expect(owner.scrollTop).toBe(2200)
+  expect(frames.size).toBe(0)
+  expect(capture).toHaveReturnedWith(expect.objectContaining({ key: 'anchor', top: 200 }))
+})

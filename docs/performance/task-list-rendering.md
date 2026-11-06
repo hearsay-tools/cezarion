@@ -621,7 +621,13 @@ It retains the pending correction until the mounted row's position, the
 virtualizer's scroll offset and its committed start margin agree; this prevents a
 delayed virtualizer correction from undoing the restore after a large fold. An
 already-settled snapshot releases immediately, and ordinary resize callbacks do
-not schedule a logical scroll.
+not schedule a logical scroll. Pending restoration also releases and captures the
+current row when retry frames make no scroll progress, after ten restore calls,
+or after one second. This bounds unreachable positions at either scroll limit,
+including a preview below the visible row collapsing near the bottom. Twenty
+anchor unit cases cover flat and virtual lists, both limits, stationary and
+oscillating corrections, and capture after that preview collapse. The 29 browser
+checks passed again on source `d0811b60e` after the bound was added.
 The list registration is removed on unmount. A filtered-out anchor has no fallback
 to another row: it retains scrollTop, subject to the browser's new height clamp.
 A surviving anchor retains its viewport position. The focused tests cover both.
@@ -631,7 +637,7 @@ the final-head timing table; that table remains evidence at its recorded hashes.
 Follow-up verification: 184 focused unit tests, web typecheck, lint and all 29
 browser checks (28 virtualization cases plus index smoke) passed. The bundled
 browser-coverage quality run timed out after 20 minutes without a measurement.
-The approved replacement used the seven focused unit files: 431 changed functions
+At `ce4793199`, the approved replacement used the seven focused unit files: 431 changed functions
 inventoried, maximum complexity 20 and measured maximum CRAP 30, with no exceeded
 limits. Coverage was unavailable for 99 functions, so this is partial quality
 evidence; CI's complexity gate and coverage merge cover the remaining paths.
