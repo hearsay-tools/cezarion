@@ -9,7 +9,7 @@
     "waitMs": 0
   },
   "baseline": {
-    "onStart": "lookup-then-run-missing"
+    "onStart": "lookup-only"
   },
   "lint": {
     "enabled": true,
@@ -30,6 +30,8 @@
       "at": "manual",
       "limits": { "maxParallel": 1, "maxWorkers": 1, "priority": "low" }
     },
+    { "name": "unit", "runner": "vitest", "at": "stop" },
+    { "name": "node", "runner": "nodeTest", "at": "stop" },
     { "name": "lint", "lint": true, "at": "stop" }
   ],
   "complexity": {
