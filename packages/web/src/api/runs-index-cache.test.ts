@@ -115,17 +115,30 @@ describe('applyIndexChange: the S1 and S5 case table', () => {
     expect(result.reconcile).toBe(true)
   })
 
-  it('unarchive of a row past a truncated window: inserted exactly, the window is unchanged', () => {
+  it('unarchive of a row past a truncated window (older than the window edge): inserted, then reconcile', () => {
+    // The project's archived count dropped by one, so `truncated` may no longer hold.
     const result = applyIndexChange(projectA({ truncated: ['a'] }), runChange('a', summary('a0', '2025-12-31')))
     expect(ids(result.index)).toEqual(['a/a4', 'b/b3', 'a/a2', 'a/a1', 'a/a0'])
+    expect(result.reconcile).toBe(true)
+  })
+
+  it('create in a truncated project (newer than the window edge): inserted, no reconciliation', () => {
+    const result = applyIndexChange(projectA({ truncated: ['a'] }), runChange('a', summary('a5', '2026-01-05')))
+    expect(ids(result.index)[0]).toBe('a/a5')
     expect(result.reconcile).toBe(false)
   })
 
-  it('an archived row past a truncated window stays out', () => {
-    const before = projectA({ truncated: ['a'] })
-    const result = applyIndexChange(before, runChange('a', summary('a0', '2025-12-31', { archived: true, title: 'old' })))
-    expect(result.index).toBe(before)
-    expect(result.reconcile).toBe(false)
+  it('an archived row a truncated index does not hold, newer than the window edge, enters the window: inserted, then reconcile', () => {
+    const result = applyIndexChange(projectA({ truncated: ['a'] }), runChange('a', summary('a3', '2026-01-03T12:00:00Z', { archived: true })))
+    expect(ids(result.index)).toEqual(['a/a4', 'a/a3', 'b/b3', 'a/a2', 'a/a1'])
+    expect(result.reconcile).toBe(true)
+  })
+
+  it('an unarchived row in a truncated project with no held archived row reconciles (no window edge)', () => {
+    const before = index([row('a', 'a4', '2026-01-04')], { truncated: ['a'], perProjectLimit: 0 })
+    const result = applyIndexChange(before, runChange('a', summary('a5', '2026-01-05')))
+    expect(ids(result.index)).toEqual(['a/a5', 'a/a4'])
+    expect(result.reconcile).toBe(true)
   })
 
   it('delete: removes the row', () => {
@@ -143,6 +156,12 @@ describe('applyIndexChange: the S1 and S5 case table', () => {
   it('delete of a row the index does not hold: the same object back', () => {
     const before = projectA()
     expect(applyIndexChange(before, deleted('a', 'nope'))).toEqual({ index: before, reconcile: false })
+  })
+
+  it('delete of a row a truncated index does not hold cannot be placed: no change, no reconciliation (remaining limit)', () => {
+    // It may be a worker or a row past the window. A stale `truncated` heals at the next read.
+    const before = projectA({ truncated: ['a'] })
+    expect(applyIndexChange(before, deleted('a', 'past-the-window'))).toEqual({ index: before, reconcile: false })
   })
 
   it('parent-worker update: a worker row never enters', () => {
@@ -263,14 +282,20 @@ describe('mergeIndexSnapshot: the fence', () => {
     expect(overlay.floor).toBe(0)
   })
 
-  it('a snapshot of another generation than the stream\'s stays unpatched and asks for a reconciliation', () => {
+  it('a snapshot of another generation than the stream\'s stays unpatched and asks for ONE reconciliation', () => {
     const overlay = createIndexOverlay()
     overlayReady(overlay, 'g2', 0)
     overlayRecord(overlay, runChange('a', summary('a4', '2026-01-04', { title: 'g2' }), 1))
     const stale = projectA({ generation: 'g1', eventSeq: 40 })
-    const result = mergeIndexSnapshot(overlay, stale)
-    expect(result).toEqual({ index: stale, reconcile: true })
+    expect(mergeIndexSnapshot(overlay, stale)).toEqual({ index: stale, reconcile: true })
     expect(overlay.changes.size).toBe(1)
+    // The stream stays on g2 and every read answers g1: no read loop.
+    expect(mergeIndexSnapshot(overlay, projectA({ generation: 'g1', eventSeq: 41 })).reconcile).toBe(false)
+    expect(mergeIndexSnapshot(overlay, projectA({ generation: 'g1', eventSeq: 42 })).reconcile).toBe(false)
+    // A third generation is news once more; a stream `ready` clears the record.
+    expect(mergeIndexSnapshot(overlay, projectA({ generation: 'g3', eventSeq: 0 })).reconcile).toBe(true)
+    overlayReady(overlay, 'g2', 5)
+    expect(mergeIndexSnapshot(overlay, projectA({ generation: 'g3', eventSeq: 0 })).reconcile).toBe(true)
   })
 
   it('without a stream generation, a snapshot of another generation resets the overlay', () => {

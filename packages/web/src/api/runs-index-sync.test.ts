@@ -232,6 +232,18 @@ describe('runs index sync: reconciliation', () => {
   })
 })
 
+describe('runs index sync: generation mismatch (R1)', () => {
+  it('stream generation A, snapshots keep arriving from B, no stream ready: at most one extra read', async () => {
+    sync.ready('A', 0)
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, snapshot(SEED().runs, { generation: 'A', eventSeq: 0 }))
+    const { queryFn, unsubscribe } = observe(() => snapshot(SEED().runs, { generation: 'B', eventSeq: 7 }))
+    await sync.reconcile()
+    await vi.advanceTimersByTimeAsync(RUNS_INDEX_RECONCILE_HOLD_MS * 10)
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    unsubscribe()
+  })
+})
+
 describe('runs index sync: sustained updates', () => {
   it('events every 200 ms for 5 s patch rows each animation frame, and a boundary read still fires', async () => {
     const answer = () => snapshot([row('a', 'a2', '2026-01-02'), row('a', 'a1', '2026-01-01', { archived: true })], { truncated: ['a'], eventSeq: seq })

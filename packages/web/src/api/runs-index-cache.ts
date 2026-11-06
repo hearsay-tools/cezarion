@@ -74,9 +74,11 @@ function isKnownProject(index: RunsIndexResponse, project: string, registry: Rea
  * - Create inserts at the row's `createdAt` position.
  * - Archive and unarchive are exact for a project that is not truncated. In a truncated project,
  *   they move the window boundary: the row is patched and the result asks for a reconciliation.
- *   An archived row the truncated index does not hold is outside the window and stays out.
+ *   A row a truncated index does not hold is placed by the window edge (`applyToTruncatedWindow`).
  * - Delete removes the row. Deleting an archived row of a truncated project asks for a
- *   reconciliation, because the next archived row enters the window.
+ *   reconciliation, because the next archived row enters the window. A delete of a row the index
+ *   does not hold cannot be placed (it may be a worker) and changes nothing: a `truncated` it
+ *   made stale heals at the next reconciliation or backstop read.
  * - A frame of a project the cockpit does not know is not applied and asks for a reconciliation.
  */
 export function applyIndexChange(
@@ -115,14 +117,40 @@ export function applyIndexChange(
       && (truncated || archivedCount(runs, project) > index.perProjectLimit)
     return { index: withRuns(index, runs), reconcile: boundary }
   }
-  // An archived row the index does not hold: outside a truncated project's window, or a row of a
-  // complete project that was never seen. Only the second one belongs in the index.
-  if (row.archived && truncated) return { index, reconcile: false }
+  if (truncated) return applyToTruncatedWindow(index, row)
   const runs = insertRow(index.runs, row)
   return {
     index: withRuns(index, runs),
     reconcile: row.archived && archivedCount(runs, project) > index.perProjectLimit,
   }
+}
+
+/** The `createdAt` of the oldest archived row a truncated project still holds: the window edge. */
+function windowEdge(runs: readonly RunIndexEntry[], project: string): string | undefined {
+  let edge: string | undefined
+  for (const row of runs) {
+    if (row.projectId === project && row.archived && (edge === undefined || row.createdAt < edge)) edge = row.createdAt
+  }
+  return edge
+}
+
+/**
+ * A row the index does not hold, in a truncated project. The window edge tells where it was:
+ *
+ * - unarchived and older than the edge: it was unarchived from beyond the window, so the project
+ *   may no longer be truncated. Insert it and reconcile.
+ * - unarchived otherwise: a create. Insert it; the window is unchanged.
+ * - archived and newer than the edge: it belongs in the window, and the window's oldest row leaves.
+ *   Insert it and reconcile.
+ * - archived otherwise: beyond the window. It stays out.
+ *
+ * With no held archived row there is no edge, so an unarchived row reconciles to stay honest.
+ */
+function applyToTruncatedWindow(index: RunsIndexResponse, row: RunIndexEntry): IndexPatch {
+  const edge = windowEdge(index.runs, row.projectId)
+  const insideWindow = edge !== undefined && row.createdAt > edge
+  if (row.archived && !insideWindow) return { index, reconcile: false }
+  return { index: withRuns(index, insertRow(index.runs, row)), reconcile: row.archived || edge === undefined || row.createdAt < edge }
 }
 
 /**
@@ -175,12 +203,15 @@ export interface IndexOverlay {
   generation: string | undefined
   /** True when `generation` came from the stream's `ready`, not from a snapshot. */
   streamGeneration: boolean
+  /** The last snapshot generation that disagreed with the stream's. It asks for one
+   *  reconciliation, not one per snapshot: the stream's next `ready` settles which is current. */
+  mismatch: string | undefined
   floor: number | undefined
   changes: Map<string, IndexChange>
 }
 
 export function createIndexOverlay(): IndexOverlay {
-  return { generation: undefined, streamGeneration: false, floor: undefined, changes: new Map() }
+  return { generation: undefined, streamGeneration: false, mismatch: undefined, floor: undefined, changes: new Map() }
 }
 
 /** A stream attachment. Another generation is a reset. In the same generation, frames up to
@@ -194,6 +225,7 @@ export function overlayReady(overlay: IndexOverlay, generation: string, seq: num
     overlay.floor = Math.max(overlay.floor ?? seq, seq)
   }
   overlay.streamGeneration = true
+  overlay.mismatch = undefined
 }
 
 /**
@@ -221,7 +253,8 @@ function hasFence(snapshot: RunsIndexResponse): boolean {
  * here: the query function, the shared live read and each reconciliation.
  *
  * - Another generation: when the overlay's generation came from the stream, the snapshot is from
- *   a process this stream no longer hears. It is kept unpatched and asks for a reconciliation.
+ *   a process this stream does not hear (yet). It is kept unpatched and asks for one
+ *   reconciliation per such generation, so a stream that stays down cannot cause a read loop.
  *   Otherwise the overlay resets to the snapshot's generation.
  * - A frame above `eventSeq` is newer than the snapshot and is laid over it.
  * - A frame at or below `eventSeq` is in the snapshot and leaves the overlay.
@@ -235,7 +268,11 @@ export function mergeIndexSnapshot(
 ): IndexPatch {
   if (!hasFence(snapshot)) return { index: snapshot, reconcile: false }
   if (overlay.generation !== undefined && overlay.generation !== snapshot.generation) {
-    if (overlay.streamGeneration) return { index: snapshot, reconcile: true }
+    if (overlay.streamGeneration) {
+      const first = overlay.mismatch !== snapshot.generation
+      overlay.mismatch = snapshot.generation
+      return { index: snapshot, reconcile: first }
+    }
     overlay.changes.clear()
     overlay.floor = undefined
   }

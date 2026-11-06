@@ -124,6 +124,22 @@ describe('runs index backstop (D2)', () => {
   })
 })
 
+describe('runs index: remote mode (D9)', () => {
+  it('keeps the 5 s full reconciliation through the fence, with no extra read per snapshot', async () => {
+    vi.stubGlobal('SharedWorker', undefined)
+    configureLiveSession({ local: false, bootProject: 'boot', apiBase: '' })
+    const usage = createUsageStore()
+    renderHook(() => { useGlobalEvents(usage); return useRunsIndex() }, { wrapper })
+    await act(async () => vi.advanceTimersByTimeAsync(10_000))
+    const before = indexReads().length
+    await act(async () => vi.advanceTimersByTimeAsync(20_000))
+    // One read per 5 s workspace reconciliation; the 60 s backstop does not replace it, and no
+    // snapshot (there is no stream generation to disagree with) asks for another read.
+    expect(indexReads().length - before).toBe(4)
+    expect(title()).toBe('a1')
+  })
+})
+
 describe('runs index: visibility restore', () => {
   it('reconciles through the fence: the restored snapshot keeps frames newer than it', async () => {
     configureLiveSession({ local: true, bootProject: 'boot', apiBase: '' })
