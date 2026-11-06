@@ -1,0 +1,1120 @@
+{
+  "note": "Median of each field over 5 runs per side; a row can combine fields from different runs.",
+  "runs": {
+    "baseline-1": {
+      "revision": "0320d57fb81048642c80bb4de93038cbf5c12ce1",
+      "sourceDirty": true,
+      "builtContentSha256": "4e97b2924e1ecf8efb6d53073c825692ce4322de6f120dcdea2d2138a8d2d949",
+      "loads": [
+        [
+          "closed",
+          48.67,
+          44.49
+        ],
+        [
+          "all-tasks",
+          42.21,
+          27.4
+        ],
+        [
+          "detail",
+          27.4,
+          30.22
+        ]
+      ]
+    },
+    "baseline-2": {
+      "revision": "0320d57fb81048642c80bb4de93038cbf5c12ce1",
+      "sourceDirty": true,
+      "builtContentSha256": "4e97b2924e1ecf8efb6d53073c825692ce4322de6f120dcdea2d2138a8d2d949",
+      "loads": [
+        [
+          "closed",
+          46.85,
+          35.08
+        ],
+        [
+          "all-tasks",
+          35.08,
+          38.8
+        ],
+        [
+          "detail",
+          38.02,
+          39.52
+        ]
+      ]
+    },
+    "baseline-3": {
+      "revision": "0320d57fb81048642c80bb4de93038cbf5c12ce1",
+      "sourceDirty": true,
+      "builtContentSha256": "4e97b2924e1ecf8efb6d53073c825692ce4322de6f120dcdea2d2138a8d2d949",
+      "loads": [
+        [
+          "closed",
+          26.54,
+          31.46
+        ],
+        [
+          "all-tasks",
+          33.75,
+          34.3
+        ],
+        [
+          "detail",
+          34.3,
+          54.87
+        ]
+      ]
+    },
+    "baseline-4": {
+      "revision": "0320d57fb81048642c80bb4de93038cbf5c12ce1",
+      "sourceDirty": true,
+      "builtContentSha256": "4e97b2924e1ecf8efb6d53073c825692ce4322de6f120dcdea2d2138a8d2d949",
+      "loads": [
+        [
+          "closed",
+          45.2,
+          37
+        ],
+        [
+          "all-tasks",
+          36.2,
+          27.04
+        ],
+        [
+          "detail",
+          28.4,
+          36.58
+        ]
+      ]
+    },
+    "baseline-5": {
+      "revision": "0320d57fb81048642c80bb4de93038cbf5c12ce1",
+      "sourceDirty": true,
+      "builtContentSha256": "4e97b2924e1ecf8efb6d53073c825692ce4322de6f120dcdea2d2138a8d2d949",
+      "loads": [
+        [
+          "closed",
+          20.27,
+          17.85
+        ],
+        [
+          "all-tasks",
+          17.85,
+          25.16
+        ],
+        [
+          "detail",
+          25.16,
+          23.58
+        ]
+      ]
+    },
+    "branch-perframe-1": {
+      "revision": "447f546d92b8885c28b4cdad40d1ae19e995077b",
+      "sourceDirty": true,
+      "builtContentSha256": "2082f330e9bcf455b3e8403aea02fcf1b9775976734df363643e1638b7b4be4c",
+      "loads": [
+        [
+          "closed",
+          29.17,
+          29.6
+        ],
+        [
+          "all-tasks",
+          29.55,
+          35.46
+        ],
+        [
+          "detail",
+          35.46,
+          47.7
+        ]
+      ]
+    },
+    "branch-perframe-2": {
+      "revision": "447f546d92b8885c28b4cdad40d1ae19e995077b",
+      "sourceDirty": true,
+      "builtContentSha256": "2082f330e9bcf455b3e8403aea02fcf1b9775976734df363643e1638b7b4be4c",
+      "loads": [
+        [
+          "closed",
+          39.23,
+          37.14
+        ],
+        [
+          "all-tasks",
+          37.29,
+          26.55
+        ],
+        [
+          "detail",
+          26.55,
+          27.63
+        ]
+      ]
+    },
+    "branch-perframe-3": {
+      "revision": "447f546d92b8885c28b4cdad40d1ae19e995077b",
+      "sourceDirty": true,
+      "builtContentSha256": "2082f330e9bcf455b3e8403aea02fcf1b9775976734df363643e1638b7b4be4c",
+      "loads": [
+        [
+          "closed",
+          56.65,
+          47.15
+        ],
+        [
+          "all-tasks",
+          45.46,
+          41.22
+        ],
+        [
+          "detail",
+          40.72,
+          45.2
+        ]
+      ]
+    },
+    "branch-perframe-4": {
+      "revision": "447f546d92b8885c28b4cdad40d1ae19e995077b",
+      "sourceDirty": true,
+      "builtContentSha256": "2082f330e9bcf455b3e8403aea02fcf1b9775976734df363643e1638b7b4be4c",
+      "loads": [
+        [
+          "closed",
+          36.58,
+          34.39
+        ],
+        [
+          "all-tasks",
+          34.39,
+          24.66
+        ],
+        [
+          "detail",
+          24.66,
+          19.77
+        ]
+      ]
+    },
+    "branch-perframe-5": {
+      "revision": "447f546d92b8885c28b4cdad40d1ae19e995077b",
+      "sourceDirty": true,
+      "builtContentSha256": "2082f330e9bcf455b3e8403aea02fcf1b9775976734df363643e1638b7b4be4c",
+      "loads": [
+        [
+          "closed",
+          22.89,
+          21.3
+        ],
+        [
+          "all-tasks",
+          21.3,
+          28.86
+        ],
+        [
+          "detail",
+          28.71,
+          22.57
+        ]
+      ]
+    },
+    "branch-1": {
+      "revision": "a2cc0e05d04d7ed2b79edad0845236963b3bf056",
+      "sourceDirty": true,
+      "builtContentSha256": "b37566c978a662a6ab510215562359c3892036ee290e3d5de3664c039f8286ed",
+      "loads": [
+        [
+          "closed",
+          17.05,
+          14.52
+        ],
+        [
+          "all-tasks",
+          14.52,
+          15.08
+        ],
+        [
+          "detail",
+          16.43,
+          16.8
+        ]
+      ]
+    },
+    "branch-2": {
+      "revision": "a2cc0e05d04d7ed2b79edad0845236963b3bf056",
+      "sourceDirty": true,
+      "builtContentSha256": "b37566c978a662a6ab510215562359c3892036ee290e3d5de3664c039f8286ed",
+      "loads": [
+        [
+          "closed",
+          16.8,
+          17.77
+        ],
+        [
+          "all-tasks",
+          17.31,
+          15.38
+        ],
+        [
+          "detail",
+          15.38,
+          20.21
+        ]
+      ]
+    },
+    "branch-3": {
+      "revision": "a2cc0e05d04d7ed2b79edad0845236963b3bf056",
+      "sourceDirty": true,
+      "builtContentSha256": "b37566c978a662a6ab510215562359c3892036ee290e3d5de3664c039f8286ed",
+      "loads": [
+        [
+          "closed",
+          19.87,
+          18.4
+        ],
+        [
+          "all-tasks",
+          18.4,
+          17.57
+        ],
+        [
+          "detail",
+          17.85,
+          17.47
+        ]
+      ]
+    },
+    "branch-4": {
+      "revision": "a2cc0e05d04d7ed2b79edad0845236963b3bf056",
+      "sourceDirty": true,
+      "builtContentSha256": "b37566c978a662a6ab510215562359c3892036ee290e3d5de3664c039f8286ed",
+      "loads": [
+        [
+          "closed",
+          17.47,
+          16.94
+        ],
+        [
+          "all-tasks",
+          17.99,
+          15.6
+        ],
+        [
+          "detail",
+          15.6,
+          20.36
+        ]
+      ]
+    },
+    "branch-5": {
+      "revision": "a2cc0e05d04d7ed2b79edad0845236963b3bf056",
+      "sourceDirty": true,
+      "builtContentSha256": "b37566c978a662a6ab510215562359c3892036ee290e3d5de3664c039f8286ed",
+      "loads": [
+        [
+          "closed",
+          20.36,
+          22.31
+        ],
+        [
+          "all-tasks",
+          22.45,
+          17.75
+        ],
+        [
+          "detail",
+          17.75,
+          21.22
+        ]
+      ]
+    }
+  },
+  "medians": {
+    "baseline|closed|cold": {
+      "elapsedMs": 8044,
+      "indexRequests": 7,
+      "indexRequestsPerMin": 52.22,
+      "indexBodyBytes": 1366575,
+      "indexDurationP50Ms": 37.75,
+      "indexDurationP95Ms": 53.88,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 47139,
+      "allBodyBytes": 4365943,
+      "requests": 64,
+      "serverCpuMs": 2160,
+      "rendererTaskMs": 1848,
+      "reactCommits": 24,
+      "reactCommitMsTotal": 455.6,
+      "reactCommitP50Ms": 6.7,
+      "reactCommitP95Ms": 72.8,
+      "main": "5/5"
+    },
+    "baseline|closed|update": {
+      "elapsedMs": 3032,
+      "indexRequests": 1,
+      "indexRequestsPerMin": 19.79,
+      "indexBodyBytes": 199638,
+      "indexDurationP50Ms": 16.07,
+      "indexDurationP95Ms": 16.07,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 591,
+      "allBodyBytes": 200232,
+      "requests": 1,
+      "serverCpuMs": 30,
+      "rendererTaskMs": 329,
+      "reactCommits": 2,
+      "reactCommitMsTotal": 10.5,
+      "reactCommitP50Ms": 10.4,
+      "reactCommitP95Ms": 10.4,
+      "titleShownMs": null
+    },
+    "baseline|closed|sustained": {
+      "elapsedMs": 60513,
+      "indexRequests": 110,
+      "indexRequestsPerMin": 108.69,
+      "indexBodyBytes": 21927968,
+      "indexDurationP50Ms": 23.15,
+      "indexDurationP95Ms": 48.86,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 202531,
+      "allBodyBytes": 22242149,
+      "requests": 170,
+      "serverCpuMs": 4750,
+      "rendererTaskMs": 35259,
+      "reactCommits": 624,
+      "reactCommitMsTotal": 21297.3,
+      "reactCommitP50Ms": 3.8,
+      "reactCommitP95Ms": 123.3,
+      "ticks": 300,
+      "probeP50Ms": 17.8,
+      "probeP95Ms": 421.1,
+      "probes": 56
+    },
+    "baseline|closed|reconnect": {
+      "elapsedMs": 8015,
+      "indexRequests": 2,
+      "indexRequestsPerMin": 14.97,
+      "indexBodyBytes": 423086,
+      "indexDurationP50Ms": 39.72,
+      "indexDurationP95Ms": 39.72,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 929,
+      "allBodyBytes": 524736,
+      "requests": 9,
+      "serverCpuMs": 90,
+      "rendererTaskMs": 291,
+      "reactCommits": 6,
+      "reactCommitMsTotal": 117.9,
+      "reactCommitP50Ms": 2.7,
+      "reactCommitP95Ms": 110.1,
+      "main": "5/5"
+    },
+    "baseline|all-tasks|cold": {
+      "elapsedMs": 8063,
+      "indexRequests": 7,
+      "indexRequestsPerMin": 52.09,
+      "indexBodyBytes": 1174715,
+      "indexDurationP50Ms": 28.65,
+      "indexDurationP95Ms": 76.58,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 47878,
+      "allBodyBytes": 4174820,
+      "requests": 62,
+      "serverCpuMs": 2230,
+      "rendererTaskMs": 2611,
+      "reactCommits": 24,
+      "reactCommitMsTotal": 1056.8,
+      "reactCommitP50Ms": 6.1,
+      "reactCommitP95Ms": 185.7,
+      "main": "5/5"
+    },
+    "baseline|all-tasks|update": {
+      "elapsedMs": 3016,
+      "indexRequests": 1,
+      "indexRequestsPerMin": 19.89,
+      "indexBodyBytes": 199638,
+      "indexDurationP50Ms": 14.24,
+      "indexDurationP95Ms": 14.24,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 591,
+      "allBodyBytes": 200230,
+      "requests": 1,
+      "serverCpuMs": 30,
+      "rendererTaskMs": 401,
+      "reactCommits": 2,
+      "reactCommitMsTotal": 93.7,
+      "reactCommitP50Ms": 93.7,
+      "reactCommitP95Ms": 93.7,
+      "titleShownMs": 761
+    },
+    "baseline|all-tasks|sustained": {
+      "elapsedMs": 60518,
+      "indexRequests": 118,
+      "indexRequestsPerMin": 116.91,
+      "indexBodyBytes": 23586862,
+      "indexDurationP50Ms": 19.95,
+      "indexDurationP95Ms": 50.39,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 203160,
+      "allBodyBytes": 23814466,
+      "requests": 177,
+      "serverCpuMs": 4950,
+      "rendererTaskMs": 23991,
+      "reactCommits": 804,
+      "reactCommitMsTotal": 14840.6,
+      "reactCommitP50Ms": 3.1,
+      "reactCommitP95Ms": 109.1,
+      "ticks": 300,
+      "probeP50Ms": 15,
+      "probeP95Ms": 224,
+      "probes": 59
+    },
+    "baseline|all-tasks|reconnect": {
+      "elapsedMs": 8008,
+      "indexRequests": 3,
+      "indexRequestsPerMin": 22.48,
+      "indexBodyBytes": 634624,
+      "indexDurationP50Ms": 35.46,
+      "indexDurationP95Ms": 54.56,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 1202,
+      "allBodyBytes": 736266,
+      "requests": 10,
+      "serverCpuMs": 120,
+      "rendererTaskMs": 430,
+      "reactCommits": 8,
+      "reactCommitMsTotal": 218.6,
+      "reactCommitP50Ms": 3.5,
+      "reactCommitP95Ms": 136.4,
+      "main": "5/5"
+    },
+    "baseline|detail|cold": {
+      "elapsedMs": 8066,
+      "indexRequests": 12,
+      "indexRequestsPerMin": 89.6,
+      "indexBodyBytes": 2145390,
+      "indexDurationP50Ms": 41.05,
+      "indexDurationP95Ms": 97.58,
+      "detailRequests": 2,
+      "detailRequestsPerMin": 14.88,
+      "detailBodyBytes": 2476,
+      "sseBodyBytes": 63049,
+      "allBodyBytes": 5492400,
+      "requests": 96,
+      "serverCpuMs": 2810,
+      "rendererTaskMs": 2574,
+      "reactCommits": 50,
+      "reactCommitMsTotal": 459.4,
+      "reactCommitP50Ms": 2.7,
+      "reactCommitP95Ms": 42.5,
+      "main": "5/5"
+    },
+    "baseline|detail|update": {
+      "elapsedMs": 3052,
+      "indexRequests": 1,
+      "indexRequestsPerMin": 19.66,
+      "indexBodyBytes": 199639,
+      "indexDurationP50Ms": 28.97,
+      "indexDurationP95Ms": 28.97,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 512,
+      "allBodyBytes": 200149,
+      "requests": 1,
+      "serverCpuMs": 30,
+      "rendererTaskMs": 498,
+      "reactCommits": 2,
+      "reactCommitMsTotal": 19.5,
+      "reactCommitP50Ms": 19.5,
+      "reactCommitP95Ms": 19.5,
+      "titleShownMs": null
+    },
+    "baseline|detail|sustained": {
+      "elapsedMs": 60465,
+      "indexRequests": 118,
+      "indexRequestsPerMin": 117.13,
+      "indexBodyBytes": 23823554,
+      "indexDurationP50Ms": 30.13,
+      "indexDurationP95Ms": 64.81,
+      "detailRequests": 75,
+      "detailRequestsPerMin": 74.42,
+      "detailBodyBytes": 94845,
+      "sseBodyBytes": 205041,
+      "allBodyBytes": 24147515,
+      "requests": 328,
+      "serverCpuMs": 5430,
+      "rendererTaskMs": 19509,
+      "reactCommits": 1352,
+      "reactCommitMsTotal": 7075.3,
+      "reactCommitP50Ms": 0.6,
+      "reactCommitP95Ms": 19.9,
+      "ticks": 300,
+      "probeP50Ms": 19.2,
+      "probeP95Ms": 86,
+      "probes": 60
+    },
+    "baseline|detail|reconnect": {
+      "elapsedMs": 8014,
+      "indexRequests": 2,
+      "indexRequestsPerMin": 14.97,
+      "indexBodyBytes": 423088,
+      "indexDurationP50Ms": 83.01,
+      "indexDurationP95Ms": 83.01,
+      "detailRequests": 2,
+      "detailRequestsPerMin": 14.97,
+      "detailBodyBytes": 2530,
+      "sseBodyBytes": 929,
+      "allBodyBytes": 527448,
+      "requests": 15,
+      "serverCpuMs": 130,
+      "rendererTaskMs": 911,
+      "reactCommits": 17,
+      "reactCommitMsTotal": 61.2,
+      "reactCommitP50Ms": 0.6,
+      "reactCommitP95Ms": 14.3,
+      "main": "5/5"
+    },
+    "branch-perframe|closed|cold": {
+      "elapsedMs": 8044,
+      "indexRequests": 2,
+      "indexRequestsPerMin": 14.92,
+      "indexBodyBytes": 378558,
+      "indexDurationP50Ms": 51.42,
+      "indexDurationP95Ms": 51.42,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 53429,
+      "allBodyBytes": 3385726,
+      "requests": 59,
+      "serverCpuMs": 2190,
+      "rendererTaskMs": 2679,
+      "reactCommits": 191,
+      "reactCommitMsTotal": 1160.1,
+      "reactCommitP50Ms": 4.3,
+      "reactCommitP95Ms": 11.7,
+      "main": "5/5"
+    },
+    "branch-perframe|closed|update": {
+      "elapsedMs": 3052,
+      "indexRequests": 0,
+      "indexRequestsPerMin": 0,
+      "indexBodyBytes": 0,
+      "indexDurationP50Ms": null,
+      "indexDurationP95Ms": null,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 512,
+      "allBodyBytes": 512,
+      "requests": 0,
+      "serverCpuMs": 20,
+      "rendererTaskMs": 326,
+      "reactCommits": 2,
+      "reactCommitMsTotal": 8.1,
+      "reactCommitP50Ms": 7.2,
+      "reactCommitP95Ms": 8.1,
+      "titleShownMs": null
+    },
+    "branch-perframe|closed|sustained": {
+      "elapsedMs": 60767,
+      "indexRequests": 2,
+      "indexRequestsPerMin": 1.97,
+      "indexBodyBytes": 404028,
+      "indexDurationP50Ms": 95.25,
+      "indexDurationP95Ms": 95.25,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 203819,
+      "allBodyBytes": 722396,
+      "requests": 62,
+      "serverCpuMs": 3750,
+      "rendererTaskMs": 38413,
+      "reactCommits": 641,
+      "reactCommitMsTotal": 22861.2,
+      "reactCommitP50Ms": 4.1,
+      "reactCommitP95Ms": 125.4,
+      "ticks": 300,
+      "probeP50Ms": 21,
+      "probeP95Ms": 591.6,
+      "probes": 54
+    },
+    "branch-perframe|closed|reconnect": {
+      "elapsedMs": 8015,
+      "indexRequests": 1,
+      "indexRequestsPerMin": 7.49,
+      "indexBodyBytes": 211541,
+      "indexDurationP50Ms": 37.24,
+      "indexDurationP95Ms": 37.24,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 927,
+      "allBodyBytes": 313182,
+      "requests": 8,
+      "serverCpuMs": 80,
+      "rendererTaskMs": 352,
+      "reactCommits": 12,
+      "reactCommitMsTotal": 155.5,
+      "reactCommitP50Ms": 4.4,
+      "reactCommitP95Ms": 115.8,
+      "main": "5/5"
+    },
+    "branch-perframe|all-tasks|cold": {
+      "elapsedMs": 8031,
+      "indexRequests": 2,
+      "indexRequestsPerMin": 14.94,
+      "indexBodyBytes": 379138,
+      "indexDurationP50Ms": 63.95,
+      "indexDurationP95Ms": 63.95,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 45289,
+      "allBodyBytes": 3380951,
+      "requests": 57,
+      "serverCpuMs": 2300,
+      "rendererTaskMs": 4220,
+      "reactCommits": 41,
+      "reactCommitMsTotal": 2239.8,
+      "reactCommitP50Ms": 8.3,
+      "reactCommitP95Ms": 157.3,
+      "main": "5/5"
+    },
+    "branch-perframe|all-tasks|update": {
+      "elapsedMs": 3037,
+      "indexRequests": 0,
+      "indexRequestsPerMin": 0,
+      "indexBodyBytes": 0,
+      "indexDurationP50Ms": null,
+      "indexDurationP95Ms": null,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 453,
+      "allBodyBytes": 453,
+      "requests": 0,
+      "serverCpuMs": 20,
+      "rendererTaskMs": 222,
+      "reactCommits": 2,
+      "reactCommitMsTotal": 121.3,
+      "reactCommitP50Ms": 121.3,
+      "reactCommitP95Ms": 121.3,
+      "titleShownMs": 215
+    },
+    "branch-perframe|all-tasks|sustained": {
+      "elapsedMs": 60298,
+      "indexRequests": 4,
+      "indexRequestsPerMin": 3.98,
+      "indexBodyBytes": 806026,
+      "indexDurationP50Ms": 34.24,
+      "indexDurationP95Ms": 42.63,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 204548,
+      "allBodyBytes": 1034723,
+      "requests": 62,
+      "serverCpuMs": 3490,
+      "rendererTaskMs": 29864,
+      "reactCommits": 719,
+      "reactCommitMsTotal": 19283.2,
+      "reactCommitP50Ms": 4.1,
+      "reactCommitP95Ms": 112.8,
+      "ticks": 299,
+      "probeP50Ms": 12.7,
+      "probeP95Ms": 515.5,
+      "probes": 58
+    },
+    "branch-perframe|all-tasks|reconnect": {
+      "elapsedMs": 8011,
+      "indexRequests": 2,
+      "indexRequestsPerMin": 14.98,
+      "indexBodyBytes": 423090,
+      "indexDurationP50Ms": 38.81,
+      "indexDurationP95Ms": 38.81,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 1202,
+      "allBodyBytes": 524951,
+      "requests": 9,
+      "serverCpuMs": 90,
+      "rendererTaskMs": 737,
+      "reactCommits": 12,
+      "reactCommitMsTotal": 427.5,
+      "reactCommitP50Ms": 2.9,
+      "reactCommitP95Ms": 120.3,
+      "main": "5/5"
+    },
+    "branch-perframe|detail|cold": {
+      "elapsedMs": 8054,
+      "indexRequests": 3,
+      "indexRequestsPerMin": 22.35,
+      "indexBodyBytes": 570477,
+      "indexDurationP50Ms": 49.82,
+      "indexDurationP95Ms": 63.37,
+      "detailRequests": 2,
+      "detailRequestsPerMin": 14.9,
+      "detailBodyBytes": 2476,
+      "sseBodyBytes": 60598,
+      "allBodyBytes": 3921203,
+      "requests": 87,
+      "serverCpuMs": 2600,
+      "rendererTaskMs": 4004,
+      "reactCommits": 245,
+      "reactCommitMsTotal": 1512.7,
+      "reactCommitP50Ms": 2.8,
+      "reactCommitP95Ms": 13.5,
+      "main": "5/5"
+    },
+    "branch-perframe|detail|update": {
+      "elapsedMs": 3017,
+      "indexRequests": 0,
+      "indexRequestsPerMin": 0,
+      "indexBodyBytes": 0,
+      "indexDurationP50Ms": null,
+      "indexDurationP95Ms": null,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 510,
+      "allBodyBytes": 510,
+      "requests": 0,
+      "serverCpuMs": 20,
+      "rendererTaskMs": 444,
+      "reactCommits": 2,
+      "reactCommitMsTotal": 10.9,
+      "reactCommitP50Ms": 10.9,
+      "reactCommitP95Ms": 10.9,
+      "titleShownMs": null
+    },
+    "branch-perframe|detail|sustained": {
+      "elapsedMs": 60271,
+      "indexRequests": 1,
+      "indexRequestsPerMin": 1,
+      "indexBodyBytes": 203745,
+      "indexDurationP50Ms": 47.37,
+      "indexDurationP95Ms": 47.37,
+      "detailRequests": 75,
+      "detailRequestsPerMin": 74.66,
+      "detailBodyBytes": 94845,
+      "sseBodyBytes": 204238,
+      "allBodyBytes": 529863,
+      "requests": 211,
+      "serverCpuMs": 4550,
+      "rendererTaskMs": 14401,
+      "reactCommits": 1472,
+      "reactCommitMsTotal": 5140.7,
+      "reactCommitP50Ms": 0.6,
+      "reactCommitP95Ms": 11.4,
+      "ticks": 299,
+      "probeP50Ms": 13,
+      "probeP95Ms": 61.2,
+      "probes": 60
+    },
+    "branch-perframe|detail|reconnect": {
+      "elapsedMs": 8015,
+      "indexRequests": 1,
+      "indexRequestsPerMin": 7.49,
+      "indexBodyBytes": 211543,
+      "indexDurationP50Ms": 80.9,
+      "indexDurationP95Ms": 80.9,
+      "detailRequests": 2,
+      "detailRequestsPerMin": 14.97,
+      "detailBodyBytes": 2530,
+      "sseBodyBytes": 929,
+      "allBodyBytes": 315905,
+      "requests": 14,
+      "serverCpuMs": 130,
+      "rendererTaskMs": 945,
+      "reactCommits": 22,
+      "reactCommitMsTotal": 63.5,
+      "reactCommitP50Ms": 0.6,
+      "reactCommitP95Ms": 6.7,
+      "main": "5/5"
+    },
+    "branch|closed|cold": {
+      "elapsedMs": 8032,
+      "indexRequests": 2,
+      "indexRequestsPerMin": 14.94,
+      "indexBodyBytes": 376060,
+      "indexDurationP50Ms": 48.1,
+      "indexDurationP95Ms": 48.1,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 79291,
+      "allBodyBytes": 3387747,
+      "requests": 60,
+      "serverCpuMs": 2120,
+      "rendererTaskMs": 1647,
+      "reactCommits": 34,
+      "reactCommitMsTotal": 423.1,
+      "reactCommitP50Ms": 5.3,
+      "reactCommitP95Ms": 58.4,
+      "main": "5/5"
+    },
+    "branch|closed|update": {
+      "elapsedMs": 3040,
+      "indexRequests": 0,
+      "indexRequestsPerMin": 0,
+      "indexBodyBytes": 0,
+      "indexDurationP50Ms": null,
+      "indexDurationP95Ms": null,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 453,
+      "allBodyBytes": 453,
+      "requests": 0,
+      "serverCpuMs": 20,
+      "rendererTaskMs": 260,
+      "reactCommits": 2,
+      "reactCommitMsTotal": 7.3,
+      "reactCommitP50Ms": 7.3,
+      "reactCommitP95Ms": 7.3,
+      "titleShownMs": null
+    },
+    "branch|closed|sustained": {
+      "elapsedMs": 60288,
+      "indexRequests": 2,
+      "indexRequestsPerMin": 1.99,
+      "indexBodyBytes": 406408,
+      "indexDurationP50Ms": 51.91,
+      "indexDurationP95Ms": 51.91,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 204314,
+      "allBodyBytes": 721681,
+      "requests": 66,
+      "serverCpuMs": 3210,
+      "rendererTaskMs": 26389,
+      "reactCommits": 719,
+      "reactCommitMsTotal": 15750.2,
+      "reactCommitP50Ms": 1.9,
+      "reactCommitP95Ms": 83.8,
+      "ticks": 299,
+      "probeP50Ms": 7.1,
+      "probeP95Ms": 206.8,
+      "probes": 58
+    },
+    "branch|closed|reconnect": {
+      "elapsedMs": 8008,
+      "indexRequests": 1,
+      "indexRequestsPerMin": 7.49,
+      "indexBodyBytes": 211544,
+      "indexDurationP50Ms": 35.91,
+      "indexDurationP95Ms": 35.91,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 929,
+      "allBodyBytes": 313189,
+      "requests": 8,
+      "serverCpuMs": 90,
+      "rendererTaskMs": 188,
+      "reactCommits": 12,
+      "reactCommitMsTotal": 90.1,
+      "reactCommitP50Ms": 2.3,
+      "reactCommitP95Ms": 60,
+      "main": "5/5"
+    },
+    "branch|all-tasks|cold": {
+      "elapsedMs": 8021,
+      "indexRequests": 2,
+      "indexRequestsPerMin": 14.96,
+      "indexBodyBytes": 189713,
+      "indexDurationP50Ms": 34.34,
+      "indexDurationP95Ms": 34.34,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 49127,
+      "allBodyBytes": 3225641,
+      "requests": 58,
+      "serverCpuMs": 1830,
+      "rendererTaskMs": 2345,
+      "reactCommits": 28,
+      "reactCommitMsTotal": 1023.9,
+      "reactCommitP50Ms": 4,
+      "reactCommitP95Ms": 118.8,
+      "main": "5/5"
+    },
+    "branch|all-tasks|update": {
+      "elapsedMs": 3025,
+      "indexRequests": 0,
+      "indexRequestsPerMin": 0,
+      "indexBodyBytes": 0,
+      "indexDurationP50Ms": null,
+      "indexDurationP95Ms": null,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 453,
+      "allBodyBytes": 453,
+      "requests": 0,
+      "serverCpuMs": 10,
+      "rendererTaskMs": 170,
+      "reactCommits": 2,
+      "reactCommitMsTotal": 84.3,
+      "reactCommitP50Ms": 84.3,
+      "reactCommitP95Ms": 84.3,
+      "titleShownMs": 157
+    },
+    "branch|all-tasks|sustained": {
+      "elapsedMs": 60236,
+      "indexRequests": 4,
+      "indexRequestsPerMin": 3.98,
+      "indexBodyBytes": 805912,
+      "indexDurationP50Ms": 23.38,
+      "indexDurationP95Ms": 47.49,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 203416,
+      "allBodyBytes": 1035484,
+      "requests": 62,
+      "serverCpuMs": 2840,
+      "rendererTaskMs": 21996,
+      "reactCommits": 898,
+      "reactCommitMsTotal": 13989.1,
+      "reactCommitP50Ms": 2.4,
+      "reactCommitP95Ms": 86.5,
+      "ticks": 299,
+      "probeP50Ms": 7.9,
+      "probeP95Ms": 98.5,
+      "probes": 58
+    },
+    "branch|all-tasks|reconnect": {
+      "elapsedMs": 8008,
+      "indexRequests": 2,
+      "indexRequestsPerMin": 14.99,
+      "indexBodyBytes": 423084,
+      "indexDurationP50Ms": 28.1,
+      "indexDurationP95Ms": 28.1,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 929,
+      "allBodyBytes": 524734,
+      "requests": 9,
+      "serverCpuMs": 80,
+      "rendererTaskMs": 599,
+      "reactCommits": 12,
+      "reactCommitMsTotal": 349.3,
+      "reactCommitP50Ms": 2.9,
+      "reactCommitP95Ms": 86.4,
+      "main": "5/5"
+    },
+    "branch|detail|cold": {
+      "elapsedMs": 8020,
+      "indexRequests": 3,
+      "indexRequestsPerMin": 22.42,
+      "indexBodyBytes": 570071,
+      "indexDurationP50Ms": 26.23,
+      "indexDurationP95Ms": 29.34,
+      "detailRequests": 2,
+      "detailRequestsPerMin": 14.95,
+      "detailBodyBytes": 2476,
+      "sseBodyBytes": 60965,
+      "allBodyBytes": 3921720,
+      "requests": 88,
+      "serverCpuMs": 1840,
+      "rendererTaskMs": 1640,
+      "reactCommits": 47,
+      "reactCommitMsTotal": 289.6,
+      "reactCommitP50Ms": 0.6,
+      "reactCommitP95Ms": 27.1,
+      "main": "5/5"
+    },
+    "branch|detail|update": {
+      "elapsedMs": 3043,
+      "indexRequests": 0,
+      "indexRequestsPerMin": 0,
+      "indexBodyBytes": 0,
+      "indexDurationP50Ms": null,
+      "indexDurationP95Ms": null,
+      "detailRequests": 0,
+      "detailRequestsPerMin": 0,
+      "detailBodyBytes": 0,
+      "sseBodyBytes": 453,
+      "allBodyBytes": 453,
+      "requests": 0,
+      "serverCpuMs": 20,
+      "rendererTaskMs": 258,
+      "reactCommits": 2,
+      "reactCommitMsTotal": 5.7,
+      "reactCommitP50Ms": 6.4,
+      "reactCommitP95Ms": 6.4,
+      "titleShownMs": null
+    },
+    "branch|detail|sustained": {
+      "elapsedMs": 60224,
+      "indexRequests": 1,
+      "indexRequestsPerMin": 1,
+      "indexBodyBytes": 202672,
+      "indexDurationP50Ms": 25.76,
+      "indexDurationP95Ms": 25.76,
+      "detailRequests": 75,
+      "detailRequestsPerMin": 74.72,
+      "detailBodyBytes": 94845,
+      "sseBodyBytes": 201983,
+      "allBodyBytes": 527435,
+      "requests": 211,
+      "serverCpuMs": 3870,
+      "rendererTaskMs": 12382,
+      "reactCommits": 1414,
+      "reactCommitMsTotal": 4335.2,
+      "reactCommitP50Ms": 0.4,
+      "reactCommitP95Ms": 9.7,
+      "ticks": 299,
+      "probeP50Ms": 9.9,
+      "probeP95Ms": 37.6,
+      "probes": 60
+    },
+    "branch|detail|reconnect": {
+      "elapsedMs": 8011,
+      "indexRequests": 1,
+      "indexRequestsPerMin": 7.49,
+      "indexBodyBytes": 211543,
+      "indexDurationP50Ms": 37.3,
+      "indexDurationP95Ms": 37.3,
+      "detailRequests": 2,
+      "detailRequestsPerMin": 14.98,
+      "detailBodyBytes": 2530,
+      "sseBodyBytes": 929,
+      "allBodyBytes": 315902,
+      "requests": 14,
+      "serverCpuMs": 90,
+      "rendererTaskMs": 725,
+      "reactCommits": 22,
+      "reactCommitMsTotal": 44.1,
+      "reactCommitP50Ms": 0.5,
+      "reactCommitP95Ms": 8.1,
+      "main": "5/5"
+    }
+  }
+}
