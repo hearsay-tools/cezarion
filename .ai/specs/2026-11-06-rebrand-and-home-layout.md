@@ -2,6 +2,14 @@
 
 Status: proposal, waiting for owner acceptance (2026-11-06).
 
+Owner decisions so far (2026-11-06):
+
+- Name: open. The owner's working name is **Squawk** (Hearsay bird; aviation transponder code;
+  "keep agents on the radar"; parrot logo with pilot goggles). See section 2.1.
+- Delivery: all phases ship together in one release. P0 is not released on its own.
+- Per-project dir: read both `.ai/cezar/` and the new dir; an opt-in `migrate-project` moves it.
+- Desktop and mobile bundle IDs: change them too (section 4.1).
+
 ## 1. Incident and root cause
 
 On 2026-11-06 between 10:55:53 and 10:59:15 Europe/Warsaw, a process wrote test fixtures
@@ -66,6 +74,31 @@ through the review gate. Its weakness: the word is rare, so people must learn th
 *Cezarion* is the lowest-cost option. The safety fix in sections 3 and 4 does not depend on
 the name: any name other than `cezar` moves the live install away from what upstream and old
 builds resolve.
+
+### 2.1 Squawk (owner's working name)
+
+Checks done 2026-11-06:
+
+| Surface | Result |
+| --- | --- |
+| CLI `squawk` | Taken in our field. `sbdchd/squawk` (Postgres migration linter, 1.2k stars, active today) installs a `squawk` binary through npm `squawk-cli`, pip and others. `Jack-Lin-DS-AI/squawk` (Claude Code monitor, Homebrew tap) also installs `squawk`. |
+| Same-name agent tools | `Jack-Lin-DS-AI/squawk` (Claude Code loop monitor), `goriparthi/squawk` (Claude Code approval dock), `studypilot/squawk` (review comments for agents, `squawk watch`), Sqwakie (multi-agent live view). All small. |
+| npm | unscoped `squawk` taken; `@hearsay-tools/squawk` available to us |
+| GitHub | `squawk` is a user account; `hearsay-tools/squawk` free |
+| Domains | `squawk.com/.dev/.sh/.ai/.io/.app` all registered; `hearsay.tools` is registered (ours, per the app IDs), so `squawk.hearsay.tools` works |
+| Short CLI | `sqk` and `sqwk` free in Homebrew and Debian |
+
+Rules if Squawk is chosen:
+
+- Brand "Hearsay Squawk"; package `@hearsay-tools/squawk`; repo `hearsay-tools/squawk`;
+  site `squawk.hearsay.tools`.
+- The binary must not be a bare `squawk`: a Postgres user would get one tool shadowing the
+  other on `PATH`. Use `hsquawk` or `sqk` (decision open).
+- The home dirs must not be a bare `squawk` either: another `squawk` could use
+  `~/.config/squawk`, which is the clobber class this spec removes. Use
+  `~/.config/hearsay-squawk` (and the same for state, data, cache, runtime).
+- Env prefix `SQUAWK_` is shared with nobody we found, but `HSQ_` or `HEARSAY_SQUAWK_` is
+  safer for the same reason. Proposed: `SQUAWK_`, because env vars reach only our children.
 
 ### What gets renamed (shown for Ostlery)
 
@@ -158,6 +191,18 @@ failure it re-enables the old unit and old site. Old unit files stay as `*.migra
 **Desktop installs**: the bundled server runs the same migration at boot. launchd labels move
 as in section 2.
 
+### 4.1 New bundle IDs
+
+A new identifier is a new app to the OS and the stores:
+
+- Desktop (Tauri): the last old-ID release updates itself one more time to a small bridge
+  build. The bridge installs the new-ID app, hands over the window state, and removes itself.
+  macOS asks again for permissions bound to the old ID (notifications, automation). Keychain
+  items stored under the old ID are copied by the bridge while it still has access.
+- Mobile: a new `applicationId` / bundle ID is a new store listing. The old app gets a final
+  release that tells the user to install the new one and opens its store page. Paired-device
+  data is re-paired, not copied.
+
 **Deprecation window**: two minor releases or 60 days, whichever is later. During it: old
 binaries, `CEZ_*` variables and `.ai/cezar` work with a notice. After it: aliases and env
 fallbacks go; a boot still logs any `CEZ_*` that is set, so nobody loses a setting silently.
@@ -183,5 +228,6 @@ zero accounts, the cockpit shows a banner with a one-click restore of the newest
 | **P4 Per-project dir** | per decision 3. | yes |
 | **P5 Window end** | remove aliases and fallbacks. | yes |
 
-P0 does not wait for the name. P1 can start at once and take the name as one constant.
+All phases ship in one release (owner decision). Phases stay separate PRs for review; they land on
+an integration branch `rebrand` and merge into `main` together, so no release carries half of it.
 Every phase updates `BACKWARD_COMPATIBILITY.md`, `.env.example` and the area docs it touches.
