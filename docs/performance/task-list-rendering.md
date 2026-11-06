@@ -254,7 +254,7 @@ Large-list A timings were measured at `5a32a5816`. Later commits remove work on
 those paths: unchanged observer callbacks bail out,
 focus no longer reruns route derivations, and owner lookup no longer mounts every
 row before virtualization. They also add row-size hints and bounded initialization.
-The A timings are not pre-rebase source numbers. The mount-count and small-list checks
+The A timings do not come from the later `6608d3696` recheck. The mount-count and small-list checks
 below were repeated at pre-rebase source `6608d3696`.
 
 Large global groups do less scroll work with virtualization. In paired runs on the
@@ -270,7 +270,7 @@ cost from virtualization.
 
 The recorded pre-rebase evidence supports acceptance criterion 6 through lower **scroll work** (global paired frame p95
 improves 5/5 at both viewports) and lower **update work** (the small global list
-renders/event falls 3.5 → 0.4 at pre-rebase source `6608d3696`). This is evidence at the measured sources, not a new measurement of the reviewed S5 source. It does not show a
+renders/event falls 3.5 → 0.4 at pre-rebase source `6608d3696`). This historical evidence is limited to those measured sources; the bounded S5-base check below separately measures the later bookkeeping. It does not show a
 universal timing improvement,
 an optimal crossover near 100 rows, or Phase 2's commit-time acceptance. Phase 2
 must compare global Tasks React commit time on main against `0320d57fb` under its
@@ -548,5 +548,63 @@ an absent run with repeated unrelated mutations and an empty-space press before
 a matching delayed mount. Delayed virtual controls still regain focus.
 
 This membership and anchor bookkeeping adds work on list updates and scrolling.
-The pre-rebase timing tables do not measure it. A separate final-head check follows;
-it is a bounded sanity check, not a replacement for the paired study above.
+The pre-rebase timing tables do not measure it. The final-head check below measures
+it as a bounded sanity check, not a replacement for the paired study above.
+
+
+### Final head check
+
+This bounded check measures the membership and cross-group anchor bookkeeping on
+S5-base source `806418730`. Part A uses pushed head `1f5656a5f`; part B uses
+`95311b186`, whose only later change reacquires a remounted benchmark control.
+Product rendering is identical. Both use global summary at 1440×900, 20 events/s
+for three seconds, five repeats, then the same scroll pass and Expand/search
+interactions. This does not exercise S5's separate index workload.
+
+Part A retains the C seed: ten projects with five active rows each. Values are
+medians of per-run measurements, with run ranges in parentheses.
+
+| Small global list | Rows rendered/event | Commit p50 ms | Commit p95 ms | Load average (1 min) |
+| --- | ---: | ---: | ---: | ---: |
+| pre-rebase `6608d3696` | 0.390 (0.356–0.424) | 0.1 (0.1–0.1) | 16.7 (12.1–26.9) | 13.39–14.07 |
+| final head check | 0.397 (0.305–0.492) | 0.1 (0–6.9) | 12.7 (10.8–44.3) | 14.99–16.30 |
+
+The rows/event median remains inside the earlier run spread; commit p95's median
+falls. One final-head run reaches **44.3 ms**, above the earlier 26.9 ms maximum.
+The broader spread and differing load prevent a timing guarantee.
+[Five small-list raw cases](task-list-rendering/s3b/head-small/index.json).
+
+Part B uses 300 active rows across ten projects, so the Working group is in the
+virtual tier. Each repeat interleaves forced flat and virtual in the same build;
+the order alternates. The paired differences below are virtual minus flat, with
+medians and ranges across the five pairs. Rows/event counts sum rendered rows
+across commits and divide by published events, including events for unmounted rows.
+
+| Virtual-tier check | Rows rendered/event | Commit p95 ms | Scroll frame p95 ms | Load average (1 min) |
+| --- | ---: | ---: | ---: | ---: |
+| forced flat | 0.322 (0.175–0.377) | 27.1 (21.9–94.9) | 33.4 (33.4–50.1) | 14.96–17.71 |
+| forced virtual | 0.034 (0.017–0.068) | 22.3 (14.4–35.9) | 33.4 (33.4–49.9) | 14.40–17.09 |
+| paired difference | −0.288 (−0.360 to −0.142) | −12.7 (−67.2 to +14.0) | 0.0 (−0.2 to +16.5) | same-build pairs |
+
+Rendered rows/event falls in all five pairs; commit p95 falls in four of five.
+**This final-head check shows no scroll frame p95 speedup.** The earlier large-list
+paired study improved global frame p95 in five of five pairs at both widths;
+that historical result and this smaller check use different list sizes and loads.
+Neither result establishes a universal timing improvement.
+[Ten paired raw cases](task-list-rendering/s3b/head-pairs-final/index.json).
+
+The first final-head paired attempt stopped after five cases because the helper
+held a detached overscan control. A diagnostic found the same logical run remounted
+after about 152 ms. The helper now reacquires only the same task key, control tag
+and accessible label, then requires query idle, loaded fonts and 200 ms of stable,
+hit-tested geometry. Expand and search remain included; the completed ten pairs
+use this identical helper on both sides. Incomplete attempts do not enter tables.
+
+**Limitations:** instant jumps larger than the overscan (scrollIntoView,
+PageUp/PageDown, scrollbar drags) can show one blank frame. The diagnostic measured
+1 of 96 frames with a 336.5 px uncovered list gap for a 26.5 ms sampling interval
+after an instant 479 px jump at 1440×900. The Working start margin remained 491.5 px,
+no anchor correction was pending, and no focus/startup pins were active. A second
+180-frame reproduction had no uncovered frame. Flat mode never has this
+virtualization gap; both sampled flat controls stayed covered. This is a jump
+limitation, separate from the retained anchor during content updates.

@@ -1,0 +1,57 @@
+{
+  "revision": "1f5656a5fe7886d8781a51712e930af55ad81c4c",
+  "productionProfilingBuild": true,
+  "workloadSha256": "8fc91b89ec650197e7c44fa7eeb7b3f1c6154c93b18699399ae49fe726781c62",
+  "builtContentSha256": "4a3a2d30bf2e65539324e5ce1ea23e6afd0755526fedf69be6f6a808d1efe5f7",
+  "sourceDirty": false,
+  "quick": false,
+  "host": {
+    "cpu": "AMD Ryzen 9 5950X 16-Core Processor",
+    "affinity": "23"
+  },
+  "pendingCase": null,
+  "lastClick": {
+    "expected": "document.querySelector('input[aria-label=\"Search tasks\"],input[placeholder*=\"Search\"]')",
+    "point": {
+      "x": 770.140625,
+      "y": 274.5
+    }
+  },
+  "fixtureExits": [
+    {
+      "scope": "global",
+      "pid": 1227695,
+      "spawnfile": "/home/agent/.nvm/versions/node/v24.22.1/bin/node",
+      "spawnargs": [
+        "/home/agent/.nvm/versions/node/v24.22.1/bin/node",
+        "/home/agent/projects/cezar/.ai/cezar/worktrees/be11c106-852d-4943-811c-057c0ba1248d/packages/web/scripts/tab-fixture-server.mjs",
+        "/tmp/cez-tabs-AzZ7TG",
+        "/home/agent/projects/cezar/.ai/cezar/worktrees/be11c106-852d-4943-811c-057c0ba1248d/packages/cezar",
+        "none",
+        "global",
+        "{\"active\":5,\"archived\":5,\"projects\":10}"
+      ],
+      "elapsedMs": 34123,
+      "exitCode": 0,
+      "signalCode": null,
+      "lifecycle": [
+        {
+          "kind": "exit",
+          "elapsedMs": 34123,
+          "detail": "code=0 signal=null"
+        }
+      ],
+      "stdout": "",
+      "stderr": "",
+      "stdoutDropped": 0,
+      "stderrDropped": 0
+    }
+  ],
+  "caseFiles": [
+    "global-1440-summary-active-flat-r1.json",
+    "global-1440-summary-active-flat-r2.json",
+    "global-1440-summary-active-flat-r3.json",
+    "global-1440-summary-active-flat-r4.json",
+    "global-1440-summary-active-flat-r5.json"
+  ]
+}
