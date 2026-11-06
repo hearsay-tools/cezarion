@@ -62,7 +62,9 @@ release condition passes, even if there is no patch overlap.
    rename-related paths from the original patch too. If trial rebasing changes
    scope or loses intended work, return to the worker for repair.
 5. Compare every candidate pair in the relevant outstanding set. For a hunk
-   `@@ -s,n +... @@`, `n > 0` consumes base lines `[s, s+n-1]`; `n = 0` inserts
+   `@@ -s,n +... @@`, an omitted count means `1` on either side: for example,
+   `@@ -10 +10 @@` consumes one base line and adds one line. Explicit counts
+   keep their value. `n > 0` consumes base lines `[s, s+n-1]`; `n = 0` inserts
    at the gap after base line `s` (0 is before the first line). Consumed intervals
    intersecting each other conflict. Equal insertion anchors conflict. An anchor
    in `[s-1, s+n-1]` conflicts with that consumed interval, including both edit
