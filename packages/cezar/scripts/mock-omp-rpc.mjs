@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 import { loadControls } from './mock-controls.mjs';
-import { stall, waitForRelease } from './mock-lifecycle.mjs';
+import { scenarioFor, play } from './mock-scenario.mjs';
 import readline from 'node:readline';
-import { appendFileSync, closeSync, existsSync } from 'node:fs';
+import { appendFileSync, closeSync } from 'node:fs';
 import { rawMessage, stripCommandMessage } from './mock-session-context.mjs';
 const { failureControl, delivery } = await loadControls({ delivery: ['reject', 'hold-ack', 'hold-response'] });
 // Offline OMP (Oh My Pi) `--mode rpc` mock in OMP's own wire shape (v18.4.11, #595): the `ready`
 // frame, id-echoed responses, `prompt_result`, `session_settled`. Startup argv and model errors
 // are copied from the real binary (2026-10-05).
-const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
+const { answerNudge } = await import('./mock-nudge.mjs');
 
 const argv = process.argv.slice(2);
 if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(argv)}\n`);
@@ -118,25 +118,21 @@ write({ type: 'extension_ui_request', id: 'mock-widget-1', method: 'setWidget', 
 write({ type: 'advisor_cost_changed' });
 write({ type: 'available_commands_update', commands: [{ name: 'model', description: 'Select model' }] });
 
-/** The card `mock:cezar-ask` sends (spec #473), as mock-pi-rpc.mjs `ASK_QUESTIONS`. */
-const ASK_QUESTIONS = [{ header: 'Library', question: 'Which test library?', multiSelect: false, options: [{ label: 'Vitest', description: 'Use the existing test runner' }, { label: 'Node test', description: 'Use node:test' }] }];
-// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that cezar tool through
-// the session's --extension before its turn ends. Returns '' or a note for the text.
+// Lifecycle calls use OMP's own extension configuration.
 const ciTool = () => import('./mock-ci-tool.mjs');
 const lifecycle = async (call) => (await ciTool()).lifecycleCall('omp', argv, ...call);
-const done = async (text) => text + await lifecycle((await ciTool()).DONE);
+const scenarioContext = {
+  runner: 'omp', lifecycle, session: {}, nativeFailureControl: Boolean(failureControl),
+  toolPrompt: async prompt => (await ciTool()).toolPrompt('omp', argv, prompt),
+  ciPrompt: async prompt => (await ciTool()).ciPrompt('omp', argv, prompt),
+  async crash(prompt) {
+    const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+    crashWithStderr(prompt, '{"type":"tool_execution_update","toolCallId":"truncated');
+  },
+};
+const deferredStart = message => scenarioFor(message, scenarioContext)?.name === 'deferred-turn-start';
 // OMP's tool-approval error with no interactive UI (v18.4.11 tool wrapper, `runner.hasUI()` false).
 const NO_UI_APPROVAL_ERROR = 'Tool "bash" requires approval but no interactive UI available.\nOptions:\n  1. Set tools.approvalMode: yolo in /settings\n  2. Add tools.approval.bash: allow to config\n  3. Use an interactive UI to approve the tool call';
-/** Set by `mock:cezar-ask mock:resume-cezar-done`: the human answer then calls cezar_done. */
-let resumeAfterAsk = false;
-
-/** #401: hold late wire frames until the test has observed the park (as the codex mock). */
-async function afterParityPark(message) {
-  const gate = /parity-release=([^\s"\\]+)/.exec(message)?.[1];
-  if (!gate) throw new Error('post-park scenario requires a release path');
-  while (!existsSync(gate)) await sleep(10);
-}
-
 /** The turn in flight: steers admitted into it are read before it ends (#505). */
 let activeTurn = null;
 let messageSeq = 0;
@@ -235,7 +231,7 @@ rl.on('line', (line) => {
   // hearsay-tools/cezarion#1112: a late-ack steer is admitted after the turn's last model call.
   // OMP acknowledges it now and, never settling with a queued message, reads it in a further
   // run before `session_settled` (the endTurn `late` path).
-  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && command.message.includes('mock:deferred-turn-start:late-ack')) {
+  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && deferredStart(command.message) && command.message.includes(':late-ack')) {
     const admit = () => {
       if (!activeTurn) { setTimeout(admit, 5); return; }
       record({ userText: rawMessage(command), imageCount: (command.images ?? []).length, streamingBehavior: 'steer' });
@@ -249,7 +245,7 @@ rl.on('line', (line) => {
   // hearsay-tools/cezarion#1112: a deferred-start steer is not admitted into the running turn;
   // OMP acknowledges it as its next prompt once that turn settles, with no turn open.
   if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn &&
-    !command.message.includes('mock:deferred-turn-start')) {
+    !deferredStart(command.message)) {
     record({ userText: rawMessage(command), imageCount: (command.images ?? []).length, streamingBehavior: 'steer' });
     // Steers OMP never hands to the running agent: none of them may end its turn.
     if (command.message.includes('mock:steer-rejected')) {
@@ -350,114 +346,6 @@ function respondPromptRejected(command, message, ack) {
   fail(command, 'input hook rejected the prompt');
 }
 
-async function respondMultiPrRefs(command, message, gated) {
-  const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
-  assistantThinking(unrelatedPr);
-  subagentText('multi-child', unrelatedPr);
-  write({ type: 'tool_execution_start', toolCallId: 'multi-read', toolName: 'read', args: { path: 'other.txt' } });
-  write({ type: 'tool_execution_end', toolCallId: 'multi-read', toolName: 'read', result: { content: [{ type: 'text', text: unrelatedPr }] }, isError: false });
-  const text = await multiPrText(message, lifecycle);
-  assistantText([text.slice(0, 5), text.slice(5)]);
-  endTurn(); return;
-}
-
-async function respondTurnMessages(command, message, gated) {
-  const { turnMessages } = await import('./mock-turn-messages.mjs');
-  // Separate assistant messages within one native OMP turn; settle only after all of them.
-  for (const text of turnMessages(message)) assistantText([text]);
-  endTurn();
-  return;
-}
-
-function respondAgentEcho(command, message, gated) {
-  assistantText([message]);
-  endTurn();
-  return;
-}
-
-async function respondAutonomous(command, message, gated) {
-  const { autonomousReply } = await import('./mock-autonomous.mjs');
-  assistantText([await autonomousReply(message, lifecycle)]);
-  endTurn();
-  return;
-}
-
-async function respondFinalNudge(silent) {
-  const kind = silent.finalMessageNudgeKind();
-  if (kind === 'silent') assistantThinking(silent.SILENT_TAIL_REASONING);
-  else if (kind === 'slow-done') {
-    assistantText([silent.SLOW_DONE_PREFIX]);
-    await silent.sleep(silent.SLOW_DONE_TAIL_MS);
-    assistantText([await silent.finalNudgeText('done', lifecycle)]);
-  } else assistantText([await silent.finalNudgeText(kind, lifecycle)]);
-  endTurn();
-  return;
-}
-
-async function respondSilentTail(command, message, gated) {
-  const silent = await import('./mock-silent-tail.mjs');
-  silent.noteSilentTailPrompt(message);
-  if (silent.isFinalMessageNudge(message)) {
-    return respondFinalNudge(silent);
-  }
-  if (silent.isSilentTailScenario(message)) {
-    assistantText([silent.SILENT_TAIL_OPENING]);
-    write({ type: 'tool_execution_start', toolCallId: 'tool-silent-gh', toolName: 'bash', args: { command: 'gh issue create' } });
-    write({ type: 'tool_execution_end', toolCallId: 'tool-silent-gh', toolName: 'bash', result: { content: [{ type: 'text', text: 'created' }] }, isError: false });
-    assistantThinking(silent.SILENT_TAIL_REASONING);
-    endTurn();
-    return;
-  }
-  if (silent.isToolTailScenario(message)) {
-    assistantText([silent.TOOL_TAIL_OPENING]);
-    write({ type: 'tool_execution_start', toolCallId: 'tool-tail-git', toolName: 'bash', args: { command: 'git status --short' } });
-    write({ type: 'tool_execution_end', toolCallId: 'tool-tail-git', toolName: 'bash', result: { content: [{ type: 'text', text: ' M src/example.ts' }] }, isError: false });
-    endTurn();
-    return;
-  }
-  return false;
-}
-
-async function respondProgress(command, message, gated) {
-  if (message.includes('mock:no-progress')) {
-    // The turn never progresses and never settles.
-    if (!gated) stall(message, { closeInput: () => closeSync(0) });
-    return;
-  }
-  for (let i = 0; i < 24; i++) {
-    write({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', args: { command: 'build' }, partialResult: { content: [{ type: 'text', text: 'working' }] } });
-    await sleep(100);
-  }
-  assistantText([await done('busy progress finished')]);
-  endTurn();
-  return;
-}
-
-async function respondAsk(command, message, gated) {
-  resumeAfterAsk = message.includes('mock:resume-cezar-done');
-  // OMP's `ask` tool needs an interactive UI, so cezar_ask is the ask path (as Pi's).
-  assistantText(['Pick one.' + await lifecycle((await ciTool()).ask(ASK_QUESTIONS))]);
-  endTurn();
-  return;
-}
-
-async function respondSubagentAfterPark(command, message, gated) {
-  // A `task` call whose sub-agent is still reporting after the parent parked on cezar_wait.
-  write({ type: 'tool_execution_start', toolCallId: 'toolu_park_task', toolName: 'task', args: { agent: 'explore', task: 'Review the change' } });
-  write({ type: 'subagent_lifecycle', payload: { id: 'ParkReviewer', agent: 'explore', status: 'started', parentToolCallId: 'toolu_park_task', index: 0 } });
-  subagentText('ParkReviewer', 'Child review started.');
-  write({ type: 'tool_execution_end', toolCallId: 'toolu_park_task', toolName: 'task', result: { content: [{ type: 'text', text: 'ParkReviewer: running' }] }, isError: false });
-  assistantText(['Watching the child.' + await lifecycle((await ciTool()).wait())]);
-  endTurn();
-  await afterParityPark(message);
-  write({ type: 'subagent_event', payload: { id: 'ParkReviewer', event: { type: 'tool_execution_start', toolCallId: 'toolu_park_read', toolName: 'read', args: { path: 'README.md' } } } });
-  write({ type: 'subagent_event', payload: { id: 'ParkReviewer', event: { type: 'tool_execution_end', toolCallId: 'toolu_park_read', toolName: 'read', result: { content: [{ type: 'text', text: 'mock file' }] } } } });
-  subagentText('ParkReviewer', 'Post-park child update processed.');
-  write({ type: 'subagent_event', payload: { id: 'ParkReviewer', event: { type: 'agent_end', messages: [], isTerminal: true, yielded: true } } });
-  write({ type: 'subagent_lifecycle', payload: { id: 'ParkReviewer', agent: 'explore', status: 'completed', parentToolCallId: 'toolu_park_task', index: 0 } });
-  return;
-}
-
 async function respondSubagent(command, message, gated) {
   // #5/#600: the sub-agent's own terminal agent_end, nested under the parent's `task` call
   // (rpc-subagents.ndjson), must not end the parent turn; #149: its text stays nested.
@@ -488,91 +376,17 @@ function respondApprovalDenied(command, message, gated) {
   return;
 }
 
-async function respondSteerLate(command, message, gated) {
-  // The final text first; a steer admitted now arrives after the last model call (#505).
-  assistantText(['late window: final message already sent']);
-  activeTurn.late = true;
-  await sleep(300);
-  endTurn();
-  return;
-}
-
-async function respondHoldDone(command, message, gated) {
-  await waitForRelease(400);
-  assistantText([await done('parity hold-done: content after the pause')]);
-  endTurn();
-  return;
-}
-
-async function respondHoldAsk(command, message, gated) {
-  await waitForRelease(400);
-  assistantText(['Pick one.' + await lifecycle((await ciTool()).ask())]);
-  endTurn();
-  return;
-}
-
-async function respondDone(command, message, gated) {
-  resumeAfterAsk = false;
-  assistantText([await done('parity done: the task is complete')]);
-  endTurn();
-  return;
-}
-
-async function respondCezarTool(command, message, gated) {
-  const { toolPrompt } = await import('./mock-ci-tool.mjs');
-  assistantText([await toolPrompt('omp', argv, message)]);
-  endTurn();
-  return;
-}
-
-async function respondCiWait(command, message, gated) {
-  const { ciPrompt } = await import('./mock-ci-tool.mjs');
-  assistantText([await ciPrompt('omp', argv, message)]);
-  endTurn();
-  return;
-}
-
-async function respondSteerTool(command, message, gated) {
-  write({ type: 'tool_execution_start', toolCallId: 'tool-steer', toolName: 'bash', args: { command: 'wait' } });
-  await sleep(Number(process.env.CEZ_MOCK_STEER_MS ?? 600));
-  write({ type: 'tool_execution_end', toolCallId: 'tool-steer', toolName: 'bash', result: { content: [{ type: 'text', text: 'waited' }] }, isError: false });
-  assistantText(['steer tool done']);
-  endTurn();
-  return;
-}
-
 function respondNoSettle(command, message) {
   // The stream ends mid-turn after a failed attempt: no agent_end, no settle.
   assistantText([], { stopReason: 'error', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } }, extra: { errorMessage: 'Overloaded' } });
   process.exit(0);
 }
 
-async function respondHoldGated(command, message) {
-  await waitForRelease(250);
-  assistantText(['parity hold-gated: content after the pause']);
-  await sleep(250);
-  endTurn();
-  return;
-}
-
-async function respondHold(command, message) {
-  // Content and the settle both trail the prompt ack, so a turn-end derived from the ack
-  // (or a short deadline) is caught before any content arrives.
-  await sleep(250);
-  assistantText(['parity hold: content after the pause']);
-  await sleep(250);
-  endTurn();
-  return;
-}
-
 async function respondDefault(command, message) {
-  const waiting = message.includes('mock:cezar-wait');
-  assistantText([`Investigating: `, message, ...(waiting ? [await lifecycle((await ciTool()).wait())] : [])]);
+  assistantText([`Investigating: `, message]);
   write({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'read', args: { path: 'README.md' } });
   write({ type: 'tool_execution_end', toolCallId: 'tool-1', toolName: 'read', result: { content: [{ type: 'text', text: 'mock file' }] }, isError: false });
-  if (!waiting) {
     assistantText(['Done with the first pass.'], { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } } });
-  }
   endTurn();
   if (message.includes('mock:wake-after-settle')) {
     // OMP resumes on its own after settling (async work finished): a new agent run, no prompt.
@@ -594,33 +408,68 @@ const localPromptScenarios = [
   { matches: message => message.includes('mock:prompt-rejected'), respond: respondPromptRejected },
 ];
 
-// The first handled scenario wins; silent-tail can fall through after its import.
+// Native OMP scenarios still run before its provider failure control.
 const promptScenarios = [
-  { matches: message => message.includes('mock:multi-pr-refs'), respond: respondMultiPrRefs },
-  { matches: message => message.includes('mock:turn-messages:'), respond: respondTurnMessages },
-  { matches: message => message.includes('mock:agent-echo'), respond: respondAgentEcho },
-  { matches: message => message.includes('mock:autonomous') || message.startsWith('Continue working autonomously until the task is fully complete.'), respond: respondAutonomous },
-  { matches: message => message.includes('mock:silent-tail') || message.includes('mock:tool-tail') || silentNudge(message), respond: respondSilentTail },
-  { matches: message => /mock:(no-progress|busy-progress)/.test(message), respond: respondProgress },
-  { matches: message => message.includes('mock:cezar-ask'), respond: respondAsk },
-  { matches: message => message.includes('mock:subagent-after-park'), respond: respondSubagentAfterPark },
   { matches: message => message.includes('mock:subagent'), respond: respondSubagent },
   { matches: message => message.includes('mock:approval-denied'), respond: respondApprovalDenied },
-  { matches: message => message.includes('mock:steer-late'), respond: respondSteerLate },
-  { matches: message => message.includes('mock:hold-cezar-done'), respond: respondHoldDone },
-  { matches: message => message.includes('mock:hold-cezar-ask'), respond: respondHoldAsk },
-  { matches: message => message.includes('mock:cezar-done') || (resumeAfterAsk && message.trim() === 'Library: Vitest'), respond: respondDone },
-  { matches: message => message.includes('mock:cezar-tool'), respond: respondCezarTool },
-  { matches: message => message.includes('mock:ci-wait'), respond: respondCiWait },
-  { matches: message => message.includes('mock:steer-tool'), respond: respondSteerTool },
 ];
 
-// Failure controls run before these trailing scenarios, even for an ordinary prompt.
-const tailPromptScenarios = [
-  { matches: message => message.includes('mock:no-settle'), respond: respondNoSettle },
-  { matches: message => message.includes('mock:hold-gated'), respond: respondHoldGated },
-  { matches: message => message.includes('mock:hold'), respond: respondHold },
-];
+// Preserve OMP's pre-failure placement for scenarios that other mocks run later.
+const beforeNativeFailure = new Set(['busy-progress', 'no-progress', 'cezar-ask',
+  'subagent-after-park', 'steer-late', 'hold-cezar-done', 'hold-cezar-ask', 'cezar-done']);
+
+function providerError() {
+  const error = { message: 'Not Found', provider: 'anthropic', model: 'claude-mock', retryable: false };
+  assistantText([], { stopReason: 'error', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } }, extra: { errorMessage: 'Not Found' } });
+  endTurn({ status: 'error', error });
+}
+
+function toolFrame(kind, call, child = false) {
+  if (kind === 'start') return { type: 'tool_execution_start', toolCallId: call.id, toolName: call.name, args: call.input };
+  return { type: 'tool_execution_end', toolCallId: call.id, toolName: call.name,
+    result: { content: [{ type: 'text', text: call.output }] }, ...(!child ? { isError: call.isError } : {}) };
+}
+
+function scenarioChild(step, playChild) {
+  const event = inner => write({ type: 'subagent_event', payload: { id: step.id, event: inner } });
+  const lifecycle = status => write({ type: 'subagent_lifecycle', payload: { id: step.id, agent: 'explore', status, parentToolCallId: 'toolu_park_task', index: 0 } });
+  if (step.phase === 'start') lifecycle('started');
+  const result = playChild({
+    ...scenarioEncoder(),
+    text: ({ parts }) => subagentText(step.id, parts.join('')),
+    toolStart: ({ call }) => event(toolFrame('start', call, true)),
+    toolEnd: ({ call }) => event(toolFrame('end', call, true)),
+  });
+  const finish = () => {
+    if (step.phase !== 'end') return;
+    event({ type: 'agent_end', messages: [], isTerminal: true, yielded: true });
+    lifecycle('completed');
+  };
+  if (result instanceof Promise) return result.then(finish);
+  finish();
+}
+
+/** OMP owns acknowledgement, usage, message ids and admitted-steer replay. */
+function scenarioEncoder(command, ack, state = { acknowledged: false, opened: false }) {
+  return {
+    closeInput: () => closeSync(0),
+    open(step) {
+      if (!state.acknowledged && !step.acknowledged) { ack(); state.acknowledged = true; }
+      if (step.ackOnly || state.opened) return;
+      beginTurn(command);
+      state.opened = true;
+      return delivery?.holdResponse(command.message);
+    },
+    text: ({ parts }) => assistantText(parts),
+    reasoning: ({ text }) => assistantThinking(text),
+    toolStart: ({ call }) => write(toolFrame('start', call)),
+    toolEnd: ({ call }) => write(toolFrame('end', call)),
+    child: scenarioChild,
+    progress: () => write({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', args: { command: 'build' }, partialResult: { content: [{ type: 'text', text: 'working' }] } }),
+    readSteers(step) { if (step.late) activeTurn.late = true; },
+    end(step) { if (step.error === 'provider') providerError(); else endTurn(); },
+  };
+}
 
 async function prompt(command, sent = command.message) {
   const message = command.message;
@@ -629,13 +478,6 @@ async function prompt(command, sent = command.message) {
   // Every successful admission acknowledges through here, so a configured hold-ack holds it
   // whichever scenario branch answers the prompt.
   const ack = (extra) => { if (delivery) delivery.ack(sent, () => respond(command, extra)); else respond(command, extra); };
-  // `mock:ack-only` → the prompt is accepted and no agent run starts (hearsay-tools/cezarion#1301).
-  if (message.includes('mock:ack-only')) { ack(); return; }
-  const gated = message.includes('mock:gate-prompt-ack');
-  if (gated) {
-    stall(message, { closeInput: () => closeSync(0) });
-    while (!existsSync('input-ack.release')) await sleep(10);
-  }
   const local = localPromptScenarios.find(scenario => scenario.matches(message));
   if (local) { local.respond(command, message, ack); return; }
 
@@ -654,57 +496,27 @@ async function prompt(command, sent = command.message) {
     return;
   }
 
-  if (message.includes('mock:crash-stderr')) {
-    // Every crash scenario dies before the prompt's ack (as the Pi mock), after a malformed frame.
-    const { crashWithStderr } = await import('./mock-runner-crash.mjs');
-    if (crashWithStderr(message, '{"type":"tool_execution_update","toolCallId":"truncated')) return;
+  const state = { acknowledged: false, opened: false };
+  const encoder = scenarioEncoder(command, ack, state);
+  const early = scenarioFor(message, scenarioContext);
+  if (early?.early && await play(early, encoder) !== 'continue') return;
+  const scenario = scenarioFor(message, { ...scenarioContext, unsupported: early?.early ? [early.name] : [] });
+  if (scenario && (scenario.beforeFailure || beforeNativeFailure.has(scenario.name))) return play(scenario, encoder);
+  // A shared script owns delayed opening; native fallback opens immediately.
+  if (!scenario || scenario.name === 'provider-error') {
+    const opening = encoder.open({});
+    if (opening instanceof Promise) await opening;
   }
-
-  return startPromptTurn(command, message, ack, gated);
-}
-
-async function startPromptTurn(command, message, ack, gated) {
-  if (message.includes('mock:silent-tail') || silentNudge(message)) {
-    const silentEarly = await import('./mock-silent-tail.mjs');
-    silentEarly.noteSilentTailPrompt(message);
-    if (silentEarly.isAckOnlyNudge(message)) { ack(); return; }
-    if (silentEarly.isLateNudge(message)) {
-      ack();
-      await waitForRelease(silentEarly.LATE_REPLY_MS);
-      beginTurn(command);
-    } else {
-      ack();
-      beginTurn(command);
-    }
-  } else if (message.includes('mock:deferred-turn-start')) {
-    // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late.
-    ack();
-    await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
-    beginTurn(command);
-  } else {
-    ack();
-    beginTurn(command);
-  }
-  if (delivery) await delivery.holdResponse(message);
-  return respondPromptTurn(command, message, gated);
-}
-
-async function respondPromptTurn(command, message, gated) {
-  for (const scenario of promptScenarios) {
-    if (!scenario.matches(message)) continue;
-    const result = scenario.respond(command, message, gated);
-    const handled = result instanceof Promise ? await result : result;
-    if (handled !== false) return;
-  }
+  const native = promptScenarios.find(scenario => scenario.matches(message));
+  if (native) return native.respond(command, message);
   const selectedFailure = failureControl?.failureFor(message);
   const nativeFailure = selectedFailure instanceof Promise ? await selectedFailure : selectedFailure;
-  if (failureControl ? nativeFailure === 'provider' : message.includes('mock:provider-error')) {
-    const error = { message: 'Not Found', provider: 'anthropic', model: 'claude-mock', retryable: false };
-    assistantText([], { stopReason: 'error', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } }, extra: { errorMessage: 'Not Found' } });
-    endTurn({ status: 'error', error });
-    return;
+  if (nativeFailure === 'provider') {
+    const opening = encoder.open({});
+    if (opening instanceof Promise) await opening;
+    return providerError();
   }
-  const tail = tailPromptScenarios.find(scenario => scenario.matches(message));
-  if (tail) return tail.respond(command, message);
+  if (message.includes('mock:no-settle')) return respondNoSettle(command, message);
+  if (scenario) return play(scenario, encoder);
   return respondDefault(command, message);
 }
