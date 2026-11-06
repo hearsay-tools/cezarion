@@ -39,7 +39,6 @@ async function heldParent() {
 
 /** The delegation service the peers send through, and a credential per run. */
 function conversations() {
-  process.env.CEZ_DELEGATION = '1';
   const service = new DelegationService();
   const detach = service.registerProject({ id: 'project', root, store, manager });
   const credentials = new CredentialRegistry();
@@ -105,6 +104,18 @@ describe('peer waits (R9)', { timeout: 45_000 }, () => {
     expect(store.readEvents(a).some(event => event.type === 'lifecycle' && String(event.message).includes('inactivity'))).toBe(true);
     expect(entryOf(a, entry.id)).toMatchObject({ phase: WAIT_PHASE.open });
     expect(deriveAttention(run)).toMatchObject({ rung: 'waiting-on-workers', bucket: 'none', label: 'waiting on 1 task' });
+  });
+
+  // hearsay-tools/cezarion#2784: a new peer wait is peer messaging, so the task's switch gates it.
+  it('refuses a new peer wait while the task has messaging off', async () => {
+    const { run, release } = await heldParent();
+    const b = peer();
+    store.updateRun(run.id, { allowMessaging: false });
+    const registered = await handlers(run.id).registerWait({ kind: WAIT_KIND.peer, peer_ids: [b], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
+    expect(registered.answer).toMatchObject({ ok: false });
+    expect(JSON.stringify(registered.answer)).toContain('Task messaging is off for this task');
+    expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+    release();
   });
 
   it('a named peer\'s message resolves the wait as message and wakes the run with it', async () => {

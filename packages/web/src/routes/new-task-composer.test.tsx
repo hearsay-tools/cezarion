@@ -57,6 +57,31 @@ describe('the hero surface', () => {
     expect(postedBody()).toMatchObject({ archiveWhenDone: true, autoMergePr: true })
   })
 
+  it('defaults task access on and sends an explicit off on create (hearsay-tools/cezarion#2784)', async () => {
+    serve()
+    renderNewTask()
+    await pillReady()
+    const execution = document.querySelector('[data-slot="execution-options"]')!
+    const group = screen.getByRole('group', { name: 'Task access' })
+    expect(execution.contains(group)).toBe(true)
+    const workers = screen.getByRole('switch', { name: 'Allow cezar workers' })
+    const messaging = screen.getByRole('switch', { name: 'Allow task messaging' })
+    expect(workers.getAttribute('aria-checked')).toBe('true')
+    expect(messaging.getAttribute('aria-checked')).toBe('true')
+    expect(document.getElementById(workers.getAttribute('aria-describedby')!)?.textContent).toBe(
+      'Agents in this task can start Cezar workers. Each worker is a separate paid agent session. Worker limits cap resources, not spending.',
+    )
+    expect(document.getElementById(messaging.getAttribute('aria-describedby')!)?.textContent).toBe(
+      'Agents in this task can message other tasks in this project.',
+    )
+    fireEvent.click(workers)
+    expect(workers.getAttribute('aria-checked')).toBe('false')
+    fireEvent.change(textarea(), { target: { value: 'Ship it' } })
+    await startTask()
+    expect(postedBody()).toMatchObject({ allowWorkers: false })
+    expect(postedBody()).not.toHaveProperty('allowMessaging')
+  })
+
   it('describes the selected working directory directly under Worktree', async () => {
     serve()
     renderNewTask()
@@ -317,7 +342,7 @@ describe('picker data flows', () => {
   it('drops a persisted model preset that belongs to another runner', async () => {
     writeDraft({
       text: '', source: null, runner: 'codex', agentProfile: null, model: 'claude-opus-4-8', effort: null, retiredVariants: false,
-      planFirst: false, worktree: null, autonomous: null, archiveWhenDone: false, autoMergePr: false,
+      planFirst: false, worktree: null, autonomous: null, archiveWhenDone: false, autoMergePr: false, allowWorkers: true, allowMessaging: true,
     })
     serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
     renderNewTask()

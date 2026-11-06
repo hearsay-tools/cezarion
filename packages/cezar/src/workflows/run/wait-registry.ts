@@ -2,7 +2,7 @@ import { registrationIdentity, registrationReceipt, replayRegistration, repeatRe
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { requestWaitRequestSchema, type RequestWaitRequest } from '@open-mercato/cezar-contract/conversations';
 import { hasWorkerDeadline, workerWaitEntryToLegacy } from '@open-mercato/cezar-contract/waits';
-import { DelegationPolicyError } from '../../delegation/policy.ts';
+import { DelegationPolicyError, requireMessagingAllowed } from '../../delegation/policy.ts';
 import { historyDeletionPending, rootFinishRequested, executionBlockedByRootFinish, familyOf } from './run-guards.ts';
 import { assertOwnedWorkerWaitScope, assertRequestWaitScope, peerWaitEntry, peerWaitOf, peerWaitResult, workerWaitTarget } from '../wait-scope.ts';
 import { identicalWorkerWait } from '../waits.ts';
@@ -164,9 +164,12 @@ export class WaitRegistry {
     this.assertCanRegisterWorkerWait(runId);
     const state = this.host.active(runId)!;
     const entry = peerWaitEntry(this.context.store.getRun(runId)!, request, via, () => state.waitIdentity.ensureCiTurn(), id => this.context.store.getRun(id));
-    return this.context.store.getRun(runId)?.waits?.some(wait => wait.id === entry.id)
-      ? repeatRegistration(this.context.store, runId, entry, request.timeoutSeconds, registration) as PeerWaitEntry
-      : this.openWait(runId, state, entry, registration);
+    if (this.context.store.getRun(runId)?.waits?.some(wait => wait.id === entry.id)) {
+      return repeatRegistration(this.context.store, runId, entry, request.timeoutSeconds, registration) as PeerWaitEntry;
+    }
+    // A new peer wait is peer messaging (hearsay-tools/cezarion#2784); an open one keeps running.
+    requireMessagingAllowed(this.context.store.getRun(runId)!);
+    return this.openWait(runId, state, entry, registration);
   }
 
   /** `cez message cancel-wait` on a peer wait, through the list, as `cancelWorkerWait`; a settled one comes back as it is. */

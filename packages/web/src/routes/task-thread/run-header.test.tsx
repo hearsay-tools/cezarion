@@ -353,7 +353,7 @@ describe('action bar visibility per status (the legacy rules, rendered)', () => 
     renderHeader(run(status))
     actionBar()
     const names = [...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map(el => el.textContent?.trim())
-    const settings = ['Archive when Done', 'Auto-merge PR']
+    const settings = ['Archive when Done', 'Auto-merge PR', 'Allow cezar workers', 'Allow task messaging']
     const deleteIndex = visible.indexOf('Delete task…')
     expect(names).toEqual(deleteIndex < 0 ? [...visible, ...settings] : [...visible.slice(0, deleteIndex), ...settings, ...visible.slice(deleteIndex)])
   })
@@ -390,7 +390,7 @@ describe('Mark unread (#775)', () => {
     renderHeader(readDone())
     actionBar()
     const names = [...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map(el => el.textContent?.trim())
-    expect(names).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Archive when Done', 'Auto-merge PR', 'Delete task…'])
+    expect(names).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Archive when Done', 'Auto-merge PR', 'Allow cezar workers', 'Allow task messaging', 'Delete task…'])
   })
 
   it.each([
@@ -1267,5 +1267,53 @@ describe('completion settings', () => {
     } }))
     expect(within(screen.getByRole('region', { name: 'Completion action' })).getByRole('status').textContent).toContain('Required checks have not passed.')
     expect(screen.getByRole('button', { name: 'Disable auto-merge' })).toBeTruthy()
+  })
+})
+
+describe('task access settings (hearsay-tools/cezarion#2784)', () => {
+  it('shows a legacy run without the fields as allowed', () => {
+    stubFetch()
+    renderHeader(run('done'))
+    expect(actionBar().getByRole('menuitemcheckbox', { name: 'Allow cezar workers' }).getAttribute('aria-checked')).toBe('true')
+    expect(actionBar().getByRole('menuitemcheckbox', { name: 'Allow task messaging' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it.each(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled'] as const)('lets a %s task turn workers off with a scoped PATCH', async status => {
+    const sent = stubFetch()
+    renderHeader(run(status), undefined, 'session', 'sample')
+    const workers = actionBar().getByRole('menuitemcheckbox', { name: 'Allow cezar workers' })
+    expect(workers.getAttribute('aria-describedby')).toBeTruthy()
+    const described = workers.getAttribute('aria-describedby')!.split(' ').map(id => document.getElementById(id)?.textContent ?? '').join(' ')
+    expect(described).toContain('separate paid agent session')
+    expect(described).toContain('reaches a running agent at its next session')
+    fireEvent.click(workers)
+    await waitFor(() => expect(sent.find(request => request.method === 'PATCH')).toMatchObject({
+      path: '/api/v1/p/sample/runs/r1', body: { allowWorkers: false },
+    }))
+  })
+
+  it('turns saved-off messaging back on with an explicit true', async () => {
+    const sent = stubFetch()
+    renderHeader(run('done', { allowMessaging: false }))
+    const messaging = actionBar().getByRole('menuitemcheckbox', { name: 'Allow task messaging' })
+    expect(messaging.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(messaging)
+    await waitFor(() => expect(sent.find(request => request.method === 'PATCH')?.body).toEqual({ allowMessaging: true }))
+  })
+
+  it('surfaces PATCH errors and keeps the saved setting', async () => {
+    stubFetch({ '/api/v1/runs/r1': () => jsonResponse({ error: 'Cannot save task access' }, 409) })
+    renderHeader(run('done'))
+    fireEvent.click(actionBar().getByRole('menuitemcheckbox', { name: 'Allow cezar workers' }))
+    expect(await screen.findByText('Cannot save task access')).toBeTruthy()
+    expect(actionBar().getByRole('menuitemcheckbox', { name: 'Allow cezar workers' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('hides both items for an owned worker', () => {
+    stubFetch()
+    renderHeader(workerRun())
+    expect(actionBar().queryByRole('menuitemcheckbox', { name: 'Allow cezar workers' })).toBeNull()
+    expect(actionBar().queryByRole('menuitemcheckbox', { name: 'Allow task messaging' })).toBeNull()
+    expect(actionBar().getByRole('menuitemcheckbox', { name: 'Archive when Done' })).toBeTruthy()
   })
 })

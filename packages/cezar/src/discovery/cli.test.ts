@@ -21,7 +21,7 @@ describe('cez discover', () => {
   let origin: string;
   let output: string[];
   beforeEach(async () => {
-    vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); output = [];
+    f = fixture(); output = [];
     const models = new RunnerModelCatalog({ adapters: { codex: { discover: async () => [
       { id: 'current', label: 'Current', description: '', effortLevels: ['low', 'high'] },
       { id: 'unknown-efforts', label: 'Unknown', description: '' },
@@ -82,6 +82,16 @@ describe('cez discover', () => {
   it.each([['models'], ['models', '--runner=bogus'], ['runners', '--runner=codex'], ['effort-levels'], ['models', '--runner=codex', '--backend=codex']])('rejects invalid usage %j', async (...args) => {
     expect(await run(args)).toBe(64);
     expect(last().code).toBe('invalid_input');
+  });
+  // hearsay-tools/cezarion#2784: a task with both settings off holds the endpoint without a token,
+  // so it refuses; a worktree setup command (task id, no endpoint) still reaches the cockpit.
+  it('refuses a task session that holds the endpoint alone, and lets a setup command use the cockpit', async () => {
+    const discover = vi.fn(async () => ({ origin, projectId: 'default', api: `${origin}/api/v1` }));
+    expect(await runDiscoverCommand(['runners'], { CEZ_TASK_ID: 'task', CEZ_DELEGATION_URL: privateTransport.url }, { stdout: line => output.push(line), discover })).toBe(2);
+    expect(last()).toMatchObject({ code: 'unavailable_transport' });
+    expect(discover).not.toHaveBeenCalled();
+    expect(await runDiscoverCommand(['runners'], { CEZ_TASK_ID: 'task' }, { stdout: line => output.push(line), discover })).toBe(0);
+    expect(discover).toHaveBeenCalledOnce();
   });
   it('prints help without a controller or catalog', async () => {
     expect(await run(['--help'], { CEZ_DELEGATION_TOKEN: 'bad' })).toBe(0);

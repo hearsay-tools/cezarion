@@ -10,7 +10,7 @@ import { fixture } from './service.testkit.ts';
 import { ensureOwnedWorkspace } from './workspace.ts';
 
 let f: ReturnType<typeof fixture>;
-beforeEach(() => { onTestFinished(scopeFixtureProcesses()); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+beforeEach(() => { onTestFinished(scopeFixtureProcesses()); f = fixture(); });
 afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, '-c', 'user.name=QA', '-c', 'user.email=qa@cezar.test', ...args], { encoding: 'utf8' }).trim();
 

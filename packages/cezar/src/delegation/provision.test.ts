@@ -8,7 +8,7 @@ import * as transport from './transport.ts';
 
 describe('session provisioning', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { f = fixture(); });
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   const provision = (id = f.parent.id) => provisionDelegationSession({ projectId: 'project', runId: id, store: f.store, credentials: f.credentials, url: 'http://127.0.0.1:12345/api/v1/delegation' });
   it('rotates session identity, revokes on teardown, and never includes a token in instructions/events', () => {
@@ -89,10 +89,9 @@ describe('session provisioning', () => {
     expect(instructions).toContain('(or cezar_wait with kind "request") to register a request wait');
     expect(instructions).toContain("except a named peer's message to a peer wait");
   });
-  it('provisions no ordinary-run metadata while off and never promotes invalid/worker records to roots', async () => {
+  it('never promotes invalid/worker records to roots', async () => {
     const ordinary = f.store.createRun({ title: 'ordinary', task: 'ordinary', workflow: 'quick-task', steps: [] });
-    vi.stubEnv('CEZ_DELEGATION', '0'); expect(provision(ordinary.id)).toBeUndefined(); expect(f.store.getRun(ordinary.id)?.delegation).toBeUndefined();
-    vi.stubEnv('CEZ_DELEGATION', '1'); f.store.updateRun(ordinary.id, { delegation: { role: 'invalid' } });
+    f.store.updateRun(ordinary.id, { delegation: { role: 'invalid' } });
     expect(provision(ordinary.id)).toBeUndefined();
     const { workerId } = await f.service.spawn(f.caller, { task: 'worker', baseline: 'HEAD', requestId: randomUUID() });
     const worker = provision(workerId)!; expect(worker.instructions).toContain('You cannot spawn Cezar workers'); expect(worker.instructions).toContain('wait --request'); expect(worker.instructions).toContain(f.parent.id); expect(worker.instructions).toContain('message reply');
@@ -136,12 +135,67 @@ describe('session provisioning', () => {
       }
     }
   });
-  it('starts no listener off; one failed listener leaves ordinary execution unprovisioned and logs once without secrets', async () => {
+  it('always starts the listener; one failed listener leaves ordinary execution unprovisioned and logs once without secrets', async () => {
     const listen = vi.spyOn(transport, 'startDelegationTransport'); const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.stubEnv('CEZ_DELEGATION', '0'); const off = await DelegationController.start(); expect(listen).not.toHaveBeenCalled(); await off.close();
-    vi.stubEnv('CEZ_DELEGATION', '1'); listen.mockRejectedValue(Error('unavailable'));
+    vi.stubEnv('CEZ_DELEGATION', '0'); const on = await DelegationController.start(); expect(listen).toHaveBeenCalledTimes(1); expect(on.url).toBeDefined(); await on.close();
+    listen.mockRejectedValue(Error('unavailable'));
     const broken = await DelegationController.start();
     broken.attachProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
     expect(broken.url).toBeUndefined(); expect(warn).toHaveBeenCalledTimes(1); await broken.close();
+  });
+  // hearsay-tools/cezarion#2784: the per-task switches decide what a root session is taught and issued.
+  describe('task access', () => {
+    const root = (access: { allowWorkers?: boolean; allowMessaging?: boolean }) =>
+      f.store.createRun({ title: 'root', task: 'root', workflow: 'quick-task', steps: [], ...access });
+    it('a record with no saved choice gets workers and messaging', () => {
+      const legacy = root({});
+      const session = provision(legacy.id)!;
+      expect(session.env.CEZ_DELEGATION_TOKEN).toBeTypeOf('string');
+      expect(session.instructions).toContain(' spawn --baseline parent-head');
+      expect(session.instructions).not.toContain('off for this task');
+      expect(f.store.getRun(legacy.id)?.delegation).toMatchObject({ role: 'root' });
+    });
+    it('workers off keeps messaging and teaches no spawn', () => {
+      const session = provision(root({ allowWorkers: false, allowMessaging: true }).id)!;
+      expect(session.env.CEZ_DELEGATION_TOKEN).toBeTypeOf('string');
+      expect(session.instructions).toContain('Cezar workers are off for this task. A human can turn them on in the task menu.');
+      expect(session.instructions).not.toContain(' spawn --baseline parent-head');
+      expect(session.instructions).not.toContain('You still manage the workers you own');
+      expect(session.instructions).toContain('wait --peer <task-id>');
+      expect(session.instructions).not.toContain('Task messaging is off');
+    });
+    it('messaging off keeps workers and says peers are unreachable', () => {
+      const session = provision(root({ allowWorkers: true, allowMessaging: false }).id)!;
+      expect(session.instructions).toContain(' spawn --baseline parent-head');
+      expect(session.instructions).toContain('Task messaging is off for this task: you cannot list, message or wait on peer tasks');
+    });
+    it('both off issues no credential and keeps the governed-session cross-session controls', () => {
+      const run = root({ allowWorkers: false, allowMessaging: false });
+      const session = provision(run.id)!;
+      // The endpoint without a token: discovery refuses rather than reach the cockpit.
+      expect(session).toMatchObject({ restrictCrossSessionMessaging: true, env: { CEZ_DELEGATION_URL: 'http://127.0.0.1:12345/api/v1/delegation' } });
+      expect(session.env).not.toHaveProperty('CEZ_DELEGATION_TOKEN');
+      expect(session.instructions).toContain('Cezar workers and task messaging are off for this task');
+      expect(session.instructions).toContain('they reach you at your next session');
+      expect(session.instructions).not.toMatch(/index\.[jt]s' message/);
+      expect(f.store.getRun(run.id)?.delegation).toBeUndefined();
+    });
+    it('both off still issues a credential while a peer request it accepted is open', async () => {
+      const lone = root({});
+      await f.service.send(f.caller, { id: randomUUID(), recipientRunId: lone.id, kind: 'request', text: 'Check this', timeoutSeconds: 600 });
+      f.store.updateRun(lone.id, { allowWorkers: false, allowMessaging: false });
+      const session = provision(lone.id)!;
+      expect(session.env.CEZ_DELEGATION_TOKEN).toBeTypeOf('string');
+      expect(session.instructions).toContain('message reply');
+      expect(session.instructions).toContain('Task messaging is off for this task');
+    });
+    it('both off still issues a credential to manage workers the task already owns', async () => {
+      await f.service.spawn(f.caller, { task: 'worker', baseline: 'HEAD', requestId: randomUUID() });
+      f.store.updateRun(f.parent.id, { allowWorkers: false, allowMessaging: false });
+      const session = provision()!;
+      expect(session.env.CEZ_DELEGATION_TOKEN).toBeTypeOf('string');
+      expect(session.instructions).toContain('You still manage the workers you own');
+      expect(session.instructions).toContain('Cezar workers are off for this task.');
+    });
   });
 });

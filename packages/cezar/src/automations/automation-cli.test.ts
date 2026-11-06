@@ -103,6 +103,8 @@ describe('cez automation', () => {
       [['--archive-when-done'], { archiveWhenDone: true }],
       [['--auto-merge-pr'], { autoMergePr: true }],
       [['--archive-when-done', '--auto-merge-pr'], { archiveWhenDone: true, autoMergePr: true }],
+      [['--no-workers'], { allowWorkers: false }],
+      [['--no-messaging'], { allowMessaging: false }],
     ] as const)('saves completion controls from %j without enabling the automation', async (flags, expected) => {
       expect(await run(['add', '--name', 'Completion', '--cron', '0 4 * * *', '--prompt-file', 'task.md', ...flags], env(), {
         readFile: async () => 'Finish the task',

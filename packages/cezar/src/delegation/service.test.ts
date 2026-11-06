@@ -24,7 +24,7 @@ import { DelegationService } from './service.ts';
 
 describe('delegation service durable authority', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { scopeFixtureProcesses(); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { scopeFixtureProcesses(); f = fixture(); });
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); syncBuiltinESMExports(); vi.unstubAllEnvs(); });
   const input = () => ({ task: 'do work', baseline: 'parent-head', requestId: randomUUID() });
   it('accepts one durable owned creation, no resource before admission, replay survives moving HEAD and restart', async () => {
@@ -323,15 +323,15 @@ describe('delegation service durable authority', () => {
     expect(await f.service.stop(f.caller, { workerId })).toEqual({ workerId, state: 'terminated' });
     expect(await f.service.destroy(f.caller, { workerId })).toEqual({ workerId, state: 'complete', remaining: [] });
   });
-  it('serializes cleanup, preserves tombstone/history, and permits human retry with delegation off', async () => {
+  it('serializes cleanup, preserves tombstone/history, and permits inspection and human retry with workers off', async () => {
     const { workerId } = await f.service.spawn(f.caller, input());
     f.store.appendEvent(workerId, { type: 'note', message: 'history retained' });
     const result = await Promise.all([f.service.destroy(f.caller, { workerId }), f.service.destroy(f.caller, { workerId })]);
     expect(result).toEqual([{ workerId, state: 'complete', remaining: [] }, { workerId, state: 'complete', remaining: [] }]);
     expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } });
     expect(f.store.readEvents(workerId).some(e => e.message === 'history retained')).toBe(true);
-    vi.stubEnv('CEZ_DELEGATION', '0');
-    await expect(f.service.inspect(f.caller, { workerId })).rejects.toMatchObject({ code: 'unavailable_transport' });
+    f.store.updateRun(f.parent.id, { allowWorkers: false, allowMessaging: false });
+    expect(await f.service.inspect(f.caller, { workerId })).toMatchObject({ workerId });
     expect(await f.service.destroyForHuman('project', workerId)).toEqual({ workerId, state: 'complete', remaining: [] });
   });
   it('does not clean unknown termination; durably records exact remaining resources', async () => {

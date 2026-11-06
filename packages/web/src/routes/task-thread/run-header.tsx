@@ -16,6 +16,7 @@ import {
   useRuns,
 } from '@/api/queries'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
+import { messagingAllowed, workersAllowed } from '@open-mercato/cezar-api-client/contract/task-options'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
 import { Pill } from '@/components/pill'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -566,6 +567,7 @@ function ActionsKebab({
         <p id={completionHelpId} className="text-xs text-muted-foreground [padding-inline:0.5rem] [padding-block:0.5rem]">
           After Done, auto-merge can mark a draft PR ready. It waits for current-head CI and GitHub rules. Merge comes before archive.
         </p>
+        {run.delegation?.role === 'worker' ? null : <TaskAccessItems run={run} patch={completionPatch} />}
         {flags.deleteRun ? <DropdownMenuSeparator /> : null}
         {flags.deleteRun ? (
           <DropdownMenuItem variant="destructive" onSelect={() => actions.setConfirming('delete')}>
@@ -574,6 +576,40 @@ function ActionsKebab({
         ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+/** Per-task Cezar access (hearsay-tools/cezarion#2784). Owned workers never show it: their
+ *  parent's settings decide what the family may do. */
+function TaskAccessItems({ run, patch }: { run: ApiRun; patch: ReturnType<typeof usePatchRun> }) {
+  const workersHelpId = useId()
+  const messagingHelpId = useId()
+  const sessionHelpId = useId()
+  const onError = (error: Error) => toast(error.message, { tone: 'danger' })
+  return (
+    <>
+      <DropdownMenuSeparator />
+      <DropdownMenuLabel className="text-xs text-muted-foreground">TASK ACCESS</DropdownMenuLabel>
+      <DropdownMenuCheckboxItem data-slot="allow-workers" className="min-h-11" checked={workersAllowed(run)} disabled={patch.isPending}
+        aria-describedby={`${workersHelpId} ${sessionHelpId}`}
+        onCheckedChange={(allowWorkers) => patch.mutate({ allowWorkers }, { onError })}>
+        Allow cezar workers
+      </DropdownMenuCheckboxItem>
+      <p id={workersHelpId} className="text-xs text-muted-foreground [padding-inline:0.5rem] [padding-block-end:0.5rem]">
+        Agents in this task can start Cezar workers. Each worker is a separate paid agent session. Worker limits cap resources, not spending.
+      </p>
+      <DropdownMenuCheckboxItem data-slot="allow-messaging" className="min-h-11" checked={messagingAllowed(run)} disabled={patch.isPending}
+        aria-describedby={`${messagingHelpId} ${sessionHelpId}`}
+        onCheckedChange={(allowMessaging) => patch.mutate({ allowMessaging }, { onError })}>
+        Allow task messaging
+      </DropdownMenuCheckboxItem>
+      <p id={messagingHelpId} className="text-xs text-muted-foreground [padding-inline:0.5rem] [padding-block-end:0.5rem]">
+        Agents in this task can message other tasks in this project.
+      </p>
+      <p id={sessionHelpId} data-slot="task-access-session-note" className="text-xs text-muted-foreground [padding-inline:0.5rem] [padding-block-end:0.5rem]">
+        Turning one off applies at once. Turning one on reaches a running agent at its next session.
+      </p>
+    </>
   )
 }
 

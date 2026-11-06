@@ -3,7 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { RunStore } from '../runs/store.ts';
 import { CredentialRegistry } from './credentials.ts';
-import { DelegationService, delegationEnabled, rootDelegation, type DelegationProject } from './service.ts';
+import { messagingAllowed, workersAllowed } from '@open-mercato/cezar-contract/task-options';
+import { DelegationService, rootDelegation, type DelegationProject } from './service.ts';
+import { WORKERS_OFF } from './policy.ts';
+import { openCompletionRequests } from '../workflows/completion-policy.ts';
 import { createDelegationRoutes } from './routes.ts';
 import { createDelegationApp, startDelegationTransport } from './transport.ts';
 import { delegationEndpoint } from './cli.ts';
@@ -19,7 +22,6 @@ export function bundledWorkerInvocation(command: 'worker' | 'discover' | 'messag
 }
 
 export function provisionDelegationSession(options: { projectId: string; runId: string; store: RunStore; credentials: CredentialRegistry; url: string }): DelegationSession | undefined {
-  if (!delegationEnabled()) return;
   delegationEndpoint(options.url);
   const run = options.store.getRun(options.runId);
   if (!run || run.delegation?.role === 'invalid') return;
@@ -44,13 +46,91 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
     `Credentials stay in the environment: never read, echo, forward, or persist them.`,
   ].join(' ');
   // hearsay-tools/cezarion#2279: native subagents are allowed; tasks talk only through cez message.
+  const subagentOnly = `You may use native subagents and message them with your runner's tools. No agent channel to another task exists: tell the user instead.`;
   const subagentMessaging = [
     `You may message your own native subagents with your runner's tools.`,
     `Reach another Cezar task only through ${messaging}; never use your runner's native tools for that.`,
   ].join(' ');
 
-  // No metadata on ordinary off/unavailable paths. Root authority is durable before a token exists.
+  const worker = run.delegation?.role === 'worker';
+  const owned = run.delegation?.role === 'root' && run.delegation.receipts.length > 0;
+  // Accepted peer requests still allow a reply, a wait or a cancel after messaging goes off.
+  const open = openCompletionRequests(options.store, run.id);
+  const owesRequests = open.sent.length + open.incoming.length > 0;
+  const workersOn = workersAllowed(run);
+  const messagingOn = messagingAllowed(run);
+  // hearsay-tools/cezarion#2784: with both switches off, no worker receipt (a deleted worker's counts) and no open request, the session gets no
+  // credential; it keeps the governed-session cross-session controls (runner-specific, D1). The endpoint
+  // alone marks it as a controller-bound session, so `cez discover` refuses instead of falling
+  // back to the cockpit, as it does for any partial credential.
+  if (!worker && !workersOn && !messagingOn && !owned && !owesRequests) {
+    return { restrictCrossSessionMessaging: true, env: { CEZ_DELEGATION_URL: options.url }, revoke: () => {},
+      instructions: `Cezar workers and task messaging are off for this task; a human can turn them on in the task menu, and they reach you at your next session. ${subagentOnly}` };
+  }
+  // Root authority is durable before a token exists. The switches never edit it: they are read per call.
   if (!run.delegation) options.store.commitDelegation([{ id: run.id, delegation: rootDelegation() }]);
+  const messagingOff = messagingOn ? [] : [`Task messaging is off for this task: you cannot list, message or wait on peer tasks; a human can turn it on in the task menu. Messages with your own workers, and replies to peer requests accepted earlier, still work.`];
+  const rootInstructions = (): string[] => workersOn ? [
+    `Use native subagents for work that needs no separate worktree: research, code reading and focused analysis.`,
+    `For example, a subagent reads the parser and summarizes how it handles errors.`,
+    `Use Cezar workers for work that needs its own worktree, its own commits or a lifecycle Cezar tracks.`,
+    `Also use a Cezar worker when the task needs a model available only through another runner, even if the work is research or analysis.`,
+    `Native subagents need no Cezar worker, worktree, collection or destruction.`,
+    subagentMessaging,
+    `Owned workers are available through the bundled command ${invocation}.`,
+    `Commands return JSON.`,
+    `Before choosing a runner, model or effort, use ${bundledWorkerInvocation('discover')} runners, then ${bundledWorkerInvocation('discover')} models --runner=<name>.`,
+    `Discovery lists host default-account runner status, enablement, model IDs and advertised per-model effortLevels; absent effort metadata means unknown. It uses your controller automatically.`,
+    `When overrides are allowed and effortLevels is nonempty, choose an explicit --effort level for the task from that list. Do not leave effort on auto by habit.`,
+    `A spawn --effort pin applies to every agent step whose effort is unset. Use a shared effort only when every affected step's model advertises that level; otherwise use a workflow with compatible per-step effort settings. A high-only model and a low-only model need separate step settings.`,
+    `An empty effortLevels list advertises no levels; absent metadata means support is unknown. Do not guess supported levels or override locked native settings.`,
+    `A fresh nonempty default-account catalog rejects unknown explicit default-account model pins before creating a worker and reports available models and alternative runners; unavailable, empty or stale discovery does not invent choices. Inherited defaults and accepted retries stay unchanged.`,
+    ...messagingOff,
+    conversationGuidance,
+    `Worker questions arrive as requests carrying a question; answer with ${messaging} reply <worker-id> '<answer>' --id <new-message-UUID> --request-id <question-id>, one '<header>: <answer>' line per question (an option's label, or your own words for a question without options), which the worker reads verbatim as its answer. If you cannot decide, ask the human with your own question, then reply. Progress and follow-ups never answer it, and you cannot finish while it is unanswered.`,
+    `Use ${invocation} spawn --baseline parent-head --request-id <UUID> '<task>' (or an explicit committed ref).`,
+    `Reuse the request ID only for the exact same task/baseline/context/runner/model/effort/workflow/skill on a retry.`,
+    `Optional spawn flags: --workflow <name> or --skill <name> (mutually exclusive), --context '<selected text>' or --context-file <local-UTF-8-file> (mutually exclusive), --attach <path> (repeatable; copies a git-ignored file from your worktree into the worker's worktree at the same relative path before it starts; tracked or unignored files and .gitignore are refused, commit those instead), --runner <claude|codex|opencode|pi|cursor|omp>, --model <model>, --effort <low|medium|high|xhigh|max|auto>.`,
+    `--workflow runs a catalog workflow (the built-in quick-task or a .ai/cezar/workflows/*.yaml name) inside the worker, agent and check steps alike; --skill runs one discovered skill as the worker task; omitting both means quick-task; a worker inherits your extra system prompt, never your selected skill.`,
+    `--runner, --model and --effort fill only the steps that leave those fields unset; an unknown name fails. Agent steps may mix runners: each step is pinned to its own runner, account, model, effort and grants at spawn, and a step's agentProfile names its account explicitly.`,
+    `Example: spawn --baseline parent-head --request-id <UUID> --runner codex --effort high --context 'Inspect only the parser' 'Review parser'. Use high here only when the selected model advertises it and overrides are allowed.`,
+    `Example: spawn --baseline parent-head --request-id <UUID> --workflow review 'Review the parser change'.`,
+    `Task plus context text is limited to 100,000 characters.`,
+    `The API also accepts up to 32 baseline-file, parent-attachment or parent-file references, with at most 8 MiB of copied attachments.`,
+    `Inspect reports worker-local input paths.`,
+    `Omitted --runner inherits the active parent's runner; same-runner workers inherit omitted model/account/effort, while mixed-runner workers use that runner's project/default account and model.`,
+    `Omitting --effort or using --effort auto applies the same rules: same-runner workers inherit the parent's effort; workers on another runner leave effort to that runner. Omission and auto do not clear an inherited effort pin.`,
+    `Accepted identity and grants remain fixed.`,
+    `Use list to find every worker you own, including incomplete cleanup with remaining resources. Use inspect <worker-id>, collect <worker-id>, steer <worker-id> '<text>', stop <worker-id>, destroy <worker-id>, diff <worker-id>, or wait <worker-id>... --mode <one|any|all> --timeout-seconds <1-1800>.`,
+    `Mode defaults to any; one requires one worker, all requires every selected worker to settle.`,
+    `cancel-wait <wait-id> stops one wait, is safe to retry, and never touches workers.`,
+    `Wait registers and returns immediately: end your turn to release capacity, then Cezar resumes you on a selected terminal outcome or deadline (default 600 seconds).`,
+    `Your other waits stay open beside it; timeout/cancellation reports partial outcomes and unresolved workers. The same wait is open to you as cezar_wait with kind "worker".`,
+    `When a worker you wait on parks before finishing, Cezar sends you a notice from it naming what it waits on, at most one per wait; like any message it wakes you and closes no wait.`,
+    `collect returns revision/status/settled plus typed summary/head/diff/artifacts availability and records the latest evidence under the parent.`,
+    `An available diff.path points to a JSON result file: read its diffSnapshot field for the bounded patch, not the file as a raw patch.`,
+    `Running output is partial.`,
+    `Collect the latest settled revision of every worker before completing; Continue invalidates older readiness.`,
+    `A done while workers are live or uncollected is refused once with what to do first; done again while workers are live makes Cezar wait on them for you and wake you when they have all settled, never silently finishing.`,
+    `If a parent is already under review, Continue the parent first, then the worker.`,
+    `Review changes and deliberately integrate desired worker commits with Git before cleanup; no automatic merge or review acceptance.`,
+    `Collect/integrate desired results, destroy owned resources, explicitly delete child histories through the cockpit/API, then delete parent history.`,
+    `Summary and bounded diff snapshots survive until parent deletion; general artifact bytes are not archived.`,
+    `Branch/path strings and SHAs are historical descriptors after removal.`,
+    `At most 32 outstanding workers (accepted, live, or not yet verifiably destroyed) and 1,024 creations per parent; destroy finished workers to free capacity. These limits bound resources and runaway spawning, not spending; 32 undelivered steering messages per worker.`,
+    `Review is a human gate.`,
+    `Destruction may be incomplete; inspect remaining resources and retry explicitly.`,
+    `Credentials are supplied only in the environment: never read, echo, forward or include them in commands, messages, prompts, events or files.`,
+    `Workers cannot spawn Cezar workers or message peers.`,
+    `This is cooperative local supervision, not process isolation.`,
+  ] : [
+    `Use native subagents for research, code reading and focused analysis.`,
+    subagentMessaging,
+    WORKERS_OFF,
+    ...(owned ? [`You still manage the workers you own with ${invocation} list, inspect, collect, steer, stop, destroy, diff and wait. Collect the latest settled revision of every worker before completing.`] : []),
+    ...messagingOff,
+    conversationGuidance,
+  ];
   const generation = randomUUID();
   const token = options.credentials.issue(options.projectId, run.id, generation);
   options.store.registerSessionSecret(token);
@@ -68,59 +148,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `Commit reviewed work before your parent deliberately integrates it; report the summary, commits, tests and remaining concerns.`,
         `When you park before finishing while your parent waits on you, Cezar tells your parent what you wait on and quotes your last message: end such a turn by saying what you wait on and what you have done.`,
       ].join(' ')
-      : [
-        `Use native subagents for work that needs no separate worktree: research, code reading and focused analysis.`,
-        `For example, a subagent reads the parser and summarizes how it handles errors.`,
-        `Use Cezar workers for work that needs its own worktree, its own commits or a lifecycle Cezar tracks.`,
-        `Also use a Cezar worker when the task needs a model available only through another runner, even if the work is research or analysis.`,
-        `Native subagents need no Cezar worker, worktree, collection or destruction.`,
-        subagentMessaging,
-        `Owned workers are available through the bundled command ${invocation}.`,
-        `Commands return JSON.`,
-        `Before choosing a runner, model or effort, use ${bundledWorkerInvocation('discover')} runners, then ${bundledWorkerInvocation('discover')} models --runner=<name>.`,
-        `Discovery lists host default-account runner status, enablement, model IDs and advertised per-model effortLevels; absent effort metadata means unknown. It uses your controller automatically.`,
-        `When overrides are allowed and effortLevels is nonempty, choose an explicit --effort level for the task from that list. Do not leave effort on auto by habit.`,
-        `A spawn --effort pin applies to every agent step whose effort is unset. Use a shared effort only when every affected step's model advertises that level; otherwise use a workflow with compatible per-step effort settings. A high-only model and a low-only model need separate step settings.`,
-        `An empty effortLevels list advertises no levels; absent metadata means support is unknown. Do not guess supported levels or override locked native settings.`,
-        `A fresh nonempty default-account catalog rejects unknown explicit default-account model pins before creating a worker and reports available models and alternative runners; unavailable, empty or stale discovery does not invent choices. Inherited defaults and accepted retries stay unchanged.`,
-        conversationGuidance,
-        `Worker questions arrive as requests carrying a question; answer with ${messaging} reply <worker-id> '<answer>' --id <new-message-UUID> --request-id <question-id>, one '<header>: <answer>' line per question (an option's label, or your own words for a question without options), which the worker reads verbatim as its answer. If you cannot decide, ask the human with your own question, then reply. Progress and follow-ups never answer it, and you cannot finish while it is unanswered.`,
-        `Use ${invocation} spawn --baseline parent-head --request-id <UUID> '<task>' (or an explicit committed ref).`,
-        `Reuse the request ID only for the exact same task/baseline/context/runner/model/effort/workflow/skill on a retry.`,
-        `Optional spawn flags: --workflow <name> or --skill <name> (mutually exclusive), --context '<selected text>' or --context-file <local-UTF-8-file> (mutually exclusive), --attach <path> (repeatable; copies a git-ignored file from your worktree into the worker's worktree at the same relative path before it starts; tracked or unignored files and .gitignore are refused, commit those instead), --runner <claude|codex|opencode|pi|cursor|omp>, --model <model>, --effort <low|medium|high|xhigh|max|auto>.`,
-        `--workflow runs a catalog workflow (the built-in quick-task or a .ai/cezar/workflows/*.yaml name) inside the worker, agent and check steps alike; --skill runs one discovered skill as the worker task; omitting both means quick-task; a worker inherits your extra system prompt, never your selected skill.`,
-        `--runner, --model and --effort fill only the steps that leave those fields unset; an unknown name fails. Agent steps may mix runners: each step is pinned to its own runner, account, model, effort and grants at spawn, and a step's agentProfile names its account explicitly.`,
-        `Example: spawn --baseline parent-head --request-id <UUID> --runner codex --effort high --context 'Inspect only the parser' 'Review parser'. Use high here only when the selected model advertises it and overrides are allowed.`,
-        `Example: spawn --baseline parent-head --request-id <UUID> --workflow review 'Review the parser change'.`,
-        `Task plus context text is limited to 100,000 characters.`,
-        `The API also accepts up to 32 baseline-file, parent-attachment or parent-file references, with at most 8 MiB of copied attachments.`,
-        `Inspect reports worker-local input paths.`,
-        `Omitted --runner inherits the active parent's runner; same-runner workers inherit omitted model/account/effort, while mixed-runner workers use that runner's project/default account and model.`,
-        `Omitting --effort or using --effort auto applies the same rules: same-runner workers inherit the parent's effort; workers on another runner leave effort to that runner. Omission and auto do not clear an inherited effort pin.`,
-        `Accepted identity and grants remain fixed.`,
-        `Use list to find every worker you own, including incomplete cleanup with remaining resources. Use inspect <worker-id>, collect <worker-id>, steer <worker-id> '<text>', stop <worker-id>, destroy <worker-id>, diff <worker-id>, or wait <worker-id>... --mode <one|any|all> --timeout-seconds <1-1800>.`,
-        `Mode defaults to any; one requires one worker, all requires every selected worker to settle.`,
-        `cancel-wait <wait-id> stops one wait, is safe to retry, and never touches workers.`,
-        `Wait registers and returns immediately: end your turn to release capacity, then Cezar resumes you on a selected terminal outcome or deadline (default 600 seconds).`,
-        `Your other waits stay open beside it; timeout/cancellation reports partial outcomes and unresolved workers. The same wait is open to you as cezar_wait with kind "worker".`,
-        `When a worker you wait on parks before finishing, Cezar sends you a notice from it naming what it waits on, at most one per wait; like any message it wakes you and closes no wait.`,
-        `collect returns revision/status/settled plus typed summary/head/diff/artifacts availability and records the latest evidence under the parent.`,
-        `An available diff.path points to a JSON result file: read its diffSnapshot field for the bounded patch, not the file as a raw patch.`,
-        `Running output is partial.`,
-        `Collect the latest settled revision of every worker before completing; Continue invalidates older readiness.`,
-        `A done while workers are live or uncollected is refused once with what to do first; done again while workers are live makes Cezar wait on them for you and wake you when they have all settled, never silently finishing.`,
-        `If a parent is already under review, Continue the parent first, then the worker.`,
-        `Review changes and deliberately integrate desired worker commits with Git before cleanup; no automatic merge or review acceptance.`,
-        `Collect/integrate desired results, destroy owned resources, explicitly delete child histories through the cockpit/API, then delete parent history.`,
-        `Summary and bounded diff snapshots survive until parent deletion; general artifact bytes are not archived.`,
-        `Branch/path strings and SHAs are historical descriptors after removal.`,
-        `At most 32 outstanding workers (accepted, live, or not yet verifiably destroyed) and 1,024 creations per parent; destroy finished workers to free capacity. These limits bound resources and runaway spawning, not spending; 32 undelivered steering messages per worker.`,
-        `Review is a human gate.`,
-        `Destruction may be incomplete; inspect remaining resources and retry explicitly.`,
-        `Credentials are supplied only in the environment: never read, echo, forward or include them in commands, messages, prompts, events or files.`,
-        `Workers cannot spawn Cezar workers or message peers.`,
-        `This is cooperative local supervision, not process isolation.`,
-      ].join(' '),
+      : rootInstructions().join(' '),
     revoke: () => options.credentials.revoke(run.id, generation),
   };
 }
@@ -136,10 +164,9 @@ export class DelegationController {
   get url(): string | undefined { return this.transport?.url; }
   static async start(): Promise<DelegationController> {
     const controller = new DelegationController();
-    if (delegationEnabled()) {
-      try { controller.transport = await startDelegationTransport(createDelegationApp(createDelegationRoutes(controller.service, controller.credentials))); }
-      catch { controller.unavailable(); }
-    }
+    // Always on since hearsay-tools/cezarion#2784: each task's switches gate workers and messaging.
+    try { controller.transport = await startDelegationTransport(createDelegationApp(createDelegationRoutes(controller.service, controller.credentials))); }
+    catch { controller.unavailable(); }
     return controller;
   }
   private unavailable() {
@@ -150,7 +177,7 @@ export class DelegationController {
     this.projects.get(project.id)?.detach();
     const unregister = this.service.registerProject(project);
     const clear = project.manager.setDelegationProvisioner(runId => {
-      if (this.closed || !this.transport || !delegationEnabled()) return;
+      if (this.closed || !this.transport) return;
       try { return provisionDelegationSession({ projectId: project.id, runId, store: project.store, credentials: this.credentials, url: this.transport.url }); }
       catch { this.credentials.revoke(runId); this.unavailable(); return; }
     });

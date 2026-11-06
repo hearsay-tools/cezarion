@@ -88,7 +88,6 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
   });
 
 it('wakes a parent parked on its worker when the worker asks, within maxParallel', async () => {
-    process.env.CEZ_DELEGATION = '1';
     const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:cezar-ask');
     register(p.id, [w.id]);

@@ -39,7 +39,7 @@ The owner took these at the design gate.
 | Mechanism | Reuse the parent–worker conversation protocol. Abstract only the step that decides who may talk to whom. |
 | Ledger for a peer message | A new request or progress message lives in its sender's family ledger. A follow-up or reply lives with the request it names. |
 | `cez task send` run by an agent inside a task | Refused, exit 64. `cez task send` stays human input. |
-| Consent | Any root task may message any other root task in the same project. No opt-in, no setting. |
+| Consent | Any root task may message any other root task in the same project while both have the per-task "Allow task messaging" setting on, the default (hearsay-tools/cezarion#2784). With it off, the task's agent cannot discover, message or wait on peers, and peers' new messages to it are not delivered; replies to requests accepted earlier still pass. |
 | CLI | A new family, `cez message`. `cez worker` keeps only the lifecycle verbs. |
 | Compatibility | The `cez worker` message verbs are removed, with no aliases. The delegation CLI is an agent-facing surface inside the cockpit, not a user-facing one; agents get the new instructions. |
 | Waiting for a peer | A new wait kind, `peer`. It always names its peers. A message from a named peer, or that peer settling, closes it. A human message or a family message does not. |
@@ -51,7 +51,7 @@ The owner took these at the design gate.
 ## Terms
 
 - **Task**: a run.
-- **Root task**: a run that is not an owned worker. With `CEZ_DELEGATION=1` its record
+- **Root task**: a run that is not an owned worker. Once a session is provisioned its record
   carries `delegation.role: 'root'` (`packages/cezar/src/delegation/provision.ts:46`).
 - **Family**: a root task and its owned workers.
 - **Peer**: another root task in the same project. This replaces the meaning
@@ -138,7 +138,7 @@ The resolver has two levels:
   keep today's checks for both levels.
 
 A top-level task with no delegation record yet counts as a root task. This covers a task
-that has not started a session under `CEZ_DELEGATION=1`. The first accepted message writes
+that has not started a provisioned session yet. The first accepted message writes
 its root record, as provisioning does. The record grants the recipient nothing it would not
 get at its first session.
 
@@ -206,7 +206,14 @@ request or progress message. **Reply** means it can reply to the recipient's req
 **Answer** means it can answer the recipient's human question. **Control** means steer, stop,
 resume, inspect, collect, diff or destroy.
 
-### At shipped defaults (`CEZ_DELEGATION` unset)
+### With the task's messaging setting off (hearsay-tools/cezarion#2784)
+
+`CEZ_DELEGATION` is retired. The listener always starts, and each task has its own
+"Allow task messaging" setting, on by default. With it off, the task's agent cannot
+discover, message or wait on peers, and peers' new messages to it are not delivered; a reply
+to a request accepted earlier still passes. Family rows below are unchanged. When the
+listener cannot start, or a task has both workers and messaging off and no worker, this table
+applies:
 
 | Sender → recipient | Discover | Message | Reply | Answer | Control |
 | --- | --- | --- | --- | --- | --- |
@@ -214,13 +221,13 @@ resume, inspect, collect, diff or destroy.
 | Person or outside bot, `cez task` outside any task → any task in the project | `cez task list` | Human input | — | Yes | `cez task stop`, `finish`, `send --resume`, … |
 | Agent in any task → any task | No agent path | No: `cez task send` exits 64 ([F1](#14-follow-ups)); there is no agent channel | No | No | Outside this protocol (see below) |
 
-With delegation off, agents have no supported channel to another task. Enabling
-`CEZ_DELEGATION=1` is the remedy, and the exit-64 message says so. The other `cez task`
+Without a delegation session, agents have no supported channel to another task. Turning the
+task's messaging on is the remedy, and the exit-64 message says so. The other `cez task`
 commands are operator commands. An agent that runs them acts with the operator's authority
 through the shell. This spec does not change them. A guard for them would be a separate
 decision.
 
-### With `CEZ_DELEGATION=1`
+### With task messaging on (the default)
 
 | Sender → recipient | Discover | Message | Reply | Answer | Control |
 | --- | --- | --- | --- | --- | --- |
@@ -309,7 +316,7 @@ with `denied_scope`. The recipient's history shows only what remains in existing
    ```json
    { "code": "invalid_input",
      "error": "cez task send is human input. An agent inside a task cannot use it to message another task.",
-     "next": "cez message progress <task-id> '<text>' --id <message-UUID> (needs CEZ_DELEGATION=1)" }
+     "next": "cez message progress <task-id> '<text>' --id <message-UUID> (needs task messaging on)" }
    ```
 
    A person or an outside bot outside any task sees no change. The guard protects the
@@ -547,10 +554,10 @@ request --resume` is refused and names `cez worker resume`.
 > now turns off only a separate cross-session tool (Codex's message board, an OpenCode
 > `task_id` outside the session tree). See `AGENT_PROTOCOL.md` D1.
 
-- With `CEZ_DELEGATION=1`, every runner's `restrictNativeDelegation` blocks its native
-  delegation entry points. For the Claude CLI runner that includes `SendMessage` and
-  `ListAgents` (`--disallowedTools Agent,Task,Workflow,SendMessage,ListAgents`,
-  `packages/cezar/src/core/claude-cli-runner.ts:750`).
+- In every governed session, native subagents stay available, subject to the user's tool
+  settings. `restrictCrossSessionMessaging` turns off only a separate cross-session tool. For
+  the Claude CLI runner, `SendMessage` and `ListAgents` stay callable for the session's own
+  subagents, and inbound messages from other sessions are refused on every launch.
 - With delegation off, a runner's native cross-session tools may be available. Messages sent
   through them are untracked: no ledger, no cockpit attribution, no receipts, no deadline,
   and no protection for human questions beyond the runner's own. The protocol does not use
@@ -669,9 +676,8 @@ the change it documents.
 - **Agents.** New sessions get the new instructions. The removed `cez worker` message verbs
   exit 64 with the replacement, so an agent that follows old habits finds the new verb in one
   step. `cez worker send --resume` becomes `cez worker resume`.
-- **Coordinators that used `cez task send`.** With delegation off, they now get exit 64. The
-  remedy is `CEZ_DELEGATION=1`, then `cez message`. With delegation on, they use `cez message`
-  directly.
+- **Coordinators that used `cez task send`.** They get exit 64 and use `cez message`, which needs the
+  task's messaging setting on (on by default since hearsay-tools/cezarion#2784).
 - **People and outside bots.** No change. `cez task send` outside a task is human input, as
   before.
 - **Stored records.** `relationship` is optional and absent on old messages, which read as

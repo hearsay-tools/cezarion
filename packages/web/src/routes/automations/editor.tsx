@@ -5,6 +5,7 @@ import { ApiError, createAutomation, deleteAutomation, setAutomationEnabled, upd
 import { useConfig, useProviderStatus, useRunnerModels, useWorkflows } from '@/api/queries'
 import { CpuIcon, TerminalIcon, WorkflowIcon } from '@/components/design-icons'
 import { CompletionControls } from '@/components/completion-controls'
+import { TaskAccessControls } from '@/components/task-access-controls'
 import { SegmentedControl } from '@/components/facet-filter'
 import { PickerPill, PickerPillGroup } from '@/components/picker-pill'
 import { Button } from '@/components/ui/button'
@@ -180,6 +181,7 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
             </label>
             <p className="text-xs break-words text-muted-foreground">Each run is an ordinary task in its own worktree, queued behind the parallel cap.</p>
             <CompletionControls archiveWhenDone={draft.archiveWhenDone} autoMergePr={draft.autoMergePr} onChange={patch} disabled={saving} />
+            <TaskAccessControls allowWorkers={draft.allowWorkers} allowMessaging={draft.allowMessaging} onChange={patch} disabled={saving} />
             {automation ? <p className="text-xs text-muted-foreground">These settings apply to future tasks. Existing tasks keep their settings.</p> : null}
           </Section>
 

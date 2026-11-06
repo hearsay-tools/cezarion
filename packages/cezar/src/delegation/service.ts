@@ -58,6 +58,7 @@ import {
   type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract/delegation';
 import type { AgentInput } from '@open-mercato/cezar-contract';
+import { messagingAllowed } from '@open-mercato/cezar-contract/task-options';
 import { completionWaitEntry, hasWorkerDeadline, peerWaitView, workerCompletionWaitProjection, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import type { RunStore, RunRecord } from '../runs/store.ts';
 import { assertConversationIdFree, ConversationIdInUseError } from '../runs/conversation-identity.ts';
@@ -71,7 +72,7 @@ import type { RunnerId } from '../core/agent-runner.ts';
 import type { Caller } from './credentials.ts';
 import { isAuthenticatedCaller } from './credentials.ts';
 import { parseDelegationEffort } from './effort.ts';
-import { authorizeWorkerList, authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
+import { authorizeWorkerList, authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError, MESSAGING_OFF, requireWorkersAllowed } from './policy.ts';
 import { planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline } from './workspace.ts';
 import { WorkerCleanup, type WorkerCleanupOptions } from './worker-cleanup.ts';
 
@@ -149,7 +150,12 @@ async function resolveSpawnSteps(manager: DelegationManager, parentId: string, r
 function stepIdentityFields({ settings, grants }: ResolvedSpawnStep) {
   return { account: settings.accountBinding, grants, ...(settings.model === undefined ? {} : { model: settings.model }), ...(settings.effort === undefined ? {} : { effort: settings.effort }) };
 }
-export const delegationEnabled = () => process.env.CEZ_DELEGATION === '1';
+
+/** Messaging off refuses new peer sends (hearsay-tools/cezarion#2784). Called after an exact retry of
+ *  an accepted message has returned; a reply to a request accepted earlier still passes. */
+function assertNewPeerSend(pair: ConversationPair, request: ConversationSendRequest): void {
+  if (pair.relationship === 'peer' && request.kind !== 'reply' && !messagingAllowed(pair.sender)) throw new DelegationPolicyError('incompatible_state', MESSAGING_OFF);
+}
 
 /** A single controller's shared policy adapter; managers retain scheduling and lifecycle ownership. */
 export class DelegationService {
@@ -160,7 +166,9 @@ export class DelegationService {
     const request = discoveryRequestSchema.parse(value);
     if (request.kind === 'tasks') return discoverTasks(project.store, caller.runId, request);
     // Discovery accompanies spawn authority, including roots persisted before this command existed.
-    authorizeSpawnReplay(caller, project.store.getRun(caller.runId), project.id);
+    const callerRun = project.store.getRun(caller.runId);
+    authorizeSpawnReplay(caller, callerRun, project.id);
+    requireWorkersAllowed(callerRun!);
     if (!this.discovery) throw new DelegationPolicyError('unavailable_transport', 'Host discovery is unavailable');
     return request.kind === 'models' ? this.discovery.models.get(request.runner) : discoveredRunners(await this.discovery.providers());
   }
@@ -201,7 +209,6 @@ export class DelegationService {
   /** Called only after manager recovery, when persisted destroy intents may be retried. */
   armDestroyRetries(projectId: string): void { this.cleanups.get(projectId)?.armAfterRecovery(); }
   private context(caller: Caller) {
-    if (!delegationEnabled()) throw new DelegationPolicyError('unavailable_transport', 'Delegation is unavailable');
     const project = isAuthenticatedCaller(caller) ? this.projects.get(caller.projectId) : undefined;
     if (!project) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
     return project;
@@ -288,9 +295,12 @@ export class DelegationService {
     const state = this.currentConversation(project, root);
     const existing = state.messages.find(message => message.id === request.id);
     if (existing) return this.retrySend(pair, root, existing, requestHash);
+    assertNewPeerSend(pair, request);
     const { original, settled } = sendRequestContext(state, request, sender, recipient);
     const now = new Date().toISOString();
     const { destroyed, resumable, resume, instruction } = sendAdmission(pair, root, request);
+    // A new continuation is new worker work: the parent's switch gates it (hearsay-tools/cezarion#2784).
+    if (resume) requireWorkersAllowed(root);
     const message = sendMessage(pair, request, requestHash, now, settled, { destroyed, resumable, resume, instruction });
     const enqueue = !destroyed && (!resumable || resume);
     // Open worker questions reserve ledger room for their replies (hearsay-tools/cezarion#505); the reply spends its

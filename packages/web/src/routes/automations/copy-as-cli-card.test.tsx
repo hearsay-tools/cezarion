@@ -48,6 +48,11 @@ describe('CopyAsCliCard', () => {
     expect(screen.getByText(`${address}cez automation add --name 'Check' --at '2030-01-15T09:00' --tz 'Europe/Warsaw' --latest-start '6h' --workflow 'quick-task' --prompt 'Go'`)).not.toBeNull()
   })
 
+  it('emits --no-workers and --no-messaging when task access is off', () => {
+    renderInProject(<CopyAsCliCard draft={{ ...draft, allowWorkers: false, allowMessaging: false }} />)
+    expect(screen.getByText(`${address}cez automation add --name 'Nightly' --cron '0 4 * * *' --workflow 'quick-task' --no-autonomous --no-workers --no-messaging --prompt 'Bump what'\\''s stale'`)).not.toBeNull()
+  })
+
   it('falls back to the JSON form for what flags cannot say', () => {
     renderInProject(<CopyAsCliCard draft={{ ...draft, description: 'Nightly bumps' }} />)
     expect(screen.getByText((text) => text.startsWith(`${address}cez automation create --json '`))).not.toBeNull()

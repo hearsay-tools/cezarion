@@ -1569,11 +1569,13 @@ function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest):
     });
 
     // Finish answers Cezar's own human wait; it keeps the agent's question (the #151 guard).
-    it(`${runner} U5c a root parked on its no-wait human wait is finished by the user, and an agent question still blocks it`, async () => {
+    it(`${runner} U5c a root parked on its no-wait human wait is finished by the user, and an agent question still blocks a root with workers`, async () => {
       nativeWire(runner);
-      const asRoot = (task: string) => {
+      // Only a root with workers keeps its question through Finish (hearsay-tools/cezarion#2784).
+      const asRoot = (task: string, withWorker = false) => {
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task });
-        store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+        const receipts = withWorker ? [{ requestId: randomUUID(), workerId: randomUUID(), requestHash: 'b'.repeat(64) }] : [];
+        store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts } }]);
         return run;
       };
       const plain = asRoot(HARNESS_ADAPTERS[runner].scenarios.baseline!);
@@ -1583,7 +1585,7 @@ function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest):
       expect(manager.finish(plain.id)).toBe(true);
       await until(() => store.getRun(plain.id)?.status === 'done' && !manager.isActive(plain.id));
       delete process.env.CEZ_MOCK_NUDGE_REPLY;
-      const asked = asRoot(HARNESS_ADAPTERS[runner].scenarios.baseline!);
+      const asked = asRoot(HARNESS_ADAPTERS[runner].scenarios.baseline!, true);
       await until(() => pendingQuestion(asked.id));
       expect(humanOpen(asked.id)).toMatchObject([{ via: WAIT_VIA.cezar_ask, source: WAIT_SOURCE.agent }]);
       expect(manager.finishBlockedReason(asked.id)).toBe('Answer the pending human question before finishing.');
@@ -3172,7 +3174,6 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
     // question, as the plain park it replaced let it through: it reaches the wire, the routed request
     // gets an outcome, and the parent's done is no longer blocked by the question.
     it(`${runner} U25 an automatic message supersedes a worker's fallback question`, async () => {
-      process.env.CEZ_DELEGATION = '1';
       nativeWire(runner);
       const p = await parent(HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
       await until(() => store.getRun(p.id)?.status === 'waiting');

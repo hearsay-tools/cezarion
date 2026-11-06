@@ -12,7 +12,7 @@ describe('parent discovery and model admission', () => {
   let f: ReturnType<typeof fixture>;
   let catalog: RunnerModelCatalog;
   beforeEach(() => {
-    vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); vi.stubEnv('CODEX_HOME', f.root);
+    f = fixture(); vi.stubEnv('CODEX_HOME', f.root);
     catalog = new RunnerModelCatalog({ adapters: {
       codex: { discover: async () => [{ ...model('gpt-current'), effortLevels: ['low', 'high'] }] },
       claude: { discover: async () => [{ id: 'gpt-retired', label: 'Other', description: '' }] },

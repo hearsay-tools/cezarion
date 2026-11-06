@@ -51,6 +51,17 @@ describe('completion choices in create bodies', () => {
   })
 })
 
+describe('task access in create bodies (hearsay-tools/cezarion#2784)', () => {
+  const input = { task: 'Ship', source: null, runner: 'claude' as const, model: '', images: [] }
+  it('omits default-on access and sends each explicit false', () => {
+    expect(buildCreateRunBody({ ...input, allowWorkers: true, allowMessaging: true })).not.toHaveProperty('allowWorkers')
+    expect(buildCreateRunBody({ ...input, allowWorkers: true, allowMessaging: true })).not.toHaveProperty('allowMessaging')
+    expect(buildCreateRunBody({ ...input, allowWorkers: false, allowMessaging: true })).toMatchObject({ allowWorkers: false })
+    expect(buildCreateRunBody({ ...input, allowWorkers: true, allowMessaging: false })).toMatchObject({ allowMessaging: false })
+    expect(buildAutomationTask({ ...input, allowWorkers: false })).toMatchObject({ allowWorkers: false })
+  })
+})
+
 describe('availableRunners (legacy renderChrome rule)', () => {
   it('offers only auto for Cursor without advertised effort and clears stale effort', () => {
     const options = effortOptionsForModel('cursor', 'model[effort=high]')

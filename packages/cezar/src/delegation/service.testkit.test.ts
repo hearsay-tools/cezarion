@@ -48,7 +48,7 @@ describe('delegation fixture cleanup', () => {
 
 it('refuses directory removal when worker termination returns false', async () => {
   const f = fixture();
-  vi.stubEnv('CEZ_DELEGATION', '1');
+
   await f.service.spawn(f.caller, { task: 'work', baseline: 'HEAD', requestId: randomUUID() });
   // Only the termination boundary is replaced: false is its timeout result,
   // not a resolved proof that deletion is safe. Acceptance and Stop are real.

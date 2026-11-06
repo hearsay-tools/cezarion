@@ -39,7 +39,7 @@ export interface AgentRunSpec {
    *  carries a `bashAllowlist`, so treat it as full shell access in `cwd`, not
    *  a sandboxed allowlist (#430). */
   toolGrant: ToolGrant;
-  /** A governed session (CEZ_DELEGATION=1): turn off native tools that reach another
+  /** A governed session (every root and worker session the delegation listener provisions): turn off native tools that reach another
    * session where a runner keeps them separate from subagent messaging, for this
    * invocation only. Native subagents stay. Adapters map this intent; absent preserves
    * ordinary harness settings. Custom tools and unrestricted shell are not

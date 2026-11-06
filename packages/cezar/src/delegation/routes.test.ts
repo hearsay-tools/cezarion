@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import { WaitDeadlineConflict } from '../ci-wait/errors.ts';
+import { WORKERS_OFF } from './policy.ts';
 import { createDelegationRoutes } from './routes.ts';
 import { fixture, seedWorkerWait } from './service.testkit.ts';
 import { conversationSendResultSchema, conversationInspectResultSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
@@ -25,7 +26,7 @@ import { setRunStatus, seedRuns } from '../runs/run-store.testkit.ts';
 
 describe('authenticated delegation HTTP family', () => {
   let f: ReturnType<typeof fixture>, app: ReturnType<typeof createDelegationRoutes>;
-  beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); app = createDelegationRoutes(f.service, f.credentials); });
+  beforeEach(() => { f = fixture(); app = createDelegationRoutes(f.service, f.credentials); });
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   const request = (path: string, body?: unknown, headers: Record<string, string> = {}, method = body === undefined ? 'GET' : 'POST') => app.request(`http://127.0.0.1${path}`, { method, headers: { host: '127.0.0.1', authorization: `Bearer ${f.token}`, 'content-type': 'application/json', ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   async function spawn() {
@@ -288,9 +289,11 @@ describe('authenticated delegation HTTP family', () => {
     const response = await listener.request(`http://127.0.0.1${path}`, { headers: { authorization: `Bearer ${f.token}`, host: '127.0.0.1' } });
     expect(response.status).toBe(404);
   });
-  it('disables existing credentials immediately', async () => {
-    vi.stubEnv('CEZ_DELEGATION', '0');
-    expect(await (await request('/spawn', {})).json()).toMatchObject({ code: 'unavailable_transport' });
+  it('refuses spawn through an existing credential as soon as the task turns workers off (hearsay-tools/cezarion#2784)', async () => {
+    f.store.updateRun(f.parent.id, { allowWorkers: false });
+    const response = await request('/spawn', { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'incompatible_state', error: WORKERS_OFF });
   });
   it.each([['queued', false], ['done', false], ['review', false], ['failed', false], ['cancelled', false], ['done', true]] as const)('reads a settled current cancellation over HTTP for a %s parent after restart (legacy=%s)', async (status, legacy) => {
     const { workerId } = await spawn(); const waitId = randomUUID();

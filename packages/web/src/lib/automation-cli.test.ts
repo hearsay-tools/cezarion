@@ -73,6 +73,14 @@ describe('cliOf', () => {
     expect(cliOf(scheduleDraft())).not.toMatch(/--archive-when-done|--auto-merge-pr/)
   })
 
+  it('prints task access that is off as --no-workers and --no-messaging (hearsay-tools/cezarion#2784)', () => {
+    expect(cliOf(scheduleDraft())).not.toMatch(/--no-workers|--no-messaging/)
+    const draft = scheduleDraft({ allowWorkers: false, allowMessaging: false })
+    expect(flagExpressible(draft)).toBe(true)
+    expect(cliOf(draft)).toContain(' --no-workers --no-messaging ')
+    expect(cliOf(scheduleDraft({ allowMessaging: false }))).not.toContain('--no-workers')
+  })
+
   it('prints a poll with any-of labels and authors as flags', () => {
     expect(cliOf(pollDraft())).toBe(
       "cez automation add --name 'Review PRs' --on 'pull_request.opened,issue.opened' --every 1h --label 'needs review' --author 'octo cat' --prompt 'Review the diff'",
@@ -159,6 +167,8 @@ describe('Copy as CLI round-trips through a real shell into the cez automation r
     ['a schedule that archives completed tasks', completionDraft(scheduleDraft(), { archiveWhenDone: true }), 'add'],
     ['a poll that merges PRs', completionDraft(pollDraft(), { autoMergePr: true }), 'add'],
     ['a schedule with both completion controls', completionDraft(scheduleDraft(), { archiveWhenDone: true, autoMergePr: true }), 'add'],
+    ['a schedule without workers', scheduleDraft({ allowWorkers: false }), 'add'],
+    ['a poll without workers or messaging', pollDraft({ allowWorkers: false, allowMessaging: false }), 'add'],
     ['a cockpit-made schedule with a description', scheduleDraft({ prompt: HOSTILE, description: "It's `daily`", taskExtra: {} }), 'create'],
   ]
 

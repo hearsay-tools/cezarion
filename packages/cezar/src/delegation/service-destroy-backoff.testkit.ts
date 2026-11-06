@@ -46,6 +46,6 @@ export const destroyOf = (workerId: string) => { const run = f.store.getRun(work
 export const listings = () => vi.mocked(fs.readdirSync).mock.calls.filter(([path]) => path === '/proc').length;
 
 export function useDestroyBackoffFixture() {
-  beforeEach(() => { scopeFixtureProcesses(); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { scopeFixtureProcesses(); f = fixture(); });
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); syncBuiltinESMExports(); vi.unstubAllEnvs(); });
 }

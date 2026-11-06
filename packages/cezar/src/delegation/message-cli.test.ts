@@ -16,7 +16,7 @@ describe('task message command family', () => {
   let env: NodeJS.ProcessEnv;
   let output: ReturnType<typeof vi.spyOn>;
   beforeEach(async () => {
-    vi.stubEnv('CEZ_DELEGATION', '1');
+
     f = fixture();
     transport = await startDelegationTransport(createDelegationApp(createDelegationRoutes(f.service, f.credentials)));
     env = { CEZ_DELEGATION_URL: transport.url, CEZ_DELEGATION_TOKEN: f.token };

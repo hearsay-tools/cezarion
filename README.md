@@ -376,10 +376,10 @@ The moves that make the cockpit worth the browser tab:
   register; the desktop rail switches between them, and **All tasks** shows every
   project's tasks in one table. See
   [Multiple projects, one cockpit](#multiple-projects-one-cockpit).
-- 👥 **Owned workers (opt-in).** With `CEZ_DELEGATION=1`, a task's agent can spawn
-  its own tracked workers — on the same or another runner — message them, and
-  collect their diffs; you still review the result. See
-  [Owned workers](#owned-workers-opt-in).
+- 👥 **Owned workers.** A task's agent can spawn its own tracked workers — on the
+  same or another runner — message them, and collect their diffs; you still review
+  the result. Each task has an **Allow cezar workers** switch, on by default. See
+  [Owned workers](#owned-workers).
 - 📱 **Runs on your coding server, drives from your pocket.** The cockpit is a
   responsive web app streaming over SSE, so the box running Cezarion can be a
   **VPS, cloud, or dedicated server** you never sit in front of. Point a browser
@@ -765,9 +765,18 @@ as a patch. Collect each worker's latest settled revision before finishing. Owne
 keep their ownership, isolation, resource limits and Git cleanup safeguards. There is
 no one-click comparison page, automatic winner selection or automatic loser cleanup.
 
-## Owned workers (opt-in)
+## Owned workers
 
-Start the cockpit or a headless task with `CEZ_DELEGATION=1`. Each eligible parent session receives the absolute bundled Node/CLI invocation and its own environment credentials; no `cez` installation on the agent's PATH, config file, separate daemon, or remembered port is needed. If the private listener cannot start, ordinary tasks keep working without delegation tools. `.env` is never loaded automatically.
+Every task has two settings, both on by default:
+
+- **Allow cezar workers**: the task's agent may start Cezar workers and resume them. Each worker is a separate paid agent session. The worker limits below cap resources, not spending.
+- **Allow task messaging**: the task's agent may list, message and wait on other tasks in this project with `cez message`.
+
+Set them in the new-task form, in the task's header menu at any time, with `cez task start` or `cez run` and `--no-workers` / `--no-messaging`, or in an automation's `task.allowWorkers` / `task.allowMessaging`. A task created before these settings existed counts as on for both. The cockpit and headless `cez run` start one private loopback listener; each eligible session receives the absolute bundled Node/CLI invocation and its own environment credentials. No `cez` installation on the agent's PATH, config file, separate daemon, or remembered port is needed. If the listener cannot start, ordinary tasks keep working without delegation tools.
+
+Turning **Allow cezar workers** off refuses new `spawn` and `--resume` at once, including through a session's existing credential and for a spawn still waiting to be accepted. The task keeps messaging, waiting on, inspecting, collecting, stopping and destroying the workers it already has, and work already accepted finishes. Turning **Allow task messaging** off refuses peer discovery, new peer waits and new peer messages in both directions; a reply to a request accepted earlier still lands, and messages between a task and its own workers are never blocked. A root task with both off, no worker receipt and no open peer request gets no credential; worker sessions, and roots with a worker receipt (also a deleted worker's, so its retained result stays collectable) or an open peer request, keep theirs. Native subagents inside one session are not Cezar workers, and these settings do not change them. These settings are cooperative supervision, not process isolation.
+
+`CEZ_DELEGATION` is retired and has no effect. A caller that set `CEZ_DELEGATION=1` needs no change. A caller that relied on it being unset turns the settings off per task, for example `cez run --no-workers --no-messaging "<task>"`.
 
 The provisioned command has these forms (the session instructions supply the absolute invocation):
 
@@ -826,7 +835,7 @@ Parent completion requires collection of every worker's latest settled execution
 
 Stop requests cancellation; `stopping` does not prove termination. Destroy checkpoints obtainable results, waits up to 30 seconds for proven termination, and removes only verified owned resources. An `incomplete` response lists remaining resources; resolve the cause and retry explicitly. Cleanup order is: collect/integrate desired results, destroy owned resources, explicitly delete child histories through the cockpit/API, then delete parent history. Parent-owned summaries and bounded diff snapshots remain until parent deletion, including after child-history deletion; general artifact bytes are not archived. Branch/path strings and SHAs become historical descriptors after removal, not promises of available Git objects or files. The human cleanup endpoint `POST /api/v1/p/<projectId>/runs/<worker-id>/worker-destroy` stays available when delegation is disabled. The CLI bounds each HTTP request to 45 seconds and rejects endpoint/auth/origin overrides and redirects.
 
-Provisioned root tasks and workers may use native subagents, and each mechanism has its own purpose. Use native subagents for work that needs no separate worktree: research, code reading and focused analysis, for example a subagent that reads the parser and summarizes its error handling. Native subagents need no worker creation, worktree, collection or destruction. Use Cezarion workers for work that needs its own worktree, its own commits or a tracked lifecycle. Workers may use native subagents too, but cannot spawn Cezarion workers. An agent may message its own subagents with its runner's tools; it reaches another Cezarion task only through `cez message`. Where a runner's native tool for reaching another session is separate from subagent messaging, a per-run adapter control turns it off: Codex's cross-thread message board, and an OpenCode plugin that refuses a `task` call whose `task_id` names a session outside the caller's own session tree. Claude sessions refuse messages from other sessions on every launch. Known limitations: a Claude session Cezarion starts can still list and message Claude sessions that Cezarion did not start, and sessions on other machines; an OpenCode session that an older Cezarion created under delegation keeps its `task` deny on Continue and restart recovery, because OpenCode cannot remove a session permission rule (new OpenCode sessions allow subagents). See [the backend capability table](AGENT_PROTOCOL.md#governed-delegation-controls-d1) for tested versions and exemptions. With delegation disabled or unavailable, ordinary tools/settings stay unchanged. The listener binds to `127.0.0.1`, including hosted cockpit mode. Its credentials authorize only the parent's own workers through that listener. This is cooperative local-agent supervision; same-user unrestricted shell and custom tools are not hard isolation. Workers cannot spawn Cezarion workers or message peers through Cezarion. Review remains a human gate with no automatic acceptance. Never read, echo, forward, or persist the generated token.
+Provisioned root tasks and workers may use native subagents, and each mechanism has its own purpose. Use native subagents for work that needs no separate worktree: research, code reading and focused analysis, for example a subagent that reads the parser and summarizes its error handling. Native subagents need no worker creation, worktree, collection or destruction. Use Cezarion workers for work that needs its own worktree, its own commits or a tracked lifecycle. Workers may use native subagents too, but cannot spawn Cezarion workers. An agent may message its own subagents with its runner's tools; it reaches another Cezarion task only through `cez message`. Where a runner's native tool for reaching another session is separate from subagent messaging, a per-run adapter control turns it off: Codex's cross-thread message board, and an OpenCode plugin that refuses a `task` call whose `task_id` names a session outside the caller's own session tree. Claude sessions refuse messages from other sessions on every launch. Known limitations: a Claude session Cezarion starts can still list and message Claude sessions that Cezarion did not start, and sessions on other machines; an OpenCode session that an older Cezarion created under delegation keeps its `task` deny on Continue and restart recovery, because OpenCode cannot remove a session permission rule (new OpenCode sessions allow subagents). See [the backend capability table](AGENT_PROTOCOL.md#governed-delegation-controls-d1) for tested versions and exemptions. When the listener is unavailable, ordinary tools/settings stay unchanged. The listener binds to `127.0.0.1`, including hosted cockpit mode. Its session credentials authorize only what that session may do: a root manages its own workers and messages peer roots in the same project, subject to the task's settings and relationship checks; a worker addresses only its parent. This is cooperative local-agent supervision; same-user unrestricted shell and custom tools are not hard isolation. Workers cannot spawn Cezarion workers or message peers through Cezarion. Review remains a human gate with no automatic acceptance. Never read, echo, forward, or persist the generated token.
 
 ## From the terminal: `cez task` and `cez message`
 
@@ -848,7 +857,7 @@ An explicit `--url` wins over `CEZ_URL`; `--repo` selects the checkout to discov
 
 `cez task send` is human input. It can answer a pending human question. It refuses
 inside a task (`CEZ_TASK_ID` is set). Agents use `cez message` for task messages,
-including peer and parent/worker conversations; see [Owned workers](#owned-workers-opt-in).
+including peer and parent/worker conversations; see [Owned workers](#owned-workers).
 
 ```bash
 id=$(cez task start --task-file - <<'EOF' | jq -r .id
@@ -1159,7 +1168,7 @@ Useful environment variables:
 
 | Var | Effect |
 |---|---|
-| `CEZ_DELEGATION=1` | Enable owned workers and the private loopback listener for this controller. Off by default; works with the cockpit and headless `cez run`. When disabled, terminal cleanup checkpoints skip conversation/wait history reconciliation; explicit recovery and cleanup termination safeguards remain active. Session instructions and credentials are automatic. |
+| `CEZ_DELEGATION` | Retired (hearsay-tools/cezarion#2784); has no effect. Workers and task messaging are per-task settings, both on by default. See [Owned workers](#owned-workers). |
 | `CEZ_DELEGATION_URL`, `CEZ_DELEGATION_TOKEN` | Internal generated session values; do not configure or copy them. Tokens rotate on Continue/restart and are revoked when the session/controller closes. |
 | `CEZ_UPDATE_CHANNEL` | Managed desktop channel: stable (default), nightly, or development. The version dialog's saved choice takes precedence. |
 | `CEZ_DESKTOP_ENTRY` / `CEZ_DESKTOP_CWD` / `CEZ_DESKTOP_NODE` | Desktop development overrides for the built entry, boot directory and Node executable; otherwise discovered automatically. |
@@ -1358,7 +1367,7 @@ steps:
 ```
 
 Owned workers can compare approaches in separate worktrees. Each worker has its own
-runner and model selection; see [Owned workers](#owned-workers-opt-in).
+runner and model selection; see [Owned workers](#owned-workers).
 
 **Models come from your own machine.** For Claude, Codex, OpenCode, and Pi, the model picker
 is not a list Cezarion ships — it asks the installed CLI what it can actually run

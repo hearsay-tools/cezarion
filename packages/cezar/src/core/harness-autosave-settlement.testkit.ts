@@ -219,7 +219,7 @@ export function describeAutosaveSettlement(outcome: 'failed' | 'cancelled' | 'su
       for (const continuation of continuations) {
           const row = (outcome === 'failed' ? 61 : outcome === 'cancelled' ? 63 : 65) + Number(continuation);
           it(`${backend} R${row} ${continuation ? 'Continue' : 'fresh'} ${outcome} settles with a detached Git holder`, async () => {
-            vi.stubEnv('CEZ_DELEGATION', '1');
+
             const save = worktrees.autosaveCommit;
             // Only the intercepted save gets the stubbed budget. A Continue cell's first
             // Finish/idle close saves through real Git; at 500 ms that save can time out
@@ -321,7 +321,7 @@ export function describeAutosaveChurn(registration = { describe, it }): void {
       for (const continuation of [false, true]) {
         const row = continuation ? 68 : 67;
         it(`${backend} R${row} ${continuation ? 'Continue' : 'fresh'} Finish commits without holding cleanup`, async () => {
-          vi.stubEnv('CEZ_DELEGATION', '1');
+
           const save = worktrees.autosaveCommit;
           const saves: ReturnType<typeof save>[] = [];
           const settled = new Set<ReturnType<typeof save>>();

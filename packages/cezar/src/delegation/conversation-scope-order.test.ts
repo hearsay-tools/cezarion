@@ -7,7 +7,7 @@ import { fixture } from './service.testkit.ts';
 
 describe('reply scope before direction guidance', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { f = fixture(); });
   afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
   function ownReply(provisioned = true): ConversationSendRequest {

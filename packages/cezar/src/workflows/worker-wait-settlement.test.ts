@@ -65,6 +65,8 @@ it('readiness discards cached unsettled observations lacking current private pro
   });
 it('readiness Finish preserves pending parent human questions', async () => {
     const p = await parent('mock:cezar-ask'); await until(() => store.getRun(p.id)?.status === 'waiting');
+    // Only a parent with workers keeps its question through Finish (hearsay-tools/cezarion#2784).
+    await worker(p.id);
     expect(manager.finish(p.id)).toBe(false);
     expect(store.getRun(p.id)?.status).toBe('waiting');
     expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);

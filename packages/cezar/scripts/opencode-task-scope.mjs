@@ -1,4 +1,4 @@
-// OpenCode plugin that cezar loads into governed sessions (CEZ_DELEGATION=1) through
+// OpenCode plugin that cezar loads into governed sessions (every session the delegation listener provisions) through
 // OPENCODE_CONFIG_CONTENT (hearsay-tools/cezarion#2279). OpenCode's `task` tool starts the
 // session's own subagents, and with `task_id` it resumes any session by ID without a parent
 // check, which can reach another cezar task's session. This hook keeps `task` for the

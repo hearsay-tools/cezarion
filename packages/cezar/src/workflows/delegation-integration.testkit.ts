@@ -89,7 +89,7 @@ export function registerDelegationIntegrationGroup(group: 'reviewed-integration'
     const wire = join(root, 'agent.mjs');
     writeFileSync(wire, `#!${process.execPath}\nimport { runWire } from ${JSON.stringify(new URL('./__fixtures__/delegation-wire.mjs', import.meta.url).href)};\nrunWire(${JSON.stringify(control)});\n`, { mode: 0o755 });
     const claudeHome = join(root, 'claude'); const codexHome = join(root, 'codex'); mkdirSync(claudeHome); mkdirSync(codexHome);
-    for (const [name, value] of Object.entries({ CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '0', CEZ_DELEGATION: '1', CEZ_AUTONAME: '0', CEZ_REVIEW_GATE: '1',
+    for (const [name, value] of Object.entries({ CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '0', CEZ_AUTONAME: '0', CEZ_REVIEW_GATE: '1',
       CEZ_CLAUDE_BIN: wire, CEZ_CODEX_BIN: wire, CLAUDE_CONFIG_DIR: claudeHome, CODEX_HOME: codexHome })) vi.stubEnv(name, value);
     store = RunStore.open(join(repo, '.ai/cezar'), { keepLive: true });
     manager = createFixtureManager(store, repo, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 3 } }) }); track();

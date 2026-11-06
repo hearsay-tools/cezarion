@@ -458,7 +458,7 @@ async function agentEnvForStep(
   return {
     env,
     profileId: resolved.profile.id,
-    accountBinding: process.env.CEZ_DELEGATION === '1' ? captureWorkerAccount(resolved.profile, buildChildEnv({ backend, extraEnv: env })) : undefined,
+    accountBinding: captureWorkerAccount(resolved.profile, buildChildEnv({ backend, extraEnv: env })),
   };
 }
 
@@ -528,6 +528,9 @@ function acceptedRunFields(input: StartRunInput, workflow: WorkflowDef, effectiv
       autonomous: input.autonomous === true,
       archiveWhenDone: input.archiveWhenDone,
       autoMergePr: input.autoMergePr,
+      // Stored explicitly, so a later change of the default never widens an existing task.
+      allowWorkers: input.allowWorkers !== false,
+      allowMessaging: input.allowMessaging !== false,
       notify: input.notify === true,
       // Persist the explicit opt-out so queued-run restart recovery and the
       // session Git routes can distinguish it from a removed isolated worktree.

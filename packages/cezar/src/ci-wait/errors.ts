@@ -1,4 +1,5 @@
 import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type AskErrorCode, type DoneErrorCode, type WaitErrorCode, type Wait } from '@open-mercato/cezar-contract/waits';
+import { MESSAGING_OFF } from '../delegation/policy.ts';
 import { ASK_LIMITS } from '@open-mercato/cezar-contract/ask-schema';
 import type { CiWaitErrorCode, PreviewResultCode, PreviewServeResult } from '@open-mercato/cezar-contract';
 import type { ScheduledTaskRefusalCode } from '@open-mercato/cezar-contract/scheduled-tasks';
@@ -56,6 +57,7 @@ const waitMessages: Partial<Record<WaitErrorCode, string>> = {
   timers_disabled: 'Automatic re-checks are turned off for this workspace (Park until resumed). Do not register a timer; end your turn and the user resumes the task.',
   wake_budget_spent: 'This run spent its automatic wakes. Do not register another timer; call cezar_ask if you need the user, or end your turn.',
   capacity: 'Cezar cannot open another wait now: this run has the maximum open waits, or the CI watcher is full. Cancel a wait you no longer need with cezar_cancel_wait, or retry later.',
+  messaging_off: MESSAGING_OFF,
   denied_scope: 'This run cannot wait on those workers or requests: wait only on workers you own (a parent with the wait permission), or on requests you sent that are still accepted.',
   // hearsay-tools/cezarion#1446: process waits.
   exit_file_outside: 'exit_file must be inside the task worktree or the Cezar temp directory that $TMPDIR names, with no symlink leading out. If $TMPDIR is not under .ai/cezar or a cez-agent directory, use a git-ignored path in the worktree. For a command that writes its own status file somewhere else, leave exit_file out: wait on pid alone, and read that file after the wake.',

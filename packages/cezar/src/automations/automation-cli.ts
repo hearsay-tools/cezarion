@@ -49,7 +49,7 @@ One JSON object per invocation; exit 0 ok, 1 check failed, 2 refused or no cockp
                     | --at <YYYY-MM-DDTHH:MM> | --in <30m|6h|7d>) [--tz <zone>] [--latest-start <6h>]
       [--prompt <text> | --prompt-file <path>] [--workflow <w>] [--runner <id>] [--model <m>]
       [--autonomous | --no-autonomous] [--label <l>]... [--author <a>]... [--changed-label <l>]... [--include-existing] [--enable]
-      [--archive-when-done] [--auto-merge-pr]
+      [--archive-when-done] [--auto-merge-pr] [--no-workers] [--no-messaging]
                                            the same from flags. --cron takes "M H * * *" (daily), "M H * * 1-5"
                                            (weekdays), "M H * * D" (0 or 7 = Sunday) or "0 */N * * *"
                                            (N in 1,2,3,4,6,8,12); anything else needs the JSON form.
@@ -90,6 +90,7 @@ const ADD_FLAGS = {
   workflow: { type: 'string' }, runner: { type: 'string' }, model: { type: 'string' },
   autonomous: { type: 'boolean' }, 'no-autonomous': { type: 'boolean' },
   'archive-when-done': { type: 'boolean' }, 'auto-merge-pr': { type: 'boolean' },
+  'no-workers': { type: 'boolean' }, 'no-messaging': { type: 'boolean' },
   label: { type: 'string', multiple: true }, author: { type: 'string', multiple: true },
   'changed-label': { type: 'string', multiple: true },
   'include-existing': { type: 'boolean' },
@@ -133,7 +134,7 @@ export function parseEvery(value: string): number {
 export interface AddFlags {
   name?: string; cron?: string; on?: string; every?: string;
   workflow?: string; runner?: string; model?: string; autonomous?: boolean; 'no-autonomous'?: boolean;
-  'archive-when-done'?: boolean; 'auto-merge-pr'?: boolean;
+  'archive-when-done'?: boolean; 'auto-merge-pr'?: boolean; 'no-workers'?: boolean; 'no-messaging'?: boolean;
   label?: string[]; author?: string[]; 'changed-label'?: string[]; 'include-existing'?: boolean; enable?: boolean;
   at?: string; in?: string; tz?: string; 'latest-start'?: string;
 }
@@ -167,6 +168,19 @@ function onceFromFlags(values: AddFlags, timeZone: string, now: number): Automat
  * The `add` flags as the `create` body they stand for. Anything they cannot say is exit 64.
  * `timeZone` is the zone `--at`/`--in` resolve in when `--tz` is absent (the cockpit's own).
  */
+/** The launched task's keys; an absent flag leaves the key out, so the task default applies. */
+function taskFromAddFlags(values: AddFlags, prompt: string): CreateAutomationInput['task'] {
+  const task: CreateAutomationInput['task'] = { prompt, worktree: true, autonomous: !values['no-autonomous'] };
+  if (values['archive-when-done']) task.archiveWhenDone = true;
+  if (values['auto-merge-pr']) task.autoMergePr = true;
+  if (values['no-workers']) task.allowWorkers = false;
+  if (values['no-messaging']) task.allowMessaging = false;
+  if (values.workflow) task.workflow = values.workflow;
+  if (values.runner) task.runner = values.runner as CreateAutomationInput['task']['runner'];
+  if (values.model) task.model = values.model;
+  return task;
+}
+
 export function bodyFromAddFlags(values: AddFlags, prompt: string, once: { timeZone?: string; now?: number } = {}): CreateAutomationInput {
   if (!values.name?.trim()) usageError('--name is required');
   if (!prompt.trim()) usageError('--prompt (or --prompt-file) is required');
@@ -176,12 +190,7 @@ export function bodyFromAddFlags(values: AddFlags, prompt: string, once: { timeZ
   if (values.cron && values['include-existing']) usageError('--include-existing applies only to a GitHub poll');
   if (!isOnce && !values.cron && !values.on) usageError('give --cron "<M H * * *>" for a schedule, --at or --in for a one-time schedule, or --on <event> for a GitHub poll');
   if (values.autonomous && values['no-autonomous']) usageError('give --autonomous OR --no-autonomous, not both');
-  const task: CreateAutomationInput['task'] = { prompt, worktree: true, autonomous: !values['no-autonomous'] };
-  if (values['archive-when-done']) task.archiveWhenDone = true;
-  if (values['auto-merge-pr']) task.autoMergePr = true;
-  if (values.workflow) task.workflow = values.workflow;
-  if (values.runner) task.runner = values.runner as CreateAutomationInput['task']['runner'];
-  if (values.model) task.model = values.model;
+  const task = taskFromAddFlags(values, prompt);
   let body: CreateAutomationInput;
   if (isOnce) {
     const schedule = onceFromFlags(values, values.tz ?? once.timeZone ?? 'UTC', once.now ?? Date.now());

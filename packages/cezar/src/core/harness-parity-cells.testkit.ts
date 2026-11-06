@@ -611,7 +611,6 @@ const CONTROL_CRITERIA = [
   // #961: hook items never move run state, mid-turn or after the park.
   { id: 'R77', scenario: 'hook-after-park' },
   { id: 'R20', scenario: 'baseline' },
-  { id: 'R21', scenario: 'baseline' },
   { id: 'R22', scenario: 'baseline' },
   { id: 'R23', scenario: 'ask' },
   // harness-autosave.test.ts drives both cleanup paths with native runner wires.
@@ -2610,31 +2609,22 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
   // Every adapter supplies baseline; there is no wire exemption for this path.
   describeRunners('cleanup', 'harness parity — terminal cleanup reconciliation', () => {
     for (const backend of runners) {
-      for (const enabled of [true, false]) {
-        const criterion = enabled ? 'R20' : 'R21';
-        it(`${backend} ${criterion} cleanup checkpoints ${enabled ? 'read only their family' : 'skip reconciliation with delegation disabled'}`, async () => {
-          vi.stubEnv('CEZ_DELEGATION', '1');
+      it(`${backend} R20 cleanup checkpoints read only their family`, async () => {
+        await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, repoRoot }) => {
+          manager.enqueueOwnedRun(runId);
+          await waitFor(() => store.getRun(runId)?.status === 'waiting');
+          expect(manager.finish(runId)).toBe(true);
+          await waitFor(() => !manager.isActive(runId) && store.readWorkerExecution(runId)?.phase === 'complete');
+          const unrelated = seedSettledFamily(store, repoRoot);
+          const reads = vi.spyOn(store, 'readEvents');
           try {
-            await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, repoRoot }) => {
-              manager.enqueueOwnedRun(runId);
-              await waitFor(() => store.getRun(runId)?.status === 'waiting');
-              if (!enabled) vi.stubEnv('CEZ_DELEGATION', '0');
-              expect(manager.finish(runId)).toBe(true);
-              await waitFor(() => !manager.isActive(runId) && store.readWorkerExecution(runId)?.phase === 'complete');
-              const unrelated = seedSettledFamily(store, repoRoot);
-              const reads = vi.spyOn(store, 'readEvents');
-              const reconcile = vi.spyOn(manager, 'reconcileWorkerWaits');
-              try {
-                cleanupCheckpoint(store, runId);
-                expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
-                expect(reads.mock.calls.map(([id]) => id)).not.toContain(unrelated.parentId);
-                expect(reads.mock.calls.map(([id]) => id)).not.toContain(unrelated.workerId);
-                if (!enabled) { expect(reconcile).not.toHaveBeenCalled(); expect(reads).not.toHaveBeenCalled(); }
-              } finally { reads.mockRestore(); reconcile.mockRestore(); }
-            });
-          } finally { vi.unstubAllEnvs(); }
-        }, 60_000);
-      }
+            cleanupCheckpoint(store, runId);
+            expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
+            expect(reads.mock.calls.map(([id]) => id)).not.toContain(unrelated.parentId);
+            expect(reads.mock.calls.map(([id]) => id)).not.toContain(unrelated.workerId);
+          } finally { reads.mockRestore(); }
+        });
+      }, 60_000);
     }
   });
 

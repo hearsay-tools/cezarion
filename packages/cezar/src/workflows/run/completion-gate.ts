@@ -52,7 +52,9 @@ export function monitorsLiveWorkers(context: RunModuleContext, host: CompletionG
 
 export function delegationFinishBlockedReason(context: RunModuleContext, host: CompletionGateHost, runId: string): string | undefined {
   const parent = context.store.getRun(runId);
-  if (parent?.delegation?.role !== 'root') return undefined;
+  // A root without workers finishes like any task (hearsay-tools/cezarion#2784): every task is a root
+  // once its first session is provisioned, and these rules protect a family, not a lone task.
+  if (parent?.delegation?.role !== 'root' || parent.delegation.receipts.length === 0) return undefined;
   if (hasPendingHumanAsk(runId, id => host.pendingHumanAskSeq(id)) || host.active.get(runId)?.boundary.pendingHumanAsk) return 'Answer the pending human question before finishing.';
   const questions = host.unansweredQuestions(runId);
   if (questions.length) return `Answer your workers' questions before finishing: ${questions.map(q => q.workerId).join(', ')}`;

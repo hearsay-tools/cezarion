@@ -63,7 +63,7 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     await f.releaseAdmission();
   };
   beforeEach(() => {
-    vi.stubEnv('CEZ_DELEGATION', '1'); vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
+    vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     f = fixture();
     tools.clear();
     const handlers = f.manager.cezarToolHandlers.bind(f.manager);

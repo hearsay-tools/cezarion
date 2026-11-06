@@ -26,8 +26,8 @@ New state may be **written**, never **required**: `.ai/cezar/`, `~/.cache/cez/`,
 Practical rules:
 
 - When a feature seems to need configuration, the design is wrong. Discover it, or default it.
-- Features that widen exposure or cost use opt-in `CEZ_*` flags. Automations are
-  opt-out; see [automations](docs/areas/automations.md).
+- Features that widen exposure or cost use opt-in `CEZ_*` flags. [Automations](docs/areas/automations.md)
+  and [workers](docs/adr/0058-task-workers.md) are opt-out.
 - A missing dependency, an absent peer, a read-only home: degrade to a smaller working cockpit, never fail the boot.
 - Prefer a proxy-free, daemon-free mechanism when one exists — and when it doesn't, keep the mechanism invisible: no process to manage, no port to remember, no file to edit.
 - Never trade a working default for a knob.

@@ -20,7 +20,7 @@ import { projectConversationEvents } from './conversations.ts';
 // 2026-10-27-task-communication-protocol § 2, § 4, § 5 and § 13.
 describe('peer conversations', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { f = fixture(); });
   afterEach(async () => {
     for (const run of f.store.listRuns()) if (f.manager.isActive(run.id)) f.manager.cancel(run.id);
     await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs();

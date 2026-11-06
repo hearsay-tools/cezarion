@@ -2016,7 +2016,7 @@ export class RunStore extends EventEmitter {
     return run?.clientRequestId === clientRequestId ? run : undefined;
   }
 
-  createRun(input: {
+  createRun(input: Pick<RunRecord, 'allowWorkers' | 'allowMessaging'> & {
     title: string;
     systemPrompt?: string | undefined;
     workflowDef?: z.infer<typeof workflowDefSchema>;
@@ -2075,7 +2075,7 @@ export class RunStore extends EventEmitter {
       agentProfile: input.agentProfile,
       autonomous: input.autonomous,
       archiveWhenDone: input.archiveWhenDone,
-      autoMergePr: input.autoMergePr,
+      autoMergePr: input.autoMergePr, allowWorkers: input.allowWorkers, allowMessaging: input.allowMessaging,
       ...(input.notify ? { notify: true } : {}),
       worktree: input.worktree,
       groupId: input.groupId,
@@ -2689,14 +2689,14 @@ export class RunStore extends EventEmitter {
     return moved;
   }
 
-  /** A write that is not a run exit. It commits at once when it changes handoff records or a
-   *  completion option, else the next save writes it. A status in the patch, which only test
+  /** A write that is not a run exit. It commits at once when it changes handoff records, a
+   *  completion option or task access, else the next save writes it. A status in the patch, which only test
    *  fixtures still write, takes the exit's record rule (`doneCommits`). */
   updateRun(id: string, patch: RunPatch): RunRecord | undefined {
     const run = this.record(id);
     if (!run) return undefined;
     const committed = (patch.status === 'done' && doneCommits(run)) || patch.handoffRecords !== undefined ||
-      patch.archiveWhenDone !== undefined || patch.autoMergePr !== undefined;
+      [patch.archiveWhenDone, patch.autoMergePr, patch.allowWorkers, patch.allowMessaging].some(value => value !== undefined);
     return this.writeRun(id, run, patch, committed ? 'committed' : 'debounced');
   }
 

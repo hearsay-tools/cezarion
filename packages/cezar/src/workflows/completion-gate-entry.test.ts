@@ -302,6 +302,8 @@ describe('completion refusal through a live runner', () => {
   it('parks the step and releases capacity for a pending human question', async () => {
     const id = await start();
     expect(await handlers.finishTurn({}, new AbortController().signal)).toMatchObject({ ok: true });
+    // The question holds completion only for a root with workers (hearsay-tools/cezarion#2784).
+    f.store.commitDelegation([{ id, delegation: { role: 'root', permissions: ['wait'], receipts: [{ requestId: randomUUID(), workerId: randomUUID(), requestHash: 'b'.repeat(64) }] } }]);
     emitUi({ type: 'ask.requested', requestId: randomUUID(), context: 'Choose a path.',
       questions: [{ header: 'Choice', question: 'Which path?' }] });
     await f.store.factsWarmIdle();

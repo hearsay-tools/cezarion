@@ -63,13 +63,21 @@ describe('authoritative finishability (#449)', () => {
     }
   });
 
-  it.each([false, true])('pending human ask, delegation root=%s: the verdict agrees with POST', async isRoot => {
-    const p = isRoot ? await parent('mock:cezar-ask') : manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:cezar-ask', runner: 'claude' });
+  // hearsay-tools/cezarion#2784: only a root with workers keeps its pending question through Finish;
+  // every task is a root once provisioned, and a lone task finishes as before.
+  it.each(['no record', 'root without workers', 'root with a worker'] as const)('pending human ask, %s: the verdict agrees with POST', async shape => {
+    const p = shape === 'no record' ? manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:cezar-ask', runner: 'claude' }) : await parent('mock:cezar-ask');
     await until(() => hasPendingAsk(store, p.id) === true);
+    if (shape === 'root with a worker') await worker(p.id);
+    const blocked = shape === 'root with a worker';
     const verdict = (await detail(p.id)).finishBlocked;
-    if (isRoot) expect(verdict).toMatch(/pending human question/);
+    if (blocked) expect(verdict).toMatch(/pending human question/);
     else expect(verdict).toBeNull();
-    expect((await apiRequest(app(), `/api/v1/runs/${p.id}/finish`, { method: 'POST' })).status).toBe(isRoot ? 409 : 200);
+    expect((await apiRequest(app(), `/api/v1/runs/${p.id}/finish`, { method: 'POST' })).status).toBe(blocked ? 409 : 200);
+    if (blocked) return;
+    // The accepted Finish settles the task and closes its question, root or not.
+    await until(() => ['done', 'review'].includes(store.getRun(p.id)?.status ?? ''));
+    expect(hasPendingAsk(store, p.id)).toBe(false);
   });
 
   it.each(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled'] as const)(

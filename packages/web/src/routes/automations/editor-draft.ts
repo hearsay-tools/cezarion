@@ -36,12 +36,15 @@ export interface AutomationDraft {
   autonomous: boolean
   archiveWhenDone: boolean
   autoMergePr: boolean
+  /** Task access (hearsay-tools/cezarion#2784): an absent key is on. */
+  allowWorkers: boolean
+  allowMessaging: boolean
   /** The state the user wants after saving. */
   enabled: boolean
   retiredVariants: boolean
   /** Task keys the editor has no control for (effort, a system prompt …), carried
    *  through an edit untouched. */
-  taskExtra: Omit<TaskInput, 'prompt' | 'workflow' | 'runner' | 'model' | 'autonomous' | 'archiveWhenDone' | 'autoMergePr'>
+  taskExtra: Omit<TaskInput, 'prompt' | 'workflow' | 'runner' | 'model' | 'autonomous' | 'archiveWhenDone' | 'autoMergePr' | 'allowWorkers' | 'allowMessaging'>
 }
 
 /** What `fromDefinition` reads: a stored definition, or the create body built from a draft. */
@@ -59,7 +62,7 @@ type DraftSource = Partial<{
 }>
 
 export function fromDefinition(source: DraftSource = {}): AutomationDraft {
-  const { prompt, workflow, runner, model, autonomous, archiveWhenDone, autoMergePr, variants, ...taskExtra } = source.task ?? { prompt: '' }
+  const { prompt, workflow, runner, model, autonomous, archiveWhenDone, autoMergePr, allowWorkers, allowMessaging, variants, ...taskExtra } = source.task ?? { prompt: '' }
   const fresh = source.task === undefined
   return {
     retiredVariants: variants !== undefined && variants !== 1,
@@ -78,6 +81,8 @@ export function fromDefinition(source: DraftSource = {}): AutomationDraft {
     autonomous: autonomous ?? true,
     archiveWhenDone: archiveWhenDone ?? false,
     autoMergePr: autoMergePr ?? false,
+    allowWorkers: allowWorkers !== false,
+    allowMessaging: allowMessaging !== false,
     enabled: source.enabled ?? source.enable ?? false,
     taskExtra,
   }
@@ -111,6 +116,8 @@ function taskBody(draft: AutomationDraft): TaskInput {
     autonomous: draft.autonomous,
     ...(draft.archiveWhenDone ? { archiveWhenDone: true } : {}),
     ...(draft.autoMergePr ? { autoMergePr: true } : {}),
+    ...(draft.allowWorkers ? {} : { allowWorkers: false }),
+    ...(draft.allowMessaging ? {} : { allowMessaging: false }),
   }
 }
 
@@ -134,7 +141,13 @@ export function toCreateBody(draft: AutomationDraft): CreateAutomationInput {
 export function toUpdateBody(draft: AutomationDraft, revision: number): UpdateAutomationInput {
   return {
     ...commonBody(draft),
-    task: { ...taskBody(draft), archiveWhenDone: draft.archiveWhenDone, autoMergePr: draft.autoMergePr },
+    task: {
+      ...taskBody(draft),
+      archiveWhenDone: draft.archiveWhenDone,
+      autoMergePr: draft.autoMergePr,
+      allowWorkers: draft.allowWorkers,
+      allowMessaging: draft.allowMessaging,
+    },
     enabled: draft.enabled,
     expectedRevision: revision,
   }

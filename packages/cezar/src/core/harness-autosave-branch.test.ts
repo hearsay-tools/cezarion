@@ -31,7 +31,7 @@ describe('harness parity — autosave on an agent-checked-out branch (#1004)', (
   for (const backend of RUNNER_IDS) {
     for (const continuation of [false, true]) {
       it(`${backend} ${continuation ? 'R79 continuation turn end' : 'R78 initial run finalize'} leaves work on another branch uncommitted and reports it`, async () => {
-        vi.stubEnv('CEZ_DELEGATION', '1');
+
         try {
           await withOwnedInputRun(backend, 'baseline', async ({ repoRoot, store, manager, runId }) => {
             const dataDir = join(repoRoot, '.ai/cezar');
@@ -81,7 +81,7 @@ describe('harness parity — autosave on an agent-checked-out branch (#1004)', (
     // Continue's turn-end flush finds a clean tree and reports nothing; the timer's own
     // coalesced handoff line is what a resumed session reads.
     it(`${backend} R79 continuation periodic commit followed by a clean turn end is reported`, async () => {
-      vi.stubEnv('CEZ_DELEGATION', '1');
+
       vi.stubEnv('CEZ_AUTOSAVE', '1');
       const intervals = vi.spyOn(globalThis, 'setInterval');
       try {

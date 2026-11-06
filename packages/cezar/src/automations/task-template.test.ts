@@ -92,7 +92,8 @@ describe('automation task templates', () => {
     // These queued tasks exercise saved options, without invoking the title model.
     vi.stubEnv('CEZ_AUTONAME', '0');
     try {
-      const choices = [{}, { archiveWhenDone: true }, { autoMergePr: true }, { archiveWhenDone: true, autoMergePr: true }, { archiveWhenDone: false, autoMergePr: false }];
+      const choices: Array<{ archiveWhenDone?: boolean; autoMergePr?: boolean; allowWorkers?: boolean; allowMessaging?: boolean }> = [{}, { archiveWhenDone: true }, { autoMergePr: true }, { archiveWhenDone: true, autoMergePr: true }, { archiveWhenDone: false, autoMergePr: false },
+        { allowWorkers: false }, { allowMessaging: false }];
       for (const [index, completion] of choices.entries()) {
         const receiptId = `completion-${index}`;
         const task = { variants, ...completion };
@@ -116,6 +117,8 @@ describe('automation task templates', () => {
         for (const run of runs) {
           expect(run.archiveWhenDone).toBe(completion.archiveWhenDone);
           expect(run.autoMergePr).toBe(completion.autoMergePr);
+          // hearsay-tools/cezarion#2784: an omitted switch launches on.
+          expect(run).toMatchObject({ allowWorkers: completion.allowWorkers ?? true, allowMessaging: completion.allowMessaging ?? true });
         }
       }
     } finally {

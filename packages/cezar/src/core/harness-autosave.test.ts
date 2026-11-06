@@ -19,7 +19,7 @@ describe('harness parity — autosave cleanup (#495)', () => {
   for (const backend of RUNNER_IDS) {
     for (const continuation of [false, true]) {
       it(`${backend} ${continuation ? 'R25 continuation' : 'R24 initial'} retains reuse guard until Git termination`, async () => {
-        vi.stubEnv('CEZ_DELEGATION', '1');
+
         const save = worktrees.autosaveCommit;
         const saves: Promise<unknown>[] = [];
         // The stubbed 700 ms budget is for the intercepted Git below, not for the real

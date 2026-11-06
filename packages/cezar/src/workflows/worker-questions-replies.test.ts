@@ -57,7 +57,6 @@ it('progress and follow-ups never answer a pending worker question', async () =>
 // hearsay-tools/cezarion#1235: the worker's question reaches the parent beside the parent's own
   // pending question, which stays the human's to answer.
   it('delivers a worker question beside the parent\'s own pending question, which stays answerable', async () => {
-    process.env.CEZ_DELEGATION = '1';
     const p = await steeringParent('mock:cezar-ask'); await until(() => eventsOf(p.id, 'ask.requested').length === 1 && store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'worker-question-routed').length === 1);

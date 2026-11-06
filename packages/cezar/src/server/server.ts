@@ -3485,12 +3485,9 @@ export function createApp(deps: ServerDeps) {
           titleOrigin: 'user',
         });
       }
-      if (parsed.data.archiveWhenDone !== undefined || parsed.data.autoMergePr !== undefined) {
-        store.updateRun(id, {
-          ...(parsed.data.archiveWhenDone === undefined ? {} : { archiveWhenDone: parsed.data.archiveWhenDone }),
-          ...(parsed.data.autoMergePr === undefined ? {} : { autoMergePr: parsed.data.autoMergePr }),
-        });
-      }
+      // Completion controls and task access (hearsay-tools/cezarion#2784) change at any status.
+      const { title: _title, task: _task, ...options } = parsed.data;
+      if (Object.values(options).some(value => value !== undefined)) store.updateRun(id, options);
       return c.json(store.getRun(id));
     })
 

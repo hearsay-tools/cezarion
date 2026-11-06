@@ -178,7 +178,7 @@ it('the receipt setup contract propagates recordProcess failure before marking p
 });
 
 it.each(['fresh', 'continuation'] as const)('%s keeps a worker session live when its process record write fails', async mode => {
-  vi.stubEnv('CEZ_DELEGATION', '1');
+
   const owned = ownedFixture();
   let runner = controlledRunner();
   Object.defineProperty(runner.session, 'pid', { value: 12345 });
@@ -215,7 +215,7 @@ it.each(['fresh', 'continuation'] as const)('%s keeps a worker session live when
 });
 
 it.each(['fresh', 'continuation'] as const)('%s replaces a changed PID before recording the worker process', async mode => {
-  vi.stubEnv('CEZ_DELEGATION', '1');
+
   const owned = ownedFixture();
   let runner = controlledRunner();
   const firstSetup = observePrepared(runner.session);

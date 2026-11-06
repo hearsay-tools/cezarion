@@ -16,7 +16,7 @@ function unused<T extends object>(name: string, values: Partial<T> = {}): T {
 
 describe('unanswered worker question completion guidance', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { f = fixture(); });
   afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
   it.each([1, 100])('teaches usable message commands for %i questions without a live session', count => {

@@ -678,7 +678,7 @@ it('P6-17 P6-33 pump keeps a runnerless recovered task behind the current defaul
 });
 
 it('P6-35 Continue worker identity wins over a conflicting recorded account', async () => {
-  vi.stubEnv('CEZ_DELEGATION', '1');
+
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'accepted', steps: [] });
