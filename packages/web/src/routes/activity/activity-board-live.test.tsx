@@ -86,4 +86,31 @@ describe('the live board', () => {
     live.rerender(at(1_000, { tasks: [A, C] }))
     expect(column()).toEqual(['a', 'ghost:b', 'c'])
   })
+
+  it('measures the lines again when FLIP settles, so a line never stays where a card was mid-flight', () => {
+    const boxes: Record<string, Box> = { a: { x: 0, y: 0, w: 300, h: 120 }, b: { x: 396, y: 0, w: 300, h: 120 }, c: { x: 792, y: 0, w: 300, h: 120 }, d: { x: 0, y: 200, w: 300, h: 120 } }
+    placeBoxes('data-activity-card', boxes)
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0)
+      return 1
+    })
+    const peer = request({ senderRunId: 'd', recipientRunId: 'b' })
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1092)
+    const view = render(<MemoryRouter><ActivityBoard project={project({ tasks: [A, B, C, D], requests: [peer] })} now={NOW} watchingSince={iso(-60_000)} motion={EMPTY_MOTION} /></MemoryRouter>)
+    const start = () => samplePath(document.querySelector(`path[data-request="${peer.requestId}"]`)?.getAttribute('d') ?? '')[0]
+    expect(start()).toEqual({ x: 300, y: 222 })
+
+    // A leaves: D moves up into its place, and FLIP plays it from where it was.
+    boxes.d!.y = 0
+    view.rerender(<MemoryRouter><ActivityBoard project={project({ tasks: [B, C, D], requests: [peer] })} now={NOW} watchingSince={iso(-60_000)} motion={EMPTY_MOTION} /></MemoryRouter>)
+    expect(animations).toHaveLength(1)
+    // A measure taken mid-flight reads the transformed card.
+    boxes.d!.y = 120
+    act(() => { window.dispatchEvent(new Event('scroll')) })
+    expect(start()).toEqual({ x: 300, y: 142 })
+    // The transform ends, which no resize reports; the settled layout is measured again.
+    boxes.d!.y = 0
+    act(() => { animations[0]!.finish() })
+    expect(start()).toEqual({ x: 300, y: 22 })
+  })
 })

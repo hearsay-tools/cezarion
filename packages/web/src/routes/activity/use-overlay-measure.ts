@@ -1,13 +1,16 @@
 import * as React from 'react'
 
 import { scrollParents } from './line-viewport'
+import { LAYOUT_SETTLED } from './use-flip'
 
 /**
  * Measure line shapes from a laid-out host: the overlay's parent element. It measures once after
  * layout, then again when the host or one of its `observed` elements changes size
  * (`ResizeObserver`), never on a frame loop (spec 2026-11-05-live-activity-view, "Performance").
  * With `scroll`, it also measures again when the host's scrolling parents or the window scroll or
- * resize, at most once a frame, for lines that follow what is on screen ("Many lines").
+ * resize, at most once a frame, for lines that follow what is on screen ("Many lines"). It
+ * measures again when the host's FLIP animations settle (`LAYOUT_SETTLED`): a transform causes no
+ * resize, so a measure taken mid-flight would otherwise stay.
  *
  * The host is read through the overlay's own ref: React attaches a parent's ref only after its
  * children's layout effects run, so a ref passed down from the host is still null at the first
@@ -32,12 +35,13 @@ export function useOverlayMeasure<T>(
     }
     run()
     const releaseScroll = scroll ? followScroll(host, run) : undefined
-    if (typeof ResizeObserver === 'undefined') return releaseScroll
-    const observer = new ResizeObserver(run)
-    observer.observe(host)
-    for (const el of host.querySelectorAll(observed)) observer.observe(el)
+    host.addEventListener(LAYOUT_SETTLED, run)
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(run)
+    observer?.observe(host)
+    for (const el of host.querySelectorAll(observed)) observer?.observe(el)
     return () => {
-      observer.disconnect()
+      observer?.disconnect()
+      host.removeEventListener(LAYOUT_SETTLED, run)
       releaseScroll?.()
     }
   }, [overlayRef, measure, same, observed, layoutKey, scroll])

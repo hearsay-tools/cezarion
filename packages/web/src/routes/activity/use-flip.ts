@@ -36,10 +36,16 @@ function places(host: HTMLElement, attribute: string): Map<string, { el: HTMLEle
   return out
 }
 
+/** The event a FLIP host fires when its cards have settled: every FLIP animation finished or was
+ *  cancelled. A line overlay over the host measures again on it, because a transform causes no
+ *  resize and lines measured mid-flight would stay off their cards. */
+export const LAYOUT_SETTLED = 'activity-layout-settled'
+
 /** Play FLIP on the host's `[attribute]` elements whenever `layoutKey` changes; `enabled` false
  *  (reduced motion, a hidden tab) moves them at once. */
 export function useFlip(hostRef: React.RefObject<HTMLElement | null>, attribute: string, layoutKey: string, enabled: boolean) {
   const last = React.useRef<{ key: string; at: Map<string, Place> } | undefined>(undefined)
+  const running = React.useRef(new Set<Animation>())
   React.useLayoutEffect(() => {
     const host = hostRef.current
     if (!host) return
@@ -49,7 +55,20 @@ export function useFlip(hostRef: React.RefObject<HTMLElement | null>, attribute:
     last.current = { key: layoutKey, at }
     if (!enabled || !before || before.key === layoutKey) return
     for (const [id, delta] of flipDeltas(before.at, at)) {
-      now.get(id)?.el.animate?.([{ transform: `translate(${delta.x}px, ${delta.y}px)` }, { transform: 'none' }], { duration: FLIP_MS, easing: 'cubic-bezier(0.2, 0, 0, 1)' })
+      const animation = now.get(id)?.el.animate?.([{ transform: `translate(${delta.x}px, ${delta.y}px)` }, { transform: 'none' }], { duration: FLIP_MS, easing: 'cubic-bezier(0.2, 0, 0, 1)' })
+      if (animation) track(animation, running.current, host)
     }
   })
+}
+
+/** Hold a running FLIP animation until it finishes or is cancelled; when the last one ends, the
+ *  host fires `LAYOUT_SETTLED`. */
+function track(animation: Animation, running: Set<Animation>, host: HTMLElement) {
+  running.add(animation)
+  const end = () => {
+    if (!running.delete(animation)) return
+    if (running.size === 0) host.dispatchEvent(new Event(LAYOUT_SETTLED))
+  }
+  animation.addEventListener('finish', end)
+  animation.addEventListener('cancel', end)
 }
