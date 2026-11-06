@@ -84,7 +84,7 @@ Options:
       --workflow <name>       workflow for \`run\` (default: quick-task)
       --model <model>         model override for \`run\`
       --no-workers            \`run\`: the task cannot start or resume Cezar workers
-      --no-messaging          \`run\`: the task cannot message other tasks
+      --no-messaging          \`run\`: no new peer-task messages; worker messages and replies stay
       --no-open               don't open the browser
       --platform <id>         server-install target (ubuntu-vps | macosx-ngrok)
       --domain <host>         server-install (ubuntu-vps): host a SECOND, independent

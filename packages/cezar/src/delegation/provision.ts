@@ -69,7 +69,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
   }
   // Root authority is durable before a token exists. The switches never edit it: they are read per call.
   if (!run.delegation) options.store.commitDelegation([{ id: run.id, delegation: rootDelegation() }]);
-  const messagingOff = messagingOn ? [] : [`Task messaging is off for this task: you cannot list, message or wait on peer tasks; a human can turn it on in the task menu. Messages with your own workers still work.`];
+  const messagingOff = messagingOn ? [] : [`Task messaging is off for this task: you cannot list, message or wait on peer tasks; a human can turn it on in the task menu. Messages with your own workers, and replies to peer requests accepted earlier, still work.`];
   const rootInstructions = (): string[] => workersOn ? [
     `Use native subagents for work that needs no separate worktree: research, code reading and focused analysis.`,
     `For example, a subagent reads the parser and summarizes how it handles errors.`,

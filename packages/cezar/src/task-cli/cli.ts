@@ -88,7 +88,7 @@ export const OPERATIONS: Record<string, Operation> = {
       'auto-merge-pr': { type: 'boolean', help: '      Merge the task PR after Done when current-head CI and GitHub rules pass (default off); may mark a draft ready.' },
       'no-worktree': { type: 'boolean', help: '      Run in the repo working tree, not a worktree.' },
       'no-workers': { type: 'boolean', help: '       Do not let this task start or resume Cezar workers (default on).' },
-      'no-messaging': { type: 'boolean', help: '     Do not let this task message other tasks (default on).' },
+      'no-messaging': { type: 'boolean', help: '     Block new peer-task messages; worker messages and replies to earlier requests stay (default on).' },
       wait: { type: 'boolean', help: '               Then wait until the task needs you or ends (see wait).' },
       until: UNTIL_FLAG,
       'timeout-seconds': TIMEOUT_FLAG,
