@@ -158,7 +158,8 @@ type BoardFacts = {
 /** One page read of the project board: each card's verb and the text form of its own lines (not
  *  its workers'), whether the peer-wait line is drawn, the worker row, the rail's open requests
  *  and the open-requests chip. */
-const board = () => `(() => {
+const board = () => {
+  return `(() => {
   const ids = ${JSON.stringify({ sender: senderId, recipient: recipientId, waiter: waiterId, parent: parentId, running: runningId })};
   const texts = (el, selector) => [...el.querySelectorAll(selector)].map(li => li.textContent.trim());
   const card = id => {
@@ -181,6 +182,7 @@ const board = () => `(() => {
     openChip: document.querySelector('[data-slot="activity-chip"][data-chip="open requests"] strong')?.textContent ?? null,
   };
 })()`
+}
 
 describe('activity view', () => {
   it('shows the cards, the lines and the open requests, and drops a request when it closes', async () => {
