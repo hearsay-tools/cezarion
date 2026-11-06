@@ -250,34 +250,36 @@ describe('automations gate (#801)', () => {
     it.each(['project discovery', 'Git inspection'] as const)('does not restart after closing during %s', async (stage) => {
       delete process.env.CEZ_AUTOMATIONS;
       const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start').mockResolvedValue();
-      const entered = Promise.withResolvers<void>();
-      const release = Promise.withResolvers<void>();
+      let entered!: () => void;
+      let release!: () => void;
+      const reached = new Promise<void>((resolve) => { entered = resolve; });
+      const pending = new Promise<void>((resolve) => { release = resolve; });
       const workspace = createWorkspaceProjects({ bootRoot: repoRoot });
       vi.spyOn(workspace, 'listVisibleProjects').mockImplementation(async () => {
         if (stage === 'project discovery') {
-          entered.resolve();
-          await release.promise;
+          entered();
+          await pending;
         }
         return [];
       });
       vi.spyOn(git, 'getRepoInfo').mockImplementation(async () => {
         if (stage === 'Git inspection') {
-          entered.resolve();
-          await release.promise;
+          entered();
+          await pending;
         }
         return null;
       });
       const server = startServer({ repoRoot, store, workspaceProjects: workspace,
         manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' }, 0);
       try {
-        await entered.promise;
+        await reached;
         await new Promise<void>((resolve) => server.close(() => resolve()));
-        release.resolve();
+        release();
         // One real event-loop turn drains the released startup chain; these probes do no I/O.
         await setImmediate();
         expect(started).not.toHaveBeenCalled();
       } finally {
-        release.resolve();
+        release();
         if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
       }
     });

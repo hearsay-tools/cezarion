@@ -5412,9 +5412,8 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
         void sharedContexts.warmAll(all.filter((project) => project.id !== bootId && project.root !== deps.repoRoot))
           .catch(() => undefined);
       }
-      // #801: with automations off there is nothing to warm — no remote to resolve, no receipts
-      // to reconcile, and above all no scheduler to start.
-      // Discovery can settle after close; do not restart a scheduler teardown already stopped.
+      // No automation warmup while opted out, or after discovery outlives the listener.
+      // The final continuation also checks for close during Git inspection.
       if (!automationsEnabled() || !server.listening) return;
       void Promise.all(all.map(async (project) => {
         await rememberAutomationProject(project.id, project.root);
@@ -5425,11 +5424,8 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
           : sharedContexts.peek(project.id)?.store;
         // A run store that could not open (#779) cannot say which receipts launched a run.
         if (automationStore && runStore && !runStore.unavailable) reconcileAutomationReceipts(automationStore, runStore);
-        // After reconciliation and before the timer arms.
         brakeIdleAutomations(project.id, automationStore);
-      })).then(() => {
-        if (server.listening) return automationScheduler.start();
-      }).catch(() => undefined);
+      })).then(() => server.listening ? automationScheduler.start() : undefined).catch(() => undefined);
     }).catch(() => undefined);
   };
   if (server.listening) startBackgroundServices();
