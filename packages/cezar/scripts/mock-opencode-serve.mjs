@@ -18,10 +18,10 @@ let inputClosed = false;
 // arrive over SSE afterwards, so a correct stream (v1 and v2 alike) must
 // take its turn-end from `session.idle`, never from the HTTP response.
 const { answerNudgeBody, silentNudge } = await import('./mock-nudge.mjs');
-
 // #872: the first N starts die before listening, the way opencode 1.18.33 did
 // when started within ~2 s of SIGTERM to the previous server on the same DB.
 // Starts are counted across processes in a file, so start N+1 listens normally.
+const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined : await import('./mock-wire-recorder.mjs'); wireRecorder?.installWireRecorder();
 const failStarts = Number(process.env.CEZ_MOCK_OPENCODE_SERVE_FAIL_STARTS ?? 0);
 if (failStarts > 0) {
   const counter = process.env.CEZ_MOCK_OPENCODE_SERVE_FAIL_FILE
@@ -313,7 +313,7 @@ async function dispatchReply(replies, body) {
 
 const server = createServer(handleRequest);
 
-function handleRequest(req, res) {
+function handleRequest(req, res) { wireRecorder?.recordHttpResponse(req, res);
   const url = req.url ?? '';
   if (inputClosed && req.method === 'POST') { req.socket.destroy(); return; }
   if (req.method === 'GET' && url === '/question') {
