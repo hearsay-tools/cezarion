@@ -246,7 +246,7 @@ export function waitInvalidInput(error?: z.ZodError): string {
 
 // hearsay-tools/cezarion#1465: `cezar_schedule_task` and `cezar_scheduled_tasks` refusals.
 const scheduleMessages: Record<Extract<ScheduledTaskRefusalCode, 'automations_off' | 'unavailable'>, string> = {
-  automations_off: 'Automations are off in this cockpit (CEZ_AUTOMATIONS is not 1), so Cezar cannot schedule a task. Tell the user.',
+  automations_off: 'Automations are off in this cockpit (CEZ_AUTOMATIONS=0), so Cezar cannot schedule a task. Tell the user.',
   unavailable: 'Cezar could not reach its scheduler for this session. Tell the user; scheduling needs a running cockpit.',
 };
 export function scheduleRefusal(code: ScheduledTaskRefusalCode, message?: string): { ok: false; code: ScheduledTaskRefusalCode; message: string } {

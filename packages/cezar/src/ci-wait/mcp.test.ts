@@ -43,7 +43,7 @@ describe('cezar-ci MCP server instructions', () => {
 
   // #781: the preview tool is listed only under the exact opt-in.
   it('lists cezar_preview_serve with its trigger line only when CEZ_PREVIEW=1', async () => {
-    const on = await connect({ CEZ_PREVIEW: '1' });
+    const on = await connect({ CEZ_PREVIEW: '1', CEZ_AUTOMATIONS: '0' });
     try {
       expect((await on.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_preview_serve', 'cezar_preview_stop']);
       const instructions = on.client.getInstructions()!;
@@ -51,7 +51,7 @@ describe('cezar-ci MCP server instructions', () => {
       expect(instructions).toContain('- cezar_preview_serve: load when you have started, or are about to start, a web server the user should click through.');
     } finally { await on.close(); }
     for (const value of [undefined, '0', 'true']) {
-      const off = await connect(value === undefined ? {} : { CEZ_PREVIEW: value });
+      const off = await connect({ CEZ_PREVIEW: value, CEZ_AUTOMATIONS: '0' });
       try {
         expect((await off.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
         expect(off.client.getInstructions()).not.toContain('cezar_preview_serve');
@@ -77,19 +77,19 @@ describe('cezar-ci MCP server instructions', () => {
     } finally { await close(); }
   });
 
-  // hearsay-tools/cezarion#1465: the one-time schedule tools ride the automations opt-in.
-  it('lists the schedule tools only with CEZ_AUTOMATIONS=1', async () => {
-    const on = await connect({ CEZ_AUTOMATIONS: '1' });
+  it.each([undefined, '', '1', 'true', 'false'])('lists schedule tools by default: %j', async (value) => {
+    const on = await connect(value === undefined ? {} : { CEZ_AUTOMATIONS: value });
     try {
       expect((await on.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
     } finally { await on.close(); }
-    for (const value of [undefined, '0', 'true']) {
-      const off = await connect(value === undefined ? {} : { CEZ_AUTOMATIONS: value });
-      try {
-        expect((await off.client.listTools()).tools.map(tool => tool.name)).not.toContain('cezar_schedule_task');
-        expect(off.client.getInstructions()).not.toContain('cezar_scheduled_tasks');
-      } finally { await off.close(); }
-    }
+  });
+
+  it('hides schedule tools only with CEZ_AUTOMATIONS=0', async () => {
+    const off = await connect({ CEZ_AUTOMATIONS: '0' });
+    try {
+      expect((await off.client.listTools()).tools.map(tool => tool.name)).not.toContain('cezar_schedule_task');
+      expect(off.client.getInstructions()).not.toContain('cezar_scheduled_tasks');
+    } finally { await off.close(); }
   });
 
   it('server instructions carry one trigger line per schedule tool', async () => {

@@ -28,7 +28,7 @@
 #             boot reports its own error rather than a dead env's browser notes. A reuse
 #             syncs the clone to the checkout's current edits; a moved HEAD cold-boots.
 #   2026-10-15 scrub every ambient CEZ_* before boot (hearsay-tools/cezarion#1045): an agent's
-#             shell inherits the live cockpit's opt-ins, which CI never sets. Opt-ins are
+#             shell inherits the live cockpit's feature overrides, which CI never sets. Opt-ins are
 #             requested with --server-env=CEZ_NAME=value and are part of the reuse key.
 #   2026-10-25 record the app's start identity (app.start) and stop its whole process group
 #             through test-env-lease.mjs stop-app, which never signals a reused pid
@@ -113,7 +113,7 @@ E2E_BUILD_MARKER="$REPO_ROOT/$E2E_BUILD_ROOT/web/dist/.cez-e2e-build"
 BUILD_INPUT_PATHS="packages/contract/src packages/contract/package.json packages/cezar/src packages/cezar/package.json packages/cezar/tsconfig.json packages/api-client/src packages/api-client/package.json packages/cezar/scripts/inline-contract.mjs packages/web/src packages/web/public packages/web/index.html packages/web/vite.config.ts packages/web/package.json package.json pnpm-lock.yaml pnpm-workspace.yaml .ai/scripts/test-env-up.sh .ai/scripts/build-e2e.sh"
 
 # No ambient CEZ_* reaches the server (hearsay-tools/cezarion#1045). An agent's shell inherits
-# the live cockpit's opt-ins (CEZ_PREVIEW=1, CEZ_AUTOMATIONS=1, …) and its per-task plumbing
+# the live cockpit's feature overrides (CEZ_PREVIEW=1, CEZ_AUTOMATIONS=0, …) and its per-task plumbing
 # (CEZ_TASK_ID, CEZ_DELEGATION_*, …), so a local boot differed from CI in ways nobody chose.
 # Every CEZ_* goes rather than a list of known opt-ins: a list is one new flag away from the
 # same leak. A run that wants a flag asks for it with --server-env=CEZ_NAME=value below.

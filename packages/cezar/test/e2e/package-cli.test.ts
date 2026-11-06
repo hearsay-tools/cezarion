@@ -77,6 +77,7 @@ import piExtension from ${JSON.stringify(pathToFileURL(join(packageRoot, 'script
 import ompExtension from ${JSON.stringify(pathToFileURL(join(packageRoot, 'scripts/omp-ci-wait.mjs')).href)};
 // Live preview is opt-in: the flag-off assertions below must not depend on the caller's environment.
 delete process.env.CEZ_PREVIEW;
+delete process.env.CEZ_AUTOMATIONS;
 const controller = await CiToolController.start();
 let count = 0;
 const wait = { id:'11111111-1111-4111-8111-111111111111', generation:'generation', turnId:'turn', timeoutSeconds:1800, prUrl:'https://github.com/owner/repo/pull/1', repository:'owner/repo', prNumber:1, headSha:'a'.repeat(40), registeredAt:'2026-09-22T00:00:00.000Z', deadline:'2026-09-22T00:30:00.000Z', phase:'registered' };
@@ -93,7 +94,13 @@ try {
  // hearsay-tools/cezarion#1236: the deprecated CI alias is gone.
  assert.ok(!(client.getInstructions() ?? '').includes('cezar_wait_for_ci'));
  const tools = await client.listTools();
- assert.deepEqual(tools.tools.map(tool => tool.name), ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+ const defaultTools = ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks'];
+ assert.deepEqual(tools.tools.map(tool => tool.name), defaultTools);
+ const optedOutClient = new Client({ name:'installed-opt-out-smoke', version:'1' });
+ try {
+   await optedOutClient.connect(new StdioClientTransport({ ...session.descriptor, env:{ ...session.env, CEZ_AUTOMATIONS:'0' }, stderr:'pipe' }));
+   assert.deepEqual((await optedOutClient.listTools()).tools.map(tool => tool.name), defaultTools.slice(0, 4));
+ } finally { await optedOutClient.close(); }
  // Flag unset: neither preview tool appears in the listing or in the instructions.
  assert.ok(!tools.tools.some(tool => tool.name === 'cezar_preview_serve'));
  assert.ok(!(client.getInstructions() ?? '').includes('cezar_preview_serve'));
@@ -104,7 +111,7 @@ try {
  const previewClient = new Client({ name:'installed-preview-smoke', version:'1' });
  try {
    await previewClient.connect(new StdioClientTransport({ ...session.descriptor, env:{ ...session.env, CEZ_PREVIEW:'1' }, stderr:'pipe' }));
-   assert.deepEqual((await previewClient.listTools()).tools.map(tool => tool.name), ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_preview_serve', 'cezar_preview_stop']);
+   assert.deepEqual((await previewClient.listTools()).tools.map(tool => tool.name), [...defaultTools.slice(0, 4), 'cezar_preview_serve', 'cezar_preview_stop', ...defaultTools.slice(4)]);
    assert.match(previewClient.getInstructions() ?? '', /^- cezar_preview_serve: load when you have started, or are about to start, a web server the user should click through\\.$/m);
    assert.match(previewClient.getInstructions() ?? '', /^- cezar_preview_stop: load when your Cezar-started preview server needs stopping or restarting\\.$/m);
  } finally { await previewClient.close(); }
@@ -118,13 +125,13 @@ try {
  Object.assign(process.env, session.env);
  const registered = [];
  piExtension({ registerTool(tool) { registered.push(tool); } });
- assert.deepEqual(registered.map(tool => tool.name), ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+ assert.deepEqual(registered.map(tool => tool.name), defaultTools);
  const piResult = await registered[0].execute('pi-call', {kind:'pr', pr:wait.prUrl});
  assert.notEqual(piResult.isError, true);
  assert.equal(count, 2);
  const ompRegistered = [];
  ompExtension({ registerTool(tool) { ompRegistered.push(tool); } });
- assert.deepEqual(ompRegistered.map(tool => tool.name), ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+ assert.deepEqual(ompRegistered.map(tool => tool.name), defaultTools);
  const ompResult = await ompRegistered[0].execute('omp-call', {kind:'pr', pr:wait.prUrl});
  assert.notEqual(ompResult.isError, true);
  assert.equal(count, 3);

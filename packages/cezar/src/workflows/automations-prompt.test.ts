@@ -112,7 +112,7 @@ describe('automations prompt part and cockpit address (#774)', () => {
   });
 
   it('an addressed manager with automations off injects the address but composes nothing', async () => {
-    delete process.env.CEZ_AUTOMATIONS;
+    process.env.CEZ_AUTOMATIONS = '0';
     manager!.setCockpitAddress(ADDRESS);
     const [opening, continued] = await startAndContinue('claude');
     for (const spec of [opening, continued]) {
@@ -123,8 +123,8 @@ describe('automations prompt part and cockpit address (#774)', () => {
     expect(manager!.builtinSkills()).toEqual([]);
   });
 
-  it.each(RUNNER_IDS)('%s: an addressed manager with automations on composes the part at both sites', async (runner) => {
-    process.env.CEZ_AUTOMATIONS = '1';
+  it.each(RUNNER_IDS)('%s: an addressed manager composes the part by default at both sites', async (runner) => {
+    delete process.env.CEZ_AUTOMATIONS;
     manager!.setCockpitAddress(ADDRESS);
     const [opening, continued] = await startAndContinue(runner);
     for (const spec of [opening, continued]) {

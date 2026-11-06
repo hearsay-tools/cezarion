@@ -89,7 +89,7 @@ describe('NAV_ITEMS', () => {
 })
 
 /** The gates: the GitHub item exists exactly while health reports the forge driver (R6 Step 1.1),
- *  and the Automations item exactly while it reports the opt-in `capabilities.automations` (#801; no forge
+ *  and the Automations item exactly while it reports `capabilities.automations` (#801; no forge
  *  needed since schedules, #766). Each gate owns ONLY its own item, and all default to absent while health is unknown. */
 describe('visibleNavItems', () => {
   const labelsOf = (opts?: Parameters<typeof visibleNavItems>[0]) =>
@@ -127,7 +127,7 @@ describe('visibleNavItems', () => {
     ])
   })
 
-  it('without the automations opt-in, exactly the Automations item drops out (#801)', () => {
+  it('with automations disabled, exactly the Automations item drops out (#801)', () => {
     expect(labelsOf({ forge: true, automations: false })).toEqual([
       'Tasks',
       'Activity',

@@ -1321,9 +1321,9 @@ the adapter's `tools/list` and server instructions, Pi's and OMP's extensions, C
 generated allow-list entries, Pi's and OMP's tool admission and the environment names each
 harness forwards to the adapter all read it. `cezar_preview_serve` and
 `cezar_preview_stop` (hearsay-tools/cezarion#803) are on that list only under `CEZ_PREVIEW=1`, and
-`cezar_schedule_task` and `cezar_scheduled_tasks` (hearsay-tools/cezarion#1465) only under
-`CEZ_AUTOMATIONS=1`; the provisioned session environment carries each opt-in,
-and Claude, Codex and Cursor forward it explicitly because they start MCP servers
+`cezar_schedule_task` and `cezar_scheduled_tasks` (hearsay-tools/cezarion#1465) by default;
+`CEZ_AUTOMATIONS=0` disables them. The provisioned session environment carries an explicit
+`CEZ_AUTOMATIONS=0` or `1` plus the preview opt-in. Claude, Codex and Cursor forward these because they start MCP servers
 from an environment allowlist. Harness row R35 lists the tools through every
 runner's native mock wire and the real bundled adapter, with the flag on and off.
 Under `CEZ_PREVIEW=1` the session environment also carries `CEZ_PREVIEW_CDP_URL`, the agent's

@@ -30,7 +30,7 @@ const valid = { name: 'Check the rollout', prompt: 'Check it', delay: '7d' };
 
 describe('schedule-task route', () => {
   it('forwards a valid schedule-task call and answers the handler\'s result', async () => {
-    vi.stubEnv('CEZ_AUTOMATIONS', '1');
+    vi.stubEnv('CEZ_AUTOMATIONS', undefined);
     const scheduleTask = vi.fn(async () => created);
     const { env } = await session({ scheduleTask });
     await expect(callScheduleTask(valid, env)).resolves.toEqual(created);
@@ -38,7 +38,7 @@ describe('schedule-task route', () => {
   });
 
   it('accepts a 100 000-character prompt', async () => {
-    vi.stubEnv('CEZ_AUTOMATIONS', '1');
+    vi.stubEnv('CEZ_AUTOMATIONS', undefined);
     const scheduleTask = vi.fn(async () => created);
     const { env } = await session({ scheduleTask });
     await expect(callScheduleTask({ ...valid, prompt: 'x'.repeat(100_000) }, env)).resolves.toEqual(created);
@@ -48,7 +48,7 @@ describe('schedule-task route', () => {
   // Review of #1465: the cap is in bytes, the prompt limit in characters. A prompt of 100 000
   // three-byte or JSON-escaped characters is valid and must reach the handler, on create and update.
   it.each([['CJK', '漢'], ['escaped control', '\u0001']])('accepts a 100 000-character %s prompt on create and update', async (_kind, char) => {
-    vi.stubEnv('CEZ_AUTOMATIONS', '1');
+    vi.stubEnv('CEZ_AUTOMATIONS', undefined);
     const scheduleTask = vi.fn(async () => created);
     const scheduledTasks = vi.fn(async () => listed);
     const { env } = await session({ scheduleTask, scheduledTasks });
@@ -60,7 +60,7 @@ describe('schedule-task route', () => {
   });
 
   it('refuses at plus delay with invalid_request naming the field', async () => {
-    vi.stubEnv('CEZ_AUTOMATIONS', '1');
+    vi.stubEnv('CEZ_AUTOMATIONS', undefined);
     const scheduleTask = vi.fn(async () => created);
     const { env } = await session({ scheduleTask });
     const answer = await callScheduleTask({ ...valid, at: '2026-10-29T09:00Z' }, env);
@@ -78,21 +78,19 @@ describe('schedule-task route', () => {
     await expect(callScheduledTasks({ action: 'list' }, env)).resolves.toMatchObject({ ok: false, code: 'unavailable' });
   });
 
-  it('answers automations_off when the flag is unset', async () => {
+  it('answers automations_off only for the explicit opt-out', async () => {
     const scheduleTask = vi.fn(async () => created);
     const scheduledTasks = vi.fn(async () => listed);
     const { env } = await session({ scheduleTask, scheduledTasks });
-    for (const value of ['', '0', 'true']) {
-      vi.stubEnv('CEZ_AUTOMATIONS', value);
-      await expect(callScheduleTask(valid, env)).resolves.toMatchObject({ ok: false, code: 'automations_off' });
-      await expect(callScheduledTasks({ action: 'list' }, env)).resolves.toMatchObject({ ok: false, code: 'automations_off' });
-    }
+    vi.stubEnv('CEZ_AUTOMATIONS', '0');
+    await expect(callScheduleTask(valid, env)).resolves.toMatchObject({ ok: false, code: 'automations_off' });
+    await expect(callScheduledTasks({ action: 'list' }, env)).resolves.toMatchObject({ ok: false, code: 'automations_off' });
     expect(scheduleTask).not.toHaveBeenCalled();
     expect(scheduledTasks).not.toHaveBeenCalled();
   });
 
   it('refuses an unknown token with 401', async () => {
-    vi.stubEnv('CEZ_AUTOMATIONS', '1');
+    vi.stubEnv('CEZ_AUTOMATIONS', undefined);
     const scheduleTask = vi.fn(async () => created);
     const { env } = await session({ scheduleTask });
     expect((await post(env, 'schedule-task', JSON.stringify(valid), 'invalid')).status).toBe(401);
