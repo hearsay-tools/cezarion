@@ -48,10 +48,10 @@ beforeAll(async () => {
   const source = join(root, 'published-results.html')
   writeFileSync(source, '<!doctype html><title>Published research results</title><main><h1>Research results</h1><p style="height:3000px">Long report body</p><p>End of report</p></main>')
   publication = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {
-    cwd: project, env: { ...env, CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${runId}-artifacts`) }, encoding: 'utf8',
+    cwd: project, env: { ...env, CEZ_PROJECT_ID: projectId, CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${runId}-artifacts`) }, encoding: 'utf8',
   }))
   unreferencedPublication = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {
-    cwd: project, env: { ...env, CEZ_TASK_ID: otherRunId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${otherRunId}-artifacts`) }, encoding: 'utf8',
+    cwd: project, env: { ...env, CEZ_PROJECT_ID: projectId, CEZ_TASK_ID: otherRunId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${otherRunId}-artifacts`) }, encoding: 'utf8',
   }))
   rmSync(source)
   const records = [[runId, 'Report card source'], [otherRunId, 'Other conversation'], [virtualRunId, 'Long report conversation'], [agentRunId, 'Agent report conversation']].map(([id, title]) => makeRunRecord({
