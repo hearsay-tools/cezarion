@@ -6,6 +6,10 @@ import { createInterface } from 'node:readline';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import * as parityGateFs from 'node:fs';
 import { withoutSessionContext } from './mock-session-context.mjs';
+// No import or await on the ordinary mock path.
+const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
+  : await import('./mock-wire-recorder.mjs');
+wireRecorder?.installWireRecorder();
 // Claude acknowledges agent input with the local stdin write, so only a held response is native.
 const { failureControl, delivery } = await loadControls({ failure: ['provider', 'usage-limit', 'unread'], delivery: ['hold-response'] });
 // Mock `claude` binary for CEZ_DRY_RUN=1 — emits a plausible stream-json

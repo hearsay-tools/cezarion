@@ -4,6 +4,10 @@ import { stall, waitForRelease } from './mock-lifecycle.mjs';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+// No import or await on the ordinary mock path.
+const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
+  : await import('./mock-wire-recorder.mjs');
+wireRecorder?.installWireRecorder();
 // Print acknowledges an input on its first model work and cannot refuse one, so a held
 // acknowledgement and a held response both hold that first model work.
 const { failureControl, delivery } = await loadControls({ delivery: ['hold-ack', 'hold-response'] });

@@ -9,6 +9,10 @@ import { dirname, join } from 'node:path';
 import * as parityGateFs from 'node:fs';
 import { withoutSessionContextBody } from './mock-session-context.mjs';
 const { failureControl, delivery } = await loadControls({ delivery: ['reject', 'hold-ack', 'hold-response'] });
+// No import or await on the ordinary mock path.
+const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
+  : await import('./mock-wire-recorder.mjs');
+wireRecorder?.installWireRecorder();
 let inputClosed = false;
 // Bundled dry-run mock of `opencode serve` — speaks just enough of the HTTP+SSE
 // API (§4 of agent-event-protocols.md) for the runner wiring test in
@@ -314,6 +318,7 @@ async function dispatchReply(replies, body) {
 const server = createServer(handleRequest);
 
 function handleRequest(req, res) {
+  wireRecorder?.recordHttpResponse(req, res);
   const url = req.url ?? '';
   if (inputClosed && req.method === 'POST') { req.socket.destroy(); return; }
   if (req.method === 'GET' && url === '/question') {

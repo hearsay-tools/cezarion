@@ -2,6 +2,10 @@
 import { loadControls } from './mock-controls.mjs';
 import { stall, waitForRelease } from './mock-lifecycle.mjs';
 import { closeSync } from 'node:fs';
+// No import or await on the ordinary mock path.
+const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
+  : await import('./mock-wire-recorder.mjs');
+wireRecorder?.installWireRecorder();
 import readline from 'node:readline';
 import { appendFileSync, existsSync as promptAckReleased } from 'node:fs';
 import { rawMessage, stripCommandMessage } from './mock-session-context.mjs';

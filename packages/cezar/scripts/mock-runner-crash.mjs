@@ -1,7 +1,13 @@
 // Synthetic Node uncaught-exception diagnostic matching #499's property/footer layout.
 // Native transports call this when a prompt arrives, optionally before its ACK.
 import { spawn } from 'node:child_process';
-import { writeSync } from 'node:fs';
+import { writeSync as rawWriteSync } from 'node:fs';
+const recorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
+  : await import('./mock-wire-recorder.mjs');
+function writeSync(fd, data) {
+  recorder?.recordWire(fd === 1 ? 'stdout' : 'stderr', data);
+  return rawWriteSync(fd, data);
+}
 export function crashWithStderr(prompt, malformedFrame) {
   if (!prompt.includes('mock:crash-stderr')) return false;
   if (prompt.includes('mock:crash-stderr-clean')) {
@@ -20,6 +26,7 @@ export function crashWithStderr(prompt, malformedFrame) {
     // The late line comes 250ms after the leader's exit, late enough that a
     // runner that stops draining reliably fails S19 (hearsay-tools/cezarion#887).
     const child = spawn(process.execPath, ['-e', `
+      ${recorder ? `const recorder = await import(${JSON.stringify(new URL('./mock-wire-recorder.mjs', import.meta.url).href)}); recorder.installWireRecorder();` : ''}
       process.on('disconnect', () => {
         setTimeout(() => process.stderr.write('late buffered crash diagnostic\\n'), 250);
         setTimeout(() => {}, 5000);
