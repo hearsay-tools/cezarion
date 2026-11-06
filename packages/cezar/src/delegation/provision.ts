@@ -56,9 +56,11 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
   const workersOn = workersAllowed(run);
   const messagingOn = messagingAllowed(run);
   // hearsay-tools/cezarion#2784: with both switches off and no worker to manage, the session gets no
-  // credential at all; native cross-session tools stay off, as on every governed session.
+  // credential; native cross-session tools stay off, as on every governed session. The endpoint
+  // alone marks it as a controller-bound session, so `cez discover` refuses instead of falling
+  // back to the cockpit, as it does for any partial credential.
   if (!worker && !workersOn && !messagingOn && !owned) {
-    return { restrictCrossSessionMessaging: true, env: {}, revoke: () => {},
+    return { restrictCrossSessionMessaging: true, env: { CEZ_DELEGATION_URL: options.url }, revoke: () => {},
       instructions: `Cezar workers and task messaging are off for this task; a human can turn them on in the task menu. ${subagentOnly}` };
   }
   // Root authority is durable before a token exists. The switches never edit it: they are read per call.

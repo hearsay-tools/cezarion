@@ -73,9 +73,6 @@ export async function runDiscoverCommand(argv: string[], env: NodeJS.ProcessEnv 
       if (values.url !== undefined || values.repo !== undefined) throw new TaskCliError(64, { code: 'invalid_input', error: 'A delegation session uses its own controller; --url and --repo are unavailable.' });
       return await sessionDiscovery(env, request, schema, print);
     }
-    // hearsay-tools/cezarion#2784: inside a task, discovery follows its workers setting. A task
-    // with no credential (both settings off, or no listener) does not fall back to the cockpit.
-    if (env.CEZ_TASK_ID) throw new TaskCliError(2, { code: 'incompatible_state', error: 'Runner and model discovery is unavailable in this task: Cezar workers are off for it, or the delegation listener is unavailable. A human can turn workers on in the task menu.' });
     const cockpit = await (io.discover ?? discoverCockpit)({ repoDir: values.repo ?? process.cwd(), ...(values.url ?? env.CEZ_URL ? { url: values.url ?? env.CEZ_URL } : {}) });
     const response = await fetchJson(`${cockpit.origin}/api/v1/${request.kind === 'runners' ? 'providers/status' : `models?runner=${encodeURIComponent(request.runner)}`}`);
     if (response.status !== 200) refuse(response);
