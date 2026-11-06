@@ -151,6 +151,12 @@ function stepIdentityFields({ settings, grants }: ResolvedSpawnStep) {
   return { account: settings.accountBinding, grants, ...(settings.model === undefined ? {} : { model: settings.model }), ...(settings.effort === undefined ? {} : { effort: settings.effort }) };
 }
 
+/** Messaging off refuses new peer sends (hearsay-tools/cezarion#2784). Called after an exact retry of
+ *  an accepted message has returned; a reply to a request accepted earlier still passes. */
+function assertNewPeerSend(pair: ConversationPair, request: ConversationSendRequest): void {
+  if (pair.relationship === 'peer' && request.kind !== 'reply' && !messagingAllowed(pair.sender)) throw new DelegationPolicyError('incompatible_state', MESSAGING_OFF);
+}
+
 /** A single controller's shared policy adapter; managers retain scheduling and lifecycle ownership. */
 export class DelegationService {
   private discovery?: HostDiscovery;
@@ -293,9 +299,7 @@ export class DelegationService {
     const state = this.currentConversation(project, root);
     const existing = state.messages.find(message => message.id === request.id);
     if (existing) return this.retrySend(pair, root, existing, requestHash);
-    // Messaging off refuses new peer sends (hearsay-tools/cezarion#2784). An exact retry of an accepted
-    // message returned above; a reply to a request accepted earlier still passes.
-    if (pair.relationship === 'peer' && request.kind !== 'reply' && !messagingAllowed(sender)) throw new DelegationPolicyError('incompatible_state', MESSAGING_OFF);
+    assertNewPeerSend(pair, request);
     const { original, settled } = sendRequestContext(state, request, sender, recipient);
     const now = new Date().toISOString();
     const { destroyed, resumable, resume, instruction } = sendAdmission(pair, root, request);
