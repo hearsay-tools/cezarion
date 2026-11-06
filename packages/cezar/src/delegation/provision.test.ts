@@ -169,7 +169,7 @@ describe('session provisioning', () => {
       expect(session.instructions).toContain(' spawn --baseline parent-head');
       expect(session.instructions).toContain('Task messaging is off for this task: you cannot list, message or wait on peer tasks');
     });
-    it('both off issues no credential and keeps native cross-session tools off', () => {
+    it('both off issues no credential and keeps the governed-session cross-session controls', () => {
       const run = root({ allowWorkers: false, allowMessaging: false });
       const session = provision(run.id)!;
       // The endpoint without a token: discovery refuses rather than reach the cockpit.

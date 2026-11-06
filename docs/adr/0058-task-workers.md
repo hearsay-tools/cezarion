@@ -22,7 +22,8 @@ session's existing credential:
   directions. Messages between a task and its own workers are never gated by either setting.
 - A root session with both off and no owned worker gets the endpoint but no credential, so
   `cez discover` refuses rather than reach the cockpit; worker sessions and roots with owned
-  workers keep theirs. Native cross-session tools stay off as on every governed session.
+  workers keep theirs. The session keeps the governed-session cross-session controls, whose
+  reach is runner-specific (`AGENT_PROTOCOL.md` D1); this path does not widen or narrow them.
 
 Every task becomes a root at its first provisioned session. Rules that protect a family, such
 as holding Finish or the agent's done while the parent's question is pending, apply only to a root

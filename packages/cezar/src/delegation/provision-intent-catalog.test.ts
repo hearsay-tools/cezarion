@@ -36,7 +36,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     }
     const spec = sessions.at(-1)!.spec;
     if (mode === 'off') {
-      // hearsay-tools/cezarion#2784: both switches off issue no credential; native cross-session tools stay off.
+      // hearsay-tools/cezarion#2784: both switches off issue no credential; the governed-session cross-session controls stay.
       expect(spec.restrictCrossSessionMessaging).toBe(true);
       expect(spec.env?.CEZ_DELEGATION_TOKEN).toBeUndefined();
       expect(spec.systemPrompt).toContain('Cezar workers and task messaging are off for this task');

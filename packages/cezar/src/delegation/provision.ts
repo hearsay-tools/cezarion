@@ -56,7 +56,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
   const workersOn = workersAllowed(run);
   const messagingOn = messagingAllowed(run);
   // hearsay-tools/cezarion#2784: with both switches off and no worker to manage, the session gets no
-  // credential; native cross-session tools stay off, as on every governed session. The endpoint
+  // credential; it keeps the governed-session cross-session controls (runner-specific, D1). The endpoint
   // alone marks it as a controller-bound session, so `cez discover` refuses instead of falling
   // back to the cockpit, as it does for any partial credential.
   if (!worker && !workersOn && !messagingOn && !owned) {
