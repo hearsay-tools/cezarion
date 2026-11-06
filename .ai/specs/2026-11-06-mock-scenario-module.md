@@ -76,7 +76,7 @@ more mocks is **shared**; this campaign moves the shared scenarios.
 | `tool-tail` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
 | `turn-messages` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | decoder in `mock-turn-messages.mjs` |
 | `ack-only` | ✓ | ✓ | ✓ | ✓ | ✓ | – | a per-turn process cannot hold an ack |
-| `busy-progress` | ✓ | ✓ | ✓ | ✓ | – | ✓ | OMP sends progress, but under `no-progress` matching |
+| `busy-progress` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | OMP matches it in the same entry as `no-progress` |
 | `provider-error` | – | ✓ | ✓ | ✓ | ✓ | ✓ | Claude uses the failure control and `auth-error` |
 | `resume-cezar-done` | ✓ | ✓ | ✓ | ✓ | ✓ | – | Cursor: a resume origin in its state file |
 | `steer-tool` | ✓ | ✓ | ✓ | ✓ | ✓ | – | wire limit: no steering in print mode |
@@ -205,24 +205,54 @@ byte-identical.
 
 ### Behavior-neutral proof per slice
 
-1. **Wire diff.** Slice 2 adds an opt-in recorder: when `CEZ_MOCK_WIRE_FILE` is set,
-   each mock appends every frame it writes, normalized (ids, timestamps, paths,
-   pids). An evidence script drives each real runner through `HARNESS_ADAPTERS`
-   with every shared scenario's prompt, one session per runner and scenario, and
-   writes one transcript per pair. A slice records on its base and on its head and
-   diffs them. Every difference must be a drift item listed in the PR body with the
-   rule that chose it. An encoder slice with no listed item has an empty diff.
+1. **Wire diff.** It shows exactly what a slice changed in each mock's output. It
+   proves equivalence except for the drift items the PR lists; it does not prove
+   that a listed drift item is harmless (steps 2 and 3 do).
+   - **Recorder.** Slice 2 adds it. When `CEZ_MOCK_WIRE_FILE` is set, a mock
+     appends everything it sends to the runner: stdout and stderr, including the
+     raw writes of `mock-runner-crash.mjs` (`writeSync`) and child output in
+     held-pipe mode, and for OpenCode the SSE events and every HTTP response
+     (status, body), such as `acknowledgePrompt`. Each record names its channel.
+     Normalize ids, uuids, timestamps, temp paths and pids.
+   - **Recipes.** The evidence script owns one recipe per shared scenario. It does
+     not rely on the `HARNESS_ADAPTERS` prompts: the catalog has no `agent-echo`,
+     `ack-only` or `deferred-turn-start` entry, maps `cezar-ask` to
+     `mock:cezar-tool`, and maps `resume-cezar-done` to `ask-resume`. A recipe
+     gives:
+     - the opening prompt, with the token each mock matches directly
+       (`mock:cezar-ask`, a base64 payload after `mock:turn-messages:`, a
+       `parity-release=<path>` for `subagent-after-park`);
+     - the follow-up inputs and their timing: the answer for `resume-cezar-done`,
+       the final-message nudge for each `silent-tail-*` variant, a steer for
+       `steer-tool` and `steer-late`;
+     - the gates the script releases (`CEZ_MOCK_RELEASE_FILE`, the park path) and
+       when;
+     - the end condition: the native turn end, or for `ack-only` and
+       `no-progress-*` the acknowledgement or `watchdog.pid`, then a stop and
+       teardown, with no wait longer than the scenario's own bound;
+     - the untokened prompts too (first turn and one follow-up), which prove the
+       dry-run reply is byte-identical.
+     A recipe a wire cannot run (Cursor print has no steering) is listed as a gap,
+     not skipped in silence.
+   - **Use.** A slice records on its base and on its head and diffs the two. Every
+     difference must be a drift item listed in the PR body with the rule that chose
+     it. An encoder slice with no listed item has an empty diff.
 2. **Parity.** `npm run test:parity` and the touched runner's harness parity files
    pass with unchanged assertions.
 3. **Mapper and dry run.** The runner's `*-ui-mapper.test.ts`, `npm run
    test:package` after `npm run build` (dry run from the packed tarball), and the
    browser specs `npm run test:e2e:affected` selects.
-4. **Guard.** A source-scan test (regex over `blank()` from
-   `test-wait-discipline.testkit.ts`, as `contract-import-boundaries.test.ts` does)
-   fails when a mock that imports `mock-scenario.mjs` still matches a shared token
-   itself. The last encoder slice to land makes the import required for all six
-   `RUNNER_IDS` mocks. The guard ships with a red proof
-   (`docs/sdlc/regression-proof.md`).
+4. **Guard.** A lint `SourceRule` under `packages/cezar/src/lint/`, beside
+   `native-mock-source.ts`. The lint runner reads the scripts, so no test reads mock
+   source and `cez/native-mock-source` holds. The rule applies to
+   `packages/cezar/scripts/mock-*.mjs` other than the shared modules. It reports a
+   mock that imports `mock-scenario.mjs` and still names a shared token in a string
+   or regex literal. It must read literals, so it cannot use `blank()` from
+   `lint/blank.ts`, which erases them; comments stay ignored. Synthetic cases pin
+   what it refuses and allows, as `mock-source-boundary.test.ts` does for
+   `cez/native-mock-source`. The last encoder slice to land makes the import
+   required for all six `RUNNER_IDS` mocks. The rule ships with a red proof
+   (`docs/sdlc/regression-proof.md`): a shared token added back to the pi mock.
 
 ## Slices
 
@@ -251,7 +281,7 @@ hearsay-tools/cezarion#1529 carries.
 
 ## Acceptance
 
-- No runner mock implements a shared scenario token itself; the guard enforces it.
+- No runner mock implements a shared scenario token itself; the lint rule enforces it.
 - One copy each of the stall, the pid write, the release wait and the park wait.
 - The untokened reply of each mock is byte-identical to `bc5764da7`.
 - Every existing test passes with unchanged assertions, including all parity,
