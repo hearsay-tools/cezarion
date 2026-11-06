@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 /**
  * The option resolution behind `POST /runs` (hearsay-tools/cezarion#1635).
  *
@@ -76,8 +77,9 @@ export function replayedRun(
 export function modelLockRefusal(
   repoRoot: string,
   pins: { model?: string | undefined; effort?: string | undefined },
+  home?: Home,
 ): StartRunRefusal | undefined {
-  if (!agentModelsLocked(repoRoot)) return undefined;
+  if (!agentModelsLocked(repoRoot, process.env, home)) return undefined;
   return pins.model?.trim() || pins.effort?.trim() ? { error: AGENT_MODELS_LOCKED_ERROR, status: 409 } : undefined;
 }
 

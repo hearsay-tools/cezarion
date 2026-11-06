@@ -178,7 +178,7 @@ export class ContinuationSession {
     return this.host.prepareWorktree(
       runId,
       state,
-      atContinue.worktreeSetup(await atContinue.config(this.context.repoRoot)),
+      atContinue.worktreeSetup(await atContinue.config(this.context.repoRoot, this.context.home)),
       (event) => this.context.store.appendEvent(runId, event),
       rematerialized ? 'rematerialized' : 'resume',
     );
@@ -281,9 +281,9 @@ export class ContinuationSession {
     // agent step. A legacy record without `workflowDef` (#367), or a session no step owns,
     // keeps today's defaults.
     const toolGrant = atContinue.toolGrant(stepIdentity, toolsStep, backend);
-    const model = await continuationModel(this.context.store, this.context.repoRoot, runId, state, record, toolsStep, stepIdentity, backend);
+    const model = await continuationModel(this.context.store, this.context.repoRoot, runId, state, record, toolsStep, stepIdentity, backend, this.context.home);
     if (typeof model === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, model); return undefined; }
-    const effort = continuationEffort(this.context.repoRoot, record, toolsStep, stepIdentity);
+    const effort = continuationEffort(this.context.repoRoot, record, toolsStep, stepIdentity, this.context.home);
     if (typeof effort === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, effort); return undefined; }
     // The temp-directory preflight (#785) rides along with the account resolution: a resumed
     // turn hits the same broken `/tmp` a fresh one would, and an agent whose shell silently

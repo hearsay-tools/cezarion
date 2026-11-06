@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import {
   isRuntimeProviderAuthFailure,
   type ProviderAuthService,
@@ -18,6 +19,7 @@ const AUTH_ERROR_EVENT_TYPES = new Set(['error', 'session.error', 'note']);
 export type RuntimeAuthProfileResolver = (
   provider: ProviderId,
   profileId: string | undefined,
+  home?: Home,
 ) => Promise<RuntimeAuthVerificationTarget | null>;
 
 /**
@@ -116,12 +118,14 @@ export class ProviderRuntimeAuthObserver {
     private readonly providerAuth: ProviderAuthService,
     private readonly onProviderStatus: (status: ProviderStatus) => void,
     private readonly resolveProfile: RuntimeAuthProfileResolver = resolveRuntimeAuthVerificationTarget,
+    private readonly home?: Home,
   ) {}
 
   watch(store: RunStore): void {
     if (this.watched.has(store)) return;
     this.watched.add(store);
-    watchProviderRuntimeAuthFailures(store, this.providerAuth, this.onProviderStatus, this.resolveProfile);
+    watchProviderRuntimeAuthFailures(store, this.providerAuth, this.onProviderStatus, this.home
+      ? (provider, profileId) => this.resolveProfile(provider, profileId, this.home) : this.resolveProfile);
   }
 }
 

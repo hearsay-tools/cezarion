@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { defined } from '../core/defined.ts';
 import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -121,6 +122,7 @@ export async function shouldRegisterProject(repoRoot: string): Promise<boolean> 
 export async function registerProject(
   root: string,
   source: 'local' | 'checkout' = 'local',
+  home?: Home,
 ): Promise<WorkspaceProject> {
   const real = await normalizeRoot(root);
   const now = new Date().toISOString();
@@ -143,7 +145,7 @@ export async function registerProject(
       source,
     };
     config.projects.push(entry);
-  });
+  }, home);
   // The mutator always runs, so `entry` is always set — this satisfies TS.
   if (!entry) throw new Error('registerProject: merge-write did not run the mutator');
   if (added) invalidateProjectProbe(real);
@@ -310,8 +312,8 @@ export interface ProjectListSelector {
   projectId: string;
 }
 
-export async function listProjects(selector?: ProjectListSelector): Promise<ProjectListEntry[]> {
-  const config = await loadWorkspaceConfig();
+export async function listProjects(selector?: ProjectListSelector, home?: Home): Promise<ProjectListEntry[]> {
+  const config = await loadWorkspaceConfig(home?.workspaceConfig);
   const projects = selector
     ? config.projects.filter((project) => project.id === selector.projectId)
     : config.projects;
@@ -326,7 +328,7 @@ export async function listProjects(selector?: ProjectListSelector): Promise<Proj
  * run history) is touched — re-registering the same root later gets a fresh
  * slug but finds all its state intact.
  */
-export async function removeProject(id: string): Promise<boolean> {
+export async function removeProject(id: string, home?: Home): Promise<boolean> {
   let removed = false;
   let removedRoot: string | undefined;
   await mergeWriteWorkspaceConfig((config) => {
@@ -334,7 +336,7 @@ export async function removeProject(id: string): Promise<boolean> {
     const next = config.projects.filter((p) => p.id !== id);
     removed = next.length !== config.projects.length;
     config.projects = next;
-  });
+  }, home);
   if (removedRoot) invalidateProjectProbe(removedRoot);
   return removed;
 }

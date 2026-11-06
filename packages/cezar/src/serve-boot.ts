@@ -33,6 +33,7 @@ export async function reconcileServeWorktrees(
   manager: RunManager,
   previewHost?: PreviewHost,
   steps = reconcileDefaults,
+  home?: Home,
 ): Promise<void> {
   // Startup reconcile (spec 006): sweep worktrees whose run no longer exists. Never over a store
   // that could not open (#779): its runs are unknown, and every worktree would look orphaned.
@@ -46,14 +47,14 @@ export async function reconcileServeWorktrees(
     // Count-based worktree retention (#483): reclaim finished worktrees beyond
     // the keep-limit (directory only — `cez/<id8>` branch kept, so recoverable).
     // Best-effort; never blocks boot.
-    const keep = await steps.resolveWorktreeRetention(repoRoot).catch(() => DEFAULT_WORKTREE_RETENTION);
+    const keep = await steps.resolveWorktreeRetention(repoRoot, home).catch(() => DEFAULT_WORKTREE_RETENTION);
     const reclaimed = await steps.reclaimWorktrees(repoRoot, store, keep, { previewHost }).catch(() => [] as string[]);
     if (reclaimed.length > 0) {
       steps.log(`  reclaimed ${reclaimed.length} old worktree(s), branch kept: ${reclaimed.map((id) => id.slice(0, 8)).join(', ')}`);
     }
     // Branches whose work landed (hearsay-tools/cezarion#2268). In the background: it may ask
     // GitHub, and boot never waits on the network.
-    void steps.sweepMergedBranches({ root: repoRoot, store, manager }, { keep });
+    void steps.sweepMergedBranches({ root: repoRoot, store, manager, home }, { keep });
   }
 }
 

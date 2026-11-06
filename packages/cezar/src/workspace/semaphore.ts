@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import { DEFAULT_MONITORING_WAKE_MINUTES, loadWorkspaceConfig } from './config.ts';
@@ -112,8 +113,8 @@ const DEFAULT_LIMITS: WorkspaceResourceLimits = {
  *  plus the per-project `maxParallel` overrides built into a root→limit map.
  *  The registry `root` is already realpath-normalized (`registerProject`), so
  *  the keys match `normalizeRootSync`'s output at lookup time. */
-async function loadResourceLimits(): Promise<WorkspaceResourceLimits> {
-  const { resources, projects } = await loadWorkspaceConfig();
+async function loadResourceLimits(home?: Home): Promise<WorkspaceResourceLimits> {
+  const { resources, projects } = await loadWorkspaceConfig(home?.workspaceConfig);
   const projectLimits = new Map<string, number>();
   for (const project of projects) {
     if (typeof project.maxParallel === 'number') projectLimits.set(project.root, project.maxParallel);
@@ -129,6 +130,7 @@ async function loadResourceLimits(): Promise<WorkspaceResourceLimits> {
 }
 
 export interface WorkspaceSemaphoreOptions {
+  home?: Home | undefined;
   /** Snapshot source for `refresh()` — tests inject a stub; production keeps
    *  the `~/.cezar/config.json` reader. */
   load?: () => Promise<WorkspaceResourceLimits>;
@@ -149,7 +151,7 @@ export class WorkspaceSemaphore {
   private pendingRelease = false;
 
   constructor(options: WorkspaceSemaphoreOptions = {}) {
-    this.load = options.load ?? loadResourceLimits;
+    this.load = options.load ?? (() => loadResourceLimits(options.home));
     this.limits = { ...DEFAULT_LIMITS, ...options.initial };
   }
 

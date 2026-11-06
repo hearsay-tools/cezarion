@@ -1,3 +1,4 @@
+import type { Home } from './home/home.ts';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -52,10 +53,10 @@ export interface PlanResult {
   fallback: boolean;
 }
 
-export async function planChain(repoRoot: string, task: string, builtin: readonly Skill[] = []): Promise<PlanResult> {
+export async function planChain(repoRoot: string, task: string, builtin: readonly Skill[] = [], home?: Home): Promise<PlanResult> {
   const [skills, config, verifyCommands] = await Promise.all([
     discoverSkills(repoRoot, { builtin }),
-    loadConfig(repoRoot),
+    loadConfig(repoRoot, home),
     detectVerifyCommands(repoRoot),
   ]);
   const skillNames = new Set(skills.map((s) => s.name));
@@ -71,7 +72,7 @@ export async function planChain(repoRoot: string, task: string, builtin: readonl
   // subscription for a project the user pointed at their work account. An account cezar refuses
   // to spawn (`AgentAccountUnavailableError`) plans nothing and takes the fallback below, for the
   // same reason.
-  const account = await resolveProfileEnvForRoot(repoRoot, config.defaultRunner).catch(() => null);
+  const account = await resolveProfileEnvForRoot(repoRoot, config.defaultRunner, undefined, process.env, home).catch(() => null);
   const profileEnv = account?.env ?? {};
   // One retry on an unparseable answer; a runner error goes straight to fallback.
   for (let attempt = 0; account !== null && attempt < 2; attempt++) {

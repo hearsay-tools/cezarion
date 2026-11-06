@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 /**
  * Server-owned branch classification and cleanup policy. Reclassify before deletion:
  * active/other are protected; merged/empty allow bulk; not-landed/orphan require one typed
@@ -82,6 +83,7 @@ export interface ClassifyInput {
 /** The project a classification reads: its root, its runs and the run manager's liveness. */
 export interface ClassifyProject {
   root: string;
+  home?: Home | undefined;
   store: Pick<RunStore, 'listBranchOwners'>;
   manager: Pick<RunManager, 'isActive' | 'claimForBranchCleanup'>;
 }
@@ -90,7 +92,7 @@ export interface ClassifyProject {
 export async function classifyInputFor(project: ClassifyProject, forge: BranchForge): Promise<ClassifyInput | null> {
   const info = await getRepoInfo(project.root);
   if (!info) return null;
-  const config = await loadConfig(project.root);
+  const config = await loadConfig(project.root, project.home);
   return {
     root: info.root,
     runs: project.store.listBranchOwners(),

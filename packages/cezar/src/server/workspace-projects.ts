@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { realpath } from 'node:fs/promises';
 import { z } from 'zod';
 import { TaskWebhooks } from '../runs/webhook.ts';
@@ -9,7 +10,7 @@ import { CockpitAlreadyRunningError } from './cockpit-ownership.ts';
 import type { ServerDeps } from './server.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContext, type ProjectContextDeps } from './project-context.ts';
 
-type ContextServices = Pick<ServerDeps, 'contexts' | 'semaphore' | 'previewHost' | 'forgeFactory' | 'toolActivity'> & {
+type ContextServices = Pick<ServerDeps, 'contexts' | 'semaphore' | 'previewHost' | 'forgeFactory' | 'toolActivity' | 'home'> & {
   delegation?: Pick<NonNullable<ServerDeps['delegation']>, 'attachProject'> & {
     service: Pick<NonNullable<ServerDeps['delegation']>['service'], 'armDestroyRetries'>;
   };
@@ -25,6 +26,7 @@ export function createWorkspaceProjectContexts(
 ): ProjectContexts {
   // Both entry points supply the visible registry (hearsay-tools/cezarion#2320).
   return deps.contexts ?? new ProjectContexts({
+    home: deps.home,
     forgeFactory: deps.forgeFactory,
     ...options,
     semaphore: deps.semaphore,
@@ -41,10 +43,11 @@ export function createWorkspaceProjectContexts(
 
 /** createApp supplies an empty origin; startServer leaves origin absent until listen. */
 export function createTaskWebhooks(
-  deps: Pick<ServerDeps, 'taskWebhooks' | 'taskWebhookFetch'>,
+  deps: Pick<ServerDeps, 'taskWebhooks' | 'taskWebhookFetch' | 'home'>,
   origin?: string,
 ): TaskWebhooks {
   return deps.taskWebhooks ?? new TaskWebhooks({
+    home: deps.home,
     fetch: deps.taskWebhookFetch,
     ...(origin === undefined ? {} : { origin }),
   });
@@ -61,8 +64,8 @@ function classifyProjectBuildFailure(error: unknown) {
 }
 
 /** Workspace identity and lookup rules shared by HTTP, live feeds, upgrades and registry edits. */
-export function createWorkspaceProjects(options: { bootRoot: string; bootProjectId?: string | undefined; bindHost?: string | undefined }) {
-  const { bootRoot, bootProjectId, bindHost } = options;
+export function createWorkspaceProjects(options: { bootRoot: string; bootProjectId?: string | undefined; bindHost?: string | undefined; home?: Home | undefined }) {
+  const { bootRoot, bootProjectId, bindHost, home } = options;
   // ---- workspace boot-project identity (multi-project spec) ----------------
   // The boot flow (`initWorkspace` in src/index.ts) registers the boot repo
   // and plumbs its registry id in via `deps.bootProjectId`. Legacy callers and
@@ -77,7 +80,7 @@ export function createWorkspaceProjects(options: { bootRoot: string; bootProject
     if (bootProjectCache) return bootProjectCache;
     let registry = projects ?? [];
     try {
-      registry = projects ?? (await loadWorkspaceConfig()).projects;
+      registry = projects ?? (await loadWorkspaceConfig(home?.workspaceConfig)).projects;
       const real = await realpath(bootRoot).catch(() => bootRoot);
       const match = registry.find((p) => p.root === real || p.root === bootRoot);
       if (match) bootProjectCache = match.id;
@@ -104,10 +107,10 @@ export function createWorkspaceProjects(options: { bootRoot: string; bootProject
     return registry.filter((project) => project.id === bootId);
   };
   const projectSelector = async () => singleProject() ? { projectId: await resolveBootProject() } : undefined;
-  const listVisibleProjects = async () => listProjects(await projectSelector());
+  const listVisibleProjects = async () => home ? listProjects(await projectSelector(), home) : listProjects(await projectSelector());
   const registryEntry = async (projectId: string): Promise<WorkspaceProject | undefined> => {
     const id = await canonicalProjectId(projectId);
-    return (await loadWorkspaceConfig()).projects.find((entry) => entry.id === id);
+    return (await loadWorkspaceConfig(home?.workspaceConfig)).projects.find((entry) => entry.id === id);
   };
   const resolveRegistryEntry = async (raw: string): Promise<WorkspaceProject | undefined> => {
     if (!validProjectId(raw)) return undefined;

@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Context } from 'hono';
@@ -15,6 +16,7 @@ import type { openInTerminal } from './open-in-terminal.ts';
 import type { resumeCommand } from './server.ts';
 
 interface CliHandoffDeps {
+  home?: Home | undefined;
   providerActionError: (required: readonly RunnerId[]) => Promise<string | null>;
   resumeCommand: typeof resumeCommand;
   handoffEnv: (provider: RunnerId, profileId: string | undefined) => Promise<{ env: Record<string, string> } | { error: string }>;
@@ -88,7 +90,7 @@ export async function openRunCli(
   cliRunner: RunnerId,
   dir: string,
   repoRoot: string,
-  { providerActionError, resumeCommand, handoffEnv, handoffFallbackCommand, openTerminal }: CliHandoffDeps,
+  { providerActionError, resumeCommand, handoffEnv, handoffFallbackCommand, openTerminal, home }: CliHandoffDeps,
 ) {
   const blocked = await providerActionError([cliRunner]);
   if (blocked) return c.json({ error: blocked }, 409);
@@ -109,7 +111,7 @@ export async function openRunCli(
   // hands the user a different subscription than every task in the same project uses.
   const account = resume
     ? await handoffEnv(cliRunner, sessionStep?.profileId)
-    : await resolveProfileEnvForRoot(repoRoot, cliRunner).then(({ env }) => ({ env }), (err: unknown) => {
+    : await resolveProfileEnvForRoot(repoRoot, cliRunner, undefined, process.env, home).then(({ env }) => ({ env }), (err: unknown) => {
       if (err instanceof AgentAccountUnavailableError) return { error: err.message };
       throw err;
     });

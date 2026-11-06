@@ -92,7 +92,7 @@ export class StepSession {
     // account and grants alike. The bound `workflowDef` carries the same values; the private
     // evidence is the authority.
     const stepIdentity = this.host.workerStep(runId, step.id);
-    const model = await stepModel(this.context.store, this.context.repoRoot, runId, state, step, input, stepBackend, stepIdentity);
+    const model = await stepModel(this.context.store, this.context.repoRoot, runId, state, step, input, stepBackend, stepIdentity, this.context.home);
     if (typeof model === 'string') return model;
     // Which agent account this step spawns under, and — recorded on the step before the spawn —
     // which one its session belongs to. `sessionId` and `profileId` are a pair: a resume that

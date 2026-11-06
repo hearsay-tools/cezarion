@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import type { z } from 'zod';
 import { type AutomationKind, type AutomationListQuery, type OnceStatus } from '@open-mercato/cezar-contract/automations';
 import { nextOccurrence, ONCE_PAST_DUE_MESSAGE, onceInstant } from '@open-mercato/cezar-contract/automation-schedule';
@@ -41,6 +42,7 @@ export interface AutomationServiceProject {
 }
 
 export interface AutomationServiceDeps {
+  home?: Home | undefined;
   /** The zone the repeating schedules run in: the server's own. */
   timeZone: () => string;
   /** Host model discovery; absent = explicit models are never refused at save. */
@@ -145,7 +147,7 @@ export function createAutomationService(deps: AutomationServiceDeps) {
   /** An explicit model the fresh host catalog does not list, for a one-time schedule's task. */
   const modelRefusal = async (root: string, task: AutomationEditable['task']): Promise<string | undefined> => {
     if (!deps.discovery || !task.model) return undefined;
-    const runner = task.runner ?? (await loadConfig(root)).defaultRunner;
+    const runner = task.runner ?? (await loadConfig(root, deps.home)).defaultRunner;
     if (!(MODEL_DISCOVERY_RUNNERS as readonly string[]).includes(runner)) return undefined;
     const choices = await missingModelChoices(deps.discovery, runner as ModelDiscoveryRunner, task.model);
     if (!choices) return undefined;

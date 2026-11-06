@@ -63,7 +63,7 @@ export class StepLoop {
     const input = atTaskHead.executionInput(execution);
     // Resolve the agent backend for this run: the task choice (GUI) wins over
     // the config default. Per-step `runner` can still override it at the step.
-    const config = await atTaskHead.config(this.context.repoRoot);
+    const config = await atTaskHead.config(this.context.repoRoot, this.context.home);
     if (state.liveSession.cancelled || this.context.store.getRun(runId)?.stopping) {
       this.host.move(runId, 'cancel');
       this.host.dropActive(runId);
@@ -78,7 +78,7 @@ export class StepLoop {
     // Extra system prompt (R2 2.3): POST override > config default; echoed on
     // the record so the UI/API can show what the run actually used.
     const extraSystemPrompt = atTaskHead.systemPrompt(this.context.store, runId, input, config);
-    const modelIdentity = await taskModelIdentity(this.context.repoRoot, taskBackend, input);
+    const modelIdentity = await taskModelIdentity(this.context.repoRoot, taskBackend, input, this.context.home);
     if (state.liveSession.cancelled) {
       this.host.move(runId, 'cancel');
       this.host.dropActive(runId);

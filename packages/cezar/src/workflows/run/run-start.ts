@@ -58,7 +58,7 @@ export class RunStart {
   ): RunRecord {
     // Sanitize at the manager boundary so CLI runs, workflows, and
     // direct callers cannot bypass the HTTP policy.
-    const effectiveInput = atTaskHead.acceptInput(this.context.repoRoot, input);
+    const effectiveInput = atTaskHead.acceptInput(this.context.repoRoot, input, this.context.home);
     const run = this.context.store.createRun(atTaskHead.acceptedRunFields(input, workflow, effectiveInput, clientRequest));
     // The row exists from here on. A later write that throws still queues the job, so the caller
     // that sees the throw finds a run that starts now, not one only a restart would start (#1465).
