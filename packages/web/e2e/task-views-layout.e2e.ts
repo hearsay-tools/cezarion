@@ -90,8 +90,13 @@ it('persists column choices, filters projects, and expands mobile resources thro
   expect(state.taskTable?.expandedColumns?.branch).toBe(true)
   browser.goto(base + scoped('/')); prepare(360, 'dark')
   browser.waitForFunction(`document.querySelector('[data-slot="task-card"]') !== null`)
-  browser.click('[data-slot="task-card"][data-run-id="fixture-A"] [data-slot="mobile-resources-toggle"]')
-  expect(browser.text('[data-slot="task-card"][data-run-id="fixture-A"]')).toContain('Memory')
+  const toggle = '[data-slot="task-card"][data-run-id="fixture-A"] [data-slot="mobile-resources-toggle"]'
+  // The native click helper scrolls only outside the viewport, not past fixed phone navigation.
+  browser.evaluate(`document.querySelector('${toggle}').scrollIntoView({ block: 'center', behavior: 'instant' })`)
+  browser.waitForFunction(`(() => { const e = document.querySelector('${toggle}'); const r = e.getBoundingClientRect(); return e.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) })()`)
+  browser.click(toggle)
+  expect(browser.waitForValue(`document.querySelector('[data-slot="task-card"][data-run-id="fixture-A"]')?.textContent.includes('Memory')`)).toBe(true)
+  browser.screenshotElement('[data-slot="task-card"][data-run-id="fixture-B"] [data-slot="mobile-resources-toggle"]', join(artifacts, 'last-mobile-resources-clear.png'))
   browser.goto(base + '/tasks?project=missing&group=project')
   browser.waitForFunction(`document.body.textContent.includes('No matching tasks')`)
   browser.click('[data-action="clear-filters"]')

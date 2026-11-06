@@ -336,9 +336,12 @@ describe('the cockpit suite', () => {
   })
 
   it('scans every spec and the browser-driving helpers', () => {
-    const files = new Set(scanSuite().map((s) => s.file))
-    // Sanity: the scan covers the whole directory, not one file.
-    expect(files.size).toBeGreaterThan(10)
+    const dir = mkdtempSync(join(tmpdir(), 'cez-wait-scan-'))
+    const names = ['first.e2e.ts', 'second.e2e.ts', 'browser-helper.ts']
+    try {
+      for (const name of names) writeFileSync(join(dir, name), `browser.click('#task');\nexpect(browser.text('#task')).toBe('ready')`)
+      expect([...new Set(scanSuite(dir).map((site) => site.file))].sort()).toEqual([...names].sort())
+    } finally { rmSync(dir, { recursive: true, force: true }) }
     expect(readFileSync(join(e2eDir, 'contrast.ts'), 'utf8')).toContain('waitForValue')
   })
 
