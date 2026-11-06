@@ -39,7 +39,7 @@ The owner took these at the design gate.
 | Mechanism | Reuse the parent–worker conversation protocol. Abstract only the step that decides who may talk to whom. |
 | Ledger for a peer message | A new request or progress message lives in its sender's family ledger. A follow-up or reply lives with the request it names. |
 | `cez task send` run by an agent inside a task | Refused, exit 64. `cez task send` stays human input. |
-| Consent | Any root task may message any other root task in the same project. No opt-in, no setting. |
+| Consent | Any root task may message any other root task in the same project while both have the per-task "Allow task messaging" setting on, the default (hearsay-tools/cezarion#2784). With it off, the task's agent cannot discover, message or wait on peers, and peers' new messages to it are not delivered; replies to requests accepted earlier still pass. |
 | CLI | A new family, `cez message`. `cez worker` keeps only the lifecycle verbs. |
 | Compatibility | The `cez worker` message verbs are removed, with no aliases. The delegation CLI is an agent-facing surface inside the cockpit, not a user-facing one; agents get the new instructions. |
 | Waiting for a peer | A new wait kind, `peer`. It always names its peers. A message from a named peer, or that peer settling, closes it. A human message or a family message does not. |
@@ -554,10 +554,10 @@ request --resume` is refused and names `cez worker resume`.
 > now turns off only a separate cross-session tool (Codex's message board, an OpenCode
 > `task_id` outside the session tree). See `AGENT_PROTOCOL.md` D1.
 
-- In every governed session, every runner's `restrictNativeDelegation` blocks its native
-  delegation entry points. For the Claude CLI runner that includes `SendMessage` and
-  `ListAgents` (`--disallowedTools Agent,Task,Workflow,SendMessage,ListAgents`,
-  `packages/cezar/src/core/claude-cli-runner.ts:750`).
+- In every governed session, native subagents stay available, subject to the user's tool
+  settings. `restrictCrossSessionMessaging` turns off only a separate cross-session tool. For
+  the Claude CLI runner, `SendMessage` and `ListAgents` stay callable for the session's own
+  subagents, and inbound messages from other sessions are refused on every launch.
 - With delegation off, a runner's native cross-session tools may be available. Messages sent
   through them are untracked: no ledger, no cockpit attribution, no receipts, no deadline,
   and no protection for human questions beyond the runner's own. The protocol does not use
