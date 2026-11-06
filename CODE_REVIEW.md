@@ -53,7 +53,9 @@ Apply the checks relevant to the changed mechanism.
   local reproduction in the PR or review thread, as the
   [e2e guide](packages/web/e2e/README.md) requires. Request changes when it has
   neither. Keep durable intent in source comments and investigation evidence
-  with the PR.
+  with the PR. A shrunk product budget applies only to its step and never races
+  its fixture startup; review checks this because the scan cannot. Size a bound
+  per step, or use a window that restarts on progress.
 
 ## Changing working behavior
 

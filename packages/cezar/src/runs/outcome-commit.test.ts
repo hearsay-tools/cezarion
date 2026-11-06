@@ -120,7 +120,7 @@ describe('commitOutcome', () => {
     expect(committed().agentInputs?.map((entry: AgentInput) => entry.deliveredAt)).toEqual([at, undefined]);
   });
 
-  // CODE_REVIEW.md § Changing working behavior: recovery reaches the call with nothing but the row.
+  // CODE_REVIEW.md § Changing working behavior (no live session): recovery reaches the call with nothing but the row.
   it('commits for a run no session holds, read back by a store reopened after a crash', () => {
     const wait = human();
     store.commitWait(id, wait);
