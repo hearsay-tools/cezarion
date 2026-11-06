@@ -41,6 +41,8 @@ after the application build.
 
 ### Local iteration versus final verification
 
+Before adding a YAML, shell or Markdown reader, read [Script readers](script-readers.md).
+
 When Squeal is installed and validating the worktree, use its results during
 implementation. It covers unit Vitest, both fast node:test groups, and cockpit
 browser E2E in the slow tier. It does not run packaged CLI E2E

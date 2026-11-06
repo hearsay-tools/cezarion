@@ -98,14 +98,13 @@ unless `worktreeSetup` already did.
 - Run Vitest through `npm test -- <args>`, the repo's pinned binary.
 - CI owns the final gate and full-suite runs. Locally, run what the change affects.
 - In a unit test, wait on the product's own signal. A timeout is only a hang guard, with a
-  `// bound: <reason>` comment at the call site.
-- `npm run typecheck` checks all workspaces without a build or `dist` writes;
-  after a build, use `npm run typecheck:package` for packaged tests.
-- Run packaged CLI E2E with `npm run test:package -- <repo-root paths>`; parity with
-  `npm run test:parity`.
-- Select browser specs with `npm run test:e2e:affected`; use `npm run test:e2e` or
-  `npm run test:e2e:local` per [the e2e guide](packages/web/e2e/README.md).
-- Changed-test selection: `npm run test:changed -- --help`.
+  `// bound: <reason>` comment at the call site. A test that proves something did not happen
+  uses fake timers or states at the call site why it needs real time.
+- `npm run typecheck`: no build or `dist` writes; after a build: `npm run typecheck:package`.
+- CLI E2E: `npm run test:package -- <repo-root paths>`; parity: `npm run test:parity`.
+- Browser: `npm run test:e2e:affected`, `npm run test:e2e` / `npm run test:e2e:local`;
+  see [e2e guide](packages/web/e2e/README.md).
+- Selection: `npm run test:changed -- --help`.
 
 ### Before opening a PR
 

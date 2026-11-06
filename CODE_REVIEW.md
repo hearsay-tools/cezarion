@@ -76,7 +76,8 @@ A change to a shared name, value or default finds and updates every reader, or
 states why a reader stays. For saved data and user-facing messages, search both
 the old and new form. Follow [saved-format compatibility](BACKWARD_COMPATIBILITY.md).
 
-Changes to a run state, cross-run relationship, ToolGrant mapping, running task's
+Changes to a run state or how a run leaves an existing state (an exit trigger or
+recovery path), cross-run relationship, ToolGrant mapping, running task's
 worktree files, detached process or restored client state need the applicable
 [case tables](.ai/specs/TEMPLATE.md#case-tables) in the spec or plan before implementation.
 
