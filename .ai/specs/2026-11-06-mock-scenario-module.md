@@ -241,8 +241,10 @@ byte-identical.
        native turn end. By default it is the native turn end. Exceptions:
        `subagent-after-park` ends on the child events sent after the park
        release; the delayed-acknowledgement cases end on the acknowledgement;
-       `ack-only` and `no-progress-*` end on the acknowledgement or
-       `watchdog.pid`; the terminating `crash-stderr` variants end on the process
+       `ack-only` ends on the acknowledgement; `no-progress-*` ends when
+       `watchdog.pid` exists and the frames the mock sends before it stalls are
+       recorded (the gated variant in pi and OMP writes the pid before its
+       acknowledgement and turn start); the terminating `crash-stderr` variants end on the process
        exit, recorded with its code or signal; `crash-stderr-clean` does not exit
        and ends on the native turn end. Then a stop and teardown, with no wait
        longer than the scenario's own bound;
