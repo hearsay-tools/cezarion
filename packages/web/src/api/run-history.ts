@@ -7,7 +7,7 @@ import {
 } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { RunEvent, RunHistoryPage } from '@open-mercato/cezar-api-client'
+import type { RunEvent, RunHistoryContext, RunHistoryPage } from '@open-mercato/cezar-api-client'
 import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { getRunHistory, getRunHistoryContext } from './client'
 import { useRunEvents } from './run-events'
@@ -60,9 +60,51 @@ function mergeNewestPage(
   })
 }
 
+/** The context reaches the newest page when no event between them is missing. The two are read
+ *  together, so this holds once the first context lands, and again after each refresh. */
+function contextReachesPage(context: RunHistoryContext | undefined, newestPage: RunHistoryPage | undefined): boolean {
+  // Both `asOfSeq` values are the file's high water when it was read. A context read at or after
+  // the page holds every event before the page's first item. A page's first event can be an
+  // older turn opening, so its seq says nothing about the events between.
+  return context !== undefined && (newestPage === undefined || context.asOfSeq >= newestPage.asOfSeq)
+}
+
+/**
+ * The first page and the first context load in parallel, so the context can be read just before
+ * the page. Read it again then, once per task and page: a later read reaches it, as the file only
+ * grows. The route stays mounted across tasks, so the key names the task too.
+ */
+function useContextCatchUp(
+  runId: string | undefined,
+  context: { data: RunHistoryContext | undefined; isFetching: boolean; refetch: () => Promise<unknown> },
+  newestPage: RunHistoryPage | undefined,
+  active: boolean,
+): void {
+  const caughtUpFor = useRef<string | undefined>(undefined)
+  const behind = active && context.data !== undefined && !context.isFetching && !contextReachesPage(context.data, newestPage)
+  const key = runId === undefined || newestPage === undefined ? undefined : `${runId}:${newestPage.asOfSeq}`
+  useEffect(() => {
+    if (!behind || key === undefined || caughtUpFor.current === key) return
+    caughtUpFor.current = key
+    void context.refetch()
+  }, [behind, context, key])
+}
+
+/** Of two context snapshots, the one read later: requests overlap, and an older answer can land
+ *  last (hearsay-tools/cezarion#2588). */
+function newerContext(cached: RunHistoryContext | undefined, fresh: RunHistoryContext): RunHistoryContext {
+  return cached !== undefined && cached.asOfSeq > fresh.asOfSeq ? cached : fresh
+}
+
 export interface RunHistoryState {
   visibleEvents: RunEvent[]
   currentEvents: RunEvent[]
+  /**
+   * `currentEvents` holds the run's whole current state: the context has loaded and reaches the
+   * newest page, or the full replay stands in. Before that, it holds the newest page alone, which
+   * can miss an agent the page starts after (hearsay-tools/cezarion#2588).
+   */
+  currentComplete: boolean
   isPending: boolean
   contextPending: boolean
   fallback: boolean
@@ -101,20 +143,33 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
   const context = useQuery({
     queryKey: contextKey,
     enabled: runId !== undefined,
-    queryFn: ({ signal }) => getRunHistoryContext(runId!, { signal }),
+    // A refetch that started before a newer write must not put the older snapshot back.
+    queryFn: async ({ signal }) => {
+      const fresh = await getRunHistoryContext(runId!, { signal })
+      return newerContext(queryClient.getQueryData(contextKey), fresh)
+    },
     retry: 1,
   })
 
+  // The newest page and then the context are read every time the newest page is replaced:
+  // a new page drops the live frames before it, and a context older than those frames would leave
+  // them out of the current state until a reload (hearsay-tools/cezarion#2588).
+  const refreshNewest = useCallback(async (signal?: AbortSignal) => {
+    const options = signal ? { signal } : undefined
+    // The page first: the context read after it reaches it (`contextReachesPage`).
+    const latest = await getRunHistory(runId!, undefined, options)
+    const current = await getRunHistoryContext(runId!, options)
+    signal?.throwIfAborted()
+    mergeNewestPage(queryClient, ['run-history', scope, runId], latest)
+    queryClient.setQueryData<RunHistoryContext>(['run-history-context', scope, runId], (cached) => newerContext(cached, current))
+    return latest
+  }, [queryClient, runId, scope])
+
   const recoverLive = useCallback(async (_reason: string, signal: AbortSignal) => {
     if (runId === undefined) return
-    const [latest, current] = await Promise.all([
-      getRunHistory(runId, undefined, { signal }), getRunHistoryContext(runId, { signal }),
-    ])
-    signal.throwIfAborted()
-    mergeNewestPage(queryClient, ['run-history', scope, runId], latest)
-    queryClient.setQueryData(['run-history-context', scope, runId], current)
+    const latest = await refreshNewest(signal)
     return { cursor: latest.liveCursor, afterSeq: latest.asOfSeq }
-  }, [queryClient, runId, scope])
+  }, [refreshNewest, runId])
 
   const fallback = history.isError || context.isError
   const fallbackEvents = useRunEvents(fallback ? runId : undefined, { onReset: recoverLive })
@@ -130,8 +185,7 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
   const compactLive = useCallback(() => {
     if (runId === undefined || compactingLive.current) return
     compactingLive.current = true
-    void getRunHistory(runId, undefined)
-      .then((latestPage) => mergeNewestPage(queryClient, ['run-history', scope, runId], latestPage))
+    void refreshNewest()
       // Compaction is an optimization, not a load: this call is fire-and-forget (`void`), so a
       // rejection here has no query to reject and would surface as an unhandled rejection. The
       // live buffer still holds every event, and the next `onCompact` retries — so swallowing is
@@ -141,7 +195,7 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
       .finally(() => {
         compactingLive.current = false
       })
-  }, [queryClient, runId, scope])
+  }, [refreshNewest, runId])
 
   // Re-entry (#881): a cached newest page is as old as the last visit, and the stream would
   // replay everything since from its `asOfSeq`, one frame at a time. Read the newest page again
@@ -159,8 +213,7 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     if (!refreshPending || runId === undefined) return
     let cancelled = false
     const controller = new AbortController()
-    void getRunHistory(runId, undefined, { signal: controller.signal })
-      .then((latestPage) => mergeNewestPage(queryClient, ['run-history', scope, runId], latestPage))
+    void refreshNewest(controller.signal)
       // A failed refresh leaves the cached page, and the stream replays from its cursor as before.
       .catch(() => {})
       .finally(() => {
@@ -170,7 +223,7 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
       cancelled = true
       controller.abort()
     }
-  }, [queryClient, refreshPending, runId, scope])
+  }, [refreshNewest, refreshPending, runId])
 
   const liveEvents = useRunEvents(!fallback && newestPage && !refreshPending ? runId : undefined, {
     cursor: newestPage?.liveCursor,
@@ -197,6 +250,8 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     () => fallback ? fallbackEvents : orderedUnique(pagedEvents, liveEvents),
     [fallback, fallbackEvents, pagedEvents, liveEvents],
   )
+  useContextCatchUp(runId, context, newestPage, !fallback)
+  const currentComplete = fallback || contextReachesPage(context.data, newestPage)
   const currentEvents = useMemo(() => {
     if (fallback) return fallbackEvents
     const contextEvents = (context.data?.contextEvents ?? []) as RunEvent[]
@@ -213,12 +268,16 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     // Resetting an unavailable optimization would discard it and unmount the
     // thread, losing the caller's scroll intent while the same failure retries.
     if (fallback) return
-    await queryClient.resetQueries({ queryKey: historyKey, exact: true })
-  }, [fallback, historyKey, queryClient])
+    // The page first, so the context read after it reaches it. The jump does not wait for the
+    // context: the Subagents section stays hidden until it lands (`currentComplete`).
+    await queryClient.resetQueries({ queryKey: ['run-history', scope, runId], exact: true })
+    void queryClient.invalidateQueries({ queryKey: ['run-history-context', scope, runId], exact: true })
+  }, [fallback, queryClient, runId, scope])
 
   return {
     visibleEvents,
     currentEvents,
+    currentComplete,
     isPending: !fallback && history.isPending,
     contextPending: !fallback && context.isPending,
     fallback,

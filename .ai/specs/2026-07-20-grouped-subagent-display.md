@@ -175,7 +175,12 @@ row) — and returns summaries in stream order, or `[]` when the visibility rule
 any of its task items is still unsettled (`pending`/`running`). Children are
 gathered by `parentItemId` across the anchor turn **and every later turn** — a
 steering message mid-fan-out opens a new reducer turn, and late child items must
-still attach to their agent. Derived per agent:
+still attach to their agent. Earlier turns whose agents still run are carried
+whole; the first earlier turn whose agents have all settled bounds that
+look-back. A turn holding a **running background** agent is carried past that
+bound (hearsay-tools/cezarion#2588): the runner marks such a claude or codex
+agent `background`, always reports its end, and the subagent wait counts it, so
+the dock and the wait name the same running agents. Derived per agent:
 
 - `activity`: the most recent child item's single line — a tool child contributes
   its `title` ("Ran npm test"), a message/reasoning child its last non-empty text

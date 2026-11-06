@@ -15,6 +15,14 @@ Record these fields:
 - **Evidence:** PR and current head, reviewed head and findings, criterion-to-check
   results, landing outcome and merge SHA, integrated acceptance SHA/results,
   before/after metrics when relevant, preserved artifacts.
+- **Patch release:** candidate and all compared worker/PR heads, fetched main SHA,
+  readiness confirmations, actual paths/ranges and semantic checks, directed
+  overlap precedence (existing PR first, otherwise eligible schedule order), decision and
+  reply/request id. A hold names its reason, owner, next action and wake source.
+  A changed head, base, scope or readiness invalidates the release; retain the
+  superseded evidence and recompute. Older entries without this evidence are
+  unverified, not released. Record deletion-chain predecessors and their merged
+  and integrated-acceptance evidence before dispatching successors.
 - **Decisions:** scope changes, affected dependents, authorized exclusions,
   out-of-scope behavior questions and friction lines.
 
@@ -51,7 +59,11 @@ the superseded evidence as history.
    remains unverified.
 3. Recheck plan freshness and acceptance evidence after changes to main. A
    merged prerequisite unlocks work only after its recorded release checks pass.
-4. Restore waits for outstanding work, decisions and PRs. Resume a settled
+4. Reconcile patch holds and releases using [the release check](hot-file-release.md).
+   Recompute against live heads/main before sending or reusing a release; a saved
+   reply is not current proof. No live worker session: collect its committed result
+   and resume it explicitly for missing evidence or a rebase.
+5. Restore waits for outstanding work, decisions and PRs. Resume a settled
    worker explicitly when it has more work.
 
 Done when every nonterminal item has a current status, next action and wake

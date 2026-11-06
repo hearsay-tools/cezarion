@@ -86,3 +86,14 @@ exit table, and a status changes only by an exit. A trigger row in the run
 state table names the exit it takes.
 
 _Avoid_: transition (as a noun for the declared kind), status patch
+
+## No-progress stall
+
+The native mock mode that a `mock:no-progress-*` prompt selects: the mock stops
+making progress, so tests can exercise Cezar's no-progress deadline and the
+escalation that ends a session. Its variants close the input, ignore SIGTERM,
+hold the output pipe open in a child, or leave children behind. The mock writes
+`watchdog.pid` only after the variant is in place, so a test may signal it as
+soon as the file holds a whole pid.
+
+_Avoid_: hang, freeze

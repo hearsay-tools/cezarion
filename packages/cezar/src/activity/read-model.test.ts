@@ -240,7 +240,14 @@ describe('the state table', () => {
     ['waiting-on-workers, several entries naming one worker', {
       status: RUN_STATUS.waiting,
       waits: [makeWorkerWait({ mode: 'one', workerIds: [worker], registeredAt: iso(-4_000) }), makeWorkerWait({ mode: 'any', workerIds: [worker, other], registeredAt: iso(-1_000), deadline: iso(30_000) })],
-    }, { kind: 'workers', since: iso(-4_000), deadline: iso(30_000), detail: { owed: 3, total: 3, settled: 0, recipientRunIds: [] } }],
+    }, { kind: 'workers', since: iso(-4_000), deadline: iso(30_000), detail: { owed: 2, total: 2, settled: 0, recipientRunIds: [] } }],
+    ['waiting-on-workers, one shared worker reported', {
+      status: RUN_STATUS.waiting,
+      waits: [
+        makeWorkerWait({ workerIds: [worker], outcomes: [{ workerId: worker, status: RUN_STATUS.done, observedAt: iso(-500) }], registeredAt: iso(-4_000) }),
+        makeWorkerWait({ workerIds: [worker, other], outcomes: [{ workerId: worker, status: RUN_STATUS.done, observedAt: iso(-500) }], registeredAt: iso(-1_000), deadline: iso(30_000) }),
+      ],
+    }, { kind: 'workers', detail: { owed: 1, total: 2, settled: 1 } }],
     ['waiting-on-subagents', { status: RUN_STATUS.waiting, waits: [makeSubagentWait()] },
       { kind: 'subagents', since: '2026-10-26T00:00:00.000Z', deadline: '2026-10-26T00:05:00.000Z', detail: { running: 1 } }],
     ['waiting-for-merge', { status: RUN_STATUS.waiting, waits: [makePrWait({ until: 'merge' })] }, { kind: WAIT_KIND.pr, detail: { number: 12, target: 'merge' } }],

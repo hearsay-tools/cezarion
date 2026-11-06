@@ -536,21 +536,26 @@ export function requestsToPeers(delegation: WaitingOnInput['delegation'], reques
   return !!requestIds?.some((id) => toPeers.has(id));
 }
 
-/** Ids a worker entry has not heard about yet, or requests without an outcome. */
-function workerEntryOwed(wait: WorkerWaitEntry): number {
+/** One target of a worker entry: a request when the entry waits on replies, else a worker. Its key
+ *  names the kind, so every count over several entries (`computeWaitingOn`, the activity view)
+ *  counts each target once with the same keys (hearsay-tools/cezarion#2588). */
+export interface WorkerWaitTarget { key: string; settled: boolean }
+
+export function workerWaitTargets(wait: Pick<WorkerWaitEntry, 'requestIds' | 'requestOutcomes' | 'workerIds' | 'outcomes'>): WorkerWaitTarget[] {
   if (wait.requestIds) {
     const answered = new Set(wait.requestOutcomes?.map((outcome) => outcome.requestId));
-    return wait.requestIds.filter((id) => !answered.has(id)).length;
+    return wait.requestIds.map((id) => ({ key: `request:${id}`, settled: answered.has(id) }));
   }
   const reported = new Set(wait.outcomes?.map((outcome) => outcome.workerId));
-  return wait.workerIds?.filter((id) => !reported.has(id)).length ?? 0;
+  return (wait.workerIds ?? []).map((id) => ({ key: `worker:${id}`, settled: reported.has(id) }));
 }
 
-/** The count over every open worker entry; undefined when there is none. */
+/** The distinct workers and requests still owed over every open worker entry; undefined when there
+ *  is none. A worker in two open waits counts once (hearsay-tools/cezarion#2588). */
 function workersOwed(open: readonly Wait[]): number | undefined {
   const entries = open.filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker');
   if (!entries.length) return undefined;
-  return entries.reduce((sum, wait) => sum + workerEntryOwed(wait), 0);
+  return new Set(entries.flatMap((wait) => workerWaitTargets(wait).filter((target) => !target.settled).map((target) => target.key))).size;
 }
 
 function earliest<T extends PrWaitEntry | TimerWaitEntry | ProcessWaitEntry>(waits: readonly T[]): T | undefined {
@@ -578,7 +583,8 @@ export function computeWaitingOn(run: WaitingOnInput): WaitingOn | undefined {
   const peerWaits = open.filter((wait): wait is PeerWaitEntry => wait.kind === 'peer');
   if (peerWaits.length) return { kind: 'peers', count: new Set(peerWaits.flatMap((wait) => wait.peerIds)).size };
   const subagentWaits = open.filter((wait): wait is SubagentWaitEntry => wait.kind === 'subagent');
-  if (subagentWaits.length) return { kind: 'subagents', count: subagentWaits.reduce((sum, wait) => sum + runningSubagents(wait), 0) };
+  // Each running child once, however many open entries name it (hearsay-tools/cezarion#2588).
+  if (subagentWaits.length) return { kind: 'subagents', count: new Set(subagentWaits.flatMap((wait) => wait.children.filter((child) => child.status === 'running').map((child) => child.id))).size };
   const pr = earliest(open.filter((wait): wait is PrWaitEntry => wait.kind === 'pr'));
   if (pr) {
     return { kind: 'pr', until: pr.until, waitId: pr.id, prUrl: pr.prUrl, repository: pr.repository, prNumber: pr.prNumber, deadline: pr.deadline };

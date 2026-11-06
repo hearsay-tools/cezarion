@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { RunHistoryContext, RunHistoryPage } from '@open-mercato/cezar-api-client'
+import { TOOL_STATUSES } from '@open-mercato/cezar-api-client/protocol/ui-events'
 import { flushAnimationFrames, installAnimationFrameQueue } from '../test/animation-frames'
 import { getRunHistory, getRunHistoryContext } from './client'
 import { useRunHistory } from './run-history'
@@ -27,6 +28,7 @@ vi.mock('./live-coordinator', () => ({ subscribeLive: (demand: { projectId: stri
   return () => source.close()
 } }))
 
+const TOOL_STATUS = Object.fromEntries(TOOL_STATUSES.map(status => [status, status])) as { [Status in (typeof TOOL_STATUSES)[number]]: Status }
 const mockHistory = vi.mocked(getRunHistory)
 const mockContext = vi.mocked(getRunHistoryContext)
 
@@ -333,6 +335,21 @@ describe('useRunHistory', () => {
     expect(mockHistory).toHaveBeenLastCalledWith('run-1', undefined, expect.any(Object))
   })
 
+  it('jump-to-latest resolves with the newest page while the context is still loading', async () => {
+    mockHistory.mockResolvedValue(page(100))
+    mockContext.mockResolvedValueOnce(context()).mockReturnValueOnce(new Promise(() => {}))
+    const { wrapper } = harness()
+    const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
+    await waitFor(() => expect(result.current.currentComplete).toBe(true))
+
+    let jumped = false
+    await act(async () => { await result.current.jumpToLatest(); jumped = true })
+    expect(jumped).toBe(true)
+    // The context refresh still started after the page reset.
+    expect(mockContext).toHaveBeenCalledTimes(2)
+    mockContext.mockReset()
+  })
+
   it('compacts a long live prefix into a fresh persisted tail page', async () => {
     FakeEventSource.instances = []
     vi.stubGlobal('EventSource', FakeEventSource)
@@ -374,6 +391,104 @@ describe('useRunHistory', () => {
     expect(result.current.visibleEvents[0]?.seq).toBe(201)
     expect(result.current.retainedPages).toBe(1)
     expect(FakeEventSource.instances.length).toBeGreaterThanOrEqual(2)
+    vi.unstubAllGlobals()
+  })
+
+  // hearsay-tools/cezarion#2588: until the context lands, the current state is the newest page
+  // alone, and a reader that counts agents must know it is partial.
+  it('reports the current state incomplete until the context reaches the newest page', async () => {
+    const late = deferred<RunHistoryContext>()
+    mockHistory.mockResolvedValue(tail(51, 100))
+    mockContext.mockReturnValue(late.promise)
+    const { wrapper } = harness()
+    const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
+
+    await waitFor(() => expect(result.current.isPending).toBe(false))
+    expect(result.current.currentComplete).toBe(false)
+    await act(async () => late.resolve(context()))
+    await waitFor(() => expect(result.current.currentComplete).toBe(true))
+  })
+
+  // A page opens with its turn's boundary, which can be far older than its first item: the
+  // events between are only in a context read at or after the page.
+  it('reads the context again when it was read before the page, even if the page opens with an old turn boundary', async () => {
+    const agentStart = { seq: 110, ts: '2026-07-30T00:00:00.000Z', type: 'item.started', item: { kind: 'tool', id: 'agent-1', toolKind: 'task', status: TOOL_STATUS.running, title: 'Agent: one' } }
+    const opened: RunHistoryPage = { ...tail(151, 250), events: [{ seq: 1, ts: '2026-07-30T00:00:00.000Z', type: 'turn.started', turnId: 't1' }, ...tail(151, 250).events] }
+    const late = deferred<RunHistoryContext>()
+    mockHistory.mockResolvedValue(opened)
+    mockContext.mockResolvedValueOnce(context()).mockReturnValueOnce(late.promise)
+    const { wrapper } = harness()
+    const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
+
+    await waitFor(() => expect(mockContext).toHaveBeenCalledTimes(2))
+    expect(result.current.currentComplete).toBe(false)
+    expect(result.current.currentEvents.map(({ seq }) => seq)).not.toContain(110)
+    await act(async () => late.resolve({ contextEvents: [...context().contextEvents, agentStart] as RunHistoryContext['contextEvents'], asOfSeq: 250 }))
+    await waitFor(() => expect(result.current.currentComplete).toBe(true))
+    expect(result.current.currentEvents.map(({ seq }) => seq)).toContain(110)
+    expect(mockContext).toHaveBeenCalledTimes(2)
+  })
+
+  it('catches each task up on its own when the next task has the same page sequence', async () => {
+    mockHistory.mockResolvedValue(tail(151, 250))
+    mockContext.mockImplementation(async (id) => ({ ...context(), asOfSeq: mockContext.mock.calls.filter(([called]) => called === id).length > 1 ? 250 : 100 }))
+    const { wrapper } = harness()
+    const { result, rerender } = renderHook(({ id }) => useRunHistory(id), { wrapper, initialProps: { id: 'run-a' } })
+    await waitFor(() => expect(result.current.currentComplete).toBe(true))
+
+    rerender({ id: 'run-b' })
+    await waitFor(() => expect(mockContext.mock.calls.filter(([id]) => id === 'run-b')).toHaveLength(2))
+    await waitFor(() => expect(result.current.currentComplete).toBe(true))
+    mockContext.mockReset()
+  })
+
+  it('refreshes the context with each compaction, so frames before the new page stay current', async () => {
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const agentStart = { seq: 110, ts: '2026-07-30T00:00:00.000Z', type: 'item.started', item: { kind: 'tool', id: 'agent-1', toolKind: 'task', status: TOOL_STATUS.running, title: 'Agent: one' } }
+    mockHistory.mockResolvedValueOnce(page(100)).mockResolvedValue(tail(201, 300))
+    mockContext.mockResolvedValueOnce(context())
+      .mockResolvedValue({ contextEvents: [...context().contextEvents, agentStart] as RunHistoryContext['contextEvents'], asOfSeq: 300 })
+    const { wrapper } = harness()
+    const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+
+    act(() => {
+      for (let seq = 101; seq <= 300; seq += 1) {
+        FakeEventSource.instances[0]!.emit('run-event', seq === 110 ? JSON.stringify(agentStart) : note(seq))
+      }
+    })
+
+    await waitFor(() => expect(result.current.visibleEvents[0]?.seq).toBe(201))
+    expect(mockContext).toHaveBeenCalledTimes(2)
+    expect(result.current.currentEvents.map(({ seq }) => seq)).toContain(110)
+    expect(result.current.currentComplete).toBe(true)
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps the newer context when an older context answer lands last', async () => {
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const late = deferred<RunHistoryContext>()
+    mockHistory.mockResolvedValueOnce(page(100)).mockResolvedValue(tail(201, 300))
+    mockContext.mockReturnValueOnce(late.promise).mockResolvedValue({ ...context(), asOfSeq: 300 })
+    const { wrapper } = harness()
+    const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+
+    act(() => {
+      for (let seq = 101; seq <= 300; seq += 1) FakeEventSource.instances[0]!.emit('run-event', note(seq))
+    })
+    await waitFor(() => expect(result.current.visibleEvents[0]?.seq).toBe(201))
+    await waitFor(() => expect(result.current.currentComplete).toBe(true))
+    // The first context request, read before the compaction, answers now.
+    await act(async () => {
+      late.resolve(context())
+      await late.promise
+      await new Promise((resolve) => setTimeout(resolve, 0)) // bound: lets the query apply the late answer
+    })
+    expect(mockContext).toHaveBeenCalledTimes(2)
+    expect(result.current.currentComplete).toBe(true)
     vi.unstubAllGlobals()
   })
 
