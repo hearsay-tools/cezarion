@@ -1,0 +1,103 @@
+{
+  "revision": "fdf9cf7ddf851670204a4141c59fbabfc2c89a8f",
+  "productionProfilingBuild": true,
+  "workloadSha256": "c506b8f10dc1917cf9334c3d2009e8f244f58aa99bfcff82003d37ad47d7745a",
+  "builtContentSha256": "a960638d2507fa30dfedd9e5517a5ce3cd8551ef9aec25dd03a635263210335e",
+  "sourceDirty": false,
+  "quick": false,
+  "host": {
+    "cpu": "AMD Ryzen 9 5950X 16-Core Processor",
+    "affinity": "23"
+  },
+  "pendingCase": null,
+  "lastClick": {
+    "expected": "document.querySelector('input[aria-label=\"Search tasks\"],input[placeholder*=\"Search\"]')",
+    "point": {
+      "x": 180,
+      "y": 269
+    }
+  },
+  "fixtureExits": [
+    {
+      "scope": "project",
+      "pid": 36411,
+      "spawnfile": "/home/agent/.nvm/versions/node/v24.22.1/bin/node",
+      "spawnargs": [
+        "/home/agent/.nvm/versions/node/v24.22.1/bin/node",
+        "/home/agent/projects/cezar/.ai/cezar/worktrees/be11c106-852d-4943-811c-057c0ba1248d/packages/web/scripts/tab-fixture-server.mjs",
+        "/tmp/cez-tabs-px1TUz",
+        "/tmp/cezar-s3b-baseline-be11c106/packages/cezar",
+        "none",
+        "project"
+      ],
+      "elapsedMs": 290047,
+      "exitCode": 0,
+      "signalCode": null,
+      "lifecycle": [
+        {
+          "kind": "exit",
+          "elapsedMs": 290047,
+          "detail": "code=0 signal=null"
+        }
+      ],
+      "stdout": "",
+      "stderr": "",
+      "stdoutDropped": 0,
+      "stderrDropped": 0
+    },
+    {
+      "scope": "global",
+      "pid": 163913,
+      "spawnfile": "/home/agent/.nvm/versions/node/v24.22.1/bin/node",
+      "spawnargs": [
+        "/home/agent/.nvm/versions/node/v24.22.1/bin/node",
+        "/home/agent/projects/cezar/.ai/cezar/worktrees/be11c106-852d-4943-811c-057c0ba1248d/packages/web/scripts/tab-fixture-server.mjs",
+        "/tmp/cez-tabs-FlCqmR",
+        "/tmp/cezar-s3b-baseline-be11c106/packages/cezar",
+        "none",
+        "global"
+      ],
+      "elapsedMs": 146537,
+      "exitCode": 0,
+      "signalCode": null,
+      "lifecycle": [
+        {
+          "kind": "exit",
+          "elapsedMs": 146537,
+          "detail": "code=0 signal=null"
+        }
+      ],
+      "stdout": "",
+      "stderr": "",
+      "stdoutDropped": 0,
+      "stderrDropped": 0
+    }
+  ],
+  "caseFiles": [
+    "project-1440-summary-archived-flat-r1.json",
+    "project-1440-detailed-archived-flat-r1.json",
+    "project-360-summary-archived-flat-r1.json",
+    "project-1440-summary-archived-flat-r2.json",
+    "project-1440-detailed-archived-flat-r2.json",
+    "project-360-summary-archived-flat-r2.json",
+    "project-1440-summary-archived-flat-r3.json",
+    "project-1440-detailed-archived-flat-r3.json",
+    "project-360-summary-archived-flat-r3.json",
+    "project-1440-summary-archived-flat-r4.json",
+    "project-1440-detailed-archived-flat-r4.json",
+    "project-360-summary-archived-flat-r4.json",
+    "project-1440-summary-archived-flat-r5.json",
+    "project-1440-detailed-archived-flat-r5.json",
+    "project-360-summary-archived-flat-r5.json",
+    "global-1440-summary-archived-flat-r1.json",
+    "global-360-summary-archived-flat-r1.json",
+    "global-1440-summary-archived-flat-r2.json",
+    "global-360-summary-archived-flat-r2.json",
+    "global-1440-summary-archived-flat-r3.json",
+    "global-360-summary-archived-flat-r3.json",
+    "global-1440-summary-archived-flat-r4.json",
+    "global-360-summary-archived-flat-r4.json",
+    "global-1440-summary-archived-flat-r5.json",
+    "global-360-summary-archived-flat-r5.json"
+  ]
+}

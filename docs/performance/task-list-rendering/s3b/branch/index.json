@@ -1,0 +1,128 @@
+{
+  "revision": "5a32a5816887559b1b8fd18ae89312ba68baf8d3",
+  "productionProfilingBuild": true,
+  "workloadSha256": "c506b8f10dc1917cf9334c3d2009e8f244f58aa99bfcff82003d37ad47d7745a",
+  "builtContentSha256": "22120a1a2e9cbd7f33a9255dfc289917152403cd0133bd46b77a8fa37b3fff3b",
+  "sourceDirty": false,
+  "quick": false,
+  "host": {
+    "cpu": "AMD Ryzen 9 5950X 16-Core Processor",
+    "affinity": "23"
+  },
+  "pendingCase": null,
+  "lastClick": {
+    "expected": "document.querySelector('input[aria-label=\"Search tasks\"],input[placeholder*=\"Search\"]')",
+    "point": {
+      "x": 180,
+      "y": 269
+    }
+  },
+  "fixtureExits": [
+    {
+      "scope": "project",
+      "pid": 4036928,
+      "spawnfile": "/home/agent/.nvm/versions/node/v24.22.1/bin/node",
+      "spawnargs": [
+        "/home/agent/.nvm/versions/node/v24.22.1/bin/node",
+        "/home/agent/projects/cezar/.ai/cezar/worktrees/be11c106-852d-4943-811c-057c0ba1248d/packages/web/scripts/tab-fixture-server.mjs",
+        "/tmp/cez-tabs-A4JL4X",
+        "/home/agent/projects/cezar/.ai/cezar/worktrees/be11c106-852d-4943-811c-057c0ba1248d/packages/cezar",
+        "none",
+        "project"
+      ],
+      "elapsedMs": 272638,
+      "exitCode": 0,
+      "signalCode": null,
+      "lifecycle": [
+        {
+          "kind": "exit",
+          "elapsedMs": 272638,
+          "detail": "code=0 signal=null"
+        }
+      ],
+      "stdout": "",
+      "stderr": "",
+      "stdoutDropped": 0,
+      "stderrDropped": 0
+    },
+    {
+      "scope": "global",
+      "pid": 4126682,
+      "spawnfile": "/home/agent/.nvm/versions/node/v24.22.1/bin/node",
+      "spawnargs": [
+        "/home/agent/.nvm/versions/node/v24.22.1/bin/node",
+        "/home/agent/projects/cezar/.ai/cezar/worktrees/be11c106-852d-4943-811c-057c0ba1248d/packages/web/scripts/tab-fixture-server.mjs",
+        "/tmp/cez-tabs-z4lo8R",
+        "/home/agent/projects/cezar/.ai/cezar/worktrees/be11c106-852d-4943-811c-057c0ba1248d/packages/cezar",
+        "none",
+        "global"
+      ],
+      "elapsedMs": 223889,
+      "exitCode": 0,
+      "signalCode": null,
+      "lifecycle": [
+        {
+          "kind": "exit",
+          "elapsedMs": 223889,
+          "detail": "code=0 signal=null"
+        }
+      ],
+      "stdout": "",
+      "stderr": "",
+      "stdoutDropped": 0,
+      "stderrDropped": 0
+    }
+  ],
+  "caseFiles": [
+    "project-1440-summary-archived-flat-r1.json",
+    "project-1440-summary-archived-virtual-r1.json",
+    "project-1440-detailed-archived-flat-r1.json",
+    "project-1440-detailed-archived-virtual-r1.json",
+    "project-360-summary-archived-flat-r1.json",
+    "project-360-summary-archived-virtual-r1.json",
+    "project-1440-summary-archived-virtual-r2.json",
+    "project-1440-summary-archived-flat-r2.json",
+    "project-1440-detailed-archived-virtual-r2.json",
+    "project-1440-detailed-archived-flat-r2.json",
+    "project-360-summary-archived-virtual-r2.json",
+    "project-360-summary-archived-flat-r2.json",
+    "project-1440-summary-archived-flat-r3.json",
+    "project-1440-summary-archived-virtual-r3.json",
+    "project-1440-detailed-archived-flat-r3.json",
+    "project-1440-detailed-archived-virtual-r3.json",
+    "project-360-summary-archived-flat-r3.json",
+    "project-360-summary-archived-virtual-r3.json",
+    "project-1440-summary-archived-virtual-r4.json",
+    "project-1440-summary-archived-flat-r4.json",
+    "project-1440-detailed-archived-virtual-r4.json",
+    "project-1440-detailed-archived-flat-r4.json",
+    "project-360-summary-archived-virtual-r4.json",
+    "project-360-summary-archived-flat-r4.json",
+    "project-1440-summary-archived-flat-r5.json",
+    "project-1440-summary-archived-virtual-r5.json",
+    "project-1440-detailed-archived-flat-r5.json",
+    "project-1440-detailed-archived-virtual-r5.json",
+    "project-360-summary-archived-flat-r5.json",
+    "project-360-summary-archived-virtual-r5.json",
+    "global-1440-summary-archived-flat-r1.json",
+    "global-1440-summary-archived-virtual-r1.json",
+    "global-360-summary-archived-flat-r1.json",
+    "global-360-summary-archived-virtual-r1.json",
+    "global-1440-summary-archived-virtual-r2.json",
+    "global-1440-summary-archived-flat-r2.json",
+    "global-360-summary-archived-virtual-r2.json",
+    "global-360-summary-archived-flat-r2.json",
+    "global-1440-summary-archived-flat-r3.json",
+    "global-1440-summary-archived-virtual-r3.json",
+    "global-360-summary-archived-flat-r3.json",
+    "global-360-summary-archived-virtual-r3.json",
+    "global-1440-summary-archived-virtual-r4.json",
+    "global-1440-summary-archived-flat-r4.json",
+    "global-360-summary-archived-virtual-r4.json",
+    "global-360-summary-archived-flat-r4.json",
+    "global-1440-summary-archived-flat-r5.json",
+    "global-1440-summary-archived-virtual-r5.json",
+    "global-360-summary-archived-flat-r5.json",
+    "global-360-summary-archived-virtual-r5.json"
+  ]
+}

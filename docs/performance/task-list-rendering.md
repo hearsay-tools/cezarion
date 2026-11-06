@@ -242,3 +242,189 @@ clean fixture exits. It uses short observation windows and the e2e build mirror;
 it is correctness evidence, not a performance sample. The measured production
 matrix above used the harness at `af998efd8`, before this test-only runner refactor.
 Normal CLI defaults and fixture sizes remain the full workload described above.
+
+
+## S3b: virtual groups and memoized rows
+
+Large global groups do less scroll work with virtualization. In paired runs on the
+same branch, global frame p95 falls in all five pairs at both widths. The median
+paired change is −83.2 ms at 1440 and −33.3 ms at 360. Project summary commit p95
+also falls in all five pairs. Two regressions sit beside those gains: global
+desktop paired commit p95 rises **19.3 ms** (range **−15.5 to +133.2 ms**; four
+of five pairs rise), and project detailed paired frame p95 rises **33.1 ms**
+(range **−16.7 to +50.0 ms**; three of five pairs rise). Both spreads cross zero
+on this shared host. The global desktop absolute commit p95 medians are 75.3 ms
+flat and 102.1 ms virtual. This study does not show a lower global desktop commit
+cost from virtualization.
+
+Acceptance criterion 6 is met by lower **scroll work** (global paired frame p95
+improves 5/5 at both viewports) and lower **update work** (the small global list
+renders/event falls 4.3 → 0.4). It does not show a universal timing improvement,
+an optimal crossover near 100 rows, or Phase 2's commit-time acceptance. Phase 2
+must compare global Tasks React commit time on main against `0320d57fb` under its
+S5 index workload. The global desktop commit regression above remains explicit
+input to that separate check.
+
+### Method and noise reference
+
+The unchanged workload runs against S3a baseline
+`fdf9cf7ddf851670204a4141c59fbabfc2c89a8f` and branch
+`5a32a5816887559b1b8fd18ae89312ba68baf8d3`. Both source trees were clean during
+measurement. Later commits extract the same expansion state into a shared hook,
+extract fixture streaming branches, and make no-op/test callback bodies explicit
+for coverage. Those refactors do not change rendering behavior and were not
+resampled. The producer now labels the global interaction **Archived tab** and
+the project interaction **Archived tab and paging**. Existing S3a labels and samples
+above remain unchanged.
+
+The bounded study has 85 runs: five archived cases × paired flat/virtual × five
+repetitions on the branch (50); the same five flat cases × five on baseline (25);
+and a small global active fixture × five per build (10). The five large cases are
+project 1440 summary, project 1440 detailed, project 360 cards, global 1440 summary,
+and global 360 summary. Large fixture sizes match S3a: 1000 archived project runs,
+or 2000 archived global runs. The small global fixture has ten projects with five
+active and five archived runs each: 50 rows per selected group, below the threshold.
+
+Each branch flat/virtual pair uses the same case and repetition. Pair order
+alternates by repetition. These pairs are the noise reference: they share one
+build and run next to each other, while retaining host load per case. Global
+scroll improvements are roughly one 16.7 ms frame or more in every pair at both widths; paired
+API p50 changes have mixed direction. The lower mounted-row counts and rendered-row
+work provide an independent work measure. Baseline runs follow the paired branch
+study; small branch runs precede small baseline runs. Those cross-build timings
+remain exposed to temporal host noise and are not a paired causal estimate.
+
+All runs use isolated fixtures, no agents and no live-cockpit requests. Processes
+inherit CPU 23 affinity on an AMD Ryzen 9 5950X. Squeal was stopped during the
+measurement after its hold command failed to record a hold due to a locked store.
+No tests ran during measurement. The production profiling build and DevTools hook
+are harness-only. Workload SHA256 is
+`c506b8f10dc1917cf9334c3d2009e8f244f58aa99bfcff82003d37ad47d7745a`.
+Build hashes are `a960638d2507fa30dfedd9e5517a5ce3cd8551ef9aec25dd03a635263210335e`
+(baseline) and `22120a1a2e9cbd7f33a9255dfc289917152403cd0133bd46b77a8fa37b3fff3b`
+(branch). Indexes retain both hashes and source/host metadata.
+
+| Study | Runs | Load1 before/after range | Published updates/s range |
+| --- | ---: | ---: | ---: |
+| branch | 50 | 16.1–49.2 | 15.9–19.6 |
+| baseline | 25 | 35.6–48.8 | 13.6–18.7 |
+| branch-small | 5 | 42.0–44.9 | 19.1–19.2 |
+| baseline-small | 5 | 41.1–45.3 | 18.9–19.2 |
+
+The producer targets 20 summary events/s for three seconds. The tables report
+observed publication rates. Commit samples now cover only that stream window:
+the harness clears commits and row counts after archived loading and before the
+stream. Each commit records root actualDuration and the number of rendered host
+row fibers reached through positive-duration subtrees. “Rows/event” is the sum of
+these counts divided by published events; it is an aggregate work proxy, not an
+attribution of each commit to one event. Offscreen changed rows can produce zero
+visible row renders. The global phone flat repetition 4 recorded no stream commits
+(55 events published). Its commit percentiles are null in raw data; commit medians
+and paired commit differences for that case use the four nonempty samples. Other
+metrics retain all five samples. A zero-duration commit remains a valid sample.
+
+Mounted rows and DOM/fibers use the S3a definitions. Scroll moves the main owner
+64 px/frame for 60 frames; percentiles exclude the first non-interval value.
+Long-task counts and Event Timing cover the whole case, including interactions;
+Event Timing p95 is not INP or an interaction-specific percentile. Control elapsed
+times end after two animation frames, with Archived including project paging.
+
+### Mounts, stream commits and scroll
+
+Values are medians across five runs (except the null case described above).
+Durations are ms. “Detailed” means Resource columns. Flat and virtual are forced
+through the query override on the same branch.
+
+| Case | Build/tier | Mounted rows | DOM nodes | Fibers | Commit p50 | Commit p95 | Frame p95 | Rows/event |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| project/1440/summary | baseline/flat | 1000.0 | 21414.0 | 36026.0 | 95.2 | 386.0 | 66.7 | 139.6 |
+| project/1440/summary | branch/flat | 1000.0 | 23407.0 | 38022.0 | 6.1 | 21.7 | 50.1 | 2.8 |
+| project/1440/summary | branch/virtual | 13.0 | 721.0 | 1534.0 | 2.4 | 13.5 | 49.9 | 0.1 |
+| project/1440/detailed | baseline/flat | 1000.0 | 30471.0 | 61301.0 | 88.1 | 828.6 | 316.6 | 105.2 |
+| project/1440/detailed | branch/flat | 1000.0 | 31459.0 | 62292.0 | 8.8 | 67.7 | 66.7 | 19.4 |
+| project/1440/detailed | branch/virtual | 26.0 | 1293.0 | 2935.0 | 5.9 | 32.3 | 83.3 | 0.1 |
+| project/360/cards | baseline/flat | 1000.0 | 13383.0 | 24992.0 | 23.6 | 186.2 | 50.0 | 134.1 |
+| project/360/cards | branch/flat | 1000.0 | 14385.0 | 25997.0 | 6.4 | 21.4 | 50.0 | 2.5 |
+| project/360/cards | branch/virtual | 6.0 | 477.0 | 1164.0 | 3.3 | 18.0 | 33.4 | 0.1 |
+| global/1440/summary | baseline/flat | 2000.0 | 40511.0 | 59246.0 | 0.0 | 472.4 | 66.7 | 25.7 |
+| global/1440/summary | branch/flat | 2000.0 | 44513.0 | 67251.0 | 0.0 | 75.3 | 133.3 | 0.6 |
+| global/1440/summary | branch/virtual | 10.0 | 745.0 | 1606.0 | 0.5 | 102.1 | 50.1 | 0.0 |
+| global/360/summary | baseline/flat | 2000.0 | 40496.0 | 59229.0 | 0.0 | 1831.2 | 50.1 | 71.4 |
+| global/360/summary | branch/flat | 2000.0 | 44498.0 | 67234.0 | 0.0 | 613.0 | 83.3 | 0.8 |
+| global/360/summary | branch/virtual | 3.0 | 569.0 | 1344.0 | 0.6 | 65.8 | 50.0 | 0.0 |
+
+The next table takes the median of each **within-repetition virtual minus flat**
+difference. It is distinct from subtracting the medians above. Frame wins require
+a reduction greater than 1 ms to avoid rounding ties.
+
+| Case | Paired frame p95 delta | Frame wins | Paired commit p95 delta | Paired API p50 delta |
+| --- | ---: | ---: | ---: | ---: |
+| project/1440/summary | -0.2 | 2/5 | -7.6 | 0.9 |
+| project/1440/detailed | 33.1 | 2/5 | -13.0 | -1.3 |
+| project/360/cards | -0.0 | 2/5 | -6.4 | -3.8 |
+| global/1440/summary | -83.2 | 5/5 | 19.3 | -6.7 |
+| global/360/summary | -33.3 | 5/5 | -544.9 | 2.7 |
+
+### Small global group under summary events
+
+Both modes mount 50 rows. Memoization reduces measured row renders/event from 4.3
+to 0.4 (about 90%). Commit p95 falls from 35.2 to 24.3 ms; p50 remains 0.1 ms.
+This work-count result supports the row memoization requirement below the virtual
+threshold. The timing comparison is sequential across builds and remains subject
+to host noise. The independent row render-count regression test proves an unchanged
+summary skips rendering when another run changes.
+
+| Build | Mounted rows | DOM nodes | Fibers | Commit p50 | Commit p95 | Frame p95 | Rows/event |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline-small | 50.0 | 1497.0 | 2674.0 | 0.1 | 35.2 | 50.0 | 4.3 |
+| branch-small | 50.0 | 1600.0 | 2881.0 | 0.1 | 24.3 | 50.0 | 0.4 |
+
+### API, long tasks and interactions
+
+Each row is a median of per-run values. Event p95 uses delivered entries at the
+16 ms observation threshold. Long tasks is a count, not a duration. The raw files
+retain every event duration and name.
+
+| Case | Build/tier | API p50 | API p95 | Long tasks | Event p95 | Archived elapsed | Search elapsed | Expand elapsed |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| project/1440/summary | baseline/flat | 7.9 | 30.4 | 37.0 | 240.0 | 3708.5 | 401.8 | 753.1 |
+| project/1440/summary | branch/flat | 1.9 | 7.1 | 15.0 | 176.0 | 1188.3 | 212.7 | 510.4 |
+| project/1440/summary | branch/virtual | 1.9 | 4.2 | 1.0 | 264.0 | 934.3 | 68.2 | 52.9 |
+| project/1440/detailed | baseline/flat | 9.6 | 40.0 | 89.0 | 496.0 | 10708.4 | 917.2 | 0.0 |
+| project/1440/detailed | branch/flat | 6.0 | 12.4 | 42.0 | 216.0 | 3075.5 | 307.2 | 0.0 |
+| project/1440/detailed | branch/virtual | 3.4 | 11.7 | 15.0 | 600.0 | 1247.2 | 126.4 | 0.0 |
+| project/360/cards | baseline/flat | 8.0 | 23.0 | 33.0 | 216.0 | 2153.3 | 242.0 | 315.0 |
+| project/360/cards | branch/flat | 5.2 | 9.8 | 13.0 | 112.0 | 879.6 | 144.3 | 114.5 |
+| project/360/cards | branch/virtual | 2.1 | 8.2 | 4.0 | 192.0 | 907.5 | 64.8 | 59.4 |
+| global/1440/summary | baseline/flat | 8.7 | 65.2 | 11.0 | 176.0 | 2132.9 | 530.9 | 221.4 |
+| global/1440/summary | branch/flat | 9.7 | 34.2 | 43.0 | 304.0 | 1852.2 | 292.8 | 1086.5 |
+| global/1440/summary | branch/virtual | 4.6 | 11.8 | 10.0 | 144.0 | 1150.2 | 129.9 | 71.4 |
+| global/360/summary | baseline/flat | 9.6 | 26.7 | 15.0 | 120.0 | 1620.7 | 562.8 | 353.7 |
+| global/360/summary | branch/flat | 6.9 | 17.4 | 20.0 | 160.0 | 1041.6 | 324.0 | 738.4 |
+| global/360/summary | branch/virtual | 7.3 | 33.9 | 8.0 | 120.0 | 1132.7 | 87.7 | 56.6 |
+
+### Threshold, exclusions and raw data
+
+Keep `TASK_LIST_VIRTUALIZE_THRESHOLD = 100` rows per group. The selected large
+cases show a large mount reduction and consistent global scroll improvement;
+the 50-row control stays flat and benefits from memoization. This validates the
+chosen tiers, not an exact optimal crossover: this study does not sweep sizes
+near 100. A per-group threshold avoids making a small group virtual merely because
+another group is large. Forced flat/virtual overrides remain available for diagnosis.
+
+Omitted from the S3a matrix: large active lists, global grouped cards, and the
+phone Resource columns setting duplicate. S3a already measured exclusive mounting
+across that full matrix. This bounded study targets the largest archived groups,
+the phone card layout, and the small global update case. Global has no detailed
+setting. Intermediate widths and sizes around 100 were not benchmarked. Functional
+browser checks cover layout widths, insertion anchoring, expansion, pointer and
+keyboard rename, focus pinning, and query/path scroll behavior. Ctrl+F cannot find
+unmounted offscreen rows above the threshold, as approved in decision D5.
+
+Raw data: [branch pairs](task-list-rendering/s3b/branch/index.json),
+[baseline large](task-list-rendering/s3b/baseline/index.json),
+[branch small](task-list-rendering/s3b/branch-small/index.json), and
+[baseline small](task-list-rendering/s3b/baseline-small/index.json).
+Each index points to one compact file per case/repetition. The largest case is
+10,312 bytes. Long tasks and Event Timing use the same lossless name dictionary
+encoding as S3a; all samples were round-trip checked against the original output.
