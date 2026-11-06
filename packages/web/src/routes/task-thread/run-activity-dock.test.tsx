@@ -166,7 +166,7 @@ describe('RunActivityDock — subagent counts agree with the subagent wait', () 
   }))
   const parked = run({
     status: RUN_STATUS.waiting,
-    waits: [makeSubagentWait({ children: titles.map((_, index) => ({ id: `agent_${index}`, status: 'running' as const })) })],
+    waits: [makeSubagentWait({ children: titles.map((_, index) => ({ id: `agent_${index}`, status: TOOL_STATUS.running })) })],
   })
   const statusText = () => document.querySelector('[data-slot="run-activity-status"]')?.textContent
 
@@ -185,8 +185,8 @@ describe('RunActivityDock — subagent counts agree with the subagent wait', () 
   })
 
   it('updates the waiting count and the completion total together when an agent ends', () => {
-    const ended = [...agentEvents, line(9, 'item.completed', { item: { ...(agentEvents[0] as { item: object }).item, status: 'completed' } })]
-    const children = titles.map((_, index) => ({ id: `agent_${index}`, status: index === 0 ? 'completed' as const : 'running' as const }))
+    const ended = [...agentEvents, line(9, 'item.completed', { item: { ...(agentEvents[0] as unknown as { item: object }).item, status: 'completed' } })]
+    const children = titles.map((_, index) => ({ id: `agent_${index}`, status: index === 0 ? TOOL_STATUS.completed : TOOL_STATUS.running }))
     renderDock(run({ status: RUN_STATUS.waiting, waits: [makeSubagentWait({ children })] }), [line(1, 'turn.started', { turnId: 'turn_1' }), ...ended], [])
     expect(statusText()).toBe('Waiting for 3 subagents')
     expect(metaOf('subagents')).toBe('1 of 4 complete')

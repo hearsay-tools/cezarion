@@ -428,7 +428,7 @@ describe('live cursor replay and compact context', () => {
       { seq: 8, type: 'turn.started', turnId: 't4' },
     ]);
     const context = await deriveRunContextEvents(settled.dataDir, settled.id);
-    const roots = context.contextEvents.filter(({ type }) => type.startsWith('item.')).map((event) => (event as { item: { id: string } }).item.id);
+    const roots = context.contextEvents.filter(({ type }) => type.startsWith('item.')).map((event) => (event as unknown as { item: { id: string } }).item.id);
     expect(roots).toContain('long');
     expect(roots).toContain('now');
     expect(roots).not.toContain('old');

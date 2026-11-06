@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { RunHistoryContext, RunHistoryPage } from '@open-mercato/cezar-api-client'
+import { TOOL_STATUSES } from '@open-mercato/cezar-api-client/protocol/ui-events'
 import { flushAnimationFrames, installAnimationFrameQueue } from '../test/animation-frames'
 import { getRunHistory, getRunHistoryContext } from './client'
 import { useRunHistory } from './run-history'
@@ -27,6 +28,7 @@ vi.mock('./live-coordinator', () => ({ subscribeLive: (demand: { projectId: stri
   return () => source.close()
 } }))
 
+const TOOL_STATUS = Object.fromEntries(TOOL_STATUSES.map(status => [status, status])) as { [Status in (typeof TOOL_STATUSES)[number]]: Status }
 const mockHistory = vi.mocked(getRunHistory)
 const mockContext = vi.mocked(getRunHistoryContext)
 
@@ -395,7 +397,7 @@ describe('useRunHistory', () => {
   it('refreshes the context with each compaction, so frames before the new page stay current', async () => {
     FakeEventSource.instances = []
     vi.stubGlobal('EventSource', FakeEventSource)
-    const agentStart = { seq: 110, ts: '2026-07-30T00:00:00.000Z', type: 'item.started', item: { kind: 'tool', id: 'agent-1', toolKind: 'task', status: 'running', title: 'Agent: one' } }
+    const agentStart = { seq: 110, ts: '2026-07-30T00:00:00.000Z', type: 'item.started', item: { kind: 'tool', id: 'agent-1', toolKind: 'task', status: TOOL_STATUS.running, title: 'Agent: one' } }
     mockHistory.mockResolvedValueOnce(page(100)).mockResolvedValue(tail(201, 300))
     mockContext.mockResolvedValueOnce(context())
       .mockResolvedValue({ contextEvents: [...context().contextEvents, agentStart] as RunHistoryContext['contextEvents'], asOfSeq: 300 })
