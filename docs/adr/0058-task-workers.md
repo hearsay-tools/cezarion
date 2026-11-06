@@ -20,7 +20,7 @@ session's existing credential:
 - Messaging off refuses new peer sends, peer discovery and new peer waits from the task, and sends
   to it are recorded as not delivered. A reply to a request accepted earlier passes in both
   directions. Messages between a task and its own workers are never gated by either setting.
-- A root session with both off and no owned worker gets the endpoint but no credential, so
+- A root session with both off, no owned worker and no open peer request gets the endpoint but no credential, so
   `cez discover` refuses rather than reach the cockpit; worker sessions and roots with owned
   workers keep theirs. The session keeps the governed-session cross-session controls, whose
   reach is runner-specific (`AGENT_PROTOCOL.md` D1); this path does not widen or narrow them.

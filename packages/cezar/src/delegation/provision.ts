@@ -6,6 +6,7 @@ import { CredentialRegistry } from './credentials.ts';
 import { messagingAllowed, workersAllowed } from '@open-mercato/cezar-contract/task-options';
 import { DelegationService, rootDelegation, type DelegationProject } from './service.ts';
 import { WORKERS_OFF } from './policy.ts';
+import { openCompletionRequests } from '../workflows/completion-policy.ts';
 import { createDelegationRoutes } from './routes.ts';
 import { createDelegationApp, startDelegationTransport } from './transport.ts';
 import { delegationEndpoint } from './cli.ts';
@@ -53,13 +54,16 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
 
   const worker = run.delegation?.role === 'worker';
   const owned = run.delegation?.role === 'root' && run.delegation.receipts.length > 0;
+  // Accepted peer requests still allow a reply, a wait or a cancel after messaging goes off.
+  const open = openCompletionRequests(options.store, run.id);
+  const owesRequests = open.sent.length + open.incoming.length > 0;
   const workersOn = workersAllowed(run);
   const messagingOn = messagingAllowed(run);
-  // hearsay-tools/cezarion#2784: with both switches off and no worker to manage, the session gets no
+  // hearsay-tools/cezarion#2784: with both switches off, no worker to manage and no open request, the session gets no
   // credential; it keeps the governed-session cross-session controls (runner-specific, D1). The endpoint
   // alone marks it as a controller-bound session, so `cez discover` refuses instead of falling
   // back to the cockpit, as it does for any partial credential.
-  if (!worker && !workersOn && !messagingOn && !owned) {
+  if (!worker && !workersOn && !messagingOn && !owned && !owesRequests) {
     return { restrictCrossSessionMessaging: true, env: { CEZ_DELEGATION_URL: options.url }, revoke: () => {},
       instructions: `Cezar workers and task messaging are off for this task; a human can turn them on in the task menu, and they reach you at your next session. ${subagentOnly}` };
   }

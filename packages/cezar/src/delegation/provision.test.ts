@@ -180,6 +180,15 @@ describe('session provisioning', () => {
       expect(session.instructions).not.toMatch(/index\.[jt]s' message/);
       expect(f.store.getRun(run.id)?.delegation).toBeUndefined();
     });
+    it('both off still issues a credential while a peer request it accepted is open', async () => {
+      const lone = root({});
+      await f.service.send(f.caller, { id: randomUUID(), recipientRunId: lone.id, kind: 'request', text: 'Check this', timeoutSeconds: 600 });
+      f.store.updateRun(lone.id, { allowWorkers: false, allowMessaging: false });
+      const session = provision(lone.id)!;
+      expect(session.env.CEZ_DELEGATION_TOKEN).toBeTypeOf('string');
+      expect(session.instructions).toContain('message reply');
+      expect(session.instructions).toContain('Task messaging is off for this task');
+    });
     it('both off still issues a credential to manage workers the task already owns', async () => {
       await f.service.spawn(f.caller, { task: 'worker', baseline: 'HEAD', requestId: randomUUID() });
       f.store.updateRun(f.parent.id, { allowWorkers: false, allowMessaging: false });
