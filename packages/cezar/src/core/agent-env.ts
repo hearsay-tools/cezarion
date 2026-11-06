@@ -297,6 +297,14 @@ export interface BuildChildEnvOptions {
   source?: NodeJS.ProcessEnv;
 }
 
+/** Home locators belong to the cockpit, never to a child process. */
+export const HOME_LOCATING_ENV: readonly string[] = ['CEZ_HOME'];
+
+/** Preserve every other name, including host command credentials and escape hatches. */
+export function withoutHomeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !HOME_LOCATING_ENV.includes(name.toUpperCase())));
+}
+
 /**
  * Build the curated child environment for a spawned backend. `extraEnv`
  * (the runner's `spec.env`) is applied last so per-run vars always win.
@@ -335,6 +343,7 @@ function curateEnv(
   // total. `extra` is cezar's own, never a host secret, and always wins.
   const overridden = upperSet([
     ...Object.keys(extra),
+    ...HOME_LOCATING_ENV,
     // Session authority may only come from controller-generated spec.env, never
     // inherited from a parent agent — even through passthrough or full-env mode.
     'CEZ_TOOL_TOKEN',
@@ -360,7 +369,7 @@ function curateEnv(
     for (const [name, value] of Object.entries(source)) {
       if (!overridden.has(name.toUpperCase())) full[name] = value;
     }
-    return { ...full, ...extra };
+    return withoutHomeEnv({ ...full, ...extra });
   }
 
   const { backendPrefixes } = grants;
@@ -392,7 +401,7 @@ function curateEnv(
   }
   // Per-run env last — it is cezar's own, never a host secret, and must win.
   for (const [name, value] of Object.entries(extra)) out[name] = value;
-  return out;
+  return withoutHomeEnv(out);
 
   /** `name` is matched normalized; the caller keeps the original spelling. */
   function allow(name: string): boolean {

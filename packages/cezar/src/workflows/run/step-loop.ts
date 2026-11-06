@@ -1,3 +1,4 @@
+import { withoutHomeEnv } from '../../core/agent-env.ts';
 import { atTaskHead, atStepOpen, type LaunchSource } from './launch-read-resolver.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { RunnerId } from '../../core/agent-runner.ts';
@@ -505,7 +506,7 @@ export class StepLoop {
     const result = await runGroupedCommand({
       command,
       cwd: state.liveSession.cwd,
-      env: process.env,
+      env: withoutHomeEnv(process.env),
       setInterrupt: (stop) => { state.liveSession.installInterrupt(stop); },
       keep: 'head',
       cap: CHECK_OUTPUT_CAP,

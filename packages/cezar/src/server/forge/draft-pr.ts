@@ -1,3 +1,4 @@
+import { withoutHomeEnv } from '../../core/agent-env.ts';
 import { execFile } from 'node:child_process';
 import { exactLineIndex, nextLineIndex } from '@open-mercato/cezar-contract/handoff';
 import { autosaveCommit } from '../../git-worktree.ts';
@@ -133,7 +134,7 @@ function execTool(args: string[], cwd: string, bin: string, timeoutMs = 30_000):
         // piped stdio is not enough to stop it. Without this a `git push` that
         // cannot authenticate hangs for the whole timeout and surfaces as a
         // blank one-minute stall instead of git's own "could not read Username".
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        env: { ...withoutHomeEnv(process.env), GIT_TERMINAL_PROMPT: '0' },
       },
       (err, stdout, stderr) =>
         resolve({
