@@ -22,6 +22,7 @@ import { apiPath, getApiScope } from '@open-mercato/cezar-api-client/utils/proje
 import { healthPayloadSchema } from './health-payload'
 import { queryKeys, useHealthSubscription, workspaceQueryKeys } from './queries'
 import { createRunDetailFetcher, createRunDetailRefresher, dropFinishVerdict, type RunDetailFetcher } from './run-detail-refresh'
+import { runsIndexSync } from './runs-index-sync'
 import type {
   ArchivedRunsResponse,
   HealthResponse,
@@ -83,51 +84,6 @@ export function onWorkspaceEvent(
   workspaceListeners.add(listener)
   return () => {
     workspaceListeners.delete(listener)
-  }
-}
-
-/**
- * The cross-project index behind the global Tasks page, refreshed from ANY project's run news.
- *
- * Invalidated rather than patched, and debounced. Patching would mean synthesizing a
- * `RunIndexEntry` from a `RunRecord` — a slim row from a fat one, including the `usage` the server
- * attaches per poll — and inventing a row is exactly what the reducers in `events.ts` refuse to
- * do. Invalidation asks the authoritative endpoint instead, and costs nothing at all unless the
- * page is actually mounted: `invalidateQueries` refetches what is rendered and only marks the rest
- * stale.
- *
- * The debounce is what keeps that honest. One run emits many events (started, step, usage,
- * finished), and a workspace of forty projects emits them from everywhere at once; without it a
- * busy minute would be a refetch per event. One request per quiet moment is the whole point.
- */
-const RUNS_INDEX_REFRESH_DEBOUNCE_MS = 400
-
-/** Built per mount, not module-level: a pending timer holds the `queryClient` it will write to,
- *  and one that outlives its provider would invalidate a cache nobody is reading. `cancel` runs
- *  in the effect cleanup. */
-function createRunsIndexRefresher(queryClient: QueryClient): {
-  onEvent: (event: WorkspaceEvent) => void
-  refresh: () => void
-  cancel: () => void
-} {
-  let pending: ReturnType<typeof setTimeout> | undefined
-  const refresh = () => {
-    if (pending !== undefined) return
-    pending = setTimeout(() => {
-      pending = undefined
-      void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex })
-    }, RUNS_INDEX_REFRESH_DEBOUNCE_MS)
-  }
-  return {
-    onEvent(event) {
-      if (event.type === 'run-summary' || event.type === 'run-deleted') refresh()
-    },
-    // A project finished preparing (#667): its recovery changed runs no stream had heard of yet.
-    refresh,
-    cancel() {
-      clearTimeout(pending)
-      pending = undefined
-    },
   }
 }
 
@@ -218,8 +174,8 @@ function reconcile(queryClient: QueryClient, signal?: AbortSignal, periodic = fa
       // reconnect would otherwise leave an expanded non-active group's patched list stale (#129).
       queryClient.invalidateQueries({ predicate: query => isRunListQueryKey(query.queryKey) }),
       // Events happened while we were disconnected, and the index is cross-project — nothing else
-      // here covers it.
-      queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex }),
+      // here covers it. A fenced reconciliation: frames heard during the read stay on top of it.
+      runsIndexSync(queryClient).reconcile(),
       queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.projects }),
       reconcileBackgroundQuery(queryClient, queryKeys.health),
       // The worktree panel's list/total (#483) — a run finishing or a reclaim changes it.
@@ -459,8 +415,8 @@ function createRunListBatcher(queryClient: QueryClient) {
  *   covers exactly those fields (server `relationshipsDigest`); a token tick or a rename keeps
  *   it, and is dropped at the door, judged against the last digest this stream saw for that run
  *   rather than against a cache the sidebar stamp may already have overwritten;
- * - at most one refetch per entry per quiet window, on the runs-index refresher's cadence and
- *   with the same hold-then-fire shape, so a run that never goes quiet still refreshes.
+ * - at most one refetch per entry per 400 ms window, hold-then-fire, so a run that never goes
+ *   quiet still refreshes.
  *
  * A deleted run refreshes the parent it was last seen under. One the stream never saw has no
  * known parent, and that rare case keeps the old whole-family refresh, debounced under one key.
@@ -641,7 +597,15 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
     if (typeof Source !== 'function') return
 
     let source: LiveWorkspaceSource | null = null
-    const runsIndexRefresher = createRunsIndexRefresher(queryClient)
+    const indexSync = runsIndexSync(queryClient)
+    // A numbered frame that arrives while this document knows no stream generation (its first
+    // `ready` was lost to an epoch change, hearsay-tools/cezarion#2729): the shared source asks its
+    // worker for the `ready` again. One request until the next accepted `ready`; that `ready`
+    // reads the index once for the frames skipped meanwhile.
+    indexSync.setUnknownGenerationHandler(() => {
+      const requestReady = (source as { requestReady?: () => boolean } | null)?.requestReady
+      return typeof requestReady === 'function' && requestReady.call(source)
+    })
     const runDetailRefresher = createRunDetailRefresher(queryClient)
     const runDetailFetcher = createRunDetailFetcher(queryClient)
     const details = { fetcher: runDetailFetcher, refreshParent: runDetailRefresher.refresh }
@@ -690,6 +654,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
         attachmentNeedsReconcile = true
         // A new attachment: its `ready` (or first numbered frame) sets the seq baseline.
         seqFence.reset()
+        indexSync.detach()
         setWorkspaceLive(false)
         // Not the first one: at boot the queries are fetching anyway, and invalidating them here
         // would only ask the same questions twice. Every later open is a *re*connect — we were
@@ -702,13 +667,15 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           trackSseReconcile(() => reconcileRunLists(queryClient))
           // Discovery can finish between the cold HTTP read and SSE connection.
           // Cancel that read and reconcile once after the completion listener is attached.
-          // The runs index likewise: a project that finished recovering in that gap sent its
-          // `project-ready` to nobody, and the index read may predate the recovery (#667).
-          for (const key of [queryKeys.health, workspaceQueryKeys.models('cursor'), workspaceQueryKeys.runsIndex]) {
+          for (const key of [queryKeys.health, workspaceQueryKeys.models('cursor')]) {
             void queryClient.cancelQueries({ queryKey: key }).then(() => {
               if (!disposed) void queryClient.invalidateQueries({ queryKey: key })
             })
           }
+          // The runs index likewise: a project that finished recovering in that gap sent its
+          // `project-ready` to nobody, and the index read may predate the recovery (#667). The
+          // bootstrap reconciliation is fenced like every other index read.
+          void indexSync.reconcile()
         }
         everOpened = true
       })
@@ -718,7 +685,14 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           const parsed = parseWorkspaceEvent(name, (event as MessageEvent<string>).data)
           if (!parsed) return
           if (parsed.event.type === 'ready') {
-            seqFence.ready(parsed.event.seq)
+            // A ready past the last accepted frame (a requested ready, which does not reopen)
+            // means frames were lost: reconcile as after any other gap.
+            const lost = seqFence.ready(parsed.event.seq)
+            indexSync.ready(parsed.event.generation, parsed.event.seq)
+            if (lost) {
+              runListBatcher.flush()
+              void reconcile(queryClient)
+            }
             return
           }
           // A jump in `seq` means this document lost frames: apply this one, then reconcile as
@@ -735,10 +709,15 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           }
           // The cross-project index first, and BEFORE the scope filter below — it is the one
           // cache that spans every project, so another project's news is exactly what it is news
-          // for. Dropping those events left the global Tasks page entirely poll-driven: a title
-          // the namer had rewritten stayed stale until the next tick, and the tick does not run
-          // in a background tab, so coming back to one showed yesterday's rows until a reload.
-          runsIndexRefresher.onEvent(parsed.event)
+          // for. The frame patches its row in the next animation frame, with no request
+          // (hearsay-tools/cezarion#2729); a lost frame also reconciles below.
+          if (parsed.project !== null) {
+            if (parsed.event.type === 'run-summary' || parsed.event.type === 'run-deleted') {
+              indexSync.run(parsed.project, parsed.event, lostFrames)
+            } else if (parsed.event.type === 'usage') {
+              indexSync.usage(parsed.project, parsed.event.usage)
+            }
+          }
           // Run lists are per-project sidebar caches, so a stamped run patches its OWNER's
           // list even when that project is not the mounted scope (#129). Todos/usage/detail
           // stay active-scope-only: those caches are the current project's, and the
@@ -772,9 +751,20 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           if (name === 'project-ready') {
             // Recovery ran before any stream listened to that project's store, so the index still
             // holds the cold read: runs the restart interrupted, shown as failed (#667).
-            runsIndexRefresher.refresh()
+            void indexSync.reconcile({ hold: true })
           } else if (name !== 'checkout-progress' && name !== 'automation-change') {
             void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.projects })
+          }
+          // A new project may hold runs no frame named; a removed one leaves the index whole,
+          // with no request.
+          if (name === 'project-added') {
+            const id = (payload as { project?: { id?: unknown } } | null)?.project?.id
+            if (typeof id === 'string' && id !== '') indexSync.restoreProject(id)
+            void indexSync.reconcile({ hold: true })
+          }
+          if (name === 'project-removed') {
+            const id = (payload as { id?: unknown } | null)?.id
+            if (typeof id === 'string' && id !== '') indexSync.dropProject(id)
           }
           for (const listener of [...workspaceListeners]) listener(name, payload)
         })
@@ -828,6 +818,9 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
       source.addEventListener('error', () => {
         // Any drop: events are not reaching the reducers until the next attachment ping.
         setWorkspaceLive(false)
+        // No stream is attached now, so it names no generation: a snapshot from a restarted
+        // server (the backstop, a poll) must not wait for a stream that may never reopen.
+        indexSync.detach()
         // An ordinary drop leaves the stream CONNECTING and the browser retries it on its own —
         // touching that would just race its backoff. CLOSED means it gave up for good, which is
         // what a restarting server produces (the request is answered with a non-2xx while it
@@ -842,6 +835,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
       // The coordinator authenticates and reconciles on restore. Only flush local
       // queued patches here; a second invalidation would cancel its recovery reads.
       runListBatcher.flush()
+      indexSync.flush()
       if (!source || source.readyState === CLOSED) {
         // Don't make them wait out a backoff that started while they were away.
         clearTimeout(reopenTimer)
@@ -873,9 +867,10 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
       clearTimeout(reopenTimer)
       runListBatcher.flush()
       runListBatcher.cancel()
-      runsIndexRefresher.cancel()
+      indexSync.stop()
       runDetailRefresher.cancel()
       runDetailFetcher.cancel()
+      indexSync.setUnknownGenerationHandler(undefined)
       relationshipsRefresher.cancel()
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('pagehide', onPageHide)

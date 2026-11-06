@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createLiveOwner, type LivePort, type LiveOwnerDeps } from './live-owner'
 import { LIVE_PROTOCOL } from './live-protocol'
+import { createWorkspaceSeqFence } from './events'
 
 class Port implements LivePort {
   onmessage: ((event: { data: unknown }) => void) | null = null
@@ -139,6 +140,113 @@ describe('shared live ownership', () => {
     expect(events(port)).toEqual(['ping', 'disconnect', 'reconnect'])
     expect(events(late)).toEqual(['reconnect'])
     owner.dispose()
+  })
+
+  describe('workspace generation for late subscribers (hearsay-tools/cezarion#2729)', () => {
+    const frames = (p: Port) => p.frames.filter(frame => frame.type === 'frame').map(frame => frame.frame.data ? `${frame.frame.event} ${frame.frame.data}` : frame.frame.event)
+    const ready = (generation: string, seq: number) => ({ event: 'ready', data: JSON.stringify({ generation, seq }), id: '' })
+    const summary = (seq: number) => ({ event: 'run-summary', data: JSON.stringify({ project: 'boot', seq, run: { id: 'r' }, relationships: 'd' }), id: '' })
+
+    it('sends a late subscriber a ready with the generation and the last delivered seq, then the barrier ping', async () => {
+      const owner = createLiveOwner(deps)
+      const first = new Port(); owner.attach(first); first.sync('a', [workspace])
+      await vi.advanceTimersByTimeAsync(0)
+      streams[0]!.frame(ready('g1', 10))
+      streams[0]!.frame({ event: 'ping', data: '', id: '' })
+      streams[0]!.frame(summary(11)); streams[0]!.frame(summary(12))
+      const late = new Port(); owner.attach(late); late.sync('b', [workspace])
+      await vi.advanceTimersByTimeAsync(0)
+      expect(frames(late)).toEqual([`ready ${JSON.stringify({ generation: 'g1', seq: 12 })}`, 'ping'])
+      streams[0]!.frame(summary(13))
+      expect(frames(late).at(-1)).toContain('"seq":13')
+      // The first subscriber saw the stream's own ready and no synthetic one.
+      expect(frames(first).filter(frame => frame.startsWith('ready'))).toEqual([`ready ${JSON.stringify({ generation: 'g1', seq: 10 })}`])
+      owner.dispose()
+    })
+
+    it('a document that rejoins after a server restart learns the new generation before any frame', async () => {
+      const owner = createLiveOwner(deps)
+      const port = new Port(); owner.attach(port); port.sync('a', [workspace])
+      await vi.advanceTimersByTimeAsync(0)
+      streams[0]!.frame(ready('g1', 10))
+      streams[0]!.frame({ event: 'ping', data: '', id: '' })
+      // The server restarted: the held entry is reset and the new ready reaches nobody.
+      streams[0]!.frame(ready('g2', 0))
+      expect(port.frames.some(frame => frame.type === 'reset')).toBe(true)
+      streams[0]!.frame(summary(1))
+      // The document recovers (it was hidden, or it rejoins after the reset) with a new epoch.
+      const before = port.frames.length
+      port.sync('a', [workspace], 2)
+      await vi.advanceTimersByTimeAsync(0)
+      const rejoined = port.frames.slice(before).filter(frame => frame.type === 'frame').map(frame => frame.frame)
+      expect(rejoined[0]).toEqual(ready('g2', 1))
+      expect(rejoined[1]).toMatchObject({ event: 'ping' })
+      owner.dispose()
+    })
+
+    it('a demand change (new epoch) in the same generation sends no ready, so a frame dropped under the old epoch still shows as a gap', async () => {
+      const owner = createLiveOwner(deps)
+      const port = new Port(); owner.attach(port); port.sync('a', [workspace], 1)
+      await vi.advanceTimersByTimeAsync(0)
+      streams[0]!.frame(ready('g1', 10))
+      streams[0]!.frame({ event: 'ping', data: '', id: '' })
+      // The document has already moved to epoch 2 (a demand change), so it drops seq 11.
+      streams[0]!.frame(summary(11))
+      port.sync('a', [workspace, run()], 2)
+      await vi.advanceTimersByTimeAsync(0)
+      streams[0]!.frame(summary(12))
+      // The document's own fence over the frames it accepts. It moved to epoch 2 just before seq 11
+      // arrived, so from then on it drops every epoch-1 message.
+      const fence = createWorkspaceSeqFence()
+      const gaps: boolean[] = []
+      let documentEpoch = 1
+      for (const message of port.frames) {
+        if (message.type !== 'frame' || !message.frame.data) continue
+        const data = JSON.parse(message.frame.data) as { seq: number }
+        if (message.frame.event === 'run-summary' && data.seq === 11) documentEpoch = 2
+        if (message.epoch !== documentEpoch) continue
+        if (message.frame.event === 'ready') fence.ready(data.seq)
+        else gaps.push(fence.frame(data.seq))
+      }
+      expect(gaps).toEqual([true])
+      owner.dispose()
+    })
+
+    it('a sync that asks for the workspace ready gets ready(generation, current seq), without restarting the stream', async () => {
+      const owner = createLiveOwner(deps)
+      const port = new Port(); owner.attach(port); port.sync('a', [workspace], 1)
+      await vi.advanceTimersByTimeAsync(0)
+      streams[0]!.frame(ready('g1', 10))
+      streams[0]!.frame({ event: 'ping', data: '', id: '' })
+      streams[0]!.frame(summary(11))
+      // The document lost that ready to an epoch change and asks for it again.
+      port.onmessage?.({ data: { type: 'sync', version: LIVE_PROTOCOL, documentId: 'a', epoch: 2, entries: [workspace], workspaceReady: true } })
+      await vi.advanceTimersByTimeAsync(0)
+      const after = port.frames.filter(message => message.type === 'frame' && message.epoch === 2).map(message => message.frame)
+      expect(after[0]).toEqual(ready('g1', 11))
+      expect(after[1]).toMatchObject({ event: 'ping' })
+      expect(streams).toHaveLength(1)
+      expect(streams[0]!.signal.aborted).toBe(false)
+      // A sync without the request, in the same generation, sends no ready.
+      port.sync('a', [workspace], 3)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(port.frames.filter(message => message.type === 'frame' && message.epoch === 3 && message.frame.event === 'ready')).toEqual([])
+      owner.dispose()
+    })
+
+    it('a document that joins before the barrier gets the ready at once and contiguous frames after it', async () => {
+      const owner = createLiveOwner(deps)
+      const port = new Port(); owner.attach(port); port.sync('a', [workspace])
+      await vi.advanceTimersByTimeAsync(0)
+      // Joined before the barrier (no ping yet): the ready comes at once, the ping with the stream.
+      streams[0]!.frame(ready('g1', 4))
+      const late = new Port(); owner.attach(late); late.sync('b', [workspace])
+      await vi.advanceTimersByTimeAsync(0)
+      expect(frames(late)).toEqual([`ready ${JSON.stringify({ generation: 'g1', seq: 4 })}`])
+      streams[0]!.frame(summary(5))
+      expect(frames(late)).toEqual([`ready ${JSON.stringify({ generation: 'g1', seq: 4 })}`, expect.stringContaining('"seq":5')])
+      owner.dispose()
+    })
   })
 
   it('delivers the latest topic snapshot to a late subscriber without another socket', async () => {

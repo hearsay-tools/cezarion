@@ -11,12 +11,13 @@ import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { toRunSummary } from '@open-mercato/cezar-api-client/contract/runs'
 import { createQueryClient } from './query-client'
+import { runsIndexSync } from './runs-index-sync'
 import { queryKeys, useHealth, useRunnerModels, useRun, useRuns, useProjectRuns, useProviderStatus, workspaceQueryKeys } from './queries'
 import { TaskQuickList } from '../components/task-quick-list'
 import { HandoffAction } from '../routes/task-thread/handoff-action'
 import { RunNotifications } from '../components/run-notifications'
 import { TasksOverview } from '../routes/tasks-overview'
-import type { ApiRun, ProviderStatusResponse, RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
+import type { ApiRun, ProviderStatusResponse, RunRecord, RunsIndexResponse, RunSummary } from '@open-mercato/cezar-api-client'
 
 // Reducer/lifecycle tests control named frames at the adapter seam. Actual ownership and
 // finite fallback are tested in live-coordinator and the browser suite.
@@ -142,6 +143,12 @@ function relationshipsDigestOf(record: RunRecord): string {
  *  its project stamp, the next `seq` and the relationships digest. */
 function stampedRun(record: RunRecord, project = BOOT, seq = ++frameSeq): string {
   return JSON.stringify({ project, seq, run: toRunSummary(record), relationships: relationshipsDigestOf(record) })
+}
+
+/** The stream's `ready`: its generation and the last frame number before this connection. The
+ *  runs index applies only frames of a known generation (hearsay-tools/cezarion#2729). */
+function streamReady(generation = 'g1'): string {
+  return JSON.stringify({ generation, seq: frameSeq })
 }
 
 /** A numbered `run-deleted` frame. */
@@ -1116,21 +1123,29 @@ describe('useGlobalEvents — run events', () => {
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: queryKeys.runs.changes('r2') })
   })
 
-  it('refreshes the cross-project index from ANOTHER project\u2019s run event', async () => {
-    // The bug this covers: every non-active project's event was dropped before it touched
-    // anything, so the global Tasks page — which spans the whole registry — heard nothing and ran
-    // on its poll alone. A renamed or finished task in a project you were not standing in stayed
-    // stale on screen until the next tick, and the tick does not run in a hidden tab.
+  it('patches the cross-project index row from ANOTHER project\u2019s run event, with no index request (hearsay-tools/cezarion#2729)', () => {
+    // The bug this first covered: every non-active project's event was dropped before it touched
+    // anything, so the global Tasks page heard nothing and ran on its poll alone. Since S5 the
+    // frame's row replaces the cached index row in the next animation frame; no full GET runs.
+    vi.useFakeTimers()
+    const frames: Array<() => void> = []
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: () => void) => frames.push(callback)))
+    client.setQueryData(workspaceQueryKeys.projects, { projects: [{ id: BOOT }, { id: 'some-other-project' }] })
+    client.setQueryData(workspaceQueryKeys.runsIndex, {
+      runs: [{ projectId: 'some-other-project', ...toRunSummary(runRecord('r9')) }],
+      referenceStatuses: {}, perProjectLimit: 200, truncated: [], generation: 'g1', eventSeq: 0,
+    })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
+    source.emit('ready', streamReady())
 
-    source.emit('run-summary', stampedRun(runRecord('r9', { status: RUN_STATUS.done }), 'some-other-project'))
+    source.emit('run-summary', stampedRun(runRecord('r9', { status: RUN_STATUS.done, title: 'renamed' }), 'some-other-project'))
+    act(() => { for (const callback of frames.splice(0)) callback() })
 
-    // Debounced: one run emits many events, and a busy workspace emits from everywhere at once.
+    expect(client.getQueryData<{ runs: RunSummary[] }>(workspaceQueryKeys.runsIndex)?.runs[0]).toMatchObject({ status: RUN_STATUS.done, title: 'renamed' })
+    act(() => void vi.advanceTimersByTime(60_000))
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.runsIndex })
-    await vi.waitFor(() =>
-      expect(invalidate).toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.runsIndex }),
-    )
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('refreshes the cross-project index when a project finishes preparing (#667)', async () => {
@@ -1158,21 +1173,33 @@ describe('useGlobalEvents — run events', () => {
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
   })
 
-  it('coalesces a burst of run events into ONE index refresh', async () => {
+  it('patches a burst of run events in one animation frame and never refetches the index', () => {
+    vi.useFakeTimers()
+    const frames: Array<() => void> = []
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: () => void) => frames.push(callback)))
+    client.setQueryData(workspaceQueryKeys.runsIndex, {
+      runs: [{ projectId: BOOT, ...toRunSummary(runRecord('r1', { status: RUN_STATUS.queued })) }],
+      referenceStatuses: {}, perProjectLimit: 200, truncated: [], generation: 'g1', eventSeq: 0,
+    })
+    const writes = vi.spyOn(client, 'setQueryData')
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
+    source.emit('ready', streamReady())
 
     for (const status of ['queued', 'running', 'done'] as const) {
       source.emit('run-summary', stampedRun(runRecord('r1', { status })))
     }
+    const indexWrites = () => writes.mock.calls.filter(([key]) => JSON.stringify(key) === JSON.stringify(workspaceQueryKeys.runsIndex))
+    expect(indexWrites()).toHaveLength(0)
+    act(() => { for (const callback of frames.splice(0)) callback() })
 
-    await vi.waitFor(() =>
-      expect(invalidate).toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.runsIndex }),
-    )
-    const indexRefreshes = invalidate.mock.calls.filter(
-      (call) => (call[0] as { queryKey: readonly unknown[] }).queryKey?.[1] === 'runs-index',
-    )
-    expect(indexRefreshes).toHaveLength(1)
+    expect(indexWrites()).toHaveLength(1)
+    expect(client.getQueryData<{ runs: RunSummary[] }>(workspaceQueryKeys.runsIndex)?.runs[0]?.status).toBe(RUN_STATUS.done)
+    act(() => void vi.advanceTimersByTime(60_000))
+    const indexRefreshes = invalidate.mock.calls.filter((call) => {
+      return (call[0] as { queryKey?: readonly unknown[] }).queryKey?.[1] === 'runs-index'
+    })
+    expect(indexRefreshes).toHaveLength(0)
   })
 
   it('ignores a malformed frame and keeps serving the next one', () => {
@@ -1787,7 +1814,8 @@ describe('useGlobalEvents — reconcile doctrine', () => {
 
     source.open()
 
-    await waitFor(() => expect(invalidatedKeys(invalidate)).toEqual([workspaceQueryKeys.models('cursor'), workspaceQueryKeys.runsIndex, queryKeys.health]))
+    // The index reconciles through its fence at once; health and models cancel their cold read first.
+    await waitFor(() => expect(invalidatedKeys(invalidate)).toEqual([workspaceQueryKeys.runsIndex, workspaceQueryKeys.models('cursor'), queryKeys.health]))
   })
 
   it('reconciles the cross-project index on first open, covering a project-ready sent before it (#667)', async () => {
@@ -1935,6 +1963,109 @@ describe('useGlobalEvents — seq fence (hearsay-tools/cezarion#2730)', () => {
     source.emit('run-summary', stampedRun(runRecord('r1'), BOOT, 40))
     source.emit('run-summary', stampedRun(runRecord('r1'), BOOT, 41))
     expect(reconciled(invalidate)).toBe(false)
+  })
+})
+
+describe('useGlobalEvents — runs index patches (hearsay-tools/cezarion#2729)', () => {
+  let frames: Array<() => void>
+  const runFrames = () => act(() => { for (const callback of frames.splice(0)) callback() })
+  const index = () => client.getQueryData<{ runs: Array<RunSummary & { projectId: string }>; truncated: string[]; referenceStatuses: Record<string, unknown> }>(workspaceQueryKeys.runsIndex)
+  const indexInvalidations = (invalidate: { mock: { calls: unknown[][] } }) => invalidate.mock.calls
+    .filter(([filters]) => JSON.stringify((filters as { queryKey?: unknown } | undefined)?.queryKey) === JSON.stringify(workspaceQueryKeys.runsIndex)).length
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    frames = []
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: () => void) => frames.push(callback)))
+    client.setQueryData(workspaceQueryKeys.projects, { projects: [{ id: BOOT }, { id: 'other' }] })
+    client.setQueryData(workspaceQueryKeys.runsIndex, {
+      runs: [
+        { projectId: 'other', ...toRunSummary(runRecord('o1', { createdAt: '2026-07-14T11:00:00.000Z' })) },
+        { projectId: BOOT, ...toRunSummary(runRecord('b1')) },
+      ],
+      referenceStatuses: { other: { prs: {}, issues: {} } }, perProjectLimit: 200, truncated: ['other'], generation: 'g1', eventSeq: 0,
+    })
+  })
+
+  it('a removed project leaves the index whole at once, with no request', () => {
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { source } = mount()
+    source.emit('ready', streamReady())
+    source.emit('project-removed', JSON.stringify({ id: 'other' }))
+    expect(index()?.runs.map((row) => row.id)).toEqual(['b1'])
+    expect(index()?.truncated).toEqual([])
+    expect(index()?.referenceStatuses).toEqual({})
+    act(() => void vi.advanceTimersByTime(60_000))
+    expect(indexInvalidations(invalidate)).toBe(0)
+  })
+
+  it('a removed project stays out of a late snapshot; added again, it may return', () => {
+    const { source } = mount()
+    source.emit('ready', streamReady())
+    const stale = client.getQueryData<RunsIndexResponse>(workspaceQueryKeys.runsIndex)!
+    source.emit('project-removed', JSON.stringify({ id: 'other' }))
+    // A read that started before the removal answers afterwards.
+    expect(runsIndexSync(client).merge(stale).runs.map((row) => row.id)).toEqual(['b1'])
+    source.emit('project-added', JSON.stringify({ project: { id: 'other' } }))
+    expect(runsIndexSync(client).merge(stale).runs.map((row) => row.id)).toEqual(['o1', 'b1'])
+  })
+
+  it('a dropped stream that never reopens does not freeze the index: a g2 snapshot is adopted', () => {
+    const { source } = mount()
+    source.emit('ready', streamReady('g1'))
+    // The stream errors and stays down (a proxy that holds SSE while HTTP works).
+    source.drop()
+    const g2 = { ...client.getQueryData<RunsIndexResponse>(workspaceQueryKeys.runsIndex)!, generation: 'g2', eventSeq: 4 }
+    // The backstop read answers from the restarted server.
+    expect(runsIndexSync(client).merge(g2)).toBe(g2)
+  })
+
+  it('a new project reconciles the index after the hold', () => {
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { source } = mount()
+    source.emit('ready', streamReady())
+    source.emit('project-added', JSON.stringify({ project: { id: 'third' } }))
+    expect(indexInvalidations(invalidate)).toBe(0)
+    act(() => void vi.advanceTimersByTime(400))
+    expect(indexInvalidations(invalidate)).toBe(1)
+  })
+
+  it('usage ticks of any project patch that project\u2019s index rows; an empty tick clears them', () => {
+    const { source } = mount()
+    source.emit('ready', streamReady())
+    source.emit('usage', JSON.stringify({ project: 'other', usage: { o1: SAMPLE } }))
+    runFrames()
+    expect(index()?.runs[0]?.usage).toEqual(SAMPLE)
+    expect(index()?.runs[1]).not.toHaveProperty('usage')
+    source.emit('usage', JSON.stringify({ project: 'other', usage: {} }))
+    // The next write waits out the index write interval (runs-index-sync.ts).
+    act(() => void vi.advanceTimersByTime(250))
+    expect(index()?.runs[0]).not.toHaveProperty('usage')
+  })
+
+  it('a worker frame never enters the index, and a create inserts by createdAt', () => {
+    const { source } = mount()
+    source.emit('ready', streamReady())
+    source.emit('run-summary', stampedRun({ ...workerRecord(PARENT_ID, 'w1'), createdAt: '2026-07-15T00:00:00.000Z' }, BOOT))
+    source.emit('run-summary', stampedRun(runRecord('b2', { createdAt: '2026-07-14T10:30:00.000Z' }), BOOT))
+    runFrames()
+    expect(index()?.runs.map((row) => row.id)).toEqual(['o1', 'b2', 'b1'])
+  })
+
+  it('a delete removes the row; in a truncated project an archived one also reconciles', () => {
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { source } = mount()
+    source.emit('ready', streamReady())
+    source.emit('run-deleted', stampedDeleted('b1', BOOT))
+    runFrames()
+    expect(index()?.runs.map((row) => row.id)).toEqual(['o1'])
+    act(() => void vi.advanceTimersByTime(400))
+    expect(indexInvalidations(invalidate)).toBe(0)
+    source.emit('run-summary', stampedRun(runRecord('o1', { createdAt: '2026-07-14T11:00:00.000Z', archived: true }), 'other'))
+    runFrames()
+    expect(index()?.runs[0]?.archived).toBe(true)
+    act(() => void vi.advanceTimersByTime(400))
+    expect(indexInvalidations(invalidate)).toBe(1)
   })
 })
 

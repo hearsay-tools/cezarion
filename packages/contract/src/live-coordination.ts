@@ -3,9 +3,11 @@ import { liveRunDemandSchema, liveRunFrameSchema } from './live.ts'
 
 /** Bump both when a document and an older shared worker would disagree on a frame. Version 2:
  *  the workspace lane reads `?runs=summary` (hearsay-tools/cezarion#2730), so an old worker that
- *  still streams full records never feeds a new document. */
-export const LIVE_PROTOCOL = 2
-export const LIVE_WORKER_NAME = 'cezar-live-v2'
+ *  still streams full records never feeds a new document. Version 3: the worker sends a late or
+ *  rejoining workspace subscriber the stream's `ready`, and the runs index applies only frames of
+ *  a known generation (hearsay-tools/cezarion#2729); a version-2 worker sends no such `ready`. */
+export const LIVE_PROTOCOL = 3
+export const LIVE_WORKER_NAME = 'cezar-live-v3'
 export const LEASE_MS = 15_000
 export const RENEW_MS = 5_000
 
@@ -26,7 +28,12 @@ export type LiveDemand = z.infer<typeof liveDemandSchema>
 export const liveEntrySchema = z.object({ id: z.string().min(1).max(128), demand: liveDemandSchema })
 const envelope = z.object({ version: z.literal(LIVE_PROTOCOL), documentId: z.string().min(1).max(128), epoch: z.number().int().nonnegative() })
 export const ownerInputSchema = z.discriminatedUnion('type', [
-  envelope.extend({ type: z.literal('sync'), entries: z.array(liveEntrySchema).max(64) }).refine(value => new Set(value.entries.map(e => e.id)).size === value.entries.length),
+  envelope.extend({
+    type: z.literal('sync'), entries: z.array(liveEntrySchema).max(64),
+    /** The document knows no workspace stream generation (its `ready` was lost, for example to
+     *  an epoch change): send it the stream's `ready` again (hearsay-tools/cezarion#2729). */
+    workspaceReady: z.literal(true).optional(),
+  }).refine(value => new Set(value.entries.map(e => e.id)).size === value.entries.length),
   envelope.extend({ type: z.literal('ack'), id: z.string(), seq: z.number().int().nonnegative() }),
   envelope.extend({ type: z.literal('refresh'), id: z.string() }),
 ])

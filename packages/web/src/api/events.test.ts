@@ -268,3 +268,18 @@ describe('createUsageStore', () => {
     expect(store.get()).toEqual({ r3: SAMPLE })
   })
 })
+
+describe('createWorkspaceSeqFence: ready (hearsay-tools/cezarion#2729)', () => {
+  it('a ready past the last accepted frame reports lost frames; a fresh baseline or an older seq does not', () => {
+    const fence = createWorkspaceSeqFence()
+    expect(fence.ready(10)).toBe(false)
+    expect(fence.frame(11)).toBe(false)
+    // A rejoin's ready names frame 13: frame 12 never arrived.
+    expect(fence.ready(13)).toBe(true)
+    expect(fence.ready(13)).toBe(false)
+    // A new generation starts lower: a reset, not a gap.
+    expect(fence.ready(0)).toBe(false)
+    fence.reset()
+    expect(fence.ready(40)).toBe(false)
+  })
+})
