@@ -35,6 +35,25 @@ describe('shared scenario boundary', () => {
     expect(rule.check(file, adopted + sample)).toEqual([]);
   });
 
+  it.each(['provider-error-early', 'crash-stderr-pre-ack', 'no-progress-ack-only'])(
+    'allows the native token %s', token => {
+      expect(rule.check(file, adopted + `prompt.includes('mock:${token}');`)).toEqual([]);
+      expect(rule.check(file, adopted + `/mock:${token}/.test(prompt);`)).toEqual([]);
+    });
+
+  it.each(['silent-tail-late-reply', 'no-progress-input-closed', 'crash-stderr-clean',
+    'autonomous-cap', 'multi-pr-refs-extra', 'hold-cezar-ask', 'cezar-ask-reply-late',
+    'deferred-turn-start-extra', 'turn-messages-extra'])(
+    'still reports shared family member %s', token => {
+      expect(rule.check(file, adopted + `prompt.includes('mock:${token}');`)).toHaveLength(1);
+    });
+
+  it('allows the native resume flag only in the OpenCode encoder', () => {
+    const source = adopted + "prompt.includes('mock:resume-cezar-done');";
+    expect(rule.check('packages/cezar/scripts/mock-opencode-serve.mjs', source)).toEqual([]);
+    expect(rule.check(file, source)).toHaveLength(1);
+  });
+
   it('leaves mocks that have not adopted the module alone', () => {
     expect(rule.check(file, "prompt.includes('mock:hold');")).toEqual([]);
     expect(rule.check(file, "// import './mock-scenario.mjs'\nprompt.includes('mock:hold');")).toEqual([]);

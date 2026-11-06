@@ -5,7 +5,16 @@ const SHARED = ['agent-echo', 'autonomous', 'cezar-ask', 'cezar-done', 'cezar-to
   'crash-stderr', 'deferred-turn-start', 'hold', 'multi-pr-refs', 'no-progress', 'gate-prompt-ack',
   'silent-tail', 'tool-tail', 'turn-messages', 'ack-only', 'busy-progress', 'provider-error',
   'resume-cezar-done', 'steer-tool', 'steer-late', 'subagent-after-park', 'cezar-wait'];
-const TOKEN = new RegExp(`mock:(?:${SHARED.join('|')})(?=$|[^a-z0-9]|-)`);
+const TOKEN = /mock:([a-z0-9-]+)/g;
+const NATIVE_TOKENS = new Set([
+  'provider-error-early', // OpenCode rejects before creating an assistant message.
+  'crash-stderr-pre-ack', // Codex and OpenCode crash before native acknowledgement.
+  'no-progress-ack-only', // Codex holds its native acknowledgement without a turn.
+]);
+const FILE_NATIVE_TOKENS: Readonly<Record<string, readonly string[]>> = {
+  // OpenCode's native question reply consumes this flag, outside shared scenarios.
+  'packages/cezar/scripts/mock-opencode-serve.mjs': ['resume-cezar-done'],
+};
 const IMPORT = /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)(['"])[^'"\n]*mock-scenario\.mjs\1/g;
 
 function importsScenario(source: string, code: string): boolean {
@@ -73,10 +82,14 @@ function literals(source: string, code: string): Literal[] {
   return found;
 }
 
-function namesShared(value: string, regex: boolean): boolean {
-  if (TOKEN.test(value)) return true;
+function namesShared(file: string, value: string, regex: boolean): boolean {
+  for (const match of value.matchAll(TOKEN)) {
+    const token = match[1]!;
+    if (NATIVE_TOKENS.has(token) || FILE_NATIVE_TOKENS[file]?.includes(token)) continue;
+    if (SHARED.some(name => token === name || token.startsWith(`${name}-`))) return true;
+  }
   // A regex may group alternatives after the shared prefix: /mock:(hold|no-progress)/.
-  return regex && value.includes('mock:') && SHARED.some(name => new RegExp(`\\b${name}\\b`).test(value));
+  return regex && /mock:\((?:\?:)?/.test(value) && SHARED.some(name => new RegExp(`\\b${name}\\b`).test(value));
 }
 
 export const mockScenarioBoundary: SourceRule = {
@@ -84,10 +97,10 @@ export const mockScenarioBoundary: SourceRule = {
   description: 'Shared mock scripts belong to mock-scenario.mjs (hearsay-tools/cezarion#2769).',
   applies: file => /^packages\/cezar\/scripts\/mock-[^/]+\.mjs$/.test(file)
     && file !== 'packages/cezar/scripts/mock-scenario.mjs',
-  check: (_file, source) => {
+  check: (file, source) => {
     const code = blankOnce(source);
     if (!importsScenario(source, code)) return [];
-    return literals(source, code).filter(literal => namesShared(literal.value, literal.regex)).map(literal => ({
+    return literals(source, code).filter(literal => namesShared(file, literal.value, literal.regex)).map(literal => ({
       line: lineAt(source, literal.offset),
       message: 'Use mock-scenario.mjs for shared scenario selection and scripts (hearsay-tools/cezarion#2769).',
     }));
