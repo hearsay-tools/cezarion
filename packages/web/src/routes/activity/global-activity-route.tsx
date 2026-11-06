@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { useLocation } from 'react-router'
 
 import { useActivityLive } from '@/api/activity-live'
 import { useHealth, useProjects } from '@/api/queries'
@@ -34,9 +35,12 @@ export function GlobalActivityRoute() {
   const activity = useActivityLive(WORKSPACE)
   const projects = useProjects()
   const health = useHealth()
+  const returnProjectId: unknown = useLocation().state?.activityProjectId
   const railIds = useRailIds()
   const now = useServerNow(activity.data?.generatedAt, activity.dataUpdatedAt)
   const boot = projects.data?.bootProject ?? health.data?.bootProject ?? null
+  // Keep the origin per history entry: another tab or a later visit cannot replace it.
+  const projectId = typeof returnProjectId === 'string' && projects.data?.projects.some((project) => project.id === returnProjectId && project.status !== 'missing') ? returnProjectId : boot
   const snapshot = activity.data?.projects
   const groups = React.useMemo(() => groupProjects(inRailOrder(snapshot ?? [], railIds)), [snapshot, railIds])
   const { motion, paused, reduced } = useActivityMotion(activity.data, 'workspace')
@@ -44,7 +48,7 @@ export function GlobalActivityRoute() {
   return (
     <div data-route="activity-global" data-activity-paused={paused ? 'true' : undefined} className="flex min-h-full w-full flex-col gap-4 px-[18px] py-6 md:px-7">
       <ActivityHeader name="All projects" now={activity.data ? now : undefined} stale={activity.isError}>
-        <ScopeSwitch scope="all" projectId={boot} />
+        <ScopeSwitch scope="all" projectId={projectId} />
       </ActivityHeader>
       {snapshot ? <SummaryChips summary={summarize(snapshot)} tasksTo="/tasks" bumps={motion.bumps} /> : null}
       {/* The header and the scope switch stay while the snapshot loads: the user can switch away. */}
