@@ -162,7 +162,7 @@ A step is a plain object. The encoder has one method per step kind:
 
 | Step | The encoder emits |
 |---|---|
-| `open` | the native turn start, after the mock's own acknowledgement |
+| `open` | the native turn start. The encoder alone orders it against the mock's acknowledgement: OpenCode sends its HTTP acknowledgement after the SSE turn events in its delayed-ack cases (`autonomous-cap`, `f7-delay-ack`), and that order stays |
 | `text(parts)` | one assistant message; `parts` are its deltas. A part may be a function of `lifecycle`, so a cezar tool call runs before the text goes out |
 | `reasoning(text)` | one reasoning or thinking block |
 | `toolStart(call)` / `toolEnd(call)` | a tool call and its result; `call` has `id`, `name`, `input`, `output`, `isError` |
@@ -180,6 +180,12 @@ OpenCode's idle timer, the Claude replay frame. The mock still owns: the line or
 request parser, acknowledgement and delivery control, the failure control check at
 the point the scenario's `beforeFailure` names, steering admission, the untokened
 default reply, and every token that is not shared.
+
+`play` returns `handled` or `continue`. A scenario whose effect lets the turn go on
+returns `continue`, and the mock goes on with its own dispatch, as today:
+`mock:crash-stderr-clean` writes its diagnostic and the mock then sends its normal
+reply. A step can end the process (`crash-stderr`, `crash-stderr-single`); then
+`play` never returns.
 
 `unsupported` replaces silent gaps. A wire that cannot carry a step (Cursor print:
 no held ack, no steering, no child work) names those scenarios. `scenarioFor` then
@@ -214,7 +220,10 @@ byte-identical.
      held-pipe mode, and for OpenCode the SSE events and every HTTP response
      (status, body), such as `acknowledgePrompt`. Each record names its channel.
      Normalize ids, uuids, timestamps, temp paths, pids and allocated ports
-     (the OpenCode mock prints its listen port on stdout).
+     (the OpenCode mock prints its listen port on stdout). A child process that
+     inherits the mock's pipes (`crash-stderr-held-pipe`) writes past the
+     recorder; its recipe records the mock's own writes and the exit, and the
+     existing crash-stderr tests keep covering the child's output.
    - **Recipes.** The evidence script owns one recipe per shared scenario. It does
      not rely on the `HARNESS_ADAPTERS` prompts: the catalog has no `agent-echo`,
      `ack-only` or `deferred-turn-start` entry, maps `cezar-ask` to
@@ -228,14 +237,24 @@ byte-identical.
        `steer-tool` and `steer-late`;
      - the gates the script releases (`CEZ_MOCK_RELEASE_FILE`, the park path) and
        when;
-     - the end condition: the native turn end, or for `ack-only` and
-       `no-progress-*` the acknowledgement or `watchdog.pid`, then a stop and
-       teardown, with no wait longer than the scenario's own bound;
+     - the end condition: the native turn end; for `ack-only` and
+       `no-progress-*` the acknowledgement or `watchdog.pid`; for the
+       `crash-stderr` variants the process exit, recorded with its code or
+       signal. Then a stop and teardown, with no wait longer than the scenario's
+       own bound;
+     - the delayed-acknowledgement cases (OpenCode `autonomous-cap` and
+       `f7-delay-ack`), so the order of acknowledgement and turn events is in the
+       transcript;
      - the untokened prompts too (first turn and one follow-up), which prove the
        dry-run reply is byte-identical.
      A recipe a wire cannot run (Cursor print has no steering) is listed as a gap,
      not skipped in silence.
-   - **Use.** A slice records on its base and on its head and diffs the two. Every
+   - **Use.** The wire diff applies from slice 3 on: its base is `main` after
+     slice 2, which has the recorder. Slice 1 changes stall behavior on purpose and
+     is proven by its own tests and red proof. Slice 2 adds the recorder and is
+     proven by unchanged tests with `CEZ_MOCK_WIRE_FILE` unset and by two
+     identical recordings on its head. A slice records on its base and on its
+     head and diffs the two. Every
      difference must be a drift item listed in the PR body with the rule that chose
      it. An encoder slice with no listed item has an empty diff.
 2. **Parity.** `npm run test:parity` and the touched runner's harness parity files
@@ -262,13 +281,13 @@ Each slice lands as its own PR into `main`.
 | # | Issue | Work type | Change | Depends on |
 |---|---|---|---|---|
 | 1 | hearsay-tools/cezarion#1529 | feature (bug fix, plan approved on the issue) | `mock-lifecycle.mjs`: stall, pid write, release wait; Cursor print backstop, `gate-prompt-ack` for every mock, loud unsupported `input-closed`. The readiness-order fix and its `RUNNER_IDS` cell already landed in c0df8224b (hearsay-tools/cezarion#1628) | none |
-| 2 | new | cleanup (test tooling) | `CEZ_MOCK_WIRE_FILE` recorder in each mock's single frame writer; transcript script; `.env.example` | none; PR opens after 1 merges (hot files) |
-| 3 | new | cleanup | `mock-scenario.mjs` with the player and every shared script; pi becomes the first encoder; the guard; `afterParityPark` moves in; docs | 1 and 2 merged |
-| 4 | new | cleanup | OMP encoder | 3 merged |
-| 5 | new | cleanup | Codex encoder | 3 merged |
-| 6 | new | cleanup | Claude encoder | 3 merged |
-| 7 | new | cleanup | OpenCode encoder | 3 merged |
-| 8 | new | cleanup | Cursor print encoder, with its `unsupported` list and file-backed `session` | 3 merged |
+| 2 | hearsay-tools/cezarion#2768 | cleanup (test tooling) | `CEZ_MOCK_WIRE_FILE` recorder for everything a mock sends (stdout, stderr including the crash helper's raw writes, OpenCode HTTP and SSE); recipe script; `.env.example` | none; PR opens after 1 merges (hot files) |
+| 3 | hearsay-tools/cezarion#2769 | cleanup | `mock-scenario.mjs` with the player and every shared script; pi becomes the first encoder; the guard; `afterParityPark` moves in; docs | 1 and 2 merged |
+| 4 | hearsay-tools/cezarion#2770 | cleanup | OMP encoder | 3 merged |
+| 5 | hearsay-tools/cezarion#2771 | cleanup | Codex encoder | 3 merged |
+| 6 | hearsay-tools/cezarion#2772 | cleanup | Claude encoder | 3 merged |
+| 7 | hearsay-tools/cezarion#2773 | cleanup | OpenCode encoder | 3 merged |
+| 8 | hearsay-tools/cezarion#2774 | cleanup | Cursor print encoder, with its `unsupported` list and file-backed `session` | 3 merged |
 
 Slices 4 to 8 change one mock each and can run in parallel. Slice 3 defines the
 whole step vocabulary from the inventory above, so an encoder slice should not need
