@@ -89,7 +89,9 @@ const indexCommand = command => {
   }, 1000 / command.tick.rate)
 }
 // Fixture-only insertion seam: deterministic seed times permit a middle insert as well as a prepend.
-function insertTask({ projectId = 'boot', title, beforeTitle }) {
+function insertTask(command) {
+  if (!command) return
+  const { projectId = 'boot', title, beforeTitle } = command
   const target = stores.get(projectId)
   const before = beforeTitle && target.listRunIds().map(id => target.getRun(id)).find(run => run.title === beforeTitle)
   const run = target.createRun({ title, task: title, workflow: 'quick-task', steps: [] })
@@ -102,7 +104,7 @@ const control = createServer(async (req, res) => {
     const command = JSON.parse(body || '{}')
     clearInterval(timer)
     await reports.handle(command)
-    if (command.insertTask) insertTask(command.insertTask)
+    insertTask(command.insertTask)
     if (command.streaming) {
       const selected = command.runs ?? runs
       for (const run of selected) stores.get(run.projectId)?.updateRun(run.runId, { status: 'running' })

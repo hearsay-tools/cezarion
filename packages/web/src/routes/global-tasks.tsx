@@ -817,36 +817,36 @@ export const TaskRow = React.memo(function TaskRow({
   showCost: boolean
   automationName: string | undefined
 }) {
+  const rowRole = summary ? "row" : undefined
+  const cellRole = summary ? "cell" : undefined
   const { run } = task
   const attention = deriveAttention(run)
   const to = scopeTo(run.projectId, `/tasks/${run.id}`)
   // Resolve references against this run's own project repository.
   const references = taskReferences(run, task.project?.repoUrl)
-  // The SAME live/peak rule the per-project table applies. The live sample rides the index row
-  // itself (`run.usage`, attached server-side per poll) rather than the run event stream, which
-  // is project-scoped and so cannot reach forty projects at once.
+  // Global usage comes from the index; run streams are project-scoped.
   const usage = usageCells(run, run.usage)
 
   return (
     <article role={summary ? "rowgroup" : undefined} data-status={run.status} data-expanded={resourcesOpen} data-slot="global-task-row" data-run-id={run.id} data-project={run.projectId} className="hover:bg-muted max-md:flex max-md:flex-wrap max-md:items-center max-md:gap-x-3 max-md:gap-y-2 max-md:border-b max-md:border-border max-md:py-5 ">
       {/* The one column with no fixed width, so every pixel the others give up lands here — and
           dropping Branch gave up 140 of them. A cross-project list is read by TITLE. */}
-      <div data-slot="global-task-cells" className="contents" role={summary ? "row" : undefined} aria-rowindex={summary ? rowIndex : undefined}><GlobalTaskTitle summary={summary} task={task} showProject={showProject} automationName={automationName} resourcesOpen={resourcesOpen} toggleExpandedRun={toggleExpandedRun} />
-      <div role={summary ? "cell" : undefined} data-slot="global-task-workflow" className="text-[13px] text-muted-foreground">
+      <div data-slot="global-task-cells" className="contents" role={rowRole} aria-rowindex={summary ? rowIndex : undefined}><GlobalTaskTitle summary={summary} task={task} showProject={showProject} automationName={automationName} resourcesOpen={resourcesOpen} toggleExpandedRun={toggleExpandedRun} />
+      <div role={cellRole} data-slot="global-task-workflow" className="text-[13px] text-muted-foreground">
         {run.workflow}
       </div>
-      <div role={summary ? "cell" : undefined} data-slot="global-task-diff" className="text-xs text-muted-foreground"><span title="Change totals are available in the project task list">—</span></div>
-      <div role={summary ? "cell" : undefined} data-slot="global-task-references">
+      <div role={cellRole} data-slot="global-task-diff" className="text-xs text-muted-foreground"><span title="Change totals are available in the project task list">—</span></div>
+      <div role={cellRole} data-slot="global-task-references">
         {references.length > 0 ? (
           <ReferenceChips references={references} run={run} repoBase={task.project?.repoUrl} />
         ) : (
           <Dash />
         )}
       </div>
-      <div role={summary ? "cell" : undefined} data-slot="global-task-age" className="text-right text-xs text-soft-foreground tabular-nums">
+      <div role={cellRole} data-slot="global-task-age" className="text-right text-xs text-soft-foreground tabular-nums">
         {shortAge(run.startedAt ?? run.createdAt, now)}
       </div>
-      </div>{!summary || resourcesOpen ? <div className="contents" role={summary ? "row" : undefined} aria-rowindex={summary ? rowIndex + 1 : undefined}><div data-slot="global-task-detail-cell" role={summary ? "cell" : undefined} aria-colspan={summary ? 5 : undefined} className={summary ? 'col-span-full flex flex-col gap-3' : 'contents'}>
+      </div>{!summary || resourcesOpen ? <div className="contents" role={rowRole} aria-rowindex={summary ? rowIndex + 1 : undefined}><div data-slot="global-task-detail-cell" role={cellRole} aria-colspan={summary ? 5 : undefined} className={summary ? 'col-span-full flex flex-col gap-3' : 'contents'}>
       <div data-slot="global-task-actions">
         <span className="inline-flex items-center gap-0.5">
           <ReadToggle task={task} busy={busy} onSetRead={onSetRead} />
