@@ -216,10 +216,14 @@ function sendProviderError() {
 }
 
 async function respondDefault(command) {
-  const responseText = `Investigating: ${command.message}`;
   send({ id: command.id, type: 'response', command: 'prompt', success: true });
   send({ type: 'agent_start' });
   send({ type: 'turn_start' });
+  return sendDefaultReply(command);
+}
+
+function sendDefaultReply(command) {
+  const responseText = `Investigating: ${command.message}`;
   send({
     type: 'message_update',
     message: {},
@@ -356,6 +360,7 @@ function scenarioEncoder(command, scenario) {
       if (!step.agentStarted) send({ type: 'agent_start' });
       send({ type: 'turn_start' });
     },
+    reply: () => sendDefaultReply(command),
     text: step => sendText(step.parts),
     reasoning(step) {
       if (step.complete) send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'thinking', thinking: step.text }], stopReason: 'stop' } });
