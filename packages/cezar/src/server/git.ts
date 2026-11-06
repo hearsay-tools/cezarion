@@ -48,8 +48,11 @@ async function git(root: string, args: string[]): Promise<string> {
 /** Null when `dir` isn't inside a git repository. */
 export async function getRepoInfo(dir: string): Promise<RepoInfo | null> {
   try {
-    const root = (await git(dir, ['rev-parse', '--show-toplevel'])).trim();
-    const branch = (await git(root, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    const output = (await git(dir, ['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD'])).trim();
+    const split = output.lastIndexOf('\n');
+    if (split < 0) return null;
+    const root = output.slice(0, split);
+    const branch = output.slice(split + 1);
     let remote: string | undefined;
     try {
       remote = (await git(root, ['remote', 'get-url', 'origin'])).trim() || undefined;

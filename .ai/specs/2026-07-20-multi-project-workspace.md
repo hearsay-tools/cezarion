@@ -344,7 +344,7 @@ difference until they add a second project.
 
 | Route | Shape | Notes |
 |---|---|---|
-| `GET /api/projects` | `{ projects: [{id,name,root,branch?,status,source,lastOpenedAt}], bootProject: string, projectsDir: string }` | `status ∈ 'ok' \| 'missing' \| 'not-git'` (`not-git` is fully usable — same degraded single-queue mode as today; only `missing` blocks). Status/branch probes are cached with a short TTL and refreshed async — the sidebar load must not shell `git` N times per render. Never 404s. |
+| `GET /api/projects` | `{ projects: [{id,name,root,branch?,status,source,lastOpenedAt}], bootProject: string, projectsDir: string }` | `status ∈ 'ok' \| 'missing' \| 'not-git'` (`not-git` is fully usable — same degraded single-queue mode as today; only `missing` blocks). Status/branch probes are cached for five seconds and refreshed on the next read after expiry (concurrent readers share one probe; expired reads wait for the fresh result) — the sidebar load must not shell `git` N times per render. Never 404s. |
 | `POST /api/projects` | `{ root } → { project }` | Registers an existing folder (folder-browser flow). 400 non-absolute/nonexistent path; 409 already registered (returns the existing entry). |
 | `POST /api/projects/checkout` | `{ url, name? } → { project }` \| `{ error }` | `gh repo clone <url> <projectsDir>/<name>`; zod-validates `url` as a GitHub repo URL/`owner/name`; 409 target dir exists; degrades to `{ error, reason }` when `gh` is unavailable (mirrors `github.ts` degradation). Long-running: answers when the clone finishes; the dialog shows progress from `checkout-progress` SSE events. |
 | `DELETE /api/projects/:projectId` | `{ ok: true }` | Unregisters only. 409 while the project has running tasks. Never deletes files. |

@@ -1,0 +1,4687 @@
+{
+  "node": "v24.22.1",
+  "platform": "linux",
+  "cpus": "2",
+  "rows": [
+    {
+      "repeat": 0,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 24.75,
+      "gitChildCpuMs": 10,
+      "requests": 1,
+      "p50Ms": 53.094728999999916,
+      "p95Ms": 53.094728999999916,
+      "maxMs": 53.094728999999916,
+      "loadBefore": [
+        30.76,
+        31.3,
+        25.74
+      ],
+      "loadAfter": [
+        30.76,
+        31.3,
+        25.74
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 2.603,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 5.591676000000007,
+      "p95Ms": 5.591676000000007,
+      "maxMs": 5.591676000000007,
+      "loadBefore": [
+        30.76,
+        31.3,
+        25.74
+      ],
+      "loadAfter": [
+        30.76,
+        31.3,
+        25.74
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 14.96,
+      "gitChildCpuMs": 10,
+      "requests": 1,
+      "p50Ms": 53.74695700000029,
+      "p95Ms": 53.74695700000029,
+      "maxMs": 53.74695700000029,
+      "loadBefore": [
+        29.65,
+        31.06,
+        25.69
+      ],
+      "loadAfter": [
+        29.65,
+        31.06,
+        25.69
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 12.325,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 42.09846999999991,
+      "p95Ms": 42.09846999999991,
+      "maxMs": 42.09846999999991,
+      "loadBefore": [
+        29.65,
+        31.06,
+        25.69
+      ],
+      "loadAfter": [
+        29.65,
+        31.06,
+        25.69
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 53.042,
+      "gitChildCpuMs": 50,
+      "requests": 4,
+      "p50Ms": 176.7350660000002,
+      "p95Ms": 178.70013000000017,
+      "maxMs": 178.70013000000017,
+      "loadBefore": [
+        29.65,
+        31.06,
+        25.69
+      ],
+      "loadAfter": [
+        29.65,
+        31.06,
+        25.69
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 8.296,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 15.23981399999957,
+      "p95Ms": 18.503152999999656,
+      "maxMs": 18.503152999999656,
+      "loadBefore": [
+        29.65,
+        31.06,
+        25.69
+      ],
+      "loadAfter": [
+        29.65,
+        31.06,
+        25.69
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 32.823,
+      "gitChildCpuMs": 20,
+      "requests": 4,
+      "p50Ms": 61.609111000001576,
+      "p95Ms": 68.93834000000061,
+      "maxMs": 68.93834000000061,
+      "loadBefore": [
+        28.64,
+        30.83,
+        25.65
+      ],
+      "loadAfter": [
+        28.64,
+        30.83,
+        25.65
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 30.519,
+      "gitChildCpuMs": 30,
+      "requests": 4,
+      "p50Ms": 61.33329100000083,
+      "p95Ms": 62.886398000000554,
+      "maxMs": 62.886398000000554,
+      "loadBefore": [
+        28.64,
+        30.83,
+        25.65
+      ],
+      "loadAfter": [
+        28.64,
+        30.83,
+        25.65
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 16,
+        "rev-parse --abbrev-ref HEAD": 16,
+        "remote get-url origin": 16
+      },
+      "serverCpuMs": 143.025,
+      "gitChildCpuMs": 110,
+      "requests": 16,
+      "p50Ms": 239.90591999999924,
+      "p95Ms": 260.9644479999988,
+      "maxMs": 260.9644479999988,
+      "loadBefore": [
+        28.64,
+        30.83,
+        25.65
+      ],
+      "loadAfter": [
+        28.64,
+        30.83,
+        25.65
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 39.167,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 41.60152299999936,
+      "p95Ms": 43.8424959999993,
+      "maxMs": 43.8424959999993,
+      "loadBefore": [
+        28.64,
+        30.83,
+        25.65
+      ],
+      "loadAfter": [
+        28.64,
+        30.83,
+        25.65
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 16,
+        "rev-parse --abbrev-ref HEAD": 16,
+        "remote get-url origin": 16
+      },
+      "serverCpuMs": 99.083,
+      "gitChildCpuMs": 110,
+      "requests": 16,
+      "p50Ms": 194.10450199999832,
+      "p95Ms": 221.4510569999984,
+      "maxMs": 221.4510569999984,
+      "loadBefore": [
+        27.23,
+        30.5,
+        25.57
+      ],
+      "loadAfter": [
+        27.23,
+        30.5,
+        25.57
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 16,
+        "rev-parse --abbrev-ref HEAD": 16,
+        "remote get-url origin": 16
+      },
+      "serverCpuMs": 107.541,
+      "gitChildCpuMs": 110,
+      "requests": 16,
+      "p50Ms": 231.8139630000005,
+      "p95Ms": 234.701814,
+      "maxMs": 234.701814,
+      "loadBefore": [
+        27.23,
+        30.5,
+        25.57
+      ],
+      "loadAfter": [
+        27.23,
+        30.5,
+        25.57
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 57.294,
+      "gitChildCpuMs": 60,
+      "requests": 1,
+      "p50Ms": 130.51583200000096,
+      "p95Ms": 130.51583200000096,
+      "maxMs": 130.51583200000096,
+      "loadBefore": [
+        27.23,
+        30.5,
+        25.57
+      ],
+      "loadAfter": [
+        27.23,
+        30.5,
+        25.57
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 1.327,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 3.1102500000015425,
+      "p95Ms": 3.1102500000015425,
+      "maxMs": 3.1102500000015425,
+      "loadBefore": [
+        27.23,
+        30.5,
+        25.57
+      ],
+      "loadAfter": [
+        27.23,
+        30.5,
+        25.57
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 60.301,
+      "gitChildCpuMs": 80,
+      "requests": 1,
+      "p50Ms": 140.91588799999954,
+      "p95Ms": 140.91588799999954,
+      "maxMs": 140.91588799999954,
+      "loadBefore": [
+        26.65,
+        30.32,
+        25.54
+      ],
+      "loadAfter": [
+        26.65,
+        30.32,
+        25.54
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 53.554,
+      "gitChildCpuMs": 70,
+      "requests": 1,
+      "p50Ms": 121.11439700000119,
+      "p95Ms": 121.11439700000119,
+      "maxMs": 121.11439700000119,
+      "loadBefore": [
+        26.65,
+        30.32,
+        25.54
+      ],
+      "loadAfter": [
+        26.65,
+        30.32,
+        25.54
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 176.141,
+      "gitChildCpuMs": 240,
+      "requests": 4,
+      "p50Ms": 434.14584599999944,
+      "p95Ms": 437.0856539999986,
+      "maxMs": 437.0856539999986,
+      "loadBefore": [
+        26.65,
+        30.32,
+        25.54
+      ],
+      "loadAfter": [
+        25.23,
+        29.97,
+        25.45
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 3.995,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 4.456315999999788,
+      "p95Ms": 6.659818000000087,
+      "maxMs": 6.659818000000087,
+      "loadBefore": [
+        25.23,
+        29.97,
+        25.45
+      ],
+      "loadAfter": [
+        25.23,
+        29.97,
+        25.45
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 222.683,
+      "gitChildCpuMs": 310,
+      "requests": 4,
+      "p50Ms": 480.0391340000024,
+      "p95Ms": 541.959522000001,
+      "maxMs": 541.959522000001,
+      "loadBefore": [
+        24.98,
+        29.84,
+        25.43
+      ],
+      "loadAfter": [
+        24.98,
+        29.84,
+        25.43
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 272.825,
+      "gitChildCpuMs": 390,
+      "requests": 4,
+      "p50Ms": 717.8840600000003,
+      "p95Ms": 724.4089439999989,
+      "maxMs": 724.4089439999989,
+      "loadBefore": [
+        24.98,
+        29.84,
+        25.43
+      ],
+      "loadAfter": [
+        24.98,
+        29.84,
+        25.43
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1059.019,
+      "gitChildCpuMs": 1550,
+      "requests": 16,
+      "p50Ms": 2794.6367309999987,
+      "p95Ms": 2796.9771,
+      "maxMs": 2796.9771,
+      "loadBefore": [
+        24.98,
+        29.84,
+        25.43
+      ],
+      "loadAfter": [
+        24.98,
+        29.84,
+        25.43
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 7.585,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 14.864185999998881,
+      "p95Ms": 17.34706400000141,
+      "maxMs": 17.34706400000141,
+      "loadBefore": [
+        24.98,
+        29.84,
+        25.43
+      ],
+      "loadAfter": [
+        24.98,
+        29.84,
+        25.43
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1273.178,
+      "gitChildCpuMs": 1840,
+      "requests": 16,
+      "p50Ms": 3297.3821409999946,
+      "p95Ms": 3312.661138999996,
+      "maxMs": 3312.661138999996,
+      "loadBefore": [
+        25.54,
+        29.87,
+        25.46
+      ],
+      "loadAfter": [
+        27.42,
+        30.19,
+        25.59
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1320.252,
+      "gitChildCpuMs": 1470,
+      "requests": 16,
+      "p50Ms": 2854.0436539999937,
+      "p95Ms": 2862.176336999997,
+      "maxMs": 2862.176336999997,
+      "loadBefore": [
+        27.42,
+        30.19,
+        25.59
+      ],
+      "loadAfter": [
+        27.46,
+        30.15,
+        25.6
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 368.95,
+      "gitChildCpuMs": 490,
+      "requests": 1,
+      "p50Ms": 945.5985860000001,
+      "p95Ms": 945.5985860000001,
+      "maxMs": 945.5985860000001,
+      "loadBefore": [
+        27.46,
+        30.15,
+        25.6
+      ],
+      "loadAfter": [
+        27.46,
+        30.15,
+        25.6
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 3.165,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 3.997170999995433,
+      "p95Ms": 3.997170999995433,
+      "maxMs": 3.997170999995433,
+      "loadBefore": [
+        27.46,
+        30.15,
+        25.6
+      ],
+      "loadAfter": [
+        27.46,
+        30.15,
+        25.6
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 283.78,
+      "gitChildCpuMs": 350,
+      "requests": 1,
+      "p50Ms": 641.6257750000004,
+      "p95Ms": 641.6257750000004,
+      "maxMs": 641.6257750000004,
+      "loadBefore": [
+        28.79,
+        30.38,
+        25.7
+      ],
+      "loadAfter": [
+        28.79,
+        30.38,
+        25.7
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 325.134,
+      "gitChildCpuMs": 380,
+      "requests": 1,
+      "p50Ms": 721.7663810000013,
+      "p95Ms": 721.7663810000013,
+      "maxMs": 721.7663810000013,
+      "loadBefore": [
+        28.79,
+        30.38,
+        25.7
+      ],
+      "loadAfter": [
+        28.79,
+        30.38,
+        25.7
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1148.629,
+      "gitChildCpuMs": 1410,
+      "requests": 4,
+      "p50Ms": 2656.081177,
+      "p95Ms": 2660.9107860000004,
+      "maxMs": 2660.9107860000004,
+      "loadBefore": [
+        28.79,
+        30.38,
+        25.7
+      ],
+      "loadAfter": [
+        29.69,
+        30.54,
+        25.78
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 4.214,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 3.9977530000032857,
+      "p95Ms": 5.817289999999048,
+      "maxMs": 5.817289999999048,
+      "loadBefore": [
+        29.69,
+        30.54,
+        25.78
+      ],
+      "loadAfter": [
+        29.69,
+        30.54,
+        25.78
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1261.157,
+      "gitChildCpuMs": 1590,
+      "requests": 4,
+      "p50Ms": 2933.750200000002,
+      "p95Ms": 2935.960975000002,
+      "maxMs": 2935.960975000002,
+      "loadBefore": [
+        28.75,
+        30.34,
+        25.74
+      ],
+      "loadAfter": [
+        28.75,
+        30.34,
+        25.74
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1381.989,
+      "gitChildCpuMs": 1660,
+      "requests": 4,
+      "p50Ms": 3143.2219229999973,
+      "p95Ms": 3155.2018249999965,
+      "maxMs": 3155.2018249999965,
+      "loadBefore": [
+        28.75,
+        30.34,
+        25.74
+      ],
+      "loadAfter": [
+        28.61,
+        30.28,
+        25.75
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 480,
+        "rev-parse --abbrev-ref HEAD": 480,
+        "remote get-url origin": 480
+      },
+      "serverCpuMs": 4000.181,
+      "gitChildCpuMs": 5120,
+      "requests": 16,
+      "p50Ms": 8292.432537999994,
+      "p95Ms": 9446.087162000003,
+      "maxMs": 9446.087162000003,
+      "loadBefore": [
+        28.61,
+        30.28,
+        25.75
+      ],
+      "loadAfter": [
+        28.11,
+        30.11,
+        25.74
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 15.539,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 18.822434000001522,
+      "p95Ms": 28.734821000005468,
+      "maxMs": 28.734821000005468,
+      "loadBefore": [
+        28.11,
+        30.11,
+        25.74
+      ],
+      "loadAfter": [
+        28.11,
+        30.11,
+        25.74
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 400,
+        "rev-parse --abbrev-ref HEAD": 400,
+        "remote get-url origin": 400
+      },
+      "serverCpuMs": 3018.491,
+      "gitChildCpuMs": 3680,
+      "requests": 16,
+      "p50Ms": 6639.302047999998,
+      "p95Ms": 7123.790418999997,
+      "maxMs": 7123.790418999997,
+      "loadBefore": [
+        29.06,
+        30.27,
+        25.81
+      ],
+      "loadAfter": [
+        29.45,
+        30.33,
+        25.86
+      ]
+    },
+    {
+      "repeat": 0,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 640,
+        "rev-parse --abbrev-ref HEAD": 640,
+        "remote get-url origin": 640
+      },
+      "serverCpuMs": 6181.213,
+      "gitChildCpuMs": 8120,
+      "requests": 16,
+      "p50Ms": 15695.287064999997,
+      "p95Ms": 15962.539734999998,
+      "maxMs": 15962.539734999998,
+      "loadBefore": [
+        29.45,
+        30.33,
+        25.86
+      ],
+      "loadAfter": [
+        34.33,
+        31.34,
+        26.26
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 9.609,
+      "gitChildCpuMs": 10,
+      "requests": 1,
+      "p50Ms": 24.626098999986425,
+      "p95Ms": 24.626098999986425,
+      "maxMs": 24.626098999986425,
+      "loadBefore": [
+        34.33,
+        31.34,
+        26.26
+      ],
+      "loadAfter": [
+        34.33,
+        31.34,
+        26.26
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 1.179,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 2.2173279999988154,
+      "p95Ms": 2.2173279999988154,
+      "maxMs": 2.2173279999988154,
+      "loadBefore": [
+        34.33,
+        31.34,
+        26.26
+      ],
+      "loadAfter": [
+        34.33,
+        31.34,
+        26.26
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 13.311,
+      "gitChildCpuMs": 10,
+      "requests": 1,
+      "p50Ms": 30.324414999995497,
+      "p95Ms": 30.324414999995497,
+      "maxMs": 30.324414999995497,
+      "loadBefore": [
+        34.62,
+        31.45,
+        26.32
+      ],
+      "loadAfter": [
+        34.62,
+        31.45,
+        26.32
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 14.606,
+      "gitChildCpuMs": 10,
+      "requests": 1,
+      "p50Ms": 33.27390299999388,
+      "p95Ms": 33.27390299999388,
+      "maxMs": 33.27390299999388,
+      "loadBefore": [
+        34.62,
+        31.45,
+        26.32
+      ],
+      "loadAfter": [
+        34.62,
+        31.45,
+        26.32
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 45.959,
+      "gitChildCpuMs": 60,
+      "requests": 4,
+      "p50Ms": 85.1114910000033,
+      "p95Ms": 95.87174499999674,
+      "maxMs": 95.87174499999674,
+      "loadBefore": [
+        34.62,
+        31.45,
+        26.32
+      ],
+      "loadAfter": [
+        34.62,
+        31.45,
+        26.32
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 3.847,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 5.284306000001379,
+      "p95Ms": 6.050398999999743,
+      "maxMs": 6.050398999999743,
+      "loadBefore": [
+        34.62,
+        31.45,
+        26.32
+      ],
+      "loadAfter": [
+        34.62,
+        31.45,
+        26.32
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 43.909,
+      "gitChildCpuMs": 30,
+      "requests": 4,
+      "p50Ms": 88.75916299999517,
+      "p95Ms": 109.32725699999719,
+      "maxMs": 109.32725699999719,
+      "loadBefore": [
+        34.25,
+        31.42,
+        26.34
+      ],
+      "loadAfter": [
+        34.25,
+        31.42,
+        26.34
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 49.453,
+      "gitChildCpuMs": 60,
+      "requests": 4,
+      "p50Ms": 108.33364499999152,
+      "p95Ms": 133.99739899999986,
+      "maxMs": 133.99739899999986,
+      "loadBefore": [
+        34.25,
+        31.42,
+        26.34
+      ],
+      "loadAfter": [
+        34.25,
+        31.42,
+        26.34
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 12,
+        "rev-parse --abbrev-ref HEAD": 12,
+        "remote get-url origin": 12
+      },
+      "serverCpuMs": 125.958,
+      "gitChildCpuMs": 130,
+      "requests": 16,
+      "p50Ms": 247.52304600000207,
+      "p95Ms": 298.0003910000087,
+      "maxMs": 298.0003910000087,
+      "loadBefore": [
+        34.25,
+        31.42,
+        26.34
+      ],
+      "loadAfter": [
+        34.25,
+        31.42,
+        26.34
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 7.321,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 10.745074999998906,
+      "p95Ms": 12.554443999993964,
+      "maxMs": 12.554443999993964,
+      "loadBefore": [
+        34.25,
+        31.42,
+        26.34
+      ],
+      "loadAfter": [
+        34.25,
+        31.42,
+        26.34
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 16,
+        "rev-parse --abbrev-ref HEAD": 16,
+        "remote get-url origin": 16
+      },
+      "serverCpuMs": 149.52,
+      "gitChildCpuMs": 150,
+      "requests": 16,
+      "p50Ms": 330.58490499999607,
+      "p95Ms": 341.4922150000057,
+      "maxMs": 341.4922150000057,
+      "loadBefore": [
+        35.19,
+        31.67,
+        26.45
+      ],
+      "loadAfter": [
+        35.66,
+        31.82,
+        26.53
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 16,
+        "rev-parse --abbrev-ref HEAD": 16,
+        "remote get-url origin": 16
+      },
+      "serverCpuMs": 135.489,
+      "gitChildCpuMs": 160,
+      "requests": 16,
+      "p50Ms": 285.9427020000003,
+      "p95Ms": 300.98931200000516,
+      "maxMs": 300.98931200000516,
+      "loadBefore": [
+        35.66,
+        31.82,
+        26.53
+      ],
+      "loadAfter": [
+        35.66,
+        31.82,
+        26.53
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 87.887,
+      "gitChildCpuMs": 100,
+      "requests": 1,
+      "p50Ms": 211.92737799999304,
+      "p95Ms": 211.92737799999304,
+      "maxMs": 211.92737799999304,
+      "loadBefore": [
+        35.66,
+        31.82,
+        26.53
+      ],
+      "loadAfter": [
+        35.66,
+        31.82,
+        26.53
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 1.037,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 2.318989999999758,
+      "p95Ms": 2.318989999999758,
+      "maxMs": 2.318989999999758,
+      "loadBefore": [
+        35.66,
+        31.82,
+        26.53
+      ],
+      "loadAfter": [
+        35.66,
+        31.82,
+        26.53
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 87.751,
+      "gitChildCpuMs": 110,
+      "requests": 1,
+      "p50Ms": 333.3549630000052,
+      "p95Ms": 333.3549630000052,
+      "maxMs": 333.3549630000052,
+      "loadBefore": [
+        36.97,
+        32.16,
+        26.66
+      ],
+      "loadAfter": [
+        36.97,
+        32.16,
+        26.66
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 98.51,
+      "gitChildCpuMs": 120,
+      "requests": 1,
+      "p50Ms": 352.11434899999585,
+      "p95Ms": 352.11434899999585,
+      "maxMs": 352.11434899999585,
+      "loadBefore": [
+        36.97,
+        32.16,
+        26.66
+      ],
+      "loadAfter": [
+        36.97,
+        32.16,
+        26.66
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 413.522,
+      "gitChildCpuMs": 500,
+      "requests": 4,
+      "p50Ms": 1187.9801460000017,
+      "p95Ms": 1193.726444,
+      "maxMs": 1193.726444,
+      "loadBefore": [
+        36.97,
+        32.16,
+        26.66
+      ],
+      "loadAfter": [
+        36.97,
+        32.16,
+        26.66
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 3.987,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 5.728192999988096,
+      "p95Ms": 5.905045999999857,
+      "maxMs": 5.905045999999857,
+      "loadBefore": [
+        36.97,
+        32.16,
+        26.66
+      ],
+      "loadAfter": [
+        36.97,
+        32.16,
+        26.66
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 315.622,
+      "gitChildCpuMs": 370,
+      "requests": 4,
+      "p50Ms": 710.6287040000025,
+      "p95Ms": 724.8642160000163,
+      "maxMs": 724.8642160000163,
+      "loadBefore": [
+        36.81,
+        32.2,
+        26.71
+      ],
+      "loadAfter": [
+        36.81,
+        32.2,
+        26.71
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 592.815,
+      "gitChildCpuMs": 590,
+      "requests": 4,
+      "p50Ms": 1410.2751670000143,
+      "p95Ms": 1411.3246149999904,
+      "maxMs": 1411.3246149999904,
+      "loadBefore": [
+        36.81,
+        32.2,
+        26.71
+      ],
+      "loadAfter": [
+        36.81,
+        32.2,
+        26.71
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1549.941,
+      "gitChildCpuMs": 1850,
+      "requests": 16,
+      "p50Ms": 3865.6534039999824,
+      "p95Ms": 3875.314717000001,
+      "maxMs": 3875.314717000001,
+      "loadBefore": [
+        36.81,
+        32.2,
+        26.71
+      ],
+      "loadAfter": [
+        37.54,
+        32.43,
+        26.81
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 12.022,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 18.21383700001752,
+      "p95Ms": 27.735908000002382,
+      "maxMs": 27.735908000002382,
+      "loadBefore": [
+        37.54,
+        32.43,
+        26.81
+      ],
+      "loadAfter": [
+        37.54,
+        32.43,
+        26.81
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 110,
+        "rev-parse --abbrev-ref HEAD": 110,
+        "remote get-url origin": 110
+      },
+      "serverCpuMs": 976.878,
+      "gitChildCpuMs": 1100,
+      "requests": 16,
+      "p50Ms": 1688.2865889999957,
+      "p95Ms": 2121.7965950000216,
+      "maxMs": 2121.7965950000216,
+      "loadBefore": [
+        37.74,
+        32.56,
+        26.88
+      ],
+      "loadAfter": [
+        36.88,
+        32.47,
+        26.88
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1235.906,
+      "gitChildCpuMs": 1430,
+      "requests": 16,
+      "p50Ms": 2698.114036999992,
+      "p95Ms": 2708.3456050000095,
+      "maxMs": 2708.3456050000095,
+      "loadBefore": [
+        36.88,
+        32.47,
+        26.88
+      ],
+      "loadAfter": [
+        36.88,
+        32.47,
+        26.88
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 366.335,
+      "gitChildCpuMs": 390,
+      "requests": 1,
+      "p50Ms": 763.412182,
+      "p95Ms": 763.412182,
+      "maxMs": 763.412182,
+      "loadBefore": [
+        36.88,
+        32.47,
+        26.88
+      ],
+      "loadAfter": [
+        36.88,
+        32.47,
+        26.88
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 1.204,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 1.8058420000015758,
+      "p95Ms": 1.8058420000015758,
+      "maxMs": 1.8058420000015758,
+      "loadBefore": [
+        36.88,
+        32.47,
+        26.88
+      ],
+      "loadAfter": [
+        36.88,
+        32.47,
+        26.88
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 372.581,
+      "gitChildCpuMs": 410,
+      "requests": 1,
+      "p50Ms": 804.8743309999991,
+      "p95Ms": 804.8743309999991,
+      "maxMs": 804.8743309999991,
+      "loadBefore": [
+        35.21,
+        32.19,
+        26.83
+      ],
+      "loadAfter": [
+        34.47,
+        32.09,
+        26.82
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 294.442,
+      "gitChildCpuMs": 320,
+      "requests": 1,
+      "p50Ms": 622.9812119999842,
+      "p95Ms": 622.9812119999842,
+      "maxMs": 622.9812119999842,
+      "loadBefore": [
+        34.47,
+        32.09,
+        26.82
+      ],
+      "loadAfter": [
+        34.47,
+        32.09,
+        26.82
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1355.858,
+      "gitChildCpuMs": 1610,
+      "requests": 4,
+      "p50Ms": 3125.338114000013,
+      "p95Ms": 3128.4991100000043,
+      "maxMs": 3128.4991100000043,
+      "loadBefore": [
+        34.47,
+        32.09,
+        26.82
+      ],
+      "loadAfter": [
+        34.47,
+        32.09,
+        26.82
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 4.97,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 5.738702000002377,
+      "p95Ms": 7.075400999980047,
+      "maxMs": 7.075400999980047,
+      "loadBefore": [
+        34.47,
+        32.09,
+        26.82
+      ],
+      "loadAfter": [
+        34.47,
+        32.09,
+        26.82
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1466.841,
+      "gitChildCpuMs": 1890,
+      "requests": 4,
+      "p50Ms": 3747.372645000025,
+      "p95Ms": 3758.6297649999906,
+      "maxMs": 3758.6297649999906,
+      "loadBefore": [
+        35.31,
+        32.31,
+        26.92
+      ],
+      "loadAfter": [
+        36.49,
+        32.6,
+        27.04
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1651.5,
+      "gitChildCpuMs": 2060,
+      "requests": 4,
+      "p50Ms": 4035.007762000023,
+      "p95Ms": 4046.1506560000125,
+      "maxMs": 4046.1506560000125,
+      "loadBefore": [
+        36.49,
+        32.6,
+        27.04
+      ],
+      "loadAfter": [
+        36.29,
+        32.62,
+        27.08
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 640,
+        "rev-parse --abbrev-ref HEAD": 640,
+        "remote get-url origin": 640
+      },
+      "serverCpuMs": 5604.715,
+      "gitChildCpuMs": 6990,
+      "requests": 16,
+      "p50Ms": 13636.028284,
+      "p95Ms": 13647.833997000009,
+      "maxMs": 13647.833997000009,
+      "loadBefore": [
+        36.29,
+        32.62,
+        27.08
+      ],
+      "loadAfter": [
+        38.78,
+        33.31,
+        27.39
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 15.037,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 18.26657599999453,
+      "p95Ms": 25.480497999989893,
+      "maxMs": 25.480497999989893,
+      "loadBefore": [
+        38.78,
+        33.31,
+        27.39
+      ],
+      "loadAfter": [
+        38.78,
+        33.31,
+        27.39
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 640,
+        "rev-parse --abbrev-ref HEAD": 640,
+        "remote get-url origin": 640
+      },
+      "serverCpuMs": 5963.867,
+      "gitChildCpuMs": 7650,
+      "requests": 16,
+      "p50Ms": 14517.164465000009,
+      "p95Ms": 14532.335529000004,
+      "maxMs": 14532.335529000004,
+      "loadBefore": [
+        38.56,
+        33.35,
+        27.44
+      ],
+      "loadAfter": [
+        37.92,
+        33.39,
+        27.51
+      ]
+    },
+    {
+      "repeat": 1,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 640,
+        "rev-parse --abbrev-ref HEAD": 640,
+        "remote get-url origin": 640
+      },
+      "serverCpuMs": 5516.454,
+      "gitChildCpuMs": 6680,
+      "requests": 16,
+      "p50Ms": 12002.877275000006,
+      "p95Ms": 12391.080652000004,
+      "maxMs": 12391.080652000004,
+      "loadBefore": [
+        37.92,
+        33.39,
+        27.51
+      ],
+      "loadAfter": [
+        34.75,
+        32.91,
+        27.45
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 21.983,
+      "gitChildCpuMs": 20,
+      "requests": 1,
+      "p50Ms": 47.05671900001471,
+      "p95Ms": 47.05671900001471,
+      "maxMs": 47.05671900001471,
+      "loadBefore": [
+        34.75,
+        32.91,
+        27.45
+      ],
+      "loadAfter": [
+        34.75,
+        32.91,
+        27.45
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 1.458,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 2.4142379999975674,
+      "p95Ms": 2.4142379999975674,
+      "maxMs": 2.4142379999975674,
+      "loadBefore": [
+        34.75,
+        32.91,
+        27.45
+      ],
+      "loadAfter": [
+        34.75,
+        32.91,
+        27.45
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 10.842,
+      "gitChildCpuMs": 10,
+      "requests": 1,
+      "p50Ms": 22.884516999998596,
+      "p95Ms": 22.884516999998596,
+      "maxMs": 22.884516999998596,
+      "loadBefore": [
+        34.61,
+        32.91,
+        27.48
+      ],
+      "loadAfter": [
+        34.61,
+        32.91,
+        27.48
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 8.677,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 19.116095999983372,
+      "p95Ms": 19.116095999983372,
+      "maxMs": 19.116095999983372,
+      "loadBefore": [
+        34.61,
+        32.91,
+        27.48
+      ],
+      "loadAfter": [
+        34.61,
+        32.91,
+        27.48
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 52.827,
+      "gitChildCpuMs": 50,
+      "requests": 4,
+      "p50Ms": 99.24453799999901,
+      "p95Ms": 119.96635999999125,
+      "maxMs": 119.96635999999125,
+      "loadBefore": [
+        34.61,
+        32.91,
+        27.48
+      ],
+      "loadAfter": [
+        34.61,
+        32.91,
+        27.48
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 14.061,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 17.33909899997525,
+      "p95Ms": 18.235957999975653,
+      "maxMs": 18.235957999975653,
+      "loadBefore": [
+        34.61,
+        32.91,
+        27.48
+      ],
+      "loadAfter": [
+        34.61,
+        32.91,
+        27.48
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 33.853,
+      "gitChildCpuMs": 30,
+      "requests": 4,
+      "p50Ms": 58.21594500000356,
+      "p95Ms": 75.92173499998171,
+      "maxMs": 75.92173499998171,
+      "loadBefore": [
+        36.96,
+        33.43,
+        27.68
+      ],
+      "loadAfter": [
+        36.96,
+        33.43,
+        27.68
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 32.152,
+      "gitChildCpuMs": 30,
+      "requests": 4,
+      "p50Ms": 64.51708700001473,
+      "p95Ms": 65.50414699999965,
+      "maxMs": 65.50414699999965,
+      "loadBefore": [
+        36.96,
+        33.43,
+        27.68
+      ],
+      "loadAfter": [
+        36.96,
+        33.43,
+        27.68
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 16,
+        "rev-parse --abbrev-ref HEAD": 16,
+        "remote get-url origin": 16
+      },
+      "serverCpuMs": 145.043,
+      "gitChildCpuMs": 160,
+      "requests": 16,
+      "p50Ms": 313.74298500001896,
+      "p95Ms": 323.57176299998537,
+      "maxMs": 323.57176299998537,
+      "loadBefore": [
+        36.96,
+        33.43,
+        27.68
+      ],
+      "loadAfter": [
+        36.96,
+        33.43,
+        27.68
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 6.634,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 11.128919000009773,
+      "p95Ms": 11.727164999989327,
+      "maxMs": 11.727164999989327,
+      "loadBefore": [
+        36.96,
+        33.43,
+        27.68
+      ],
+      "loadAfter": [
+        36.96,
+        33.43,
+        27.68
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 16,
+        "rev-parse --abbrev-ref HEAD": 16,
+        "remote get-url origin": 16
+      },
+      "serverCpuMs": 168.055,
+      "gitChildCpuMs": 170,
+      "requests": 16,
+      "p50Ms": 288.983625999972,
+      "p95Ms": 367.42887499998324,
+      "maxMs": 367.42887499998324,
+      "loadBefore": [
+        37.04,
+        33.51,
+        27.73
+      ],
+      "loadAfter": [
+        37.04,
+        33.51,
+        27.73
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 16,
+        "rev-parse --abbrev-ref HEAD": 16,
+        "remote get-url origin": 16
+      },
+      "serverCpuMs": 146.278,
+      "gitChildCpuMs": 150,
+      "requests": 16,
+      "p50Ms": 319.24047300001257,
+      "p95Ms": 324.3907670000044,
+      "maxMs": 324.3907670000044,
+      "loadBefore": [
+        37.04,
+        33.51,
+        27.73
+      ],
+      "loadAfter": [
+        37.04,
+        33.51,
+        27.73
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 75.14,
+      "gitChildCpuMs": 90,
+      "requests": 1,
+      "p50Ms": 160.97943200002192,
+      "p95Ms": 160.97943200002192,
+      "maxMs": 160.97943200002192,
+      "loadBefore": [
+        37.04,
+        33.51,
+        27.73
+      ],
+      "loadAfter": [
+        37.04,
+        33.51,
+        27.73
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 1.007,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 1.603601000009803,
+      "p95Ms": 1.603601000009803,
+      "maxMs": 1.603601000009803,
+      "loadBefore": [
+        37.04,
+        33.51,
+        27.73
+      ],
+      "loadAfter": [
+        37.04,
+        33.51,
+        27.73
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 85.687,
+      "gitChildCpuMs": 100,
+      "requests": 1,
+      "p50Ms": 183.7351670000062,
+      "p95Ms": 183.7351670000062,
+      "maxMs": 183.7351670000062,
+      "loadBefore": [
+        38.56,
+        33.88,
+        27.89
+      ],
+      "loadAfter": [
+        38.56,
+        33.88,
+        27.89
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 112.993,
+      "gitChildCpuMs": 120,
+      "requests": 1,
+      "p50Ms": 246.34311600000365,
+      "p95Ms": 246.34311600000365,
+      "maxMs": 246.34311600000365,
+      "loadBefore": [
+        38.56,
+        33.88,
+        27.89
+      ],
+      "loadAfter": [
+        38.56,
+        33.88,
+        27.89
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 502.738,
+      "gitChildCpuMs": 410,
+      "requests": 4,
+      "p50Ms": 930.5311900000088,
+      "p95Ms": 931.9167610000004,
+      "maxMs": 931.9167610000004,
+      "loadBefore": [
+        38.56,
+        33.88,
+        27.89
+      ],
+      "loadAfter": [
+        37.47,
+        33.73,
+        27.87
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 2.755,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 5.284216000000015,
+      "p95Ms": 5.367491999990307,
+      "maxMs": 5.367491999990307,
+      "loadBefore": [
+        37.47,
+        33.73,
+        27.87
+      ],
+      "loadAfter": [
+        37.47,
+        33.73,
+        27.87
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 322.249,
+      "gitChildCpuMs": 460,
+      "requests": 4,
+      "p50Ms": 911.4936589999998,
+      "p95Ms": 915.1874290000123,
+      "maxMs": 915.1874290000123,
+      "loadBefore": [
+        37.68,
+        33.84,
+        27.94
+      ],
+      "loadAfter": [
+        37.68,
+        33.84,
+        27.94
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 319.476,
+      "gitChildCpuMs": 460,
+      "requests": 4,
+      "p50Ms": 833.4424320000107,
+      "p95Ms": 834.4639569999999,
+      "maxMs": 834.4639569999999,
+      "loadBefore": [
+        37.68,
+        33.84,
+        27.94
+      ],
+      "loadAfter": [
+        37.68,
+        33.84,
+        27.94
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1370.027,
+      "gitChildCpuMs": 1810,
+      "requests": 16,
+      "p50Ms": 3317.5991599999834,
+      "p95Ms": 3320.5679539999983,
+      "maxMs": 3320.5679539999983,
+      "loadBefore": [
+        37.68,
+        33.84,
+        27.94
+      ],
+      "loadAfter": [
+        37.46,
+        33.86,
+        27.97
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 17.344,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 19.802399999985937,
+      "p95Ms": 26.80739800000447,
+      "maxMs": 26.80739800000447,
+      "loadBefore": [
+        37.46,
+        33.86,
+        27.97
+      ],
+      "loadAfter": [
+        37.46,
+        33.86,
+        27.97
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1131.35,
+      "gitChildCpuMs": 1550,
+      "requests": 16,
+      "p50Ms": 2757.2545999999857,
+      "p95Ms": 2789.8577170000062,
+      "maxMs": 2789.8577170000062,
+      "loadBefore": [
+        37.99,
+        34.02,
+        28.06
+      ],
+      "loadAfter": [
+        37.99,
+        34.02,
+        28.06
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 997.117,
+      "gitChildCpuMs": 1440,
+      "requests": 16,
+      "p50Ms": 2473.972256000008,
+      "p95Ms": 2477.6840699999884,
+      "maxMs": 2477.6840699999884,
+      "loadBefore": [
+        37.99,
+        34.02,
+        28.06
+      ],
+      "loadAfter": [
+        36.95,
+        33.87,
+        28.04
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 248.611,
+      "gitChildCpuMs": 380,
+      "requests": 1,
+      "p50Ms": 678.5632519999926,
+      "p95Ms": 678.5632519999926,
+      "maxMs": 678.5632519999926,
+      "loadBefore": [
+        36.95,
+        33.87,
+        28.04
+      ],
+      "loadAfter": [
+        36.95,
+        33.87,
+        28.04
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 1.562,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 2.5351270000101067,
+      "p95Ms": 2.5351270000101067,
+      "maxMs": 2.5351270000101067,
+      "loadBefore": [
+        36.95,
+        33.87,
+        28.04
+      ],
+      "loadAfter": [
+        36.95,
+        33.87,
+        28.04
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 238.026,
+      "gitChildCpuMs": 360,
+      "requests": 1,
+      "p50Ms": 607.2938420000137,
+      "p95Ms": 607.2938420000137,
+      "maxMs": 607.2938420000137,
+      "loadBefore": [
+        36.87,
+        33.91,
+        28.09
+      ],
+      "loadAfter": [
+        36.87,
+        33.91,
+        28.09
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 261.408,
+      "gitChildCpuMs": 380,
+      "requests": 1,
+      "p50Ms": 660.5438110000105,
+      "p95Ms": 660.5438110000105,
+      "maxMs": 660.5438110000105,
+      "loadBefore": [
+        36.87,
+        33.91,
+        28.09
+      ],
+      "loadAfter": [
+        36.87,
+        33.91,
+        28.09
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1088.724,
+      "gitChildCpuMs": 1390,
+      "requests": 4,
+      "p50Ms": 2562.864143999992,
+      "p95Ms": 2571.6147200000123,
+      "maxMs": 2571.6147200000123,
+      "loadBefore": [
+        36.87,
+        33.91,
+        28.09
+      ],
+      "loadAfter": [
+        38.08,
+        34.21,
+        28.22
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 5.558,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 5.7355160000151955,
+      "p95Ms": 7.393720000050962,
+      "maxMs": 7.393720000050962,
+      "loadBefore": [
+        38.08,
+        34.21,
+        28.22
+      ],
+      "loadAfter": [
+        38.08,
+        34.21,
+        28.22
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1053.039,
+      "gitChildCpuMs": 1590,
+      "requests": 4,
+      "p50Ms": 2767.212182999996,
+      "p95Ms": 2769.9210160000366,
+      "maxMs": 2769.9210160000366,
+      "loadBefore": [
+        36.47,
+        33.94,
+        28.16
+      ],
+      "loadAfter": [
+        36.47,
+        33.94,
+        28.16
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1179.889,
+      "gitChildCpuMs": 1590,
+      "requests": 4,
+      "p50Ms": 2854.999501000042,
+      "p95Ms": 2856.3111419999623,
+      "maxMs": 2856.3111419999623,
+      "loadBefore": [
+        36.47,
+        33.94,
+        28.16
+      ],
+      "loadAfter": [
+        35.63,
+        33.81,
+        28.15
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 640,
+        "rev-parse --abbrev-ref HEAD": 640,
+        "remote get-url origin": 640
+      },
+      "serverCpuMs": 4954.753,
+      "gitChildCpuMs": 7500,
+      "requests": 16,
+      "p50Ms": 10563.362597999978,
+      "p95Ms": 13402.066521,
+      "maxMs": 13402.066521,
+      "loadBefore": [
+        35.63,
+        33.81,
+        28.15
+      ],
+      "loadAfter": [
+        36.66,
+        34.11,
+        28.31
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 22.317,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 24.211027000041213,
+      "p95Ms": 31.395141000044532,
+      "maxMs": 31.395141000044532,
+      "loadBefore": [
+        36.66,
+        34.11,
+        28.31
+      ],
+      "loadAfter": [
+        36.66,
+        34.11,
+        28.31
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 640,
+        "rev-parse --abbrev-ref HEAD": 640,
+        "remote get-url origin": 640
+      },
+      "serverCpuMs": 5908.424,
+      "gitChildCpuMs": 8650,
+      "requests": 16,
+      "p50Ms": 15505.55419200001,
+      "p95Ms": 15523.791702999966,
+      "maxMs": 15523.791702999966,
+      "loadBefore": [
+        37.17,
+        34.26,
+        28.39
+      ],
+      "loadAfter": [
+        37.13,
+        34.4,
+        28.53
+      ]
+    },
+    {
+      "repeat": 2,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 640,
+        "rev-parse --abbrev-ref HEAD": 640,
+        "remote get-url origin": 640
+      },
+      "serverCpuMs": 6260.176,
+      "gitChildCpuMs": 8310,
+      "requests": 16,
+      "p50Ms": 15260.189197,
+      "p95Ms": 15543.248625999957,
+      "maxMs": 15543.248625999957,
+      "loadBefore": [
+        37.13,
+        34.4,
+        28.53
+      ],
+      "loadAfter": [
+        37.95,
+        34.75,
+        28.77
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 8.603,
+      "gitChildCpuMs": 10,
+      "requests": 1,
+      "p50Ms": 21.181097999971826,
+      "p95Ms": 21.181097999971826,
+      "maxMs": 21.181097999971826,
+      "loadBefore": [
+        37.95,
+        34.75,
+        28.77
+      ],
+      "loadAfter": [
+        37.95,
+        34.75,
+        28.77
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 0.969,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 2.185408000019379,
+      "p95Ms": 2.185408000019379,
+      "maxMs": 2.185408000019379,
+      "loadBefore": [
+        37.95,
+        34.75,
+        28.77
+      ],
+      "loadAfter": [
+        37.95,
+        34.75,
+        28.77
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 12.989,
+      "gitChildCpuMs": 10,
+      "requests": 1,
+      "p50Ms": 26.46305800002301,
+      "p95Ms": 26.46305800002301,
+      "maxMs": 26.46305800002301,
+      "loadBefore": [
+        37.24,
+        34.66,
+        28.77
+      ],
+      "loadAfter": [
+        37.24,
+        34.66,
+        28.77
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 10.025,
+      "gitChildCpuMs": 10,
+      "requests": 1,
+      "p50Ms": 20.60392000002321,
+      "p95Ms": 20.60392000002321,
+      "maxMs": 20.60392000002321,
+      "loadBefore": [
+        37.24,
+        34.66,
+        28.77
+      ],
+      "loadAfter": [
+        37.24,
+        34.66,
+        28.77
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 36.987,
+      "gitChildCpuMs": 40,
+      "requests": 4,
+      "p50Ms": 77.2626900000032,
+      "p95Ms": 77.69622699997853,
+      "maxMs": 77.69622699997853,
+      "loadBefore": [
+        37.24,
+        34.66,
+        28.77
+      ],
+      "loadAfter": [
+        37.24,
+        34.66,
+        28.77
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 2.778,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 4.686059000028763,
+      "p95Ms": 4.963341000024229,
+      "maxMs": 4.963341000024229,
+      "loadBefore": [
+        37.24,
+        34.66,
+        28.77
+      ],
+      "loadAfter": [
+        37.24,
+        34.66,
+        28.77
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 44.767,
+      "gitChildCpuMs": 50,
+      "requests": 4,
+      "p50Ms": 102.16393499996047,
+      "p95Ms": 113.32397299999138,
+      "maxMs": 113.32397299999138,
+      "loadBefore": [
+        35.78,
+        34.4,
+        28.72
+      ],
+      "loadAfter": [
+        35.78,
+        34.4,
+        28.72
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 45.057,
+      "gitChildCpuMs": 50,
+      "requests": 4,
+      "p50Ms": 95.00546900002519,
+      "p95Ms": 110.0325699999812,
+      "maxMs": 110.0325699999812,
+      "loadBefore": [
+        35.78,
+        34.4,
+        28.72
+      ],
+      "loadAfter": [
+        35.78,
+        34.4,
+        28.72
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 16,
+        "rev-parse --abbrev-ref HEAD": 16,
+        "remote get-url origin": 16
+      },
+      "serverCpuMs": 138.278,
+      "gitChildCpuMs": 160,
+      "requests": 16,
+      "p50Ms": 301.7757720000227,
+      "p95Ms": 324.7402299999958,
+      "maxMs": 324.7402299999958,
+      "loadBefore": [
+        35.78,
+        34.4,
+        28.72
+      ],
+      "loadAfter": [
+        35.78,
+        34.4,
+        28.72
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 7.796,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 11.913806000025943,
+      "p95Ms": 12.983281000051647,
+      "maxMs": 12.983281000051647,
+      "loadBefore": [
+        35.78,
+        34.4,
+        28.72
+      ],
+      "loadAfter": [
+        35.78,
+        34.4,
+        28.72
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 16,
+        "rev-parse --abbrev-ref HEAD": 16,
+        "remote get-url origin": 16
+      },
+      "serverCpuMs": 145.191,
+      "gitChildCpuMs": 170,
+      "requests": 16,
+      "p50Ms": 345.77273700002115,
+      "p95Ms": 348.3396730000386,
+      "maxMs": 348.3396730000386,
+      "loadBefore": [
+        34.43,
+        34.14,
+        28.67
+      ],
+      "loadAfter": [
+        34.43,
+        34.14,
+        28.67
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 16,
+        "rev-parse --abbrev-ref HEAD": 16,
+        "remote get-url origin": 16
+      },
+      "serverCpuMs": 147.836,
+      "gitChildCpuMs": 180,
+      "requests": 16,
+      "p50Ms": 363.8574389999849,
+      "p95Ms": 368.7598270000308,
+      "maxMs": 368.7598270000308,
+      "loadBefore": [
+        34.43,
+        34.14,
+        28.67
+      ],
+      "loadAfter": [
+        34.43,
+        34.14,
+        28.67
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 116.619,
+      "gitChildCpuMs": 110,
+      "requests": 1,
+      "p50Ms": 237.47085700003663,
+      "p95Ms": 237.47085700003663,
+      "maxMs": 237.47085700003663,
+      "loadBefore": [
+        34.43,
+        34.14,
+        28.67
+      ],
+      "loadAfter": [
+        34.43,
+        34.14,
+        28.67
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 1.112,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 1.746910999994725,
+      "p95Ms": 1.746910999994725,
+      "maxMs": 1.746910999994725,
+      "loadBefore": [
+        34.43,
+        34.14,
+        28.67
+      ],
+      "loadAfter": [
+        34.43,
+        34.14,
+        28.67
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 123.155,
+      "gitChildCpuMs": 140,
+      "requests": 1,
+      "p50Ms": 330.3055240000249,
+      "p95Ms": 330.3055240000249,
+      "maxMs": 330.3055240000249,
+      "loadBefore": [
+        34.48,
+        34.16,
+        28.7
+      ],
+      "loadAfter": [
+        34.48,
+        34.16,
+        28.7
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 102.709,
+      "gitChildCpuMs": 120,
+      "requests": 1,
+      "p50Ms": 246.961427000002,
+      "p95Ms": 246.961427000002,
+      "maxMs": 246.961427000002,
+      "loadBefore": [
+        34.48,
+        34.16,
+        28.7
+      ],
+      "loadAfter": [
+        34.48,
+        34.16,
+        28.7
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 401.984,
+      "gitChildCpuMs": 480,
+      "requests": 4,
+      "p50Ms": 940.8267510000151,
+      "p95Ms": 949.5002819999936,
+      "maxMs": 949.5002819999936,
+      "loadBefore": [
+        34.48,
+        34.16,
+        28.7
+      ],
+      "loadAfter": [
+        34.48,
+        34.16,
+        28.7
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 3.101,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 6.3054899999988265,
+      "p95Ms": 6.578704000043217,
+      "maxMs": 6.578704000043217,
+      "loadBefore": [
+        34.48,
+        34.16,
+        28.7
+      ],
+      "loadAfter": [
+        34.48,
+        34.16,
+        28.7
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 390.916,
+      "gitChildCpuMs": 480,
+      "requests": 4,
+      "p50Ms": 954.0522580000106,
+      "p95Ms": 964.820596000005,
+      "maxMs": 964.820596000005,
+      "loadBefore": [
+        34.84,
+        34.24,
+        28.76
+      ],
+      "loadAfter": [
+        34.84,
+        34.24,
+        28.76
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 328.742,
+      "gitChildCpuMs": 420,
+      "requests": 4,
+      "p50Ms": 800.6759130000137,
+      "p95Ms": 820.4983810000122,
+      "maxMs": 820.4983810000122,
+      "loadBefore": [
+        34.84,
+        34.24,
+        28.76
+      ],
+      "loadAfter": [
+        35.89,
+        34.47,
+        28.86
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 120,
+        "rev-parse --abbrev-ref HEAD": 120,
+        "remote get-url origin": 120
+      },
+      "serverCpuMs": 1092.129,
+      "gitChildCpuMs": 1320,
+      "requests": 16,
+      "p50Ms": 2086.9730989999953,
+      "p95Ms": 2671.758716000011,
+      "maxMs": 2671.758716000011,
+      "loadBefore": [
+        35.89,
+        34.47,
+        28.86
+      ],
+      "loadAfter": [
+        35.89,
+        34.47,
+        28.86
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 9.503,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 28.96814800001448,
+      "p95Ms": 37.654695000033826,
+      "maxMs": 37.654695000033826,
+      "loadBefore": [
+        35.89,
+        34.47,
+        28.86
+      ],
+      "loadAfter": [
+        35.89,
+        34.47,
+        28.86
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 120,
+        "rev-parse --abbrev-ref HEAD": 120,
+        "remote get-url origin": 120
+      },
+      "serverCpuMs": 1182.486,
+      "gitChildCpuMs": 1420,
+      "requests": 16,
+      "p50Ms": 2310.9973069999833,
+      "p95Ms": 2747.4666629999992,
+      "maxMs": 2747.4666629999992,
+      "loadBefore": [
+        35.34,
+        34.37,
+        28.86
+      ],
+      "loadAfter": [
+        34.51,
+        34.22,
+        28.84
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1413.852,
+      "gitChildCpuMs": 1660,
+      "requests": 16,
+      "p50Ms": 3235.7030010000453,
+      "p95Ms": 3237.651702000003,
+      "maxMs": 3237.651702000003,
+      "loadBefore": [
+        34.51,
+        34.22,
+        28.84
+      ],
+      "loadAfter": [
+        34.51,
+        34.22,
+        28.84
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 406.436,
+      "gitChildCpuMs": 520,
+      "requests": 1,
+      "p50Ms": 956.9890389999491,
+      "p95Ms": 956.9890389999491,
+      "maxMs": 956.9890389999491,
+      "loadBefore": [
+        34.51,
+        34.22,
+        28.84
+      ],
+      "loadAfter": [
+        34.55,
+        34.23,
+        28.87
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 1.316,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 1.8422209999989718,
+      "p95Ms": 1.8422209999989718,
+      "maxMs": 1.8422209999989718,
+      "loadBefore": [
+        34.55,
+        34.23,
+        28.87
+      ],
+      "loadAfter": [
+        34.55,
+        34.23,
+        28.87
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 354.687,
+      "gitChildCpuMs": 400,
+      "requests": 1,
+      "p50Ms": 835.476297999965,
+      "p95Ms": 835.476297999965,
+      "maxMs": 835.476297999965,
+      "loadBefore": [
+        34.75,
+        34.28,
+        28.92
+      ],
+      "loadAfter": [
+        34.75,
+        34.28,
+        28.92
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 310.642,
+      "gitChildCpuMs": 360,
+      "requests": 1,
+      "p50Ms": 728.7035489999689,
+      "p95Ms": 728.7035489999689,
+      "maxMs": 728.7035489999689,
+      "loadBefore": [
+        34.75,
+        34.28,
+        28.92
+      ],
+      "loadAfter": [
+        34.75,
+        34.28,
+        28.92
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1428.242,
+      "gitChildCpuMs": 1630,
+      "requests": 4,
+      "p50Ms": 3234.9101120000123,
+      "p95Ms": 3247.599850999948,
+      "maxMs": 3247.599850999948,
+      "loadBefore": [
+        34.75,
+        34.28,
+        28.92
+      ],
+      "loadAfter": [
+        34.75,
+        34.28,
+        28.92
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 3.902,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 5.541870000015479,
+      "p95Ms": 6.376723999972455,
+      "maxMs": 6.376723999972455,
+      "loadBefore": [
+        34.75,
+        34.28,
+        28.92
+      ],
+      "loadAfter": [
+        34.75,
+        34.28,
+        28.92
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1335.618,
+      "gitChildCpuMs": 1820,
+      "requests": 4,
+      "p50Ms": 3370.0456960000447,
+      "p95Ms": 3385.6398359999876,
+      "maxMs": 3385.6398359999876,
+      "loadBefore": [
+        34.61,
+        34.26,
+        28.94
+      ],
+      "loadAfter": [
+        34.88,
+        34.32,
+        28.99
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1175.329,
+      "gitChildCpuMs": 1570,
+      "requests": 4,
+      "p50Ms": 2840.346849000023,
+      "p95Ms": 2843.2870480000274,
+      "maxMs": 2843.2870480000274,
+      "loadBefore": [
+        34.88,
+        34.32,
+        28.99
+      ],
+      "loadAfter": [
+        34.25,
+        34.2,
+        28.98
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 516,
+        "rev-parse --abbrev-ref HEAD": 516,
+        "remote get-url origin": 516
+      },
+      "serverCpuMs": 3490.752,
+      "gitChildCpuMs": 5120,
+      "requests": 16,
+      "p50Ms": 7876.970568999997,
+      "p95Ms": 8853.772952999978,
+      "maxMs": 8853.772952999978,
+      "loadBefore": [
+        34.25,
+        34.2,
+        28.98
+      ],
+      "loadAfter": [
+        33.91,
+        34.13,
+        28.98
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 12.751,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 16.16293199994834,
+      "p95Ms": 27.976540000003297,
+      "maxMs": 27.976540000003297,
+      "loadBefore": [
+        33.91,
+        34.13,
+        28.98
+      ],
+      "loadAfter": [
+        33.12,
+        33.96,
+        28.96
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 360,
+        "rev-parse --abbrev-ref HEAD": 360,
+        "remote get-url origin": 360
+      },
+      "serverCpuMs": 2649.951,
+      "gitChildCpuMs": 3480,
+      "requests": 16,
+      "p50Ms": 5570.765130000014,
+      "p95Ms": 6350.972131999966,
+      "maxMs": 6350.972131999966,
+      "loadBefore": [
+        34.15,
+        34.16,
+        29.05
+      ],
+      "loadAfter": [
+        32.85,
+        33.89,
+        28.99
+      ]
+    },
+    {
+      "repeat": 3,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 640,
+        "rev-parse --abbrev-ref HEAD": 640,
+        "remote get-url origin": 640
+      },
+      "serverCpuMs": 5367.018,
+      "gitChildCpuMs": 7620,
+      "requests": 16,
+      "p50Ms": 13506.028868999972,
+      "p95Ms": 13546.720284999989,
+      "maxMs": 13546.720284999989,
+      "loadBefore": [
+        32.85,
+        33.89,
+        28.99
+      ],
+      "loadAfter": [
+        33.5,
+        33.99,
+        29.08
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 9.634,
+      "gitChildCpuMs": 10,
+      "requests": 1,
+      "p50Ms": 20.17496100004064,
+      "p95Ms": 20.17496100004064,
+      "maxMs": 20.17496100004064,
+      "loadBefore": [
+        33.5,
+        33.99,
+        29.08
+      ],
+      "loadAfter": [
+        33.5,
+        33.99,
+        29.08
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 0.983,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 1.5799969999934547,
+      "p95Ms": 1.5799969999934547,
+      "maxMs": 1.5799969999934547,
+      "loadBefore": [
+        33.5,
+        33.99,
+        29.08
+      ],
+      "loadAfter": [
+        33.5,
+        33.99,
+        29.08
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 8.234,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 17.989975000033155,
+      "p95Ms": 17.989975000033155,
+      "maxMs": 17.989975000033155,
+      "loadBefore": [
+        32.18,
+        33.71,
+        29.01
+      ],
+      "loadAfter": [
+        32.18,
+        33.71,
+        29.01
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 1,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 1,
+        "rev-parse --abbrev-ref HEAD": 1,
+        "remote get-url origin": 1
+      },
+      "serverCpuMs": 7.885,
+      "gitChildCpuMs": 10,
+      "requests": 1,
+      "p50Ms": 16.774443999980576,
+      "p95Ms": 16.774443999980576,
+      "maxMs": 16.774443999980576,
+      "loadBefore": [
+        32.18,
+        33.71,
+        29.01
+      ],
+      "loadAfter": [
+        32.18,
+        33.71,
+        29.01
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 32.085,
+      "gitChildCpuMs": 40,
+      "requests": 4,
+      "p50Ms": 68.31680399994366,
+      "p95Ms": 77.28350799996406,
+      "maxMs": 77.28350799996406,
+      "loadBefore": [
+        32.18,
+        33.71,
+        29.01
+      ],
+      "loadAfter": [
+        31.84,
+        33.62,
+        29.01
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 2.5,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 4.643488999980036,
+      "p95Ms": 4.905151999962982,
+      "maxMs": 4.905151999962982,
+      "loadBefore": [
+        31.84,
+        33.62,
+        29.01
+      ],
+      "loadAfter": [
+        31.84,
+        33.62,
+        29.01
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 43.087,
+      "gitChildCpuMs": 50,
+      "requests": 4,
+      "p50Ms": 117.75244499999098,
+      "p95Ms": 133.34430100000463,
+      "maxMs": 133.34430100000463,
+      "loadBefore": [
+        32.9,
+        33.81,
+        29.09
+      ],
+      "loadAfter": [
+        32.9,
+        33.81,
+        29.09
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 1,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 4,
+        "rev-parse --abbrev-ref HEAD": 4,
+        "remote get-url origin": 4
+      },
+      "serverCpuMs": 40.326,
+      "gitChildCpuMs": 40,
+      "requests": 4,
+      "p50Ms": 94.40664900001138,
+      "p95Ms": 106.06665700004669,
+      "maxMs": 106.06665700004669,
+      "loadBefore": [
+        32.9,
+        33.81,
+        29.09
+      ],
+      "loadAfter": [
+        32.9,
+        33.81,
+        29.09
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 16,
+        "rev-parse --abbrev-ref HEAD": 16,
+        "remote get-url origin": 16
+      },
+      "serverCpuMs": 144.837,
+      "gitChildCpuMs": 170,
+      "requests": 16,
+      "p50Ms": 333.91422999999486,
+      "p95Ms": 340.56326800002716,
+      "maxMs": 340.56326800002716,
+      "loadBefore": [
+        32.9,
+        33.81,
+        29.09
+      ],
+      "loadAfter": [
+        32.9,
+        33.81,
+        29.09
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 6.44,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 15.044694999989588,
+      "p95Ms": 15.983394999988377,
+      "maxMs": 15.983394999988377,
+      "loadBefore": [
+        32.9,
+        33.81,
+        29.09
+      ],
+      "loadAfter": [
+        32.9,
+        33.81,
+        29.09
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 16,
+        "rev-parse --abbrev-ref HEAD": 16,
+        "remote get-url origin": 16
+      },
+      "serverCpuMs": 154.838,
+      "gitChildCpuMs": 180,
+      "requests": 16,
+      "p50Ms": 369.139245999977,
+      "p95Ms": 393.19793399999617,
+      "maxMs": 393.19793399999617,
+      "loadBefore": [
+        33.39,
+        33.89,
+        29.14
+      ],
+      "loadAfter": [
+        33.39,
+        33.89,
+        29.14
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 1,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 16,
+        "rev-parse --abbrev-ref HEAD": 16,
+        "remote get-url origin": 16
+      },
+      "serverCpuMs": 153.231,
+      "gitChildCpuMs": 170,
+      "requests": 16,
+      "p50Ms": 306.72619500005385,
+      "p95Ms": 358.2491479999735,
+      "maxMs": 358.2491479999735,
+      "loadBefore": [
+        33.39,
+        33.89,
+        29.14
+      ],
+      "loadAfter": [
+        33.39,
+        33.89,
+        29.14
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 79.144,
+      "gitChildCpuMs": 110,
+      "requests": 1,
+      "p50Ms": 184.2656909999787,
+      "p95Ms": 184.2656909999787,
+      "maxMs": 184.2656909999787,
+      "loadBefore": [
+        33.39,
+        33.89,
+        29.14
+      ],
+      "loadAfter": [
+        33.39,
+        33.89,
+        29.14
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 1.182,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 1.7652150000212714,
+      "p95Ms": 1.7652150000212714,
+      "maxMs": 1.7652150000212714,
+      "loadBefore": [
+        33.39,
+        33.89,
+        29.14
+      ],
+      "loadAfter": [
+        33.39,
+        33.89,
+        29.14
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 89.383,
+      "gitChildCpuMs": 110,
+      "requests": 1,
+      "p50Ms": 215.08350499998778,
+      "p95Ms": 215.08350499998778,
+      "maxMs": 215.08350499998778,
+      "loadBefore": [
+        33.03,
+        33.81,
+        29.14
+      ],
+      "loadAfter": [
+        33.03,
+        33.81,
+        29.14
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 10,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 10,
+        "rev-parse --abbrev-ref HEAD": 10,
+        "remote get-url origin": 10
+      },
+      "serverCpuMs": 77.702,
+      "gitChildCpuMs": 90,
+      "requests": 1,
+      "p50Ms": 176.17956499999855,
+      "p95Ms": 176.17956499999855,
+      "maxMs": 176.17956499999855,
+      "loadBefore": [
+        33.03,
+        33.81,
+        29.14
+      ],
+      "loadAfter": [
+        33.03,
+        33.81,
+        29.14
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 298.61,
+      "gitChildCpuMs": 380,
+      "requests": 4,
+      "p50Ms": 679.1128399999579,
+      "p95Ms": 681.1521329999669,
+      "maxMs": 681.1521329999669,
+      "loadBefore": [
+        33.03,
+        33.81,
+        29.14
+      ],
+      "loadAfter": [
+        33.03,
+        33.81,
+        29.14
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 3.066,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 5.816829000017606,
+      "p95Ms": 6.549801000044681,
+      "maxMs": 6.549801000044681,
+      "loadBefore": [
+        33.03,
+        33.81,
+        29.14
+      ],
+      "loadAfter": [
+        33.03,
+        33.81,
+        29.14
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 259.389,
+      "gitChildCpuMs": 290,
+      "requests": 4,
+      "p50Ms": 557.777184000006,
+      "p95Ms": 558.5973289999529,
+      "maxMs": 558.5973289999529,
+      "loadBefore": [
+        31.19,
+        33.42,
+        29.04
+      ],
+      "loadAfter": [
+        31.19,
+        33.42,
+        29.04
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 10,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 242.54,
+      "gitChildCpuMs": 270,
+      "requests": 4,
+      "p50Ms": 523.9084320000256,
+      "p95Ms": 524.413264999981,
+      "maxMs": 524.413264999981,
+      "loadBefore": [
+        31.19,
+        33.42,
+        29.04
+      ],
+      "loadAfter": [
+        31.19,
+        33.42,
+        29.04
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1067.019,
+      "gitChildCpuMs": 1310,
+      "requests": 16,
+      "p50Ms": 2403.8710929999943,
+      "p95Ms": 2408.7657250000047,
+      "maxMs": 2408.7657250000047,
+      "loadBefore": [
+        31.19,
+        33.42,
+        29.04
+      ],
+      "loadAfter": [
+        29.65,
+        33.06,
+        28.95
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 6.896,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 10.606102999998257,
+      "p95Ms": 11.404867000004742,
+      "maxMs": 11.404867000004742,
+      "loadBefore": [
+        29.65,
+        33.06,
+        28.95
+      ],
+      "loadAfter": [
+        29.65,
+        33.06,
+        28.95
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1146.266,
+      "gitChildCpuMs": 1320,
+      "requests": 16,
+      "p50Ms": 2283.5082890000194,
+      "p95Ms": 2536.5808160000015,
+      "maxMs": 2536.5808160000015,
+      "loadBefore": [
+        31.28,
+        33.34,
+        29.06
+      ],
+      "loadAfter": [
+        31.28,
+        33.34,
+        29.06
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 10,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1082.113,
+      "gitChildCpuMs": 1240,
+      "requests": 16,
+      "p50Ms": 2372.4406730000046,
+      "p95Ms": 2389.5375450000283,
+      "maxMs": 2389.5375450000283,
+      "loadBefore": [
+        31.28,
+        33.34,
+        29.06
+      ],
+      "loadAfter": [
+        30.94,
+        33.24,
+        29.05
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 277.167,
+      "gitChildCpuMs": 340,
+      "requests": 1,
+      "p50Ms": 627.7575610000058,
+      "p95Ms": 627.7575610000058,
+      "maxMs": 627.7575610000058,
+      "loadBefore": [
+        30.94,
+        33.24,
+        29.05
+      ],
+      "loadAfter": [
+        30.94,
+        33.24,
+        29.05
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 1.255,
+      "gitChildCpuMs": 0,
+      "requests": 1,
+      "p50Ms": 1.975832000025548,
+      "p95Ms": 1.975832000025548,
+      "maxMs": 1.975832000025548,
+      "loadBefore": [
+        30.94,
+        33.24,
+        29.05
+      ],
+      "loadAfter": [
+        30.94,
+        33.24,
+        29.05
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 303.435,
+      "gitChildCpuMs": 400,
+      "requests": 1,
+      "p50Ms": 812.5327009999892,
+      "p95Ms": 812.5327009999892,
+      "maxMs": 812.5327009999892,
+      "loadBefore": [
+        30.62,
+        33.13,
+        29.04
+      ],
+      "loadAfter": [
+        30.62,
+        33.13,
+        29.04
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 40,
+      "concurrency": 1,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 40,
+        "rev-parse --abbrev-ref HEAD": 40,
+        "remote get-url origin": 40
+      },
+      "serverCpuMs": 235.117,
+      "gitChildCpuMs": 290,
+      "requests": 1,
+      "p50Ms": 569.9041900000302,
+      "p95Ms": 569.9041900000302,
+      "maxMs": 569.9041900000302,
+      "loadBefore": [
+        30.62,
+        33.13,
+        29.04
+      ],
+      "loadAfter": [
+        30.62,
+        33.13,
+        29.04
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1247.903,
+      "gitChildCpuMs": 1580,
+      "requests": 4,
+      "p50Ms": 3052.7831369999913,
+      "p95Ms": 3054.6651710000006,
+      "maxMs": 3054.6651710000006,
+      "loadBefore": [
+        30.62,
+        33.13,
+        29.04
+      ],
+      "loadAfter": [
+        31.13,
+        33.2,
+        29.08
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 4.741,
+      "gitChildCpuMs": 0,
+      "requests": 4,
+      "p50Ms": 6.374960999994073,
+      "p95Ms": 6.794621999957599,
+      "maxMs": 6.794621999957599,
+      "loadBefore": [
+        31.13,
+        33.2,
+        29.08
+      ],
+      "loadAfter": [
+        31.13,
+        33.2,
+        29.08
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1484.416,
+      "gitChildCpuMs": 1830,
+      "requests": 4,
+      "p50Ms": 3529.3764990000054,
+      "p95Ms": 3531.991296000022,
+      "maxMs": 3531.991296000022,
+      "loadBefore": [
+        30.64,
+        33.06,
+        29.06
+      ],
+      "loadAfter": [
+        30.64,
+        33.06,
+        29.06
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 40,
+      "concurrency": 4,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 160,
+        "rev-parse --abbrev-ref HEAD": 160,
+        "remote get-url origin": 160
+      },
+      "serverCpuMs": 1377.921,
+      "gitChildCpuMs": 1700,
+      "requests": 4,
+      "p50Ms": 3174.2956809999887,
+      "p95Ms": 3175.3654150000075,
+      "maxMs": 3175.3654150000075,
+      "loadBefore": [
+        30.64,
+        33.06,
+        29.06
+      ],
+      "loadAfter": [
+        30.91,
+        33.08,
+        29.09
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "cold",
+      "commands": {
+        "rev-parse --show-toplevel": 640,
+        "rev-parse --abbrev-ref HEAD": 640,
+        "remote get-url origin": 640
+      },
+      "serverCpuMs": 5085.696,
+      "gitChildCpuMs": 6380,
+      "requests": 16,
+      "p50Ms": 11686.988463999995,
+      "p95Ms": 11698.015190000006,
+      "maxMs": 11698.015190000006,
+      "loadBefore": [
+        30.91,
+        33.08,
+        29.09
+      ],
+      "loadAfter": [
+        28.53,
+        32.5,
+        28.94
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "warm",
+      "commands": {},
+      "serverCpuMs": 9.377,
+      "gitChildCpuMs": 0,
+      "requests": 16,
+      "p50Ms": 13.297171999991406,
+      "p95Ms": 15.141818000003695,
+      "maxMs": 15.141818000003695,
+      "loadBefore": [
+        28.53,
+        32.5,
+        28.94
+      ],
+      "loadAfter": [
+        28.53,
+        32.5,
+        28.94
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "expired",
+      "commands": {
+        "rev-parse --show-toplevel": 640,
+        "rev-parse --abbrev-ref HEAD": 640,
+        "remote get-url origin": 640
+      },
+      "serverCpuMs": 5854.744,
+      "gitChildCpuMs": 7890,
+      "requests": 16,
+      "p50Ms": 14332.263343999977,
+      "p95Ms": 14369.273103000014,
+      "maxMs": 14369.273103000014,
+      "loadBefore": [
+        28.88,
+        32.5,
+        28.96
+      ],
+      "loadAfter": [
+        31.4,
+        32.86,
+        29.14
+      ]
+    },
+    {
+      "repeat": 4,
+      "repos": 40,
+      "concurrency": 16,
+      "phase": "concurrent",
+      "commands": {
+        "rev-parse --show-toplevel": 640,
+        "rev-parse --abbrev-ref HEAD": 640,
+        "remote get-url origin": 640
+      },
+      "serverCpuMs": 6548.992,
+      "gitChildCpuMs": 8430,
+      "requests": 16,
+      "p50Ms": 16474.280698999995,
+      "p95Ms": 16509.08845900005,
+      "maxMs": 16509.08845900005,
+      "loadBefore": [
+        31.4,
+        32.86,
+        29.14
+      ],
+      "loadAfter": [
+        34.56,
+        33.51,
+        29.43
+      ]
+    }
+  ]
+}

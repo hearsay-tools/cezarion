@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PROJECT_TAGS_MAX, PROJECT_TAG_MAX_LENGTH } from '@open-mercato/cezar-contract/project-limits';
 import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from './config.ts';
 import {
@@ -10,6 +10,7 @@ import {
   clearProjectProbeCache,
   listProjects,
   normalizeProjectTags,
+  probeProjectStatus,
   registerProject,
   removeProject,
   shouldRegisterProject,
@@ -237,6 +238,41 @@ describe('workspace projects', () => {
       clearProjectProbeCache();
       expect((await listProjects())[0]?.status).toBe('missing');
     });
+  });
+
+  it('keeps a Git project usable when Git is absent', async () => {
+    const root = makeRepo('no-git-executable');
+    const path = process.env.PATH;
+    process.env.PATH = makeDir('empty-path');
+    try {
+      expect(await probeProjectStatus(root)).toEqual({ status: 'ok' });
+    } finally { process.env.PATH = path; }
+  });
+
+  it('sees a deleted root at the five-second boundary', async () => {
+    const root = makeDir('expires');
+    let time = 100;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => time);
+    try {
+      expect((await probeProjectStatus(root)).status).toBe('not-git');
+      rmSync(root, { recursive: true });
+      time += 4999;
+      expect((await probeProjectStatus(root)).status).toBe('not-git');
+      time++;
+      expect((await probeProjectStatus(root)).status).toBe('missing');
+    } finally { clock.mockRestore(); }
+  });
+
+  it('evicts probes on removal and on new registration', async () => {
+    const root = makeDir('evicted');
+    const entry = await registerProject(root);
+    expect((await probeProjectStatus(root)).status).toBe('not-git');
+    await removeProject(entry.id);
+    rmSync(root, { recursive: true });
+    expect((await probeProjectStatus(root)).status).toBe('missing');
+    mkdirSync(root);
+    await registerProject(root);
+    expect((await probeProjectStatus(root)).status).toBe('not-git');
   });
 
   describe('removeProject', () => {
