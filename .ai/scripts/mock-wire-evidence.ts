@@ -74,10 +74,10 @@ function acknowledged(runner: RunnerId, file: string, offset = 0): boolean {
   return acknowledgementBoundary(runner, file, offset) !== undefined;
 }
 
-function trimAtAcknowledgement(runner: RunnerId, file: string, offset = 0) {
+function transcriptAtAcknowledgement(runner: RunnerId, file: string, offset = 0) {
   const boundary = acknowledgementBoundary(runner, file, offset);
   if (boundary === undefined) throw new Error('Missing recipe acknowledgement boundary');
-  writeFileSync(file, readFileSync(file, 'utf8').slice(0, boundary));
+  return readFileSync(file, 'utf8').slice(0, boundary);
 }
 
 function stallFramesRecorded(runner: RunnerId, file: string): boolean {
@@ -170,8 +170,7 @@ async function driveRecipe(scenario: string, runner: RunnerId, session: AgentSes
   if (scenario === 'ack-only') {
     // bound: wait for this prompt's native ACK/replay, not an arbitrary elapsed duration.
     await waitFor(() => acknowledged(runner, file), 5_000);
-    trimAtAcknowledgement(runner, file);
-    return;
+    return transcriptAtAcknowledgement(runner, file);
   }
   if (scenario === 'steer-tool' || scenario === 'steer-late') {
     // bound: inject only after the tool starts or the last assistant message arrives.
@@ -204,7 +203,7 @@ async function driveRecipe(scenario: string, runner: RunnerId, session: AgentSes
     // bound: the runner's quiet grace proves no follow-on native turn will read this steer.
     await waitFor(() => events.some(event => event.type === 'input-unconsumed'), 5_000);
   }
-  await driveFollowups(scenario, runner, session, events, activity, file);
+  return driveFollowups(scenario, runner, session, events, activity, file);
 }
 
 async function driveFollowups(scenario: string, runner: RunnerId, session: AgentSession, events: AgentEvent[], activity: () => number, file: string) {
@@ -220,7 +219,7 @@ async function driveFollowups(scenario: string, runner: RunnerId, session: Agent
       // This wire deliberately never emits a turn. Stop after ACK/activity, not a turn-end.
       // bound: no-reply ACK arrives on its native wire; Cursor print has only process startup.
       await waitFor(() => acknowledged(runner, file, offset), 5_000);
-      trimAtAcknowledgement(runner, file, offset);
+      return transcriptAtAcknowledgement(runner, file, offset);
     } else await followTurn(session, events, FINAL);
   }
   if (runner === 'opencode' && (scenario === 'autonomous-cap' || scenario === 'autonomous-cezar-ask-cap' || scenario === 'silent-tail-ack-delay')) {
@@ -256,8 +255,8 @@ async function recordRecipe(runner: RunnerId, scenario: string) {
         NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE ?? '' },
     }, event => events.push(event), { onActivity: () => { activity += 1; }, onUiEvent: event => { if (event.type === 'ask.requested') asked = true; } });
     const settled = session.result.catch(() => undefined);
-    await driveRecipe(scenario, runner, session, events, () => activity, cwd, file, observed.exits, () => asked);
-    const transcript = readFileSync(file, 'utf8');
+    const selectedTranscript = await driveRecipe(scenario, runner, session, events, () => activity, cwd, file, observed.exits, () => asked);
+    const transcript = selectedTranscript ?? readFileSync(file, 'utf8');
     stopFixture(session, scenario, cwd);
     // bound: end uses a 10-second SIGTERM escalation; evidence must never hang on a fixture.
     let timer: ReturnType<typeof setTimeout> | undefined;
