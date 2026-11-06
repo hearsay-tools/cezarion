@@ -106,8 +106,10 @@ async function installSpec(
     if (!existsSync(entry)) throw new Error('install finished but the entry file is missing');
     // A stale complete install of the same id (registry re-install after a manual delete of
     // the manifest, say) is replaced wholesale.
-    rmSync(versionDir(id, env), { recursive: true, force: true });
-    renameSync(staging, versionDir(id, env));
+    const destination = versionDir(id, env);
+    assertCezarHomeWriteIsSandboxed(destination, env);
+    rmSync(destination, { recursive: true, force: true });
+    renameSync(staging, destination);
     writeManifest(id, { ...manifest, installedAt: new Date().toISOString() }, env);
     opts.onLog?.(`installed ${id}`);
   } catch (error) {

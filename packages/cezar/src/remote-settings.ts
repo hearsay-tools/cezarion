@@ -115,7 +115,7 @@ export async function enableRemoteSettings(
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const temporary = join(dir, `.${port}.${process.pid}.${Date.now()}.tmp`);
   await writeFile(temporary, `${JSON.stringify({ enabledAt: now.toISOString() }, null, 2)}\n`, { mode: 0o600 });
-  await rename(temporary, grantFile(env, port));
+  await rename(temporary, join(dir, `${port}.json`));
   return readRemoteSettings(env);
 }
 
