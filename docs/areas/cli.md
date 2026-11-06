@@ -18,7 +18,7 @@ Uses `node:util` `parseArgs`, no CLI framework. `serve` is the default command. 
 do not read the cockpit home. Artifact links use the supplied `CEZ_PROJECT_ID`;
 without it they keep the unprefixed task link.
 
-Operator commands (`projects`, nested `run`, `remote-settings`, `install`,
-`update`, `versions`, `use`, `link`, `unlink`) retain their home access.
+Operator commands (`projects`, nested `run`, `remote-settings`, `backup`,
+`install`, `update`, `versions`, `use`, `link`, `unlink`) retain their home access.
 Inside a task they now resolve the default home because the cockpit's
 `CEZ_HOME` override is absent. Their command behavior is otherwise unchanged.
