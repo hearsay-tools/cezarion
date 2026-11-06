@@ -70,6 +70,7 @@ export class ToolActivityTracker implements ToolActivitySource {
   private readonly now: () => number;
   /** The second of the last prune sweep: observe() sweeps at most once a second. */
   private sweptSecond = Number.NEGATIVE_INFINITY;
+  private readonly listeners = new Set<() => void>();
 
   constructor(options: { now?: () => number } = {}) {
     this.now = options.now ?? Date.now;
@@ -85,14 +86,33 @@ export class ToolActivityTracker implements ToolActivitySource {
     this.record(undefined, runId, event, redact);
   }
 
+  /** Call `listener` after any change of the latest tool a read shows: a new call, its status, its
+   *  end or its title. The activity topics listen while they have subscribers. Returns the release. */
+  onChange(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  private changed(): void {
+    for (const listener of [...this.listeners]) listener();
+  }
+
   private record(owner: FeedOwner | undefined, runId: string, event: UiEvent, redact: (text: string) => string): void {
     if (event.type !== 'item.started' && event.type !== 'item.updated' && event.type !== 'item.completed') return;
     if (event.item.kind !== 'tool') return;
-    const item = event.item;
+    // Every change of what read() shows replaces the latest tool object: a new call, a status, an
+    // end, a title (also of a completed or backgrounded call). One comparison signals them all.
+    const before = this.runs.get(runId)?.latest?.tool;
+    this.apply(owner, runId, event.type, event.item, redact);
+    if (this.runs.get(runId)?.latest?.tool !== before) this.changed();
+  }
+
+  private apply(owner: FeedOwner | undefined, runId: string, type: 'item.started' | 'item.updated' | 'item.completed', item: UiToolItem,
+    redact: (text: string) => string): void {
     const at = this.now();
     this.sweep(at);
     // Only the completion closes an item: an update to a terminal status may still be followed by it.
-    const closes = event.type === 'item.completed';
+    const closes = type === 'item.completed';
     const terminal = closes || TERMINAL.has(item.status);
     const run = this.runs.get(runId);
     if (run) run.lastEventAt = at;

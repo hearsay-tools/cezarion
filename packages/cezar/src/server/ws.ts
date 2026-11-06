@@ -42,6 +42,13 @@ export interface TopicPublisher {
   start(publish: (data: unknown) => void): () => void;
 }
 
+/**
+ * A topic family's resolver: the publisher for one concrete name under the family's prefix, from
+ * the rest of the name. `undefined` (or a rejection) answers the unknown-topic error. It runs on
+ * the first subscriber of a concrete name, each time the name's demand starts again.
+ */
+export type TopicFamilyResolver = (suffix: string) => TopicPublisher | undefined | Promise<TopicPublisher | undefined>;
+
 export interface TopicOptions {
   /** Whether an ADMITTED-BUT-UNTRUSTED connection may subscribe (see
    *  `WsUpgradeVerdict`). Defaults to `false` — the safe default that makes the
@@ -71,6 +78,12 @@ export interface SocketHub {
    *  `options.loopbackReadable` defaults to `false` (topic legible to trusted
    *  connections only) — see `TopicOptions`. */
   registerTopic(name: string, publisher: TopicPublisher, options?: TopicOptions): void;
+  /** Register every topic whose name starts with `prefix` (spec 2026-11-05-live-activity-view,
+   *  Live transport): the first subscriber of a concrete name resolves its publisher, demand is
+   *  counted per concrete name, and the last release stops and drops it. `options` applies to
+   *  every name in the family, under the same trust rules as `registerTopic`. A prefix that
+   *  overlaps another registration is a programming error: throw. */
+  registerTopicFamily(prefix: string, resolve: TopicFamilyResolver, options?: TopicOptions): void;
   /** Accept one `WS_PATH` upgrade under the request-origin guard's verdict:
    *  `false` answers 403 before the handshake, otherwise its `trusted` flag
    *  decides which topics the connection may read. */
@@ -78,6 +91,9 @@ export interface SocketHub {
   /** Stop publishers, terminate clients, clear timers. Idempotent; the server
    *  that routes upgrades here calls it on its own `close`. */
   close(): void;
+  /** Call `listener` once when the hub closes: whatever a topic's registration holds for the
+   *  server's lifetime is released there. Returns the release of the listener itself. */
+  onClose(listener: () => void): () => void;
 }
 
 interface TopicState {
@@ -87,12 +103,23 @@ interface TopicState {
   stop: (() => void) | null;
   /** `TopicOptions.loopbackReadable`, resolved (default `false`). */
   loopbackReadable: boolean;
+  /** A family member: dropped from the map when its last subscriber leaves. */
+  family: boolean;
+}
+
+interface TopicFamily {
+  prefix: string;
+  resolve: TopicFamilyResolver;
+  loopbackReadable: boolean;
 }
 
 interface ClientState {
   /** Flipped by `pong`, cleared before each `ping` — two silent beats = dead. */
   alive: boolean;
   topics: Set<string>;
+  /** Family names whose publisher is still resolving, each with this subscribe's token: a
+   *  resolution that finds another token (or none) was released meanwhile and attaches nothing. */
+  pending: Map<string, object>;
   /** The upgrade verdict's trust flag (see `WsUpgradeVerdict`). An untrusted
    *  connection may subscribe only to `loopbackReadable` topics. */
   trusted: boolean;
@@ -107,31 +134,21 @@ export interface SocketHubOptions {
 export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
   const heartbeatMs = options.heartbeatMs ?? HEARTBEAT_MS;
   const topics = new Map<string, TopicState>();
+  const families: TopicFamily[] = [];
+  /** One resolution per concrete family name at a time, shared by its concurrent subscribers. */
+  const resolving = new Map<string, Promise<TopicPublisher | undefined>>();
   const clients = new Map<WebSocket, ClientState>();
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let closed = false;
+  const closeListeners = new Set<() => void>();
 
   const send = (ws: WebSocket, frame: unknown): void => {
     // OPEN as the literal 1: the check must hold for any socket implementation.
     if (ws.readyState === 1) ws.send(JSON.stringify(frame));
   };
 
-  const subscribe = (ws: WebSocket, client: ClientState, topic: string): void => {
-    const state = topics.get(topic);
-    if (!state) {
-      send(ws, { type: 'error', topic, error: 'unknown topic' });
-      return;
-    }
-    if (!state.loopbackReadable && !client.trusted) {
-      // Admitted by the loopback-origin fallback (a browser with no Sec-Fetch,
-      // so indistinguishable from a foreign local page): only topics explicitly
-      // marked safe for any local page are legible. This is the mechanical half
-      // of the topic-safety invariant — the guard opens the door, the flag says
-      // which rooms an unproven caller may enter.
-      send(ws, { type: 'error', topic, error: 'forbidden topic' });
-      return;
-    }
+  const attach = (ws: WebSocket, client: ClientState, topic: string, state: TopicState): void => {
     if (client.topics.has(topic)) return; // idempotent — a re-sent frame must not double anything
     client.topics.add(topic);
     state.subscribers.add(ws);
@@ -151,7 +168,69 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
       .catch(() => undefined);
   };
 
+  const familyOf = (topic: string): TopicFamily | undefined =>
+    families.find((family) => topic.startsWith(family.prefix) && topic.length > family.prefix.length);
+
+  const resolveMember = (family: TopicFamily, topic: string): Promise<TopicPublisher | undefined> => {
+    const inFlight = resolving.get(topic);
+    if (inFlight) return inFlight;
+    // The resolver runs after the resolution is registered, so its cleanup always follows the
+    // registration, also when it throws synchronously. A resolver that throws names no topic.
+    const resolution: Promise<TopicPublisher | undefined> = Promise.resolve()
+      .then(() => family.resolve(topic.slice(family.prefix.length)))
+      .catch(() => undefined)
+      .finally(() => {
+        if (resolving.get(topic) === resolution) resolving.delete(topic);
+      });
+    resolving.set(topic, resolution);
+    return resolution;
+  };
+
+  /** A family member's first subscriber resolves its publisher; the subscription may be released,
+   *  or the socket gone, by the time it resolves. */
+  const subscribeMember = (ws: WebSocket, client: ClientState, topic: string, family: TopicFamily): void => {
+    if (client.pending.has(topic)) return; // idempotent while resolving
+    const token = {};
+    client.pending.set(topic, token);
+    void resolveMember(family, topic).then((publisher) => {
+      if (closed || client.pending.get(topic) !== token || clients.get(ws) !== client) return;
+      client.pending.delete(topic);
+      if (!publisher && !topics.has(topic)) {
+        send(ws, { type: 'error', topic, error: 'unknown topic' });
+        return;
+      }
+      let state = topics.get(topic);
+      if (!state) {
+        state = { publisher: publisher!, subscribers: new Set(), stop: null, loopbackReadable: family.loopbackReadable, family: true };
+        topics.set(topic, state);
+      }
+      attach(ws, client, topic, state);
+    });
+  };
+
+  const subscribe = (ws: WebSocket, client: ClientState, topic: string): void => {
+    const state = topics.get(topic);
+    const family = state ? undefined : familyOf(topic);
+    if (!state && !family) {
+      send(ws, { type: 'error', topic, error: 'unknown topic' });
+      return;
+    }
+    if (!(state?.loopbackReadable ?? family!.loopbackReadable) && !client.trusted) {
+      // Admitted by the loopback-origin fallback (a browser with no Sec-Fetch,
+      // so indistinguishable from a foreign local page): only topics explicitly
+      // marked safe for any local page are legible. This is the mechanical half
+      // of the topic-safety invariant — the guard opens the door, the flag says
+      // which rooms an unproven caller may enter. A family member is refused
+      // before its resolver runs: an untrusted caller starts no work.
+      send(ws, { type: 'error', topic, error: 'forbidden topic' });
+      return;
+    }
+    if (state) attach(ws, client, topic, state);
+    else subscribeMember(ws, client, topic, family!);
+  };
+
   const unsubscribe = (ws: WebSocket, client: ClientState, topic: string): void => {
+    client.pending.delete(topic); // a resolution still in flight attaches nothing now
     if (!client.topics.delete(topic)) return;
     const state = topics.get(topic);
     if (!state) return;
@@ -160,6 +239,8 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
       state.stop();
       state.stop = null;
     }
+    // Demand is counted per concrete name: a family member's next subscriber resolves it again.
+    if (state.subscribers.size === 0 && state.family) topics.delete(topic);
   };
 
   /** Started by the first upgrade, so a hub nobody connects to holds no timer. */
@@ -192,6 +273,7 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
   const dropClient = (ws: WebSocket): void => {
     const client = clients.get(ws);
     if (!client) return;
+    client.pending.clear();
     for (const topic of [...client.topics]) unsubscribe(ws, client, topic);
     clients.delete(ws);
   };
@@ -199,7 +281,7 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
   wss.on('connection', (ws: WebSocket, _req: IncomingMessage, trusted?: boolean) => {
     // `trusted` is emitted by `handleUpgrade` from the upgrade verdict; default false is
     // the safe read for any path that reaches here without one.
-    const client: ClientState = { alive: true, topics: new Set(), trusted: trusted === true };
+    const client: ClientState = { alive: true, topics: new Set(), pending: new Map(), trusted: trusted === true };
     clients.set(ws, client);
     ws.on('pong', () => {
       client.alive = true;
@@ -229,12 +311,23 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
   const hub: SocketHub = {
     registerTopic(name, publisher, options) {
       if (topics.has(name)) throw new Error(`ws topic already registered: ${name}`);
+      if (familyOf(name)) throw new Error(`ws topic ${name} falls inside a registered topic family`);
       topics.set(name, {
         publisher,
         subscribers: new Set(),
         stop: null,
         loopbackReadable: options?.loopbackReadable ?? false,
+        family: false,
       });
+    },
+
+    registerTopicFamily(prefix, resolve, options) {
+      if (prefix.length === 0) throw new Error('ws topic family needs a prefix');
+      const overlaps = (other: string) => other.startsWith(prefix) || prefix.startsWith(other);
+      if (families.some((family) => overlaps(family.prefix)) || [...topics.keys()].some((name) => name.startsWith(prefix))) {
+        throw new Error(`ws topic family overlaps a registration: ${prefix}`);
+      }
+      families.push({ prefix, resolve, loopbackReadable: options?.loopbackReadable ?? false });
     },
 
     handleUpgrade(req, socket, head, verdict) {
@@ -262,6 +355,17 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
         ws.terminate();
       }
       wss.close();
+      for (const listener of [...closeListeners]) listener();
+      closeListeners.clear();
+    },
+
+    onClose(listener) {
+      if (closed) {
+        listener();
+        return () => undefined;
+      }
+      closeListeners.add(listener);
+      return () => { closeListeners.delete(listener); };
     },
   };
 

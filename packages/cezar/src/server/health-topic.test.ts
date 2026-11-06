@@ -24,14 +24,19 @@ import { disableRemoteSettings, enableRemoteSettings } from '../remote-settings.
 /** A hub that records what `createApp` registers, so the test can drive the topic by hand. */
 function stubHub() {
   const topics = new Map<string, TopicPublisher>();
+  const families: string[] = [];
   const hub: SocketHub = {
     registerTopic: (name, publisher) => {
       topics.set(name, publisher);
     },
+    registerTopicFamily: (prefix) => {
+      families.push(prefix);
+    },
     handleUpgrade: () => undefined,
     close: () => undefined,
+    onClose: () => () => undefined,
   };
-  return { hub, topics };
+  return { hub, topics, families };
 }
 
 describe('health topic + cache (live-server path)', () => {
@@ -80,7 +85,7 @@ describe('health topic + cache (live-server path)', () => {
   };
 
   const build = () => {
-    const { hub, topics } = stubHub();
+    const { hub, topics, families } = stubHub();
     const deps: ServerDeps = {
       repoRoot,
       store,
@@ -89,7 +94,7 @@ describe('health topic + cache (live-server path)', () => {
       socketHub: hub,
       cezarPort: () => 4321,
     };
-    return { app: createApp(deps), topics };
+    return { app: createApp(deps), topics, families };
   };
 
   /** One health snapshot spawns the CLI/forge probes and shells out to git, which costs
@@ -144,9 +149,10 @@ describe('health topic + cache (live-server path)', () => {
     return ((await res.json()) as { defaultRunner?: string }).defaultRunner;
   };
 
-  it('registers the health and Cursor models topics', () => {
-    const { topics } = build();
-    expect([...topics.keys()]).toEqual(['health', 'models:cursor']);
+  it('registers the health, Cursor models and activity topics', () => {
+    const { topics, families } = build();
+    expect([...topics.keys()]).toEqual(['health', 'models:cursor', 'activity:workspace']);
+    expect(families).toEqual(['activity:project:']);
   });
 
   it('pre-warms the cache at boot so the first GET is already warm', async () => {

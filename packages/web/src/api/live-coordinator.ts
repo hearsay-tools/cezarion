@@ -12,6 +12,10 @@ export interface LiveHandlers {
 }
 interface Subscription extends FallbackEntry { handlers: LiveHandlers; bootAlias: boolean; recovering: boolean; released: boolean; recovery?: AbortController | undefined }
 interface LiveSession { local: boolean; bootProject: string; apiBase: string }
+/** How this document's live demand travels: `topics` through the SharedWorker's socket, `finite`
+ *  through document-authenticated HTTP (remote mode, no SharedWorker, or a failed one). Topic data
+ *  arrives only with `topics`; a view whose topic has an HTTP twin reads it itself on `finite`. */
+export type LiveTransport = 'topics' | 'finite'
 type ReconcileListener = (signal: AbortSignal, periodic: boolean) => void | Promise<void>
 const reconciliations = new Set<ReconcileListener>()
 export function onLiveReconcile(listener: ReconcileListener): () => void {
@@ -46,6 +50,14 @@ export function createLiveCoordinator() {
   let restoration: AbortController | undefined
   let restoreRetry: ReturnType<typeof setTimeout> | undefined
   let restoreFailures = 0
+  let transport: LiveTransport | undefined
+  const transportListeners = new Set<() => void>()
+  // Listeners run after the current call: a listener may add demand, which re-enters start().
+  const setTransport = (next: LiveTransport | undefined) => {
+    if (transport === next) return
+    transport = next
+    queueMicrotask(() => { for (const listener of [...transportListeners]) listener() })
+  }
   const available = () => [...subscriptions.values()].filter(entry => !entry.recovering && !entry.released)
   let reconciliation: AbortController | undefined
   const reconcile = () => {
@@ -80,6 +92,7 @@ export function createLiveCoordinator() {
     if (!active || disposed) return
     workerFailed = true
     disconnect()
+    setTransport('finite')
     // No permanent page SSE/WS fallback: ordinary HTTP always keeps connection capacity.
     for (const entry of available()) entry.handlers.ready?.()
     fallback.start()
@@ -118,15 +131,17 @@ export function createLiveCoordinator() {
     // The shared owner serves root-relative URLs. Other origins or service prefixes
     // use document-authenticated finite requests, which preserve the configured base.
     if (!session.local || apiUrl.origin !== location.origin || apiUrl.pathname !== '/' || workerFailed || typeof SharedWorker !== 'function') {
+      setTransport('finite')
       for (const entry of available()) entry.handlers.ready?.()
       fallback.start(workspaceReconciled)
       return
     }
-    if (worker) { for (const entry of available()) entry.handlers.ready?.(); sync(); return }
+    if (worker) { setTransport('topics'); for (const entry of available()) entry.handlers.ready?.(); sync(); return }
     try {
       const url = import.meta.env.DEV ? new URL('./live-worker.ts', import.meta.url) : new URL('/live-worker.js', location.href)
       const created = new SharedWorker(url, { type: 'module', name: LIVE_WORKER_NAME })
       worker = created; lastAlive = Date.now()
+      setTransport('topics')
       created.addEventListener('error', () => { if (worker === created) failWorker() })
       created.port.onmessageerror = () => { if (worker === created) failWorker() }
       created.port.onmessage = ({ data }: MessageEvent<unknown>) => {
@@ -205,7 +220,14 @@ export function createLiveCoordinator() {
     window.addEventListener('online', onOnline)
   }
   return {
-    resetSession() { stop(); session = undefined; workerFailed = false },
+    resetSession() { stop(); session = undefined; workerFailed = false; setTransport(undefined) },
+    /** The transport the last start chose; undefined before the authenticated bootstrap. */
+    transport: () => transport,
+    /** Called after each transport change; returns the release. */
+    onTransport(listener: () => void) {
+      transportListeners.add(listener)
+      return () => { transportListeners.delete(listener) }
+    },
     /** The project the `'default'` alias names, once health has configured the session. */
     bootProject: () => session?.bootProject,
     configure(next: LiveSession) {
@@ -258,5 +280,7 @@ export const configureLiveSession = coordinator.configure
 export const subscribeLive = coordinator.subscribe
 export const invalidateLiveReads = coordinator.invalidateReads
 export const liveBootProject = coordinator.bootProject
+export const liveTransport = coordinator.transport
+export const onLiveTransport = coordinator.onTransport
 
 export const resetLiveSession = coordinator.resetSession

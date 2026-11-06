@@ -148,6 +148,15 @@ deps.socketHub?.registerTopic('run-changes:<id>', publisher)
 deps.socketHub?.registerTopic('health', publisher, { loopbackReadable: true })
 ```
 
+**A topic whose name carries a scope is a family.** The wire protocol has no subscription
+parameter, so a scoped topic puts the scope in its name. `registerTopicFamily(prefix, resolve,
+options)` registers every name under `prefix` at once: the first subscriber of a concrete name
+calls `resolve(suffix)` for its publisher (`undefined` answers `unknown topic`), demand is counted
+per concrete name, and the last release stops the publisher and drops the name, so its next
+subscriber resolves it again. The trust check runs before `resolve`: an untrusted caller starts no
+work. A prefix may not overlap another registration. The activity view's
+`activity:project:<projectId>` is the first family (spec `2026-11-05-live-activity-view`).
+
 **If a topic's snapshot shares a cache with an HTTP route, bound the staleness.** The `health`
 cache is stale-while-revalidate with *two* numbers, and the second one is the load-bearing one:
 `HEALTH_TTL_MS` decides how often a revalidation is kicked off, but the revalidation is

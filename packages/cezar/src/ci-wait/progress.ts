@@ -59,6 +59,7 @@ export class DemandSlot implements ProgressDemand {
  */
 export class CiProgressRegistry implements CiProgressSource {
   private readonly entries = new Map<string, { progress: ActivityPrProgress; projectId?: string }>();
+  private readonly listeners = new Set<() => void>();
 
   constructor(private readonly demand: DemandSlot = new DemandSlot()) {}
 
@@ -67,17 +68,30 @@ export class CiProgressRegistry implements CiProgressSource {
     return this.demand.use(demand);
   }
 
+  /** Call `listener` after a wait's progress changes or its entry is removed. The activity topics
+   *  listen while they have subscribers. Returns the release. */
+  onChange(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
   /** A checks read of an open wait. */
   publish(waitId: string, rows: readonly GithubCheck[]): void {
     const entry = this.entries.get(waitId);
     const progress = checkProgress(rows);
+    if (entry && JSON.stringify(entry.progress) === JSON.stringify(progress)) return;
     if (entry) entry.progress = progress;
     else this.entries.set(waitId, { progress });
+    this.changed();
   }
 
   /** The wait resolved or was cancelled. */
   remove(waitId: string): void {
-    this.entries.delete(waitId);
+    if (this.entries.delete(waitId)) this.changed();
+  }
+
+  private changed(): void {
+    for (const listener of [...this.listeners]) listener();
   }
 
   /** A snapshot of `projectId` reads the wait. A wait this process does not watch records nothing. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { liveDemandSchema, ownerInputSchema } from './live-coordination.ts'
+import { allowedLiveRead, liveDemandSchema, ownerInputSchema } from './live-coordination.ts'
 
 const read = (intervalMs: number) => ({ kind: 'read', path: '/api/v1/p/boot/github/ref-status?prs=1', intervalMs })
 
@@ -11,5 +11,15 @@ describe('recurring read cadence', () => {
 
   it.each([999, 1_000.5, 2_147_483_648, Infinity, NaN])('rejects intervals that hammer or overflow timers (%s)', intervalMs => {
     expect(liveDemandSchema.safeParse(read(intervalMs)).success).toBe(false)
+  })
+})
+
+describe('the shared-read allowlist', () => {
+  it.each(['/api/v1/workspace/activity', '/api/v1/workspace/activity?project=shop'])('shares the activity snapshot read %s', path => {
+    expect(allowedLiveRead(path)).toBe(true)
+  })
+
+  it.each(['/api/v1/workspace/activity/extra', '/api/v1/workspace/activityx', '/api/workspace/activity'])('refuses %s', path => {
+    expect(allowedLiveRead(path)).toBe(false)
   })
 })

@@ -93,6 +93,24 @@ describe('the progress registry', () => {
   });
 });
 
+describe('the progress registry change signal', () => {
+  it('signals a changed progress and a removed entry, and nothing else', () => {
+    const registry = new CiProgressRegistry();
+    let changes = 0;
+    const release = registry.onChange(() => { changes++; });
+    const pending: GithubCheck = { name: 'build', state: 'PENDING', link: '', bucket: 'pending' };
+    registry.publish('wait', [pending]);
+    registry.publish('wait', [pending]); // the same read again changes nothing
+    registry.publish('wait', [{ ...pending, state: 'SUCCESS', bucket: 'pass' }]);
+    registry.remove('wait');
+    registry.remove('wait');
+    expect(changes).toBe(3);
+    release();
+    registry.publish('wait', [pending]);
+    expect(changes).toBe(3);
+  });
+});
+
 describe('the demand slot', () => {
   it('reads no demand until the activity view plugs one in, and none after its release', () => {
     const registry = new CiProgressRegistry();
