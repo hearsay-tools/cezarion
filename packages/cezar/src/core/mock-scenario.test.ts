@@ -1,3 +1,4 @@
+import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it, vi } from 'vitest';
 import { play, scenarioFor, type Encoder, type ScenarioContext, type Step } from '../../scripts/mock-scenario.mjs';
 
@@ -75,7 +76,7 @@ describe('shared mock scenario selection', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it.each(['pi', 'omp'] as const)('keeps the lifecycle wait after the %s deferred opening', async runner => {
+  it.each(['pi', 'omp'] as const)('registers the %s lifecycle wait before deferred admission', async runner => {
     vi.useFakeTimers();
     try {
       const events: string[] = [];
@@ -85,12 +86,11 @@ describe('shared mock scenario selection', () => {
       const prompt = 'mock:deferred-turn-start mock:cezar-wait';
       let settled = false;
       const result = Promise.resolve(play(scenarioFor(prompt, state)!, encoder(events))).then(() => { settled = true; });
-      expect(events).toEqual(['open']);
       // bound: advance fake time after the optional deferred module has loaded.
       await vi.waitFor(() => expect(settled).toBe(true), { timeout: 3_000 });
       await result;
-      expect(state.lifecycle).toHaveBeenCalledExactlyOnceWith(['cezar_wait', { kind: 'timer', seconds: 60, note: 'Re-check the downstream work.' }]);
-      expect(events).toEqual(['open', 'open', 'wait', `Investigating: ${prompt} wait receipt`, 'start:read', 'end:read', 'end']);
+      expect(state.lifecycle).toHaveBeenCalledExactlyOnceWith(['cezar_wait', { kind: WAIT_KIND.timer, seconds: 60, note: 'Re-check the downstream work.' }]);
+      expect(events).toEqual(['wait', 'open', 'open', `Investigating: ${prompt} wait receipt`, 'start:read', 'end:read', 'end']);
     } finally { vi.useRealTimers(); }
   });
 

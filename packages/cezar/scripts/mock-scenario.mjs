@@ -157,24 +157,28 @@ function* parkedChild(prompt, context) {
   yield { kind: 'child', id: 'ParkReviewer', phase: 'end', steps: [...calls(tool('toolu_park_read', 'read', { path: 'README.md' }, 'mock file')), text('Post-park child update processed.')] };
 }
 
-function* deferredReply(prompt, context) {
+function* deferredOpening(prompt) {
   yield open({ ackOnly: true, agentStart: prompt.includes(':late-ack') });
   yield effect(async function delayStart() {
     await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
   });
   yield open({ acknowledged: true, agentStarted: prompt.includes(':late-ack') });
-  if (has(prompt, 'cezar-wait') && !context.unsupported?.includes('cezar-wait')) yield* waitReply(prompt, context);
-  else yield { kind: 'reply', prompt };
 }
 
-/** Shared wait content; a deferred script has already acknowledged and opened its turn. */
-function* waitReply(prompt, context, includeOpening = false) {
+function* deferredReply(prompt, context) {
+  if (has(prompt, 'cezar-wait') && !context.unsupported?.includes('cezar-wait')) {
+    yield* waitReply(prompt, context, deferredOpening(prompt));
+  } else {
+    yield* deferredOpening(prompt);
+    yield { kind: 'reply', prompt };
+  }
+}
+
+/** Register the wait before admission; the supplied opening preserves native timing. */
+function* waitReply(prompt, context, opening) {
   let reply;
   yield effect(async () => { reply = `Investigating: ${prompt}${await context.lifecycle((await tools()).wait())}`; });
-  if (includeOpening) {
-    yield open({ ackOnly: true });
-    yield open({ acknowledged: true });
-  }
+  yield* opening;
   yield text(reply);
   yield* calls(tool('tool-1', 'read', { path: 'README.md' }, 'mock file'));
   yield end();
@@ -250,7 +254,7 @@ function trailingScenario(prompt, context) {
   if (matches('hold')) return scenario('hold', hold(false));
   if (matches('subagent-after-park')) return scenario('subagent-after-park', parkedChild(prompt, context));
   if (matches('deferred-turn-start')) return scenario('deferred-turn-start', deferredReply(prompt, context));
-  if (matches('cezar-wait')) return scenario('cezar-wait', waitReply(prompt, context, true));
+  if (matches('cezar-wait')) return scenario('cezar-wait', waitReply(prompt, context, [open({ ackOnly: true }), open({ acknowledged: true })]));
 }
 
 /** First match wins. A wire declares genuine gaps rather than implementing a partial script. */
