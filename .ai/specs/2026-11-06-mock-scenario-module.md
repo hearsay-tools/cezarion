@@ -237,11 +237,15 @@ byte-identical.
        `steer-tool` and `steer-late`;
      - the gates the script releases (`CEZ_MOCK_RELEASE_FILE`, the park path) and
        when;
-     - the end condition: the native turn end; for `ack-only` and
-       `no-progress-*` the acknowledgement or `watchdog.pid`; for the
-       `crash-stderr` variants the process exit, recorded with its code or
-       signal. Then a stop and teardown, with no wait longer than the scenario's
-       own bound;
+     - the end condition: the recipe's own last expected record, not the first
+       native turn end. By default it is the native turn end. Exceptions:
+       `subagent-after-park` ends on the child events sent after the park
+       release; the delayed-acknowledgement cases end on the acknowledgement;
+       `ack-only` and `no-progress-*` end on the acknowledgement or
+       `watchdog.pid`; the terminating `crash-stderr` variants end on the process
+       exit, recorded with its code or signal; `crash-stderr-clean` does not exit
+       and ends on the native turn end. Then a stop and teardown, with no wait
+       longer than the scenario's own bound;
      - the delayed-acknowledgement cases (OpenCode `autonomous-cap` and
        `f7-delay-ack`), so the order of acknowledgement and turn events is in the
        transcript;
