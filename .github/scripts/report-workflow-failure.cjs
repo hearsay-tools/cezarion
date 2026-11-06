@@ -58,18 +58,13 @@ async function downloadLog(github, args, fetchImpl) {
   } finally { await reader.cancel(); }
   return Buffer.concat(chunks).toString('utf8');
 }
-// The workflow's GLOBAL concurrency group is the cross-process lock. Do not
-// call this writer from a different workflow unless it uses the same group.
-async function reportFailure({github,owner,repo,event,log=()=>{},fetchImpl=fetch}) {
+function assertValidRepo(owner, repo) {
   if (!/^[\w.-]+$/.test(owner) || !/^[\w.-]+$/.test(repo)) throw new Error('Invalid repository');
-  const source=event.workflow_run;
-  if (event.action !== 'completed' || !eligible(source,owner,repo)) return {reported:0};
-  validateRun(source);
-  const base={owner,repo};
-  const {data:run}=await github.request('GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}', {...base,run_id:source.id,attempt_number:source.run_attempt});
-  if (!eligible(run,owner,repo) || run.id!==source.id || run.run_attempt!==source.run_attempt) throw new Error('Failure attempt metadata changed');
-  validateRun(run);
-  const jobs=await github.paginate('GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}/jobs',{...base,run_id:run.id,attempt_number:run.run_attempt,per_page:100});
+}
+// Classifies the attempt's jobs: failed or timed-out jobs to report, and the
+// earliest completion among cancelled jobs (its check-run annotation tells a
+// timeout apart from a cancellation).
+async function collectFailedJobs({github,base,jobs}) {
   const failed=[];
   let cancelledAt=Infinity;
   for(const job of jobs) {
@@ -82,19 +77,23 @@ async function reportFailure({github,owner,repo,event,log=()=>{},fetchImpl=fetch
     if(timeout) failed.push({...job,timeout});
     else cancelledAt=Math.min(cancelledAt,Date.parse(job.completed_at) || Infinity);
   }
-  // In a cancelled run, a job that starts after the cancellation fails only
-  // because of it: an `always()` gate reads its cancelled needs
-  // (hearsay-tools/cezarion#1442). Failures that ended earlier still report.
-  if(run.conclusion==='cancelled') {
-    for(let i=failed.length-1;i>=0;i--) {
-      if(!failed[i].timeout && Date.parse(failed[i].started_at)>=cancelledAt) failed.splice(i,1);
-    }
+  return {failed,cancelledAt};
+}
+// In a cancelled run, a job that starts after the cancellation fails only
+// because of it: an `always()` gate reads its cancelled needs
+// (hearsay-tools/cezarion#1442). Failures that ended earlier still report.
+function pruneCancellationFailures(failed,cancelledAt) {
+  for(let i=failed.length-1;i>=0;i--) {
+    if(!failed[i].timeout && Date.parse(failed[i].started_at)>=cancelledAt) failed.splice(i,1);
   }
-  if(!failed.length) {
-    if(run.conclusion==='cancelled') {log(`Run ${run.id} was cancelled before any job reached its time limit; nothing to report.`);return {reported:0};}
-    throw new Error('Failed run has no failed jobs; inspect Actions metadata');
-  }
-  const writer=await createFailureWriter({github,owner,repo,log});
+}
+// A stopped job's running step ends `cancelled`, not `failure`.
+function failedStepsFor(job) {
+  const steps=(job.steps || []).filter(step=>step.conclusion==='failure' || step.conclusion==='timed_out' || (job.timeout && step.conclusion==='cancelled'));
+  if(!steps.length) steps.push({number:0,name:'Job failed before a step was recorded',started_at:job.started_at,completed_at:job.completed_at});
+  return steps;
+}
+async function reportFailedJobs({github,base,fetchImpl,run,writer,failed,log}) {
   let reported=0;
   const reports=[];
   for(const job of failed) {
@@ -102,9 +101,7 @@ async function reportFailure({github,owner,repo,event,log=()=>{},fetchImpl=fetch
     let jobLog='';
     try {jobLog=await downloadLog(github,{...base,job_id:job.id},fetchImpl);}
     catch {log(`Job ${job.id}: logs unavailable, expired or above the download limit; reporting metadata.`);}
-    // A stopped job's running step ends `cancelled`, not `failure`.
-    const steps=(job.steps || []).filter(step=>step.conclusion==='failure' || step.conclusion==='timed_out' || (job.timeout && step.conclusion==='cancelled'));
-    if(!steps.length) steps.push({number:0,name:'Job failed before a step was recorded',started_at:job.started_at,completed_at:job.completed_at});
+    const steps=failedStepsFor(job);
     for(const step of steps) {
       if(!Number.isSafeInteger(step.number) || step.number<0) throw new Error('Invalid failed step');
       const causes=causesForStep({run,job,step,log:jobLog});
@@ -113,6 +110,28 @@ async function reportFailure({github,owner,repo,event,log=()=>{},fetchImpl=fetch
       reports.push(...results.map(result=>result.issue));
     }
   }
+  return {reported,reports};
+}
+// The workflow's GLOBAL concurrency group is the cross-process lock. Do not
+// call this writer from a different workflow unless it uses the same group.
+async function reportFailure({github,owner,repo,event,log=()=>{},fetchImpl=fetch}) {
+  assertValidRepo(owner, repo);
+  const source=event.workflow_run;
+  if (event.action !== 'completed' || !eligible(source,owner,repo)) return {reported:0};
+  validateRun(source);
+  const base={owner,repo};
+  const {data:run}=await github.request('GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}', {...base,run_id:source.id,attempt_number:source.run_attempt});
+  if (!eligible(run,owner,repo) || run.id!==source.id || run.run_attempt!==source.run_attempt) throw new Error('Failure attempt metadata changed');
+  validateRun(run);
+  const jobs=await github.paginate('GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}/jobs',{...base,run_id:run.id,attempt_number:run.run_attempt,per_page:100});
+  const {failed,cancelledAt}=await collectFailedJobs({github,base,jobs});
+  if(run.conclusion==='cancelled') pruneCancellationFailures(failed,cancelledAt);
+  if(!failed.length) {
+    if(run.conclusion==='cancelled') {log(`Run ${run.id} was cancelled before any job reached its time limit; nothing to report.`);return {reported:0};}
+    throw new Error('Failed run has no failed jobs; inspect Actions metadata');
+  }
+  const writer=await createFailureWriter({github,owner,repo,log});
+  const {reported,reports}=await reportFailedJobs({github,base,fetchImpl,run,writer,failed,log});
   if(run.name==='CI') {
     await routeMainCiSummary({github,owner,repo,run,issues:writer.issues,reports});
   }
