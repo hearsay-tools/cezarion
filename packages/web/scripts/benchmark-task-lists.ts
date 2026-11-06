@@ -18,11 +18,11 @@ import { pollFor } from '../e2e/poll.ts'
 import { captureFixtureServer } from '../e2e/fixture-server.ts'
 
 export type TaskListBenchmarkOptions = {
-  buildRoot?: string
+  buildRoot?: string | undefined
   build?: boolean
   output?: string
   quick?: boolean
-  prepareOnly?: boolean
+  prepareOnly?: boolean | undefined
   /** Tiny correctness workload for CI, not performance evidence. */
   smoke?: boolean
 }

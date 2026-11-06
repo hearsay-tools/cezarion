@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { expect, it } from 'vitest'
 import { runTaskListsBenchmark } from '../scripts/benchmark-task-lists'
 
-// fixture-server starts: 2
 it('runs the task-list workload matrix with tiny fixtures and clean shutdown', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-task-list-smoke-'))
   try {
