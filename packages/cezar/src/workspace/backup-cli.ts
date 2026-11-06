@@ -12,7 +12,8 @@ Restore the newest backup, or the newest at or before an ISO UTC time.
 Only JSON is restored. Account config directories are not restored.`;
 
 export async function restoreBackup(file: BackupFile, at?: string): Promise<string> {
-  const limit = at === undefined ? Infinity : Date.parse(at);
+  const utc = at === undefined || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(at);
+  const limit = at === undefined ? Infinity : utc ? Date.parse(at) : NaN;
   if (Number.isNaN(limit)) throw new Error('Invalid --at time; use an ISO UTC time');
   const entry = listBackups(file).find((item) => Date.parse(item.time) <= limit);
   if (!entry) throw new Error(`No backup for ${file}${at ? ` at or before ${at}` : ''}`);
@@ -20,12 +21,21 @@ export async function restoreBackup(file: BackupFile, at?: string): Promise<stri
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Backup must contain a JSON object');
   if (file === 'config.json') {
     const restored = workspaceConfigSchema.parse(raw);
+    warnDroppedEntries(raw, 'projects', restored.projects.length);
     await mergeWriteWorkspaceConfig(() => restored);
   } else {
     const restored = storeSchema.parse(raw);
+    warnDroppedEntries(raw, 'accounts', restored.accounts.length);
     await mergeWriteAgentAccounts(() => restored);
   }
   return entry.time;
+}
+
+function warnDroppedEntries(raw: object, key: 'projects' | 'accounts', kept: number): void {
+  const original: unknown = (raw as Record<string, unknown>)[key];
+  if (Array.isArray(original) && original.length > kept) {
+    console.warn(`[cez] restore dropped ${original.length - kept} invalid ${key} entries from the snapshot`);
+  }
 }
 
 export async function runBackupCommand(argv: string[], _env: NodeJS.ProcessEnv): Promise<number> {

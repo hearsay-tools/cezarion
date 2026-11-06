@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { linkSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { assertCezarHomeWriteIsSandboxed, cezarHomeDir } from '../paths.ts';
 
@@ -20,10 +20,14 @@ function entries(home: string, file: BackupFile): BackupEntry[] {
     throw error;
   }
   return names.flatMap((name) => {
-    const match = /^(\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d\.\d{3}Z)-[a-f0-9]{8}\.json$/.exec(name);
+    const match = /^(\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d\.\d{3}Z)-([a-f0-9]{8})\.json$/.exec(name);
     if (!match) return [];
+    const path = join(dir, name);
+    try {
+      if (createHash('sha256').update(readFileSync(path)).digest('hex').slice(0, 8) !== match[2]) return [];
+    } catch { return []; }
     const time = match[1]!.replace(/T(\d\d)-(\d\d)-(\d\d)/, 'T$1:$2:$3');
-    return [{ file, time, path: join(dir, name) }];
+    return [{ file, time, path }];
   }).sort((a, b) => b.time.localeCompare(a.time) || b.path.localeCompare(a.path));
 }
 
@@ -75,15 +79,26 @@ export function backupBeforeWrite(path: string, next: unknown): void {
 
 /** Keep serialized writes ordered even with a coarse or adjusted clock. */
 function writeSnapshot(dir: string, timestamp: Date, sha: string, raw: Buffer): void {
-  for (;;) {
-    const target = join(dir, `${timestamp.toISOString().replaceAll(':', '-')}-${sha}.json`);
-    assertCezarHomeWriteIsSandboxed(target);
-    try {
-      writeFileSync(target, raw, { mode: 0o600, flag: 'wx' });
-      return;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      timestamp.setTime(timestamp.getTime() + 1);
+  const stage = join(dir, `${randomUUID()}.tmp`);
+  assertCezarHomeWriteIsSandboxed(stage);
+  try {
+    writeFileSync(stage, raw, { mode: 0o600, flag: 'wx' });
+    for (;;) {
+      const target = join(dir, `${timestamp.toISOString().replaceAll(':', '-')}-${sha}.json`);
+      assertCezarHomeWriteIsSandboxed(target);
+      try {
+        // A hard link publishes complete bytes atomically and refuses an existing target.
+        linkSync(stage, target);
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        timestamp.setTime(timestamp.getTime() + 1);
+      }
+    }
+  } finally {
+    assertCezarHomeWriteIsSandboxed(stage);
+    try { unlinkSync(stage); } catch {
+      // Cleanup is best effort; a leftover staging name is never listed or restored.
     }
   }
 }
