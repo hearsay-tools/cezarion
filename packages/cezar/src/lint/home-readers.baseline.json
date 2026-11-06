@@ -1,0 +1,70 @@
+{
+  "entries": [
+    {
+      "file": "packages/cezar/src/paths.ts",
+      "kind": "homedir",
+      "calls": 5,
+      "reason": "Expand user-authored tilde paths and locate vendor config beneath the OS user home."
+    },
+    {
+      "file": "packages/cezar/src/preview/chromium.ts",
+      "kind": "homedir",
+      "calls": 1,
+      "reason": "Read OS-user browser caches and Applications paths."
+    },
+    {
+      "file": "packages/cezar/src/self-update/launcher.ts",
+      "kind": "homedir",
+      "calls": 2,
+      "reason": "Display PATH with a tilde and locate the OS-user shell rc file."
+    },
+    {
+      "file": "packages/cezar/src/server-install/npx-cache.ts",
+      "kind": "homedir",
+      "calls": 1,
+      "reason": "Locate the OS-user npm cache."
+    },
+    {
+      "file": "packages/cezar/src/server-install/platforms/macosx-ngrok.ts",
+      "kind": "homedir",
+      "calls": 4,
+      "reason": "Locate OS-user LaunchAgents files."
+    },
+    {
+      "file": "packages/cezar/src/server-install/platforms/ubuntu-vps.ts",
+      "kind": "homedir",
+      "calls": 3,
+      "reason": "Locate OS-user systemd unit files."
+    },
+    {
+      "file": "packages/cezar/src/server/open-in-app.ts",
+      "kind": "homedir",
+      "calls": 2,
+      "reason": "Discover applications installed for the OS user."
+    },
+    {
+      "file": "packages/cezar/src/server/repo-branches.ts",
+      "kind": "homedir",
+      "calls": 1,
+      "reason": "Read the OS-user Git attributes file."
+    },
+    {
+      "file": "packages/cezar/src/skills-remote.ts",
+      "kind": "homedir",
+      "calls": 1,
+      "reason": "Expand a user-authored ~/ skill source."
+    },
+    {
+      "file": "packages/cezar/src/skills.ts",
+      "kind": "homedir",
+      "calls": 2,
+      "reason": "Discover the OS user global agent skill directories."
+    },
+    {
+      "file": "packages/cezar/src/workspace/projects.ts",
+      "kind": "homedir",
+      "calls": 1,
+      "reason": "Exclude the OS user home from project registration."
+    }
+  ]
+}

@@ -44,6 +44,7 @@ afterAll(() => {
 });
 
 const VIOLATIONS: Record<string, [string, string]> = {
+  'home-boundary': ['packages/cezar/src/ambient-home.ts', 'cezarHomeDir();\n'],
   'unit-wait-discipline': ['packages/web/src/wait-violation.test.tsx', 'await sleep(5);\n'],
   'test-wait-discipline': ['packages/cezar/src/wait-violation.test.ts', 'await sleep(5);\n'],
   'card-2-contrast': ['packages/web/src/unsafe.tsx', '<p className="bg-card-2 text-danger text-xs">bad</p>'],
@@ -60,6 +61,10 @@ const VIOLATIONS: Record<string, [string, string]> = {
 
 /** Each approved exception, by the rule it exercises. None may produce a finding. */
 const APPROVED: Record<string, string> = {
+  'packages/cezar/src/paths.ts': 'homedir();',
+  'packages/cezar/src/index.ts': 'resolveHome({ purpose: "cli" });',
+  'packages/cezar/vitest.setup.ts': 'process.env.CEZ_HOME = dir;',
+
   'packages/cezar/scripts/mock-scenario-approved.mjs': "import { play } from './mock-scenario.mjs';\nconst x = 'mock:backend-resume';\n",
   'packages/web/src/wait-approved.test.tsx': 'await sleep(5); // bound: a negative window\n',
   'packages/cezar/src/wait-approved.test.ts': 'await sleep(5); // bound: a negative window\n',
@@ -133,6 +138,14 @@ describe('the cez rules under oxlint', () => {
     expect(result).toEqual([expect.stringContaining('cez(run-history-reader)')]);
   }, OXLINT_TIMEOUT_MS);
 
+  it.each([
+    ['packages/cezar/src/ambient.ts', 'resolveHome({ purpose: "cli" });'],
+    ['packages/cezar/src/ambient.ts', 'homedir();'],
+    ['packages/cezar/src/ambient.test.ts', 'process.env.CEZ_HOME = dir;'],
+  ])('oxlint refuses ambient home access in %s: %s', async (file, source) => {
+    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
+  }, OXLINT_TIMEOUT_MS);
+
   it('fails a file oxlint cannot parse', () => {
     expect(problems).toContainEqual(expect.stringMatching(/^packages\/cezar\/src\/broken\.ts:1:\d+ oxlint: /));
   });
@@ -179,6 +192,7 @@ describe('stale entries', () => {
     'packages/web/src/test/card-2-contrast.baseline.json': JSON.stringify(['gone.tsx: <p className="bg-card-2 text-danger">']),
     'packages/cezar/src/lint/contract-root-import.baseline.json': JSON.stringify({ files: { 'packages/api-client/src/index.ts': 'barrel', 'packages/web/src/gone.ts': 'gone' } }),
     'packages/cezar/src/lint/run-history-readers.json': JSON.stringify({ entries: [] }),
+    'packages/cezar/src/lint/home-readers.baseline.json': JSON.stringify({ entries: [] }),
     'packages/cezar/src/lint/resume-time-readers.json': JSON.stringify({ files: { 'packages/web/src/lib/reads.ts': 'reads', 'packages/web/src/lib/stopped.ts': 'stopped' } }),
     'packages/web/src/test/search-params-discipline.baseline.json': JSON.stringify({ sites: [{ file: 'routes/x.tsx', site: '[query, setQuery] = useSearchParams()', reason: 'r' }] }),
     'packages/api-client/src/index.ts': "export * from '@open-mercato/cezar-contract';\n",
