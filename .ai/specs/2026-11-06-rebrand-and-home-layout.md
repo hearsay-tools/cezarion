@@ -130,7 +130,7 @@ Resolved once, at the process entry point, from the platform. No setting is requ
    - a write to a dir with no marker, unless the caller is an entry point that creates one.
    The check reads the marker, not the path, so pinned `HOME`, inherited variables and
    custom env objects cannot hide the live home.
-4. **Presence lease and write lock.** Two separate files in the runtime dir. Each serving
+4. **Presence leases and write lock.** Two kinds of file in the runtime dir. Each serving
    cockpit holds a lease (pid, installId, instance) for its whole life; it only tells other
    processes that a cockpit serves this home (the migration reads it, step 1 in section 4).
    One home can serve several cockpits (server instances), so each one holds its own file,
