@@ -6,12 +6,12 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
 /** Production CLI over a private workspace; pages share a browser, never host state. `serverPackage`
  * is the cezar package directory to serve: the specs' e2e build mirror by default, and
  * `<root>/packages/cezar` for the production-build benchmark. */
-export async function createTabFixture(buildRoot = process.cwd(), options: { remote?: boolean | undefined; basicAuth?: boolean; serverPackage?: string; taskList?: 'project' | 'global'; taskListSizes?: { active: number; archived: number; projects: number } } = {}) {
+export async function createTabFixture(buildRoot = process.cwd(), options: { remote?: boolean | undefined; basicAuth?: boolean; serverPackage?: string; taskList?: 'project' | 'global'; taskListSizes?: { active: number; archived: number; projects: number }; indexSeed?: boolean } = {}) {
   const serverPackage = resolve(buildRoot, options.serverPackage ?? '.ai/qa/build/cezar')
   const root = mkdtempSync('/tmp/cez-tabs-')
   const env = fixtureServeEnv(root, { CEZ_REMOTE: options.remote ? '1' : '0' })
   for (const key of ['CEZ_TASK_ID', 'CEZ_HANDOFF_FILE', 'CEZ_ARTIFACTS_DIR']) delete env[key]
-  const server = spawnFixtureServer([resolve('packages/web/scripts/tab-fixture-server.mjs'), root, serverPackage, ...(options.taskList ? [options.basicAuth ? 'basic-auth' : 'none', options.taskList, ...(options.taskListSizes ? [JSON.stringify(options.taskListSizes)] : [])] : options.basicAuth ? ['basic-auth'] : [])], { env }, { timeoutMs: 60_000 })
+  const server = spawnFixtureServer([resolve('packages/web/scripts/tab-fixture-server.mjs'), root, serverPackage, ...(options.taskList ? [options.basicAuth ? 'basic-auth' : 'none', options.taskList, ...(options.taskListSizes ? [JSON.stringify(options.taskListSizes)] : [])] : options.basicAuth ? ['basic-auth'] : []), ...(options.indexSeed ? ['--index'] : [])], { env }, { timeoutMs: 60_000 })
   let controlOrigin = ''
   server.stdout?.on('data', chunk => { const match = /control → (http:\/\/127\.0\.0\.1:\d+)/.exec(String(chunk)); if (match) controlOrigin = match[1]! })
   try {
@@ -19,7 +19,7 @@ export async function createTabFixture(buildRoot = process.cwd(), options: { rem
     if (!controlOrigin) throw new Error('fixture control listener missing')
     const control = async (command?: unknown) => {
       const response = await fetch(controlOrigin, command === undefined ? {} : { method: 'POST', body: JSON.stringify(command) })
-      return await response.json() as { reportsFixture?: { artifacts: Array<{ id: string; runId: string; taskTitle: string }>; settled: Array<{ projectId: string; runId: string }>; live: Array<{ projectId: string; runId: string }>; publication?: { id: string; at: number; runId: string } }; reportIo: { scans: number; contentLstat: number; pageChecks: number }; reportTitles: Record<string, string>; runs: Array<{ projectId: string; runId: string }>; published: number; listeners: Array<{ projectId: string; event: number; run: number; deleted: number }> }
+      return await response.json() as { reportsFixture?: { artifacts: Array<{ id: string; runId: string; taskTitle: string }>; settled: Array<{ projectId: string; runId: string }>; live: Array<{ projectId: string; runId: string }>; publication?: { id: string; at: number; runId: string } }; reportIo: { scans: number; contentLstat: number; pageChecks: number }; reportTitles: Record<string, string>; runs: Array<{ projectId: string; runId: string }>; published: number; ticks: number; family?: { parent: string; workers: string[] }; indexRoots?: Record<string, string[]>; listeners: Array<{ projectId: string; event: number; run: number; deleted: number }> }
     }
     const { runs } = await control()
     const runIds = runs.filter(run => run.projectId === 'boot').map(run => run.runId)

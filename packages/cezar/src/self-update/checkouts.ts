@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { workspaceConfigPath } from '../paths.ts';
+import type { Home } from '../home/home.ts';
 import { loadWorkspaceConfig } from '../workspace/config.ts';
 import { findColdRunByCheckout } from '../runs/run-index.ts';
 import { runNpm } from './installer.ts';
@@ -136,9 +137,9 @@ export async function branchOf(worktree: string): Promise<string> {
  * that was never registered but was linked once keeps showing its siblings), newest commit
  * first, each with what it takes to tell it apart: its task, its last commit, its build age.
  */
-export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env): Promise<CezarCheckout[]> {
-  const config = await loadWorkspaceConfig(workspaceConfigPath(env));
-  const links = listLinks(env);
+export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env, home?: Home): Promise<CezarCheckout[]> {
+  const config = await loadWorkspaceConfig(workspaceConfigPath(env, home));
+  const links = listLinks(env, home);
   const roots = [...config.projects.map((project) => project.root), ...links.map((link) => link.checkout).filter((p): p is string => !!p)];
   const seen = new Set<string>();
   const found: Omit<CezarCheckout, 'commit'>[] = [];
@@ -172,7 +173,7 @@ export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env): P
       });
     }
   }
-  assignUniqueIds(found, links, env);
+  assignUniqueIds(found, links, env, home);
   const out = await Promise.all(
     found.map(async (checkout): Promise<CezarCheckout> => {
       const [commit, dirty] = await Promise.all([
@@ -194,7 +195,7 @@ export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env): P
  * first unlinked checkout on a slug keeps the plain id, later ones get `linkCheckout`'s
  * path-hash suffix — which `linkDiscovered` then passes back so the link lands under it.
  */
-function assignUniqueIds(found: Omit<CezarCheckout, 'commit'>[], links: { id: string; checkout?: string | undefined }[], env: NodeJS.ProcessEnv): void {
+function assignUniqueIds(found: Omit<CezarCheckout, 'commit'>[], links: { id: string; checkout?: string | undefined }[], env: NodeJS.ProcessEnv, home?: Home): void {
   const owner = new Map<string, string>();
   for (const link of links) owner.set(link.id, link.checkout ?? '');
   for (const checkout of found) {
@@ -202,7 +203,7 @@ function assignUniqueIds(found: Omit<CezarCheckout, 'commit'>[], links: { id: st
     const base = safeLinkId(checkout.version, checkout.branch);
     if (!base) continue;
     // Taken by another checkout, or by any install on disk (`+local` builds included).
-    const taken = owner.get(base) ?? (readManifest(base, env) ? '' : undefined);
+    const taken = owner.get(base) ?? (readManifest(base, env, home) ? '' : undefined);
     checkout.id = taken === undefined || taken === checkout.packageRoot ? base : safeSuffixed(base, checkout.packageRoot);
     if (checkout.id) owner.set(checkout.id, checkout.packageRoot);
   }

@@ -26,6 +26,8 @@ import { RunStore } from './runs/store.ts';
 import { RunStoreOpenError } from './runs/store-open-error.ts';
 import { ensureDataGitignore } from './data-gitignore.ts';
 import { TaskWebhooks } from './runs/webhook.ts';
+import { resolveHome } from './home/resolve.ts';
+import type { Home } from './home/home.ts';
 import { runSubcommand } from './subcommands.ts';
 import { RunManager } from './workflows/run.ts';
 import { loadWorkflows } from './workflows/load.ts';
@@ -107,13 +109,16 @@ Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repos
 workflows in .ai/cezar/workflows/.`;
 
 async function main(): Promise<void> {
-  const managedExit = await runManagedCommand(process.argv.slice(2), { pkgName: readOwnName(), version: readOwnVersion(), entry: resolve(process.argv[1] ?? '') });
+  let resolvedHome: Home | undefined;
+  // Dispatch task commands without invoking this factory or giving them a Home.
+  const home = () => resolvedHome ??= resolveHome({ purpose: 'cli' });
+  const managedExit = await runManagedCommand(process.argv.slice(2), { pkgName: readOwnName(), version: readOwnVersion(), entry: resolve(process.argv[1] ?? '') }, home);
   if (managedExit !== undefined) {
     process.exitCode = managedExit;
     return;
   }
   // Subcommands with flags of their own run before the global parseArgs (#504, #774, #1576).
-  const subcommandExit = await runSubcommand(process.argv.slice(2), process.env);
+  const subcommandExit = await runSubcommand(process.argv.slice(2), process.env, home);
   if (subcommandExit !== undefined) {
     process.exitCode = subcommandExit;
     return;
@@ -160,10 +165,10 @@ async function main(): Promise<void> {
 
   switch (command) {
     case 'serve':
-      await serveCommand(repoRoot, Number(values.port), !values['no-open'], values['bind-host'], Boolean(values['restart-exact']));
+      await serveCommand(home(), repoRoot, Number(values.port), !values['no-open'], values['bind-host'], Boolean(values['restart-exact']));
       return;
     case 'run':
-      await runCommand(repoRoot, positionals.slice(1).join(' ').trim(), values.workflow, values.model,
+      await runCommand(home(), repoRoot, positionals.slice(1).join(' ').trim(), values.workflow, values.model,
         { allowWorkers: !values['no-workers'], allowMessaging: !values['no-messaging'] });
       return;
     case 'init':
@@ -177,7 +182,7 @@ async function main(): Promise<void> {
       const projectArgs = positionals.slice(1);
       const isList = projectArgs.length === 0 || projectArgs[0] === 'list';
       const bootProjectId = process.env.CEZ_SINGLE_PROJECT === '1' && isList
-        ? await initWorkspace(repoRoot)
+        ? await initWorkspace(repoRoot, home())
         : undefined;
       process.exitCode = await runProjectsCommand(projectArgs, { defaultRoot: repoRoot, bootProjectId });
       return;
@@ -228,9 +233,9 @@ async function main(): Promise<void> {
  * lookup. Undefined when registration was suppressed or the workspace is
  * unavailable; the server then derives a fallback on its own.
  */
-async function initWorkspace(repoRoot: string): Promise<string | undefined> {
+async function initWorkspace(repoRoot: string, home: Home): Promise<string | undefined> {
   try {
-    await runMigrations({ bootRepoRoot: repoRoot });
+    await runMigrations({ bootRepoRoot: repoRoot, home });
     if (await shouldRegisterProject(repoRoot)) return (await registerProject(repoRoot)).id;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -242,6 +247,7 @@ async function initWorkspace(repoRoot: string): Promise<string | undefined> {
 // ---- serve -----------------------------------------------------------------
 
 async function serveCommand(
+  home: Home,
   repoRoot: string,
   preferredPort: number,
   openBrowser: boolean,
@@ -254,7 +260,7 @@ async function serveCommand(
   // Hold the real listener before workspace writes, recovery or background resources.
   // A probe followed by a later bind would allow another cwd to win in between.
   const listener = await acquireServeListener(preferredPort, bindHost);
-  const bootProjectId = await initWorkspace(repoRoot);
+  const bootProjectId = await initWorkspace(repoRoot, home);
   // ONE workspace semaphore for the whole process (spec 2026-07-20, step 2.5):
   // the boot manager and every lazily-built project context count their runs
   // against the same `resources.maxParallel`. The boot refresh() below is the
@@ -270,7 +276,7 @@ async function serveCommand(
   taskWebhooks.attach({ id: bootProjectId ?? 'default', root: repoRoot, store });
   // ONE preview host for the whole process (#781), like the semaphore: ports are host-global, so
   // `port_held` must see every project's servers. Off unless `CEZ_PREVIEW=1`.
-  const previewHost = previewToolEnabled() ? new PreviewHost() : undefined;
+  const previewHost = previewToolEnabled() ? new PreviewHost({ home }) : undefined;
   // The port the cockpit bound, once `startServer` listens; the preview tool refuses it.
   let boundPort: number | undefined;
   const cezarPort = () => boundPort;
@@ -318,9 +324,10 @@ async function serveCommand(
   const port = preferredPort;
   warnServeBind(bindHost, port);
   let server: ReturnType<typeof startServer>;
-  const selfUpdate = createServeSelfUpdate({ pkgName, version, store, bindHost }, () => server);
-  const applicationUpdate = createServeApplicationUpdate(repoRoot, update, () => server, undefined, store);
+  const selfUpdate = createServeSelfUpdate({ pkgName, version, store, bindHost, home }, () => server);
+  const applicationUpdate = createServeApplicationUpdate(repoRoot, update, () => server, undefined, store, home);
   server = startServer({
+    home,
     ownership,
     delegation,
     repoRoot,
@@ -449,6 +456,7 @@ function hintRunningCockpit(repoRoot: string): () => void {
 type TaskAccess = { allowWorkers: boolean; allowMessaging: boolean };
 
 async function runCommand(
+  home: Home,
   repoRoot: string,
   task: string,
   workflowName: string | undefined,
@@ -462,20 +470,21 @@ async function runCommand(
   }
   const stopHint = hintRunningCockpit(repoRoot);
   try {
-    await runHeadless(repoRoot, task, workflowName, model, access);
+    await runHeadless(home, repoRoot, task, workflowName, model, access);
   } finally {
     stopHint();
   }
 }
 
 async function runHeadless(
+  home: Home,
   repoRoot: string,
   task: string,
   workflowName: string | undefined,
   model: string | undefined,
   access: TaskAccess,
 ): Promise<void> {
-  await initWorkspace(repoRoot);
+  await initWorkspace(repoRoot, home);
   const { workflows, issues } = await loadWorkflows(repoRoot);
   for (const issue of issues) console.error(`! skipped ${issue.path}: ${issue.message}`);
   const name = workflowName ?? 'quick-task';

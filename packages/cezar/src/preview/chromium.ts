@@ -1,3 +1,5 @@
+import { resolveHome } from '../home/resolve.ts';
+import type { Home } from '../home/home.ts';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -43,8 +45,9 @@ export const realFs: ChromiumFs = {
 };
 
 /** `~/.cache/cez`: the root the skills cache already uses. */
-export function cezCacheDir(home = homedir()): string {
-  return join(home, '.cache', 'cez');
+export function cezCacheDir(home?: string | Home): string {
+  if (typeof home === 'string') return join(home, '.cache', 'cez');
+  return (home ?? resolveHome({ purpose: 'compatibility' })).cache;
 }
 
 /** Google Chrome first: a distro `chromium` is often a snap shim (Ubuntu) or a build that never
@@ -104,6 +107,7 @@ export function resolveChromium(
   env: NodeJS.ProcessEnv = process.env,
   platform: string = process.platform,
   _arch: string = process.arch,
+  paths?: Home,
 ): string | undefined {
   const home = env.HOME || env.USERPROFILE || homedir();
 
@@ -115,6 +119,11 @@ export function resolveChromium(
     }
   }
 
+  return cachedChromium(fs, env, platform, home, paths);
+}
+
+/** Third-party caches follow the OS user; cezar's downloaded copy follows the injected Home. */
+function cachedChromium(fs: ChromiumFs, env: NodeJS.ProcessEnv, platform: string, home: string, paths?: Home): string | undefined {
   if (platform === 'darwin') {
     for (const root of ['/Applications', join(home, 'Applications')]) {
       for (const app of MAC_APPS) {
@@ -140,7 +149,8 @@ export function resolveChromium(
   const agentBrowser = firstInRevisions(fs, join(home, '.agent-browser', 'browsers'), /^chrome-/, platform);
   if (agentBrowser) return agentBrowser;
 
-  const cache = join(cezCacheDir(home), 'chromium');
+  const cache = join(cezCacheDir(paths ?? home), 'chromium');
+  const exe = platform === 'win32' ? '.exe' : '';
   for (const dir of fs.readdirSync(cache).filter(d => d.startsWith(`${HEADLESS_SHELL}-`)).sort(byRevisionDesc)) {
     const p = join(cache, dir, HEADLESS_SHELL + exe);
     if (fs.existsSync(p)) return p;

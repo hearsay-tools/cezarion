@@ -23,7 +23,13 @@ interface Entry {
   bytes: number
   paused: boolean
 }
-interface DocumentPort { port: LivePort; id: string; epoch: number; seenAt: number; entries: Map<string, Entry> }
+interface DocumentPort {
+  port: LivePort; id: string; epoch: number; seenAt: number; entries: Map<string, Entry>
+  /** The stream generation whose `ready` this document received. Per document, not per entry:
+   *  an epoch change keeps it, so the document's seq baseline is never moved past a frame it
+   *  may have dropped under the old epoch. A new workspace subscription clears it. */
+  readyGeneration?: string | undefined
+}
 interface Lane { signature: string; controller?: AbortController | undefined; retry?: ReturnType<typeof setTimeout> | undefined; lastFrame: number }
 interface ReadJob { controller: AbortController; deadline?: ReturnType<typeof setTimeout> | undefined; nextAt: number; timer?: ReturnType<typeof setTimeout> | undefined; revision: number; interval: number }
 
@@ -42,6 +48,43 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
   // at once (`disconnect`), so the next start still owes them a `reconnect` (hearsay-tools/cezarion#1069).
   let workspaceDropped = false
   let generation: string | undefined
+  /** The workspace stream's generation (its `ready`) and the last frame number it delivered. A
+   *  document that joins the shared stream late, or rejoins after a server restart, gets a `ready`
+   *  with both before any other frame, so it learns the generation of every frame it receives. */
+  let workspaceGeneration: string | undefined
+  let workspaceSeq = 0
+  const workspaceReadyFor = (doc: DocumentPort, entry: Entry, seq = workspaceSeq) => {
+    if (workspaceGeneration === undefined || doc.readyGeneration === workspaceGeneration) return
+    doc.readyGeneration = workspaceGeneration
+    deliver(doc, entry, { event: 'ready', data: JSON.stringify({ generation: workspaceGeneration, seq }), id: '' })
+  }
+  /** One workspace-lane frame: note the barrier ping, the generation and the seq, then deliver it
+   *  after the `ready` each entry still lacks. A numbered frame's own seq is counted by
+   *  `observeWorkspace`, so a `ready` sent before it names the frame before. */
+  const deliverWorkspaceFrame = (frame: LiveFrame) => {
+    if ('event' in frame && frame.event === 'ping') workspaceReady = true
+    const seqBefore = workspaceSeq
+    const readyGeneration = observeWorkspace(frame)
+    for (const { doc, entry } of held('workspace')) {
+      if (readyGeneration !== undefined) doc.readyGeneration = readyGeneration
+      else workspaceReadyFor(doc, entry, seqBefore)
+      deliver(doc, entry, frame)
+    }
+  }
+  /** Track the workspace stream's own `ready` and numbered frames. */
+  const observeWorkspace = (frame: LiveFrame): string | undefined => {
+    if (!('data' in frame) || !['ready', 'run-summary', 'run-deleted'].includes(frame.event)) return undefined
+    try {
+      const data = JSON.parse(frame.data) as { generation?: unknown; seq?: unknown }
+      if (frame.event === 'ready' && typeof data.generation === 'string' && typeof data.seq === 'number') {
+        workspaceGeneration = data.generation
+        workspaceSeq = data.seq
+        return data.generation
+      }
+      if (typeof data.seq === 'number') workspaceSeq = Math.max(workspaceSeq, data.seq)
+    } catch { /* ignore malformed frames */ }
+    return undefined
+  }
   const held = (kind?: LiveDemand['kind']) => [...documents].flatMap(doc => [...doc.entries.values()]
     .filter(entry => !entry.paused && (!kind || entry.demand.kind === kind)).map(entry => ({ doc, entry })))
   const send = (doc: DocumentPort, message: OwnerOutput) => {
@@ -108,8 +151,8 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
       if ('data' in frame && frame.event === 'ready') {
         try { const data = JSON.parse(frame.data) as { generation?: unknown }; if (typeof data.generation === 'string') onGeneration(data.generation) } catch { /* ignore malformed control */ }
       }
-      if (kind === 'workspace' && 'event' in frame && frame.event === 'ping') workspaceReady = true
-      for (const { doc, entry } of held(kind === 'workspace' ? 'workspace' : 'run')) {
+      if (kind === 'workspace') { deliverWorkspaceFrame(frame); return }
+      for (const { doc, entry } of held('run')) {
         if (entry.demand.kind === 'run' && 'type' in frame && 'runId' in frame && runKey(frame) !== runKey(entry.demand)) continue
         deliver(doc, entry, frame)
       }
@@ -207,6 +250,44 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
     try { doc.port.close() } catch { /* already detached */ }
     schedule()
   }
+  /**
+   * Before a sync's entries are rebuilt. Returns whether the workspace subscription is new (the
+   * document held no workspace demand). A document that lost the stream's `ready` asks for it
+   * (`workspaceReady`): it is then owed one again, sent before any greeting ping.
+   */
+  const startSync = (doc: DocumentPort, workspaceReadyWanted: true | undefined) => {
+    if (workspaceReadyWanted) doc.readyGeneration = undefined
+    return ![...doc.entries.values()].some(entry => entry.demand.kind === 'workspace')
+  }
+  /** After a sync: a document owed the current generation's `ready` gets it now, naming the last
+   *  frame the stream delivered (a frame it dropped meanwhile shows as a gap there). In the same
+   *  generation, an ordinary epoch change owes nothing. */
+  const ensureReady = (doc: DocumentPort, entries: Map<string, Entry>) => {
+    const entry = [...entries.values()].find(candidate => candidate.demand.kind === 'workspace' && !candidate.paused)
+    if (entry) workspaceReadyFor(doc, entry)
+  }
+  const newEntry = (item: { id: string; demand: LiveDemand }): Entry => {
+    const afterSeq = item.demand.kind === 'run' ? item.demand.afterSeq : 0
+    return { ...item, sent: afterSeq, ack: afterSeq, unacked: [], bytes: 0, paused: false }
+  }
+  /**
+   * What a late subscriber is owed at once: the latest topic value, or the workspace `ready` (the
+   * generation and the last frame already delivered) and then the barrier ping, which still marks
+   * the attachment live (hearsay-tools/cezarion#795). `fresh`: the document held no workspace demand before this sync,
+   * so it opened a new attachment and reset its own seq baseline. Otherwise only the epoch moved,
+   * and a `ready` in the same generation would hide a frame the document dropped meanwhile.
+   */
+  const greetNewEntry = (doc: DocumentPort, entry: Entry, fresh: boolean) => {
+    const demand = entry.demand
+    if (demand.kind === 'topic' && topicValues.has(demand.topic)) {
+      send(doc, { type: 'value', version: LIVE_PROTOCOL, epoch: doc.epoch, id: entry.id, value: topicValues.get(demand.topic) })
+    }
+    if (demand.kind === 'workspace' && fresh) doc.readyGeneration = undefined
+    if (demand.kind === 'workspace' && workspaceReady) {
+      workspaceReadyFor(doc, entry)
+      deliver(doc, entry, { event: 'ping', data: '', id: '' })
+    }
+  }
   const attach = (port: LivePort) => {
     if (disposed || documents.size >= 128) { port.close(); return () => {} }
     const doc: DocumentPort = { port, id: '', epoch: -1, seenAt: Date.now(), entries: new Map() }
@@ -222,18 +303,14 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
         const epochChanged = doc.epoch !== message.epoch
         doc.epoch = message.epoch; doc.seenAt = Date.now()
         const next = new Map<string, Entry>()
+        const fresh = startSync(doc, message.workspaceReady)
         for (const item of message.entries) {
           const old = epochChanged ? undefined : doc.entries.get(item.id)
-          const entry: Entry = old ?? { ...item, sent: item.demand.kind === 'run' ? item.demand.afterSeq : 0, ack: item.demand.kind === 'run' ? item.demand.afterSeq : 0, unacked: [], bytes: 0, paused: false }
+          const entry: Entry = old ?? newEntry(item)
           next.set(item.id, entry)
-          if (!old && item.demand.kind === 'topic' && topicValues.has(item.demand.topic)) {
-            send(doc, { type: 'value', version: LIVE_PROTOCOL, epoch: doc.epoch, id: entry.id, value: topicValues.get(item.demand.topic) })
-          }
-          if (!old && item.demand.kind === 'workspace' && workspaceReady) {
-            deliver(doc, entry, { event: 'ping', data: '', id: '' })
-          }
-
+          if (!old) greetNewEntry(doc, entry, fresh)
         }
+        ensureReady(doc, next)
         doc.entries = next
         if (!next.size) { release(doc); return }
         send(doc, { type: 'alive', version: LIVE_PROTOCOL, epoch: doc.epoch })

@@ -4,6 +4,7 @@
  * its command runs.
  */
 
+import { resolveHome } from './home/resolve.ts';
 export type SubcommandRunner = (argv: string[], env: NodeJS.ProcessEnv) => Promise<number>;
 
 export const SUBCOMMAND_NAMES = ['backup', 'discover', 'artifact', 'task', 'automation', 'webhook', 'worker', 'message', 'remote-settings'] as const;
@@ -25,7 +26,10 @@ export async function loadSubcommand(name: string | undefined): Promise<Subcomma
 }
 
 /** Run `argv[0]` when it names a subcommand and answer its exit code; anything else is not ours. */
-export async function runSubcommand(argv: string[], env: NodeJS.ProcessEnv): Promise<number | undefined> {
+export async function runSubcommand(argv: string[], env: NodeJS.ProcessEnv, home = () => resolveHome({ purpose: 'cli', env })): Promise<number | undefined> {
+  // Only operator commands receive Home. Task runners keep their two-argument contract.
+  if (argv[0] === 'backup') return (await import('./workspace/backup-cli.ts')).runBackupCommand(argv.slice(1), env, home());
+  if (argv[0] === 'remote-settings') return (await import('./remote-settings-cli.ts')).runRemoteSettingsCommand(argv.slice(1), env, undefined, home());
   const run = await loadSubcommand(argv[0]);
   return run ? run(argv.slice(1), env) : undefined;
 }

@@ -16,16 +16,18 @@
  * Windows) to a worktree's `packages/cezar`. Node runs the entry through its realpath, so the
  * checkout's own `node_modules` resolve, and every rebuild of that worktree is live on the next
  * restart. Anything that reads `current` — the launchers, the desktop shell — runs it unchanged.
- * Removing a link removes the link, never the checkout. Everything is under `cezarHomeDir()` so
+ * Removing a link removes the link, never the checkout. The legacy layout stays under `Home.root` so
  * `CEZ_HOME` keeps tests off the real home. Delete the whole directory and `cezar install`
  * rebuilds it — state, never configuration.
  */
 
+import { resolveHome } from '../home/resolve.ts';
+import type { Home } from '../home/home.ts';
 import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 
-import { assertCezarHomeWriteIsSandboxed, cezarHomeDir } from '../paths.ts';
+import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 
 export const PACKAGE_NAME = '@wjarka/cezarion';
 export const CURRENT_LINK = 'current';
@@ -33,12 +35,12 @@ const MANIFEST_FILE = '.cezar-install.json';
 
 export type InstallKind = 'managed' | 'global-npm' | 'npx' | 'checkout' | 'unknown';
 
-export function versionsDir(env: NodeJS.ProcessEnv = process.env): string {
-  return join(cezarHomeDir(env), 'versions');
+export function versionsDir(env: NodeJS.ProcessEnv = process.env, home?: Home): string {
+  return (home ?? resolveHome({ purpose: 'compatibility', env })).versions;
 }
 
-export function binDir(env: NodeJS.ProcessEnv = process.env): string {
-  return join(cezarHomeDir(env), 'bin');
+export function binDir(env: NodeJS.ProcessEnv = process.env, home?: Home): string {
+  return (home ?? resolveHome({ purpose: 'compatibility', env })).bin;
 }
 
 /**
@@ -54,18 +56,18 @@ export function assertSafeId(id: string): string {
   return id;
 }
 
-export function versionDir(id: string, env: NodeJS.ProcessEnv = process.env): string {
-  return join(versionsDir(env), assertSafeId(id));
+export function versionDir(id: string, env: NodeJS.ProcessEnv = process.env, home?: Home): string {
+  return join(versionsDir(env, home), assertSafeId(id));
 }
 
 /** The entry file inside one installed version's tree. */
-export function versionEntry(id: string, env: NodeJS.ProcessEnv = process.env): string {
-  return join(versionDir(id, env), 'node_modules', ...PACKAGE_NAME.split('/'), 'dist', 'index.js');
+export function versionEntry(id: string, env: NodeJS.ProcessEnv = process.env, home?: Home): string {
+  return join(versionDir(id, env, home), 'node_modules', ...PACKAGE_NAME.split('/'), 'dist', 'index.js');
 }
 
 /** The entry the launcher execs: through `current`, so a swap never edits the launcher. */
-export function currentEntry(env: NodeJS.ProcessEnv = process.env): string {
-  return join(versionsDir(env), CURRENT_LINK, 'node_modules', ...PACKAGE_NAME.split('/'), 'dist', 'index.js');
+export function currentEntry(env: NodeJS.ProcessEnv = process.env, home?: Home): string {
+  return join(versionsDir(env, home), CURRENT_LINK, 'node_modules', ...PACKAGE_NAME.split('/'), 'dist', 'index.js');
 }
 
 const manifestSchema = z
@@ -80,17 +82,17 @@ const manifestSchema = z
   .passthrough();
 export type InstallManifest = z.infer<typeof manifestSchema>;
 
-export function readManifest(id: string, env: NodeJS.ProcessEnv = process.env): InstallManifest | null {
+export function readManifest(id: string, env: NodeJS.ProcessEnv = process.env, home?: Home): InstallManifest | null {
   try {
-    const parsed = manifestSchema.safeParse(JSON.parse(readFileSync(join(versionDir(id, env), MANIFEST_FILE), 'utf8')));
+    const parsed = manifestSchema.safeParse(JSON.parse(readFileSync(join(versionDir(id, env, home), MANIFEST_FILE), 'utf8')));
     return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
 }
 
-export function writeManifest(id: string, manifest: InstallManifest, env: NodeJS.ProcessEnv = process.env): void {
-  const dir = versionDir(id, env);
+export function writeManifest(id: string, manifest: InstallManifest, env: NodeJS.ProcessEnv = process.env, home?: Home): void {
+  const dir = versionDir(id, env, home);
   assertCezarHomeWriteIsSandboxed(dir, env);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -107,36 +109,36 @@ export interface InstalledEntry extends InstallManifest {
 }
 
 /** Every entry under `versions/` with a manifest that `keep` accepts, in directory order. */
-function listEntries(env: NodeJS.ProcessEnv, keep: (id: string, manifest: InstallManifest) => boolean): InstalledEntry[] {
-  const dir = versionsDir(env);
+function listEntries(env: NodeJS.ProcessEnv, keep: (id: string, manifest: InstallManifest) => boolean, home?: Home): InstalledEntry[] {
+  const dir = versionsDir(env, home);
   if (!existsSync(dir)) return [];
-  const active = activeId(env);
+  const active = activeId(env, home);
   const out: InstalledEntry[] = [];
   for (const name of readdirSync(dir)) {
     if (name === CURRENT_LINK || name.startsWith('.')) continue;
-    const manifest = readManifest(name, env);
+    const manifest = readManifest(name, env, home);
     if (manifest && keep(name, manifest)) out.push({ ...manifest, id: name, active: name === active });
   }
   return out;
 }
 
 /** Every complete install under `versions/` (a manifest AND an entry file), newest first. */
-export function listInstalled(env: NodeJS.ProcessEnv = process.env): InstalledEntry[] {
-  return listEntries(env, (id) => existsSync(versionEntry(id, env)))
+export function listInstalled(env: NodeJS.ProcessEnv = process.env, home?: Home): InstalledEntry[] {
+  return listEntries(env, (id) => existsSync(versionEntry(id, env, home)), home)
     .sort((a, b) => b.installedAt.localeCompare(a.installedAt));
 }
 
 /** Resolve an apply target to an installed entry: an exact id (`0.11.1+local`) first, else a
  *  REGISTRY install of that version — a local build never stands in for the published release
  *  it was cut from, or `cezar update` on a checkout would only ever re-activate the checkout. */
-export function findInstalled(target: string, env: NodeJS.ProcessEnv = process.env): InstalledEntry | undefined {
-  const installed = listInstalled(env);
+export function findInstalled(target: string, env: NodeJS.ProcessEnv = process.env, home?: Home): InstalledEntry | undefined {
+  const installed = listInstalled(env, home);
   return installed.find((entry) => entry.id === target) ?? installed.find((entry) => entry.source === 'registry' && entry.version === target);
 }
 
 /** The id `current` points at, or null when nothing is activated. */
-export function activeId(env: NodeJS.ProcessEnv = process.env): string | null {
-  const link = join(versionsDir(env), CURRENT_LINK);
+export function activeId(env: NodeJS.ProcessEnv = process.env, home?: Home): string | null {
+  const link = join(versionsDir(env, home), CURRENT_LINK);
   // Read, never check-then-read: `readlink` on something that is not a link fails, and that
   // failure is what selects the text-file fallback.
   try {
@@ -173,15 +175,15 @@ function removeLink(link: string): void {
   }
 }
 
-export function activate(id: string, env: NodeJS.ProcessEnv = process.env): void {
-  if (!existsSync(versionEntry(id, env))) throw new Error(`version ${id} is not installed`);
-  const dir = versionsDir(env);
+export function activate(id: string, env: NodeJS.ProcessEnv = process.env, home?: Home): void {
+  if (!existsSync(versionEntry(id, env, home))) throw new Error(`version ${id} is not installed`);
+  const dir = versionsDir(env, home);
   assertCezarHomeWriteIsSandboxed(dir, env);
   const link = join(dir, CURRENT_LINK);
   const tmp = join(dir, `.${CURRENT_LINK}.${process.pid}.tmp`);
   if (process.platform === 'win32') {
     removeLink(link);
-    symlinkSync(versionDir(id, env), link, 'junction');
+    symlinkSync(versionDir(id, env, home), link, 'junction');
     return;
   }
   rmSync(tmp, { force: true });
@@ -189,11 +191,11 @@ export function activate(id: string, env: NodeJS.ProcessEnv = process.env): void
   renameSync(tmp, link);
 }
 
-export function removeInstalled(id: string, env: NodeJS.ProcessEnv = process.env): void {
-  assertCezarHomeWriteIsSandboxed(versionDir(id, env), env);
-  if (id === activeId(env)) throw new Error(`version ${id} is active — switch first`);
+export function removeInstalled(id: string, env: NodeJS.ProcessEnv = process.env, home?: Home): void {
+  assertCezarHomeWriteIsSandboxed(versionDir(id, env, home), env);
+  if (id === activeId(env, home)) throw new Error(`version ${id} is active — switch first`);
   // `rmSync` never follows symlinks, so a linked checkout loses its link, not its files.
-  rmSync(versionDir(id, env), { recursive: true, force: true });
+  rmSync(versionDir(id, env, home), { recursive: true, force: true });
 }
 
 /** Build metadata for a branch name: `cez/cb28888e` → `cez-cb28888e`. */
@@ -224,7 +226,7 @@ export interface LinkResult {
  * checkout replaces its previous entry (the version or branch may have moved since); a
  * DIFFERENT checkout that would get the same id gets a path-derived suffix instead.
  */
-export function linkCheckout(packageRoot: string, branch: string, env: NodeJS.ProcessEnv = process.env, preferredId?: string): LinkResult {
+export function linkCheckout(packageRoot: string, branch: string, env: NodeJS.ProcessEnv = process.env, preferredId?: string, home?: Home): LinkResult {
   let root = resolve(packageRoot);
   try {
     root = realpathSync(root);
@@ -241,32 +243,32 @@ export function linkCheckout(packageRoot: string, branch: string, env: NodeJS.Pr
   if (!existsSync(join(root, 'dist', 'index.js'))) throw new Error(`${root} is not built — run \`npm run build\` in the checkout first`);
   const version = pkg.version;
 
-  const installed = listLinks(env);
+  const installed = listLinks(env, home);
   for (const entry of installed) {
-    if (entry.checkout === root && entry.id !== activeId(env)) removeInstalled(entry.id, env);
+    if (entry.checkout === root && entry.id !== activeId(env, home)) removeInstalled(entry.id, env, home);
   }
   // Discovery may already have told this checkout apart from a sibling on the same slug
   // (`preferredId`, the suffixed form): link it under the id the picker showed.
   const base = linkId(version, branch);
   const suffixed = suffixedLinkId(base, root);
   let id = preferredId === suffixed ? suffixed : base;
-  const clash = readManifest(id, env);
+  const clash = readManifest(id, env, home);
   if (clash && clash.checkout !== root) id = suffixed;
 
-  const scopeDir = join(versionDir(id, env), 'node_modules', ...PACKAGE_NAME.split('/').slice(0, -1));
+  const scopeDir = join(versionDir(id, env, home), 'node_modules', ...PACKAGE_NAME.split('/').slice(0, -1));
   const link = join(scopeDir, PACKAGE_NAME.split('/').pop()!);
   assertCezarHomeWriteIsSandboxed(scopeDir, env);
   mkdirSync(scopeDir, { recursive: true });
   removeLink(link);
   symlinkSync(root, link, process.platform === 'win32' ? 'junction' : 'dir');
-  writeManifest(id, { version, source: 'link', installedAt: new Date().toISOString(), checkout: root, branch }, env);
-  return { id, version, entry: versionEntry(id, env) };
+  writeManifest(id, { version, source: 'link', installedAt: new Date().toISOString(), checkout: root, branch }, env, home);
+  return { id, version, entry: versionEntry(id, env, home) };
 }
 
 /** Every linked checkout, dangling ones included (a worktree that was removed) — `listInstalled`
  *  hides those, but they still need finding to be pruned or replaced. */
-export function listLinks(env: NodeJS.ProcessEnv = process.env): InstalledEntry[] {
-  return listEntries(env, (_id, manifest) => manifest.source === 'link');
+export function listLinks(env: NodeJS.ProcessEnv = process.env, home?: Home): InstalledEntry[] {
+  return listEntries(env, (_id, manifest) => manifest.source === 'link', home);
 }
 
 /** The id a checkout gets when `base` already belongs to another checkout or install. */
@@ -287,9 +289,9 @@ function shortHash(value: string): string {
  *   npx         → the `_npx` cache — nothing to update in place; offer `cezar install`
  *   checkout    → a git checkout (`packages/cezar/dist/index.js` beside `src/`) — dev mode
  */
-export function detectInstallKind(entry: string, env: NodeJS.ProcessEnv = process.env): InstallKind {
+export function detectInstallKind(entry: string, env: NodeJS.ProcessEnv = process.env, home?: Home): InstallKind {
   const normalized = resolve(entry).split(sep).join('/');
-  const managedRoot = resolve(versionsDir(env)).split(sep).join('/');
+  const managedRoot = resolve(versionsDir(env, home)).split(sep).join('/');
   if (normalized.startsWith(`${managedRoot}/`)) return 'managed';
   if (normalized.includes('/_npx/')) return 'npx';
   if (normalized.includes('/node_modules/')) return 'global-npm';

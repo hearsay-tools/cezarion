@@ -1,7 +1,9 @@
+import type { Home } from '../home/home.ts';
+import { resolveHome } from '../home/resolve.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { linkSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { assertCezarHomeWriteIsSandboxed, cezarHomeDir } from '../paths.ts';
+import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 
 export const BACKUP_FILES = ['config.json', 'agent-accounts.json'] as const;
 export type BackupFile = typeof BACKUP_FILES[number];
@@ -12,8 +14,8 @@ export function isBackupFile(value: string): value is BackupFile {
 }
 
 /** Names are sortable UTC times, with colons replaced for Windows. */
-function entries(home: string, file: BackupFile): BackupEntry[] {
-  const dir = join(home, 'backups', file);
+function entries(home: string | Home, file: BackupFile): BackupEntry[] {
+  const dir = join(typeof home === 'string' ? join(home, 'backups') : home.backups, file);
   let names: string[];
   try { names = readdirSync(dir); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
@@ -31,7 +33,7 @@ function entries(home: string, file: BackupFile): BackupEntry[] {
   }).sort((a, b) => b.time.localeCompare(a.time) || b.path.localeCompare(a.path));
 }
 
-export function listBackups(file?: BackupFile, home = cezarHomeDir()): BackupEntry[] {
+export function listBackups(file?: BackupFile, home: string | Home = resolveHome({ purpose: 'compatibility' })): BackupEntry[] {
   return (file ? [file] : BACKUP_FILES).flatMap((name) => entries(home, name));
 }
 

@@ -1,3 +1,4 @@
+import { resolveHome } from './home/resolve.ts';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -97,16 +98,16 @@ function cacheKeyFor(repo: string): string {
 }
 
 /** The source's bare clone: `~/.cache/cez/skills/<owner>__<name>`. */
-export function bareDirFor(repo: string): string {
-  return join(homedir(), '.cache', 'cez', 'skills', cacheKeyFor(repo));
+export function bareDirFor(repo: string, home = resolveHome({ purpose: 'compatibility' })): string {
+  return join(home.skillsCache, cacheKeyFor(repo));
 }
 
 /**
  * Per-commit copies of the source's directory skills for runs without a task
  * worktree (#1024): `~/.cache/cez/skill-files/<owner>__<name>/<commit>/<skill>/`.
  */
-export function skillFilesCacheDirFor(repo: string): string {
-  return join(homedir(), '.cache', 'cez', 'skill-files', cacheKeyFor(repo));
+export function skillFilesCacheDirFor(repo: string, home = resolveHome({ purpose: 'compatibility' })): string {
+  return join(home.skillFilesCache, cacheKeyFor(repo));
 }
 
 function sanitizeSegment(s: string): string {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { loadControls } from './mock-controls.mjs';
-import { stall, waitForRelease } from './mock-lifecycle.mjs';
+import { scenarioFor, play } from './mock-scenario.mjs';
+import { waitForRelease } from './mock-lifecycle.mjs';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -80,7 +81,6 @@ const finish = (text) => { assistant(text); result(text); };
 const tools = () => import('./mock-ci-tool.mjs');
 const lifecycle = async (call) => (await tools()).lifecycleCall('cursor', args, ...call);
 const done = async (text) => text + await lifecycle((await tools()).DONE);
-const askLibrary = async () => 'Pick one.' + await lifecycle((await tools()).ask());
 const log = process.env.CEZ_MOCK_CURSOR_PRINT_LOG;
 if (log) appendFileSync(log, `${JSON.stringify({ pid: process.pid, resumeId, id, args,
   promptSource: stdinPrompt ? 'stdin' : 'argv', prompt: promptArg })}\n`);
@@ -110,8 +110,76 @@ if (mode === 'model-rejection-held') {
   rejectModel(); await waitForRelease(10_000); process.exit(1);
 }
 if (mode === 'unrelated-startup-error') { process.stderr.write('Account unavailable\n'); process.exit(1); }
-// hearsay-tools/cezarion#1112: a slow process start, before the init frame that opens the native turn.
-if (prompt.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
+const sharedNames = ['autonomous', 'silent-tail', 'tool-tail', 'crash-stderr', 'cezar-tool', 'ci-wait',
+  'multi-pr-refs', 'turn-messages', 'agent-echo', 'provider-error', 'hold-cezar-done', 'hold-cezar-ask',
+  'cezar-done', 'cezar-ask', 'busy-progress', 'no-progress', 'hold-gated', 'hold', 'deferred-turn-start'];
+// Print has no persistent input, steering, child transcript or cezar-wait reply.
+const unsupported = ['ack-only', 'steer-tool', 'steer-late', 'subagent-after-park', 'cezar-wait'];
+let crashContinues = false;
+const session = {
+  get resumeAfterAsk() { return origin === 'resume-cezar-done'; },
+  set resumeAfterAsk(value) {
+    if (!value) return;
+    mkdirSync(join(process.cwd(), '.ai', 'cezar', 'mock-cursor-print'), { recursive: true });
+    writeFileSync(stateFile, JSON.stringify({ origin: 'resume-cezar-done' }));
+  },
+};
+function selectScenario(name, text = prompt) {
+  return scenarioFor(text, {
+    runner: 'cursor', lifecycle, session, nativeFailureControl: Boolean(failureControl),
+    unsupported: [...unsupported, ...sharedNames.filter(candidate => candidate !== name)],
+    toolPrompt: text => tools().then(module => module.toolPrompt('cursor', args, text)),
+    ciPrompt: text => tools().then(module => module.ciPrompt('cursor', args, text)),
+    async crash(text) { crashContinues = (await import('./mock-runner-crash.mjs')).crashWithStderr(text, '{"type":"assistant",') === true; },
+  });
+}
+// A missing scenario is synchronous. The player alone awaits asynchronous steps.
+function dispatch(replies, index = 0) {
+  for (; index < replies.length; index++) {
+    const route = replies[index];
+    if (route.when && !route.when()) continue;
+    if (route.reply) return route.reply();
+    const selected = selectScenario(route.name, route.prompt?.() ?? prompt);
+    if (!selected) continue;
+    const next = index + 1;
+    const finish = outcome => {
+      if (selected.name === 'no-progress' || selected.name === 'silent-tail' && origin === 'silent-tail-no-reply' && prompt.includes(NO_WAIT_NUDGE_PREFIX)) {
+        setInterval(() => {}, 1000); return new Promise(() => {});
+      }
+      return outcome === 'continue' || selected.name === 'crash-stderr' && crashContinues ? dispatch(replies, next) : undefined;
+    };
+    const outcome = play(selected, encoder(selected));
+    return outcome instanceof Promise ? outcome.then(finish) : finish(outcome);
+  }
+}
+function encoder(selected) {
+  let text = '';
+  return {
+    open() {},
+    text(step) { const block = step.parts.join(''); text = block; assistant(block); },
+    reasoning(step) { frame({ type: 'assistant', session_id: id, message: { role: 'assistant', content: [{ type: 'thinking', thinking: step.text }] } }); },
+    toolStart: ({ call }) => scenarioTool(call, false),
+    toolEnd: ({ call }) => scenarioTool(call, true),
+    child() { throw new Error('Cursor print has no child wire'); },
+    readSteers() {},
+    progress: () => assistant('working\n'),
+    reply: () => prompt === 'inspect the working tree' || prompt.includes('mock:baseline') ? baselineReply() : defaultReply(),
+    end(step) {
+      const empty = selected.name === 'turn-messages' || ['silent-tail', 'tool-tail'].includes(selected.name) && !prompt.includes(NO_WAIT_NUDGE_PREFIX);
+      result(step.error === 'provider' ? 'RetriableError: provider unavailable' : empty ? '' : text, step.error === 'provider');
+    },
+  };
+}
+function scenarioTool(call, completed) {
+  const key = call.name === 'read' ? 'readToolCall' : 'shellToolCall';
+  const args = call.input;
+  const success = call.name === 'read' ? { content: call.output } : { exitCode: call.isError ? 1 : 0, stdout: call.output, stderr: '' };
+  frame({ type: 'tool_call', subtype: completed ? 'completed' : 'started', call_id: call.id, session_id: id,
+    tool_call: { [key]: { args, ...(completed ? { result: { success } } : {}) } } });
+}
+// Delay admission through the shared script, but keep native init and modes in their slots.
+const deferred = selectScenario('deferred-turn-start');
+if (deferred) await play({ steps: [...deferred.steps].filter(step => step.kind === 'effect') }, encoder(deferred));
 frame({ type: 'system', subtype: 'init', session_id: id, model: flag('--model') ?? 'auto', cwd: process.cwd() });
 if (delivery) {
   await new Promise(resolve => delivery.ack(prompt, resolve));
@@ -136,90 +204,34 @@ if (failureControl ? nativeFailure === 'provider' : mode === 'provider-error') {
   result('RetriableError: provider unavailable', true);
   process.exit(0);
 }
-if (prompt.includes('mock:crash-stderr')) {
-  const { crashWithStderr } = await import('./mock-runner-crash.mjs');
-  crashWithStderr(prompt, '{"type":"assistant",');
+if (silentOrigin) (await import('./mock-silent-tail.mjs')).noteSilentTailPrompt(`mock:${origin}`);
+await dispatch([
+  { name: 'crash-stderr' },
+  { when: () => origin === 'autonomous-cezar-ask-cap' && resumeId && prompt.startsWith('Continue working autonomously until the task is fully complete.'), reply: () => finish('Still working.') },
+  { name: 'autonomous', prompt: () => origin?.startsWith('autonomous') && selectScenario('autonomous') ? `${prompt} mock:${origin}` : prompt },
+  { name: 'silent-tail' }, { name: 'tool-tail' },
+  { when: () => origin === 'resume-cezar-done' && resumeId, reply: async () => finish(await done('Resumed work finished.')) },
+  { name: 'cezar-tool' }, { name: 'ci-wait' },
+  { when: () => process.env.CEZ_MOCK_CI_PR, reply: async () => finish(JSON.stringify((await (await tools()).probeCiTool('cursor', args)).response)) },
+  ...['no-progress', 'busy-progress', 'hold-cezar-done', 'hold-cezar-ask', 'hold-gated', 'multi-pr-refs', 'turn-messages'].map(name => ({ name })),
+  { when: () => prompt.includes('mock:ask-bad'), reply: () => finish('Malformed question skipped.') },
+  { name: 'provider-error' },
+  { when: () => resumeId && /Library:|Tests:|Plan:/.test(prompt), reply: async () => finish(await done('Done.')) },
+  { name: 'cezar-done' },
+  { name: 'cezar-ask', when: () => !resumeId || prompt.includes('mock:cezar-ask-reply-late') },
+  { name: 'hold' },
+  { when: () => prompt === 'inspect the working tree' || prompt.includes('mock:baseline'), reply: baselineReply },
+  { name: 'agent-echo' },
+  { reply: defaultReply },
+]);
+function baselineReply() { readTool(); finish('Cursor inspected the workspace.'); }
+async function defaultReply() {
+  const text = `turn ${turn}: ${prompt}`;
+  if (mode === 'delay-work' && resumeId) await new Promise(resolve => setTimeout(resolve, 200));
+  assistant(text);
+  if (mode === 'crash-after-work') process.exit(1);
+  result(text);
+  if (mode === 'duplicate-result') result(text);
+  if (mode === 'late-frame') assistant('LATE_FRAME');
+  if (mode === 'result-before-exit') await new Promise(resolve => setTimeout(resolve, 250));
 }
-if (prompt.includes('mock:autonomous') || prompt.startsWith('Continue working autonomously until the task is fully complete.')) {
-  const { autonomousReply } = await import('./mock-autonomous.mjs');
-  if (origin === 'autonomous-cezar-ask-cap' && resumeId && prompt.startsWith('Continue working autonomously until the task is fully complete.')) {
-    finish('Still working.'); process.exit(0);
-  }
-  const tagged = origin?.startsWith('autonomous') ? `${prompt} mock:${origin}` : prompt;
-  finish(await autonomousReply(tagged, lifecycle)); process.exit(0);
-}
-if (prompt.includes('mock:silent-tail') || prompt.includes('mock:tool-tail') ||
-    (silentOrigin && prompt.includes(NO_WAIT_NUDGE_PREFIX))) {
-  const silent = await import('./mock-silent-tail.mjs');
-  if (silentOrigin && prompt.includes(NO_WAIT_NUDGE_PREFIX)) {
-    if (origin === 'silent-tail-no-reply') { setInterval(() => {}, 1000); await new Promise(() => {}); }
-    if (origin === 'silent-tail-late-reply') await new Promise(resolve => setTimeout(resolve, silent.LATE_REPLY_MS));
-    if (origin === 'silent-tail-slow-done') {
-      assistant(silent.SLOW_DONE_PREFIX);
-      // F10 can hold DONE while its test advances the reply clock; the default stays 400 ms.
-      await waitForRelease(silent.SLOW_DONE_TAIL_MS);
-    }
-    if (origin === 'silent-tail-again') { result(''); process.exit(0); }
-    finish(await silent.finalNudgeText(origin === 'tool-tail' ? 'standing' : 'done', lifecycle));
-    process.exit(0);
-  }
-  assistant(prompt.includes('mock:tool-tail') ? silent.TOOL_TAIL_OPENING : silent.SILENT_TAIL_OPENING);
-  readTool(origin === 'silent-tail-again' ? silent.SILENT_TAIL_REASONING : 'A project'); result(''); process.exit(0);
-}
-if (origin === 'resume-cezar-done' && resumeId) { finish(await done('Resumed work finished.')); process.exit(0); }
-if (prompt.includes('mock:cezar-tool')) {
-  const { toolPrompt } = await import('./mock-ci-tool.mjs');
-  finish(await toolPrompt('cursor', args, prompt)); process.exit(0);
-}
-if (prompt.includes('mock:ci-wait') || process.env.CEZ_MOCK_CI_PR) {
-  const { ciPrompt, probeCiTool } = await import('./mock-ci-tool.mjs');
-  const response = prompt.includes('mock:ci-wait') ? await ciPrompt('cursor', args, prompt)
-    : JSON.stringify((await probeCiTool('cursor', args)).response);
-  finish(response); process.exit(0);
-}
-if (stall(prompt)) {
-  setInterval(() => {}, 1000);
-  await new Promise(() => {});
-}
-if (prompt.includes('mock:busy-progress')) {
-  // N2: a long turn whose native output keeps it alive, then a done (hearsay-tools/cezarion#1620).
-  for (let i = 0; i < 24; i++) { assistant('working\n'); await new Promise(resolve => setTimeout(resolve, 100)); }
-  finish(await done('busy complete')); process.exit(0);
-}
-if (prompt.includes('mock:hold-cezar-done')) { await waitForRelease(400); finish(await done('parity hold-done: content after the pause')); process.exit(0); }
-if (prompt.includes('mock:hold-cezar-ask')) { await waitForRelease(400); finish(await askLibrary()); process.exit(0); }
-if (prompt.includes('mock:hold-gated')) { await waitForRelease(500); finish('parity hold-gated: content after the pause'); process.exit(0); }
-if (prompt.includes('mock:multi-pr-refs')) {
-  const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
-  readTool(unrelatedPr);
-  const text = await multiPrText(prompt, lifecycle);
-  for (const block of text.split('\n')) assistant(block + '\n');
-  result(text); process.exit(0);
-}
-if (prompt.includes('mock:turn-messages:')) {
-  const { turnMessages } = await import('./mock-turn-messages.mjs');
-  for (const message of turnMessages(prompt)) assistant(message + '\n');
-  result(''); process.exit(0);
-}
-if (prompt.includes('mock:ask-bad')) { finish('Malformed question skipped.'); process.exit(0); }
-if (!failureControl && prompt.includes('mock:provider-error')) { result('RetriableError: provider unavailable', true); process.exit(0); }
-if (prompt.includes('mock:cezar-done') || (resumeId && /Library:|Tests:|Plan:/.test(prompt))) {
-  finish(await done('Done.')); process.exit(0);
-}
-if (prompt.includes('mock:cezar-ask') && (!resumeId || prompt.includes('mock:cezar-ask-reply-late'))) {
-  finish(await askLibrary()); process.exit(0);
-}
-if (prompt.includes('mock:hold')) await new Promise(resolve => setTimeout(resolve, 500));
-if (prompt === 'inspect the working tree' || prompt.includes('mock:baseline')) {
-  readTool(); const text = 'Cursor inspected the workspace.'; assistant(text); result(text); process.exit(0);
-}
-if (prompt.includes('mock:agent-echo')) { finish(prompt); process.exit(0); }
-const text = `turn ${turn}: ${prompt}`;
-if (mode === 'delay-work' && resumeId) await new Promise(resolve => setTimeout(resolve, 200));
-assistant(text);
-if (mode === 'crash-after-work') process.exit(1);
-result(text);
-if (mode === 'duplicate-result') frame({ type: 'result', subtype: 'success', session_id: id, is_error: false, result: text });
-if (mode === 'late-frame') frame({ type: 'assistant', session_id: id,
-  message: { role: 'assistant', content: [{ type: 'text', text: 'LATE_FRAME' }] } });
-if (mode === 'result-before-exit') await new Promise(resolve => setTimeout(resolve, 250));

@@ -15,11 +15,13 @@
  * closed: a missing, malformed or unreadable file grants nothing.
  */
 
+import { resolveHome } from './home/resolve.ts';
+import type { Home } from './home/home.ts';
 import { readdirSync, readFileSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { assertCezarHomeWriteIsSandboxed, cezarHomeDir } from './paths.ts';
+import { assertCezarHomeWriteIsSandboxed } from './paths.ts';
 
 export const REMOTE_SETTINGS_DIR = 'remote-settings';
 
@@ -38,16 +40,16 @@ export interface RemoteSettingsState {
   issue?: string;
 }
 
-export function remoteSettingsPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(cezarHomeDir(env), REMOTE_SETTINGS_DIR);
+export function remoteSettingsPath(env: NodeJS.ProcessEnv = process.env, home?: Home): string {
+  return (home ?? resolveHome({ purpose: 'compatibility', env })).remoteSettings;
 }
 
 function isPort(port: number): boolean {
   return Number.isInteger(port) && port >= 1 && port <= 65_535;
 }
 
-function grantFile(env: NodeJS.ProcessEnv, port: number): string {
-  return join(remoteSettingsPath(env), `${port}.json`);
+function grantFile(env: NodeJS.ProcessEnv, port: number, home?: Home): string {
+  return join(remoteSettingsPath(env, home), `${port}.json`);
 }
 
 /** The grant in one port's file, or why it grants nothing. Never throws. */
@@ -69,9 +71,9 @@ function readGrant(path: string, port: number): RemoteSettingsGrant | { issue: s
 }
 
 /** True when the host operator granted the cockpit listening on `port`. Read per call. */
-export function isPortGranted(env: NodeJS.ProcessEnv, port: number | undefined): boolean {
+export function isPortGranted(env: NodeJS.ProcessEnv, port: number | undefined, home?: Home): boolean {
   if (port === undefined || !isPort(port)) return false;
-  const grant = readGrant(grantFile(env, port), port);
+  const grant = readGrant(grantFile(env, port, home), port);
   return grant !== null && 'port' in grant;
 }
 
@@ -81,8 +83,8 @@ export function isGranted(state: RemoteSettingsState, port: number | undefined):
 }
 
 /** Every grant on this host. Never throws. */
-export function readRemoteSettings(env: NodeJS.ProcessEnv = process.env): RemoteSettingsState {
-  const path = remoteSettingsPath(env);
+export function readRemoteSettings(env: NodeJS.ProcessEnv = process.env, home?: Home): RemoteSettingsState {
+  const path = remoteSettingsPath(env, home);
   let names: string[];
   try {
     names = readdirSync(path);
@@ -108,21 +110,22 @@ export async function enableRemoteSettings(
   port: number,
   env: NodeJS.ProcessEnv = process.env,
   now: Date = new Date(),
+  home?: Home,
 ): Promise<RemoteSettingsState> {
   if (!isPort(port)) throw new RangeError(`not a port: ${port}`);
-  const dir = remoteSettingsPath(env);
+  const dir = remoteSettingsPath(env, home);
   assertCezarHomeWriteIsSandboxed(dir, env);
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const temporary = join(dir, `.${port}.${process.pid}.${Date.now()}.tmp`);
   await writeFile(temporary, `${JSON.stringify({ enabledAt: now.toISOString() }, null, 2)}\n`, { mode: 0o600 });
   await rename(temporary, join(dir, `${port}.json`));
-  return readRemoteSettings(env);
+  return readRemoteSettings(env, home);
 }
 
 /** Withdraw the grant for `port`, or every grant when no port is given. */
-export async function disableRemoteSettings(env: NodeJS.ProcessEnv = process.env, port?: number): Promise<RemoteSettingsState> {
-  assertCezarHomeWriteIsSandboxed(remoteSettingsPath(env), env);
-  if (port === undefined) await rm(remoteSettingsPath(env), { recursive: true, force: true });
-  else await rm(grantFile(env, port), { force: true });
-  return readRemoteSettings(env);
+export async function disableRemoteSettings(env: NodeJS.ProcessEnv = process.env, port?: number, home?: Home): Promise<RemoteSettingsState> {
+  assertCezarHomeWriteIsSandboxed(remoteSettingsPath(env, home), env);
+  if (port === undefined) await rm(remoteSettingsPath(env, home), { recursive: true, force: true });
+  else await rm(grantFile(env, port, home), { force: true });
+  return readRemoteSettings(env, home);
 }

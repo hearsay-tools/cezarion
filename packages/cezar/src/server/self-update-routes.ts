@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { Hono } from 'hono';
 import { selfUpdateApplyRequestSchema, selfUpdateChannelRequestSchema, selfUpdateDevelopmentQuerySchema } from '@open-mercato/cezar-contract/self-update';
 import type { RunStore } from '../runs/store.ts';
@@ -6,6 +7,7 @@ import { jsonZodValidator, queryZodValidator } from './validators.ts';
 
 /** The `createApp` dependency this family adds to `ServerDeps`. */
 export interface SelfUpdateServerDeps {
+  home?: Home;
   /** The cockpit's own updater (`/api/v1/workspace/self-update`, src/self-update/). Built by
    *  the CLI, which knows the entry file, the port and how to restart; absent in tests and for
    *  bare `createApp` callers, where the family answers a read-only "not available" status. */
@@ -15,8 +17,9 @@ export interface SelfUpdateServerDeps {
 /** No injected updater (tests, embedded callers): a READ-ONLY service over the running entry.
  *  It has no way to restart the process, so it must not install either — an install that flips
  *  `current` under a process that keeps running the old code is the worst of both. */
-function readOnlySelfUpdate(version: string, localHandoff: () => boolean): SelfUpdateService {
+function readOnlySelfUpdate(version: string, localHandoff: () => boolean, home?: Home): SelfUpdateService {
   return new SelfUpdateService({
+    home,
     pkgName: '@wjarka/cezarion',
     version,
     entry: process.argv[1] ?? '',
@@ -41,7 +44,7 @@ export function createSelfUpdateRoutes(
   /** Every open project's store: an update restarts the process under all of them. */
   stores: () => readonly RunStore[],
 ) {
-  const selfUpdate = deps.selfUpdate ?? readOnlySelfUpdate(deps.version, localHandoff);
+  const selfUpdate = deps.selfUpdate ?? readOnlySelfUpdate(deps.version, localHandoff, deps.home);
   const managedUpdateStatus = async (opts?: { refresh?: boolean }) => {
     const activeRuns = [...new Set(stores())].reduce((count, store) => count + store.listRuns().filter(run => ['queued', 'waiting', 'running'].includes(run.status)).length, 0);
     return { ...await selfUpdate.status({ ...opts, registryOnly: !localHandoff() }), activeRuns };

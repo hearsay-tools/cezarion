@@ -2,7 +2,8 @@ import * as React from 'react'
 
 import { useQueryClient } from '@tanstack/react-query'
 
-import { useHealth, useProjects, useRunsIndex, workspaceQueryKeys } from '@/api/queries'
+import { useHealth, useProjects, useRunsIndex } from '@/api/queries'
+import { runsIndexSync } from '@/api/runs-index-sync'
 import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
 import { canPersistProjectOrder, orderProjects } from '@/lib/project-order'
 import { signalsByProject, type ProjectSignal } from '@/lib/project-signal'
@@ -45,20 +46,26 @@ export function useWorkspaceSignals(): WorkspaceSignals | null {
   const singleProject = useHealth().data?.capabilities.singleProject === true
   const signals = React.useMemo(() => (index ? signalsByProject(index.runs) : null), [index])
 
-  // The index is refreshed by run events and reconnects, and none of those fire when the registry
-  // changes. A project registered (or cloned, or removed) with runs already on disk would show no
-  // signal until the next run event, so a change in WHICH projects exist asks for a fresh index.
-  // Keyed on the id set so a rename or a `lastOpenedAt` bump does not refetch.
-  // Sorted, so a reorder (which changes no membership) is not a registry change either.
+  // The stream patches the index row by row, and none of its frames fire when the registry
+  // changes. A project registered (or cloned) with runs already on disk would show no signal until
+  // its next run event, so a NEW id asks for a fenced reconciliation. A removed id only drops its
+  // rows: that needs no request (hearsay-tools/cezarion#2729). Keyed on the id set so a rename or
+  // a `lastOpenedAt` bump does nothing; a reorder changes no membership either.
   const registry = registered?.map((project) => project.id).sort().join('\n')
   const seenRegistry = React.useRef<string | undefined>(undefined)
   React.useEffect(() => {
     if (registry === undefined) return
-    // The first sighting is the index's own initial fetch; only a later change needs a refresh.
-    if (seenRegistry.current !== undefined && seenRegistry.current !== registry) {
-      void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex })
-    }
+    const previous = seenRegistry.current
     seenRegistry.current = registry
+    // The first sighting is the index's own initial fetch; only a later change needs work.
+    if (previous === undefined || previous === registry) return
+    const before = new Set(previous.split('\n'))
+    const after = new Set(registry.split('\n'))
+    const sync = runsIndexSync(queryClient)
+    for (const id of before) if (!after.has(id)) sync.dropProject(id)
+    const added = [...after].filter((id) => !before.has(id))
+    for (const id of added) sync.restoreProject(id)
+    if (added.length > 0) void sync.reconcile({ hold: true })
   }, [queryClient, registry])
 
   return React.useMemo(

@@ -3,21 +3,12 @@ import { dirname, join, resolve, sep } from 'node:path';
 import type { AgentHomePaths } from './agent-config/catalog.ts';
 import { isOmpProfileName } from './core/agent-profiles.ts';
 
-/**
- * Per-user cezar home. Literal `~/.cezar` on every platform (no XDG, no
- * `%LOCALAPPDATA%` branch) — one rule, and it matches how the existing cache
- * path already behaves (`skills-remote.ts` hardcodes `~/.cache/cez`).
- *
- * `CEZ_HOME` overrides the base so tests (and containers) never touch a real
- * home dir. This is the first shared home-path helper in the repo; two other
- * 2026-07-16 specs (multi-project-switcher, agent-config-files) extend it —
- * first writer owns the file, later specs import it. Do not duplicate this
- * homedir logic elsewhere.
- */
+import { resolveHome } from './home/resolve.ts';
+import type { Home } from './home/home.ts';
+
+/** Compatibility shim for P1a-2. New entry points pass Home; see ADR 0059. */
 export function cezarHomeDir(env: NodeJS.ProcessEnv = process.env): string {
-  // `|| undefined` so an EMPTY CEZ_HOME (e.g. `CEZ_HOME= cezar …`) falls back
-  // to the default instead of yielding relative paths in the cwd.
-  return (env.CEZ_HOME || undefined) ?? join(homedir(), '.cezar');
+  return resolveHome({ purpose: 'compatibility', env }).root;
 }
 
 /**
@@ -64,8 +55,8 @@ export function instanceSlug(domain: string | undefined | null): string {
 }
 
 /** The directory holding per-domain (named) server-install state files. */
-export function serverInstancesDir(): string {
-  return join(cezarHomeDir(), 'server-instances');
+export function serverInstancesDir(home = resolveHome({ purpose: 'compatibility' })): string {
+  return home.serverInstances;
 }
 
 /**
@@ -76,19 +67,18 @@ export function serverInstancesDir(): string {
  * Distinct from the per-user project registry the multi-project workspace keeps
  * inside `~/.cezar/config.json` (see `workspaceConfigPath`) — they coexist.
  */
-export function serverStatePath(instance: string = DEFAULT_SERVER_INSTANCE): string {
-  if (instance === DEFAULT_SERVER_INSTANCE) return join(cezarHomeDir(), 'server.json');
-  return join(serverInstancesDir(), `${instance}.json`);
+export function serverStatePath(instance: string = DEFAULT_SERVER_INSTANCE, home = resolveHome({ purpose: 'compatibility' })): string {
+  return home.serverState(instance);
 }
 
 /**
  * Per-user workspace config (spec 2026-07-20-multi-project-workspace): schema
  * version, global defaults, and the project registry — every repo cezar has
- * been booted in. Lives directly under `cezarHomeDir()`, so the `CEZ_HOME`
+ * been booted in. The legacy layout keeps it under `Home.root`, so the `CEZ_HOME`
  * override applies (tests/containers never touch a real home dir).
  */
-export function workspaceConfigPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(cezarHomeDir(env), 'config.json');
+export function workspaceConfigPath(env: NodeJS.ProcessEnv = process.env, home?: Home): string {
+  return (home ?? resolveHome({ purpose: 'compatibility', env })).workspaceConfig;
 }
 
 /**
@@ -96,16 +86,16 @@ export function workspaceConfigPath(env: NodeJS.ProcessEnv = process.env): strin
  * `.ai/cezar/ui-state.json`. Cross-project UI prefs live here; per-project
  * state (pinned runs, templates) stays in each repo's file.
  */
-export function workspaceUiStatePath(): string {
-  return join(cezarHomeDir(), 'ui-state.json');
+export function workspaceUiStatePath(home = resolveHome({ purpose: 'compatibility' })): string {
+  return home.workspaceUiState;
 }
 
 /**
  * Agent accounts and per-project selections use their own file. Account deletion and selection
  * cleanup share one atomic write.
  */
-export function agentAccountsPath(): string {
-  return join(cezarHomeDir(), 'agent-accounts.json');
+export function agentAccountsPath(home = resolveHome({ purpose: 'compatibility' })): string {
+  return home.agentAccounts;
 }
 
 /**
@@ -127,9 +117,8 @@ export function expandTilde(path: string): string {
  * on the same host. The host-level installer is not concurrency-safe with
  * itself *for the same instance*.
  */
-export function serverLockPath(instance: string = DEFAULT_SERVER_INSTANCE): string {
-  if (instance === DEFAULT_SERVER_INSTANCE) return join(cezarHomeDir(), 'server.install.lock');
-  return join(serverInstancesDir(), `${instance}.install.lock`);
+export function serverLockPath(instance: string = DEFAULT_SERVER_INSTANCE, home = resolveHome({ purpose: 'compatibility' })): string {
+  return home.serverLock(instance);
 }
 
 /**

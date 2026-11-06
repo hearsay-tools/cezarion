@@ -91,6 +91,7 @@ function* silentSteps(prompt, context) {
     silent = await import('./mock-silent-tail.mjs');
     silent.noteSilentTailPrompt(prompt);
   });
+  const cursorSilent = context.runner === 'cursor' && silent.finalMessageNudgeKind() === 'silent';
   if (silent.isFinalMessageNudge(prompt)) {
     const kind = silent.finalMessageNudgeKind();
     yield open({ ackOnly: true });
@@ -99,7 +100,9 @@ function* silentSteps(prompt, context) {
     if (kind === 'late' || lateStart) yield { kind: 'release', fallbackMs: silent.LATE_REPLY_MS };
     yield open({ acknowledged: true });
     if (lateStart) yield { kind: 'release', fallbackMs: silent.LATE_TURN_START_HOLD_MS, suffix: '.content' };
-    if (kind === 'silent') yield { kind: 'reasoning', text: silent.SILENT_TAIL_REASONING };
+    if (kind === 'silent') {
+      if (!cursorSilent) yield { kind: 'reasoning', text: silent.SILENT_TAIL_REASONING };
+    }
     else {
       if (kind === 'slow-done') {
         yield text(silent.SLOW_DONE_PREFIX);
@@ -113,8 +116,10 @@ function* silentSteps(prompt, context) {
   yield open();
   const toolTail = silent.isToolTailScenario(prompt);
   yield text(toolTail ? silent.TOOL_TAIL_OPENING : silent.SILENT_TAIL_OPENING);
-  yield* calls(tool(toolTail ? 'tool-tail-git' : 'tool-silent-gh', 'bash', { command: toolTail ? 'git status --short' : 'gh issue create' }, toolTail ? ' M src/example.ts' : 'created'));
-  if (!toolTail) yield { kind: 'reasoning', text: silent.SILENT_TAIL_REASONING, index: 1 };
+  // Cursor F3 pins this reasoning in read-tool output, with no thinking frames.
+  yield* calls(cursorSilent ? tool('tool-silent-read', 'read', { path: 'README.md' }, silent.SILENT_TAIL_REASONING)
+    : tool(toolTail ? 'tool-tail-git' : 'tool-silent-gh', 'bash', { command: toolTail ? 'git status --short' : 'gh issue create' }, toolTail ? ' M src/example.ts' : 'created'));
+  if (!toolTail && !cursorSilent) yield { kind: 'reasoning', text: silent.SILENT_TAIL_REASONING, index: 1 };
   yield end();
 }
 
@@ -248,7 +253,7 @@ function trailingScenario(prompt, context) {
   if (matches('hold-cezar-done')) return scenario('hold-cezar-done', held(done(context, 'parity hold-done: content after the pause')));
   if (matches('hold-cezar-ask')) return scenario('hold-cezar-ask', held(ask(context)));
   if (matches('cezar-done') || !context.unsupported?.includes('cezar-done') && context.session.resumeAfterAsk && prompt.trim() === 'Library: Vitest') {
-    return scenario('cezar-done', [effect(() => { context.session.resumeAfterAsk = false; }), open(), text(done(context, 'parity done: the task is complete')), end()]);
+    return scenario('cezar-done', [effect(() => { context.session.resumeAfterAsk = false; }), open(), text(done(context, context.runner === 'cursor' ? 'Done.' : 'parity done: the task is complete')), end()]);
   }
   if (matches('cezar-ask')) {
     return scenario('cezar-ask', [effect(() => { context.session.resumeAfterAsk = matches('resume-cezar-done'); }), open(), text(ask(context, QUESTIONS)), end()]);
