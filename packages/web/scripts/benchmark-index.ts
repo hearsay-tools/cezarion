@@ -58,6 +58,10 @@ interface RequestRow { url: string; at: number; startTs?: number; durationMs?: n
 export async function runIndexWorkload(options: {
   buildRoot: string; report: { cases: unknown[] }; save: () => void; views?: string[] | undefined; cpu?: string | undefined
   sustainedMs?: number | undefined
+  /** How long the `update` phase waits for the title on the page, at least 3 s (the default). */
+  updateWindowMs?: number | undefined
+  /** The cezar package to serve, relative to `buildRoot`: the production build by default. */
+  serverPackage?: string | undefined
   /** Diagnostics: a renderer CPU profile of the sustained phase. */
   profileOut?: string | undefined
 }) {
@@ -65,7 +69,7 @@ export async function runIndexWorkload(options: {
   if (views.some(view => !VIEWS.includes(view))) throw new Error(`Use views from ${VIEWS.join(',')}`)
   const sustainedMs = options.sustainedMs ?? 60_000
   for (const view of views) {
-    const fixture = await createTabFixture(options.buildRoot, { serverPackage: 'packages/cezar', indexSeed: true })
+    const fixture = await createTabFixture(options.buildRoot, { serverPackage: options.serverPackage ?? 'packages/cezar', indexSeed: true })
     const pid = fixture.server.pid!
     // One CPU for the cockpit server, so its CPU time is not spread by the shared host's load.
     if (options.cpu !== undefined) execFileSync('taskset', ['-a', '-cp', options.cpu, String(pid)], { stdio: 'ignore' })
@@ -100,7 +104,8 @@ export async function runIndexWorkload(options: {
 
         const state = await fixture.control()
         const family = state.family!
-        const otherRoots = state.runs.filter(run => run.projectId === 'other')
+        // Unarchived roots, so every target is an index row the global Tasks page lists by title.
+        const otherRoots = state.indexRoots!.other!.map(runId => ({ projectId: 'other', runId }))
         const path = view === 'all-tasks' ? '/tasks' : view === 'detail' ? `/p/boot/tasks/${family.parent}` : '/p/boot'
 
         const phases: Record<string, unknown> = {}
@@ -144,7 +149,8 @@ export async function runIndexWorkload(options: {
           const at = performance.now()
           await fixture.control({ update: [{ projectId: target.projectId, runId: target.runId, patch: { title } }] })
           let shownMs: number | null = null
-          while (performance.now() - at < 3_000) {
+          const windowMs = Math.max(3_000, options.updateWindowMs ?? 3_000)
+          while (performance.now() - at < 3_000 || (shownMs === null && performance.now() - at < windowMs)) {
             if (shownMs === null && await evaluate(`document.body.innerText.includes(${JSON.stringify(title)})`)) shownMs = Math.round(performance.now() - at)
             await pause(50)
           }

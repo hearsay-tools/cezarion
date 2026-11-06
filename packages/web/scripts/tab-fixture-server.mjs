@@ -34,9 +34,11 @@ writeFileSync(join(process.env.CEZ_HOME, 'config.json'), JSON.stringify({ projec
  *  roots of 210), plus one running delegation parent in `boot` with four running workers. */
 const seedIndex = (store, projectId) => {
   for (let i = 0; i < 210; i++) store.setArchived(store.createRun({ title: `Archived ${projectId} ${i}`, task: 'archived', workflow: 'quick-task', steps: [] }).id, true)
+  indexRoots[projectId] = []
   for (let i = 0; i < (projectId === 'boot' ? 203 : 204); i++) {
     const run = store.createRun({ title: `Index ${projectId} ${i}`, task: 'index', workflow: 'quick-task', steps: [] })
     store.updateRun(run.id, { status: 'done' })
+    indexRoots[projectId].push(run.id)
   }
   if (projectId !== 'boot') return
   const parent = store.createRun({ title: 'Delegation parent', task: 'parent', workflow: 'quick-task', steps: [] })
@@ -51,6 +53,8 @@ const seedIndex = (store, projectId) => {
   family = { parent: parent.id, workers: workers.map(worker => worker.id) }
 }
 let family
+/** Each project's unarchived index roots, oldest first: fixed targets for updates and ticks. */
+const indexRoots = {}
 const seed = (dir, projectId) => {
   const store = RunStore.open(join(dir, '.ai/cezar'))
   if (indexSeed) { seedIndex(store, projectId); store.flush(); return store }
@@ -120,7 +124,7 @@ const control = createServer(async (req, res) => {
     if (command.publish) for (const run of command.runs ?? runs) stores.get(run.projectId)?.appendEvent(run.runId, { type: 'item.completed', item: { kind: 'message', id: `publish-${++published}`, role: 'assistant', text: command.publish } })
   }
   res.setHeader('content-type', 'application/json')
-  res.end(JSON.stringify({ runs, published, ticks, family, ...reports.state(), reportIo, listeners: [...stores].map(([projectId, value]) => ({ projectId, event: value.listenerCount('event'), run: value.listenerCount('run'), deleted: value.listenerCount('deleted') })) }))
+  res.end(JSON.stringify({ runs, published, ticks, family, indexRoots, ...reports.state(), reportIo, listeners: [...stores].map(([projectId, value]) => ({ projectId, event: value.listenerCount('event'), run: value.listenerCount('run'), deleted: value.listenerCount('deleted') })) }))
 })
 control.listen(0, '127.0.0.1', () => console.log(`control → http://127.0.0.1:${control.address().port}`))
 const server = startServer({ repoRoot: root, store, manager, contexts, version: 'tab-fixture', bootProjectId: 'boot' }, 0)

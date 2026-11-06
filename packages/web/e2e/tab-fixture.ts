@@ -19,7 +19,7 @@ export async function createTabFixture(buildRoot = process.cwd(), options: { rem
     if (!controlOrigin) throw new Error('fixture control listener missing')
     const control = async (command?: unknown) => {
       const response = await fetch(controlOrigin, command === undefined ? {} : { method: 'POST', body: JSON.stringify(command) })
-      return await response.json() as { reportsFixture?: { artifacts: Array<{ id: string; runId: string; taskTitle: string }>; settled: Array<{ projectId: string; runId: string }>; live: Array<{ projectId: string; runId: string }>; publication?: { id: string; at: number; runId: string } }; reportIo: { scans: number; contentLstat: number; pageChecks: number }; reportTitles: Record<string, string>; runs: Array<{ projectId: string; runId: string }>; published: number; ticks: number; family?: { parent: string; workers: string[] }; listeners: Array<{ projectId: string; event: number; run: number; deleted: number }> }
+      return await response.json() as { reportsFixture?: { artifacts: Array<{ id: string; runId: string; taskTitle: string }>; settled: Array<{ projectId: string; runId: string }>; live: Array<{ projectId: string; runId: string }>; publication?: { id: string; at: number; runId: string } }; reportIo: { scans: number; contentLstat: number; pageChecks: number }; reportTitles: Record<string, string>; runs: Array<{ projectId: string; runId: string }>; published: number; ticks: number; family?: { parent: string; workers: string[] }; indexRoots?: Record<string, string[]>; listeners: Array<{ projectId: string; event: number; run: number; deleted: number }> }
     }
     const { runs } = await control()
     const runIds = runs.filter(run => run.projectId === 'boot').map(run => run.runId)
