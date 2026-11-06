@@ -317,8 +317,7 @@ async function dispatchReply(replies, body) {
 
 const server = createServer(handleRequest);
 
-function handleRequest(req, res) {
-  wireRecorder?.recordHttpResponse(req, res);
+function handleRequest(req, res) { wireRecorder?.recordHttpResponse(req, res);
   const url = req.url ?? '';
   if (inputClosed && req.method === 'POST') { req.socket.destroy(); return; }
   if (req.method === 'GET' && url === '/question') {

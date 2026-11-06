@@ -31,6 +31,7 @@
     "test": "vitest run --project server --project contract --project api-client --project web",
     "test:watch": "vitest --project server --project contract --project api-client --project web",
     "test:changed": "node scripts/test-changed.mjs",
+    "mock:wire": "node packages/cezar/scripts/record-mock-wires.mjs",
     "test:parity": "node scripts/test-parity.mjs",
     "metrics": "node scripts/metrics.mjs",
     "test:unit": "npm run test:unit -w @wjarka/cezarion && node --import ./scripts/test-git-env.mjs --test .github/scripts/*.test.cjs scripts/*.test.mjs .ai/skills/*/scripts/*.test.mjs",

@@ -26,7 +26,6 @@ export function crashWithStderr(prompt, malformedFrame) {
     // The late line comes 250ms after the leader's exit, late enough that a
     // runner that stops draining reliably fails S19 (hearsay-tools/cezarion#887).
     const child = spawn(process.execPath, ['-e', `
-      ${recorder ? `const recorder = await import(${JSON.stringify(new URL('./mock-wire-recorder.mjs', import.meta.url).href)}); recorder.installWireRecorder();` : ''}
       process.on('disconnect', () => {
         setTimeout(() => process.stderr.write('late buffered crash diagnostic\\n'), 250);
         setTimeout(() => {}, 5000);
