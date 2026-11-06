@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setImmediate } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutomationStore } from '../automations/store.ts';
 import { WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
@@ -8,6 +9,8 @@ import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { sweepRegisteredPreviewLeftovers } from './project-context.ts';
 import { createApp, startServer, type ServerDeps } from './server.ts';
+import * as git from './git.ts';
+import { createWorkspaceProjects } from './workspace-projects.ts';
 
 // The post-listen chain reads the registry, then sweeps preview leftovers, then decides on the
 // warm-up: the sweep call is the test's signal that the chain reached that decision.
@@ -243,6 +246,41 @@ describe('automations gate (#801)', () => {
       delete process.env.CEZ_AUTOMATIONS;
       await boot();
     }, WARMUP_MS + 5_000);
+
+    it.each(['project discovery', 'Git inspection'] as const)('does not restart after closing during %s', async (stage) => {
+      delete process.env.CEZ_AUTOMATIONS;
+      const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start').mockResolvedValue();
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const workspace = createWorkspaceProjects({ bootRoot: repoRoot });
+      vi.spyOn(workspace, 'listVisibleProjects').mockImplementation(async () => {
+        if (stage === 'project discovery') {
+          entered.resolve();
+          await release.promise;
+        }
+        return [];
+      });
+      vi.spyOn(git, 'getRepoInfo').mockImplementation(async () => {
+        if (stage === 'Git inspection') {
+          entered.resolve();
+          await release.promise;
+        }
+        return null;
+      });
+      const server = startServer({ repoRoot, store, workspaceProjects: workspace,
+        manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' }, 0);
+      try {
+        await entered.promise;
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        release.resolve();
+        // One real event-loop turn drains the released startup chain; these probes do no I/O.
+        await setImmediate();
+        expect(started).not.toHaveBeenCalled();
+      } finally {
+        release.resolve();
+        if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
 
     it('starts even when the post-listen chain outlasts a 50ms guess', async () => {
       process.env.CEZ_AUTOMATIONS = '1';

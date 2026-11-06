@@ -5414,9 +5414,11 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       }
       // #801: with automations off there is nothing to warm — no remote to resolve, no receipts
       // to reconcile, and above all no scheduler to start.
-      if (!automationsEnabled()) return;
+      // Discovery can settle after close; do not restart a scheduler teardown already stopped.
+      if (!automationsEnabled() || !server.listening) return;
       void Promise.all(all.map(async (project) => {
         await rememberAutomationProject(project.id, project.root);
+        if (!server.listening) return;
         const automationStore = automationCoordinator.store(project.id, project.root);
         const runStore = project.id === (deps.bootProjectId ?? 'default')
           ? deps.store
@@ -5425,7 +5427,9 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
         if (automationStore && runStore && !runStore.unavailable) reconcileAutomationReceipts(automationStore, runStore);
         // After reconciliation and before the timer arms.
         brakeIdleAutomations(project.id, automationStore);
-      })).then(() => automationScheduler.start()).catch(() => undefined);
+      })).then(() => {
+        if (server.listening) return automationScheduler.start();
+      }).catch(() => undefined);
     }).catch(() => undefined);
   };
   if (server.listening) startBackgroundServices();
