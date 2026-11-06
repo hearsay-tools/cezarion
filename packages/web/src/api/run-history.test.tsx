@@ -418,6 +418,32 @@ describe('useRunHistory', () => {
     vi.unstubAllGlobals()
   })
 
+  it('keeps the newer context when an older context answer lands last', async () => {
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const late = deferred<RunHistoryContext>()
+    mockHistory.mockResolvedValueOnce(page(100)).mockResolvedValue(tail(201, 300))
+    mockContext.mockReturnValueOnce(late.promise).mockResolvedValue({ ...context(), asOfSeq: 300 })
+    const { wrapper } = harness()
+    const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+
+    act(() => {
+      for (let seq = 101; seq <= 300; seq += 1) FakeEventSource.instances[0]!.emit('run-event', note(seq))
+    })
+    await waitFor(() => expect(result.current.visibleEvents[0]?.seq).toBe(201))
+    await waitFor(() => expect(result.current.currentComplete).toBe(true))
+    // The first context request, read before the compaction, answers now.
+    await act(async () => {
+      late.resolve(context())
+      await late.promise
+      await new Promise((resolve) => setTimeout(resolve, 0)) // bound: lets the query apply the late answer
+    })
+    expect(mockContext).toHaveBeenCalledTimes(2)
+    expect(result.current.currentComplete).toBe(true)
+    vi.unstubAllGlobals()
+  })
+
   /**
    * The compaction call is fire-and-forget, so it has no query to carry a rejection (#827).
    * Since the client now REJECTS a malformed history page instead of casting it, this path can

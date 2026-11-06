@@ -68,6 +68,12 @@ function contextReachesPage(context: RunHistoryContext | undefined, newestPage: 
   return firstSeq === undefined || context.asOfSeq >= firstSeq - 1
 }
 
+/** Of two context snapshots, the one read later: requests overlap, and an older answer can land
+ *  last (hearsay-tools/cezarion#2588). */
+function newerContext(cached: RunHistoryContext | undefined, fresh: RunHistoryContext): RunHistoryContext {
+  return cached !== undefined && cached.asOfSeq > fresh.asOfSeq ? cached : fresh
+}
+
 export interface RunHistoryState {
   visibleEvents: RunEvent[]
   currentEvents: RunEvent[]
@@ -115,7 +121,11 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
   const context = useQuery({
     queryKey: contextKey,
     enabled: runId !== undefined,
-    queryFn: ({ signal }) => getRunHistoryContext(runId!, { signal }),
+    // A refetch that started before a newer write must not put the older snapshot back.
+    queryFn: async ({ signal }) => {
+      const fresh = await getRunHistoryContext(runId!, { signal })
+      return newerContext(queryClient.getQueryData(contextKey), fresh)
+    },
     retry: 1,
   })
 
@@ -129,7 +139,7 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     ])
     signal?.throwIfAborted()
     mergeNewestPage(queryClient, ['run-history', scope, runId], latest)
-    queryClient.setQueryData(['run-history-context', scope, runId], current)
+    queryClient.setQueryData<RunHistoryContext>(['run-history-context', scope, runId], (cached) => newerContext(cached, current))
     return latest
   }, [queryClient, runId, scope])
 
