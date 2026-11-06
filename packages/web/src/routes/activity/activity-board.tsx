@@ -63,7 +63,7 @@ export interface BoardProps {
   watchingSince: string
   motion?: MotionState
   feed?: readonly FeedEntry[]
-  /** Reduced motion or a hidden tab: cards move at once, without FLIP. */
+  /** Reduced motion: cards move at once, without FLIP, and no comet flies. */
   still?: boolean
   paused?: boolean
 }
@@ -108,7 +108,7 @@ export function ActivityBoard({ project, now, watchingSince, motion = EMPTY_MOTI
               })}
             </div>
           ))}
-          <ActivityLines requests={drawnRequests} index={index} peers={!narrow} layoutKey={layoutKey} now={now} motion={motion} paused={paused} />
+          <ActivityLines requests={drawnRequests} index={index} peers={!narrow} layoutKey={layoutKey} now={now} motion={motion} paused={paused || still} />
         </div>
       </div>
       <ActivityRail requests={project.requests} closing={ghosts.folding} index={index} now={now} watchingSince={watchingSince} feed={feed} motion={motion} />

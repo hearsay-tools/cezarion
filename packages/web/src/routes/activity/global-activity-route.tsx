@@ -39,7 +39,7 @@ export function GlobalActivityRoute() {
   const boot = projects.data?.bootProject ?? health.data?.bootProject ?? null
   const snapshot = activity.data?.projects
   const groups = React.useMemo(() => groupProjects(inRailOrder(snapshot ?? [], railIds)), [snapshot, railIds])
-  const { motion, paused } = useActivityMotion(activity.data, 'workspace')
+  const { motion, paused, reduced } = useActivityMotion(activity.data, 'workspace')
 
   return (
     <div data-route="activity-global" data-activity-paused={paused ? 'true' : undefined} className="flex min-h-full w-full flex-col gap-4 px-[18px] py-6 md:px-7">
@@ -59,7 +59,7 @@ export function GlobalActivityRoute() {
         <p data-slot="activity-empty" className="py-6 text-[13px] text-muted-foreground">No projects to show.</p>
       ) : null}
       <div data-slot="activity-panels" className="flex flex-col gap-3.5">
-        {groups.panels.map((project) => <ProjectPanel key={project.projectId} project={project} now={now} motion={motion} paused={paused} />)}
+        {groups.panels.map((project) => <ProjectPanel key={project.projectId} project={project} now={now} motion={motion} paused={paused || reduced} />)}
       </div>
       <IdleLine projects={groups.idle} belowPanels={groups.panels.length > 0} />
     </div>

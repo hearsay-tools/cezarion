@@ -85,5 +85,6 @@ export function advanceMotion(tracker: MotionTracker, input: MotionInput): Motio
   if (input.snapshot === was.snapshot && input.active === was.active && input.reduced === was.reduced) return tracker
   let next: MotionTracker = { ...tracker, input }
   if (was.active && !input.active) next = { ...still(next), reconcile: true }
+  if (!was.reduced && input.reduced) next = still(next)
   return nextSnapshot(next, input.snapshot)
 }

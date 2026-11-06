@@ -113,4 +113,31 @@ describe('the live board', () => {
     act(() => { animations[0]!.finish() })
     expect(start()).toEqual({ x: 300, y: 22 })
   })
+
+  it('stops the comet loop, cancels FLIP and ends every motion at once when reduced motion turns on', () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', frames.request)
+    vi.stubGlobal('cancelAnimationFrame', frames.cancel)
+    const boxes: Record<string, Box> = { a: { x: 0, y: 0, w: 300, h: 120 }, b: { x: 396, y: 0, w: 300, h: 120 }, c: { x: 792, y: 0, w: 300, h: 120 }, d: { x: 0, y: 200, w: 300, h: 120 } }
+    placeBoxes('data-activity-card', boxes)
+    const peer = request({ senderRunId: 'b', recipientRunId: 'c' })
+    const live = renderLive(at(0, { tasks: [A, B, C, D] }), 1092)
+    live.rerender(at(1_000, { tasks: [B, C, D], requests: [peer] }))
+    // The request opened: its comet flies and its line fades in. A is a ghost.
+    expect(frames.request).toHaveBeenCalled()
+    expect(document.querySelector(`path[data-request="${peer.requestId}"]`)?.classList.contains('activity-line-in')).toBe(true)
+    // The ghost goes: D moves up with FLIP while the comet still flies.
+    boxes.d!.y = 0
+    act(() => { vi.advanceTimersByTime(MOTION_MS.cardLeave) })
+    expect(animations).toHaveLength(1)
+    expect(MOTION_MS.cardLeave).toBeLessThan(MOTION_MS.comet)
+
+    reduced = true
+    act(() => { for (const listener of mediaListeners) listener() })
+    expect(frames.cancel).toHaveBeenCalledWith(7)
+    expect(animations[0]!.cancel).toHaveBeenCalled()
+    expect(document.querySelector(`path[data-request="${peer.requestId}"]`)?.classList.contains('activity-line-in')).toBe(false)
+    // No timer of the dropped motion fires later.
+    expect(vi.getTimerCount()).toBe(0)
+  })
 })

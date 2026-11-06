@@ -42,7 +42,7 @@ function places(host: HTMLElement, attribute: string): Map<string, { el: HTMLEle
 export const LAYOUT_SETTLED = 'activity-layout-settled'
 
 /** Play FLIP on the host's `[attribute]` elements whenever `layoutKey` changes; `enabled` false
- *  (reduced motion, a hidden tab) moves them at once. */
+ *  (reduced motion, a hidden tab) moves them at once and cancels the animations still running. */
 export function useFlip(hostRef: React.RefObject<HTMLElement | null>, attribute: string, layoutKey: string, enabled: boolean) {
   const last = React.useRef<{ key: string; at: Map<string, Place> } | undefined>(undefined)
   const running = React.useRef(new Set<Animation>())
@@ -59,6 +59,10 @@ export function useFlip(hostRef: React.RefObject<HTMLElement | null>, attribute:
       if (animation) track(animation, running.current, host)
     }
   })
+  React.useEffect(() => {
+    if (enabled) return
+    for (const animation of [...running.current]) animation.cancel()
+  }, [enabled])
 }
 
 /** Hold a running FLIP animation until it finishes or is cancelled; when the last one ends, the
