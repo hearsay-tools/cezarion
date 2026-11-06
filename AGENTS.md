@@ -34,17 +34,9 @@ Practical rules:
 
 ## Changing what already works
 
-Read [`.ai/skills/load-bearing-change/SKILL.md`](.ai/skills/load-bearing-change/SKILL.md)
-before you plan or review a change that replaces, removes or merges working behavior
-(a timer, lock, cap, timeout, state, handler, queue or default). It also says which
-changes need a **case table** in the spec or plan: a run state, a cross-run
-relationship, a ToolGrant mapping, worktree files, a detached process or restored
-client state. Prove each regression test **red** without the fix
-([`docs/sdlc/regression-proof.md`](docs/sdlc/regression-proof.md)).
-
-Read [`.ai/skills/reader-sweep/SKILL.md`](.ai/skills/reader-sweep/SKILL.md) before you
-rename, move or remove a shared name, value or default: a `RunRecord` field, an enum
-value, a seeded default, a cockpit control, visible copy or dry-run turn-end behavior.
+Follow [CODE_REVIEW.md § Changing working behavior](CODE_REVIEW.md#changing-working-behavior)
+when replacing working behavior or changing a shared name, value or default.
+Use the case tables in [the spec template](.ai/specs/TEMPLATE.md#case-tables).
 
 ## Repository layout
 
@@ -102,14 +94,17 @@ In a fresh task worktree (`.ai/cezar/worktrees/<runId>`), run `pnpm install --fr
 unless `worktreeSetup` already did.
 
 - When Squeal validates this worktree, it runs the unit tests after each edit: read its
-  verdicts and let it run them.
+  verdicts and let it run them. Follow the [wait bound](docs/sdlc/ci.md#squeal-wait-bound).
 - Run Vitest through `npm test -- <args>`, the repo's pinned binary.
 - CI owns the final gate and full-suite runs. Locally, run what the change affects.
 - In a unit test, wait on the product's own signal. A timeout is only a hang guard, with a
-  `// bound: <reason>` comment at the call site.
-
-Read [`.ai/skills/validation/SKILL.md`](.ai/skills/validation/SKILL.md) before running
-tests, lint, typechecks, browser or packaged E2E, or choosing a Squeal or unit-test wait.
+  `// bound: <reason>` comment at the call site. A test that proves something did not happen
+  uses fake timers or states at the call site why it needs real time.
+- `npm run typecheck`: no build or `dist` writes; after a build: `npm run typecheck:package`.
+- CLI E2E: `npm run test:package -- <repo-root paths>`; parity: `npm run test:parity`.
+- Browser: `npm run test:e2e:affected`, `npm run test:e2e` / `npm run test:e2e:local`;
+  see [e2e guide](packages/web/e2e/README.md).
+- Selection: `npm run test:changed -- --help`.
 
 ### Before opening a PR
 

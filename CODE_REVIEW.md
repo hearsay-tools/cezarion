@@ -24,7 +24,7 @@ Apply the checks relevant to the changed mechanism.
 
 - **Scope and preserved behavior:** compare the diff with the accepted outcome.
   Check the guarantees the old mechanism provided, shipped defaults, failure paths
-  and applicable case tables. Follow [AGENTS.md](AGENTS.md#changing-what-already-works)
+  and applicable case tables. Follow [Changing working behavior](#changing-working-behavior)
   and require the relevant [regression proof](docs/sdlc/regression-proof.md).
 - **Types and boundaries:** preserve the changed package's compiler checks and
   narrow uncertain values. For HTTP changes, use the
@@ -54,6 +54,32 @@ Apply the checks relevant to the changed mechanism.
   [e2e guide](packages/web/e2e/README.md) requires. Request changes when it has
   neither. Keep durable intent in source comments and investigation evidence
   with the PR.
+
+## Changing working behavior
+
+Before replacing, removing or merging a timer, lock, cap, timeout, state, handler,
+queue or default, name the guarantee the old mechanism was load-bearing for.
+Before changing an existing test's expected outcome, name the guarantee it pinned
+and explain its replacement or the authorized reason to drop it.
+
+Diff the shipped-default path: with every new setting at its shipped default,
+what does the old scenario do now? A replacement that ships off is not a replacement.
+Test paths that read `this.active.get(runId)` with no live session: the absent
+entry still reaches the required durable outcome and a usable next step. A
+fail-open helper needs a test of empty or absent input.
+
+A regression test must fail without the fix: require
+[regression proof](docs/sdlc/regression-proof.md). Guard tests that pass both ways
+may stay; say which is which.
+
+A change to a shared name, value or default finds and updates every reader, or
+states why a reader stays. For saved data and user-facing messages, search both
+the old and new form. Follow [saved-format compatibility](BACKWARD_COMPATIBILITY.md).
+
+Changes to a run state or how a run leaves an existing state (an exit trigger or
+recovery path), cross-run relationship, ToolGrant mapping, running task's
+worktree files, detached process or restored client state need the applicable
+[case tables](.ai/specs/TEMPLATE.md#case-tables) in the spec or plan before implementation.
 
 ## CI surface rules
 
