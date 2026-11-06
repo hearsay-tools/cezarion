@@ -52,7 +52,7 @@ describe('GET /api/v1/health — forge + capabilities', () => {
     // must not decide what these assertions see.
     delete process.env.CEZ_FOLLOWUPS;
     delete process.env.CEZ_SINGLE_PROJECT;
-    // #801: automations are opt-in for the same reason, and the same ambient-env hazard applies.
+    // #801: clear any ambient automation opt-out so the suite sees the default.
     delete process.env.CEZ_AUTOMATIONS;
     delete process.env.CEZ_HIDE_TOKEN_METRICS;
     delete process.env.CEZ_HIDE_TOKEN_USAGE;

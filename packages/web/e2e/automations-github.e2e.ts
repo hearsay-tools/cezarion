@@ -28,7 +28,7 @@ beforeAll(async () => {
   // Dry-run mocks agent CLIs and forge lists, but the automation poller still invokes gh.
   // This fixture supplies only an empty search response and refuses every other command.
   writeFileSync(join(bin, 'gh'), `#!/usr/bin/env node
-import { appendFileSync } from 'node:fs';
+const { appendFileSync } = await import('node:fs');
 const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(ghCalls)}, JSON.stringify(args) + '\\n');
 if (args[0] === 'api' && args.includes('/search/issues')) process.stdout.write('{"items":[]}');

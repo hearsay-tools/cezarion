@@ -5231,7 +5231,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   });
   // Injected contexts (tests) skip `prepareManager`.
   sharedContexts.onContextBuilt(addressManager);
-  // #801: GitHub automations are opt-in. Off, the flag must remove the BEHAVIOR and not merely
+  // #801: Automations can be disabled. Off, the flag must remove the BEHAVIOR and not merely
   // the UI — no scheduler, no GitHub polling, no launched runs — so every entry point into the
   // workspace scheduler below is gated on it. Read per call rather than captured, for the same
   // reason `capabilities()` is inside `createApp`: tests flip the variable between apps.

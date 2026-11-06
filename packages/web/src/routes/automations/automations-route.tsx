@@ -23,7 +23,7 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
   // Bumped by the editor's Reload and nothing else: a background revision change must reach the
   // user as the save-time 409, not as a form that silently resets under their typing.
   const [reloadToken, setReloadToken] = useState(0)
-  // Automations are opt-in (#801). A bookmarked `/automations…` URL still routes here with the
+  // Automations are disabled by CEZ_AUTOMATIONS=0. A bookmarked `/automations…` URL still routes here with the
   // capability off, so the view says so rather than rendering an editor whose every request
   // would 409. `!== true` deliberately: only a health payload that HAS answered switches this on.
   const health = useHealth()

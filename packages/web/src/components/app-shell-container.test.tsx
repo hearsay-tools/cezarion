@@ -160,7 +160,7 @@ describe('sidebar wiring', () => {
 
   // #471 — the global inbox is opt-in; the shell must not offer what the server cannot fill.
 
-  // #801 — the same honesty rule for the opt-in automations capability. Both cases carry a
+  // #801 — the same honesty rule for the automations capability. Both cases carry a
   // reachable forge, so the ONLY thing deciding the Automations item here is the capability:
   // before the flag, every project with a GitHub remote saw that tab.
   const WITH_FORGE = { ...HEALTH, forge: { kind: 'github' as const, available: true } }
