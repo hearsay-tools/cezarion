@@ -118,12 +118,17 @@ export async function runTaskListsBenchmark(values: TaskListBenchmarkOptions = {
         }
         const until = async (expression: string) => pollFor(async () => await evaluate(`Boolean(${expression})`) || undefined, () => `Not ready: ${expression}`, { timeoutMs: 60_000, intervalMs: 100, tries: 600 })
         const click = async (expression: string) => {
-          // Keep the same control while virtual overscan changes the first mounted row.
-          await evaluate(`(()=>{window.__taskListProbe.clickTarget=${expression};return true})()`)
+          // Keep the same logical control even if virtua remounts an overscan row.
+          await evaluate(`(()=>{const p=window.__taskListProbe,e=${expression};p.clickTarget=e;p.clickIdentity={item:e?.closest('[data-task-item]')?.dataset.taskItem,label:e?.getAttribute('aria-label'),tag:e?.tagName};return true})()`)
           let previous = '', stableSince = 0
           const point = await pollFor(async () => {
             const sample = await evaluate(`(()=>{
-              const e=window.__taskListProbe.clickTarget;if(!e?.isConnected || window.__cezIdle!==true || document.fonts.status!=='loaded')return null;
+              const p=window.__taskListProbe,id=p.clickIdentity;
+              if(!p.clickTarget?.isConnected && id.item && id.label){
+                const row=[...document.querySelectorAll('[data-task-item]')].find(e=>e.dataset.taskItem===id.item);
+                p.clickTarget=[...(row?.querySelectorAll('[aria-label]')??[])].find(e=>e.tagName===id.tag && e.getAttribute('aria-label')===id.label);
+              }
+              const e=p.clickTarget;if(!e?.isConnected || window.__cezIdle!==true || document.fonts.status!=='loaded')return null;
               e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();
               const x=r.x+r.width/2,y=r.y+r.height/2;
               return e.contains(document.elementFromPoint(x,y)) ? {x,y,width:r.width,height:r.height} : null;
