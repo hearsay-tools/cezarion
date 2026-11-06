@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import type { Home } from '../home/home.ts';
 import { z } from 'zod';
 import type { Cdp, CdpConnection } from './cdp.ts';
 import { ChromiumError, launchChromium, resolveChromium } from './chromium.ts';
@@ -27,8 +28,8 @@ export async function waitForExit(browser: BrowserHandle): Promise<void> {
 }
 
 /** resolve → launch → a flat session on the page target. */
-export async function launchBrowser(profileDir: string, env: NodeJS.ProcessEnv): Promise<BrowserHandle> {
-  const bin = resolveChromium(undefined, env);
+export async function launchBrowser(profileDir: string, env: NodeJS.ProcessEnv, home?: Home): Promise<BrowserHandle> {
+  const bin = home ? resolveChromium(undefined, env, undefined, undefined, home) : resolveChromium(undefined, env);
   if (!bin) throw new ChromiumMissingError('No Chromium found');
   const { proc, browser: connection } = await launchChromium(bin, profileDir, env);
   let tail = '';

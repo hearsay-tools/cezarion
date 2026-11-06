@@ -172,7 +172,7 @@ async function versionsCommand(home?: Home): Promise<number> {
     const where = entry.source === 'link' && entry.checkout ? `  → ${entry.checkout}` : '';
     console.log(`  ${entry.active ? '*' : ' '} ${entry.id.padEnd(36)} ${entry.source.padEnd(9)} ${entry.installedAt.slice(0, 19).replace('T', ' ')}${where}`);
   }
-  const unlinked = (await discoverCheckouts().catch(() => [])).filter((checkout) => !checkout.linked);
+  const unlinked = (await discoverCheckouts(process.env, home).catch(() => [])).filter((checkout) => !checkout.linked);
   if (unlinked.length > 0) {
     console.log('\n  cez worktrees (not linked yet — `cez link <dir>` or pick one in the cockpit):');
     for (const checkout of unlinked) {

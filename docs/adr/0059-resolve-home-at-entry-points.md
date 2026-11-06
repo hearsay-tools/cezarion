@@ -13,7 +13,8 @@ resolves it lazily once for operator commands. Server updater consumers reuse th
 object, or resolve one when called directly. Task commands (`artifact`, `message`,
 `worker`, `task`, `automation`, `webhook`, `discover`) receive no `Home` and do not
 invoke the factory. The selected object passes through migrations, managed update
-services, application update boot, backup listing and preview download.
+services, checkout discovery, managed restart, application update boot, backup listing
+and preview lookup/download.
 
 `Home` names individual paths. Kind roots alone cannot describe the legacy layout:
 registry, install, dry cache, dry prefix, backups and application updates use
@@ -56,5 +57,8 @@ explicit env-object override. Launcher fixtures were generated from the old
 implementation and compare both generated formats byte for byte.
 `home/entry-points.test.ts` checks dispatch isolation and propagation through boot
 services and migrations. `home/write-isolation.test.ts` checks that injected-home
-restore and migration writes leave a different ambient home untouched. Existing path, write-guard and task-home-read suites keep
+restore and migration writes leave a different ambient home untouched.
+`home/discovery-isolation.test.ts` keeps discovery, id collision checks and apply
+on the injected Home when another home holds a same-id checkout. Restart and preview
+lookup tests keep using the injected entry and cache after environment changes. Existing path, write-guard and task-home-read suites keep
 their expectations.

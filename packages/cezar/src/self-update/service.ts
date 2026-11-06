@@ -156,7 +156,7 @@ export class SelfUpdateService {
   async development(opts: { refresh?: boolean } = {}): Promise<SelfUpdateDevelopment> {
     const trim = this.deps.trimPaths?.() ?? false;
     const [checkouts, pulls, doc] = await Promise.all([
-      trim ? Promise.resolve([]) : discoverCheckouts(this.env).catch(() => []),
+      trim ? Promise.resolve([]) : discoverCheckouts(this.env, this.home).catch(() => []),
       this.pulls.get(opts.refresh),
       opts.refresh ? this.registry.refresh() : this.registry.get(),
     ]);
@@ -310,7 +310,7 @@ export class SelfUpdateService {
    *  links here (`trimPaths`), and hosted apply also refuses already-installed local/link targets. */
   private async linkDiscovered(target: string, log: (line: string) => void): Promise<string | null> {
     if (this.deps.trimPaths?.()) return null;
-    const checkout = (await discoverCheckouts(this.env)).find((entry) => entry.id === target);
+    const checkout = (await discoverCheckouts(this.env, this.home)).find((entry) => entry.id === target);
     if (!checkout) return null;
     if (!checkout.built || checkout.stale) {
       log(`${checkout.built ? 'rebuilding' : 'building'} ${checkout.branch} first`);

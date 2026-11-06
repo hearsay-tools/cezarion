@@ -131,7 +131,7 @@ export class PreviewHost implements PreviewHostLike {
     this.deps = {
       probe: deps.probe ?? probePort,
       createServer: deps.createServer ?? (opts => new DevServer(opts)),
-      launchBrowser: deps.launchBrowser ?? (profileDir => launchBrowser(profileDir, env)),
+      launchBrowser: deps.launchBrowser ?? (profileDir => launchBrowser(profileDir, env, deps.home)),
       download: deps.download ?? (opts => downloadChromium({ ...opts, ...(deps.home ? { cacheDir: deps.home.cache } : {}) })),
       osRelease: deps.osRelease ?? readOsRelease,
       env,

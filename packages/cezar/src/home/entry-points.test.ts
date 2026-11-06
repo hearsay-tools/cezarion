@@ -1,10 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
 import { resolveHome } from './resolve.ts';
 import { runSubcommand } from '../subcommands.ts';
 import { runManagedCommand } from '../self-update/cli.ts';
 import { SelfUpdateService } from '../self-update/service.ts';
 import { ApplicationUpdateService } from '../application-update/service.ts';
-import { createServeApplicationUpdate, createServeSelfUpdate } from '../serve-boot.ts';
+import { createServeApplicationUpdate, createServeSelfUpdate, restartServe } from '../serve-boot.ts';
 import { runMigrations } from '../workspace/migrations.ts';
 import type { RunStore } from '../runs/store.ts';
 import type { startServer } from '../server/server.ts';
@@ -69,4 +70,13 @@ it('passes the resolved boot home to migrations', async () => {
   const run = vi.fn(async () => {});
   await runMigrations({ bootRepoRoot: '/repo', home }, [{ id: 'test', to: 1, run }]);
   expect(run).toHaveBeenCalledWith({ home: '/resolved/home', bootRepoRoot: '/repo' }, home);
+});
+
+it('restarts through the injected Home current entry after the ambient home changes', async () => {
+  const home = resolveHome({ purpose: 'server', env: { CEZ_HOME: '/resolved/home' } });
+  vi.stubEnv('CEZ_HOME', '/later/home');
+  const restart = vi.fn();
+  const server = { shutdownForRestart: vi.fn(async () => {}), address: () => ({ address: '127.0.0.1', family: 'IPv4', port: 4321 }) };
+  await restartServe(server as unknown as Parameters<typeof restartServe>[0], restart, { forward: vi.fn() }, home);
+  expect(restart).toHaveBeenCalledWith(expect.objectContaining({ entry: join('/resolved/home', 'versions/current/node_modules/@wjarka/cezarion/dist/index.js') }));
 });

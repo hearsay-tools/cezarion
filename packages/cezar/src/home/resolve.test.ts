@@ -7,7 +7,7 @@ import { remoteSettingsPath } from '../remote-settings.ts';
 import { binDir, versionsDir, currentEntry } from '../self-update/layout.ts';
 import { posixLauncher, windowsLauncher } from '../self-update/launcher.ts';
 import { bareDirFor, skillFilesCacheDirFor } from '../skills-remote.ts';
-import { cezCacheDir } from '../preview/chromium.ts';
+import { cezCacheDir, resolveChromium } from '../preview/chromium.ts';
 import { resolveHome } from './resolve.ts';
 import { REBRAND_SWITCH } from './switch.ts';
 
@@ -110,5 +110,14 @@ describe('legacy Home compatibility (release switch off)', () => {
     expect(expandTilde('~/projects').replaceAll('\\', '/')).toBe('/home/operator/projects');
     expect(ompProfilesDir({ CEZ_HOME: '/srv/cockpit' }).replaceAll('\\', '/')).toBe('/home/operator/.omp/profiles');
     expect(claudeStateFilePath(join('/home/operator', '.claude'), {}).replaceAll('\\', '/')).toBe('/home/operator/.claude.json');
+  });
+
+  it('finds the downloaded browser in the injected Home cache after the ambient user home changes', () => {
+    const home = resolveHome({ purpose: 'server' });
+    const cache = join('/home/operator/.cache/cez', 'chromium');
+    const binary = join(cache, 'chrome-headless-shell-linux64', 'chrome-headless-shell');
+    const fs = { existsSync: (path: string) => path === binary,
+      readdirSync: (path: string) => path === cache ? ['chrome-headless-shell-linux64'] : [] };
+    expect(resolveChromium(fs, { HOME: '/later/home', PATH: '' }, 'linux', 'x64', home)).toBe(binary);
   });
 });

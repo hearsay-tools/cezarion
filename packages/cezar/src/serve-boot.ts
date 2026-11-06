@@ -6,6 +6,7 @@ import type { startServer } from './server/server.ts';
 import { recoverWithProviderRuntimeAuthObservation, type ProviderRuntimeAuthObserver } from './server/provider-auth-runtime.ts';
 import { resolveHome } from './home/resolve.ts';
 import type { Home } from './home/home.ts';
+import { currentEntry } from './self-update/layout.ts';
 import { readNpmConfiguration } from './application-update/npm-process.ts';
 import { restartEndpoint } from './application-update/helper.ts';
 import { armRestartHelper } from './application-update/launcher.ts';
@@ -165,10 +166,11 @@ export async function restartServe(
   server: StoppableServer & Pick<ReturnType<typeof startServer>, 'address'>,
   restart: (opts: RestartOptions) => void = restartProcess,
   opts: StopServeOptions = {},
+  home?: Home,
 ): Promise<void> {
   const port = restartEndpoint(server.address()).port;
   await stopServe(server, 'SIGTERM', opts);
-  restart({ server: null, args: process.argv.slice(2), port, supervised: isSupervised() });
+  restart({ server: null, args: process.argv.slice(2), port, supervised: isSupervised(), ...(home ? { entry: currentEntry(process.env, home) } : {}) });
 }
 
 /** The managed desktop updater; a restart re-execs this serve on the same port. */
@@ -180,7 +182,7 @@ export function createServeSelfUpdate(
     home: opts.home, pkgName: opts.pkgName, version: opts.version, entry: resolve(process.argv[1] ?? ''), supervised: isSupervised(),
     activeRuns: () => opts.store.listRuns().filter(r => ['queued', 'waiting', 'running'].includes(r.status)).length,
     trimPaths: () => !resolveCapabilities(process.env, opts.bindHost).localHandoff,
-    restart: () => { void restartServe(getServer(), restartProcess, { store: opts.store }); },
+    restart: () => { void restartServe(getServer(), restartProcess, { store: opts.store }, opts.home); },
   });
 }
 
