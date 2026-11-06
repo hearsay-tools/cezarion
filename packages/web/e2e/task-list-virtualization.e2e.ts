@@ -152,3 +152,18 @@ it.each([[1440, 900], [360, 640]] as const)('fills a large global list before an
     expect(sample.covered).toBe(true)
   } finally { await large.stop() }
 })
+
+it.each(['project', 'global'] as const)('restores ordinary %s virtual-row focus across both breakpoint flips', async (scope) => {
+  const large = await createTabFixture(process.cwd(), { taskList: scope, taskListSizes: { active: 310, archived: 0, projects: 1 } })
+  try {
+    browser.setViewport(1440, 900)
+    browser.goto(`${large.origin}${scope === 'project' ? '/p/boot/' : '/tasks'}?tasks=virtual`)
+    browser.waitForFunction(`document.querySelector('[data-virtualized="true"] [data-run-id] a') !== null && window.__cezIdle`)
+    const id = browser.evaluate(`(() => {const row=document.querySelector('[data-virtualized="true"] [data-run-id]');row.querySelector('[data-task-control=title]').focus();return row.dataset.runId})()`)
+    browser.waitForFunction(`document.activeElement?.dataset.taskControl === 'title' && document.activeElement.closest('[data-run-id]')?.dataset.runId === ${JSON.stringify(id)}`)
+    for (const [width, height] of [[360, 640], [1440, 900], [360, 640]]) {
+      browser.setViewport(width!, height!)
+      browser.waitForFunction(`document.activeElement?.tagName === 'A' && document.activeElement.closest('[data-run-id]')?.dataset.runId === ${JSON.stringify(id)}`)
+    }
+  } finally { await large.stop() }
+})

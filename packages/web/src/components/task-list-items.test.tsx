@@ -91,3 +91,29 @@ it('keeps focus updates below route derivations', () => {
   act(() => { screen.getByRole('button', { name: 'two' }).focus() })
   expect(derive).toHaveBeenCalledOnce()
 })
+it.each([[undefined, 'title'], ['boot', 'title'], [undefined, 'resources'], ['boot', 'resources']] as const)('restores a virtual row control through both layout flips (project %s, control %s)', async (project, control) => {
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(private callback: ResizeObserverCallback) {}
+    observe(element: HTMLElement) {
+      Object.defineProperty(element, 'offsetParent', { configurable: true, get: () => document.body })
+      queueMicrotask(() => this.callback([{ target: element, contentRect: { width: 1000, height: element.dataset.slot === 'main' ? 300 : 60 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver))
+    }
+    unobserve() {} disconnect() {}
+  })
+  function Page({ layout }: { layout: string }) {
+    return <MemoryRouter><div data-slot="main"><TaskListFocusBoundary layout={layout} revision={items}>
+      <TaskListItems key={layout} items={items} itemKey={(id) => project ? `${project}/${id}` : id}>{(id) =>
+        <div data-run-id={id} data-project={project}><a href={`#${id}`} data-task-control="title">{id}</a><button data-task-control="resources">Resources {id}</button></div>}
+      </TaskListItems>
+    </TaskListFocusBoundary></div></MemoryRouter>
+  }
+  const view = render(<Page layout="desktop" />)
+  await act(async () => {})
+  const focusedControl = () => control === 'title' ? screen.getByRole('link', { name: 'run-0' }) : screen.getByRole('button', { name: 'Resources run-0' })
+  act(() => focusedControl().focus())
+  for (const layout of ['phone', 'desktop']) {
+    view.rerender(<Page layout={layout} />)
+    await act(async () => {})
+    expect(document.activeElement).toBe(focusedControl())
+  }
+})

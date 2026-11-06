@@ -133,7 +133,7 @@ export async function runTaskListsBenchmark(values: TaskListBenchmarkOptions = {
             return performance.now() - stableSince >= 200 ? { x: sample.x, y: sample.y } : undefined
           }, () => `Unsettled click target: ${expression}`, {
             // bound: fonts, query idle, virtual row-size correction and 200 ms stable geometry.
-            timeoutMs: 60_000, intervalMs: 50,
+            timeoutMs: 60_000, intervalMs: 50, tries: 1200,
           })
           report.lastClick = { expected: expression, point }
           await page('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
