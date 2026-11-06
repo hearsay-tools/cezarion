@@ -1,0 +1,506 @@
+helpers:
+  config-asserted-expression:
+    any:
+      - matches: lr-config-assertion
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: lr-config-asserted-expression
+  config-assertion:
+    all:
+      - matches: lr-assertion-wrapper
+      - has:
+          matches: lr-config-type
+  config-member-receiver:
+    all:
+      - any:
+          - kind: member_expression
+          - kind: subscript_expression
+      - any:
+          - has:
+              field: property
+              pattern: $MEMBER
+          - has:
+              field: index
+              kind: string
+              has:
+                kind: string_fragment
+                pattern: $MEMBER
+      - has:
+          field: object
+          matches: lr-config-property-holder
+  config-member:
+    all:
+      - any:
+          - kind: member_expression
+          - kind: subscript_expression
+      - has:
+          field: object
+          matches: lr-capture-receiver
+      - any:
+          - has:
+              field: property
+              regex: ^config$
+          - has:
+              field: index
+              regex: ^['"]config['"]$
+  config-property-holder:
+    any:
+      - all:
+          - kind: identifier
+            pattern: $SOURCE
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $HOLDER_VALUE_SCOPE
+                    - any:
+                        - has:
+                            all:
+                              - matches: lr-value-declaration
+                              - has:
+                                  field: type
+                                  matches: lr-config-property-type
+                            stopBy:
+                              matches: lr-nested-scope
+                        - all:
+                            - matches: lr-function-scope
+                            - has:
+                                all:
+                                  - matches: lr-hoisted-var-declaration
+                                  - all:
+                                      - matches: lr-value-declaration
+                                      - has:
+                                          field: type
+                                          matches: lr-config-property-type
+                                stopBy:
+                                  matches: lr-function-boundary
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - matches: lr-scope-declares-value
+                      - inside:
+                          pattern: $HOLDER_VALUE_SCOPE
+                          stopBy: end
+                    stopBy: end
+      - all:
+          - kind: this
+          - inside:
+              all:
+                - kind: class_body
+                - pattern: $CLASS_SCOPE
+                - has:
+                    any:
+                      - all:
+                          - any:
+                              - kind: property_signature
+                              - kind: public_field_definition
+                          - has:
+                              field: name
+                              pattern: $MEMBER
+                          - has:
+                              field: type
+                              matches: lr-config-type
+                      - all:
+                          - kind: method_definition
+                          - has:
+                              field: name
+                              regex: ^constructor$
+                          - has:
+                              field: parameters
+                              kind: formal_parameters
+                              has:
+                                all:
+                                  - any:
+                                      - kind: required_parameter
+                                      - kind: optional_parameter
+                                  - has:
+                                      field: pattern
+                                      pattern: $MEMBER
+                                  - has:
+                                      field: type
+                                      matches: lr-config-type
+                                  - any:
+                                      - has:
+                                          kind: accessibility_modifier
+                                      - regex: ^readonly\s
+                    stopBy:
+                      matches: lr-nested-scope
+              stopBy: end
+          - not:
+              inside:
+                all:
+                  - matches: lr-this-binding-boundary
+                  - inside:
+                      pattern: $CLASS_SCOPE
+                      stopBy: end
+                stopBy: end
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: lr-config-property-holder
+      - all:
+          - matches: lr-assertion-wrapper
+          - has:
+              matches: lr-config-property-type
+  config-property-root-type:
+    any:
+      - all:
+          - any:
+              - kind: object_type
+              - kind: interface_body
+          - has:
+              all:
+                - any:
+                    - kind: property_signature
+                    - kind: public_field_definition
+                - has:
+                    field: name
+                    pattern: $MEMBER
+                - has:
+                    field: type
+                    matches: lr-config-type
+      - all:
+          - matches: lr-type-wrapper
+          - has:
+              matches: lr-config-property-root-type
+  config-property-type:
+    any:
+      - matches: lr-config-property-root-type
+      - all:
+          - kind: type_identifier
+            pattern: $HOLDER_TYPE
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $HOLDER_TYPE_SCOPE
+                    - has:
+                        all:
+                          - all:
+                              - any:
+                                  - kind: type_alias_declaration
+                                  - kind: interface_declaration
+                              - has:
+                                  field: name
+                                  kind: type_identifier
+                                  pattern: $HOLDER_TYPE
+                          - any:
+                              - has:
+                                  field: value
+                                  matches: lr-config-property-root-type
+                              - has:
+                                  field: body
+                                  matches: lr-config-property-root-type
+                        stopBy:
+                          matches: lr-nested-scope
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - has:
+                          all:
+                            - any:
+                                - kind: type_alias_declaration
+                                - kind: interface_declaration
+                            - has:
+                                field: name
+                                kind: type_identifier
+                                pattern: $HOLDER_TYPE
+                          stopBy:
+                            matches: lr-nested-scope
+                      - inside:
+                          pattern: $HOLDER_TYPE_SCOPE
+                          stopBy: end
+                    stopBy: end
+          - not:
+              inside:
+                all:
+                  - has:
+                      field: type_parameters
+                      has:
+                        kind: type_parameter
+                        has:
+                          field: name
+                          pattern: $HOLDER_TYPE
+                  - inside:
+                      pattern: $HOLDER_TYPE_SCOPE
+                      stopBy: end
+                stopBy: end
+      - all:
+          - matches: lr-type-wrapper
+          - has:
+              matches: lr-config-property-type
+  config-receiver:
+    any:
+      - matches: lr-config-assertion
+      - matches: lr-config-reference
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: lr-config-receiver
+      - matches: lr-config-member-receiver
+  config-reference:
+    all:
+      - kind: identifier
+        pattern: $SOURCE
+      - any:
+          - all:
+              - regex: ^(config|configHandle)$
+              - not:
+                  inside:
+                    stopBy: end
+                    all:
+                      - matches: lr-lexical-scope
+                      - matches: lr-scope-declares-value
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $VALUE_CONFIG_SCOPE
+                    - any:
+                        - has:
+                            any:
+                              - all:
+                                  - matches: lr-value-declaration
+                                  - has:
+                                      field: type
+                                      matches: lr-config-type
+                              - all:
+                                  - kind: variable_declarator
+                                  - has:
+                                      field: name
+                                      kind: identifier
+                                      pattern: $SOURCE
+                                  - has:
+                                      field: value
+                                      matches: lr-config-asserted-expression
+                            stopBy:
+                              matches: lr-nested-scope
+                        - all:
+                            - matches: lr-function-scope
+                            - has:
+                                all:
+                                  - matches: lr-hoisted-var-declaration
+                                  - any:
+                                      - all:
+                                          - matches: lr-value-declaration
+                                          - has:
+                                              field: type
+                                              matches: lr-config-type
+                                      - all:
+                                          - kind: variable_declarator
+                                          - has:
+                                              field: name
+                                              kind: identifier
+                                              pattern: $SOURCE
+                                          - has:
+                                              field: value
+                                              matches: lr-config-asserted-expression
+                                stopBy:
+                                  matches: lr-function-boundary
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - matches: lr-scope-declares-value
+                      - inside:
+                          pattern: $VALUE_CONFIG_SCOPE
+                          stopBy: end
+                    stopBy: end
+  config-root-type:
+    any:
+      - all:
+          - kind: type_identifier
+            pattern: $ROOT_CONFIG_TYPE
+          - regex: ^(CezConfig|LaunchConfig)$
+          - not:
+              inside:
+                matches: lr-lexical-scope
+                stopBy: end
+                has:
+                  all:
+                    - any:
+                        - kind: type_alias_declaration
+                        - kind: interface_declaration
+                        - kind: class_declaration
+                    - has:
+                        field: name
+                        kind: type_identifier
+                        pattern: $ROOT_CONFIG_TYPE
+                  stopBy:
+                    matches: lr-nested-scope
+          - not:
+              inside:
+                has:
+                  field: type_parameters
+                  has:
+                    kind: type_parameter
+                    has:
+                      field: name
+                      pattern: $ROOT_CONFIG_TYPE
+                stopBy: end
+      - all:
+          - kind: type_identifier
+            pattern: $ROOT_CONFIG_TYPE
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $ROOT_CONFIG_SCOPE
+                    - has:
+                        all:
+                          - kind: import_specifier
+                          - has:
+                              field: alias
+                              pattern: $ROOT_CONFIG_TYPE
+                          - has:
+                              field: name
+                              regex: ^(CezConfig|LaunchConfig)$
+                        stopBy:
+                          matches: lr-nested-scope
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - has:
+                          any:
+                            - all:
+                                - any:
+                                    - kind: type_alias_declaration
+                                    - kind: interface_declaration
+                                    - kind: class_declaration
+                                - has:
+                                    field: name
+                                    kind: type_identifier
+                                    pattern: $ROOT_CONFIG_TYPE
+                            - all:
+                                - kind: import_specifier
+                                - any:
+                                    - has:
+                                        field: alias
+                                        pattern: $ROOT_CONFIG_TYPE
+                                    - has:
+                                        field: name
+                                        kind: type_identifier
+                                        pattern: $ROOT_CONFIG_TYPE
+                          stopBy:
+                            matches: lr-nested-scope
+                      - inside:
+                          pattern: $ROOT_CONFIG_SCOPE
+                          stopBy: end
+                    stopBy: end
+          - not:
+              inside:
+                all:
+                  - has:
+                      field: type_parameters
+                      has:
+                        kind: type_parameter
+                        has:
+                          field: name
+                          pattern: $ROOT_CONFIG_TYPE
+                  - inside:
+                      pattern: $ROOT_CONFIG_SCOPE
+                      stopBy: end
+                stopBy: end
+      - all:
+          - kind: member_expression
+          - has:
+              field: object
+              all:
+                - kind: call_expression
+                - has:
+                    field: function
+                    regex: ^import$
+          - has:
+              field: property
+              regex: ^(CezConfig|LaunchConfig)$
+      - all:
+          - matches: lr-type-wrapper
+          - has:
+              matches: lr-config-root-type
+  config-type:
+    any:
+      - matches: lr-config-root-type
+      - all:
+          - kind: type_identifier
+            pattern: $REF_CONFIG_TYPE
+          - all:
+              - inside:
+                  all:
+                    - matches: lr-lexical-scope
+                    - pattern: $REF_CONFIG_SCOPE
+                    - has:
+                        all:
+                          - kind: type_alias_declaration
+                          - has:
+                              field: name
+                              kind: type_identifier
+                              pattern: $REF_CONFIG_TYPE
+                          - has:
+                              field: value
+                              matches: lr-config-root-type
+                        stopBy:
+                          matches: lr-nested-scope
+                  stopBy: end
+              - not:
+                  inside:
+                    all:
+                      - matches: lr-lexical-scope
+                      - has:
+                          any:
+                            - all:
+                                - any:
+                                    - kind: type_alias_declaration
+                                    - kind: interface_declaration
+                                    - kind: class_declaration
+                                - has:
+                                    field: name
+                                    kind: type_identifier
+                                    pattern: $REF_CONFIG_TYPE
+                            - all:
+                                - kind: import_specifier
+                                - any:
+                                    - has:
+                                        field: alias
+                                        pattern: $REF_CONFIG_TYPE
+                                    - has:
+                                        field: name
+                                        kind: type_identifier
+                                        pattern: $REF_CONFIG_TYPE
+                          stopBy:
+                            matches: lr-nested-scope
+                      - inside:
+                          pattern: $REF_CONFIG_SCOPE
+                          stopBy: end
+                    stopBy: end
+          - not:
+              inside:
+                all:
+                  - has:
+                      field: type_parameters
+                      has:
+                        kind: type_parameter
+                        has:
+                          field: name
+                          pattern: $REF_CONFIG_TYPE
+                  - inside:
+                      pattern: $REF_CONFIG_SCOPE
+                      stopBy: end
+                stopBy: end
+      - all:
+          - matches: lr-type-wrapper
+          - has:
+              matches: lr-config-type
+      - all:
+          - matches: lr-view-type-wrapper
+          - has:
+              kind: type_arguments
+              has:
+                matches: lr-config-type

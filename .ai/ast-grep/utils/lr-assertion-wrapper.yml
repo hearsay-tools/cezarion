@@ -1,0 +1,7 @@
+id: lr-assertion-wrapper
+language: typescript
+rule:
+  any:
+    - kind: as_expression
+    - kind: satisfies_expression
+    - kind: type_assertion

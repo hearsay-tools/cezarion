@@ -4,3 +4,5 @@ ruleDirs:
   - .ai/ast-grep/rules
 testConfigs:
   - testDir: .ai/ast-grep/rule-tests
+utilDirs:
+  - .ai/ast-grep/utils

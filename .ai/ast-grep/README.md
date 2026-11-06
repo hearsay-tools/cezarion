@@ -22,6 +22,26 @@ covers every repository rule.
 
 `sgconfig.yml` at the repo root names both directories.
 
+## Launch-read normalization and generated cases
+
+`launch-read-normalization/` holds the shared semantic helper definitions by source type.
+`launch-read-normalization.yml` maps each form family to those definitions. Run
+`node .ai/ast-grep/generate-launch-read-normalization.cjs` after editing them.
+Each split rule includes only its used helpers. Global `utils/` entries classify syntax and have no captures.
+Semantic helpers stay local because ast-grep global utilities isolate metavariable bindings.
+Check field names and destructuring shapes before resolving a receiver's lexical bindings.
+Those checks have no captures and reject unrelated reads without searching enclosing scopes.
+The shared selector utilities also have no captures: they recognize owned module literals and
+transparent wrappers for static imports, dynamic imports and `require` calls. Template literals
+must have no substitutions; similarly named modules remain valid controls.
+
+`generate-launch-read-matrix.cjs` deterministically builds all cells in memory and parses each one.
+`packages/cezar/src/launch-read-matrix*.test.ts` splits fields, captures and selectors across
+three files. Their shared testkit writes cells only to a temporary directory, scans once per
+split rule, and asserts each invalid cell, unrelated control and documented limit cell.
+The test asserts the approved documented-limit count,3456, also stated in the PR body.
+No generated corpus, manifest or matrix output is committed. Curated YAML cases stay beside each rule.
+
 ## Add a rule
 
 1. Write `rules/<id>.yml` and `rule-tests/<id>-test.yml`, and run

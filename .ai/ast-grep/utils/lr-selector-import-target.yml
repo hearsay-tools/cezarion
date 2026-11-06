@@ -1,0 +1,11 @@
+id: lr-selector-import-target
+language: typescript
+rule:
+  any:
+    - kind: import
+    - kind: identifier
+      regex: ^require$
+    - all:
+        - matches: lr-expression-wrapper
+        - has:
+            matches: lr-selector-import-target

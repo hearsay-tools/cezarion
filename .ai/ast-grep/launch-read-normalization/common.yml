@@ -1,0 +1,434 @@
+helpers:
+  binding-pattern:
+    any:
+      - all:
+          - any:
+              - kind: identifier
+              - kind: shorthand_property_identifier_pattern
+          - pattern: $SOURCE
+      - all:
+          - any:
+              - kind: object_pattern
+              - kind: array_pattern
+              - kind: rest_pattern
+          - has:
+              matches: lr-binding-pattern
+      - all:
+          - kind: pair_pattern
+          - has:
+              field: value
+              matches: lr-binding-pattern
+      - all:
+          - any:
+              - kind: assignment_pattern
+              - kind: object_assignment_pattern
+          - has:
+              field: left
+              matches: lr-binding-pattern
+  copy-expression:
+    any:
+      - matches: lr-capture-expression
+      - matches: lr-factory-expression
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: lr-copy-expression
+  copy-target:
+    any:
+      - all:
+          - kind: identifier
+          - regex: ^structuredClone$
+      - all:
+          - kind: member_expression
+          - has:
+              field: object
+              regex: ^Object$
+          - has:
+              field: property
+              regex: ^(assign|entries|keys|values)$
+      - all:
+          - kind: member_expression
+          - has:
+              field: object
+              regex: ^JSON$
+          - has:
+              field: property
+              regex: ^(stringify|parse)$
+      - all:
+          - kind: subscript_expression
+          - has:
+              field: object
+              regex: ^Object$
+          - has:
+              field: index
+              regex: ^['"](assign|entries|keys|values)['"]$
+      - all:
+          - kind: subscript_expression
+          - has:
+              field: object
+              regex: ^JSON$
+          - has:
+              field: index
+              regex: ^['"](stringify|parse)['"]$
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: lr-copy-target
+  factory-expression:
+    any:
+      - matches: lr-source-factory
+      - matches: lr-capture-assertion
+      - all:
+          - any:
+              - matches: lr-expression-wrapper
+              - kind: await_expression
+          - has:
+              matches: lr-factory-expression
+  factory-reference:
+    all:
+      - kind: identifier
+        pattern: $SOURCE
+      - all:
+          - inside:
+              all:
+                - matches: lr-lexical-scope
+                - pattern: $FACTORY_SCOPE
+                - any:
+                    - has:
+                        all:
+                          - kind: variable_declarator
+                          - has:
+                              field: name
+                              kind: identifier
+                              pattern: $SOURCE
+                          - has:
+                              field: value
+                              matches: lr-factory-expression
+                        stopBy:
+                          matches: lr-nested-scope
+                    - all:
+                        - matches: lr-function-scope
+                        - has:
+                            all:
+                              - matches: lr-hoisted-var-declaration
+                              - all:
+                                  - kind: variable_declarator
+                                  - has:
+                                      field: name
+                                      kind: identifier
+                                      pattern: $SOURCE
+                                  - has:
+                                      field: value
+                                      matches: lr-factory-expression
+                            stopBy:
+                              matches: lr-function-boundary
+              stopBy: end
+          - not:
+              inside:
+                all:
+                  - matches: lr-lexical-scope
+                  - matches: lr-scope-declares-value
+                  - inside:
+                      pattern: $FACTORY_SCOPE
+                      stopBy: end
+                stopBy: end
+  raw-receiver:
+    any:
+      - matches: lr-source-receiver
+      - matches: lr-store-reference
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: lr-raw-receiver
+  recovered-source-type:
+    any:
+      - matches: lr-source-root-type
+      - all:
+          - any:
+              - kind: ERROR
+              - kind: formal_parameters
+              - kind: required_parameter
+              - kind: parenthesized_expression
+          - has:
+              matches: lr-recovered-source-type
+  root-source-alias:
+    any:
+      - all:
+          - kind: type_alias_declaration
+          - has:
+              field: value
+              matches: lr-source-root-type
+      - all:
+          - kind: expression_statement
+          - has:
+              kind: identifier
+              regex: ^type$
+          - has:
+              kind: ERROR
+              has:
+                matches: lr-recovered-source-type
+      - all:
+          - kind: type_alias_declaration
+          - has:
+              kind: ERROR
+              has:
+                matches: lr-recovered-source-type
+  selector-target:
+    any:
+      - all:
+          - kind: identifier
+            pattern: $SOURCE
+          - regex: ^(loadWorkflows|stepToolGrant|loadConfig|agentModelsLocked|readAgentModelProvider|normalizeModelForBackend|workerIdentity|workerStepIdentity|ownedWorkflow|continuationDefStep|resolveProfileEnvForRoot|boundWorkerAccountEnv|captureWorkerAccount|discoverSkills|filterDisabledTeamSkills|filterDisabledTeamSources|readDisabledTeamSkills|readDisabledSkillsReposSync|readProjectUiState|readProjectUiStateSync|getTeamSkillsCached|resolveAttachmentPath|readPersistedAttachments|accountHeldFor|executionAccount|queuedRecoveryInput)$
+          - not:
+              inside:
+                stopBy: end
+                all:
+                  - matches: lr-lexical-scope
+                  - matches: lr-scope-declares-value
+      - all:
+          - kind: member_expression
+          - has:
+              field: object
+              all:
+                - kind: identifier
+                  pattern: $SOURCE
+                - regex: ^source$
+                - not:
+                    inside:
+                      stopBy: end
+                      all:
+                        - matches: lr-lexical-scope
+                        - matches: lr-scope-declares-value
+          - has:
+              field: property
+              regex: ^(loadWorkflows|stepToolGrant|loadConfig|agentModelsLocked|readAgentModelProvider|normalizeModelForBackend|workerIdentity|workerStepIdentity|ownedWorkflow|continuationDefStep|resolveProfileEnvForRoot|boundWorkerAccountEnv|captureWorkerAccount|discoverSkills|filterDisabledTeamSkills|filterDisabledTeamSources|readDisabledTeamSkills|readDisabledSkillsReposSync|readProjectUiState|readProjectUiStateSync|getTeamSkillsCached|resolveAttachmentPath|readPersistedAttachments|accountHeldFor|executionAccount|queuedRecoveryInput)$
+      - all:
+          - matches: lr-expression-wrapper
+          - has:
+              matches: lr-selector-target
+  store-reference:
+    any:
+      - pattern: $STORE.getRun($$$)
+      - all:
+          - kind: identifier
+          - pattern: $STORED
+          - inside:
+              matches: lr-lexical-scope
+              stopBy: end
+              has:
+                kind: variable_declarator
+                all:
+                  - has:
+                      field: name
+                      pattern: $STORED
+                  - has:
+                      field: value
+                      pattern: $STORE.getRun($$$)
+                stopBy:
+                  matches: lr-nested-scope
+  value-declaration:
+    any:
+      - all:
+          - any:
+              - kind: required_parameter
+              - kind: optional_parameter
+          - has:
+              field: pattern
+              matches: lr-binding-pattern
+      - all:
+          - kind: variable_declarator
+          - has:
+              field: name
+              matches: lr-binding-pattern
+      - all:
+          - any:
+              - kind: function_declaration
+              - kind: generator_function_declaration
+              - kind: class_declaration
+              - kind: enum_declaration
+              - kind: internal_module
+          - has:
+              field: name
+              pattern: $SOURCE
+      - all:
+          - any:
+              - kind: identifier
+              - kind: type_identifier
+          - pattern: $SOURCE
+          - inside:
+              any:
+                - all:
+                    - kind: function_declaration
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: generator_function_declaration
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: class_declaration
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: enum_declaration
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: internal_module
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: function_expression
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: generator_function
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+                - all:
+                    - kind: class
+                    - has:
+                        field: name
+                        pattern: $SOURCE
+      - all:
+          - matches: lr-binding-pattern
+          - inside:
+              all:
+                - kind: catch_clause
+                - has:
+                    field: parameter
+                    matches: lr-binding-pattern
+      - all:
+          - matches: lr-binding-pattern
+          - inside:
+              all:
+                - kind: for_in_statement
+                - has:
+                    field: kind
+                    regex: ^(const|let|var)$
+                - has:
+                    field: left
+                    matches: lr-binding-pattern
+      - all:
+          - kind: import_clause
+          - has:
+              kind: identifier
+              pattern: $SOURCE
+      - all:
+          - kind: namespace_import
+          - has:
+              kind: identifier
+              pattern: $SOURCE
+      - all:
+          - kind: import_specifier
+          - any:
+              - has:
+                  field: alias
+                  pattern: $SOURCE
+              - all:
+                  - not:
+                      has:
+                        field: alias
+                        kind: identifier
+                  - has:
+                      field: name
+                      pattern: $SOURCE
+  hoisted-var-declaration:
+    any:
+      - all:
+          - kind: variable_declarator
+          - has:
+              field: name
+              matches: lr-binding-pattern
+          - inside:
+              kind: variable_declaration
+      - all:
+          - kind: for_in_statement
+          - has:
+              field: kind
+              regex: ^var$
+          - has:
+              field: left
+              matches: lr-binding-pattern
+  lexical-value-declaration:
+    all:
+      - matches: lr-value-declaration
+      - not:
+          any:
+            - all:
+                - kind: variable_declarator
+                - inside:
+                    kind: variable_declaration
+            - all:
+                - matches: lr-binding-pattern
+                - inside:
+                    all:
+                      - kind: for_in_statement
+                      - has:
+                          field: kind
+                          regex: ^var$
+  scope-declares-value:
+    any:
+      - has:
+          matches: lr-lexical-value-declaration
+          stopBy:
+            matches: lr-nested-scope
+      - all:
+          - matches: lr-function-scope
+          - has:
+              matches: lr-hoisted-var-declaration
+              stopBy:
+                matches: lr-function-boundary
+  # Computed member names evaluate outside the member. Only its parameters and
+  # body introduce method this; nested class initializers introduce class this.
+  this-binding-boundary:
+    any:
+      - kind: function_expression
+      - kind: function_declaration
+      - kind: generator_function
+      - kind: generator_function_declaration
+      - all:
+          - any:
+              - kind: statement_block
+              - kind: formal_parameters
+          - inside:
+              all:
+                - kind: method_definition
+                - not:
+                    inside:
+                      kind: class_body
+      - all:
+          - any:
+              - all:
+                  - any:
+                      - kind: statement_block
+                      - kind: formal_parameters
+                  - inside:
+                      kind: method_definition
+                      inside:
+                        kind: class_body
+                        inside:
+                          pattern: $CLASS_SCOPE
+                          stopBy: end
+              - inside:
+                  field: value
+                  kind: public_field_definition
+                  inside:
+                    kind: class_body
+                    inside:
+                      pattern: $CLASS_SCOPE
+                      stopBy: end
+              - all:
+                  - kind: class_static_block
+                  - inside:
+                      kind: class_body
+                      inside:
+                        pattern: $CLASS_SCOPE
+                        stopBy: end
