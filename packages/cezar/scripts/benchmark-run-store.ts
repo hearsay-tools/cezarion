@@ -202,6 +202,8 @@ function quantile(values: readonly number[], q: number): number {
 async function runChild(options: ChildOptions, resultPath: string): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), 'cez-bench-'));
   process.env.CEZ_HOME = join(root, 'home');
+  const { resolveHome } = await import('../src/home/resolve.ts');
+  const home = resolveHome({ purpose: 'cli' });
   process.env.CEZ_DRY_RUN = '1';
   try {
     const { RunStore } = await import('../src/runs/store.ts');
@@ -355,7 +357,7 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
       closePrevious();
       const routeStore = open();
       const app = createApp({
-        repoRoot: join(root, 'boot'), store: routeStore, version: '0.0.0-bench',
+        home, repoRoot: join(root, 'boot'), store: routeStore, version: '0.0.0-bench',
         manager: { finishBlockedReason: () => null } as unknown as Parameters<typeof createApp>[0]['manager'],
       });
       for (const route of routes) {

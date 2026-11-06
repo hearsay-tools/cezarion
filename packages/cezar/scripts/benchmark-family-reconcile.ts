@@ -35,6 +35,8 @@ process.env.CEZ_AUTONAME = '0';
 process.env.CEZ_PROJECT_WARMUP = '0';
 const ownHome = process.env.CEZ_HOME ? undefined : mkdtempSync(join(tmpdir(), 'cez-bench-home-'));
 if (ownHome) process.env.CEZ_HOME = ownHome;
+const { resolveHome } = await import('../src/home/resolve.ts');
+const home = resolveHome({ purpose: 'cli' });
 
 const { values } = parseArgs({ options: {
   messages: { type: 'string', default: '50,300,1000' },
@@ -96,7 +98,7 @@ for (const size of sizes) {
     const rootId = seed(dataDir, root, size);
     const store = RunStore.open(dataDir, { keepLive: true });
     if (values.baseline) store.withReadCache = <T>(fn: () => T): T => fn();
-    const manager = new RunManager(store, root);
+    const manager = new RunManager(store, root, { home });
     manager.reconcileWorkerWaits(rootId); // writes the missing projections once
     const times: number[] = [];
     for (let i = 0; i < samples; i++) {

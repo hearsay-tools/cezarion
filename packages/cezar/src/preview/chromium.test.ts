@@ -1,5 +1,9 @@
 import { resolveHome } from '../home/resolve.ts';
-const testHome = (env: NodeJS.ProcessEnv = process.env) => resolveHome({ purpose: 'cli', env });
+// Fake filesystem fixtures supply an OS home independently of this test process.
+const testHome = (env: NodeJS.ProcessEnv = process.env) => {
+  const home = resolveHome({ purpose: 'cli', env });
+  return { ...home, cache: env.HOME ? join(env.HOME, '.cache', 'cez') : home.cache };
+};
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

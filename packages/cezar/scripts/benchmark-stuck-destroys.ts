@@ -39,6 +39,8 @@ process.env.CEZ_AUTONAME = '0';
 // run creates is removed with the rest of its teardown.
 const ownHome = process.env.CEZ_HOME ? undefined : mkdtempSync(join(tmpdir(), 'cez-bench-home-'));
 if (ownHome) process.env.CEZ_HOME = ownHome;
+const { resolveHome } = await import('../src/home/resolve.ts');
+const home = resolveHome({ purpose: 'cli' });
 
 const { values } = parseArgs({ options: {
   workers: { type: 'string', default: '20' },
@@ -81,9 +83,9 @@ const holders: ChildProcess[] = [];
 let store: RunStoreInstance | undefined, manager: RunManagerInstance | undefined, detach: (() => void) | undefined;
 try {
   store = RunStore.open(dataDir, { keepLive: true });
-  manager = new RunManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }) });
+  manager = new RunManager(store, root, { home, semaphore: new WorkspaceSemaphore({ home, initial: { maxParallel: 1 } }) });
   const service = new DelegationService();
-  detach = service.registerProject({ id: 'bench', root, store, manager });
+  detach = service.registerProject({ id: 'bench', root, store, manager, home });
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
   setRunStatus(store, parent.id, 'waiting', { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
 

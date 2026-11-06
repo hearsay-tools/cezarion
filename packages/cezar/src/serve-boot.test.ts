@@ -1,3 +1,4 @@
+import { currentEntry } from './self-update/layout.ts';
 import { testHome } from './home/test-home.testkit.ts';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,13 +31,13 @@ function reconcileFixture(unavailable = false) {
     sweepMergedBranches: vi.fn().mockResolvedValue(undefined),
     log: vi.fn(),
   };
-  return { store, manager, repo, steps };
+  return { store, manager, repo, steps, home: testHome() };
 }
 
 describe('reconcileServeWorktrees', () => {
   it.each(['no repo', 'unavailable store'])('skips reconciliation with %s', async (reason) => {
-    const { store, manager, repo, steps } = reconcileFixture(reason === 'unavailable store');
-    await reconcileServeWorktrees('/repo', reason === 'no repo' ? null : repo, store, manager, undefined, steps, testHome());
+    const { store, manager, repo, steps, home } = reconcileFixture(reason === 'unavailable store');
+    await reconcileServeWorktrees('/repo', reason === 'no repo' ? null : repo, store, manager, undefined, steps, home);
     expect(store.listRunIds).not.toHaveBeenCalled();
     expect(steps.pruneOrphans).not.toHaveBeenCalled();
     expect(steps.resolveWorktreeRetention).not.toHaveBeenCalled();
@@ -46,15 +47,15 @@ describe('reconcileServeWorktrees', () => {
   });
 
   it('keeps step order, output, live ids and the resolved sweep retention', async () => {
-    const { store, manager, repo, steps } = reconcileFixture();
+    const { store, manager, repo, steps, home } = reconcileFixture();
     steps.pruneOrphans.mockResolvedValue(['12345678-orphan', 'abcdefgh-orphan']);
     steps.reclaimWorktrees.mockResolvedValue(['87654321-old']);
     // A sweep can remain pending without delaying boot.
     steps.sweepMergedBranches.mockReturnValue(new Promise(() => {}));
-    await reconcileServeWorktrees('/repo', repo, store, manager, undefined, steps, testHome());
+    await reconcileServeWorktrees('/repo', repo, store, manager, undefined, steps, home);
     expect(steps.pruneOrphans).toHaveBeenCalledWith('/repo', new Set(['live-run']));
     expect(steps.reclaimWorktrees).toHaveBeenCalledWith('/repo', store, 7, { previewHost: undefined });
-    expect(steps.sweepMergedBranches).toHaveBeenCalledWith({ root: '/repo', store, manager }, { keep: 7 });
+    expect(steps.sweepMergedBranches).toHaveBeenCalledWith({ root: '/repo', store, manager, home }, { keep: 7 });
     expect(steps.log.mock.calls).toEqual([
       ['  cleaned 2 orphaned worktree(s): 12345678, abcdefgh'],
       ['  reclaimed 1 old worktree(s), branch kept: 87654321'],
@@ -66,12 +67,12 @@ describe('reconcileServeWorktrees', () => {
 
   it.each(['pruneOrphans', 'resolveWorktreeRetention', 'reclaimWorktrees'] as const)(
     'keeps boot working when %s rejects', async (failedStep) => {
-      const { store, manager, repo, steps } = reconcileFixture();
+      const { store, manager, repo, steps, home } = reconcileFixture();
       steps[failedStep].mockRejectedValue(new Error('unavailable'));
-      await reconcileServeWorktrees('/repo', repo, store, manager, undefined, steps, testHome());
+      await reconcileServeWorktrees('/repo', repo, store, manager, undefined, steps, home);
       const keep = failedStep === 'resolveWorktreeRetention' ? DEFAULT_WORKTREE_RETENTION : 7;
       expect(steps.reclaimWorktrees).toHaveBeenCalledWith('/repo', store, keep, { previewHost: undefined });
-      expect(steps.sweepMergedBranches).toHaveBeenCalledWith({ root: '/repo', store, manager }, { keep });
+      expect(steps.sweepMergedBranches).toHaveBeenCalledWith({ root: '/repo', store, manager, home }, { keep });
       expect(steps.log).not.toHaveBeenCalled();
     },
   );
@@ -361,7 +362,7 @@ describe('serve boot mutation regressions', () => {
     // bound: the restart callback returns void; observe its injected restart dependency after shutdown.
     await vi.waitFor(() => expect(restartProcess).toHaveBeenCalledOnce(), { timeout: 10_000 });
     expect(shutdownForRestart).toHaveBeenCalledBefore(vi.mocked(restartProcess));
-    expect(restartProcess).toHaveBeenCalledWith({ server: null, port: 5432, args: process.argv.slice(2), supervised: false });
+    expect(restartProcess).toHaveBeenCalledWith({ server: null, port: 5432, args: process.argv.slice(2), supervised: false, entry: currentEntry(process.env, testHome()) });
   });
 
   it('keeps the boot store in application restart cleanup when server shutdown fails', async () => {

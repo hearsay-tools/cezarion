@@ -85,11 +85,11 @@ describe('watchProviderRuntimeAuthFailures', () => {
     else process.env.CEZ_DRY_RUN = savedDryRun;
   });
 
-  const watch = (resolveProfile?: RuntimeAuthProfileResolver) => {
+  const watch = (resolveProfile?: RuntimeAuthProfileResolver, home = testHome()) => {
     const onInvalidated = vi.fn();
     unwatchers.push(resolveProfile
-      ? watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated, resolveProfile, testHome())
-      : watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated, undefined, testHome()));
+      ? watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated, resolveProfile, home)
+      : watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated, undefined, home));
     return onInvalidated;
   };
 
@@ -478,7 +478,8 @@ describe('watchProviderRuntimeAuthFailures', () => {
           ? { kind: 'profile' as const, id: 'work', configDir: '/work' }
           : { kind: 'default' as const }
       ));
-      const onProviderStatus = watch(profileResolver);
+      const home = testHome();
+      const onProviderStatus = watch(profileResolver, home);
       const verifying = vi.spyOn(providerAuth, 'verifyRuntimeAuthFailure');
 
       const run = store.createRun({
@@ -499,7 +500,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
 
       // The codex step ran under codex's DEFAULT login — the run's claude profile is not asked
       // about, and codex is verified bare.
-      expect(profileResolver).toHaveBeenCalledWith('codex', undefined);
+      expect(profileResolver).toHaveBeenCalledWith('codex', undefined, home);
       expect(runCommand).toHaveBeenCalledWith('codex', ['login', 'status'], 10_000);
       expect(onProviderStatus.mock.calls.map(([status]) => status)).toEqual([
         expect.objectContaining({ provider: 'codex', status: 'disconnected' }),

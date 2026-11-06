@@ -30,7 +30,7 @@ vi.mock('../workspace/projects.ts', async (original) => ({
 }));
 
 const row = (id: string, root = `/repos/${id}`): WorkspaceProject => ({ id, root, name: id, addedAt: '2026-10-30T00:00:00Z', lastOpenedAt: '', source: 'local' });
-const workspace = () => createWorkspaceProjects({ home: testHome(), bootRoot: '/repos/boot', bootProjectId: 'boot' });
+const workspace = (home = testHome()) => createWorkspaceProjects({ home, bootRoot: '/repos/boot', bootProjectId: 'boot' });
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -65,16 +65,17 @@ describe('workspace project identity', () => {
   });
 
   it('reads the visible set live and keeps the list selector at its existing boundary', async () => {
-    const projects = workspace();
+    const home = testHome();
+    const projects = workspace(home);
     const registry = [row('boot'), row('other')];
     vi.stubEnv('CEZ_SINGLE_PROJECT', '0');
     expect(await projects.visibleProjects(registry)).toBe(registry);
     await projects.listVisibleProjects();
-    expect(listProjects).toHaveBeenLastCalledWith(undefined);
+    expect(listProjects).toHaveBeenLastCalledWith(undefined, home);
     vi.stubEnv('CEZ_SINGLE_PROJECT', '1');
     expect(await projects.visibleProjects(registry)).toEqual([registry[0]]);
     await projects.listVisibleProjects();
-    expect(listProjects).toHaveBeenLastCalledWith({ projectId: 'boot' });
+    expect(listProjects).toHaveBeenLastCalledWith({ projectId: 'boot' }, home);
   });
 });
 
@@ -119,7 +120,7 @@ describe('project build failure policies', () => {
     expect(await projects.resolveProject('default')).toBe(boot);
     expect(await projects.resolveProject(undefined)).toBe(boot);
     expect(await projects.lookupProject('boot')).toBe(boot);
-    expect(await projects.resolveLiveProject('default')).toEqual({ id: 'boot' });
+    expect(await projects.resolveLiveProject('default')).toEqual({ home: boot.home, id: 'boot' });
     expect(context).not.toHaveBeenCalled();
   });
 });

@@ -35,8 +35,9 @@ describe('preview browser launch', () => {
   it('resolves with the supplied environment and returns the attached page and a working close callback', async () => {
     const { proc, connection, root } = browserFixture();
     const env = { PATH: '/fake/bin' };
-    const handle = await launchBrowser('/fake/profile', env, testHome(env));
-    expect(resolveChromium).toHaveBeenCalledExactlyOnceWith(undefined, env);
+    const home = testHome(env);
+    const handle = await launchBrowser('/fake/profile', env, home);
+    expect(resolveChromium).toHaveBeenCalledExactlyOnceWith(undefined, env, undefined, undefined, home);
     expect(launchChromium).toHaveBeenCalledExactlyOnceWith('/fake/chrome', '/fake/profile', env);
     expect(root.send).toHaveBeenNthCalledWith(1, 'Target.getTargets');
     expect(root.send).toHaveBeenNthCalledWith(2, 'Target.attachToTarget', { targetId: 'page', flatten: true });
