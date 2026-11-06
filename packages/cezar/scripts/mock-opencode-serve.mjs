@@ -18,7 +18,6 @@ let inputClosed = false;
 // arrive over SSE afterwards, so a correct stream (v1 and v2 alike) must
 // take its turn-end from `session.idle`, never from the HTTP response.
 const { answerNudgeBody, silentNudge } = await import('./mock-nudge.mjs');
-
 // #872: the first N starts die before listening, the way opencode 1.18.33 did
 // when started within ~2 s of SIGTERM to the previous server on the same DB.
 // Starts are counted across processes in a file, so start N+1 listens normally.
