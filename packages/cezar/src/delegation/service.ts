@@ -72,7 +72,7 @@ import type { RunnerId } from '../core/agent-runner.ts';
 import type { Caller } from './credentials.ts';
 import { isAuthenticatedCaller } from './credentials.ts';
 import { parseDelegationEffort } from './effort.ts';
-import { authorizeWorkerList, authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError, MESSAGING_OFF, requireMessagingAllowed, requireWorkersAllowed } from './policy.ts';
+import { authorizeWorkerList, authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError, MESSAGING_OFF, requireWorkersAllowed } from './policy.ts';
 import { planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline } from './workspace.ts';
 import { WorkerCleanup, type WorkerCleanupOptions } from './worker-cleanup.ts';
 
@@ -164,13 +164,9 @@ export class DelegationService {
   async discover(caller: Caller, value: DiscoveryRequest): Promise<DiscoveryResponse> {
     const project = this.context(caller);
     const request = discoveryRequestSchema.parse(value);
-    const callerRun = project.store.getRun(caller.runId);
-    if (request.kind === 'tasks') {
-      // Peer discovery is peer messaging (hearsay-tools/cezarion#2784); a worker caller has no peers to list.
-      if (callerRun?.delegation?.role === 'root') requireMessagingAllowed(callerRun);
-      return discoverTasks(project.store, caller.runId, request);
-    }
+    if (request.kind === 'tasks') return discoverTasks(project.store, caller.runId, request);
     // Discovery accompanies spawn authority, including roots persisted before this command existed.
+    const callerRun = project.store.getRun(caller.runId);
     authorizeSpawnReplay(caller, callerRun, project.id);
     requireWorkersAllowed(callerRun!);
     if (!this.discovery) throw new DelegationPolicyError('unavailable_transport', 'Host discovery is unavailable');

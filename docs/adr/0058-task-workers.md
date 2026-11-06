@@ -23,6 +23,10 @@ session's existing credential:
 - With both off and no owned worker, the session gets no credential, and native cross-session
   tools stay off as on every governed session.
 
+Every task becomes a root at its first provisioned session. Rules that protect a family, such
+as refusing Finish while the parent's question is pending, apply only to a root that has worker
+receipts; a lone task finishes as before.
+
 A session's instructions follow the settings at launch. Turning a setting on reaches the agent at
 its next session; turning one off is enforced by the server at once.
 

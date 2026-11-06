@@ -3,12 +3,14 @@ import { messagingAllowed } from '@open-mercato/cezar-contract/task-options';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import type { RunStore } from '../runs/store.ts';
 import { finishing, isRootTask } from './conversations.ts';
-import { DelegationPolicyError } from './policy.ts';
+import { DelegationPolicyError, requireMessagingAllowed } from './policy.ts';
 
 /** Read stored summaries too: review and terminal peers must remain discoverable. */
 export function discoverTasks(store: RunStore, callerId: string, request: Extract<DiscoveryRequest, { kind: 'tasks' }>): DiscoveredTasks {
   const caller = store.getRun(callerId);
   if (caller?.delegation?.role !== 'root' || caller.delegation.historyDeletion) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+  // Peer discovery is peer messaging (hearsay-tools/cezarion#2784).
+  requireMessagingAllowed(caller);
   const page = store.listPeerTaskSummaries({ callerId, ...request });
   const tasks = page.runs.flatMap(run => {
     const current = store.getRun(run.id);

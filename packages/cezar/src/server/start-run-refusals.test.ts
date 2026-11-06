@@ -233,7 +233,7 @@ describe('POST /api/v1/runs refusals', () => {
       expect(workflow.name).toBe('quick-task');
       expect(rest).toEqual([]);
       expect(Object.keys(input).sort()).toEqual([
-        'agentProfile', 'archiveWhenDone', 'autoMergePr', 'autonomous', 'effort', 'images',
+        'agentProfile', 'allowMessaging', 'allowWorkers', 'archiveWhenDone', 'autoMergePr', 'autonomous', 'effort', 'images',
         'model', 'notify', 'runner', 'systemPrompt', 'task', 'worktree',
       ]);
     });
@@ -251,6 +251,8 @@ describe('POST /api/v1/runs refusals', () => {
         autonomous: true,
         archiveWhenDone: true,
         autoMergePr: false,
+        allowWorkers: false,
+        allowMessaging: true,
         notify: false,
         images: [{ mediaType: 'image/png', data: 'YQ==' }, { mediaType: 'text/plain', data: 'Yg==' }],
       });
@@ -271,6 +273,8 @@ describe('POST /api/v1/runs refusals', () => {
         autonomous: true,
         archiveWhenDone: true,
         autoMergePr: false,
+        allowWorkers: false,
+        allowMessaging: true,
       });
     });
 
