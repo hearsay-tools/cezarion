@@ -536,14 +536,18 @@ export function requestsToPeers(delegation: WaitingOnInput['delegation'], reques
   return !!requestIds?.some((id) => toPeers.has(id));
 }
 
-/** Ids a worker entry has not heard about yet, or requests without an outcome, each keyed by kind. */
-function workerEntryOwed(wait: WorkerWaitEntry): string[] {
+/** One target of a worker entry: a request when the entry waits on replies, else a worker. Its key
+ *  names the kind, so every count over several entries (`computeWaitingOn`, the activity view)
+ *  counts each target once with the same keys (hearsay-tools/cezarion#2588). */
+export interface WorkerWaitTarget { key: string; settled: boolean }
+
+export function workerWaitTargets(wait: Pick<WorkerWaitEntry, 'requestIds' | 'requestOutcomes' | 'workerIds' | 'outcomes'>): WorkerWaitTarget[] {
   if (wait.requestIds) {
     const answered = new Set(wait.requestOutcomes?.map((outcome) => outcome.requestId));
-    return wait.requestIds.filter((id) => !answered.has(id)).map((id) => `request:${id}`);
+    return wait.requestIds.map((id) => ({ key: `request:${id}`, settled: answered.has(id) }));
   }
   const reported = new Set(wait.outcomes?.map((outcome) => outcome.workerId));
-  return (wait.workerIds ?? []).filter((id) => !reported.has(id)).map((id) => `worker:${id}`);
+  return (wait.workerIds ?? []).map((id) => ({ key: `worker:${id}`, settled: reported.has(id) }));
 }
 
 /** The distinct workers and requests still owed over every open worker entry; undefined when there
@@ -551,7 +555,7 @@ function workerEntryOwed(wait: WorkerWaitEntry): string[] {
 function workersOwed(open: readonly Wait[]): number | undefined {
   const entries = open.filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker');
   if (!entries.length) return undefined;
-  return new Set(entries.flatMap(workerEntryOwed)).size;
+  return new Set(entries.flatMap((wait) => workerWaitTargets(wait).filter((target) => !target.settled).map((target) => target.key))).size;
 }
 
 function earliest<T extends PrWaitEntry | TimerWaitEntry | ProcessWaitEntry>(waits: readonly T[]): T | undefined {
