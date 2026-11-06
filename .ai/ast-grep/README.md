@@ -36,8 +36,9 @@ transparent wrappers for static imports, dynamic imports and `require` calls. Te
 must have no substitutions; similarly named modules remain valid controls.
 
 `generate-launch-read-matrix.cjs` deterministically builds all cells in memory and parses each one.
-`packages/cezar/src/launch-read-matrix.test.ts` writes them only to a temporary directory,
-scans once per split rule, and asserts each invalid cell, unrelated control and documented limit cell.
+`packages/cezar/src/launch-read-matrix*.test.ts` splits fields, captures and selectors across
+three files. Their shared testkit writes cells only to a temporary directory, scans once per
+split rule, and asserts each invalid cell, unrelated control and documented limit cell.
 The test asserts the approved documented-limit count,3456, also stated in the PR body.
 No generated corpus, manifest or matrix output is committed. Curated YAML cases stay beside each rule.
 

@@ -35,8 +35,7 @@ utils:
           matches: normalize-workflow-type
   normalize-workflow-reference:
     all:
-      - kind: identifier
-        pattern: $SOURCE
+      - { kind: identifier, pattern: $SOURCE }
       - any:
           - all:
               - regex: ^(workflow)$
@@ -56,18 +55,11 @@ utils:
                             any:
                               - all:
                                   - matches: normalize-value-declaration
-                                  - has:
-                                      field: type
-                                      matches: normalize-workflow-type
+                                  - has: { field: type, matches: normalize-workflow-type }
                               - all:
                                   - kind: variable_declarator
-                                  - has:
-                                      field: name
-                                      kind: identifier
-                                      pattern: $SOURCE
-                                  - has:
-                                      field: value
-                                      matches: normalize-workflow-asserted-expression
+                                  - has: { field: name, kind: identifier, pattern: $SOURCE }
+                                  - has: { field: value, matches: normalize-workflow-asserted-expression }
                             stopBy:
                               matches: lr-nested-scope
                         - all:
@@ -78,18 +70,11 @@ utils:
                                   - any:
                                       - all:
                                           - matches: normalize-value-declaration
-                                          - has:
-                                              field: type
-                                              matches: normalize-workflow-type
+                                          - has: { field: type, matches: normalize-workflow-type }
                                       - all:
                                           - kind: variable_declarator
-                                          - has:
-                                              field: name
-                                              kind: identifier
-                                              pattern: $SOURCE
-                                          - has:
-                                              field: value
-                                              matches: normalize-workflow-asserted-expression
+                                          - has: { field: name, kind: identifier, pattern: $SOURCE }
+                                          - has: { field: value, matches: normalize-workflow-asserted-expression }
                                 stopBy:
                                   matches: lr-function-boundary
                   stopBy: end
@@ -98,9 +83,7 @@ utils:
                     all:
                       - matches: lr-lexical-scope
                       - matches: normalize-scope-declares-value
-                      - inside:
-                          pattern: $VALUE_WORKFLOW_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $VALUE_WORKFLOW_SCOPE, stopBy: end }
                     stopBy: end
   normalize-workflow-member-receiver:
     all:
@@ -108,18 +91,12 @@ utils:
           - kind: member_expression
           - kind: subscript_expression
       - any:
-          - has:
-              field: property
-              pattern: $MEMBER
+          - has: { field: property, pattern: $MEMBER }
           - has:
               field: index
               kind: string
-              has:
-                kind: string_fragment
-                pattern: $MEMBER
-      - has:
-          field: object
-          matches: normalize-workflow-property-holder
+              has: { kind: string_fragment, pattern: $MEMBER }
+      - has: { field: object, matches: normalize-workflow-property-holder }
   normalize-input-receiver:
     any:
       - matches: normalize-input-assertion
@@ -133,8 +110,7 @@ utils:
     any:
       - matches: normalize-workflow-root-type
       - all:
-          - kind: type_identifier
-            pattern: $REF_WORKFLOW_TYPE
+          - { kind: type_identifier, pattern: $REF_WORKFLOW_TYPE }
           - all:
               - inside:
                   all:
@@ -143,13 +119,8 @@ utils:
                     - has:
                         all:
                           - kind: type_alias_declaration
-                          - has:
-                              field: name
-                              kind: type_identifier
-                              pattern: $REF_WORKFLOW_TYPE
-                          - has:
-                              field: value
-                              matches: normalize-workflow-root-type
+                          - has: { field: name, kind: type_identifier, pattern: $REF_WORKFLOW_TYPE }
+                          - has: { field: value, matches: normalize-workflow-root-type }
                         stopBy:
                           matches: lr-nested-scope
                   stopBy: end
@@ -164,25 +135,15 @@ utils:
                                     - kind: type_alias_declaration
                                     - kind: interface_declaration
                                     - kind: class_declaration
-                                - has:
-                                    field: name
-                                    kind: type_identifier
-                                    pattern: $REF_WORKFLOW_TYPE
+                                - has: { field: name, kind: type_identifier, pattern: $REF_WORKFLOW_TYPE }
                             - all:
                                 - kind: import_specifier
                                 - any:
-                                    - has:
-                                        field: alias
-                                        pattern: $REF_WORKFLOW_TYPE
-                                    - has:
-                                        field: name
-                                        kind: type_identifier
-                                        pattern: $REF_WORKFLOW_TYPE
+                                    - has: { field: alias, pattern: $REF_WORKFLOW_TYPE }
+                                    - has: { field: name, kind: type_identifier, pattern: $REF_WORKFLOW_TYPE }
                           stopBy:
                             matches: lr-nested-scope
-                      - inside:
-                          pattern: $REF_WORKFLOW_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $REF_WORKFLOW_SCOPE, stopBy: end }
                     stopBy: end
           - not:
               inside:
@@ -191,12 +152,8 @@ utils:
                       field: type_parameters
                       has:
                         kind: type_parameter
-                        has:
-                          field: name
-                          pattern: $REF_WORKFLOW_TYPE
-                  - inside:
-                      pattern: $REF_WORKFLOW_SCOPE
-                      stopBy: end
+                        has: { field: name, pattern: $REF_WORKFLOW_TYPE }
+                  - inside: { pattern: $REF_WORKFLOW_SCOPE, stopBy: end }
                 stopBy: end
       - all:
           - matches: lr-type-wrapper
@@ -226,14 +183,10 @@ utils:
           - any:
               - kind: required_parameter
               - kind: optional_parameter
-          - has:
-              field: pattern
-              matches: normalize-binding-pattern
+          - has: { field: pattern, matches: normalize-binding-pattern }
       - all:
           - kind: variable_declarator
-          - has:
-              field: name
-              matches: normalize-binding-pattern
+          - has: { field: name, matches: normalize-binding-pattern }
       - all:
           - any:
               - kind: function_declaration
@@ -241,9 +194,7 @@ utils:
               - kind: class_declaration
               - kind: enum_declaration
               - kind: internal_module
-          - has:
-              field: name
-              pattern: $SOURCE
+          - has: { field: name, pattern: $SOURCE }
       - all:
           - any:
               - kind: identifier
@@ -253,87 +204,55 @@ utils:
               any:
                 - all:
                     - kind: function_declaration
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
                 - all:
                     - kind: generator_function_declaration
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
                 - all:
                     - kind: class_declaration
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
                 - all:
                     - kind: enum_declaration
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
                 - all:
                     - kind: internal_module
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
                 - all:
                     - kind: function_expression
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
                 - all:
                     - kind: generator_function
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
                 - all:
                     - kind: class
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
       - all:
           - matches: normalize-binding-pattern
           - inside:
               all:
                 - kind: catch_clause
-                - has:
-                    field: parameter
-                    matches: normalize-binding-pattern
+                - has: { field: parameter, matches: normalize-binding-pattern }
       - all:
           - matches: normalize-binding-pattern
           - inside:
               all:
                 - kind: for_in_statement
-                - has:
-                    field: kind
-                    regex: ^(const|let|var)$
-                - has:
-                    field: left
-                    matches: normalize-binding-pattern
+                - has: { field: kind, regex: ^(const|let|var)$ }
+                - has: { field: left, matches: normalize-binding-pattern }
       - all:
           - kind: import_clause
-          - has:
-              kind: identifier
-              pattern: $SOURCE
+          - has: { kind: identifier, pattern: $SOURCE }
       - all:
           - kind: namespace_import
-          - has:
-              kind: identifier
-              pattern: $SOURCE
+          - has: { kind: identifier, pattern: $SOURCE }
       - all:
           - kind: import_specifier
           - any:
-              - has:
-                  field: alias
-                  pattern: $SOURCE
+              - has: { field: alias, pattern: $SOURCE }
               - all:
                   - not:
-                      has:
-                        field: alias
-                        kind: identifier
-                  - has:
-                      field: name
-                      pattern: $SOURCE
+                      has: { field: alias, kind: identifier }
+                  - has: { field: name, pattern: $SOURCE }
   normalize-workflow-asserted-expression:
     any:
       - matches: normalize-workflow-assertion
@@ -345,24 +264,17 @@ utils:
     any:
       - all:
           - kind: variable_declarator
-          - has:
-              field: name
-              matches: normalize-binding-pattern
+          - has: { field: name, matches: normalize-binding-pattern }
           - inside:
               kind: variable_declaration
       - all:
           - kind: for_in_statement
-          - has:
-              field: kind
-              regex: ^var$
-          - has:
-              field: left
-              matches: normalize-binding-pattern
+          - has: { field: kind, regex: ^var$ }
+          - has: { field: left, matches: normalize-binding-pattern }
   normalize-workflow-property-holder:
     any:
       - all:
-          - kind: identifier
-            pattern: $SOURCE
+          - { kind: identifier, pattern: $SOURCE }
           - all:
               - inside:
                   all:
@@ -372,9 +284,7 @@ utils:
                         - has:
                             all:
                               - matches: normalize-value-declaration
-                              - has:
-                                  field: type
-                                  matches: normalize-workflow-property-type
+                              - has: { field: type, matches: normalize-workflow-property-type }
                             stopBy:
                               matches: lr-nested-scope
                         - all:
@@ -384,9 +294,7 @@ utils:
                                   - matches: normalize-hoisted-var-declaration
                                   - all:
                                       - matches: normalize-value-declaration
-                                      - has:
-                                          field: type
-                                          matches: normalize-workflow-property-type
+                                      - has: { field: type, matches: normalize-workflow-property-type }
                                 stopBy:
                                   matches: lr-function-boundary
                   stopBy: end
@@ -395,9 +303,7 @@ utils:
                     all:
                       - matches: lr-lexical-scope
                       - matches: normalize-scope-declares-value
-                      - inside:
-                          pattern: $HOLDER_VALUE_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $HOLDER_VALUE_SCOPE, stopBy: end }
                     stopBy: end
       - all:
           - kind: this
@@ -411,17 +317,11 @@ utils:
                           - any:
                               - kind: property_signature
                               - kind: public_field_definition
-                          - has:
-                              field: name
-                              pattern: $MEMBER
-                          - has:
-                              field: type
-                              matches: normalize-workflow-type
+                          - has: { field: name, pattern: $MEMBER }
+                          - has: { field: type, matches: normalize-workflow-type }
                       - all:
                           - kind: method_definition
-                          - has:
-                              field: name
-                              regex: ^constructor$
+                          - has: { field: name, regex: ^constructor$ }
                           - has:
                               field: parameters
                               kind: formal_parameters
@@ -430,12 +330,8 @@ utils:
                                   - any:
                                       - kind: required_parameter
                                       - kind: optional_parameter
-                                  - has:
-                                      field: pattern
-                                      pattern: $MEMBER
-                                  - has:
-                                      field: type
-                                      matches: normalize-workflow-type
+                                  - has: { field: pattern, pattern: $MEMBER }
+                                  - has: { field: type, matches: normalize-workflow-type }
                                   - any:
                                       - has:
                                           kind: accessibility_modifier
@@ -447,9 +343,7 @@ utils:
               inside:
                 all:
                   - matches: normalize-this-binding-boundary
-                  - inside:
-                      pattern: $CLASS_SCOPE
-                      stopBy: end
+                  - inside: { pattern: $CLASS_SCOPE, stopBy: end }
                 stopBy: end
       - all:
           - matches: lr-expression-wrapper
@@ -466,8 +360,7 @@ utils:
           matches: normalize-input-type
   normalize-input-reference:
     all:
-      - kind: identifier
-        pattern: $SOURCE
+      - { kind: identifier, pattern: $SOURCE }
       - any:
           - all:
               - regex: ^(input|effectiveInput)$
@@ -487,18 +380,11 @@ utils:
                             any:
                               - all:
                                   - matches: normalize-value-declaration
-                                  - has:
-                                      field: type
-                                      matches: normalize-input-type
+                                  - has: { field: type, matches: normalize-input-type }
                               - all:
                                   - kind: variable_declarator
-                                  - has:
-                                      field: name
-                                      kind: identifier
-                                      pattern: $SOURCE
-                                  - has:
-                                      field: value
-                                      matches: normalize-input-asserted-expression
+                                  - has: { field: name, kind: identifier, pattern: $SOURCE }
+                                  - has: { field: value, matches: normalize-input-asserted-expression }
                             stopBy:
                               matches: lr-nested-scope
                         - all:
@@ -509,18 +395,11 @@ utils:
                                   - any:
                                       - all:
                                           - matches: normalize-value-declaration
-                                          - has:
-                                              field: type
-                                              matches: normalize-input-type
+                                          - has: { field: type, matches: normalize-input-type }
                                       - all:
                                           - kind: variable_declarator
-                                          - has:
-                                              field: name
-                                              kind: identifier
-                                              pattern: $SOURCE
-                                          - has:
-                                              field: value
-                                              matches: normalize-input-asserted-expression
+                                          - has: { field: name, kind: identifier, pattern: $SOURCE }
+                                          - has: { field: value, matches: normalize-input-asserted-expression }
                                 stopBy:
                                   matches: lr-function-boundary
                   stopBy: end
@@ -529,9 +408,7 @@ utils:
                     all:
                       - matches: lr-lexical-scope
                       - matches: normalize-scope-declares-value
-                      - inside:
-                          pattern: $VALUE_INPUT_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $VALUE_INPUT_SCOPE, stopBy: end }
                     stopBy: end
   normalize-input-member-receiver:
     all:
@@ -539,23 +416,16 @@ utils:
           - kind: member_expression
           - kind: subscript_expression
       - any:
-          - has:
-              field: property
-              pattern: $MEMBER
+          - has: { field: property, pattern: $MEMBER }
           - has:
               field: index
               kind: string
-              has:
-                kind: string_fragment
-                pattern: $MEMBER
-      - has:
-          field: object
-          matches: normalize-input-property-holder
+              has: { kind: string_fragment, pattern: $MEMBER }
+      - has: { field: object, matches: normalize-input-property-holder }
   normalize-workflow-root-type:
     any:
       - all:
-          - kind: type_identifier
-            pattern: $ROOT_WORKFLOW_TYPE
+          - { kind: type_identifier, pattern: $ROOT_WORKFLOW_TYPE }
           - regex: ^(WorkflowDef)$
           - not:
               inside:
@@ -567,10 +437,7 @@ utils:
                         - kind: type_alias_declaration
                         - kind: interface_declaration
                         - kind: class_declaration
-                    - has:
-                        field: name
-                        kind: type_identifier
-                        pattern: $ROOT_WORKFLOW_TYPE
+                    - has: { field: name, kind: type_identifier, pattern: $ROOT_WORKFLOW_TYPE }
                   stopBy:
                     matches: lr-nested-scope
           - not:
@@ -579,13 +446,10 @@ utils:
                   field: type_parameters
                   has:
                     kind: type_parameter
-                    has:
-                      field: name
-                      pattern: $ROOT_WORKFLOW_TYPE
+                    has: { field: name, pattern: $ROOT_WORKFLOW_TYPE }
                 stopBy: end
       - all:
-          - kind: type_identifier
-            pattern: $ROOT_WORKFLOW_TYPE
+          - { kind: type_identifier, pattern: $ROOT_WORKFLOW_TYPE }
           - all:
               - inside:
                   all:
@@ -594,12 +458,8 @@ utils:
                     - has:
                         all:
                           - kind: import_specifier
-                          - has:
-                              field: alias
-                              pattern: $ROOT_WORKFLOW_TYPE
-                          - has:
-                              field: name
-                              regex: ^(WorkflowDef)$
+                          - has: { field: alias, pattern: $ROOT_WORKFLOW_TYPE }
+                          - has: { field: name, regex: ^(WorkflowDef)$ }
                         stopBy:
                           matches: lr-nested-scope
                   stopBy: end
@@ -614,25 +474,15 @@ utils:
                                     - kind: type_alias_declaration
                                     - kind: interface_declaration
                                     - kind: class_declaration
-                                - has:
-                                    field: name
-                                    kind: type_identifier
-                                    pattern: $ROOT_WORKFLOW_TYPE
+                                - has: { field: name, kind: type_identifier, pattern: $ROOT_WORKFLOW_TYPE }
                             - all:
                                 - kind: import_specifier
                                 - any:
-                                    - has:
-                                        field: alias
-                                        pattern: $ROOT_WORKFLOW_TYPE
-                                    - has:
-                                        field: name
-                                        kind: type_identifier
-                                        pattern: $ROOT_WORKFLOW_TYPE
+                                    - has: { field: alias, pattern: $ROOT_WORKFLOW_TYPE }
+                                    - has: { field: name, kind: type_identifier, pattern: $ROOT_WORKFLOW_TYPE }
                           stopBy:
                             matches: lr-nested-scope
-                      - inside:
-                          pattern: $ROOT_WORKFLOW_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $ROOT_WORKFLOW_SCOPE, stopBy: end }
                     stopBy: end
           - not:
               inside:
@@ -641,12 +491,8 @@ utils:
                       field: type_parameters
                       has:
                         kind: type_parameter
-                        has:
-                          field: name
-                          pattern: $ROOT_WORKFLOW_TYPE
-                  - inside:
-                      pattern: $ROOT_WORKFLOW_SCOPE
-                      stopBy: end
+                        has: { field: name, pattern: $ROOT_WORKFLOW_TYPE }
+                  - inside: { pattern: $ROOT_WORKFLOW_SCOPE, stopBy: end }
                 stopBy: end
       - all:
           - kind: member_expression
@@ -654,12 +500,8 @@ utils:
               field: object
               all:
                 - kind: call_expression
-                - has:
-                    field: function
-                    regex: ^import$
-          - has:
-              field: property
-              regex: ^(WorkflowDef)$
+                - has: { field: function, regex: ^import$ }
+          - has: { field: property, regex: ^(WorkflowDef)$ }
       - all:
           - matches: lr-type-wrapper
           - has:
@@ -678,9 +520,7 @@ utils:
                 - inside:
                     all:
                       - kind: for_in_statement
-                      - has:
-                          field: kind
-                          regex: ^var$
+                      - has: { field: kind, regex: ^var$ }
   normalize-binding-pattern:
     any:
       - all:
@@ -697,22 +537,17 @@ utils:
               matches: normalize-binding-pattern
       - all:
           - kind: pair_pattern
-          - has:
-              field: value
-              matches: normalize-binding-pattern
+          - has: { field: value, matches: normalize-binding-pattern }
       - all:
           - any:
               - kind: assignment_pattern
               - kind: object_assignment_pattern
-          - has:
-              field: left
-              matches: normalize-binding-pattern
+          - has: { field: left, matches: normalize-binding-pattern }
   normalize-workflow-property-type:
     any:
       - matches: normalize-workflow-property-root-type
       - all:
-          - kind: type_identifier
-            pattern: $HOLDER_TYPE
+          - { kind: type_identifier, pattern: $HOLDER_TYPE }
           - all:
               - inside:
                   all:
@@ -724,17 +559,10 @@ utils:
                               - any:
                                   - kind: type_alias_declaration
                                   - kind: interface_declaration
-                              - has:
-                                  field: name
-                                  kind: type_identifier
-                                  pattern: $HOLDER_TYPE
+                              - has: { field: name, kind: type_identifier, pattern: $HOLDER_TYPE }
                           - any:
-                              - has:
-                                  field: value
-                                  matches: normalize-workflow-property-root-type
-                              - has:
-                                  field: body
-                                  matches: normalize-workflow-property-root-type
+                              - has: { field: value, matches: normalize-workflow-property-root-type }
+                              - has: { field: body, matches: normalize-workflow-property-root-type }
                         stopBy:
                           matches: lr-nested-scope
                   stopBy: end
@@ -747,15 +575,10 @@ utils:
                             - any:
                                 - kind: type_alias_declaration
                                 - kind: interface_declaration
-                            - has:
-                                field: name
-                                kind: type_identifier
-                                pattern: $HOLDER_TYPE
+                            - has: { field: name, kind: type_identifier, pattern: $HOLDER_TYPE }
                           stopBy:
                             matches: lr-nested-scope
-                      - inside:
-                          pattern: $HOLDER_TYPE_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $HOLDER_TYPE_SCOPE, stopBy: end }
                     stopBy: end
           - not:
               inside:
@@ -764,12 +587,8 @@ utils:
                       field: type_parameters
                       has:
                         kind: type_parameter
-                        has:
-                          field: name
-                          pattern: $HOLDER_TYPE
-                  - inside:
-                      pattern: $HOLDER_TYPE_SCOPE
-                      stopBy: end
+                        has: { field: name, pattern: $HOLDER_TYPE }
+                  - inside: { pattern: $HOLDER_TYPE_SCOPE, stopBy: end }
                 stopBy: end
       - all:
           - matches: lr-type-wrapper
@@ -801,30 +620,23 @@ utils:
                       kind: method_definition
                       inside:
                         kind: class_body
-                        inside:
-                          pattern: $CLASS_SCOPE
-                          stopBy: end
+                        inside: { pattern: $CLASS_SCOPE, stopBy: end }
               - inside:
                   field: value
                   kind: public_field_definition
                   inside:
                     kind: class_body
-                    inside:
-                      pattern: $CLASS_SCOPE
-                      stopBy: end
+                    inside: { pattern: $CLASS_SCOPE, stopBy: end }
               - all:
                   - kind: class_static_block
                   - inside:
                       kind: class_body
-                      inside:
-                        pattern: $CLASS_SCOPE
-                        stopBy: end
+                      inside: { pattern: $CLASS_SCOPE, stopBy: end }
   normalize-input-type:
     any:
       - matches: normalize-input-root-type
       - all:
-          - kind: type_identifier
-            pattern: $REF_INPUT_TYPE
+          - { kind: type_identifier, pattern: $REF_INPUT_TYPE }
           - all:
               - inside:
                   all:
@@ -833,13 +645,8 @@ utils:
                     - has:
                         all:
                           - kind: type_alias_declaration
-                          - has:
-                              field: name
-                              kind: type_identifier
-                              pattern: $REF_INPUT_TYPE
-                          - has:
-                              field: value
-                              matches: normalize-input-root-type
+                          - has: { field: name, kind: type_identifier, pattern: $REF_INPUT_TYPE }
+                          - has: { field: value, matches: normalize-input-root-type }
                         stopBy:
                           matches: lr-nested-scope
                   stopBy: end
@@ -854,25 +661,15 @@ utils:
                                     - kind: type_alias_declaration
                                     - kind: interface_declaration
                                     - kind: class_declaration
-                                - has:
-                                    field: name
-                                    kind: type_identifier
-                                    pattern: $REF_INPUT_TYPE
+                                - has: { field: name, kind: type_identifier, pattern: $REF_INPUT_TYPE }
                             - all:
                                 - kind: import_specifier
                                 - any:
-                                    - has:
-                                        field: alias
-                                        pattern: $REF_INPUT_TYPE
-                                    - has:
-                                        field: name
-                                        kind: type_identifier
-                                        pattern: $REF_INPUT_TYPE
+                                    - has: { field: alias, pattern: $REF_INPUT_TYPE }
+                                    - has: { field: name, kind: type_identifier, pattern: $REF_INPUT_TYPE }
                           stopBy:
                             matches: lr-nested-scope
-                      - inside:
-                          pattern: $REF_INPUT_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $REF_INPUT_SCOPE, stopBy: end }
                     stopBy: end
           - not:
               inside:
@@ -881,12 +678,8 @@ utils:
                       field: type_parameters
                       has:
                         kind: type_parameter
-                        has:
-                          field: name
-                          pattern: $REF_INPUT_TYPE
-                  - inside:
-                      pattern: $REF_INPUT_SCOPE
-                      stopBy: end
+                        has: { field: name, pattern: $REF_INPUT_TYPE }
+                  - inside: { pattern: $REF_INPUT_SCOPE, stopBy: end }
                 stopBy: end
       - all:
           - matches: lr-type-wrapper
@@ -908,8 +701,7 @@ utils:
   normalize-input-property-holder:
     any:
       - all:
-          - kind: identifier
-            pattern: $SOURCE
+          - { kind: identifier, pattern: $SOURCE }
           - all:
               - inside:
                   all:
@@ -919,9 +711,7 @@ utils:
                         - has:
                             all:
                               - matches: normalize-value-declaration
-                              - has:
-                                  field: type
-                                  matches: normalize-input-property-type
+                              - has: { field: type, matches: normalize-input-property-type }
                             stopBy:
                               matches: lr-nested-scope
                         - all:
@@ -931,9 +721,7 @@ utils:
                                   - matches: normalize-hoisted-var-declaration
                                   - all:
                                       - matches: normalize-value-declaration
-                                      - has:
-                                          field: type
-                                          matches: normalize-input-property-type
+                                      - has: { field: type, matches: normalize-input-property-type }
                                 stopBy:
                                   matches: lr-function-boundary
                   stopBy: end
@@ -942,9 +730,7 @@ utils:
                     all:
                       - matches: lr-lexical-scope
                       - matches: normalize-scope-declares-value
-                      - inside:
-                          pattern: $HOLDER_VALUE_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $HOLDER_VALUE_SCOPE, stopBy: end }
                     stopBy: end
       - all:
           - kind: this
@@ -958,17 +744,11 @@ utils:
                           - any:
                               - kind: property_signature
                               - kind: public_field_definition
-                          - has:
-                              field: name
-                              pattern: $MEMBER
-                          - has:
-                              field: type
-                              matches: normalize-input-type
+                          - has: { field: name, pattern: $MEMBER }
+                          - has: { field: type, matches: normalize-input-type }
                       - all:
                           - kind: method_definition
-                          - has:
-                              field: name
-                              regex: ^constructor$
+                          - has: { field: name, regex: ^constructor$ }
                           - has:
                               field: parameters
                               kind: formal_parameters
@@ -977,12 +757,8 @@ utils:
                                   - any:
                                       - kind: required_parameter
                                       - kind: optional_parameter
-                                  - has:
-                                      field: pattern
-                                      pattern: $MEMBER
-                                  - has:
-                                      field: type
-                                      matches: normalize-input-type
+                                  - has: { field: pattern, pattern: $MEMBER }
+                                  - has: { field: type, matches: normalize-input-type }
                                   - any:
                                       - has:
                                           kind: accessibility_modifier
@@ -994,9 +770,7 @@ utils:
               inside:
                 all:
                   - matches: normalize-this-binding-boundary
-                  - inside:
-                      pattern: $CLASS_SCOPE
-                      stopBy: end
+                  - inside: { pattern: $CLASS_SCOPE, stopBy: end }
                 stopBy: end
       - all:
           - matches: lr-expression-wrapper
@@ -1017,12 +791,8 @@ utils:
                 - any:
                     - kind: property_signature
                     - kind: public_field_definition
-                - has:
-                    field: name
-                    pattern: $MEMBER
-                - has:
-                    field: type
-                    matches: normalize-workflow-type
+                - has: { field: name, pattern: $MEMBER }
+                - has: { field: type, matches: normalize-workflow-type }
       - all:
           - matches: lr-type-wrapper
           - has:
@@ -1030,8 +800,7 @@ utils:
   normalize-input-root-type:
     any:
       - all:
-          - kind: type_identifier
-            pattern: $ROOT_INPUT_TYPE
+          - { kind: type_identifier, pattern: $ROOT_INPUT_TYPE }
           - regex: ^(StartRunInput)$
           - not:
               inside:
@@ -1043,10 +812,7 @@ utils:
                         - kind: type_alias_declaration
                         - kind: interface_declaration
                         - kind: class_declaration
-                    - has:
-                        field: name
-                        kind: type_identifier
-                        pattern: $ROOT_INPUT_TYPE
+                    - has: { field: name, kind: type_identifier, pattern: $ROOT_INPUT_TYPE }
                   stopBy:
                     matches: lr-nested-scope
           - not:
@@ -1055,13 +821,10 @@ utils:
                   field: type_parameters
                   has:
                     kind: type_parameter
-                    has:
-                      field: name
-                      pattern: $ROOT_INPUT_TYPE
+                    has: { field: name, pattern: $ROOT_INPUT_TYPE }
                 stopBy: end
       - all:
-          - kind: type_identifier
-            pattern: $ROOT_INPUT_TYPE
+          - { kind: type_identifier, pattern: $ROOT_INPUT_TYPE }
           - all:
               - inside:
                   all:
@@ -1070,12 +833,8 @@ utils:
                     - has:
                         all:
                           - kind: import_specifier
-                          - has:
-                              field: alias
-                              pattern: $ROOT_INPUT_TYPE
-                          - has:
-                              field: name
-                              regex: ^(StartRunInput)$
+                          - has: { field: alias, pattern: $ROOT_INPUT_TYPE }
+                          - has: { field: name, regex: ^(StartRunInput)$ }
                         stopBy:
                           matches: lr-nested-scope
                   stopBy: end
@@ -1090,25 +849,15 @@ utils:
                                     - kind: type_alias_declaration
                                     - kind: interface_declaration
                                     - kind: class_declaration
-                                - has:
-                                    field: name
-                                    kind: type_identifier
-                                    pattern: $ROOT_INPUT_TYPE
+                                - has: { field: name, kind: type_identifier, pattern: $ROOT_INPUT_TYPE }
                             - all:
                                 - kind: import_specifier
                                 - any:
-                                    - has:
-                                        field: alias
-                                        pattern: $ROOT_INPUT_TYPE
-                                    - has:
-                                        field: name
-                                        kind: type_identifier
-                                        pattern: $ROOT_INPUT_TYPE
+                                    - has: { field: alias, pattern: $ROOT_INPUT_TYPE }
+                                    - has: { field: name, kind: type_identifier, pattern: $ROOT_INPUT_TYPE }
                           stopBy:
                             matches: lr-nested-scope
-                      - inside:
-                          pattern: $ROOT_INPUT_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $ROOT_INPUT_SCOPE, stopBy: end }
                     stopBy: end
           - not:
               inside:
@@ -1117,12 +866,8 @@ utils:
                       field: type_parameters
                       has:
                         kind: type_parameter
-                        has:
-                          field: name
-                          pattern: $ROOT_INPUT_TYPE
-                  - inside:
-                      pattern: $ROOT_INPUT_SCOPE
-                      stopBy: end
+                        has: { field: name, pattern: $ROOT_INPUT_TYPE }
+                  - inside: { pattern: $ROOT_INPUT_SCOPE, stopBy: end }
                 stopBy: end
       - all:
           - kind: member_expression
@@ -1130,12 +875,8 @@ utils:
               field: object
               all:
                 - kind: call_expression
-                - has:
-                    field: function
-                    regex: ^import$
-          - has:
-              field: property
-              regex: ^(StartRunInput)$
+                - has: { field: function, regex: ^import$ }
+          - has: { field: property, regex: ^(StartRunInput)$ }
       - all:
           - matches: lr-type-wrapper
           - has:
@@ -1144,8 +885,7 @@ utils:
     any:
       - matches: normalize-input-property-root-type
       - all:
-          - kind: type_identifier
-            pattern: $HOLDER_TYPE
+          - { kind: type_identifier, pattern: $HOLDER_TYPE }
           - all:
               - inside:
                   all:
@@ -1157,17 +897,10 @@ utils:
                               - any:
                                   - kind: type_alias_declaration
                                   - kind: interface_declaration
-                              - has:
-                                  field: name
-                                  kind: type_identifier
-                                  pattern: $HOLDER_TYPE
+                              - has: { field: name, kind: type_identifier, pattern: $HOLDER_TYPE }
                           - any:
-                              - has:
-                                  field: value
-                                  matches: normalize-input-property-root-type
-                              - has:
-                                  field: body
-                                  matches: normalize-input-property-root-type
+                              - has: { field: value, matches: normalize-input-property-root-type }
+                              - has: { field: body, matches: normalize-input-property-root-type }
                         stopBy:
                           matches: lr-nested-scope
                   stopBy: end
@@ -1180,15 +913,10 @@ utils:
                             - any:
                                 - kind: type_alias_declaration
                                 - kind: interface_declaration
-                            - has:
-                                field: name
-                                kind: type_identifier
-                                pattern: $HOLDER_TYPE
+                            - has: { field: name, kind: type_identifier, pattern: $HOLDER_TYPE }
                           stopBy:
                             matches: lr-nested-scope
-                      - inside:
-                          pattern: $HOLDER_TYPE_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $HOLDER_TYPE_SCOPE, stopBy: end }
                     stopBy: end
           - not:
               inside:
@@ -1197,12 +925,8 @@ utils:
                       field: type_parameters
                       has:
                         kind: type_parameter
-                        has:
-                          field: name
-                          pattern: $HOLDER_TYPE
-                  - inside:
-                      pattern: $HOLDER_TYPE_SCOPE
-                      stopBy: end
+                        has: { field: name, pattern: $HOLDER_TYPE }
+                  - inside: { pattern: $HOLDER_TYPE_SCOPE, stopBy: end }
                 stopBy: end
       - all:
           - matches: lr-type-wrapper
@@ -1219,12 +943,8 @@ utils:
                 - any:
                     - kind: property_signature
                     - kind: public_field_definition
-                - has:
-                    field: name
-                    pattern: $MEMBER
-                - has:
-                    field: type
-                    matches: normalize-input-type
+                - has: { field: name, pattern: $MEMBER }
+                - has: { field: type, matches: normalize-input-type }
       - all:
           - matches: lr-type-wrapper
           - has:
@@ -1233,28 +953,18 @@ rule:
   any:
     - all:
         - kind: member_expression
-        - has:
-            field: property
-            regex: ^steps$
-        - has:
-            field: object
-            matches: normalize-workflow-receiver
+        - has: { field: property, regex: ^steps$ }
+        - has: { field: object, matches: normalize-workflow-receiver }
     - all:
         - kind: member_expression
         - has:
             field: object
             kind: member_expression
-            has:
-              field: property
-              regex: ^skills$
-        - has:
-            field: property
-            regex: ^catalog$
+            has: { field: property, regex: ^skills$ }
+        - has: { field: property, regex: ^catalog$ }
     - all:
         - kind: member_expression
-        - has:
-            field: property
-            regex: ^(persistedImages|persistedAttachments)$
+        - has: { field: property, regex: ^(persistedImages|persistedAttachments)$ }
         - has:
             field: object
             any:
@@ -1262,13 +972,9 @@ rule:
     - all:
         - kind: subscript_expression
         - any:
-            - has:
-                field: index
-                regex: ^['"](persistedImages|persistedAttachments)['"]$
+            - has: { field: index, regex: "^['\"](persistedImages|persistedAttachments)['\"]$" }
             - not:
-                has:
-                  field: index
-                  kind: string
+                has: { field: index, kind: string }
         - has:
             field: object
             any:
@@ -1293,21 +999,14 @@ rule:
                     - has:
                         field: key
                         kind: computed_property_name
-                        has:
-                          kind: string
-                          regex: ^['"](persistedImages|persistedAttachments)[ '"]*$
-                - kind: shorthand_property_identifier_pattern
-                  regex: ^(persistedImages|persistedAttachments)$
+                        has: { kind: string, regex: "^['\"](persistedImages|persistedAttachments)[ '\"]*$" }
+                - { kind: shorthand_property_identifier_pattern, regex: ^(persistedImages|persistedAttachments)$ }
                 - all:
                     - kind: pair_pattern
-                    - has:
-                        field: key
-                        regex: ^['"]?(persistedImages|persistedAttachments)[ '"]*$
+                    - has: { field: key, regex: "^['\"]?(persistedImages|persistedAttachments)[ '\"]*$" }
                 - all:
                     - kind: object_assignment_pattern
-                    - has:
-                        field: left
-                        regex: ^(persistedImages|persistedAttachments)$
+                    - has: { field: left, regex: ^(persistedImages|persistedAttachments)$ }
               stopBy: end
         - has:
             field: value

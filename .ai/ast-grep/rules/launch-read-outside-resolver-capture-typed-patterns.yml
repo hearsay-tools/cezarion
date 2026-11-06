@@ -21,8 +21,7 @@ utils:
     any:
       - matches: normalize-input-root-type
       - all:
-          - kind: type_identifier
-            pattern: $REF_INPUT_TYPE
+          - { kind: type_identifier, pattern: $REF_INPUT_TYPE }
           - all:
               - inside:
                   all:
@@ -31,13 +30,8 @@ utils:
                     - has:
                         all:
                           - kind: type_alias_declaration
-                          - has:
-                              field: name
-                              kind: type_identifier
-                              pattern: $REF_INPUT_TYPE
-                          - has:
-                              field: value
-                              matches: normalize-input-root-type
+                          - has: { field: name, kind: type_identifier, pattern: $REF_INPUT_TYPE }
+                          - has: { field: value, matches: normalize-input-root-type }
                         stopBy:
                           matches: lr-nested-scope
                   stopBy: end
@@ -52,25 +46,15 @@ utils:
                                     - kind: type_alias_declaration
                                     - kind: interface_declaration
                                     - kind: class_declaration
-                                - has:
-                                    field: name
-                                    kind: type_identifier
-                                    pattern: $REF_INPUT_TYPE
+                                - has: { field: name, kind: type_identifier, pattern: $REF_INPUT_TYPE }
                             - all:
                                 - kind: import_specifier
                                 - any:
-                                    - has:
-                                        field: alias
-                                        pattern: $REF_INPUT_TYPE
-                                    - has:
-                                        field: name
-                                        kind: type_identifier
-                                        pattern: $REF_INPUT_TYPE
+                                    - has: { field: alias, pattern: $REF_INPUT_TYPE }
+                                    - has: { field: name, kind: type_identifier, pattern: $REF_INPUT_TYPE }
                           stopBy:
                             matches: lr-nested-scope
-                      - inside:
-                          pattern: $REF_INPUT_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $REF_INPUT_SCOPE, stopBy: end }
                     stopBy: end
           - not:
               inside:
@@ -79,12 +63,8 @@ utils:
                       field: type_parameters
                       has:
                         kind: type_parameter
-                        has:
-                          field: name
-                          pattern: $REF_INPUT_TYPE
-                  - inside:
-                      pattern: $REF_INPUT_SCOPE
-                      stopBy: end
+                        has: { field: name, pattern: $REF_INPUT_TYPE }
+                  - inside: { pattern: $REF_INPUT_SCOPE, stopBy: end }
                 stopBy: end
       - all:
           - matches: lr-type-wrapper
@@ -100,8 +80,7 @@ utils:
     any:
       - matches: normalize-source-root-type
       - all:
-          - kind: type_identifier
-            pattern: $REF_SOURCE_TYPE
+          - { kind: type_identifier, pattern: $REF_SOURCE_TYPE }
           - all:
               - inside:
                   all:
@@ -110,13 +89,8 @@ utils:
                     - has:
                         all:
                           - kind: type_alias_declaration
-                          - has:
-                              field: name
-                              kind: type_identifier
-                              pattern: $REF_SOURCE_TYPE
-                          - has:
-                              field: value
-                              matches: normalize-source-root-type
+                          - has: { field: name, kind: type_identifier, pattern: $REF_SOURCE_TYPE }
+                          - has: { field: value, matches: normalize-source-root-type }
                         stopBy:
                           matches: lr-nested-scope
                   stopBy: end
@@ -131,25 +105,15 @@ utils:
                                     - kind: type_alias_declaration
                                     - kind: interface_declaration
                                     - kind: class_declaration
-                                - has:
-                                    field: name
-                                    kind: type_identifier
-                                    pattern: $REF_SOURCE_TYPE
+                                - has: { field: name, kind: type_identifier, pattern: $REF_SOURCE_TYPE }
                             - all:
                                 - kind: import_specifier
                                 - any:
-                                    - has:
-                                        field: alias
-                                        pattern: $REF_SOURCE_TYPE
-                                    - has:
-                                        field: name
-                                        kind: type_identifier
-                                        pattern: $REF_SOURCE_TYPE
+                                    - has: { field: alias, pattern: $REF_SOURCE_TYPE }
+                                    - has: { field: name, kind: type_identifier, pattern: $REF_SOURCE_TYPE }
                           stopBy:
                             matches: lr-nested-scope
-                      - inside:
-                          pattern: $REF_SOURCE_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $REF_SOURCE_SCOPE, stopBy: end }
                     stopBy: end
           - not:
               inside:
@@ -158,12 +122,8 @@ utils:
                       field: type_parameters
                       has:
                         kind: type_parameter
-                        has:
-                          field: name
-                          pattern: $REF_SOURCE_TYPE
-                  - inside:
-                      pattern: $REF_SOURCE_SCOPE
-                      stopBy: end
+                        has: { field: name, pattern: $REF_SOURCE_TYPE }
+                  - inside: { pattern: $REF_SOURCE_SCOPE, stopBy: end }
                 stopBy: end
       - all:
           - matches: lr-type-wrapper
@@ -179,8 +139,7 @@ utils:
     any:
       - matches: normalize-workflow-root-type
       - all:
-          - kind: type_identifier
-            pattern: $REF_WORKFLOW_TYPE
+          - { kind: type_identifier, pattern: $REF_WORKFLOW_TYPE }
           - all:
               - inside:
                   all:
@@ -189,13 +148,8 @@ utils:
                     - has:
                         all:
                           - kind: type_alias_declaration
-                          - has:
-                              field: name
-                              kind: type_identifier
-                              pattern: $REF_WORKFLOW_TYPE
-                          - has:
-                              field: value
-                              matches: normalize-workflow-root-type
+                          - has: { field: name, kind: type_identifier, pattern: $REF_WORKFLOW_TYPE }
+                          - has: { field: value, matches: normalize-workflow-root-type }
                         stopBy:
                           matches: lr-nested-scope
                   stopBy: end
@@ -210,25 +164,15 @@ utils:
                                     - kind: type_alias_declaration
                                     - kind: interface_declaration
                                     - kind: class_declaration
-                                - has:
-                                    field: name
-                                    kind: type_identifier
-                                    pattern: $REF_WORKFLOW_TYPE
+                                - has: { field: name, kind: type_identifier, pattern: $REF_WORKFLOW_TYPE }
                             - all:
                                 - kind: import_specifier
                                 - any:
-                                    - has:
-                                        field: alias
-                                        pattern: $REF_WORKFLOW_TYPE
-                                    - has:
-                                        field: name
-                                        kind: type_identifier
-                                        pattern: $REF_WORKFLOW_TYPE
+                                    - has: { field: alias, pattern: $REF_WORKFLOW_TYPE }
+                                    - has: { field: name, kind: type_identifier, pattern: $REF_WORKFLOW_TYPE }
                           stopBy:
                             matches: lr-nested-scope
-                      - inside:
-                          pattern: $REF_WORKFLOW_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $REF_WORKFLOW_SCOPE, stopBy: end }
                     stopBy: end
           - not:
               inside:
@@ -237,12 +181,8 @@ utils:
                       field: type_parameters
                       has:
                         kind: type_parameter
-                        has:
-                          field: name
-                          pattern: $REF_WORKFLOW_TYPE
-                  - inside:
-                      pattern: $REF_WORKFLOW_SCOPE
-                      stopBy: end
+                        has: { field: name, pattern: $REF_WORKFLOW_TYPE }
+                  - inside: { pattern: $REF_WORKFLOW_SCOPE, stopBy: end }
                 stopBy: end
       - all:
           - matches: lr-type-wrapper
@@ -258,14 +198,10 @@ utils:
     any:
       - all:
           - kind: type_alias_declaration
-          - has:
-              field: value
-              matches: normalize-source-root-type
+          - has: { field: value, matches: normalize-source-root-type }
       - all:
           - kind: expression_statement
-          - has:
-              kind: identifier
-              regex: ^type$
+          - has: { kind: identifier, regex: ^type$ }
           - has:
               kind: ERROR
               has:
@@ -279,8 +215,7 @@ utils:
   normalize-input-root-type:
     any:
       - all:
-          - kind: type_identifier
-            pattern: $ROOT_INPUT_TYPE
+          - { kind: type_identifier, pattern: $ROOT_INPUT_TYPE }
           - regex: ^(StartRunInput)$
           - not:
               inside:
@@ -292,10 +227,7 @@ utils:
                         - kind: type_alias_declaration
                         - kind: interface_declaration
                         - kind: class_declaration
-                    - has:
-                        field: name
-                        kind: type_identifier
-                        pattern: $ROOT_INPUT_TYPE
+                    - has: { field: name, kind: type_identifier, pattern: $ROOT_INPUT_TYPE }
                   stopBy:
                     matches: lr-nested-scope
           - not:
@@ -304,13 +236,10 @@ utils:
                   field: type_parameters
                   has:
                     kind: type_parameter
-                    has:
-                      field: name
-                      pattern: $ROOT_INPUT_TYPE
+                    has: { field: name, pattern: $ROOT_INPUT_TYPE }
                 stopBy: end
       - all:
-          - kind: type_identifier
-            pattern: $ROOT_INPUT_TYPE
+          - { kind: type_identifier, pattern: $ROOT_INPUT_TYPE }
           - all:
               - inside:
                   all:
@@ -319,12 +248,8 @@ utils:
                     - has:
                         all:
                           - kind: import_specifier
-                          - has:
-                              field: alias
-                              pattern: $ROOT_INPUT_TYPE
-                          - has:
-                              field: name
-                              regex: ^(StartRunInput)$
+                          - has: { field: alias, pattern: $ROOT_INPUT_TYPE }
+                          - has: { field: name, regex: ^(StartRunInput)$ }
                         stopBy:
                           matches: lr-nested-scope
                   stopBy: end
@@ -339,25 +264,15 @@ utils:
                                     - kind: type_alias_declaration
                                     - kind: interface_declaration
                                     - kind: class_declaration
-                                - has:
-                                    field: name
-                                    kind: type_identifier
-                                    pattern: $ROOT_INPUT_TYPE
+                                - has: { field: name, kind: type_identifier, pattern: $ROOT_INPUT_TYPE }
                             - all:
                                 - kind: import_specifier
                                 - any:
-                                    - has:
-                                        field: alias
-                                        pattern: $ROOT_INPUT_TYPE
-                                    - has:
-                                        field: name
-                                        kind: type_identifier
-                                        pattern: $ROOT_INPUT_TYPE
+                                    - has: { field: alias, pattern: $ROOT_INPUT_TYPE }
+                                    - has: { field: name, kind: type_identifier, pattern: $ROOT_INPUT_TYPE }
                           stopBy:
                             matches: lr-nested-scope
-                      - inside:
-                          pattern: $ROOT_INPUT_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $ROOT_INPUT_SCOPE, stopBy: end }
                     stopBy: end
           - not:
               inside:
@@ -366,12 +281,8 @@ utils:
                       field: type_parameters
                       has:
                         kind: type_parameter
-                        has:
-                          field: name
-                          pattern: $ROOT_INPUT_TYPE
-                  - inside:
-                      pattern: $ROOT_INPUT_SCOPE
-                      stopBy: end
+                        has: { field: name, pattern: $ROOT_INPUT_TYPE }
+                  - inside: { pattern: $ROOT_INPUT_SCOPE, stopBy: end }
                 stopBy: end
       - all:
           - kind: member_expression
@@ -379,12 +290,8 @@ utils:
               field: object
               all:
                 - kind: call_expression
-                - has:
-                    field: function
-                    regex: ^import$
-          - has:
-              field: property
-              regex: ^(StartRunInput)$
+                - has: { field: function, regex: ^import$ }
+          - has: { field: property, regex: ^(StartRunInput)$ }
       - all:
           - matches: lr-type-wrapper
           - has:
@@ -392,8 +299,7 @@ utils:
   normalize-source-root-type:
     any:
       - all:
-          - kind: type_identifier
-            pattern: $ROOT_SOURCE_TYPE
+          - { kind: type_identifier, pattern: $ROOT_SOURCE_TYPE }
           - regex: ^(StartRunInput|PendingJob|PendingContinuation|WorkflowDef|WorkflowStepDef|WorkerStepIdentity|RunRecord|StepState|CezConfig|LaunchConfig|LaunchSource|ExecutionLaunch|Execution)$
           - not:
               inside:
@@ -405,10 +311,7 @@ utils:
                         - kind: type_alias_declaration
                         - kind: interface_declaration
                         - kind: class_declaration
-                    - has:
-                        field: name
-                        kind: type_identifier
-                        pattern: $ROOT_SOURCE_TYPE
+                    - has: { field: name, kind: type_identifier, pattern: $ROOT_SOURCE_TYPE }
                   stopBy:
                     matches: lr-nested-scope
           - not:
@@ -417,13 +320,10 @@ utils:
                   field: type_parameters
                   has:
                     kind: type_parameter
-                    has:
-                      field: name
-                      pattern: $ROOT_SOURCE_TYPE
+                    has: { field: name, pattern: $ROOT_SOURCE_TYPE }
                 stopBy: end
       - all:
-          - kind: type_identifier
-            pattern: $ROOT_SOURCE_TYPE
+          - { kind: type_identifier, pattern: $ROOT_SOURCE_TYPE }
           - all:
               - inside:
                   all:
@@ -432,12 +332,12 @@ utils:
                     - has:
                         all:
                           - kind: import_specifier
+                          - has: { field: alias, pattern: $ROOT_SOURCE_TYPE }
                           - has:
-                              field: alias
-                              pattern: $ROOT_SOURCE_TYPE
-                          - has:
-                              field: name
-                              regex: ^(StartRunInput|PendingJob|PendingContinuation|WorkflowDef|WorkflowStepDef|WorkerStepIdentity|RunRecord|StepState|CezConfig|LaunchConfig|LaunchSource|ExecutionLaunch|Execution)$
+                              {
+                                field: name,
+                                regex: ^(StartRunInput|PendingJob|PendingContinuation|WorkflowDef|WorkflowStepDef|WorkerStepIdentity|RunRecord|StepState|CezConfig|LaunchConfig|LaunchSource|ExecutionLaunch|Execution)$
+                              }
                         stopBy:
                           matches: lr-nested-scope
                   stopBy: end
@@ -452,25 +352,15 @@ utils:
                                     - kind: type_alias_declaration
                                     - kind: interface_declaration
                                     - kind: class_declaration
-                                - has:
-                                    field: name
-                                    kind: type_identifier
-                                    pattern: $ROOT_SOURCE_TYPE
+                                - has: { field: name, kind: type_identifier, pattern: $ROOT_SOURCE_TYPE }
                             - all:
                                 - kind: import_specifier
                                 - any:
-                                    - has:
-                                        field: alias
-                                        pattern: $ROOT_SOURCE_TYPE
-                                    - has:
-                                        field: name
-                                        kind: type_identifier
-                                        pattern: $ROOT_SOURCE_TYPE
+                                    - has: { field: alias, pattern: $ROOT_SOURCE_TYPE }
+                                    - has: { field: name, kind: type_identifier, pattern: $ROOT_SOURCE_TYPE }
                           stopBy:
                             matches: lr-nested-scope
-                      - inside:
-                          pattern: $ROOT_SOURCE_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $ROOT_SOURCE_SCOPE, stopBy: end }
                     stopBy: end
           - not:
               inside:
@@ -479,12 +369,8 @@ utils:
                       field: type_parameters
                       has:
                         kind: type_parameter
-                        has:
-                          field: name
-                          pattern: $ROOT_SOURCE_TYPE
-                  - inside:
-                      pattern: $ROOT_SOURCE_SCOPE
-                      stopBy: end
+                        has: { field: name, pattern: $ROOT_SOURCE_TYPE }
+                  - inside: { pattern: $ROOT_SOURCE_SCOPE, stopBy: end }
                 stopBy: end
       - all:
           - kind: member_expression
@@ -492,12 +378,12 @@ utils:
               field: object
               all:
                 - kind: call_expression
-                - has:
-                    field: function
-                    regex: ^import$
+                - has: { field: function, regex: ^import$ }
           - has:
-              field: property
-              regex: ^(StartRunInput|PendingJob|PendingContinuation|WorkflowDef|WorkflowStepDef|WorkerStepIdentity|RunRecord|StepState|CezConfig|LaunchConfig|LaunchSource|ExecutionLaunch|Execution)$
+              {
+                field: property,
+                regex: ^(StartRunInput|PendingJob|PendingContinuation|WorkflowDef|WorkflowStepDef|WorkerStepIdentity|RunRecord|StepState|CezConfig|LaunchConfig|LaunchSource|ExecutionLaunch|Execution)$
+              }
       - all:
           - matches: lr-type-wrapper
           - has:
@@ -505,8 +391,7 @@ utils:
   normalize-workflow-root-type:
     any:
       - all:
-          - kind: type_identifier
-            pattern: $ROOT_WORKFLOW_TYPE
+          - { kind: type_identifier, pattern: $ROOT_WORKFLOW_TYPE }
           - regex: ^(WorkflowDef)$
           - not:
               inside:
@@ -518,10 +403,7 @@ utils:
                         - kind: type_alias_declaration
                         - kind: interface_declaration
                         - kind: class_declaration
-                    - has:
-                        field: name
-                        kind: type_identifier
-                        pattern: $ROOT_WORKFLOW_TYPE
+                    - has: { field: name, kind: type_identifier, pattern: $ROOT_WORKFLOW_TYPE }
                   stopBy:
                     matches: lr-nested-scope
           - not:
@@ -530,13 +412,10 @@ utils:
                   field: type_parameters
                   has:
                     kind: type_parameter
-                    has:
-                      field: name
-                      pattern: $ROOT_WORKFLOW_TYPE
+                    has: { field: name, pattern: $ROOT_WORKFLOW_TYPE }
                 stopBy: end
       - all:
-          - kind: type_identifier
-            pattern: $ROOT_WORKFLOW_TYPE
+          - { kind: type_identifier, pattern: $ROOT_WORKFLOW_TYPE }
           - all:
               - inside:
                   all:
@@ -545,12 +424,8 @@ utils:
                     - has:
                         all:
                           - kind: import_specifier
-                          - has:
-                              field: alias
-                              pattern: $ROOT_WORKFLOW_TYPE
-                          - has:
-                              field: name
-                              regex: ^(WorkflowDef)$
+                          - has: { field: alias, pattern: $ROOT_WORKFLOW_TYPE }
+                          - has: { field: name, regex: ^(WorkflowDef)$ }
                         stopBy:
                           matches: lr-nested-scope
                   stopBy: end
@@ -565,25 +440,15 @@ utils:
                                     - kind: type_alias_declaration
                                     - kind: interface_declaration
                                     - kind: class_declaration
-                                - has:
-                                    field: name
-                                    kind: type_identifier
-                                    pattern: $ROOT_WORKFLOW_TYPE
+                                - has: { field: name, kind: type_identifier, pattern: $ROOT_WORKFLOW_TYPE }
                             - all:
                                 - kind: import_specifier
                                 - any:
-                                    - has:
-                                        field: alias
-                                        pattern: $ROOT_WORKFLOW_TYPE
-                                    - has:
-                                        field: name
-                                        kind: type_identifier
-                                        pattern: $ROOT_WORKFLOW_TYPE
+                                    - has: { field: alias, pattern: $ROOT_WORKFLOW_TYPE }
+                                    - has: { field: name, kind: type_identifier, pattern: $ROOT_WORKFLOW_TYPE }
                           stopBy:
                             matches: lr-nested-scope
-                      - inside:
-                          pattern: $ROOT_WORKFLOW_SCOPE
-                          stopBy: end
+                      - inside: { pattern: $ROOT_WORKFLOW_SCOPE, stopBy: end }
                     stopBy: end
           - not:
               inside:
@@ -592,12 +457,8 @@ utils:
                       field: type_parameters
                       has:
                         kind: type_parameter
-                        has:
-                          field: name
-                          pattern: $ROOT_WORKFLOW_TYPE
-                  - inside:
-                      pattern: $ROOT_WORKFLOW_SCOPE
-                      stopBy: end
+                        has: { field: name, pattern: $ROOT_WORKFLOW_TYPE }
+                  - inside: { pattern: $ROOT_WORKFLOW_SCOPE, stopBy: end }
                 stopBy: end
       - all:
           - kind: member_expression
@@ -605,12 +466,8 @@ utils:
               field: object
               all:
                 - kind: call_expression
-                - has:
-                    field: function
-                    regex: ^import$
-          - has:
-              field: property
-              regex: ^(WorkflowDef)$
+                - has: { field: function, regex: ^import$ }
+          - has: { field: property, regex: ^(WorkflowDef)$ }
       - all:
           - matches: lr-type-wrapper
           - has:
@@ -649,35 +506,37 @@ rule:
                         field: key
                         kind: computed_property_name
                         has:
-                          kind: string
-                          regex: ^['"](worktree|autonomous|archiveWhenDone|autoMergePr|notify|automation|automationTrigger)[ '"]*$
-                - kind: shorthand_property_identifier_pattern
-                  regex: ^(worktree|autonomous|archiveWhenDone|autoMergePr|notify|automation|automationTrigger)$
+                          {
+                            kind: string,
+                            regex: "^['\"](worktree|autonomous|archiveWhenDone|autoMergePr|notify|automation|automationTrigger)[ '\"]*$"
+                          }
+                - {
+                    kind: shorthand_property_identifier_pattern,
+                    regex: ^(worktree|autonomous|archiveWhenDone|autoMergePr|notify|automation|automationTrigger)$
+                  }
                 - all:
                     - kind: pair_pattern
                     - has:
-                        field: key
-                        regex: ^['"]?(worktree|autonomous|archiveWhenDone|autoMergePr|notify|automation|automationTrigger)[ '"]*$
+                        {
+                          field: key,
+                          regex: "^['\"]?(worktree|autonomous|archiveWhenDone|autoMergePr|notify|automation|automationTrigger)[ '\"]*$"
+                        }
                 - all:
                     - kind: object_assignment_pattern
                     - has:
-                        field: left
-                        regex: ^(worktree|autonomous|archiveWhenDone|autoMergePr|notify|automation|automationTrigger)$
+                        {
+                          field: left,
+                          regex: ^(worktree|autonomous|archiveWhenDone|autoMergePr|notify|automation|automationTrigger)$
+                        }
               stopBy: end
-        - has:
-            field: type
-            matches: normalize-input-type
+        - has: { field: type, matches: normalize-input-type }
     - all:
         - kind: variable_declarator
         - has:
             field: name
             kind: object_pattern
-            has:
-              kind: rest_pattern
-              stopBy: end
-        - has:
-            field: type
-            matches: normalize-source-type
+            has: { kind: rest_pattern, stopBy: end }
+        - has: { field: type, matches: normalize-source-type }
     - all:
         - kind: variable_declarator
         - has:
@@ -685,20 +544,13 @@ rule:
             kind: object_pattern
             has:
               any:
-                - kind: shorthand_property_identifier_pattern
-                  regex: ^(name)$
+                - { kind: shorthand_property_identifier_pattern, regex: ^(name)$ }
                 - all:
                     - kind: pair_pattern
-                    - has:
-                        field: key
-                        regex: ^['"]?(name)['"]?$
+                    - has: { field: key, regex: "^['\"]?(name)['\"]?$" }
                 - all:
                     - kind: object_assignment_pattern
-                    - has:
-                        field: left
-                        regex: ^(name)$
+                    - has: { field: left, regex: ^(name)$ }
               stopBy: end
-        - has:
-            field: type
-            matches: normalize-workflow-type
+        - has: { field: type, matches: normalize-workflow-type }
     - matches: normalize-root-source-alias

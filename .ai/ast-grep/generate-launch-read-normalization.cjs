@@ -24,6 +24,15 @@ function collectReferences(value, found = new Set()) {
   }
   return found;
 }
+function compactScalarMappings(doc) {
+  const document = YAML.parseDocument(YAML.stringify(doc, { lineWidth: 110, aliasDuplicateObjects: false }));
+  YAML.visit(document, {
+    Map(_key, node) {
+      if (node.items.length > 1 && node.items.every(pair => YAML.isScalar(pair.value))) node.flow = true;
+    },
+  });
+  return document.toString({ lineWidth: 110 });
+}
 function renderRule(suffix, doc) {
   doc.rule = replaceReferences(doc.rule);
   const bindings = template.bindings[suffix];
@@ -37,7 +46,7 @@ function renderRule(suffix, doc) {
     doc.utils[reference] = value;
   }
   return '# Semantic utils generated from ../launch-read-normalization/; edit that source.\n' +
-    YAML.stringify(doc, { lineWidth: 110, aliasDuplicateObjects: false });
+    compactScalarMappings(doc);
 }
 function familyOf(file) {
   return file.replace('launch-read-outside-resolver-', '').split(/[.-]/)[0];

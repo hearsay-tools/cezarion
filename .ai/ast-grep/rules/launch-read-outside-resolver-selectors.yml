@@ -28,32 +28,24 @@ rule:
               - kind: import_specifier
               - kind: export_specifier
             has:
-              field: name
-              regex: ^(loadWorkflows|stepToolGrant|loadConfig|agentModelsLocked|readAgentModelProvider|normalizeModelForBackend|workerIdentity|workerStepIdentity|ownedWorkflow|continuationDefStep|resolveProfileEnvForRoot|boundWorkerAccountEnv|captureWorkerAccount|discoverSkills|filterDisabledTeamSkills|filterDisabledTeamSources|readDisabledTeamSkills|readDisabledSkillsReposSync|readProjectUiState|readProjectUiStateSync|getTeamSkillsCached|resolveAttachmentPath|readPersistedAttachments|accountHeldFor|executionAccount|queuedRecoveryInput)$
+              {
+                field: name,
+                regex: ^(loadWorkflows|stepToolGrant|loadConfig|agentModelsLocked|readAgentModelProvider|normalizeModelForBackend|workerIdentity|workerStepIdentity|ownedWorkflow|continuationDefStep|resolveProfileEnvForRoot|boundWorkerAccountEnv|captureWorkerAccount|discoverSkills|filterDisabledTeamSkills|filterDisabledTeamSources|readDisabledTeamSkills|readDisabledSkillsReposSync|readProjectUiState|readProjectUiStateSync|getTeamSkillsCached|resolveAttachmentPath|readPersistedAttachments|accountHeldFor|executionAccount|queuedRecoveryInput)$
+              }
     - all:
         - kind: import_statement
-        - has:
-            kind: namespace_import
-            stopBy: end
-        - has:
-            field: source
-            matches: lr-selector-module-specifier
+        - has: { kind: namespace_import, stopBy: end }
+        - has: { field: source, matches: lr-selector-module-specifier }
     - all:
         - kind: export_statement
         - regex: ^export\s+\*
-        - has:
-            field: source
-            matches: lr-selector-module-specifier
+        - has: { field: source, matches: lr-selector-module-specifier }
     - all:
         - kind: call_expression
-        - has:
-            field: function
-            matches: selector-call-target
+        - has: { field: function, matches: selector-call-target }
     - all:
         - kind: call_expression
-        - has:
-            field: function
-            matches: lr-selector-import-target
+        - has: { field: function, matches: lr-selector-import-target }
         - has:
             field: arguments
             has:
@@ -64,24 +56,19 @@ rule:
             kind: import_clause
             has:
               kind: identifier
-        - has:
-            field: source
-            matches: lr-selector-module-specifier
+        - has: { field: source, matches: lr-selector-module-specifier }
     - all:
         - kind: import_statement
         - has:
             kind: import_require_clause
-            has:
-              field: source
-              matches: lr-selector-module-specifier
+            has: { field: source, matches: lr-selector-module-specifier }
 utils:
   selector-call-target:
     matches: normalize-selector-target
   normalize-selector-target:
     any:
       - all:
-          - kind: identifier
-            pattern: $SOURCE
+          - { kind: identifier, pattern: $SOURCE }
           - regex: ^(loadWorkflows|stepToolGrant|loadConfig|agentModelsLocked|readAgentModelProvider|normalizeModelForBackend|workerIdentity|workerStepIdentity|ownedWorkflow|continuationDefStep|resolveProfileEnvForRoot|boundWorkerAccountEnv|captureWorkerAccount|discoverSkills|filterDisabledTeamSkills|filterDisabledTeamSources|readDisabledTeamSkills|readDisabledSkillsReposSync|readProjectUiState|readProjectUiStateSync|getTeamSkillsCached|resolveAttachmentPath|readPersistedAttachments|accountHeldFor|executionAccount|queuedRecoveryInput)$
           - not:
               inside:
@@ -94,8 +81,7 @@ utils:
           - has:
               field: object
               all:
-                - kind: identifier
-                  pattern: $SOURCE
+                - { kind: identifier, pattern: $SOURCE }
                 - regex: ^source$
                 - not:
                     inside:
@@ -104,8 +90,10 @@ utils:
                         - matches: lr-lexical-scope
                         - matches: normalize-scope-declares-value
           - has:
-              field: property
-              regex: ^(loadWorkflows|stepToolGrant|loadConfig|agentModelsLocked|readAgentModelProvider|normalizeModelForBackend|workerIdentity|workerStepIdentity|ownedWorkflow|continuationDefStep|resolveProfileEnvForRoot|boundWorkerAccountEnv|captureWorkerAccount|discoverSkills|filterDisabledTeamSkills|filterDisabledTeamSources|readDisabledTeamSkills|readDisabledSkillsReposSync|readProjectUiState|readProjectUiStateSync|getTeamSkillsCached|resolveAttachmentPath|readPersistedAttachments|accountHeldFor|executionAccount|queuedRecoveryInput)$
+              {
+                field: property,
+                regex: ^(loadWorkflows|stepToolGrant|loadConfig|agentModelsLocked|readAgentModelProvider|normalizeModelForBackend|workerIdentity|workerStepIdentity|ownedWorkflow|continuationDefStep|resolveProfileEnvForRoot|boundWorkerAccountEnv|captureWorkerAccount|discoverSkills|filterDisabledTeamSkills|filterDisabledTeamSources|readDisabledTeamSkills|readDisabledSkillsReposSync|readProjectUiState|readProjectUiStateSync|getTeamSkillsCached|resolveAttachmentPath|readPersistedAttachments|accountHeldFor|executionAccount|queuedRecoveryInput)$
+              }
       - all:
           - matches: lr-expression-wrapper
           - has:
@@ -136,40 +124,28 @@ utils:
                 - inside:
                     all:
                       - kind: for_in_statement
-                      - has:
-                          field: kind
-                          regex: ^var$
+                      - has: { field: kind, regex: ^var$ }
   normalize-hoisted-var-declaration:
     any:
       - all:
           - kind: variable_declarator
-          - has:
-              field: name
-              matches: normalize-binding-pattern
+          - has: { field: name, matches: normalize-binding-pattern }
           - inside:
               kind: variable_declaration
       - all:
           - kind: for_in_statement
-          - has:
-              field: kind
-              regex: ^var$
-          - has:
-              field: left
-              matches: normalize-binding-pattern
+          - has: { field: kind, regex: ^var$ }
+          - has: { field: left, matches: normalize-binding-pattern }
   normalize-value-declaration:
     any:
       - all:
           - any:
               - kind: required_parameter
               - kind: optional_parameter
-          - has:
-              field: pattern
-              matches: normalize-binding-pattern
+          - has: { field: pattern, matches: normalize-binding-pattern }
       - all:
           - kind: variable_declarator
-          - has:
-              field: name
-              matches: normalize-binding-pattern
+          - has: { field: name, matches: normalize-binding-pattern }
       - all:
           - any:
               - kind: function_declaration
@@ -177,9 +153,7 @@ utils:
               - kind: class_declaration
               - kind: enum_declaration
               - kind: internal_module
-          - has:
-              field: name
-              pattern: $SOURCE
+          - has: { field: name, pattern: $SOURCE }
       - all:
           - any:
               - kind: identifier
@@ -189,87 +163,55 @@ utils:
               any:
                 - all:
                     - kind: function_declaration
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
                 - all:
                     - kind: generator_function_declaration
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
                 - all:
                     - kind: class_declaration
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
                 - all:
                     - kind: enum_declaration
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
                 - all:
                     - kind: internal_module
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
                 - all:
                     - kind: function_expression
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
                 - all:
                     - kind: generator_function
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
                 - all:
                     - kind: class
-                    - has:
-                        field: name
-                        pattern: $SOURCE
+                    - has: { field: name, pattern: $SOURCE }
       - all:
           - matches: normalize-binding-pattern
           - inside:
               all:
                 - kind: catch_clause
-                - has:
-                    field: parameter
-                    matches: normalize-binding-pattern
+                - has: { field: parameter, matches: normalize-binding-pattern }
       - all:
           - matches: normalize-binding-pattern
           - inside:
               all:
                 - kind: for_in_statement
-                - has:
-                    field: kind
-                    regex: ^(const|let|var)$
-                - has:
-                    field: left
-                    matches: normalize-binding-pattern
+                - has: { field: kind, regex: ^(const|let|var)$ }
+                - has: { field: left, matches: normalize-binding-pattern }
       - all:
           - kind: import_clause
-          - has:
-              kind: identifier
-              pattern: $SOURCE
+          - has: { kind: identifier, pattern: $SOURCE }
       - all:
           - kind: namespace_import
-          - has:
-              kind: identifier
-              pattern: $SOURCE
+          - has: { kind: identifier, pattern: $SOURCE }
       - all:
           - kind: import_specifier
           - any:
-              - has:
-                  field: alias
-                  pattern: $SOURCE
+              - has: { field: alias, pattern: $SOURCE }
               - all:
                   - not:
-                      has:
-                        field: alias
-                        kind: identifier
-                  - has:
-                      field: name
-                      pattern: $SOURCE
+                      has: { field: alias, kind: identifier }
+                  - has: { field: name, pattern: $SOURCE }
   normalize-binding-pattern:
     any:
       - all:
@@ -286,13 +228,9 @@ utils:
               matches: normalize-binding-pattern
       - all:
           - kind: pair_pattern
-          - has:
-              field: value
-              matches: normalize-binding-pattern
+          - has: { field: value, matches: normalize-binding-pattern }
       - all:
           - any:
               - kind: assignment_pattern
               - kind: object_assignment_pattern
-          - has:
-              field: left
-              matches: normalize-binding-pattern
+          - has: { field: left, matches: normalize-binding-pattern }
