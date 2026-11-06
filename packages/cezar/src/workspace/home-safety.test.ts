@@ -1,12 +1,17 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertCezarHomeWriteIsSandboxed, workspaceConfigPath } from '../paths.ts';
 import { atomicWriteJsonSync, loadWorkspaceConfig, mergeWriteWorkspaceConfig } from './config.ts';
+
+vi.mock('node:os', async (importOriginal) => {
+  const os = await importOriginal<typeof import('node:os')>();
+  return { ...os, userInfo: vi.fn(os.userInfo) };
+});
 
 /**
  * The registry-clobber regression. A cezar test run used to be able to replace
@@ -37,6 +42,7 @@ describe('cezar home write safety', () => {
     else process.env.CEZ_HOME = originalCezHome;
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    vi.mocked(userInfo).mockRestore();
     for (const dir of [pinned, elsewhere, fakeUserHome]) rmSync(dir, { recursive: true, force: true });
   });
 
@@ -77,6 +83,8 @@ describe('cezar home write safety', () => {
   });
 
   it('refuses a write into the real cezar home while running under vitest', () => {
+    // Model the account home without ever writing the host account's files.
+    vi.mocked(userInfo).mockReturnValue({ ...userInfo(), homedir: fakeUserHome });
     process.env.HOME = fakeUserHome;
     delete process.env.CEZ_HOME;
     const target = workspaceConfigPath();
@@ -87,6 +95,8 @@ describe('cezar home write safety', () => {
   });
 
   it('leaves an existing real-home registry byte-for-byte intact when a leaked write is refused', () => {
+    // Model the account home without ever writing the host account's files.
+    vi.mocked(userInfo).mockReturnValue({ ...userInfo(), homedir: fakeUserHome });
     process.env.HOME = fakeUserHome;
     delete process.env.CEZ_HOME;
     const target = workspaceConfigPath();
@@ -143,7 +153,7 @@ describe('cezar home write safety', () => {
     expect(existsSync(join(fakeUserHome, '.cezar'))).toBe(false);
   }, 180_000);
 
-  it('allows writes outside the real cezar home, and is inert outside vitest', () => {
+  it('allows writes outside the OS account cezar home', () => {
     process.env.HOME = fakeUserHome;
     const sandboxed = join(pinned, 'config.json');
 

@@ -93,7 +93,7 @@ export function main(args, { repo = root, platform = process.platform, spawn = s
   } else {
     log('Packaged tests: build outputs are fresh; skipping build.');
   }
-  run(process.execPath, ['--import', '../../scripts/test-git-env.mjs', '--import', 'tsx', '--test', ...files], join(repo, 'packages/cezar'));
+  run(process.execPath, ['--import', '../../scripts/test-home-env.mjs', '--import', 'tsx', '--test', ...files], join(repo, 'packages/cezar'));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

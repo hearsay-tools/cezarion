@@ -34,7 +34,7 @@
     "mock:wire": "node packages/cezar/scripts/record-mock-wires.mjs",
     "test:parity": "node scripts/test-parity.mjs",
     "metrics": "node scripts/metrics.mjs",
-    "test:unit": "npm run test:unit -w @wjarka/cezarion && node --import ./scripts/test-git-env.mjs --test .github/scripts/*.test.cjs scripts/*.test.mjs .ai/skills/*/scripts/*.test.mjs",
+    "test:unit": "npm run test:unit -w @wjarka/cezarion && node --import ./scripts/test-home-env.mjs --test .github/scripts/*.test.cjs scripts/*.test.mjs .ai/skills/*/scripts/*.test.mjs",
     "test:package": "node scripts/test-package.mjs",
     "test:e2e": "sh .ai/scripts/e2e.sh",
     "test:e2e:affected": "node scripts/e2e-affected.mjs",

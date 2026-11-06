@@ -19,7 +19,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { cezarHomeDir } from './paths.ts';
+import { assertCezarHomeWriteIsSandboxed, cezarHomeDir } from './paths.ts';
 
 export const REMOTE_SETTINGS_DIR = 'remote-settings';
 
@@ -111,6 +111,7 @@ export async function enableRemoteSettings(
 ): Promise<RemoteSettingsState> {
   if (!isPort(port)) throw new RangeError(`not a port: ${port}`);
   const dir = remoteSettingsPath(env);
+  assertCezarHomeWriteIsSandboxed(dir, env);
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const temporary = join(dir, `.${port}.${process.pid}.${Date.now()}.tmp`);
   await writeFile(temporary, `${JSON.stringify({ enabledAt: now.toISOString() }, null, 2)}\n`, { mode: 0o600 });
@@ -120,6 +121,7 @@ export async function enableRemoteSettings(
 
 /** Withdraw the grant for `port`, or every grant when no port is given. */
 export async function disableRemoteSettings(env: NodeJS.ProcessEnv = process.env, port?: number): Promise<RemoteSettingsState> {
+  assertCezarHomeWriteIsSandboxed(remoteSettingsPath(env), env);
   if (port === undefined) await rm(remoteSettingsPath(env), { recursive: true, force: true });
   else await rm(grantFile(env, port), { force: true });
   return readRemoteSettings(env);
