@@ -163,7 +163,7 @@ function encoder(selected) {
     child() { throw new Error('Cursor print has no child wire'); },
     readSteers() {},
     progress: () => assistant('working\n'),
-    reply: () => defaultReply(),
+    reply: () => prompt === 'inspect the working tree' || prompt.includes('mock:baseline') ? baselineReply() : defaultReply(),
     end(step) {
       const empty = selected.name === 'turn-messages' || ['silent-tail', 'tool-tail'].includes(selected.name) && !prompt.includes(NO_WAIT_NUDGE_PREFIX);
       result(step.error === 'provider' ? 'RetriableError: provider unavailable' : empty ? '' : text, step.error === 'provider');
