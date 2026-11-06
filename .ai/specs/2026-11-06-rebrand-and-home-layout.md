@@ -130,9 +130,11 @@ Resolved once, at the process entry point, from the platform. No setting is requ
    - a write to a dir with no marker, unless the caller is an entry point that creates one.
    The check reads the marker, not the path, so pinned `HOME`, inherited variables and
    custom env objects cannot hide the live home.
-4. **Presence lease and write lock.** Two separate files in the runtime dir. The serving
-   cockpit holds `cockpit.lease` (pid, installId) for its whole life; it only tells other
+4. **Presence lease and write lock.** Two separate files in the runtime dir. Each serving
+   cockpit holds a lease (pid, installId, instance) for its whole life; it only tells other
    processes that a cockpit serves this home (the migration reads it, step 1 in section 4).
+   One home can serve several cockpits (server instances), so each one holds its own file,
+   `cockpits/<pid>.lease`; a lease whose pid is gone is stale and is removed on read.
    Every writer, the cockpit included, takes `write.lock` only for the read-modify-write of
    one file, so CLI writers never wait on the cockpit's lifetime. This stops lost updates; the
    marker stops tests.
@@ -171,8 +173,12 @@ One code path, `migrateLegacyHome()`, runs at the first boot of the new build an
 **Server installs** (apptension-host serves 12 projects): `skein server migrate` first stops
 every instance that shares the legacy home, migrates that home once, then for each instance in
 `server.json` and `server-instances/`: install
-`skein[-<slug>].service` and the nginx site on the same port, start, check health. On
-failure it re-enables the old unit and old site. Old unit files stay as `*.migrated`.
+`skein[-<slug>].service` and the nginx site on the same port, start, check health.
+The instances that share a home form one group and succeed or fail together. If any instance
+in the group fails its health check, every instance in the group stops, the old units and old
+sites come back, and the new home's marker is renamed to `install.json.failed` so the next run
+migrates again from the untouched legacy home. Old unit files stay as `*.migrated` after
+success.
 
 **Desktop installs**: the bundled server runs the same migration at boot. launchd labels move
 as in section 2.
