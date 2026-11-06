@@ -1,13 +1,12 @@
 # Rebrand and a home layout that tests cannot clobber
 
-Status: proposal, waiting for owner acceptance (2026-11-06).
+Status: accepted by the owner (2026-11-06).
 
-Owner decisions so far (2026-11-06):
+Owner decisions (2026-11-06):
 
-- Name: open. The owner's working name is **Squawk** (Hearsay bird; aviation transponder code;
-  "keep agents on the radar"; parrot logo with pilot goggles). See section 2.1.
+- Name: **Skein** (Hearsay Skein). CLI `skein`. See section 2.
 - Delivery: all phases ship together in one release. P0 is not released on its own.
-- Per-project dir: read both `.ai/cezar/` and the new dir; an opt-in `migrate-project` moves it.
+- Per-project dir: read both `.ai/cezar/` and `.ai/skein/`; an opt-in `migrate-project` moves it.
 - Desktop and mobile bundle IDs: change them too (section 4.1).
 
 ## 1. Incident and root cause
@@ -51,69 +50,46 @@ Our own suite was not the writer: `packages/cezar/vitest.setup.ts` scrubs every 
 variable and pins `HOME`. The defect that we own is step 1, plus a home location that
 every old or foreign copy of the code also resolves by default (`~/.cezar`).
 
-## 2. New name
+## 2. New name: Skein
 
-Checks done 2026-11-06: unscoped npm, GitHub user/org, Homebrew formula, Debian
-command-not-found, DNS NS records (no NS record means "probably free"; a registrar check is
-still needed), and a web search for products with the same name.
+A skein is a flock of geese flying in a V-formation: the birds take turns leading and the
+formation holds together. It names the one Hearsay product that leads the others (Peck,
+Squeal, Screech, Swoop, Fledge, Reach, Glide, Preen) and fits "keep agents on the radar".
 
-| Candidate | npm | GitHub | brew / apt | Domains (.com/.dev/.sh/.ai) | Same-name products |
-| --- | --- | --- | --- | --- | --- |
-| **Ostlery** (recommended) | free | no account | free / free | taken / free? / free? / free? | none found |
-| Drovery | free | no account | free / free | taken / free? / free? / free? | Indian shopping app on Google Play |
-| Cezarion (finish the fork name) | ours (`cezarion` 0.17.0) | our repo `hearsay-tools/cezarion` | free / free | taken / free? / free? / free? | none; the historic figure |
-
-Rejected: Castra, Decurion, Legatio (each is already an AI-agent orchestrator or gateway);
-Cohort, Praetor, Tribune, Consul, Quaestor, Tessera, Agentry, Tasklane (npm or product
-collisions); Paddock, Tiller, Corral, Bosun, Helmsman, Wrangler (npm or brew collisions).
-
-*Ostlery* is an old word for an inn's stable yard: the place where travellers' horses get a
-stall, food and care, and leave ready. Each task gets its own stall (worktree) and leaves
-through the review gate. Its weakness: the word is rare, so people must learn the spelling.
-
-*Cezarion* is the lowest-cost option. The safety fix in sections 3 and 4 does not depend on
-the name: any name other than `cezar` moves the live install away from what upstream and old
-builds resolve.
-
-### 2.1 Squawk (owner's working name)
-
-Checks done 2026-11-06:
+Checks done 2026-11-06 (npm, GitHub, Homebrew, Debian command-not-found, DNS, web and GitHub
+search for coding-agent tools):
 
 | Surface | Result |
 | --- | --- |
-| CLI `squawk` | Taken in our field. `sbdchd/squawk` (Postgres migration linter, 1.2k stars, active today) installs a `squawk` binary through npm `squawk-cli`, pip and others. `Jack-Lin-DS-AI/squawk` (Claude Code monitor, Homebrew tap) also installs `squawk`. |
-| Same-name agent tools | `Jack-Lin-DS-AI/squawk` (Claude Code loop monitor), `goriparthi/squawk` (Claude Code approval dock), `studypilot/squawk` (review comments for agents, `squawk watch`), Sqwakie (multi-agent live view). All small. |
-| npm | unscoped `squawk` taken; `@hearsay-tools/squawk` available to us |
-| GitHub | `squawk` is a user account; `hearsay-tools/squawk` free |
-| Domains | `squawk.com/.dev/.sh/.ai/.io/.app` all registered; `hearsay.tools` is registered (ours, per the app IDs), so `squawk.hearsay.tools` works |
-| Short CLI | `sqk` and `sqwk` free in Homebrew and Debian |
+| CLI `skein` | Free in Homebrew and Debian; no coding-agent tool installs it |
+| Same-name projects | `skeinui/skein` (React components, 6 stars); no agent orchestrator |
+| npm | unscoped `skein` taken (an encryption add-on, 1.0.21); `@hearsay-tools/skein` free |
+| GitHub | `skein` is a user account; `hearsay-tools/skein` free |
+| Domains | `skein.com/.dev/.sh/.ai/.io/.app` all registered; use `skein.hearsay.tools` |
 
-Rules if Squawk is chosen:
+Rejected on the way: Ostlery, Drovery (rare words), Squawk (CLI `squawk` belongs to the
+`sbdchd/squawk` Postgres linter and three small agent tools), Murmur (Macroscope's
+orchestrator), Castra, Decurion, Legatio, Roost, Perch, Caw, Covey (agent tools with the same
+name), Flock, Hatch, Nest (existing commands), and Roman and English words with npm or brew
+collisions. Cezarion was the no-rename option.
 
-- Brand "Hearsay Squawk"; package `@hearsay-tools/squawk`; repo `hearsay-tools/squawk`;
-  site `squawk.hearsay.tools`.
-- The binary must not be a bare `squawk`: a Postgres user would get one tool shadowing the
-  other on `PATH`. Use `hsquawk` or `sqk` (decision open).
-- The home dirs must not be a bare `squawk` either: another `squawk` could use
-  `~/.config/squawk`, which is the clobber class this spec removes. Use
-  `~/.config/hearsay-squawk` (and the same for state, data, cache, runtime).
-- Env prefix `SQUAWK_` is shared with nobody we found, but `HSQ_` or `HEARSAY_SQUAWK_` is
-  safer for the same reason. Proposed: `SQUAWK_`, because env vars reach only our children.
+The safety fix in sections 3 and 4 does not depend on the name: any name other than `cezar`
+moves the live install away from what upstream and old builds resolve.
 
-### What gets renamed (shown for Ostlery)
+### What gets renamed
 
 | Surface | Now | After | Old name during the deprecation window |
 | --- | --- | --- | --- |
-| npm package | `@wjarka/cezarion`, alias `cezarion` | `@hearsay-tools/ostlery`, alias `ostlery` | last `cezarion` release depends on the new package and prints a notice; then `npm deprecate` |
-| CLI binary | `cezarion`, `cez` | `ostlery`, short `osl` (free in brew and Debian) | `cez` and `cezarion` work and print one notice to stderr, never to JSON stdout |
-| Env vars | 144 `CEZ_*` names in source, 85 in `.env.example` | `OSTLERY_*` | `CEZ_*` read as fallback; the new name wins; one boot warning lists the old names that are set |
-| Per-project dir | `.ai/cezar/` (505 files mention it) | `.ai/ostlery/` | see decision 3 |
+| npm package | `@wjarka/cezarion`, alias `cezarion` | `@hearsay-tools/skein` (unscoped `skein` is taken, so no unscoped alias; `npx @hearsay-tools/skein`) | last `cezarion` release depends on the new package and prints a notice; then `npm deprecate` |
+| CLI binary | `cezarion`, `cez` | `skein` | `cez` and `cezarion` work and print one notice to stderr, never to JSON stdout |
+| Env vars | 144 `CEZ_*` names in source, 85 in `.env.example` | `SKEIN_*` | `CEZ_*` read as fallback; the new name wins; one boot warning lists the old names that are set |
+| Per-project dir | `.ai/cezar/` (505 files mention it) | `.ai/skein/` | both read; opt-in `skein migrate-project` moves it when no task is live and repairs worktrees |
 | Home | `~/.cezar`, `~/.cache/cez` | section 3 layout | read once by the migration, then a canary |
-| GitHub repo | `hearsay-tools/cezarion` | `hearsay-tools/ostlery` (GitHub redirects) | old citations stay valid; the citation checker accepts both |
+| GitHub repo | `hearsay-tools/cezarion` | `hearsay-tools/skein` (GitHub redirects the old name) | old citations stay valid; the citation checker accepts both |
 | Docs | README, AGENTS.md, docs/, specs | new name; specs and ADRs keep history | — |
-| Desktop / mobile ids | `tools.hearsay.cezarion`, `tools.hearsay.cezarion.mobile` | unchanged (see decision 4); display name changes | — |
-| launchd labels | `ai.cezar.cockpit`, `ai.cezar.ngrok` (same as upstream) | `tools.hearsay.ostlery.cockpit`, `tools.hearsay.ostlery.ngrok` | migration unloads the old label only if its plist points at our binary |
-| systemd / nginx | `cezar.service`, `cezar-<slug>.service`, site `cezar-<slug>` | `ostlery.service`, `ostlery-<slug>.service`, site `ostlery-<slug>` | server migration swaps them, with rollback |
+| Desktop / mobile ids | `tools.hearsay.cezarion`, `tools.hearsay.cezarion.mobile` | `tools.hearsay.skein`, `tools.hearsay.skein.mobile` | section 4.1 |
+| launchd labels | `ai.cezar.cockpit`, `ai.cezar.ngrok` (same as upstream) | `tools.hearsay.skein.cockpit`, `tools.hearsay.skein.ngrok` | migration unloads the old label only if its plist points at our binary |
+| systemd / nginx | `cezar.service`, `cezar-<slug>.service`, site `cezar-<slug>` | `skein.service`, `skein-<slug>.service`, site `skein-<slug>` | server migration swaps them, with rollback |
 
 ## 3. New home layout and live-install protection
 
@@ -123,19 +99,19 @@ Resolved once, at the process entry point, from the platform. No setting is requ
 
 | Kind | Holds | Linux | macOS | Windows |
 | --- | --- | --- | --- | --- |
-| config | `config.json` (registry, settings), `agent-accounts.json`, `remote-settings/`, secrets, `install.json` marker | `$XDG_CONFIG_HOME/ostlery` (`~/.config/ostlery`) | `~/Library/Application Support/Ostlery/config` | `%APPDATA%\Ostlery` |
-| state | `ui-state.json`, `server.json`, `server-instances/`, `backups/`, migration log | `$XDG_STATE_HOME/ostlery` (`~/.local/state/ostlery`) | `~/Library/Application Support/Ostlery/state` | `%LOCALAPPDATA%\Ostlery\state` |
-| data | managed install `versions/`, `bin/` | `$XDG_DATA_HOME/ostlery` (`~/.local/share/ostlery`) | `~/Library/Application Support/Ostlery/data` | `%LOCALAPPDATA%\Ostlery\data` |
-| cache | skills cache (now `~/.cache/cez`), `dry-cache/`, `dry-prefix/` | `$XDG_CACHE_HOME/ostlery` | `~/Library/Caches/Ostlery` | `%LOCALAPPDATA%\Ostlery\cache` |
-| runtime | locks, sockets, agent temp fallback (now `~/.cezar/tmp/agent`) | `$XDG_RUNTIME_DIR/ostlery`, else `<state>/run` | `$TMPDIR/ostlery` | `%LOCALAPPDATA%\Ostlery\run` |
+| config | `config.json` (registry, settings), `agent-accounts.json`, `remote-settings/`, secrets, `install.json` marker | `$XDG_CONFIG_HOME/skein` (`~/.config/skein`) | `~/Library/Application Support/Skein/config` | `%APPDATA%\Skein` |
+| state | `ui-state.json`, `server.json`, `server-instances/`, `backups/`, migration log | `$XDG_STATE_HOME/skein` (`~/.local/state/skein`) | `~/Library/Application Support/Skein/state` | `%LOCALAPPDATA%\Skein\state` |
+| data | managed install `versions/`, `bin/` | `$XDG_DATA_HOME/skein` (`~/.local/share/skein`) | `~/Library/Application Support/Skein/data` | `%LOCALAPPDATA%\Skein\data` |
+| cache | skills cache (now `~/.cache/cez`), `dry-cache/`, `dry-prefix/` | `$XDG_CACHE_HOME/skein` | `~/Library/Caches/Skein` | `%LOCALAPPDATA%\Skein\cache` |
+| runtime | locks, sockets, agent temp fallback (now `~/.cezar/tmp/agent`) | `$XDG_RUNTIME_DIR/skein`, else `<state>/run` | `$TMPDIR/skein` | `%LOCALAPPDATA%\Skein\run` |
 
-`OSTLERY_HOME=<dir>` keeps a one-root layout (`<dir>/config`, `state`, `data`, `cache`,
+`SKEIN_HOME=<dir>` keeps a one-root layout (`<dir>/config`, `state`, `data`, `cache`,
 `run`) for containers, tests and hosts that want one directory.
 
 ### How a live install is told apart from a test or dev home
 
 1. **The live path never leaves the cockpit.** `buildChildEnv` drops every home-locating
-   variable (`CEZ_HOME`, `OSTLERY_HOME`, `XDG_*` overrides that the cockpit itself set) for
+   variable (`CEZ_HOME`, `SKEIN_HOME`, `XDG_*` overrides that the cockpit itself set) for
    agent sessions and host commands. A task that needs the cockpit uses its API URL and
    token, not the home path. The self-update launcher (`self-update/launcher.ts:22`) stops
    writing a `CEZ_HOME` that equals the default into the launcher script.
@@ -159,14 +135,14 @@ Resolved once, at the process entry point, from the platform. No setting is requ
    migration, their default (`~/.cezar`) is no longer the live home. The new build watches
    it as a canary: a write there after migration shows a warning that names the file and time.
 6. **Our suites.** Both Vitest and the `node:test` suites (`test:unit`, `test:package`) load
-   one setup that scrubs `CEZ_*` and `OSTLERY_*`, pins `HOME`, `XDG_*` and `OSTLERY_HOME`
+   one setup that scrubs `CEZ_*` and `SKEIN_*`, pins `HOME`, `XDG_*` and `SKEIN_HOME`
    to a sandbox, and writes a `test` marker. A lint rule refuses test code that writes
    through a home path it did not get from `Home.sandbox`.
 
 ## 4. Migration for existing installs
 
 One code path, `migrateLegacyHome()`, runs at the first boot of the new build and as
-`ostlery migrate [--dry-run]`.
+`skein migrate [--dry-run]`.
 
 1. Take `~/.cezar/.migrating` with `O_EXCL`. A second process waits or stops.
 2. If the new config dir has `install.json` with `migratedFrom`, do nothing (idempotent).
@@ -181,11 +157,11 @@ One code path, `migrateLegacyHome()`, runs at the first boot of the new build an
    prints what still uses it.
 
 **`CEZ_HOME` set to a non-default dir** (containers, custom hosts): treat it as
-`OSTLERY_HOME` one-root, migrate in place into `config/`, `state/`, and so on.
+`SKEIN_HOME` one-root, migrate in place into `config/`, `state/`, and so on.
 
-**Server installs** (apptension-host serves 12 projects): `ostlery server migrate` handles each
+**Server installs** (apptension-host serves 12 projects): `skein server migrate` handles each
 instance in `server.json` and `server-instances/`: stop the old unit, migrate, install
-`ostlery[-<slug>].service` and the nginx site on the same port, start, check health. On
+`skein[-<slug>].service` and the nginx site on the same port, start, check health. On
 failure it re-enables the old unit and old site. Old unit files stay as `*.migrated`.
 
 **Desktop installs**: the bundled server runs the same migration at boot. launchd labels move
@@ -212,7 +188,7 @@ fallbacks go; a boot still logs any `CEZ_*` that is set, so nobody loses a setti
 `HomeStore` writes `config.json`, `agent-accounts.json`, secrets and connection files,
 `remote-settings/*` and `server*.json`. Before it replaces a file whose content changed, it
 copies the current one to `<state>/backups/<file>/<UTC>-<sha8>.json`. It keeps the last 20
-plus one per day for 30 days. `ostlery backup list` and `ostlery backup restore <file>
+plus one per day for 30 days. `skein backup list` and `skein backup restore <file>
 [--at <time>]` restore one. When a write shrinks a non-empty registry to zero projects or
 zero accounts, the cockpit shows a banner with a one-click restore of the newest backup.
 `config.json.bak` (ADR 0010) becomes the newest entry of this set.
@@ -224,8 +200,8 @@ zero accounts, the cockpit shows a banner with a one-click restore of the newest
 | **P0 Stop the bleed** | (a) `buildChildEnv` never forwards `CEZ_HOME`; the launcher stops writing a default `CEZ_HOME`. (b) Guard compares against `os.userInfo().homedir` (passwd, not `$HOME`), runs for every env object and under `node:test` too; node:test suites load the sandbox setup. (c) Rotating backups for `config.json` and `agent-accounts.json`. (d) Issue to `apptension/toolkit-dev`: audit-agent-readiness probes run foreign suites with a scrubbed env and a temp `HOME`. Ops: drop `CEZ_HOME` from apptension-host's hand-written unit (`~/.config/systemd/user/cezar.service`). | no |
 | **P1 Home object and layout** | `resolveHome`, `Home` passed down, XDG/macOS/Windows layout behind the current names, marker, `HomeStore`, lease, backups for all registry files, test lint. ADR superseding the "literal `~/.cezar`" rule in `paths.ts`. | layout dir name only |
 | **P2 Migration** | `migrateLegacyHome`, canary, server migrate with rollback, launchd label move. | yes |
-| **P3 Rename surface** | npm package and aliases, CLI bins, `OSTLERY_*` with `CEZ_*` fallback through one env helper, docs, repo rename, display names, systemd and nginx names. Several mechanical PRs, one per surface. | yes |
-| **P4 Per-project dir** | per decision 3. | yes |
+| **P3 Rename surface** | npm package and aliases, CLI bins, `SKEIN_*` with `CEZ_*` fallback through one env helper, docs, repo rename, display names, systemd and nginx names. Several mechanical PRs, one per surface. | yes |
+| **P4 Per-project dir** | dual read of `.ai/cezar/` and `.ai/skein/`; `skein migrate-project` (refuses while a task is live; moves the dir; runs `git worktree repair`). | yes |
 | **P5 Window end** | remove aliases and fallbacks. | yes |
 
 All phases ship in one release (owner decision). Phases stay separate PRs for review; they land on
