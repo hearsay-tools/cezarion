@@ -6,7 +6,7 @@ import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { useReports } from './reports'
 const live = vi.hoisted(() => ({ topics: new Map<string, (value: unknown) => void>(), reads: new Map<string, (value: unknown) => void>(), mode: 'topics' as 'topics' | 'finite' }))
 vi.mock('./ws', () => ({ subscribeTopic: (topic: string, listener: (value: unknown) => void) => { live.topics.set(topic, listener); return () => live.topics.delete(topic) } }))
-vi.mock('./live-coordinator', () => ({ liveTransport: () => live.mode, onLiveTransport: () => () => {} }))
+vi.mock('./live-coordinator', () => ({ liveTransport: () => live.mode, onLiveTransport: () => { return () => {} } }))
 vi.mock('./live-reads', () => ({ subscribeLiveRead: (input: { path: string; intervalMs: number }, listener: (value: unknown) => void) => { expect(input.intervalMs).toBe(5_000); live.reads.set(input.path, listener); return () => live.reads.delete(input.path) } }))
 const state = { epoch: '93d9b907-7b9c-4cdb-bac4-414f40ab64eb', generation: 0, metadataGeneration: 0 }
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); live.topics.clear(); live.reads.clear(); live.mode = 'topics'; setApiScope(null) })

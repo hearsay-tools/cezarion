@@ -56,7 +56,10 @@ export async function benchmarkReports(buildRoot: string, output: string, quick:
         await request('Network.enable', {}, sessionId)
         await request('Page.enable', {}, sessionId)
         await request('Page.addScriptToEvaluateOnNewDocument', { source: instrumentation }, sessionId)
-        const evaluate = async (expression: string) => (await request('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, sessionId)).result.value
+        const evaluate = async (expression: string) => {
+          const response = await request('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, sessionId)
+          return response.result.value
+        }
         await request('Page.navigate', { url: `${fixture.origin}/p/boot/reports` }, sessionId)
         await request('Target.activateTarget', { targetId })
         await pollFor(async () => await evaluate('document.querySelectorAll("[data-slot=report-row]").length') > 0 ? true : undefined, () => 'report shelf did not mount', { timeoutMs: 30_000, intervalMs: 100, tries: 300 })
