@@ -394,6 +394,26 @@ describe('useRunHistory', () => {
     await waitFor(() => expect(result.current.currentComplete).toBe(true))
   })
 
+  // A page opens with its turn's boundary, which can be far older than its first item: the
+  // events between are only in a context read at or after the page.
+  it('reads the context again when it was read before the page, even if the page opens with an old turn boundary', async () => {
+    const agentStart = { seq: 110, ts: '2026-07-30T00:00:00.000Z', type: 'item.started', item: { kind: 'tool', id: 'agent-1', toolKind: 'task', status: TOOL_STATUS.running, title: 'Agent: one' } }
+    const opened: RunHistoryPage = { ...tail(151, 250), events: [{ seq: 1, ts: '2026-07-30T00:00:00.000Z', type: 'turn.started', turnId: 't1' }, ...tail(151, 250).events] }
+    const late = deferred<RunHistoryContext>()
+    mockHistory.mockResolvedValue(opened)
+    mockContext.mockResolvedValueOnce(context()).mockReturnValueOnce(late.promise)
+    const { wrapper } = harness()
+    const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
+
+    await waitFor(() => expect(mockContext).toHaveBeenCalledTimes(2))
+    expect(result.current.currentComplete).toBe(false)
+    expect(result.current.currentEvents.map(({ seq }) => seq)).not.toContain(110)
+    await act(async () => late.resolve({ contextEvents: [...context().contextEvents, agentStart] as RunHistoryContext['contextEvents'], asOfSeq: 250 }))
+    await waitFor(() => expect(result.current.currentComplete).toBe(true))
+    expect(result.current.currentEvents.map(({ seq }) => seq)).toContain(110)
+    expect(mockContext).toHaveBeenCalledTimes(2)
+  })
+
   it('refreshes the context with each compaction, so frames before the new page stay current', async () => {
     FakeEventSource.instances = []
     vi.stubGlobal('EventSource', FakeEventSource)

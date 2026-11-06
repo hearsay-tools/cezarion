@@ -63,9 +63,29 @@ function mergeNewestPage(
 /** The context reaches the newest page when no event between them is missing. The two are read
  *  together, so this holds once the first context lands, and again after each refresh. */
 function contextReachesPage(context: RunHistoryContext | undefined, newestPage: RunHistoryPage | undefined): boolean {
-  if (context === undefined) return false
-  const firstSeq = newestPage?.events[0]?.seq
-  return firstSeq === undefined || context.asOfSeq >= firstSeq - 1
+  // Both `asOfSeq` values are the file's high water when it was read. A context read at or after
+  // the page holds every event before the page's first item. A page's first event can be an
+  // older turn opening, so its seq says nothing about the events between.
+  return context !== undefined && (newestPage === undefined || context.asOfSeq >= newestPage.asOfSeq)
+}
+
+/**
+ * The first page and the first context load in parallel, so the context can be read just before
+ * the page. Read it again then, once per page: a later read reaches it, as the file only grows.
+ */
+function useContextCatchUp(
+  context: { data: RunHistoryContext | undefined; isFetching: boolean; refetch: () => Promise<unknown> },
+  newestPage: RunHistoryPage | undefined,
+  active: boolean,
+): void {
+  const caughtUpFor = useRef<number | undefined>(undefined)
+  const behind = active && context.data !== undefined && !context.isFetching && !contextReachesPage(context.data, newestPage)
+  const pageSeq = newestPage?.asOfSeq
+  useEffect(() => {
+    if (!behind || pageSeq === undefined || caughtUpFor.current === pageSeq) return
+    caughtUpFor.current = pageSeq
+    void context.refetch()
+  }, [behind, context, pageSeq])
 }
 
 /** Of two context snapshots, the one read later: requests overlap, and an older answer can land
@@ -129,14 +149,14 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     retry: 1,
   })
 
-  // The newest page and the context are read together, every time the newest page is replaced:
+  // The newest page and then the context are read every time the newest page is replaced:
   // a new page drops the live frames before it, and a context older than those frames would leave
   // them out of the current state until a reload (hearsay-tools/cezarion#2588).
   const refreshNewest = useCallback(async (signal?: AbortSignal) => {
     const options = signal ? { signal } : undefined
-    const [latest, current] = await Promise.all([
-      getRunHistory(runId!, undefined, options), getRunHistoryContext(runId!, options),
-    ])
+    // The page first: the context read after it reaches it (`contextReachesPage`).
+    const latest = await getRunHistory(runId!, undefined, options)
+    const current = await getRunHistoryContext(runId!, options)
     signal?.throwIfAborted()
     mergeNewestPage(queryClient, ['run-history', scope, runId], latest)
     queryClient.setQueryData<RunHistoryContext>(['run-history-context', scope, runId], (cached) => newerContext(cached, current))
@@ -228,6 +248,7 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     () => fallback ? fallbackEvents : orderedUnique(pagedEvents, liveEvents),
     [fallback, fallbackEvents, pagedEvents, liveEvents],
   )
+  useContextCatchUp(context, newestPage, !fallback)
   const currentComplete = fallback || contextReachesPage(context.data, newestPage)
   const currentEvents = useMemo(() => {
     if (fallback) return fallbackEvents
@@ -245,10 +266,9 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     // Resetting an unavailable optimization would discard it and unmount the
     // thread, losing the caller's scroll intent while the same failure retries.
     if (fallback) return
-    await Promise.all([
-      queryClient.resetQueries({ queryKey: historyKey, exact: true }),
-      queryClient.invalidateQueries({ queryKey: contextKey, exact: true }),
-    ])
+    // The page first, so the context read after it reaches it.
+    await queryClient.resetQueries({ queryKey: historyKey, exact: true })
+    await queryClient.invalidateQueries({ queryKey: contextKey, exact: true })
   }, [contextKey, fallback, historyKey, queryClient])
 
   return {
