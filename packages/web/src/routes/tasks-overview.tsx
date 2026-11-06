@@ -1,4 +1,4 @@
-import { taskResourceGrid } from '@/lib/task-list-render'
+import { taskListRowIndexes, taskResourceGrid } from '@/lib/task-list-render'
 import { TaskListItems, TaskListScrollAnchor } from '@/components/task-list-items'
 import { TaskTitleEditorProvider, useTaskTitleEditor } from '@/lib/task-title-editor'
 import { TaskListFocusContext, useTaskListFocusState } from '@/lib/use-task-list-focus'
@@ -198,7 +198,7 @@ export function TasksOverview({
   const all = runs ?? []
   const derived = useProjectTaskGroups({ all, view, query, origin, archivedPages, archivedTotal, automationName })
   const { groups, needle } = derived
-  const columns = taskColumnsForCapabilities({ tokens: showTokens, cost: showCost })
+  const columns = React.useMemo(() => taskColumnsForCapabilities({ tokens: showTokens, cost: showCost }), [showTokens, showCost])
   // A search shows every group holding a match, folded or not, without saving that choice.
   const revealed = new Set<BucketLabel>(needle ? groups.map((group) => group.label) : [])
   const folds = useTaskListFoldsFromUrl(foldScope, view, revealed, () => setQuery(''))
@@ -676,10 +676,11 @@ function SummaryTasksTable({ rows, onRename, onTogglePin, now, showTokens, showC
   showCost: boolean
   automationName: (automationId: string) => string | undefined
 }) {
-  return <div data-slot="tasks-summary"><div className="rounded-lg border border-border bg-card p-5" role="table" aria-rowcount={rows.length + 1}>
+  const aria = taskListRowIndexes(rows.map(({ run }) => run.id), expandedRuns)
+  return <div data-slot="tasks-summary"><div className="rounded-lg border border-border bg-card p-5" role="table" aria-rowcount={aria.rowCount}>
     <div role="row" aria-rowindex={1} className="task-summary-grid">{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <div role="columnheader" key={label} className="h-8 border-b border-border text-start text-[12px] font-medium uppercase text-muted-foreground">{label}</div>)}</div>
     <TaskListItems items={rows} itemKey={({ run }) => run.id}>{({ run, queuePosition }, index) =>
-      <SummaryTaskRow run={run} queuePosition={queuePosition} rowIndex={index + 2} onRename={onRename} onTogglePin={onTogglePin} now={now} showTokens={showTokens} showCost={showCost} automationName={automationName} open={expandedRuns.has(run.id)} toggleExpandedRun={toggleExpandedRun} />
+      <SummaryTaskRow run={run} queuePosition={queuePosition} rowIndex={aria.indexes[index]!} onRename={onRename} onTogglePin={onTogglePin} now={now} showTokens={showTokens} showCost={showCost} automationName={automationName} open={expandedRuns.has(run.id)} toggleExpandedRun={toggleExpandedRun} />
     }</TaskListItems>
   </div></div>
 }
@@ -692,8 +693,8 @@ const SummaryTaskRow = React.memo(function SummaryTaskRow({ run, queuePosition, 
         const scheduled = scheduledResume(run)
         const reference = taskReference(run)
         const detailId = `task-resources-${run.id}`
-        return <div role="row" aria-rowindex={rowIndex}>
-          <div data-status={run.status} data-slot="task-summary-row" data-run-id={run.id} className="task-summary-grid group/row">
+        return <div role="rowgroup">
+          <div role="row" aria-rowindex={rowIndex} data-status={run.status} data-slot="task-summary-row" data-run-id={run.id} className="task-summary-grid group/row">
             <div role="cell" className="py-5 pr-4 align-top">
               <TitleCell run={run} to={`/tasks/${run.id}`} onRename={onRename} onTogglePin={onTogglePin} />
               <div className="mt-1"><RunOriginLine run={run} automationName={automationName} /></div>
@@ -707,7 +708,7 @@ const SummaryTaskRow = React.memo(function SummaryTaskRow({ run, queuePosition, 
             <div role="cell" className="pr-2">{reference ? <TaskReferenceChip run={run} reference={reference} compact /> : <Dash />}</div>
             <div role="cell" className="text-xs text-muted-foreground">{shortAge(run.startedAt ?? run.createdAt, now)}</div>
           </div>
-          {open ? <div role="cell" className="col-span-full" data-run-id={run.id}><div className="border-b border-border pb-5"><div id={detailId} className="flex flex-col gap-3">
+          {open ? <div role="row" aria-rowindex={rowIndex + 1} data-run-id={run.id}><div role="cell" aria-colspan={5} className="border-b border-border pb-5"><div id={detailId} className="flex flex-col gap-3">
             <TaskPreview runId={run.id} status={attention.label} error={run.error} open={<Button asChild variant="outline" className="min-h-11"><Link data-task-control="open" to={`/tasks/${run.id}`}>Open task<span className="sr-only">: {runTitle(run)}</span></Link></Button>} />
             <div className="rounded-md bg-muted/50 p-4"><TaskResourceDetails run={run} showTokens={showTokens} showCost={showCost} /></div>
           </div></div></div> : null}
@@ -1418,7 +1419,6 @@ function MobileResources({ run, showTokens, showCost }: { run: RunSummary; showT
 function Dash() {
   return <span className="text-xs text-soft-foreground">—</span>
 }
-
 function BranchChip({ branch }: { branch: string }) {
   return (
     <span

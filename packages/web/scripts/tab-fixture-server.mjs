@@ -62,7 +62,7 @@ const seed = (dir, projectId) => {
   const archived = sizes?.archived ?? (taskList === 'project' ? 1000 : taskList === 'global' ? 200 : 0)
   for (let i = 0; i < active + archived; i++) {
     const run = store.createRun({ title: `Tab task ${i}`, task: `Tab task ${i}`, workflow: 'quick-task', steps: [] })
-    store.updateRun(run.id, taskList ? { status: i < active ? 'running' : 'done', archived: i >= active, inputTokens: 12345, outputTokens: 678, costUsd: 0.12, ...(i >= active ? { finishedAt: new Date().toISOString() } : {}) } : { status: 'done' })
+    store.updateRun(run.id, taskList ? { createdAt: new Date(Date.now() - (active + archived - i) * 1000).toISOString(), status: i < active ? 'running' : 'done', archived: i >= active, inputTokens: 12345, outputTokens: 678, costUsd: 0.12, ...(i >= active ? { finishedAt: new Date().toISOString() } : {}) } : { status: 'done' })
     store.appendEvent(run.id, { type: 'item.completed', item: { kind: 'message', id: 'initial', role: 'assistant', text: `Tab fixture transcript ${run.id}` } })
   }
   return store
@@ -88,6 +88,13 @@ const indexCommand = command => {
     stores.get(run.projectId)?.updateRun(run.runId, { tokensUsed: ticks, currentStepId: `tick-${ticks % 3}` })
   }, 1000 / command.tick.rate)
 }
+// Fixture-only insertion seam: deterministic seed times permit a middle insert as well as a prepend.
+function insertTask({ projectId = 'boot', title, beforeTitle }) {
+  const target = stores.get(projectId)
+  const before = beforeTitle && target.listRunIds().map(id => target.getRun(id)).find(run => run.title === beforeTitle)
+  const run = target.createRun({ title, task: title, workflow: 'quick-task', steps: [] })
+  target.updateRun(run.id, { status: 'running', ...(before ? { createdAt: new Date(Date.parse(before.createdAt) + 500).toISOString() } : {}) })
+}
 const control = createServer(async (req, res) => {
   let body = ''
   for await (const part of req) { body += part; if (body.length > 16_384) { res.writeHead(413).end(); return } }
@@ -95,6 +102,7 @@ const control = createServer(async (req, res) => {
     const command = JSON.parse(body || '{}')
     clearInterval(timer)
     await reports.handle(command)
+    if (command.insertTask) insertTask(command.insertTask)
     if (command.streaming) {
       const selected = command.runs ?? runs
       for (const run of selected) stores.get(run.projectId)?.updateRun(run.runId, { status: 'running' })

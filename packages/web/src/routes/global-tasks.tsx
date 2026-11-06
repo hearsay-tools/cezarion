@@ -1,3 +1,4 @@
+import { taskListRowIndexes } from '@/lib/task-list-render'
 import { GlobalTasksEmptyState, GlobalTasksLoadError, OtherProjects, TruncatedNotice } from './global-tasks-states'
 import { TaskListItems, TaskListScrollAnchor } from '@/components/task-list-items'
 import { TaskListFocusContext, useTaskListFocusState } from '@/lib/use-task-list-focus'
@@ -754,9 +755,10 @@ function TaskList({
   showCost: boolean
   automationName: (task: GlobalTask) => string | undefined
 }) {
+  const aria = taskListRowIndexes(tasks.map((task) => `${task.run.projectId}/${task.run.id}`), expandedRuns)
   return (
     <div
-      role={summary ? "table" : undefined} aria-rowcount={summary ? tasks.length + 1 : undefined} data-slot="global-tasks-table"
+      role={summary ? "table" : undefined} aria-rowcount={summary ? aria.rowCount : undefined} data-slot="global-tasks-table"
       className="overflow-x-auto rounded-lg border border-border bg-card p-5"
     >
       <div data-slot="global-summary-head" className="text-[12px]" role="row" aria-rowindex={1}>{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <span role="columnheader" key={label}>{label}</span>)}</div>
@@ -766,7 +768,7 @@ function TaskList({
                 key={`${task.run.projectId}/${task.run.id}`}
                 task={task}
                 summary={summary}
-                rowIndex={index + 2}
+                rowIndex={aria.indexes[index]!}
                 resourcesOpen={expandedRuns.has(`${task.run.projectId}/${task.run.id}`)}
                 toggleExpandedRun={toggleExpandedRun}
                 now={now}
@@ -818,14 +820,7 @@ export const TaskRow = React.memo(function TaskRow({
   const { run } = task
   const attention = deriveAttention(run)
   const to = scopeTo(run.projectId, `/tasks/${run.id}`)
-  // The SAME rule every other surface applies (#407, #526) — the index carries the six inputs
-  // rather than a pre-resolved chip precisely so this is one function, not two. Plural here
-  // because a task genuinely has several: opened on an issue, about one PR, having created
-  // another. The surfaces with one slot take the first; this one has room for the truth.
-  //
-  // The project's own repo root is what makes a reference known only by NUMBER clickable. A
-  // project-scoped view can use the one repo it is standing in; this page has a different repo
-  // per row, which is why the registry entry carries `repoUrl`.
+  // Resolve references against this run's own project repository.
   const references = taskReferences(run, task.project?.repoUrl)
   // The SAME live/peak rule the per-project table applies. The live sample rides the index row
   // itself (`run.usage`, attached server-side per poll) rather than the run event stream, which
@@ -833,10 +828,14 @@ export const TaskRow = React.memo(function TaskRow({
   const usage = usageCells(run, run.usage)
 
   return (
-    <article role={summary ? "row" : undefined} aria-rowindex={summary ? rowIndex : undefined} data-status={run.status} data-expanded={resourcesOpen} data-slot="global-task-row" data-run-id={run.id} data-project={run.projectId} className="hover:bg-muted max-md:flex max-md:flex-wrap max-md:items-center max-md:gap-x-3 max-md:gap-y-2 max-md:border-b max-md:border-border max-md:py-5 ">
+    <article role={summary ? "rowgroup" : undefined} data-status={run.status} data-expanded={resourcesOpen} data-slot="global-task-row" data-run-id={run.id} data-project={run.projectId} className="hover:bg-muted max-md:flex max-md:flex-wrap max-md:items-center max-md:gap-x-3 max-md:gap-y-2 max-md:border-b max-md:border-border max-md:py-5 ">
       {/* The one column with no fixed width, so every pixel the others give up lands here — and
           dropping Branch gave up 140 of them. A cross-project list is read by TITLE. */}
-      <GlobalTaskTitle summary={summary} task={task} showProject={showProject} automationName={automationName} resourcesOpen={resourcesOpen} toggleExpandedRun={toggleExpandedRun} />
+      <div data-slot="global-task-cells" className="contents" role={summary ? "row" : undefined} aria-rowindex={summary ? rowIndex : undefined}><GlobalTaskTitle summary={summary} task={task} showProject={showProject} automationName={automationName} resourcesOpen={resourcesOpen} toggleExpandedRun={toggleExpandedRun} />
+      <div role={summary ? "cell" : undefined} data-slot="global-task-workflow" className="text-[13px] text-muted-foreground">
+        {run.workflow}
+      </div>
+      <div role={summary ? "cell" : undefined} data-slot="global-task-diff" className="text-xs text-muted-foreground"><span title="Change totals are available in the project task list">—</span></div>
       <div role={summary ? "cell" : undefined} data-slot="global-task-references">
         {references.length > 0 ? (
           <ReferenceChips references={references} run={run} repoBase={task.project?.repoUrl} />
@@ -844,27 +843,24 @@ export const TaskRow = React.memo(function TaskRow({
           <Dash />
         )}
       </div>
-      <div role={summary ? "cell" : undefined} data-slot="global-task-workflow" className="text-[13px] text-muted-foreground">
-        {run.workflow}
-      </div>
-      <div role={summary ? "cell" : undefined} data-slot="global-task-diff" className="text-xs text-muted-foreground"><span title="Change totals are available in the project task list">—</span></div>
       <div role={summary ? "cell" : undefined} data-slot="global-task-age" className="text-right text-xs text-soft-foreground tabular-nums">
         {shortAge(run.startedAt ?? run.createdAt, now)}
       </div>
-      {!summary || resourcesOpen ? <div role={summary ? "cell" : undefined} data-slot="global-task-actions">
+      </div>{!summary || resourcesOpen ? <div className="contents" role={summary ? "row" : undefined} aria-rowindex={summary ? rowIndex + 1 : undefined}><div data-slot="global-task-detail-cell" role={summary ? "cell" : undefined} aria-colspan={summary ? 5 : undefined} className={summary ? 'col-span-full flex flex-col gap-3' : 'contents'}>
+      <div data-slot="global-task-actions">
         <span className="inline-flex items-center gap-0.5">
           <ReadToggle task={task} busy={busy} onSetRead={onSetRead} />
           <ArchiveToggle task={task} busy={busy} onArchive={onArchive} /><Button asChild variant="outline"><Link to={to}>Open task</Link></Button>
         </span>
-      </div> : null}
-    {resourcesOpen ? <div role={summary ? "cell" : undefined} data-slot="global-task-resources" className="col-span-full flex flex-col gap-3">
+      </div>
+    {resourcesOpen ? <div data-slot="global-task-resources" className="col-span-full flex flex-col gap-3">
       <TaskPreview projectId={run.projectId} runId={run.id} status={attention.label} error={run.error} open={<Button asChild variant="outline" className="min-h-11"><Link to={to}>Open task<span className="sr-only">: {runTitle(run)}</span></Link></Button>} />
       <dl className="grid grid-cols-2 gap-4 rounded-md bg-muted/50 p-4 text-xs md:grid-cols-3">
         {showCost ? <div><dt className="text-muted-foreground">Cost</dt><dd className="mt-1">{formatCost(run.costUsd) || '—'}</dd></div> : null}
         <div><dt className="text-muted-foreground">CPU</dt><dd data-usage="cpu" data-usage-kind={usage.cpu.kind} title={usage.cpu.title} className="mt-1">{usage.cpu.text || '—'}</dd></div>
         <div><dt className="text-muted-foreground">Memory</dt><dd data-usage="mem" data-usage-kind={usage.mem.kind} title={usage.mem.title} className="mt-1">{usage.mem.text || '—'}</dd></div>
       </dl>
-    </div> : null}
+    </div> : null}</div></div> : null}
     </article>
   )
 }, (previous, next) => {

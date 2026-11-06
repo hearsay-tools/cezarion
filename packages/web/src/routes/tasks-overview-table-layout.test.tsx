@@ -1232,3 +1232,20 @@ it('does not restore a row control after the user blurs it before a breakpoint f
   setOverviewDesktop(true)
   expect(document.activeElement).toBe(document.body)
 })
+
+it('counts expanded preview rows and gives each row a correct table index', () => {
+  renderOverview({ runs: [run({ id: 'first-summary', title: 'First summary' }), run({ id: 'second-summary', title: 'Second summary' })] }, false)
+  const table = document.querySelector('[data-slot="tasks-summary"] [role="table"]')!
+  expect(table.getAttribute('aria-rowcount')).toBe('3')
+  const firstRow = table.querySelector('[data-slot="task-summary-row"]')!
+  fireEvent.click(within(firstRow as HTMLElement).getByRole('button', { name: /^Show resources/ }))
+  const rows = [...table.querySelectorAll('[role="row"]')]
+  expect(table.getAttribute('aria-rowcount')).toBe('4')
+  expect(rows.map(row => row.getAttribute('aria-rowindex'))).toEqual(['1', '2', '3', '4'])
+  expect(rows[1]!.querySelectorAll('[role="cell"]')).toHaveLength(5)
+  expect(rows[2]!.querySelectorAll('[role="cell"]')).toHaveLength(1)
+  expect(rows[2]!.querySelector('[role="cell"]')!.getAttribute('aria-colspan')).toBe('5')
+  fireEvent.click(within(firstRow as HTMLElement).getByRole('button', { name: /^Hide resources/ }))
+  expect(table.getAttribute('aria-rowcount')).toBe('3')
+  expect([...table.querySelectorAll('[role="row"]')].map(row => row.getAttribute('aria-rowindex'))).toEqual(['1', '2', '3'])
+})

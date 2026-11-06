@@ -1,3 +1,4 @@
+import { waitForSettledSample } from './visual-ready'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { AgentBrowser } from './agent-browser'
 import { createTabFixture } from './tab-fixture'
@@ -45,4 +46,19 @@ it('bounds rows, preserves focused controls and expansion, and follows pathname 
   browser.click(`${row} a`)
   browser.waitForFunction(`location.pathname.endsWith('/tasks/${first}')`)
   expect(browser.waitForValue(`document.querySelector('[data-slot="main"]').scrollTop`)).toBe(0)
+})
+
+it.each([undefined, 'Tab task 130'])('keeps the first visible row anchored after insertion above it (%s)', async (beforeTitle) => {
+  browser.setViewport(1440, 900)
+  browser.goto(`${fixture.origin}/p/boot/?tasks=virtual`)
+  browser.waitForFunction(`document.querySelector('[data-virtualized="true"] [data-slot="task-summary-row"]') !== null`)
+  browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop=6500`)
+  const firstVisible = `(() => { const owner=document.querySelector('[data-slot="main"]'); const edge=owner.getBoundingClientRect().top; const row=[...document.querySelectorAll('[data-slot="task-summary-row"]')].find(row=>row.getBoundingClientRect().bottom>edge && row.getBoundingClientRect().top<edge+owner.clientHeight); return row ? {id:row.dataset.runId,top:row.getBoundingClientRect().top} : null })()`
+  const before = waitForSettledSample(browser, firstVisible) as { id: string; top: number }
+  const count = browser.waitForValue(`Number(document.querySelector('[data-slot="tasks-summary"] [role="table"]').getAttribute('aria-rowcount'))`) as number
+  await fixture.control({ insertTask: { title: `Inserted ${beforeTitle ?? 'prepend'}`, beforeTitle } })
+  browser.waitForFunction(`Number(document.querySelector('[data-slot="tasks-summary"] [role="table"]').getAttribute('aria-rowcount')) === ${count + 1} && window.__cezIdle && !document.querySelector('[data-slot="task-summary-row"][data-status="queued"]')`)
+  const after = waitForSettledSample(browser, `(() => { const row=document.querySelector('[data-slot="task-summary-row"][data-run-id="${before.id}"]');return row ? {id:row.dataset.runId,top:row.getBoundingClientRect().top} : null })()`) as { id: string; top: number }
+  expect(after.id).toBe(before.id)
+  expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(2)
 })

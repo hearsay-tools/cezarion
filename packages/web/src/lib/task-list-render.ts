@@ -26,3 +26,10 @@ export function taskResourceGrid(columns: readonly TaskColumnDefinition[], expan
     minInlineSize: Math.max(1240, widths.reduce((sum, width) => sum + width, 0)),
   }
 }
+
+/** A preview is a second ARIA row, while remaining in its run's one virtual item. */
+export function taskListRowIndexes(keys: readonly string[], expanded: ReadonlySet<string>) {
+  let next = 2
+  const indexes = keys.map((key) => { const index = next; next += expanded.has(key) ? 2 : 1; return index })
+  return { indexes, rowCount: next - 1 }
+}
