@@ -20,8 +20,9 @@ session's existing credential:
 - Messaging off refuses new peer sends, peer discovery and new peer waits from the task, and sends
   to it are recorded as not delivered. A reply to a request accepted earlier passes in both
   directions. Messages between a task and its own workers are never gated by either setting.
-- With both off and no owned worker, the session gets no credential, and native cross-session
-  tools stay off as on every governed session.
+- A root session with both off and no owned worker gets the endpoint but no credential, so
+  `cez discover` refuses rather than reach the cockpit; worker sessions and roots with owned
+  workers keep theirs. Native cross-session tools stay off as on every governed session.
 
 Every task becomes a root at its first provisioned session. Rules that protect a family, such
 as holding Finish or the agent's done while the parent's question is pending, apply only to a root
