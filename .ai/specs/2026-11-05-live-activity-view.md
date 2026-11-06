@@ -174,6 +174,17 @@ the project view. The summary chips count every project.
 
 ## Navigation
 
+The scope switch keeps the originating project in the global page's browser
+history entry. “This project” returns to that project's Activity page. A direct
+visit to `/activity` keeps the boot-project fallback.
+
+| Case | “This project” target |
+| --- | --- |
+| Project A → All projects → This project | Project A's Activity page, even when A is not the boot project. |
+| Project B → All projects after visiting A | Project B's Activity page. |
+| Reload or Back restores the global history entry | The originating project from that entry, if still registered and available. |
+| Direct `/activity`, invalid history state, or originating project removed/missing | The boot project's Activity page. |
+
 - Sidebar view tabs (`packages/web/src/components/nav-items.ts`,
   `sidebar-view-tabs.tsx`): Tasks, **Activity**, GitHub, Skills, Settings, then More.
   The row stays at the five-tab cap. **More** holds **Git**, Automations, Workflows and

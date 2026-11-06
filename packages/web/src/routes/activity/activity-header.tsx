@@ -31,7 +31,7 @@ export function ScopeSwitch({ scope, projectId }: { scope: 'project' | 'all'; pr
           This project
         </RouterLink>
       )}
-      <RouterLink to="/activity" aria-current={scope === 'all' ? 'page' : undefined} className={segment(scope === 'all')}>
+      <RouterLink to="/activity" state={{ activityProjectId: projectId }} aria-current={scope === 'all' ? 'page' : undefined} className={segment(scope === 'all')}>
         All projects
       </RouterLink>
     </nav>
