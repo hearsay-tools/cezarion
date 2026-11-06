@@ -106,7 +106,7 @@ Resolved once, at the process entry point, from the platform. No setting is requ
 | state | `ui-state.json`, `server.json`, `server-instances/`, `backups/`, migration log | `$XDG_STATE_HOME/skein` (`~/.local/state/skein`) | `~/Library/Application Support/Skein/state` | `%LOCALAPPDATA%\Skein\state` |
 | data | managed install `versions/`, `bin/` | `$XDG_DATA_HOME/skein` (`~/.local/share/skein`) | `~/Library/Application Support/Skein/data` | `%LOCALAPPDATA%\Skein\data` |
 | cache | skills cache (now `~/.cache/cez`), `dry-cache/`, `dry-prefix/` | `$XDG_CACHE_HOME/skein` | `~/Library/Caches/Skein` | `%LOCALAPPDATA%\Skein\cache` |
-| runtime | locks, leases, sockets (install locks are under `~/.cezar` today) | `$XDG_RUNTIME_DIR/skein`, else `<state>/run` | `$TMPDIR/skein` | `%LOCALAPPDATA%\Skein\run` |
+| runtime | sockets and temp files only; locks and leases live in `<config>/.locks/` (below) | `$XDG_RUNTIME_DIR/skein`, else `<state>/run` | `$TMPDIR/skein` | `%LOCALAPPDATA%\Skein\run` |
 
 `SKEIN_HOME=<dir>` keeps a one-root layout (`<dir>/config`, `state`, `data`, `cache`,
 `run`) for containers, tests and hosts that want one directory.
@@ -130,9 +130,11 @@ Resolved once, at the process entry point, from the platform. No setting is requ
    - a write to a dir with no marker, unless the caller is an entry point that creates one.
    The check reads the marker, not the path, so pinned `HOME`, inherited variables and
    custom env objects cannot hide the live home.
-4. **Presence leases and write lock.** Two kinds of file in the runtime dir. Each serving
+4. **Presence leases and write lock.** Two kinds of file in `<config>/.locks/`. They sit in
+   the config dir, which identifies the home, not in the runtime dir, which depends on each
+   process's `XDG_RUNTIME_DIR`; so a server and a CLI that share a home always share them. Each serving
    cockpit holds a lease (pid, installId, instance) for its whole life; it only tells other
-   processes that a cockpit serves this home (the migration reads it, step 1 in section 4).
+   processes that a cockpit serves this home (the migration reads it, step 2 in section 4).
    One home can serve several cockpits (server instances), so each one holds its own file,
    `cockpits/<pid>.lease`; a lease whose pid is gone is stale and is removed on read.
    Every writer, the cockpit included, takes `write.lock` only for the read-modify-write of
@@ -151,25 +153,39 @@ Resolved once, at the process entry point, from the platform. No setting is requ
 One code path, `migrateLegacyHome()`, runs at the first boot of the new build and as
 `skein migrate [--dry-run]`.
 
-1. Take `~/.cezar/.migrating` with `O_EXCL` first; a second migration waits or stops. Then
-   take `write.lock`, which drains any writer already in its critical section, and hold it
-   until step 5 ends. Every `HomeStore` writer checks `.migrating` inside its own
+1. Resolve the legacy home: `CEZ_HOME` when set, else `~/.cezar`. If it does not exist or
+   holds no registry file, there is nothing to migrate: write a fresh `live` marker in the new
+   home and stop. Every later lock and marker of this migration lives in the resolved legacy
+   home.
+2. Take `<legacy>/.migrating` with `O_EXCL`; a second migration waits or stops. Then take
+   the legacy `write.lock`, which drains any writer already in its critical section, and hold
+   it until step 7 ends. Every `HomeStore` writer checks `.migrating` inside its own
    `write.lock` section, after it acquires the lock, and refuses to write the legacy home when
    the file exists. A cockpit refuses to start on a home with `.migrating`. Then make sure no
    cockpit still serves the legacy home: every instance that shares it (on a server, every
    instance in `server.json` and `server-instances/` with the same home) is stopped, and the
    migration aborts, removing `.migrating`, when a live presence lease remains. It names the
    cockpit that holds it.
-2. If the new config dir has `install.json` with `migratedFrom`, do nothing (idempotent).
-3. Write a full backup: `<state>/backups/legacy-cezar-home-<UTC>.tar.gz` (without `versions/`,
+3. If the new config dir has `install.json` with `migratedFrom` and state `committed`, do
+   nothing (idempotent).
+4. Write a full backup: `<state>/backups/legacy-cezar-home-<UTC>.tar.gz` (without `versions/`,
    caches and `tmp/`).
-4. Copy, never move, each file into the new layout (temp file, fsync, rename). Parse and hash
-   each copy and compare.
-5. Write the `live` marker with `migratedFrom`, then `~/.cezar/MOVED.json` with the new paths.
-   Leave the rest of `~/.cezar` as it is.
-6. Agent accounts whose `configDir` is inside `~/.cezar` keep their path. Settings shows
-   which accounts still point there. The window-end cleanup never deletes `~/.cezar`; it
-   prints what still uses it.
+5. Record the hash and mtime of every legacy file, then copy, never move, each file into the
+   new layout (temp file, fsync, rename), including `backups/`. Parse and hash each copy and
+   compare.
+6. Older binaries do not know `write.lock` or `.migrating`, so they can still write the legacy
+   files. Before committing, re-read every recorded hash: a changed file is copied again,
+   and the check repeats (at most three times, then the migration aborts and says which
+   binary to stop). After commit, the canary (section 3 item 5) watches the same hashes; a
+   later change shows a banner with an "import changes from the old home" action that merges
+   the changed file through `HomeStore`, after a backup.
+7. Agent accounts whose `configDir` is inside the legacy home are copied to
+   `<data>/accounts/<id>/` and their `configDir` is rewritten, so a stray writer of the legacy
+   home cannot change a live account's files. An account in use by a running session is
+   copied at the next start with no session. Accounts outside the legacy home keep their path.
+8. Write the `live` marker with `migratedFrom` and state `committed`, then
+   `<legacy>/MOVED.json` with the new paths. Leave the rest of the legacy home as it is. The
+   window-end cleanup never deletes it; it prints what still uses it.
 
 **`CEZ_HOME` set to a non-default dir** (containers, custom hosts): treat it as
 `SKEIN_HOME` one-root, migrate in place into `config/`, `state/`, and so on.
@@ -178,7 +194,9 @@ One code path, `migrateLegacyHome()`, runs at the first boot of the new build an
 every instance that shares the legacy home, migrates that home once, then for each instance in
 `server.json` and `server-instances/`: install
 `skein[-<slug>].service` and the nginx site on the same port, start, check health.
-The instances that share a home form one group and succeed or fail together. If any instance
+The instances that share a home form one group and succeed or fail together. Until every
+instance passes its health check, the new marker stays in state `pending` and `HomeStore`
+refuses every write, so the cockpits serve read-only and no write can be lost by a rollback. If any instance
 in the group fails its health check, every instance in the group stops, the old units and old
 sites come back, and the new home's marker is renamed to `install.json.failed` so the next run
 migrates again from the untouched legacy home. Old unit files stay as `*.migrated` after
@@ -233,11 +251,11 @@ release are the single user-visible change.
 
 | Phase | Slices (one PR each unless noted) | Visible before the switch? |
 | --- | --- | --- |
-| **P0 Safety** | (a) `buildChildEnv`, check steps (`workflows/run/step-loop.ts:508`, full `process.env` today) and the draft-PR `git push` never pass `CEZ_HOME` (or any later home variable); In-task commands that read the home today (`cez artifact publish` reads the registry at `artifacts/cli.ts:45` to build its link) get what they need from the task context or the cockpit API instead, so a host with a custom home keeps working. (`CEZ_HOME` reached agents only through the blanket `CEZ_*` allowance added in `fedab0ed1`, not by design.) (b) The guard compares against `os.userInfo().homedir` (passwd, not `$HOME`), runs for every env object, and covers `node:test`; `test:unit` and `test:package` load the sandbox setup. (c) Rotating backups for `config.json` and `agent-accounts.json`, and `cez backup list|restore`. (d) Issue to `apptension/toolkit-dev`: audit-agent-readiness probes run foreign suites with a scrubbed env and a temp `HOME`. | Only the new `cez backup` command |
+| **P0 Safety** | (a) `buildChildEnv`, check steps (`workflows/run/step-loop.ts:508`, full `process.env` today) and the draft-PR `git push` never pass `CEZ_HOME` (or any later home variable); In-task commands that read the home today (`cez artifact publish` reads the registry at `artifacts/cli.ts:45` to build its link) get what they need from the task context or the cockpit API instead, so a host with a custom home keeps working. (`CEZ_HOME` reached agents only through the blanket `CEZ_*` allowance added in `fedab0ed1`, not by design.) (b) The guard compares against `os.userInfo().homedir` (passwd, not `$HOME`), runs for every env object, and covers `node:test`; `test:unit` and `test:package` load the sandbox setup. (c) Rotating backups for `config.json` and `agent-accounts.json`, and `cez backup list` and `cez backup restore`. (d) Issue to `apptension/toolkit-dev`: audit-agent-readiness probes run foreign suites with a scrubbed env and a temp `HOME`. | Only the new `cez backup` command |
 | **P1 Home object** | (a-1) `Home` type and `resolveHome` (legacy layout while the switch is off), passed down from entry points; `cezarHomeDir()` stays as a thin shim. (a-2) Remove the shim; tests use `Home.sandbox`; lint for `homedir()` and `cezarHomeDir()`. (b) `HomeStore` writer with `install.json` marker (written into the legacy home too), test-runner refusal and lease. (c) Backups and restore command for every registry-type file; shrink banner. (d) Lint: test code writes only through `Home.sandbox`. ADR superseding the "literal `~/.cezar`" rule. | Only the reset banner, which appears after a reset |
 | **P2 Layout and migration** | (a) XDG / macOS / Windows / `SKEIN_HOME` resolver. (b) `migrateLegacyHome` with backup, `MOVED.json`, canary; it carries `~/.cezar/backups/` into `<state>/backups/`. (c) Server migration for systemd units and nginx sites, with rollback. (d) launchd label move. All behind the switch. | No |
 | **P3 Name surfaces** | (a) One env helper: `SKEIN_*` first, `CEZ_*` fallback (additive). (b) `skein` bin added beside `cezarion` and `cez` (additive). (c) Package `@hearsay-tools/skein` prepared; publish waits for the switch. (d) Desktop and mobile new IDs and the bridge build, behind the switch. (e) Docs and display names, merged with the switch PR. | Additive names only |
-| **P4 Project dir** | Dual read of `.ai/cezar/` and `.ai/skein/` (additive); `skein migrate-project`: refuses while a task is live. It first writes a journal (`.ai/skein-migration.json` beside both dirs) that lists every step and every path rewrite: move the dir, `git worktree repair`, rewrite the owned-workspace receipt files in `.git/cezar-owned-workspaces` (`delegation/workspace.ts`), then one run-store transaction for each run's `worktreePath`, artifact and handoff paths. Each step is idempotent and marks itself done in the journal. Any later start of the cockpit, the CLI or `migrate-project` that finds an unfinished journal resumes it before anything else reads the project, so a crash never leaves receipts, worktrees and the database on different paths. A dry run lists every rewrite first. | Command only |
+| **P4 Project dir** | Dual read of `.ai/cezar/` and `.ai/skein/` (additive); `skein migrate-project`: refuses while a task is live. It first writes a journal (`.ai/skein-migration.json` beside both dirs) that lists every step and every path rewrite: move the dir, `git worktree repair`, rewrite the owned-workspace receipt files under `gitCommonDir(repoRoot)/cezar-owned-workspaces` (`delegation/workspace.ts`; in a linked worktree `.git` is a file), then one run-store transaction for each run's `worktreePath`, `delegation.workspace.path`, cleanup checkpoints, artifact and handoff paths. Each step is idempotent and marks itself done in the journal. Any later start of the cockpit, the CLI or `migrate-project` that finds an unfinished journal resumes it before anything else reads the project, so a crash never leaves receipts, worktrees and the database on different paths. A dry run lists every rewrite first. | Command only |
 | **Switch** | Turn `SKEIN_SWITCH` on; deprecation notices start; docs land. Then owner actions: stable release, npm publish and deprecate, repo rename, store listings, apptension-host server migration. | Yes: the release |
 | **P5 Window end** | Remove aliases and `CEZ_*` fallbacks, two minor releases or 60 days after the release. | Yes |
 
