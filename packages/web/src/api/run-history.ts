@@ -71,21 +71,23 @@ function contextReachesPage(context: RunHistoryContext | undefined, newestPage: 
 
 /**
  * The first page and the first context load in parallel, so the context can be read just before
- * the page. Read it again then, once per page: a later read reaches it, as the file only grows.
+ * the page. Read it again then, once per task and page: a later read reaches it, as the file only
+ * grows. The route stays mounted across tasks, so the key names the task too.
  */
 function useContextCatchUp(
+  runId: string | undefined,
   context: { data: RunHistoryContext | undefined; isFetching: boolean; refetch: () => Promise<unknown> },
   newestPage: RunHistoryPage | undefined,
   active: boolean,
 ): void {
-  const caughtUpFor = useRef<number | undefined>(undefined)
+  const caughtUpFor = useRef<string | undefined>(undefined)
   const behind = active && context.data !== undefined && !context.isFetching && !contextReachesPage(context.data, newestPage)
-  const pageSeq = newestPage?.asOfSeq
+  const key = runId === undefined || newestPage === undefined ? undefined : `${runId}:${newestPage.asOfSeq}`
   useEffect(() => {
-    if (!behind || pageSeq === undefined || caughtUpFor.current === pageSeq) return
-    caughtUpFor.current = pageSeq
+    if (!behind || key === undefined || caughtUpFor.current === key) return
+    caughtUpFor.current = key
     void context.refetch()
-  }, [behind, context, pageSeq])
+  }, [behind, context, key])
 }
 
 /** Of two context snapshots, the one read later: requests overlap, and an older answer can land
@@ -248,7 +250,7 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     () => fallback ? fallbackEvents : orderedUnique(pagedEvents, liveEvents),
     [fallback, fallbackEvents, pagedEvents, liveEvents],
   )
-  useContextCatchUp(context, newestPage, !fallback)
+  useContextCatchUp(runId, context, newestPage, !fallback)
   const currentComplete = fallback || contextReachesPage(context.data, newestPage)
   const currentEvents = useMemo(() => {
     if (fallback) return fallbackEvents

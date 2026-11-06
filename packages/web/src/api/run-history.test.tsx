@@ -414,6 +414,19 @@ describe('useRunHistory', () => {
     expect(mockContext).toHaveBeenCalledTimes(2)
   })
 
+  it('catches each task up on its own when the next task has the same page sequence', async () => {
+    mockHistory.mockResolvedValue(tail(151, 250))
+    mockContext.mockImplementation(async (id) => ({ ...context(), asOfSeq: mockContext.mock.calls.filter(([called]) => called === id).length > 1 ? 250 : 100 }))
+    const { wrapper } = harness()
+    const { result, rerender } = renderHook(({ id }) => useRunHistory(id), { wrapper, initialProps: { id: 'run-a' } })
+    await waitFor(() => expect(result.current.currentComplete).toBe(true))
+
+    rerender({ id: 'run-b' })
+    await waitFor(() => expect(mockContext.mock.calls.filter(([id]) => id === 'run-b')).toHaveLength(2))
+    await waitFor(() => expect(result.current.currentComplete).toBe(true))
+    mockContext.mockReset()
+  })
+
   it('refreshes the context with each compaction, so frames before the new page stay current', async () => {
     FakeEventSource.instances = []
     vi.stubGlobal('EventSource', FakeEventSource)
