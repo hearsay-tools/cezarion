@@ -117,7 +117,10 @@ async function send(session: AgentSession, text: string) {
 async function sendSteer(session: AgentSession) {
   let accepted: false | Promise<void> = false;
   // bound: the opening native ACK must clear before the runner admits agent input.
-  await waitFor(() => (accepted = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo Evidence steer.' }], ['wire-steer'])) !== false, 5_000);
+  await waitFor(() => {
+    accepted = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo Evidence steer.' }], ['wire-steer']);
+    return accepted !== false;
+  }, 5_000);
   if (accepted) await accepted;
 }
 
