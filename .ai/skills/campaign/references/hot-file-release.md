@@ -1,0 +1,109 @@
+# Release a patch hold
+
+The coordinator owns PR-opening release. Planned files and line distance predict
+work; they do not prove a ready branch conflicts. The old per-file cap protected
+against patch collisions by serializing PRs. This check replaces that default
+with actual patch evidence while preserving semantic dependencies, worker-slot
+limits and every review, QA and land-pr gate. Release permits opening a draft
+PR, never merging it.
+
+## Capture complete evidence
+
+On a gated worker's ready request, fetch origin/main and record its full SHA
+as `base`. Capture the candidate's committed head and every other outstanding
+campaign branch/PR head whose work could interact. Include branches not yet
+released, not just the original blocker. Require each worker's confirmation
+that its patch is complete, its worktree clean and its readiness evidence
+current. A partial diff, missing branch, dirty tree or missing confirmation
+cannot clear a hold. Record the owner, next action and matching worker/request,
+PR or human wake; unrelated eligible work can continue.
+
+Recheck semantic prerequisites and shared resources from the schedule: imports,
+contracts, pins, stored state and side-effect order. Disjoint files or a clean
+rebase do not prove semantic independence. Keep a semantic hold until its named
+release condition passes, even if there is no patch overlap.
+
+## Compare actual patches
+
+1. For each captured head, inspect its complete branch delta with
+   `git diff --name-status -z --no-renames <merge-base> <head>`, where
+   `<merge-base>` is `git merge-base <base> <head>`. Treat paths as NUL-delimited
+   data, not shell words or newline-delimited names. Confirm Git commands
+   succeeded; empty output from a failed command is not an empty patch.
+2. If a pair shares no changed path, its patch hold can clear after the semantic
+   checks. Renames appear as deletion plus addition with `--no-renames`, so both
+   paths participate. This path-set shortcut needs complete evidence from both
+   branches; it does not require rewriting either live branch.
+3. For shared paths, compare both complete patches on the same current-main
+   base. Make disposable local clones outside worker worktrees, with no checkout
+   hooks, and import the captured commits from the local repository. Check out
+   each head detached and trial-rebase its branch-only commits onto `base`
+   (`git rebase --onto <base> <merge-base>`, with hooks disabled). Never rebase a
+   live worker's branch yourself. A conflict, missing object, uncertain merge
+   history or failed comparison retains the hold; preserve the worker's original
+   branch and record the failure before removing only the disposable copies.
+4. In each successful trial, inspect
+   `git diff --no-ext-diff --no-textconv --no-renames --unified=0 <base> <trial-head>`.
+   Use the **old-side** hunk coordinates: both diffs now describe the same base.
+   Check name/status as well. Shared creation/deletion, rename-related paths,
+   binary changes, mode/type changes or other whole-file operations require
+   explicit resolution; do not automatically clear them from text hunks. Track
+   rename-related paths from the original patch too. If trial rebasing changes
+   scope or loses intended work, return to the worker for repair.
+5. Compare every candidate pair in the relevant outstanding set. For a hunk
+   `@@ -s,n +... @@`, `n > 0` consumes base lines `[s, s+n-1]`; `n = 0` inserts
+   at the gap after base line `s` (0 is before the first line). Consumed intervals
+   intersecting each other conflict. Equal insertion anchors conflict. An anchor
+   in `[s-1, s+n-1]` conflicts with that consumed interval, including both edit
+   boundaries. Unclear mappings stay held. Different hunks less than 40 lines
+   apart can clear when these ranges/anchors and semantic checks are disjoint.
+
+Trial rebases are comparison evidence, not reviewed replacement heads. If a live
+branch needs rebasing before PR opening or landing, request it from its owner.
+A settled worker requires explicit resume. Its new head needs fresh review,
+affected verification and this release check before release; use the worker
+brief's existing push rules. A release without a live rebase remains tied to the
+captured original heads and the trial evidence.
+
+## Record and reply
+
+Save the base, original and trial heads, compared paths/hunks, semantic checks,
+readiness evidence and decision in the existing campaign ledger. Immediately
+before replying, fetch main and query current worker/PR heads and readiness
+again. Changed base, head, plan or readiness invalidates the evidence: recheck,
+do not send the stale release. Reply explicitly with the authorized candidate
+head, base and evidence; the worker rechecks these identities before PR opening
+and requests a new release if they changed. Retain superseded evidence as history.
+On coordinator restart, reconcile live facts and recompute before reusing a saved
+release. Older ledger entries without comparison evidence remain unverified.
+
+## Cases
+
+| Complete patches on the same base | Patch decision (semantic checks still apply) |
+|---|---|
+| No shared changed path | Release |
+| Same short file: replace line 10 vs line 20 | Release; no distance threshold |
+| Both consume line 10 | Hold |
+| Both insert after line 10 | Hold |
+| Insert after line 9 or 10 vs consume line 10 | Hold; edit boundary |
+| Insert after line 11 vs consume line 10 | Release |
+| Main deleted earlier lines | Use rebased old-side coordinates, never pre-rebase line numbers |
+| Shared binary, rename, file deletion or mode change | Hold for explicit resolution |
+| Clean rebase but shared contract changes | Hold for semantic prerequisite |
+| Missing/unfinished branch, rebase conflict, stale head/base | Hold with owner and next action |
+
+## Transitions out
+
+| Situation | Exit trigger and owner | Recovery with no live session |
+|---|---|---|
+| Missing complete evidence | Worker supplies committed patch and readiness | Collect saved result; explicitly resume worker for gaps; restore wait |
+| Patch overlap or semantic hold | Prerequisite merges and integrated acceptance passes, or approved scope changes | Reconcile main/GitHub and ledger, then recompute |
+| Comparison/rebase failure | Named owner resolves missing evidence or worker resolves conflict | Keep original branch and reason; resume settled worker for repair |
+| Independent patches held | Coordinator records evidence and replies with release | Recompute current identities before sending or reusing reply |
+| Released evidence changes | Coordinator/worker invalidates release and returns to review/check | Reconcile heads, base and readiness; do not reuse stale approval |
+| Deletion-chain successor queued | Predecessor merges and integrated acceptance passes | Verify both recorded facts against live main before dispatch |
+
+These are campaign coordination states, not new runtime run states. No daemon,
+new configuration or store is required. Work is bounded by the existing live
+worker limit and the ready branches being compared. Nothing enables automation
+or widens merge authority.
