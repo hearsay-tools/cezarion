@@ -2,10 +2,11 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ACTIVITY_READ_MS, activityQueryKey, useActivityLive, type ActivityScope } from './activity-live'
+import { ACTIVITY_READ_MS, UNEXPECTED_ACTIVITY, activityQueryKey, useActivityLive, type ActivityScope } from './activity-live'
 import { configureLiveSession, resetLiveSession } from './live-coordinator'
 import { LIVE_PROTOCOL } from './live-protocol'
 import { createQueryClient } from './query-client'
+import { run } from '@/routes/activity/activity.testkit'
 
 class Worker {
   static all: Worker[] = []
@@ -17,7 +18,7 @@ class Worker {
 
 const snapshot = (title: string, generatedAt = '2026-11-05T00:00:00.000Z') => ({
   generatedAt,
-  projects: [{ projectId: 'shop', name: 'Shop', loaded: true, inReview: 0, tasks: [{ title }], requests: [], closed: [] }],
+  projects: [{ projectId: 'shop', name: 'Shop', loaded: true, inReview: 0, tasks: [run({ runId: 'task', title })], requests: [], closed: [] }],
 })
 const shop: ActivityScope = { kind: 'project', projectId: 'shop' }
 const readPath = '/api/v1/workspace/activity?project=shop'
@@ -195,5 +196,34 @@ describe('useActivityLive', () => {
     const { project } = mount()
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     expect(project()).toMatchObject({ projectId: 'shop', name: 'shop', unavailable: { status: 404 } })
+  })
+
+  it('keys the global read with null, never with a project id', () => {
+    expect(activityQueryKey({ kind: 'workspace' })).toEqual(['workspace', 'activity', null])
+    expect(activityQueryKey({ kind: 'project', projectId: 'all' })).toEqual(['workspace', 'activity', 'all'])
+    expect(activityQueryKey({ kind: 'project', projectId: 'all' })).not.toEqual(activityQueryKey({ kind: 'workspace' }))
+  })
+
+  it('reports a read that fails the contract as the query error', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ generatedAt: 'x', projects: 'nope' }))))
+    configureLiveSession({ local: true, bootProject: 'boot', apiBase: '' })
+    const { client } = mount()
+    // The query client retries a failed read once; the second answer is just as malformed.
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+    expect(client.getQueryState(activityQueryKey(shop))).toMatchObject({ status: 'error', error: { message: UNEXPECTED_ACTIVITY } })
+  })
+
+  it('keeps the last snapshot and reports the error when a topic frame fails the contract', async () => {
+    configureLiveSession({ local: true, bootProject: 'boot', apiBase: '' })
+    const { client, title } = mount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const worker = Worker.all[0]!
+    const sync = synced(worker)
+    await act(async () => {
+      worker.port.onmessage?.({ data: { type: 'value', version: LIVE_PROTOCOL, epoch: sync.epoch, id: sync.entries[0]!.id, value: { projects: [{ tasks: 'nope' }] } } })
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(title()).toBe('first')
+    expect(client.getQueryState(activityQueryKey(shop))).toMatchObject({ status: 'error', error: { message: UNEXPECTED_ACTIVITY } })
   })
 })

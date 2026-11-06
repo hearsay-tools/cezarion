@@ -15,12 +15,21 @@ const BUCKET_FILL: Record<ActivityCheckBucket, string> = {
   cancel: 'border border-soft-foreground',
 }
 
+/** A check's motion: a pending check breathes; one that just passed flashes. */
+const checkMotion = (bucket: ActivityCheckBucket, passed: boolean) => (passed ? 'activity-check-pass' : bucket === 'pending' ? 'activity-breathe-fast' : undefined)
+
 /** One segment for each check; a long list narrows the gaps so every segment still fits. */
-function CheckSegments({ checks, overflow }: { checks: NonNullable<NowBox['checks']>; overflow: NowBox['overflow'] }) {
+function CheckSegments({ checks, overflow, passed }: { checks: NonNullable<NowBox['checks']>; overflow: NowBox['overflow']; passed: ReadonlySet<string> }) {
   return (
     <span data-slot="activity-checks" aria-hidden="true" className={cn('col-start-2 mt-[5px] flex items-center', checks.length > 40 ? 'gap-px' : 'gap-[3px]')}>
       {checks.map((check) => (
-        <i key={check.name} data-bucket={check.bucket} title={check.name} className={cn('h-[5px] min-w-px flex-1 rounded-[2px]', BUCKET_FILL[check.bucket])} />
+        <i
+          key={check.name}
+          data-bucket={check.bucket}
+          data-passed={passed.has(check.name) ? 'true' : undefined}
+          title={check.name}
+          className={cn('h-[5px] min-w-px flex-1 rounded-[2px]', BUCKET_FILL[check.bucket], checkMotion(check.bucket, passed.has(check.name)))}
+        />
       ))}
       {overflow ? (
         <span data-slot="activity-checks-overflow" data-bucket={overflow.bucket} className="ml-1 flex shrink-0 items-center gap-1 text-[10px] leading-none text-muted-foreground tabular-nums">
@@ -39,12 +48,23 @@ function Bar({ value, ink }: { value: number; ink: string }) {
   )
 }
 
+/** The now box's motion: the light sweep while the task runs, the main line's slide at a new
+ *  tool call (a new `slideKey` replays it) and the checks that just passed. */
+export interface NowMotion {
+  sweep?: boolean
+  slideKey?: number | undefined
+  passed?: ReadonlySet<string>
+}
+
+const NO_CHECKS: ReadonlySet<string> = new Set()
+
 /** The now box: a verb, a main line, a detail line and a live age counter. */
-export function NowBoxView({ box, now, dense }: { box: NowBox; now: number; dense: boolean }) {
+export function NowBoxView({ box, now, dense, motion = {} }: { box: NowBox; now: number; dense: boolean; motion?: NowMotion }) {
   const Icon = NOW_ICON[box.icon]
   const ink = TONE_INK[box.tone]
   return (
-    <div data-slot="activity-now" data-verb={box.verb} className="grid grid-cols-[16px_minmax(0,1fr)] gap-x-2 gap-y-px rounded-lg bg-card-2 px-2.5 py-2">
+    <div data-slot="activity-now" data-verb={box.verb} className="relative grid grid-cols-[16px_minmax(0,1fr)] gap-x-2 gap-y-px overflow-hidden rounded-lg bg-card-2 px-2.5 py-2">
+      {motion.sweep ? <span data-slot="activity-sweep" aria-hidden="true" className="activity-sweep" /> : null}
       <Icon aria-hidden="true" className={cn('mt-px size-[15px]', ink)} />
       <ToneWord tone={box.tone} className="flex gap-2 text-[11px] font-semibold tracking-[0.04em] uppercase">
         <span data-slot="activity-verb">{box.verb}</span>
@@ -54,10 +74,14 @@ export function NowBoxView({ box, now, dense }: { box: NowBox; now: number; dens
           </span>
         ) : null}
       </ToneWord>
-      <span data-slot="activity-main" className={cn('col-start-2 truncate text-[12.5px] text-foreground', box.mono && 'font-mono text-[12px]')}>
+      <span
+        key={motion.slideKey ?? 'still'}
+        data-slot="activity-main"
+        className={cn('col-start-2 truncate text-[12.5px] text-foreground', box.mono && 'font-mono text-[12px]', motion.slideKey !== undefined && 'activity-slide')}
+      >
         {box.main}
       </span>
-      {box.checks ? <CheckSegments checks={box.checks} overflow={box.overflow} /> : null}
+      {box.checks ? <CheckSegments checks={box.checks} overflow={box.overflow} passed={motion.passed ?? NO_CHECKS} /> : null}
       {box.checkSummary ? <span data-slot="activity-checks-summary" className="sr-only">{box.checkSummary}</span> : null}
       {box.bar !== undefined ? <Bar value={box.bar} ink={ink} /> : null}
       {box.detail && !dense ? (

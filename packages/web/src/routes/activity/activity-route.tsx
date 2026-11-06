@@ -1,6 +1,7 @@
 import * as React from 'react'
+import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 
-import { useActivity } from '@/api/activity'
+import { useActivityLive } from '@/api/activity-live'
 import { Button } from '@/components/ui/button'
 import { useActiveProjectId } from '@/lib/project-router'
 import { useNow } from '@/lib/use-now'
@@ -9,10 +10,12 @@ import { ActivityBoard } from './activity-board'
 import { ActivityHeader, ScopeSwitch, SummaryChips } from './activity-header'
 import { ActivityLoading } from './activity-loading'
 import { projectNotice, summarize } from './activity-model'
+import { useActivityMotion } from './use-activity-motion'
+import './activity-motion.css'
 
 /**
- * `/p/:projectId/activity` (spec 2026-11-05-live-activity-view, "Project view"), static: slice S5
- * reads the snapshot once; slice S4 makes it live and slice S6 adds the motion.
+ * `/p/:projectId/activity` (spec 2026-11-05-live-activity-view, "Project view"): the live
+ * snapshot (`useActivityLive`: the topic, or the 5 s re-read without topics) and its motion.
  */
 
 /** The server's clock, ticked once a second on the client. The offset is the server's
@@ -24,10 +27,12 @@ export function useServerNow(generatedAt: string | undefined, receivedAt: number
 }
 
 export function ProjectActivityRoute() {
-  const activity = useActivity('project')
+  const scopeId = queryScope()
+  const activity = useActivityLive({ kind: 'project', projectId: scopeId })
   const projectId = useActiveProjectId()
   const [watchingSince] = React.useState(() => new Date().toISOString())
   const now = useServerNow(activity.data?.generatedAt, activity.dataUpdatedAt)
+  const { motion, feed, reduced, paused } = useActivityMotion(activity.data, scopeId)
   const project = activity.data?.projects[0]
 
   if (activity.isPending) return <ActivityLoading />
@@ -44,15 +49,15 @@ export function ProjectActivityRoute() {
     )
   }
   return (
-    <div data-route="activity" className="flex min-h-full w-full flex-col gap-4 px-[18px] py-6 md:px-7">
-      <ActivityHeader name={project.name} generatedAt={activity.data?.generatedAt}>
+    <div data-route="activity" data-activity-paused={paused ? 'true' : undefined} className="flex min-h-full w-full flex-col gap-4 px-[18px] py-6 md:px-7">
+      <ActivityHeader name={project.name} now={now} stale={activity.isError}>
         <ScopeSwitch scope="project" projectId={projectId ?? project.projectId} />
       </ActivityHeader>
-      <SummaryChips summary={summarize([project])} tasksTo="/" />
+      <SummaryChips summary={summarize([project])} tasksTo="/" bumps={motion.bumps} />
       {notice ? (
         <p data-slot="activity-project-notice" role="status" className="py-6 text-[13px] text-muted-foreground">{notice}</p>
       ) : (
-        <ActivityBoard project={project} now={now} watchingSince={watchingSince} />
+        <ActivityBoard project={project} now={now} watchingSince={watchingSince} motion={motion} feed={feed} still={reduced} paused={paused} />
       )}
     </div>
   )

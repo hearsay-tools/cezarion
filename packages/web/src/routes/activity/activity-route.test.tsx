@@ -62,11 +62,18 @@ describe('ProjectActivityRoute', () => {
   })
 
   it('says so when the snapshot cannot be read, with a retry', async () => {
-    fetchMock.mockImplementation(async () => jsonResponse({ error: 'project not found' }, 404))
+    fetchMock.mockImplementation(async () => jsonResponse({ error: 'boom' }, 500))
     renderRoute()
-    const alert = await screen.findByRole('alert')
+    // bound: the query client retries a non-4xx failure once before it reports the error.
+    const alert = await screen.findByRole('alert', {}, { timeout: 3_000 })
     expect(alert.textContent).toContain('Could not load activity')
     expect(within(alert).getByRole('button', { name: 'Retry' })).toBeTruthy()
+  })
+
+  it('shows a project the read finds removed as unavailable, as the topic does', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ error: 'unknown project: default' }, 404))
+    renderRoute()
+    expect((await screen.findByText('unknown project: default')).getAttribute('data-slot')).toBe('activity-project-notice')
   })
 
   it('treats a malformed snapshot as an error, never a crash', async () => {

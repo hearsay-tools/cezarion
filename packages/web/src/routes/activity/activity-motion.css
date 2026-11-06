@@ -1,0 +1,253 @@
+/* The activity view's motion (spec 2026-11-05-live-activity-view, "Size, motion and access").
+ * Every animation moves `transform` or `opacity` only, with one named exception: the march of
+ * open line dashes animates `stroke-dashoffset`, because no transform moves dashes along a curve.
+ * Durations match `MOTION_MS` in activity-motion.ts. A hidden tab pauses everything
+ * (`data-activity-paused`); reduced motion turns every animation off, and lines stay static
+ * dashes. */
+
+/* Running status shape: a scaled ring behind the dot, never an animated box-shadow. */
+.activity-pulse {
+  position: relative;
+}
+.activity-pulse::after {
+  content: '';
+  position: absolute;
+  inset: 2.5px;
+  border-radius: 9999px;
+  background: var(--status-running);
+  opacity: 0;
+  animation: activity-pulse 1.6s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes activity-pulse {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+/* Waiting shapes and pending checks breathe. */
+.activity-breathe {
+  animation: activity-breathe 3s ease-in-out infinite;
+}
+.activity-breathe-fast {
+  animation: activity-breathe 1.2s ease-in-out infinite;
+}
+@keyframes activity-breathe {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* A light that sweeps the running now box. */
+.activity-sweep {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--status-running) 12%, transparent), transparent);
+  transform: translateX(-100%);
+  animation: activity-sweep 2.4s ease-in-out infinite;
+}
+@keyframes activity-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* A card that needs you glows: a fixed shadow whose opacity breathes. */
+.activity-glow {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--pending) 16%, transparent), 0 0 24px color-mix(in oklch, var(--pending) 14%, transparent);
+  opacity: 0;
+  animation: activity-glow 2.6s ease-in-out infinite;
+}
+@keyframes activity-glow {
+  50% {
+    opacity: 1;
+  }
+}
+
+/* A rung change: the border flashes once in the new tone. */
+.activity-flash {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border-width: 2px;
+  pointer-events: none;
+  opacity: 0;
+  animation: activity-flash 1.3s ease-out;
+}
+@keyframes activity-flash {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+}
+
+.activity-card-enter {
+  animation: activity-card-enter 0.7s ease-out;
+}
+@keyframes activity-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+.activity-card-leave {
+  animation: activity-card-leave 0.5s ease-in forwards;
+}
+@keyframes activity-card-leave {
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* Worker rows, rail entries and feed lines slide in and fold out. */
+.activity-row-enter {
+  animation: activity-row-enter 0.7s ease-out;
+}
+@keyframes activity-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.activity-row-fold {
+  animation: activity-row-fold 0.5s ease-in forwards;
+}
+@keyframes activity-row-fold {
+  to {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+}
+.activity-feed-enter {
+  animation: activity-feed-enter 0.6s ease-out;
+}
+@keyframes activity-feed-enter {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+}
+/* A tint that fades over a row: a settled worker's flash. */
+.activity-row-flash {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  animation: activity-row-flash 1.6s ease-out;
+}
+@keyframes activity-row-flash {
+  0% {
+    opacity: 0.35;
+  }
+}
+
+/* The main line slides in at each new tool call. */
+.activity-slide {
+  animation: activity-slide 0.45s ease-out;
+}
+@keyframes activity-slide {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* A chip count that changed bumps. */
+.activity-bump {
+  display: inline-block;
+  animation: activity-bump 0.5s ease-out;
+}
+@keyframes activity-bump {
+  0% {
+    transform: scale(1.5);
+  }
+}
+
+/* A check segment that just passed. */
+.activity-check-pass {
+  animation: activity-check-pass 0.8s ease-out;
+}
+@keyframes activity-check-pass {
+  0% {
+    transform: scaleY(2.4);
+  }
+}
+
+/* Lines: open dashes march from the sender to the recipient (the stroke-dashoffset exception);
+ * a new line fades in behind its comet; a closed one fades out. */
+.activity-march {
+  animation: activity-march 0.9s linear infinite;
+}
+@keyframes activity-march {
+  to {
+    stroke-dashoffset: -22;
+  }
+}
+.activity-line-in {
+  animation: activity-line-in 0.8s ease-out;
+}
+@keyframes activity-line-in {
+  from {
+    opacity: 0;
+  }
+}
+.activity-line-out {
+  animation: activity-line-out 0.8s ease-in forwards;
+}
+@keyframes activity-line-out {
+  to {
+    opacity: 0;
+  }
+}
+
+[data-activity-paused] *,
+[data-activity-paused] *::before,
+[data-activity-paused] *::after {
+  animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-pulse::after,
+  .activity-sweep,
+  .activity-glow,
+  .activity-flash,
+  .activity-row-flash {
+    display: none;
+  }
+  .activity-breathe,
+  .activity-breathe-fast,
+  .activity-card-enter,
+  .activity-card-leave,
+  .activity-row-enter,
+  .activity-row-fold,
+  .activity-feed-enter,
+  .activity-slide,
+  .activity-bump,
+  .activity-check-pass,
+  .activity-march,
+  .activity-line-in,
+  .activity-line-out {
+    animation: none;
+  }
+}
+
+/* The header's live dot pulses in the success tone. */
+.activity-pulse[data-tone='success']::after {
+  background: var(--success);
+}

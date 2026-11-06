@@ -24,7 +24,7 @@ import { StatusDot } from '@/components/status-dot'
 import { attentionOfRung, type AttentionShape, type AttentionTone } from '@/lib/attention'
 import { cn } from '@/lib/utils'
 
-import type { NowIcon } from './now-box'
+import { isLiveStatus, type NowIcon } from './now-box'
 
 /** Readable ink for each attention tone on a card or on card-2 (packages/web/docs/card-2-contrast.md):
  *  pending reads as the amber signal word, danger as the red one and neutral as muted text.
@@ -62,6 +62,27 @@ export function ToneWord({ tone, className, children, ...props }: ComponentProps
       {children}
     </span>
   )
+}
+
+/** A tone as a border and as a fill: the flash of a card and the tint of a settled worker row. */
+export const TONE_BORDER: Record<AttentionTone, string> = {
+  success: 'border-success',
+  pending: 'border-pending-strong',
+  danger: 'border-danger',
+  accent: 'border-accent-strong',
+  info: 'border-info',
+  running: 'border-status-running',
+  neutral: 'border-soft-foreground',
+}
+
+export const TONE_FILL: Record<AttentionTone, string> = {
+  success: 'bg-success',
+  pending: 'bg-pending-strong',
+  danger: 'bg-danger',
+  accent: 'bg-accent-strong',
+  info: 'bg-info',
+  running: 'bg-status-running',
+  neutral: 'bg-soft-foreground',
 }
 
 export const NOW_ICON: Record<NowIcon, LucideIcon> = {
@@ -113,11 +134,19 @@ function labelOf(run: Pick<ActivityRun | ActivityWorker, 'rung' | 'wait'>, role:
   return undefined
 }
 
-/** The status shape with its anchor for the lines. No pulse: slice S6 adds motion. */
-export function RunShape({ run, role }: { run: Pick<ActivityRun | ActivityWorker, 'runId' | 'rung' | 'wait'>; role: 'root' | 'worker' }) {
+/** The shape's motion: a running dot pulses, a waiting shape (ring or robot) breathes. A settled
+ *  run is still. The stylesheet turns both off with reduced motion. */
+export function shapeMotion(run: Pick<ActivityRun | ActivityWorker, 'status' | 'rung'>, shape: AttentionShape): string | undefined {
+  if (!isLiveStatus(run.status)) return undefined
+  if (run.rung === 'running' && shape === 'filled') return 'activity-pulse'
+  return shape === 'filled' ? undefined : 'activity-breathe'
+}
+
+/** The status shape with its anchor for the lines, and its motion. */
+export function RunShape({ run, role }: { run: Pick<ActivityRun | ActivityWorker, 'runId' | 'rung' | 'wait' | 'status'>; role: 'root' | 'worker' }) {
   const { tone, shape, label } = shapeOf(run, role)
   return (
-    <span data-activity-anchor={run.runId} className="inline-flex size-[12px] shrink-0 items-center justify-center">
+    <span data-activity-anchor={run.runId} className={cn('inline-flex size-[12px] shrink-0 items-center justify-center', shapeMotion(run, shape))}>
       <StatusDot tone={tone} shape={shape} role="img" aria-label={label} />
     </span>
   )

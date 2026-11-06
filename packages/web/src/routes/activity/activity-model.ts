@@ -133,11 +133,13 @@ export function summarize(projects: readonly ActivityProject[]): ActivitySummary
 }
 
 /** Workers that settled and leave their row: `done`, `failed` and `cancelled`. A `review` worker
- *  stays a row, because the parent still owes it a decision. */
-export function foldedWorkers(task: ActivityRun): { finished: number; failed: number } {
+ *  stays a row, because the parent still owes it a decision. A worker that just settled (`held`)
+ *  stays a row for a moment before it folds. */
+export function foldedWorkers(task: ActivityRun, held: (runId: string) => boolean = () => false): { finished: number; failed: number } {
   let finished = 0
   let failed = 0
   for (const worker of task.workers) {
+    if (held(worker.runId)) continue
     if (worker.status === 'done' || worker.status === 'cancelled') finished += 1
     if (worker.status === 'failed') {
       finished += 1

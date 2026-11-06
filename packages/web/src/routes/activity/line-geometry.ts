@@ -1,5 +1,5 @@
 import { COLUMN_GAP } from './layout'
-import { blocked, channelDetour, gridDetour, othersThan, roundedPath, spanOf } from './line-route'
+import { blocked, channelDetour, gridDetour, othersThan, roundedPath, spanOf, type Rect } from './line-route'
 
 /**
  * The shapes of the lines between tasks (spec 2026-11-05-live-activity-view, "Lines between
@@ -29,28 +29,39 @@ export interface LinePath {
 export const PEER_ANCHOR_Y = 22
 /** How far the family line bows into the card's left margin. */
 export const FAMILY_MARGIN = 18
-/** A line whose other end is not on the view ends this far from the card that remains. */
-export const STUB_LENGTH = 72
+/** A stub to a task that is not on the view drops this far below (or above) its anchor. */
+export const STUB_DROP = 44
 
 const round = (n: number) => Math.round(n * 10) / 10
 const pt = (p: Point) => `${round(p.x)} ${round(p.y)}`
 
 export const center = (box: Box): Point => ({ x: box.x + box.w / 2, y: box.y + box.h / 2 })
 
+/** Which side of a card has a column gap: toward `other` when it is in another column, else the
+ *  right, unless the card is in the last column (`hostWidth`). */
+export function facingSide(card: Box, other: Box | undefined, hostWidth: number): 1 | -1 {
+  if (other && other.x > card.x + 40) return 1
+  if (other && other.x < card.x - 40) return -1
+  return card.x + card.w + COLUMN_GAP <= hostWidth + 1 ? 1 : -1
+}
+
+/** Two cards in one column: the line bows out through the gap on `side`. */
+function bowPath(from: Box, to: Box, lane: number, side: 1 | -1, ay: number, by: number): LinePath {
+  const x = side > 0 ? Math.max(from.x + from.w, to.x + to.w) : Math.min(from.x, to.x)
+  const bow = (70 + lane) * side
+  return { d: `M${pt({ x, y: ay })} C ${pt({ x: x + bow, y: ay })}, ${pt({ x: x + bow, y: by })}, ${pt({ x: x + 2 * side, y: by })}`, label: { x: x + bow * 0.75, y: (ay + by) / 2 } }
+}
+
 /**
  * A peer line from the sender card to the recipient card. Cards in one column (their left edges
- * within 40 px) bow out to the right; otherwise the line leaves the facing edges. A curve that
- * would cross another of `cards` (a column between the two) runs through the gaps instead.
- * `lane` (`laneOffsets`) moves the line off the pair's other lines.
+ * within 40 px) bow out through the gap on `side`; otherwise the line leaves the facing edges. A
+ * curve that would cross another of `cards` (a column between the two) runs through the gaps
+ * instead. `lane` (`laneOffsets`) moves the line off the pair's other lines.
  */
-export function peerPath(from: Box, to: Box, cards: readonly Box[] = [], lane = 0): LinePath {
+export function peerPath(from: Box, to: Box, cards: readonly Box[] = [], lane = 0, side: 1 | -1 = 1): LinePath {
   const ay = from.y + PEER_ANCHOR_Y + lane
   const by = to.y + PEER_ANCHOR_Y + lane
-  if (Math.abs(from.x - to.x) < 40) {
-    const x = Math.max(from.x + from.w, to.x + to.w)
-    const bow = 70 + lane
-    return { d: `M${pt({ x, y: ay })} C ${pt({ x: x + bow, y: ay })}, ${pt({ x: x + bow, y: by })}, ${pt({ x: x + 2, y: by })}`, label: { x: x + bow * 0.75, y: (ay + by) / 2 } }
-  }
+  if (Math.abs(from.x - to.x) < 40) return bowPath(from, to, lane, side, ay, by)
   const right = to.x > from.x
   const ax = right ? from.x + from.w : from.x
   const bx = right ? to.x : to.x + to.w
@@ -63,16 +74,40 @@ export function peerPath(from: Box, to: Box, cards: readonly Box[] = [], lane = 
   return { d: `M${pt({ x: ax, y: ay })} C ${pt({ x: ax + k, y: ay })}, ${pt({ x: bx - k, y: by })}, ${pt({ x: end, y: by })}`, label: { x: (ax + bx) / 2, y: (ay + by) / 2 } }
 }
 
+export interface StubEnd {
+  /** The gap the stub runs in: `facingSide`. */
+  side: 1 | -1
+  /** The card at the other end, when it is on the view but off screen. */
+  other?: Box
+  /** The visible part of the graph, relative to the host. */
+  view?: Rect
+  /** The label's height: the stub ends where its label still fits on screen. */
+  labelHeight: number
+  lane?: number
+}
+
+/** Where a stub's free end sits: at the viewport edge toward the off-screen card, or a short drop
+ *  below the anchor for a task that is not on the view at all. */
+function stubEndY(y: number, { other, view, labelHeight }: StubEnd): number {
+  if (!other || !view) return y + STUB_DROP
+  const margin = labelHeight / 2 + 4
+  return other.y > y ? Math.max(y + STUB_DROP, view.y1 - margin) : Math.min(y - STUB_DROP, view.y0 + margin)
+}
+
 /**
- * A peer line whose other end is not on the view: a short stub from the card's right edge. The
- * stub points into the card when the card is the recipient.
+ * A peer line whose other end is not on screen: a stub from the card's edge into the column gap,
+ * then along the gap to its free end, where the label names the other task. The stub runs from
+ * the free end into the card when the card is the recipient, so its dashes and comets still move
+ * from the sender to the recipient.
  */
-export function stubPath(card: Box, cardIs: 'sender' | 'recipient', lane = 0): LinePath {
+export function stubPath(card: Box, cardIs: 'sender' | 'recipient', end: StubEnd): LinePath {
+  const lane = end.lane ?? 0
   const y = card.y + PEER_ANCHOR_Y + lane
-  const edge = card.x + card.w
-  const free = edge + STUB_LENGTH
-  const d = cardIs === 'sender' ? `M${pt({ x: edge, y })} L ${pt({ x: free, y })}` : `M${pt({ x: free, y })} L ${pt({ x: edge + 2, y })}`
-  return { d, label: { x: free, y } }
+  const edge = end.side > 0 ? card.x + card.w : card.x
+  const gx = edge + (end.side * COLUMN_GAP) / 2 + lane / 2
+  const free = { x: gx, y: stubEndY(y, end) }
+  const points = cardIs === 'sender' ? [{ x: edge, y }, { x: gx, y }, free] : [free, { x: gx, y }, { x: edge + 2 * end.side, y }]
+  return { d: roundedPath(points), label: free }
 }
 
 /**

@@ -5,6 +5,7 @@ import { Link } from 'react-router'
 import { cn } from '@/lib/utils'
 
 import { nameOf, projectNotice, runIndex } from './activity-model'
+import { EMPTY_MOTION, type MotionState } from './activity-motion'
 import { ActivityArcs } from './global-arcs'
 import { idleLead, panelArcs, panelCounts } from './global-model'
 import { ActivityPill } from './global-pill'
@@ -42,29 +43,46 @@ function NoticePanel({ project, notice }: { project: ActivityProject; notice: st
   )
 }
 
-function WorkPanel({ project, now }: { project: ActivityProject; now: number }) {
+interface PanelProps {
+  project: ActivityProject
+  now: number
+  motion?: MotionState
+  paused?: boolean
+}
+
+/** The panel's arcs: its open peer requests between two pills, then the closed ones still playing
+ *  their reply or fade. */
+function useArcs(project: ActivityProject, motion: MotionState) {
+  return React.useMemo(() => {
+    const open = new Set(project.requests.map((request) => request.requestId))
+    const closing = Object.values(motion.closing).filter((ghost) => ghost.projectId === project.projectId && !open.has(ghost.request.requestId)).map((ghost) => ghost.request)
+    return panelArcs({ tasks: project.tasks, requests: [...project.requests, ...closing] })
+  }, [project, motion.closing])
+}
+
+function WorkPanel({ project, now, motion = EMPTY_MOTION, paused = false }: PanelProps) {
   const headingId = React.useId()
   const index = React.useMemo(() => runIndex(project), [project])
-  const arcs = React.useMemo(() => panelArcs(project), [project])
+  const arcs = useArcs(project, motion)
   const ctx: NowContext = { now, titleOf: (runId) => nameOf(index, runId) }
-  const layoutKey = project.tasks.map((task) => task.runId).join(',')
+  const layoutKey = `${project.tasks.map((task) => task.runId).join(',')}:${arcs.map((arc) => arc.requestId).join(',')}`
   return (
     <section aria-labelledby={headingId} data-slot="activity-panel" data-project={project.projectId} className={PANEL}>
       <PanelHeader project={project} headingId={headingId} detail={panelCounts(project)} to={projectActivityPath(project.projectId)} label="Open project activity →" />
       {/* The arcs rise above the pills: their strip reserves the room above each row. */}
       <div className={cn('relative mt-3', arcs.length > 0 && 'md:mt-1 md:pt-10')}>
         <ul data-slot="activity-pills" aria-label={`${project.name} tasks`} className={cn('grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] items-start gap-3.5', arcs.length > 0 && 'md:gap-y-11')}>
-          {project.tasks.map((task) => <ActivityPill key={task.runId} projectId={project.projectId} task={task} requests={project.requests} index={index} ctx={ctx} />)}
+          {project.tasks.map((task) => <ActivityPill key={task.runId} projectId={project.projectId} task={task} requests={project.requests} index={index} ctx={ctx} motion={motion} />)}
         </ul>
-        {arcs.length > 0 ? <ActivityArcs arcs={arcs} layoutKey={layoutKey} now={now} /> : null}
+        {arcs.length > 0 ? <ActivityArcs arcs={arcs} layoutKey={layoutKey} now={now} motion={motion} paused={paused} /> : null}
       </div>
     </section>
   )
 }
 
-export function ProjectPanel({ project, now }: { project: ActivityProject; now: number }) {
-  const notice = projectNotice(project)
-  return notice === undefined ? <WorkPanel project={project} now={now} /> : <NoticePanel project={project} notice={notice} />
+export function ProjectPanel(props: PanelProps) {
+  const notice = projectNotice(props.project)
+  return notice === undefined ? <WorkPanel {...props} /> : <NoticePanel project={props.project} notice={notice} />
 }
 
 /** The loaded projects with no active work, each a link to its activity. */

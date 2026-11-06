@@ -73,7 +73,7 @@ describe('ActivityBoard', () => {
     expect(document.querySelector('[data-slot="activity-graph"]')?.getAttribute('data-columns')).toBe('3')
     expect(document.querySelector(`path[data-request="${PEER.requestId}"]`)?.getAttribute('data-kind')).toBe('peer')
     const label = document.querySelector(`[data-slot="activity-line-label"][data-request="${PEER.requestId}"]`)
-    expect(label?.textContent).toContain('Request · 4:10')
+    expect(label?.textContent).toMatch(/^Request4:10/)
     expect(label?.textContent).toContain('Does spawn.ts still own the…')
     expect(within(card('task-a')).queryByRole('link', { name: /^→/ })).toBeNull()
   })

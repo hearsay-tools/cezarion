@@ -1,0 +1,120 @@
+import { act, cleanup, render } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { ActivityProject } from '@open-mercato/cezar-api-client/contract/activity'
+
+import { NOW, iso, project, request, run } from './activity.testkit'
+import { ActivityBoard } from './activity-board'
+import type { Box } from './line-geometry'
+import { PEER_LABEL } from './line-measure'
+import { labelBox, overlaps, placeBoxes, samplePath } from './line-layout.testkit'
+
+/**
+ * The "Many lines" rule and the label fit (spec 2026-11-05-live-activity-view, "Size, motion and
+ * access"). jsdom's window is 1024 × 768 and nothing scrolls, so the window is the viewport; the
+ * graph is three 300 px columns with 96 px gaps.
+ */
+
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
+
+const WIDTH = 1092
+const col = (i: number) => i * 396
+
+function renderBoard(value: ActivityProject, boxes: Record<string, Box>) {
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(WIDTH)
+  placeBoxes('data-activity-card', boxes)
+  return render(
+    <MemoryRouter initialEntries={['/p/cezarion/activity']}>
+      <ActivityBoard project={value} now={NOW} watchingSince={iso(-60_000)} />
+    </MemoryRouter>,
+  )
+}
+
+const A = run({ runId: 'a', title: 'Porting upstream SSE' })
+const B = run({ runId: 'b', title: 'Fixing flaky shard 3' })
+const C = run({ runId: 'c', title: 'Update waits docs' })
+const D = run({ runId: 'd', title: 'Coordinating digest' })
+const path = (requestId: string) => document.querySelector(`path[data-request="${requestId}"]`)?.getAttribute('d') ?? undefined
+const label = (requestId: string) => document.querySelector(`[data-slot="activity-line-label"][data-request="${requestId}"]`) as HTMLElement | null
+
+describe('the Many lines rule', () => {
+  it('ends a line whose other end is below the screen at the bottom edge, with that card’s name', () => {
+    const peer = request({ senderRunId: 'a', recipientRunId: 'b' })
+    renderBoard(project({ tasks: [A, B], requests: [peer] }), { a: { x: col(0), y: 0, w: 300, h: 120 }, b: { x: col(1), y: 2_000, w: 300, h: 120 } })
+    const points = samplePath(path(peer.requestId) ?? '')
+    const end = points[points.length - 1]!
+    // The free end sits in the gap, its label just inside the viewport's bottom edge.
+    expect(end.x).toBe(300 + 48)
+    expect(end.y).toBe(768 - PEER_LABEL.h / 2 - 4)
+    expect(Math.max(...points.map((p) => p.y))).toBeLessThan(768)
+    expect(label(peer.requestId)?.textContent).toContain('Fixing flaky shard 3')
+  })
+
+  it('runs a stub from the top edge into a recipient whose sender is above the screen', () => {
+    const peer = request({ senderRunId: 'a', recipientRunId: 'b' })
+    renderBoard(project({ tasks: [A, B], requests: [peer] }), { a: { x: col(0), y: -900, w: 300, h: 120 }, b: { x: col(1), y: 200, w: 300, h: 120 } })
+    const points = samplePath(path(peer.requestId) ?? '')
+    expect(points[0]).toEqual({ x: 348, y: PEER_LABEL.h / 2 + 4 })
+    expect(points[points.length - 1]).toEqual({ x: col(1) - 2, y: 222 })
+    expect(label(peer.requestId)?.textContent).toContain('Porting upstream SSE')
+  })
+
+  it('draws no line when neither end is on screen', () => {
+    const peer = request({ senderRunId: 'a', recipientRunId: 'b' })
+    renderBoard(project({ tasks: [A, B], requests: [peer] }), { a: { x: col(0), y: -900, w: 300, h: 120 }, b: { x: col(1), y: 2_000, w: 300, h: 120 } })
+    expect(path(peer.requestId)).toBeUndefined()
+    expect(label(peer.requestId)).toBeNull()
+    // The rail still lists the request: the rule only decides what is drawn.
+    expect(document.querySelectorAll('[data-slot="activity-request"]')).toHaveLength(1)
+  })
+
+  it('draws again when a scroll brings the card on screen', () => {
+    const peer = request({ senderRunId: 'a', recipientRunId: 'b' })
+    const boxes = { a: { x: col(0), y: 0, w: 300, h: 120 }, b: { x: col(1), y: 2_000, w: 300, h: 120 } }
+    const frame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0)
+      return 1
+    })
+    renderBoard(project({ tasks: [A, B], requests: [peer] }), boxes)
+    expect(label(peer.requestId)?.textContent).toContain('Fixing flaky shard 3')
+    boxes.b.y = 300
+    act(() => { window.dispatchEvent(new Event('scroll')) })
+    expect(frame).toHaveBeenCalled()
+    const points = samplePath(path(peer.requestId) ?? '')
+    expect(points[points.length - 1]).toEqual({ x: col(1) - 2, y: 322 })
+    expect(label(peer.requestId)?.textContent).not.toContain('Fixing flaky shard 3')
+  })
+})
+
+describe('peer labels', () => {
+  it('fit the 96 px column gap and never cover a card', () => {
+    const boxes: Record<string, Box> = {
+      a: { x: col(0), y: 0, w: 300, h: 160 },
+      b: { x: col(1), y: 0, w: 300, h: 160 },
+      c: { x: col(0), y: 220, w: 300, h: 160 },
+      d: { x: col(2), y: 0, w: 300, h: 160 },
+      e: { x: col(2), y: 220, w: 300, h: 160 },
+    }
+    const E = run({ runId: 'e', title: 'Draft report' })
+    const requests = [
+      request({ senderRunId: 'a', recipientRunId: 'b' }), // adjacent columns
+      request({ senderRunId: 'b', recipientRunId: 'a' }), // the same pair, back
+      request({ senderRunId: 'a', recipientRunId: 'c' }), // one column: bows right
+      request({ senderRunId: 'd', recipientRunId: 'e' }), // the last column: bows left
+      request({ senderRunId: 'e', recipientRunId: 'gone', recipientTitle: 'Old task' }), // not on the view
+      request({ senderRunId: 'a', recipientRunId: 'd' }), // across the middle column
+    ]
+    renderBoard(project({ tasks: [A, B, C, D, E], requests }), boxes)
+    const labels = Array.from(document.querySelectorAll('[data-slot="activity-line-label"]')) as HTMLElement[]
+    expect(labels).toHaveLength(requests.length)
+    for (const el of labels) {
+      expect(el.style.width).toBe(`${PEER_LABEL.w}px`)
+      const box = labelBox(el, PEER_LABEL)
+      for (const [id, card] of Object.entries(boxes)) expect({ label: el.dataset.request, card: id, overlaps: overlaps(box, card) }).toEqual({ label: el.dataset.request, card: id, overlaps: false })
+    }
+    expect(PEER_LABEL.w).toBeLessThanOrEqual(96 - 8)
+  })
+})
