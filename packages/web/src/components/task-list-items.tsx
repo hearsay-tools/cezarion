@@ -1,8 +1,8 @@
-import { Component, useContext, useLayoutEffect, useRef, useState, type ReactNode, type ReactElement } from 'react'
+import { Component, useContext, useLayoutEffect, useRef, useState, type ReactNode, type ReactElement, type ComponentProps } from 'react'
 import { useSearchParams } from 'react-router'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import { useTaskEditingRunId } from '@/lib/task-title-editor'
-import { TaskListFocusContext, useTaskListFocus } from '@/lib/use-task-list-focus'
+import { TaskListFocusContext, useTaskListFocus, useTaskListFocusState } from '@/lib/use-task-list-focus'
 import { taskListKeepMounted, virtualizeTaskList } from '@/lib/task-list-render'
 
 /** One item includes its expanded preview. The page remains the sole vertical scroll owner. */
@@ -14,21 +14,31 @@ export function TaskListItems<T>({ items, itemKey, children }: {
   const [params] = useSearchParams()
   const scroll = useRef<HTMLElement | null>(null)
   const handle = useRef<VirtualizerHandle>(null)
-  const [geometry, setGeometry] = useState({ available: false, margin: 0 })
+  const [geometry, setGeometry] = useState<{ available: boolean | null; margin: number }>({ available: null, margin: 0 })
   const [focused, setFocused] = useState<string | null>(null)
   const editing = useTaskEditingRunId()
   const pageFocus = useContext(TaskListFocusContext)
   const keys = items.map(itemKey)
-  const virtual = geometry.available && virtualizeTaskList(items.length, params.get('tasks'))
+  const eligible = virtualizeTaskList(items.length, params.get('tasks'))
+  const virtual = geometry.available === true && eligible
   const focus = useTaskListFocus(String(virtual))
   const root = focus.ref
+  // Resolve the owner and mount visible rows before paint; no empty state is displayed.
   useLayoutEffect(() => {
     const element = root.current
     const owner = element?.closest<HTMLElement>('[data-slot="main"]')
     scroll.current = owner ?? null
-    if (!element || !owner) return
-    const measure = () => setGeometry({ available: true, margin: Math.max(0,
-      element.getBoundingClientRect().top - owner.getBoundingClientRect().top + owner.scrollTop) })
+    if (!element || !owner) {
+      setGeometry((previous) => previous.available === false ? previous : { available: false, margin: 0 })
+      return
+    }
+    let previousMargin: number | null = null
+    const measure = () => {
+      const margin = Math.max(0, element.getBoundingClientRect().top - owner.getBoundingClientRect().top + owner.scrollTop)
+      if (margin === previousMargin) return
+      previousMargin = margin
+      setGeometry((previous) => previous.available === true && previous.margin === margin ? previous : { available: true, margin })
+    }
     measure()
     const observer = new ResizeObserver(measure)
     // Earlier groups can resize without changing this group's own size.
@@ -49,8 +59,16 @@ export function TaskListItems<T>({ items, itemKey, children }: {
       if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) setFocused(null)
     }}>
     {virtual ? <VirtualTaskItems items={items} keys={keys} handle={handle} scroll={scroll} margin={geometry.margin} focused={pageFocus?.focused ?? focused} editing={editing}>{children}</VirtualTaskItems>
-      : items.map((item, index) => <div key={keys[index]} data-task-item={keys[index]} data-first={index === 0} data-last={index === items.length - 1} className="task-list-flat-item">{children(item, index)}</div>)}
+      : (geometry.available === null && eligible ? [] : items).map((item, index) => <div key={keys[index]} data-task-item={keys[index]} data-first={index === 0} data-last={index === items.length - 1} className="task-list-flat-item">{children(item, index)}</div>)}
   </div>
+}
+
+/** Keep focus updates below the route's filtering and grouping work. */
+export function TaskListFocusBoundary({ layout, revision, children, ...props }: ComponentProps<'div'> & { layout: string; revision: unknown }) {
+  const focus = useTaskListFocusState(layout, revision)
+  return <TaskListFocusContext value={focus.value}><TaskListScrollAnchor revision={revision}>
+    <div {...props} {...focus.props}>{children}</div>
+  </TaskListScrollAnchor></TaskListFocusContext>
 }
 
 function VirtualTaskItems<T>({ items, keys, handle, scroll, margin, focused, editing, children }: {
@@ -64,7 +82,7 @@ function VirtualTaskItems<T>({ items, keys, handle, scroll, margin, focused, edi
   const added = keys.length - previous.current.length
   const shift = added > 0 && previous.current.every((key, index) => keys[index + added] === key)
   useLayoutEffect(() => { previous.current = keys })
-  return <TaskListScrollAnchor revision={keys} keys={keys} scroll={scroll} handle={handle} shifting={shift}><Virtualizer ref={handle} scrollRef={scroll} startMargin={margin} shift={shift}
+  return <TaskListScrollAnchor revision={keys} keys={keys} scroll={scroll} handle={handle} shifting={shift}><Virtualizer ref={handle} ssrCount={1} scrollRef={scroll} startMargin={margin} shift={shift}
     keepMounted={[...new Set([...taskListKeepMounted(keys, focused), ...taskListKeepMounted(keys, editing)])]} data={items}>
     {(item, index) => <div key={keys[index]} data-task-item={keys[index]} data-first={index === 0} data-last={index === items.length - 1}>{children(item, index)}</div>}
   </Virtualizer></TaskListScrollAnchor>

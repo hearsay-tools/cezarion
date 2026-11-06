@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, expect, it, vi } from 'vitest'
-import { TaskListItems } from './task-list-items'
+import { TaskListFocusBoundary, TaskListItems } from './task-list-items'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 const items = Array.from({ length: 120 }, (_, index) => `run-${index}`)
@@ -42,4 +42,44 @@ it('bounds mounted rows with the real virtualizer and keeps a focused row when s
   await act(async () => {})
   expect(first.isConnected).toBe(true)
   expect(document.activeElement).toBe(first)
+})
+
+it('never renders the full virtual-eligible group during owner lookup', () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  const rendered = new Set<string>()
+  render(<MemoryRouter><div data-slot="main"><TaskListItems items={items} itemKey={(id) => id}>{(id) => {
+    rendered.add(id)
+    return <button>{id}</button>
+  }}</TaskListItems></div></MemoryRouter>)
+  expect(rendered.size).toBeLessThan(items.length)
+  // render flushes layout effects synchronously, before the browser can paint.
+  expect(screen.getAllByRole('button').length).toBeGreaterThan(0)
+})
+it('skips unchanged observed margins but applies an earlier group size change', () => {
+  const callbacks: (() => void)[] = []
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) { callbacks.push(callback) }
+    observe() {} unobserve() {} disconnect() {}
+  })
+  const child = vi.fn((id: string) => <button>{id}</button>)
+  render(<MemoryRouter><div data-slot="main"><TaskListItems items={['one']} itemKey={(id) => id}>{child}</TaskListItems></div></MemoryRouter>)
+  child.mockClear()
+  act(() => { callbacks.forEach((callback) => callback()) })
+  expect(child).not.toHaveBeenCalled()
+  const root = document.querySelector<HTMLElement>('[data-slot="task-list-items"]')!
+  vi.spyOn(root, 'getBoundingClientRect').mockReturnValue({ top: 100 } as DOMRect)
+  act(() => { callbacks.forEach((callback) => callback()) })
+  expect(child).toHaveBeenCalledOnce()
+})
+it('keeps focus updates below route derivations', () => {
+  const derive = vi.fn(() => ['one', 'two'])
+  function Route() {
+    const rows = derive()
+    return <TaskListFocusBoundary layout="summary" revision={rows}>{rows.map((id) =>
+      <div key={id} data-run-id={id}><button>{id}</button></div>)}</TaskListFocusBoundary>
+  }
+  render(<Route />)
+  act(() => { screen.getByRole('button', { name: 'one' }).focus() })
+  act(() => { screen.getByRole('button', { name: 'two' }).focus() })
+  expect(derive).toHaveBeenCalledOnce()
 })

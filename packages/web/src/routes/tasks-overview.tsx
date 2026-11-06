@@ -1,8 +1,7 @@
 import { useTaskListExpansion } from '@/lib/use-task-list-expansion'
 import { taskListRowIndexes, taskResourceGrid } from '@/lib/task-list-render'
-import { TaskListItems, TaskListScrollAnchor } from '@/components/task-list-items'
+import { TaskListItems, TaskListFocusBoundary } from '@/components/task-list-items'
 import { TaskTitleEditorProvider, useTaskTitleEditor } from '@/lib/task-title-editor'
-import { TaskListFocusContext, useTaskListFocusState } from '@/lib/use-task-list-focus'
 import { DESKTOP_MEDIA_QUERY, useIsDesktop } from '@/lib/use-desktop'
 import { useRunCacheWriter } from '@/api/use-run-cache-writer'
 import { projectAddress } from '@/api/run-address'
@@ -188,7 +187,6 @@ export function TasksOverview({
   const [origin, setOrigin] = useOriginOrOwn(originProp, onOriginChange)
   const [detailedTable, setDetailedTable] = React.useState(false)
   const desktop = useIsDesktop()
-  const listFocus = useTaskListFocusState(`${desktop}:${detailedTable}`, runs)
   const { expandedRuns, toggleExpandedRun } = useTaskListExpansion()
   const headerRef = React.useRef<HTMLElement>(null)
   const all = runs ?? []
@@ -205,7 +203,7 @@ export function TasksOverview({
   // drop the task at the top of the active list by a click that looked like it did nothing.
   const pinToggle = view === 'archived' ? undefined : onTogglePin
   return (
-    <TaskTitleEditorProvider runs={archivedPages ? [...all, ...archivedPages.runs] : all} onRename={onRename}><TaskListFocusContext value={listFocus.value}><TaskListScrollAnchor revision={runs}><div {...listFocus.props} data-route="tasks" data-presentation={detailedTable ? 'resources' : 'summary'} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+    <TaskTitleEditorProvider runs={archivedPages ? [...all, ...archivedPages.runs] : all} onRename={onRename}><TaskListFocusBoundary layout={`${desktop}:${detailedTable}`} revision={runs} data-route="tasks" data-presentation={detailedTable ? 'resources' : 'summary'} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
       {/* One set of search/view controls across breakpoints keeps query and selection intact.
           Mobile places search above the list filters; the shell already supplies its title. */}
       <header ref={headerRef} className="flex shrink-0 flex-col gap-[22px]">
@@ -287,7 +285,7 @@ export function TasksOverview({
         )}
         {view === 'archived' && archivedPages ? <ArchivedOlder pages={archivedPages} /> : null}
       </div>
-    </div></TaskListScrollAnchor></TaskListFocusContext></TaskTitleEditorProvider>
+    </TaskListFocusBoundary></TaskTitleEditorProvider>
   )
 }
 /** Hands the search text to the page; the page calls `written` with each trimmed text its
@@ -1381,7 +1379,7 @@ const TaskCard = React.memo(function TaskCard({
           <PinToggle
             pinned={Boolean(run.pinned)}
             onToggle={(pinned) => onTogglePin(run, pinned)}
-            className="-mr-1 mt-px"
+            className="mt-px"
           />
         ) : null}
       </div>

@@ -1,8 +1,7 @@
 import { useTaskListExpansion } from '@/lib/use-task-list-expansion'
 import { taskListRowIndexes } from '@/lib/task-list-render'
 import { GlobalTasksEmptyState, GlobalTasksLoadError, OtherProjects, TruncatedNotice } from './global-tasks-states'
-import { TaskListItems, TaskListScrollAnchor } from '@/components/task-list-items'
-import { TaskListFocusContext, useTaskListFocusState } from '@/lib/use-task-list-focus'
+import { TaskListItems, TaskListFocusBoundary } from '@/components/task-list-items'
 import { runAddress } from '@/api/run-address'
 import { useRunCacheWriter } from '@/api/use-run-cache-writer'
 import './task-lists.css'
@@ -213,7 +212,6 @@ export function GlobalTasksRoute() {
     [searchParams],
   )
   const now = useNow(30_000)
-  const listFocus = useTaskListFocusState(groupBy, index.data)
 
   /**
    * `replace`, always: filtering is one continuous gesture, and a history entry per click would
@@ -306,7 +304,7 @@ export function GlobalTasksRoute() {
   )
 
   return (
-    <TaskListFocusContext value={listFocus.value}><TaskListScrollAnchor revision={index.data}><div {...listFocus.props} data-route="global-tasks" data-presentation={groupBy === 'none' ? 'summary' : 'cards'} data-filter-details={filterDetailsOpen} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+    <TaskListFocusBoundary layout={groupBy} revision={index.data} data-route="global-tasks" data-presentation={groupBy === 'none' ? 'summary' : 'cards'} data-filter-details={filterDetailsOpen} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
       <header className="flex shrink-0 flex-col gap-[22px]">
         <div className="flex flex-col gap-2"><h1 className="text-[30px] font-semibold tracking-tight">All tasks</h1><p className="text-[13px] text-muted-foreground">{groupBy === 'none' ? 'Every project. One place to review what your agents have shipped.' : 'Filter across projects and act on each run without opening the session.'}</p></div>
         <div className="flex items-center gap-6 border-b border-border">
@@ -377,7 +375,7 @@ export function GlobalTasksRoute() {
         <OtherProjects registry={registry} />
 
       </div>
-    </div></TaskListScrollAnchor></TaskListFocusContext>
+    </TaskListFocusBoundary>
   )
 }
 

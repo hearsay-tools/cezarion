@@ -246,6 +246,11 @@ Normal CLI defaults and fixture sizes remain the full workload described above.
 
 ## S3b: virtual groups and memoized rows
 
+Large-list A timings were measured at `5a32a5816`. Later commits only remove work
+on those paths: unchanged observer callbacks bail out, focus no longer reruns route
+derivations, and owner lookup no longer mounts every row before virtualization.
+The A timings are not final-source numbers.
+
 Large global groups do less scroll work with virtualization. In paired runs on the
 same branch, global frame p95 falls in all five pairs at both widths. The median
 paired change is −83.2 ms at 1440 and −33.3 ms at 360. Project summary commit p95
@@ -383,16 +388,16 @@ summary skips rendering when another run changes.
 
 Each row is a median of per-run values. Event p95 uses delivered entries at the
 16 ms observation threshold. Long tasks is a count, not a duration. The raw files
-retain every event duration and name.
+retain every event duration and name. The detailed workload records no Expand interaction, so those cells are N/A.
 
 | Case | Build/tier | API p50 | API p95 | Long tasks | Event p95 | Archived elapsed | Search elapsed | Expand elapsed |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | project/1440/summary | baseline/flat | 7.9 | 30.4 | 37.0 | 240.0 | 3708.5 | 401.8 | 753.1 |
 | project/1440/summary | branch/flat | 1.9 | 7.1 | 15.0 | 176.0 | 1188.3 | 212.7 | 510.4 |
 | project/1440/summary | branch/virtual | 1.9 | 4.2 | 1.0 | 264.0 | 934.3 | 68.2 | 52.9 |
-| project/1440/detailed | baseline/flat | 9.6 | 40.0 | 89.0 | 496.0 | 10708.4 | 917.2 | 0.0 |
-| project/1440/detailed | branch/flat | 6.0 | 12.4 | 42.0 | 216.0 | 3075.5 | 307.2 | 0.0 |
-| project/1440/detailed | branch/virtual | 3.4 | 11.7 | 15.0 | 600.0 | 1247.2 | 126.4 | 0.0 |
+| project/1440/detailed | baseline/flat | 9.6 | 40.0 | 89.0 | 496.0 | 10708.4 | 917.2 | N/A |
+| project/1440/detailed | branch/flat | 6.0 | 12.4 | 42.0 | 216.0 | 3075.5 | 307.2 | N/A |
+| project/1440/detailed | branch/virtual | 3.4 | 11.7 | 15.0 | 600.0 | 1247.2 | 126.4 | N/A |
 | project/360/cards | baseline/flat | 8.0 | 23.0 | 33.0 | 216.0 | 2153.3 | 242.0 | 315.0 |
 | project/360/cards | branch/flat | 5.2 | 9.8 | 13.0 | 112.0 | 879.6 | 144.3 | 114.5 |
 | project/360/cards | branch/virtual | 2.1 | 8.2 | 4.0 | 192.0 | 907.5 | 64.8 | 59.4 |

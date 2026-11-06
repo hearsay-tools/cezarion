@@ -81,3 +81,28 @@ it('keeps global summary column headers accessible on phones', () => {
   const headers = browser.waitForValue(`(() => { const table=document.querySelector('[data-slot="global-tasks-table"][role="table"]'); return [...table.querySelectorAll('[role="columnheader"]')].map(cell=>({name:cell.textContent,hidden:[cell,cell.parentElement].some(node=>getComputedStyle(node).display==='none'||getComputedStyle(node).visibility==='hidden')})) })()`)
   expect(headers).toEqual(['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map(name => ({ name, hidden: false })))
 })
+
+it('paints rows on the first frame that contains a large list', async () => {
+  browser.setViewport(1440, 900)
+  const currentUrl = browser.url()
+  await browser.withCdp(async (request) => {
+    const { targetInfos } = await request('Target.getTargets')
+    const target = targetInfos.find((entry: { type: string; url: string }) => entry.type === 'page' && entry.url === currentUrl)
+    const { sessionId } = await request('Target.attachToTarget', { targetId: target.targetId, flatten: true })
+    try {
+      await request('Page.enable', {}, sessionId)
+      const { identifier } = await request('Page.addScriptToEvaluateOnNewDocument', { source: `
+        const observeFirstFrame = () => {
+          const list = document.querySelector('[data-slot="task-list-items"]');
+          if (!list) { requestAnimationFrame(observeFirstFrame); return; }
+          window.__taskListFirstFrameRows = list.querySelectorAll('[data-task-item]').length;
+        };
+        requestAnimationFrame(observeFirstFrame);
+      ` }, sessionId)
+      browser.goto(`${fixture.origin}/p/boot/?tasks=virtual`)
+      browser.waitForFunction('window.__taskListFirstFrameRows !== undefined')
+      expect(browser.waitForValue('window.__taskListFirstFrameRows')).toBeGreaterThan(0)
+      await request('Page.removeScriptToEvaluateOnNewDocument', { identifier }, sessionId)
+    } finally { await request('Target.detachFromTarget', { sessionId }) }
+  })
+})
