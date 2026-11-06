@@ -1,14 +1,11 @@
 #!/usr/bin/env node
+import { loadControls } from './mock-controls.mjs';
 import { stall, waitForRelease } from './mock-lifecycle.mjs';
 import { closeSync } from 'node:fs';
 import readline from 'node:readline';
 import { appendFileSync, existsSync as promptAckReleased } from 'node:fs';
 import { rawMessage, stripCommandMessage } from './mock-session-context.mjs';
-// Load only when configured: ordinary mock turns retain their event-loop ordering.
-const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
-  : (await import('./mock-failure-control.mjs')).readFailureControl();
-const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
-  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['reject', 'hold-ack', 'hold-response']);
+const { failureControl, delivery } = await loadControls({ delivery: ['reject', 'hold-ack', 'hold-response'] });
 const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 

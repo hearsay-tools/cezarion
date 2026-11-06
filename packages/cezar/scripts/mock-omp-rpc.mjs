@@ -1,13 +1,10 @@
 #!/usr/bin/env node
+import { loadControls } from './mock-controls.mjs';
 import { stall, waitForRelease } from './mock-lifecycle.mjs';
 import readline from 'node:readline';
 import { appendFileSync, closeSync, existsSync } from 'node:fs';
 import { rawMessage, stripCommandMessage } from './mock-session-context.mjs';
-// Load only when configured: ordinary mock turns retain their event-loop ordering.
-const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
-  : (await import('./mock-failure-control.mjs')).readFailureControl();
-const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
-  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['reject', 'hold-ack', 'hold-response']);
+const { failureControl, delivery } = await loadControls({ delivery: ['reject', 'hold-ack', 'hold-response'] });
 // Offline OMP (Oh My Pi) `--mode rpc` mock in OMP's own wire shape (v18.4.11, #595): the `ready`
 // frame, id-echoed responses, `prompt_result`, `session_settled`. Startup argv and model errors
 // are copied from the real binary (2026-10-05).

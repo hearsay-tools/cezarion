@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { loadControls } from './mock-controls.mjs';
 import { stall, waitForRelease } from './mock-lifecycle.mjs';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync as sessionStoreExists, mkdirSync, readFileSync, writeFileSync as sessionStoreWrite } from 'node:fs';
@@ -7,11 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import * as parityGateFs from 'node:fs';
 import { withoutSessionContextBody } from './mock-session-context.mjs';
-// Load only when configured: ordinary mock turns retain their event-loop ordering.
-const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
-  : (await import('./mock-failure-control.mjs')).readFailureControl();
-const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
-  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['reject', 'hold-ack', 'hold-response']);
+const { failureControl, delivery } = await loadControls({ delivery: ['reject', 'hold-ack', 'hold-response'] });
 let inputClosed = false;
 // Bundled dry-run mock of `opencode serve` — speaks just enough of the HTTP+SSE
 // API (§4 of agent-event-protocols.md) for the runner wiring test in

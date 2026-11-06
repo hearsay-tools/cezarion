@@ -1,16 +1,13 @@
 #!/usr/bin/env node
+import { loadControls } from './mock-controls.mjs';
 import { stall, waitForRelease } from './mock-lifecycle.mjs';
 import { closeSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import * as parityGateFs from 'node:fs';
 import { withoutSessionContext } from './mock-session-context.mjs';
-// Load only when configured: ordinary mock turns retain their event-loop ordering.
-const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
-  : (await import('./mock-failure-control.mjs')).readFailureControl(['provider', 'usage-limit', 'unread']);
 // Claude acknowledges agent input with the local stdin write, so only a held response is native.
-const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
-  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['hold-response']);
+const { failureControl, delivery } = await loadControls({ failure: ['provider', 'usage-limit', 'unread'], delivery: ['hold-response'] });
 // Mock `claude` binary for CEZ_DRY_RUN=1 — emits a plausible stream-json
 // session so the engine / store / GUI can be exercised without tokens.
 // Mirrors the real CLI's contract in SESSION mode: keeps reading {type:user}

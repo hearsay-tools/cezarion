@@ -1,15 +1,12 @@
 #!/usr/bin/env node
+import { loadControls } from './mock-controls.mjs';
 import { stall, waitForRelease } from './mock-lifecycle.mjs';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-// Load only when configured: ordinary mock turns retain their event-loop ordering.
-const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
-  : (await import('./mock-failure-control.mjs')).readFailureControl();
 // Print acknowledges an input on its first model work and cannot refuse one, so a held
 // acknowledgement and a held response both hold that first model work.
-const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
-  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['hold-ack', 'hold-response']);
+const { failureControl, delivery } = await loadControls({ delivery: ['hold-ack', 'hold-response'] });
 const { answerNudge, NO_WAIT_NUDGE_PREFIX } = await import('./mock-nudge.mjs');
 
 const args = process.argv.slice(2);

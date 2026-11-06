@@ -1,15 +1,12 @@
 #!/usr/bin/env node
+import { loadControls } from './mock-controls.mjs';
 import { stall, waitForRelease } from './mock-lifecycle.mjs';
 import { closeSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
 import * as parityGateFs from 'node:fs';
 import { withoutSessionContextParts } from './mock-session-context.mjs';
-// Load only when configured: ordinary mock turns retain their event-loop ordering.
-const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
-  : (await import('./mock-failure-control.mjs')).readFailureControl();
-const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
-  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['reject', 'hold-ack', 'hold-response']);
+const { failureControl, delivery } = await loadControls({ delivery: ['reject', 'hold-ack', 'hold-response'] });
 // Bundled dry-run mock of `codex app-server` — speaks just enough JSON-RPC 2.0
 // JSONL (§3 of agent-event-protocols.md) for the runner wiring test in
 // `codex-ui-mapper.test.ts`: initialize/thread/turn handshake, one scripted
