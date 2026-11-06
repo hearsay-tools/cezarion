@@ -23,8 +23,11 @@ dev-flow: load none of dev-flow, plan-issue, implement-issue, run-preflight,
 pr-checks or log-friction. This shortcut applies only to approved cleanup work.
 The coordinator owns the board, the claim, labels, landing and the friction log.
 Coordinator: <run id>. Merge authority: <owner's words, or "The owner merges">.
-PR-opening gate: <coordinator release after the earlier hot-file PR merges,
-or none>. When gated, request release when ready and open only after a reply.
+PR-opening gate: coordinator actual-overlap release check for every ready branch,
+even without a predicted hot file. Report a complete committed head and readiness
+evidence; request release and
+open only after an explicit reply for that head. A changed head or base
+invalidates release: request a fresh check under campaign/references/hot-file-release.md.
 
 The change is behavior-neutral: every existing test keeps its expected outcome.
 The issue and the facts above are the approved plan. Ask the coordinator, and

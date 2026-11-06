@@ -23,6 +23,7 @@ export {
   type AttentionTone,
   attentionOfRung,
   workerWaitLabel,
+  workersWaitingLabel,
 } from '@open-mercato/cezar-api-client/contract/attention'
 
 /**

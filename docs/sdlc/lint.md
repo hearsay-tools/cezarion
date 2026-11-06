@@ -178,3 +178,10 @@ named in their assertions; no source walk runs at import. Their old duration wei
 from both duration manifests because they measured the removed repository scan; the sequencers use
 the median fallback until successful CI suite summaries provide fresh measurements. Historical
 benchmark snapshots keep their original measurements.
+
+### Mock lifecycle boundary
+
+`cez/mock-lifecycle-boundary` keeps the no-progress stall, readiness pid and release
+wait in `scripts/mock-lifecycle.mjs` (hearsay-tools/cezarion#1529). Other `mock-*.mjs`
+scripts cannot define the old lifecycle helpers or contain the `watchdog.pid` literal.
+Synthetic cases pin the scanner; tests never read native mock source.

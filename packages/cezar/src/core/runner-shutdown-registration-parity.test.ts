@@ -10,6 +10,8 @@ it('registers every runner-shutdown row exactly once', () => {
   const actual = names.map(name => { const criterion = name.match(/^(\S+) (S\d+) /); return criterion ? `${criterion[1]}:${criterion[2]}` : name; });
   const expected = RUNNER_IDS.flatMap(runner => [
     ...['S22', 'S23', 'S24', 'S26', 'S27', 'S28', 'S30', 'S31', 'S33', 'S34'].map(row => `${runner}:${row}`),
+    `${runner} an ignore-term stall exits through its own backstop without SIGKILL`,
+    ...(runner === 'cursor' ? ['cursor input-closed stall exits nonzero and names its unsupported mock'] : []),
     `${runner} an ignore-term stall survives SIGTERM sent as soon as it publishes its pid`,
     ...(['claude', 'pi'].includes(runner) ? [`${runner} reaps a live child after stdout ends cleanly`] : []),
     ...(['claude', 'codex', 'pi'].includes(runner) ? [

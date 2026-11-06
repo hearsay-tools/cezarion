@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ArrowUpRightIcon, CircleCheckIcon, CircleIcon, CircleSlashIcon, CircleXIcon, GitBranchIcon } from '@/components/design-icons'
 import { LoaderCircleIcon } from 'lucide-react'
 import { useIsDesktop } from '@/lib/use-desktop'
-import { workerWaitLabel } from '@/lib/attention'
+import { workerWaitLabel, workersWaitingLabel } from '@/lib/attention'
 import { completionWaitView, requestsToPeers, workerWaitView } from '@open-mercato/cezar-api-client/contract/waits'
 import { runTitle } from '@/lib/task-groups'
 import type { ApiRun, RunRelationships, WorkerCompletionWait, WorkerDestroyView, WorkerInspection } from '@open-mercato/cezar-api-client'
@@ -88,8 +88,7 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
   // A worker wait is a wait-list entry (hearsay-tools/cezarion#1235). Cezar's completion wait, which
   // has no deadline, comes first, as it did from `delegation.wait` (hearsay-tools/cezarion#1301).
   const wait = completionWaitView(run) ?? workerWaitView(run)
-  // A request to a peer task reads "waiting on replies" (hearsay-tools/cezarion#1995).
-  const dependencyLabel = metadata && metadata.role !== 'invalid' && wait ? workerWaitLabel(metadata.role, wait, 'requestIds' in wait && requestsToPeers(metadata, wait.requestIds)) : undefined
+  const dependencyLabel = wait ? workerDependencyLabel(run, wait) : undefined
   return (
     <ActivityRow
       slot="workers"
@@ -139,6 +138,15 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
       </div>
     </ActivityRow>
   )
+}
+
+/** The parked note's wording. The count covers every open worker wait, as the Activity row's does
+ *  (hearsay-tools/cezarion#2588); a request to a peer task reads "waiting on replies"
+ *  (hearsay-tools/cezarion#1995). */
+function workerDependencyLabel(run: ApiRun, wait: DelegationWait): string | undefined {
+  const metadata = run.delegation
+  if (!metadata || metadata.role === 'invalid') return undefined
+  return workersWaitingLabel(run) ?? workerWaitLabel(metadata.role, wait, 'requestIds' in wait && requestsToPeers(metadata, wait.requestIds))
 }
 
 /** `2 linked · 1 done · 1 cancelled` on a desktop row; the bare odometer when the row is narrow

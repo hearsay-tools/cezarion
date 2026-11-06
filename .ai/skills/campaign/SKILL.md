@@ -29,13 +29,16 @@ Use the prompt's controls, with these defaults:
 | Source | Required: a label, issue list or epic |
 | Worker | Codex `gpt-6.1-sol-fast`; confirm with runner and model discovery before spawning |
 | Live workers | 4; start one minute apart to avoid startup rate limits |
-| Hot file | At most two assigned workers; the second opens its PR after the first merges |
+| Hot file | Every ready branch needs coordinator PR-opening release from actual patch and semantic evidence; see [release check](references/hot-file-release.md) |
 | Integration | Independent PRs into `main`, as the repo's branching binding requires |
 | Merge | Owner merges; coordinator merges only with explicit permission |
 
-A **hot file** is edited by two or more queued issues. File distance estimates
-patch conflicts; shared contracts, stored state and side-effect order determine
-whether work is independent. Plans that require stacked PRs or a shared
+A **hot file** is expected to be edited by two or more queued issues. Expected
+regions are scheduling estimates, not release evidence. Shared contracts, stored
+state and side-effect order determine
+whether work is independent. Every worker requests the release check before
+opening a PR, including when no hot file was predicted or an older brief says
+`none`; unexpected overlap still needs comparison and directed precedence. Plans that require stacked PRs or a shared
 integration branch return to planning for independently landable slices.
 
 Keep `.ai/qa/campaign/state.json` in this worktree and link it from the handoff.
@@ -73,10 +76,16 @@ condition that releases it: for example, a contract merged and its consumer
 check passed on main. Topologically order the work; resolve cycles by changing
 the approved slices before dispatch.
 
-Different files can run together when they are semantically independent. In
-one file, hunks at least 40 lines apart are candidates for parallel work, after
-checking shared imports, pins and contracts. Pair a change with many call sites
-only with work local to one module. Apply the hot-file control after these checks.
+Different files can run together when they are semantically independent. Check
+shared imports, pins and contracts even when text edits are disjoint. Use the
+[release check](references/hot-file-release.md) for ready branches; no fixed
+line distance or per-file worker cap decides release. The live-worker limit
+still applies. Pair a change with many call sites only with work local to one module.
+
+Plan deletion slices on one hot file as an ordered chain of independently
+landable PRs into main. Dispatch a successor only after its predecessor merges
+and integrated acceptance passes; then use the new main as its baseline. Do not
+spawn successors merely to park them. Other independent work can fill free slots.
 
 Done when every item has a region, prerequisite conditions and a slot order.
 Post the plan and continue unless the prompt requires schedule approval.
@@ -93,7 +102,7 @@ For each free slot:
    `.ai/qa/campaign/`: [cleanup](references/cleanup-worker-brief.md) or
    [feature](references/feature-delivery.md#worker-brief). Include the merge
    authority verbatim, the coordinator id, the expected evidence and any
-   PR-opening gate for a hot file.
+   mandatory PR-opening release check.
 4. Use `cez worker spawn --baseline parent-head --request-id <UUID>
    --context-file <brief> '<task>'` with the discovered runner/model. Reuse the
    request id only for an exact retry.
@@ -109,7 +118,8 @@ Read every commit as it lands. Apply
 [cleanup review](references/cleanup-review.md) or
 [feature review](references/feature-delivery.md#review), plus the cross-issue
 contracts from the schedule. Send findings for one commit as one request.
-Record the reviewed SHA and the evidence for each acceptance criterion.
+Record the reviewed SHA and the evidence for each acceptance criterion. Before
+answering any worker's ready request, run the [release check](references/hot-file-release.md).
 
 If a worker settles before producing the required evidence, collect its latest
 result and record the gap. Resume it for repair or assign a replacement with
