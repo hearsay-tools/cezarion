@@ -211,7 +211,10 @@ difference, the slice that adopts the script picks one version by this rule:
 The timing parameters this rule's point 3 produced are Codex F11
 (`silent-tail-late-turn-start`: release before turn start, then the `.content`
 release before text) and Cursor F10 (`silent-tail-slow-done`: release the tail
-through the release file rather than a sleep). Both retain their pinned tests.
+through the release file rather than a sleep). Cursor also keeps the `cezar-done`
+text `Done.` plus the unchanged lifecycle note, pinned by
+`packages/cezar/test/e2e/cursor-print.test.ts:43`; other runners keep the shared
+completion text. All retain their pinned tests.
 
 Unification changes test-only fixture output, never what a user sees: shared
 scenarios start only from a `mock:` token, and the untokened reply stays

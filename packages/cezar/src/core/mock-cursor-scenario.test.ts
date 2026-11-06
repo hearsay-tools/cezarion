@@ -72,7 +72,7 @@ describe('Cursor scenario wire and native dispatch', () => {
     const { frames } = run('mock:hold mock:agent-echo');
     expect(frames.at(-1).result).toBe('parity hold: content after the pause');
   });
-  it('uses the shared completion text', () => {
-    expect(run('mock:cezar-done').frames.at(-1).result).toContain('parity done: the task is complete');
+  it('keeps the package-pinned Cursor completion text', () => {
+    expect(run('mock:cezar-done').frames.at(-1).result).toMatch(/^Done\./);
   });
 });

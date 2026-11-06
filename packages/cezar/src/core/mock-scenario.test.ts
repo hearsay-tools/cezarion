@@ -104,6 +104,17 @@ describe('shared mock scenario selection', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it.each([['cursor', 'Done.'], ['pi', 'parity done: the task is complete']] as const)(
+    'keeps the %s completion text and lifecycle note', async (runner, reply) => {
+      const state = context();
+      state.runner = runner;
+      state.lifecycle = vi.fn(async () => ' receipt');
+      const events: string[] = [];
+      await play(scenarioFor('mock:cezar-done', state)!, encoder(events));
+      expect(events).toEqual(['open', `${reply} receipt`, 'end']);
+      expect(state.lifecycle).toHaveBeenCalledExactlyOnceWith(['cezar_done', {}]);
+    });
+
   it('delegates crash wire details to the supplied boundary', () => {
     const state = context();
     state.crash = vi.fn();
