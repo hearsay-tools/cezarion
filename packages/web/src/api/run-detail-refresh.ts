@@ -82,6 +82,9 @@ export function createRunDetailFetcher(queryClient: QueryClient) {
       if (promise && entry.preEvent.has(promise)) {
         entry.preEvent.delete(promise)
         dropFinishVerdict(queryClient, entry.key)
+        // The answer predates the latest event, so a fetch started after it is still owed: at once
+        // for an enabled reader, or as a stale mark for the next one (a success clears the mark).
+        entry.owed = true
       }
     }
     if (event.query.state.fetchStatus === 'idle') pump(entry)

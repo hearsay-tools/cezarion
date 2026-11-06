@@ -76,7 +76,7 @@ export function relationshipsDigest(run: RunRecord): string {
       delegation.parentRunId, delegation.workspace, delegation.destroy ?? null,
       delegation.executionRevision ?? null, run.destroyRetry ?? null,
     ] : null,
-    delegation?.role === 'root' ? [delegation.receipts.length, delegation.wait?.phase ?? null] : null,
+    delegation?.role === 'root' ? delegation.receipts.length : null,
     (Array.isArray(run.waits) ? run.waits : []).map((wait) => [wait.id, wait.phase]),
   ];
   return createHash('sha1').update(JSON.stringify(shape)).digest('base64url').slice(0, 16);
