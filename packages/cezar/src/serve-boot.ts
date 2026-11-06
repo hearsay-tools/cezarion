@@ -4,7 +4,9 @@ import type { detectEnvironment } from './core/backend-detect.ts';
 import type { DelegationController } from './delegation/provision.ts';
 import type { startServer } from './server/server.ts';
 import { recoverWithProviderRuntimeAuthObservation, type ProviderRuntimeAuthObserver } from './server/provider-auth-runtime.ts';
-import { cezarHomeDir } from './paths.ts';
+import { resolveHome } from './home/resolve.ts';
+import type { Home } from './home/home.ts';
+import { currentEntry } from './self-update/layout.ts';
 import { readNpmConfiguration } from './application-update/npm-process.ts';
 import { restartEndpoint } from './application-update/helper.ts';
 import { armRestartHelper } from './application-update/launcher.ts';
@@ -99,6 +101,7 @@ export function createServeApplicationUpdate(
   getServer: () => ReturnType<typeof startServer>,
   readNpm = readNpmConfiguration,
   store?: Pick<RunStore, 'close'>,
+  home = resolveHome({ purpose: 'compatibility' }),
 ): ApplicationUpdateService | undefined {
   // Discovery reads npm metadata only; a missing npm or source checkout degrades to manual update.
   const npm = readNpm();
@@ -108,8 +111,8 @@ export function createServeApplicationUpdate(
     ? new ApplicationUpdateService({
       packageRoot: join(dirname(fileURLToPath(import.meta.url)), '..'),
       launchEntry: resolve(process.argv[1] ?? ''),
-      npmPrefix: npmPrefix ?? join(cezarHomeDir(), 'dry-prefix'),
-      npmCache: npmCache ?? join(cezarHomeDir(), 'dry-cache'), npmBin: npm?.npmBin, home: cezarHomeDir(), targetVersion: () => update.latest,
+      npmPrefix: npmPrefix ?? home.dryPrefix,
+      npmCache: npmCache ?? home.dryCache, npmBin: npm?.npmBin, home: home.root, targetVersion: () => update.latest,
       dryRun: process.env.CEZ_DRY_RUN === '1',
       armRestart: (plan) => armRestartHelper(plan, { repoRoot, ...restartEndpoint(getServer().address()), npmBin: npm?.npmBin ?? 'npm' }),
       handoff: () => { void stopServe(getServer(), 'SIGTERM', { store }).then(() => process.exit(0)); },
@@ -163,22 +166,23 @@ export async function restartServe(
   server: StoppableServer & Pick<ReturnType<typeof startServer>, 'address'>,
   restart: (opts: RestartOptions) => void = restartProcess,
   opts: StopServeOptions = {},
+  home?: Home,
 ): Promise<void> {
   const port = restartEndpoint(server.address()).port;
   await stopServe(server, 'SIGTERM', opts);
-  restart({ server: null, args: process.argv.slice(2), port, supervised: isSupervised() });
+  restart({ server: null, args: process.argv.slice(2), port, supervised: isSupervised(), ...(home ? { entry: currentEntry(process.env, home) } : {}) });
 }
 
 /** The managed desktop updater; a restart re-execs this serve on the same port. */
 export function createServeSelfUpdate(
-  opts: { pkgName: string; version: string; store: RunStore; bindHost: string | undefined },
+  opts: { pkgName: string; version: string; store: RunStore; bindHost: string | undefined; home?: Home },
   getServer: () => ReturnType<typeof startServer>,
 ): SelfUpdateService {
   return new SelfUpdateService({
-    pkgName: opts.pkgName, version: opts.version, entry: resolve(process.argv[1] ?? ''), supervised: isSupervised(),
+    home: opts.home, pkgName: opts.pkgName, version: opts.version, entry: resolve(process.argv[1] ?? ''), supervised: isSupervised(),
     activeRuns: () => opts.store.listRuns().filter(r => ['queued', 'waiting', 'running'].includes(r.status)).length,
     trimPaths: () => !resolveCapabilities(process.env, opts.bindHost).localHandoff,
-    restart: () => { void restartServe(getServer(), restartProcess, { store: opts.store }); },
+    restart: () => { void restartServe(getServer(), restartProcess, { store: opts.store }, opts.home); },
   });
 }
 

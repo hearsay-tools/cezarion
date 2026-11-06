@@ -7,6 +7,7 @@
  * predates the cockpit's update dialog (this PoC's own situation).
  */
 
+import { resolveHome } from '../home/resolve.ts';
 import { appendFileSync, chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -18,11 +19,10 @@ import { binDir, CURRENT_LINK, PACKAGE_NAME, versionsDir } from './layout.ts';
 const PATH_MARKER = '# cezar managed install';
 const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
 
-function posixLauncher(env: NodeJS.ProcessEnv): string {
+export function posixLauncher(env: NodeJS.ProcessEnv, home = resolveHome({ purpose: 'compatibility', env })): string {
   // `CEZ_HOME` is honoured at run time too, so a launcher written under the default home keeps
   // working when the user later sets it — the launcher recomputes, it does not bake the path in.
-  const home = env.CEZ_HOME || undefined;
-  const homeExpr = home ? shellQuote(home) : '"${CEZ_HOME:-$HOME/.cezar}"';
+  const homeExpr = home.rootOverride ? shellQuote(home.rootOverride) : '"${CEZ_HOME:-$HOME/.cezar}"';
   return `#!/bin/sh
 ${PATH_MARKER} — do not edit; \`cez install\` regenerates this file.
 CEZ_MANAGED_HOME=${homeExpr}
@@ -56,25 +56,24 @@ exec node "$ENTRY" "$@"
 `;
 }
 
-function windowsLauncher(env: NodeJS.ProcessEnv): string {
-  const home = env.CEZ_HOME || join(homedir(), '.cezar');
-  const entry = join(home, 'versions', CURRENT_LINK, 'node_modules', ...PACKAGE_NAME.split('/'), 'dist', 'index.js');
+export function windowsLauncher(env: NodeJS.ProcessEnv, home = resolveHome({ purpose: 'compatibility', env })): string {
+  const entry = join(home.root, 'versions', CURRENT_LINK, 'node_modules', ...PACKAGE_NAME.split('/'), 'dist', 'index.js');
   return `@echo off\r\nrem ${PATH_MARKER}\r\nnode "${entry}" %*\r\n`;
 }
 
 /** Write `cezar` and `cez` launchers. Returns the bin directory. Untested on Windows (PoC). */
-export function writeLaunchers(env: NodeJS.ProcessEnv = process.env): string {
-  const dir = binDir(env);
+export function writeLaunchers(env: NodeJS.ProcessEnv = process.env, home = resolveHome({ purpose: 'compatibility', env })): string {
+  const dir = binDir(env, home);
   assertCezarHomeWriteIsSandboxed(dir, env);
-  assertCezarHomeWriteIsSandboxed(versionsDir(env), env);
+  assertCezarHomeWriteIsSandboxed(versionsDir(env, home), env);
   mkdirSync(dir, { recursive: true });
-  mkdirSync(versionsDir(env), { recursive: true });
+  mkdirSync(versionsDir(env, home), { recursive: true });
   for (const name of ['cezarion', 'cez']) {
     if (process.platform === 'win32') {
-      writeFileSync(join(dir, `${name}.cmd`), windowsLauncher(env));
+      writeFileSync(join(dir, `${name}.cmd`), windowsLauncher(env, home));
     } else {
       const path = join(dir, name);
-      writeFileSync(path, posixLauncher(env));
+      writeFileSync(path, posixLauncher(env, home));
       chmodSync(path, 0o755);
     }
   }

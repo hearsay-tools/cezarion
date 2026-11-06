@@ -1,0 +1,3 @@
+@echo off
+rem # cezar managed install
+node "/home/operator/.cezar/versions/current/node_modules/@wjarka/cezarion/dist/index.js" %*

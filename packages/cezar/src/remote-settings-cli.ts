@@ -1,3 +1,4 @@
+import type { Home } from './home/home.ts';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import {
@@ -126,14 +127,14 @@ function parse(argv: string[]): { command: 'enable' | 'status' | 'disable'; port
   }
 }
 
-async function run(argv: string[], env: NodeJS.ProcessEnv, io: RemoteSettingsIo): Promise<Record<string, unknown>> {
+async function run(argv: string[], env: NodeJS.ProcessEnv, io: RemoteSettingsIo, home?: Home): Promise<Record<string, unknown>> {
   const { command, port } = parse(argv);
   if (command === 'enable') {
     const granted = await portToEnable(port, env, io);
-    return { ok: true, port: granted, ...stateBody(await enableRemoteSettings(granted, env)), warning: REMOTE_SETTINGS_WARNING };
+    return { ok: true, port: granted, ...stateBody(await enableRemoteSettings(granted, env, undefined, home)), warning: REMOTE_SETTINGS_WARNING };
   }
-  if (command === 'disable') return { ok: true, ...stateBody(await disableRemoteSettings(env, port)) };
-  const state = readRemoteSettings(env);
+  if (command === 'disable') return { ok: true, ...stateBody(await disableRemoteSettings(env, port, home)) };
+  const state = readRemoteSettings(env, home);
   const cockpits = await (io.cockpits ?? scanCockpits)(env);
   return {
     ok: true,
@@ -151,13 +152,14 @@ export async function runRemoteSettingsCommand(
   argv: string[],
   env: NodeJS.ProcessEnv = process.env,
   io: RemoteSettingsIo = { stdout: (line) => console.log(line) },
+  home?: Home,
 ): Promise<number> {
   if (['help', '--help', '-h'].includes(argv[0] ?? '')) {
     io.stdout(USAGE);
     return 0;
   }
   try {
-    io.stdout(JSON.stringify(await run(argv, env, io), null, 2));
+    io.stdout(JSON.stringify(await run(argv, env, io, home), null, 2));
     return 0;
   } catch (error) {
     if (!(error instanceof Refusal)) throw error;

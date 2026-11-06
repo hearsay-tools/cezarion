@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { readFile } from 'node:fs/promises';
 import type { WorkspaceUiState } from '@open-mercato/cezar-contract';
 import { workspaceUiStatePath } from '../paths.ts';
@@ -52,8 +53,9 @@ export async function readWorkspaceUiState(
  */
 export async function mergeWriteWorkspaceUiState(
   mutator: (state: WorkspaceUiState) => WorkspaceUiState | void,
+  home?: Home,
 ): Promise<WorkspaceUiState> {
-  const path = workspaceUiStatePath();
+  const path = home?.workspaceUiState ?? workspaceUiStatePath();
   const current = await readWorkspaceUiState(path);
   const next = mutator(current) ?? current;
   atomicWriteJsonSync(path, next);

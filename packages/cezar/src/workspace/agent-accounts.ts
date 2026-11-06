@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { backupBeforeWrite } from './backups.ts';
 import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -168,15 +169,15 @@ export function defaultAgentAccountStore(): AgentAccountStore {
  * one-line warning and is left on disk untouched, so the user can repair it by hand — the next
  * successful merge-write is what replaces it.
  */
-export async function loadAgentAccounts(): Promise<AgentAccountStore> {
-  const path = agentAccountsPath();
+export async function loadAgentAccounts(home?: Home): Promise<AgentAccountStore> {
+  const path = home?.agentAccounts ?? agentAccountsPath();
   let raw: string;
   try {
     raw = await readFile(path, 'utf8');
   } catch {
     // Absent — but accounts may predate this file (they lived in config.json on the branch that
     // introduced them), so give those one chance to come across.
-    return importLegacyAccounts();
+    return importLegacyAccounts(home);
   }
   try {
     const parsed = storeSchema.safeParse(JSON.parse(raw));
@@ -198,10 +199,11 @@ export async function loadAgentAccounts(): Promise<AgentAccountStore> {
  */
 export async function mergeWriteAgentAccounts(
   mutator: (store: AgentAccountStore) => AgentAccountStore | void,
+  home?: Home,
 ): Promise<AgentAccountStore> {
-  const current = await loadAgentAccounts();
+  const current = await loadAgentAccounts(home);
   const next = mutator(current) ?? current;
-  const path = agentAccountsPath();
+  const path = home?.agentAccounts ?? agentAccountsPath();
   backupBeforeWrite(path, next);
   atomicWriteJsonSync(path, next);
   return next;
@@ -216,10 +218,10 @@ export async function mergeWriteAgentAccounts(
  * `config.json`: an older cezar sharing this home keeps reading what it has always read, and this
  * import is idempotent because it only runs while `agent-accounts.json` is absent.
  */
-async function importLegacyAccounts(): Promise<AgentAccountStore> {
+async function importLegacyAccounts(home?: Home): Promise<AgentAccountStore> {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readFile(workspaceConfigPath(), 'utf8'));
+    parsed = JSON.parse(await readFile(home?.workspaceConfig ?? workspaceConfigPath(), 'utf8'));
   } catch {
     return defaultAgentAccountStore();
   }
@@ -242,7 +244,7 @@ async function importLegacyAccounts(): Promise<AgentAccountStore> {
   // exists for no reason.
   if (imported.data.accounts.length === 0) return imported.data;
   try {
-    const path = agentAccountsPath();
+    const path = home?.agentAccounts ?? agentAccountsPath();
     backupBeforeWrite(path, imported.data);
     atomicWriteJsonSync(path, imported.data);
   } catch {
