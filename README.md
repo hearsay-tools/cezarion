@@ -479,6 +479,8 @@ re-registers itself at the next start.
 **From the terminal** — the same registry, no cockpit required (handy over ssh):
 
 ```bash
+cez backup list [<file>]           # list rotating config.json / agent-accounts.json backups
+cez backup restore <file> [--at <time>] # restore JSON only; account folders are unchanged
 cez projects                      # list: id, branch or status, path, tags
 cez projects add ~/code/api       # register a folder (defaults to the current repo)
 cez projects remove api           # drop the registry entry; the repo is untouched

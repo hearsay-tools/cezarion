@@ -1,3 +1,4 @@
+import { backupBeforeWrite } from './backups.ts';
 import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { posix, resolve, win32 } from 'node:path';
@@ -106,7 +107,7 @@ const selectionSchema = z
 
 export type AgentAccountSelection = z.infer<typeof selectionSchema>;
 
-const storeSchema = z
+export const storeSchema = z
   .object({
     /** Format cursor for THIS file, independent of `config.json`'s `schemaVersion`. Nothing reads
      *  it yet; it exists so a future shape change has somewhere to say so. */
@@ -200,7 +201,9 @@ export async function mergeWriteAgentAccounts(
 ): Promise<AgentAccountStore> {
   const current = await loadAgentAccounts();
   const next = mutator(current) ?? current;
-  atomicWriteJsonSync(agentAccountsPath(), next);
+  const path = agentAccountsPath();
+  backupBeforeWrite(path, next);
+  atomicWriteJsonSync(path, next);
   return next;
 }
 
@@ -239,7 +242,9 @@ async function importLegacyAccounts(): Promise<AgentAccountStore> {
   // exists for no reason.
   if (imported.data.accounts.length === 0) return imported.data;
   try {
-    atomicWriteJsonSync(agentAccountsPath(), imported.data);
+    const path = agentAccountsPath();
+    backupBeforeWrite(path, imported.data);
+    atomicWriteJsonSync(path, imported.data);
   } catch {
     // read-only home: the import stays in memory for this process, which is still correct
   }
