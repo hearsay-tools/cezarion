@@ -74,6 +74,42 @@ it('allows turning completion switches off for future automation tasks', async (
   expect(calls.find(call => call.method === 'PUT')?.body).toMatchObject({ task: { archiveWhenDone: false, autoMergePr: false } })
 })
 
+it('starts task access on and sends an explicit off on create (hearsay-tools/cezarion#2784)', async () => {
+  const calls = stubFetch(() => json(saved, 201))
+  const onSaved = mount()
+  fill()
+  expect(screen.getByRole('group', { name: 'Task access' })).toBeTruthy()
+  for (const name of ['Allow cezar workers', 'Allow task messaging']) {
+    const control = screen.getByRole('switch', { name })
+    expect(control.getAttribute('aria-checked')).toBe('true')
+    expect(control.getAttribute('aria-describedby')).toBeTruthy()
+  }
+  fireEvent.click(screen.getByRole('switch', { name: 'Allow cezar workers' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save paused' }))
+  await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  const body = calls.find(call => call.method === 'POST')?.body as { task: Record<string, unknown> } | undefined
+  const task = body?.task
+  expect(task).toMatchObject({ allowWorkers: false })
+  expect(task).not.toHaveProperty('allowMessaging')
+})
+
+it('turns task access back on for an automation saved with it off', async () => {
+  const automation: AutomationDefinition = {
+    id: 'access', revision: 1, name: 'Ship', kind: 'schedule', enabled: false, schedule: { type: 'daily' },
+    task: { prompt: 'Ship', allowWorkers: false, allowMessaging: false }, createdAt: '', updatedAt: '',
+  }
+  const calls = stubFetch(() => json({ automation }))
+  const onSaved = mount({ automation })
+  for (const name of ['Allow cezar workers', 'Allow task messaging']) {
+    const control = screen.getByRole('switch', { name })
+    expect(control.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(control)
+  }
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  expect(calls.find(call => call.method === 'PUT')?.body).toMatchObject({ task: { allowWorkers: true, allowMessaging: true } })
+})
+
 it('saves the explicit existing-items choice for a GitHub automation', async () => {
   const calls = stubFetch(() => json(saved, 201))
   const onSaved = mount()

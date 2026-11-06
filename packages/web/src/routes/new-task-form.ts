@@ -339,6 +339,9 @@ export function buildCreateRunBody(opts: {
   autonomous?: boolean
   archiveWhenDone?: boolean
   autoMergePr?: boolean
+  /** Task access: sent only when off; an absent key is on. */
+  allowWorkers?: boolean
+  allowMessaging?: boolean
 }): CreateRunInput {
   const {
     task,
@@ -355,6 +358,8 @@ export function buildCreateRunBody(opts: {
     autonomous,
     archiveWhenDone,
     autoMergePr,
+    allowWorkers,
+    allowMessaging,
   } = opts
   return {
     task,
@@ -372,6 +377,8 @@ export function buildCreateRunBody(opts: {
     autonomous: autonomous === true ? true : undefined,
     ...(archiveWhenDone ? { archiveWhenDone: true } : {}),
     ...(autoMergePr ? { autoMergePr: true } : {}),
+    ...(allowWorkers === false ? { allowWorkers: false } : {}),
+    ...(allowMessaging === false ? { allowMessaging: false } : {}),
   }
 }
 

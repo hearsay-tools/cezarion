@@ -11,6 +11,7 @@ import { queryKeys } from '@/api/queries'
 import type { RepoResponse } from '@open-mercato/cezar-api-client'
 import { TwinkleBackdrop } from '@/components/centered-state'
 import { CompletionControls } from '@/components/completion-controls'
+import { TaskAccessControls } from '@/components/task-access-controls'
 import { PickerPill, PickerPillGroup, RunnerPill } from '@/components/picker-pill'
 import { toast } from '@/components/ui/toaster'
 import { submitShortcutHint } from '@/lib/use-submit-shortcut'
@@ -236,6 +237,7 @@ export function ExecutionSettings({
           ) : null}
         </div>
         <CompletionControls embedded archiveWhenDone={draft.archiveWhenDone} autoMergePr={draft.autoMergePr} onChange={update} disabled={completionDisabled} />
+        <TaskAccessControls embedded allowWorkers={draft.allowWorkers} allowMessaging={draft.allowMessaging} onChange={update} disabled={completionDisabled} />
       </div>
     </details>
   )

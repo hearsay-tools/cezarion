@@ -38,6 +38,9 @@ export interface NewTaskDraft {
   autonomous: boolean | null
   archiveWhenDone: boolean
   autoMergePr: boolean
+  /** Task access (hearsay-tools/cezarion#2784): on unless the user turned it off. */
+  allowWorkers: boolean
+  allowMessaging: boolean
 }
 
 export interface ComposerRunModeInput {
@@ -107,6 +110,8 @@ const EMPTY: NewTaskDraft = {
   autonomous: null,
   archiveWhenDone: false,
   autoMergePr: false,
+  allowWorkers: true,
+  allowMessaging: true,
 }
 
 const STORAGE_KEY = 'cez-new-task-draft'
@@ -143,6 +148,8 @@ function normalize(raw: unknown): NewTaskDraft {
     autonomous: typeof obj.autonomous === 'boolean' ? obj.autonomous : null,
     archiveWhenDone: obj.archiveWhenDone === true,
     autoMergePr: obj.autoMergePr === true,
+    allowWorkers: obj.allowWorkers !== false,
+    allowMessaging: obj.allowMessaging !== false,
   }
 }
 

@@ -68,3 +68,7 @@
   padding-block: 12px;
   border-block-start: 1px solid var(--border);
 }
+
+[data-slot='task-access-controls'][data-embedded] {
+  gap: 0;
+}
