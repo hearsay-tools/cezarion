@@ -1,5 +1,11 @@
 id: launch-read-outside-resolver-selectors
 valid:
+  - "import type * as config from '../config.ts';"
+  - "import type { loadConfig } from '../config.ts';"
+  - "import { type loadConfig } from '../config.ts';"
+  - "export type { loadConfig } from '../config.ts';"
+  - "let doc: import('../types.ts').WorkflowDoc;"
+  - "type Doc = import('../config.ts').CezConfig;"
   - const control = await import("../owner's/display-config.ts");
   - atTaskHead.runner(handle, configHandle)
   - atTaskHead.hydrateQueuedInput(context, read, id, recipe)
@@ -29,6 +35,8 @@ valid:
   - import display from '../ui-state.js.bak';
   - const control = await import(`../display-config.ts`);
 invalid:
+  - "import * as config from '../config.ts';"
+  - "import { loadConfig, type CezConfig } from '../config.ts';"
   - const owned = await import("../owner's/config.ts");
   - import { loadConfig } from "../owner's/config.ts";
   - const source = await import('../model-identity.js');

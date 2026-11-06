@@ -22,11 +22,15 @@ rule:
         - any:
             - kind: import_statement
             - kind: export_statement
+        - not:
+            regex: ^(import|export)\s+type\b
         - has:
             stopBy: end
             any:
               - kind: import_specifier
               - kind: export_specifier
+            not:
+              regex: ^type\s
             has:
               {
                 field: name,
@@ -34,6 +38,8 @@ rule:
               }
     - all:
         - kind: import_statement
+        - not:
+            regex: ^(import|export)\s+type\b
         - has: { kind: namespace_import, stopBy: end }
         - has: { field: source, matches: lr-selector-module-specifier }
     - all:
@@ -45,6 +51,16 @@ rule:
         - has: { field: function, matches: selector-call-target }
     - all:
         - kind: call_expression
+        - not:
+            inside:
+              stopBy: end
+              any:
+                - kind: type_annotation
+                - kind: type_alias_declaration
+                - kind: type_arguments
+                - kind: interface_declaration
+                - kind: implements_clause
+                - kind: extends_type_clause
         - has: { field: function, matches: lr-selector-import-target }
         - has:
             field: arguments
@@ -52,6 +68,8 @@ rule:
               matches: lr-selector-module-specifier
     - all:
         - kind: import_statement
+        - not:
+            regex: ^(import|export)\s+type\b
         - has:
             kind: import_clause
             has:
@@ -59,6 +77,8 @@ rule:
         - has: { field: source, matches: lr-selector-module-specifier }
     - all:
         - kind: import_statement
+        - not:
+            regex: ^(import|export)\s+type\b
         - has:
             kind: import_require_clause
             has: { field: source, matches: lr-selector-module-specifier }
