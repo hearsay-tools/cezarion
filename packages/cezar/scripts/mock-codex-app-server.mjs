@@ -100,7 +100,7 @@ const scenarioContext = {
   },
   async crash(prompt) {
     const { crashWithStderr } = await import('./mock-runner-crash.mjs');
-    if (prompt.includes('-pre-ack')) return crashWithStderr(prompt, '{"method":"turn/started","params":');
+    if (prompt.includes('mock:crash-stderr-pre-ack')) return crashWithStderr(prompt, '{"method":"turn/started","params":');
     await sleep(30);
     crashWithStderr(prompt, '{"method":"item/commandExecution/outputDelta","params":');
   },
@@ -678,7 +678,7 @@ async function handleTurnStart(msg) {
   const prompt = openingPromptText(msg);
   if (delivery?.rejects(prompt)) { emit({ id: msg.id, error: { code: -32603, message: 'owned turn rejected' } }); return; }
   const crash = promptScenarios(prompt).get('crash-stderr');
-  if (crash && prompt.includes('-pre-ack')) return play(crash, scenarioEncoder(msg, prompt, crash));
+  if (crash && prompt.includes('mock:crash-stderr-pre-ack')) return play(crash, scenarioEncoder(msg, prompt, crash));
   if (rejectedPermissionOverride) permissionWarning();
   activeTurnId = 'turn_mock_1';
   acknowledgeTurnStart(msg, prompt);
