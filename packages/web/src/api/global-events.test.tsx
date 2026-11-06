@@ -1061,6 +1061,30 @@ describe('useGlobalEvents — run events', () => {
     expect(client.getQueryData(queryKeys.runs.detail('r2'))).toBeUndefined()
   })
 
+  it.each([
+    ['disabled', false, 0],
+    ['enabled', true, 1],
+  ] as const)('a detail whose only reader is %s fetches only when that reader can fetch', (_, enabled, fetches) => {
+    const run = { ...runRecord('r1', { status: RUN_STATUS.waiting }), finishBlocked: null }
+    client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), run)
+    vi.mocked(fetch).mockImplementation(async () => json(run))
+    const queryFn = vi.fn(async () => run)
+    const observer = new QueryObserver<ApiRun>(client, { queryKey: queryKeys.runs.detail('r1'), queryFn, enabled })
+    const unsubscribe = observer.subscribe(() => undefined)
+    try {
+      const { source } = mount()
+      source.emit('run-summary', stampedRun(runRecord('r1', { status: RUN_STATUS.waiting, tokensUsed: 5 })))
+      expect(queryFn).toHaveBeenCalledTimes(fetches)
+      if (!enabled) {
+        // A disabled reader cannot refetch: the detail drops its verdict and waits stale.
+        expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeUndefined()
+        expect(client.getQueryState(queryKeys.runs.detail('r1'))?.isInvalidated).toBe(true)
+      }
+    } finally {
+      unsubscribe()
+    }
+  })
+
   it('refreshes an opened Cursor detail for its server-resolved resume command', () => {
     client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), runRecord('r1', { runner: 'claude' }))
     const invalidate = vi.spyOn(client, 'invalidateQueries')

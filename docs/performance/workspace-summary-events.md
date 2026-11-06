@@ -4,6 +4,8 @@ This report goes with [hearsay-tools/cezarion#2730](https://github.com/hearsay-t
 
 Main result for one large delegation family, one stream and the detail closed: the stream bytes fell from 14.6 MB to 0.12 MB (−99.2%). The p95 frame fell from 264,760 bytes to 412 bytes. The cockpit's per-frame parse and validation p95 fell from 0.44 ms to 0.04 ms. With the parent's detail open, the total bytes still fell by 62% (14.9 MB to 5.7 MB). The cost is 21 detail fetches instead of 1, which is the approved D1 behavior. With four connections, the shared feed cut the server dispatch total for full records from 228 ms to 106 ms.
 
+**Read the numbers with the host load.** The one-minute `loadavg` ran from 20 to 93 on a 24-core shared host during the runs. Byte counts, frame sizes, frame counts and detail-fetch counts are deterministic: every run gave the same values. Timing numbers (server dispatch, client parse and zod time, process CPU, API and detail latency) carry host noise. Use them for direction, not for exact ratios.
+
 ## Method and evidence
 
 The workload is [`bench:workspace-events`](../../packages/cezar/scripts/benchmark-workspace-events.ts) (`npm run bench:workspace-events -w @wjarka/cezarion`). It starts one in-process app over a fresh store, with no agents and no tests. It seeds one delegation root with a 256 KiB task and six active workers with 16 KiB tasks. Every eighth update changes the parent's token count and current step. The other updates are worker token ticks. Each phase sends 300 updates at 40 per second, then waits 600 ms. Two warmup phases run first and are not reported.
