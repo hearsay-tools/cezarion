@@ -213,7 +213,7 @@ frames with contiguous `seq`, and `/runs-index` returns `generation` and `eventS
 4. **Reconciliation** on bootstrap, reconnect, visibility restore, seq gap, unknown project
    and truncated-boundary moves. At most one in flight plus one trailing; hold-then-fire, so
    sustained events cannot postpone it.
-5. **Freshness.** Patches apply once per animation frame. Delete the index invalidation in
+5. **Freshness.** Patches apply once per animation frame. Amended 2026-11-06 (planner-accepted, measured cold-bootstrap cost): the first patch after a quiet period lands in the next frame, then at most one write per 250 ms, hold-then-fire. Delete the index invalidation in
    the refresher (`global-events.tsx:118`). If S2 has not merged, keep the reports
    invalidation.
 6. **Foreign-process projects.** A visible-only 60 s backstop refetch of the index (D2).

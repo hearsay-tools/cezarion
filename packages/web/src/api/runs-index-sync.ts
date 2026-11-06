@@ -18,8 +18,13 @@ import {
 /**
  * The workspace runs index, kept current from the workspace stream (hearsay-tools/cezarion#2729).
  *
- * Each `run-summary` and `run-deleted` frame patches the cached index row in the next animation
- * frame, with no request. A full `GET /workspace/runs-index` runs only as a fenced reconciliation:
+ * Each `run-summary`, `run-deleted` and `usage` frame patches the cached index with no request.
+ * The first patch after a quiet period lands in the next animation frame; after a write, the next
+ * one waits until `RUNS_INDEX_WRITE_INTERVAL_MS` has passed, and that wait never restarts. This is
+ * a measured correction of the plan's "once per animation frame" (accepted by the planner on
+ * 2026-11-06): every index write re-renders the app shell, and the per-frame cadence turned a
+ * bootstrap burst of about 120 frames into about 190 commits. A full `GET /workspace/runs-index`
+ * runs only as a fenced reconciliation:
  * bootstrap, reconnect, visibility restore, a `seq` gap, an unknown project, a truncated window
  * boundary, a new project, and the visible-only backstop read (`useRunsIndex`).
  *
@@ -40,6 +45,9 @@ export const RUNS_INDEX_BACKSTOP_MS = 60_000
 
 /** A hidden document runs no animation frames. Patches still land within this bound. */
 const FLUSH_FALLBACK_MS = 100
+
+/** The shortest time between two index writes. Each write re-renders every index reader. */
+export const RUNS_INDEX_WRITE_INTERVAL_MS = 250
 
 type QueuedPatch =
   | { type: 'change'; change: IndexChange }
@@ -107,6 +115,11 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
   let hold: ReturnType<typeof setTimeout> | undefined
   let inFlight: Promise<void> | undefined
   let trailing = false
+  let lastWrite = -Infinity
+  const write = (next: RunsIndexResponse): void => {
+    lastWrite = Date.now()
+    queryClient.setQueryData<RunsIndexResponse>(RUNS_INDEX_QUERY_KEY, next)
+  }
 
   const cached = () => queryClient.getQueryData<RunsIndexResponse>(RUNS_INDEX_QUERY_KEY)
 
@@ -168,12 +181,19 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
       next = result.index
       needsReconcile ||= result.reconcile
     }
-    if (next !== data) queryClient.setQueryData<RunsIndexResponse>(RUNS_INDEX_QUERY_KEY, next)
+    if (next !== data) write(next)
     if (needsReconcile) void reconcile({ hold: true })
   }
 
+  /** Leading edge: the next frame. Within the interval after a write: one timer at its end. A
+   *  scheduled flush is never moved, so a stream that never goes quiet cannot postpone it. */
   const schedule = (): void => {
     if (fallback !== undefined) return
+    const wait = lastWrite + RUNS_INDEX_WRITE_INTERVAL_MS - Date.now()
+    if (wait > 0) {
+      fallback = setTimeout(flush, wait)
+      return
+    }
     fallback = setTimeout(flush, FLUSH_FALLBACK_MS)
     if (typeof requestAnimationFrame === 'function') frame = requestAnimationFrame(flush)
   }
@@ -201,7 +221,7 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
       const data = cached()
       if (!data) return
       const next = dropIndexProject(data, project)
-      if (next !== data) queryClient.setQueryData<RunsIndexResponse>(RUNS_INDEX_QUERY_KEY, next)
+      if (next !== data) write(next)
     },
     merge(snapshot) {
       const result = mergeIndexSnapshot(overlay, snapshot, registryOf(queryClient))

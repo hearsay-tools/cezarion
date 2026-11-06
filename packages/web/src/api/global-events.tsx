@@ -415,8 +415,8 @@ function createRunListBatcher(queryClient: QueryClient) {
  *   covers exactly those fields (server `relationshipsDigest`); a token tick or a rename keeps
  *   it, and is dropped at the door, judged against the last digest this stream saw for that run
  *   rather than against a cache the sidebar stamp may already have overwritten;
- * - at most one refetch per entry per quiet window, on the runs-index refresher's cadence and
- *   with the same hold-then-fire shape, so a run that never goes quiet still refreshes.
+ * - at most one refetch per entry per 400 ms window, hold-then-fire, so a run that never goes
+ *   quiet still refreshes.
  *
  * A deleted run refreshes the parent it was last seen under. One the stream never saw has no
  * known parent, and that rare case keeps the old whole-family refresh, debounced under one key.

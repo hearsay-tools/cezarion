@@ -2005,7 +2005,8 @@ describe('useGlobalEvents — runs index patches (hearsay-tools/cezarion#2729)',
     expect(index()?.runs[0]?.usage).toEqual(SAMPLE)
     expect(index()?.runs[1]).not.toHaveProperty('usage')
     source.emit('usage', JSON.stringify({ project: 'other', usage: {} }))
-    runFrames()
+    // The next write waits out the index write interval (runs-index-sync.ts).
+    act(() => void vi.advanceTimersByTime(250))
     expect(index()?.runs[0]).not.toHaveProperty('usage')
   })
 

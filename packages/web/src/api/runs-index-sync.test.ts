@@ -4,7 +4,7 @@ import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factori
 import type { RunIndexEntry, RunsIndexResponse, RunSummary } from '@open-mercato/cezar-api-client'
 
 import { createQueryClient } from './query-client'
-import { createRunsIndexSync, RUNS_INDEX_QUERY_KEY, RUNS_INDEX_RECONCILE_HOLD_MS, type RunsIndexSync } from './runs-index-sync'
+import { createRunsIndexSync, RUNS_INDEX_QUERY_KEY, RUNS_INDEX_RECONCILE_HOLD_MS, RUNS_INDEX_WRITE_INTERVAL_MS, type RunsIndexSync } from './runs-index-sync'
 
 function summary(id: string, createdAt: string, over: Partial<RunSummary> = {}): RunSummary {
   return { id, title: id, status: RUN_STATUS.running, createdAt, archived: false, workflow: 'quick-task', workflowLabel: 'Quick task', tokensUsed: 0, ...over } as RunSummary
@@ -28,6 +28,17 @@ let seq: number
 const cached = () => client.getQueryData<RunsIndexResponse>(RUNS_INDEX_QUERY_KEY)
 const titles = () => cached()?.runs.map((entry) => entry.title)
 const runFrame = (project: string, run: RunSummary) => sync.run(project, { type: 'run-summary', summary: run, seq: ++seq, relationships: 'd' })
+/** The times of the sync's own index writes (`setQueryData`), as fake `Date.now()` values. */
+const indexWrites = () => {
+  const times: number[] = []
+  const original = client.setQueryData.bind(client)
+  vi.spyOn(client, 'setQueryData').mockImplementation(((key: unknown, value: unknown) => {
+    if (JSON.stringify(key) === JSON.stringify(RUNS_INDEX_QUERY_KEY)) times.push(Date.now())
+    return original(key as never, value as never)
+  }) as typeof client.setQueryData)
+  return () => times
+}
+const minGap = (times: number[]) => Math.min(Infinity, ...times.slice(1).map((at, i) => at - times[i]!))
 const runAnimationFrames = () => {
   const due = frames
   frames = []
@@ -95,14 +106,14 @@ describe('runs index sync: patches', () => {
     expect(titles()).toEqual(['a2', 'b1'])
   })
 
-  it('usage ticks patch the project\'s rows; an empty tick clears them', () => {
+  it('usage ticks patch the project\'s rows; an empty tick clears them', async () => {
     client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
     const sample = { cpuPct: 5, rssBytes: 10, procCount: 1 }
     sync.usage('a', { a2: sample })
     runAnimationFrames()
     expect(cached()?.runs[0]?.usage).toEqual(sample)
     sync.usage('a', {})
-    runAnimationFrames()
+    await vi.advanceTimersByTimeAsync(RUNS_INDEX_WRITE_INTERVAL_MS)
     expect(cached()?.runs[0]).not.toHaveProperty('usage')
   })
 
@@ -232,6 +243,72 @@ describe('runs index sync: reconciliation', () => {
   })
 })
 
+describe('runs index sync: write bound', () => {
+  it('a single patch after a quiet period lands in the next animation frame', async () => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
+    const writes = indexWrites()
+    runFrame('a', summary('a2', '2026-01-02', { title: 'one' }))
+    await vi.advanceTimersByTimeAsync(RUNS_INDEX_WRITE_INTERVAL_MS * 4)
+    runFrame('a', summary('a2', '2026-01-02', { title: 'two' }))
+    runAnimationFrames()
+    expect(titles()?.[0]).toBe('two')
+    expect(writes()).toHaveLength(2)
+  })
+
+  it('a burst gives writes at least the interval apart, and the last patch still lands', async () => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
+    const writes = indexWrites()
+    for (let i = 0; i < 40; i++) {
+      runFrame('a', summary('a2', '2026-01-02', { title: `burst ${i}` }))
+      runAnimationFrames()
+      await vi.advanceTimersByTimeAsync(20)
+    }
+    await vi.advanceTimersByTimeAsync(RUNS_INDEX_WRITE_INTERVAL_MS)
+    expect(titles()?.[0]).toBe('burst 39')
+    expect(writes().length).toBeLessThanOrEqual(Math.ceil((40 * 20) / RUNS_INDEX_WRITE_INTERVAL_MS) + 1)
+    expect(minGap(writes())).toBeGreaterThanOrEqual(RUNS_INDEX_WRITE_INTERVAL_MS)
+  })
+
+  it('frames inside the interval cannot postpone the held write', async () => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
+    const writes = indexWrites()
+    runFrame('a', summary('a2', '2026-01-02', { title: 'first' }))
+    runAnimationFrames()
+    for (let i = 0; i < 10; i++) {
+      runFrame('a', summary('a2', '2026-01-02', { title: `held ${i}` }))
+      await vi.advanceTimersByTimeAsync(20)
+    }
+    // 200 ms passed with a frame every 20 ms; the held write fires at 250 ms regardless.
+    await vi.advanceTimersByTimeAsync(RUNS_INDEX_WRITE_INTERVAL_MS - 200)
+    expect(writes()).toHaveLength(2)
+    expect(titles()?.[0]).toBe('held 9')
+  })
+
+  it('a hidden document with no animation frames still writes, through the fallback and the held timer', async () => {
+    vi.stubGlobal('requestAnimationFrame', undefined)
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
+    runFrame('a', summary('a2', '2026-01-02', { title: 'hidden one' }))
+    await vi.advanceTimersByTimeAsync(100)
+    expect(titles()?.[0]).toBe('hidden one')
+    runFrame('a', summary('a2', '2026-01-02', { title: 'hidden two' }))
+    await vi.advanceTimersByTimeAsync(RUNS_INDEX_WRITE_INTERVAL_MS)
+    expect(titles()?.[0]).toBe('hidden two')
+  })
+
+  it('usage ticks share the bound', async () => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
+    const writes = indexWrites()
+    for (let i = 1; i <= 20; i++) {
+      sync.usage('a', { a2: { cpuPct: i, rssBytes: 10, procCount: 1 } })
+      runAnimationFrames()
+      await vi.advanceTimersByTimeAsync(25)
+    }
+    await vi.advanceTimersByTimeAsync(RUNS_INDEX_WRITE_INTERVAL_MS)
+    expect(cached()?.runs[0]?.usage?.cpuPct).toBe(20)
+    expect(minGap(writes())).toBeGreaterThanOrEqual(RUNS_INDEX_WRITE_INTERVAL_MS)
+  })
+})
+
 describe('runs index sync: generation mismatch (R1)', () => {
   it('stream generation A, snapshots keep arriving from B, no stream ready: at most one extra read', async () => {
     sync.ready('A', 0)
@@ -245,23 +322,38 @@ describe('runs index sync: generation mismatch (R1)', () => {
 })
 
 describe('runs index sync: sustained updates', () => {
-  it('events every 200 ms for 5 s patch rows each animation frame, and a boundary read still fires', async () => {
-    const answer = () => snapshot([row('a', 'a2', '2026-01-02'), row('a', 'a1', '2026-01-01', { archived: true })], { truncated: ['a'], eventSeq: seq })
+  it('events every 200 ms for 5 s stay visible within the write bound, and a boundary read still fires', async () => {
+    // A snapshot includes every frame up to its eventSeq, as the server's does.
+    let latest = 0
+    const answer = () => snapshot([row('a', 'a2', '2026-01-02', { title: `tick ${latest}`, tokensUsed: latest }), row('a', 'a1', '2026-01-01', { archived: latest < 5 })], { truncated: ['a'], eventSeq: seq })
     client.setQueryData(RUNS_INDEX_QUERY_KEY, answer())
     const { queryFn, unsubscribe } = observe(answer)
+    const writes = indexWrites()
+    const emitted: Array<[number, number]> = []
+    const shownTick = () => cached()?.runs.find((entry) => entry.id === 'a2')?.tokensUsed ?? 0
     let firstRead: number | undefined
-    for (let tick = 1; tick <= 25; tick++) {
-      runFrame('a', summary('a2', '2026-01-02', { title: `tick ${tick}`, tokensUsed: tick }))
-      // A boundary move in the middle of the stream.
-      if (tick === 5) runFrame('a', summary('a1', '2026-01-01'))
+    for (let step = 0; step < 100; step++) {
+      const now = Date.now()
+      if (step % 4 === 0) {
+        const tick = step / 4 + 1
+        runFrame('a', summary('a2', '2026-01-02', { title: `tick ${tick}`, tokensUsed: tick }))
+        latest = tick
+        emitted.push([now, tick])
+        // A boundary move in the middle of the stream.
+        if (tick === 5) runFrame('a', summary('a1', '2026-01-01'))
+      }
       runAnimationFrames()
-      // The row is current after every frame; nothing waits for the stream to go quiet.
-      expect(cached()?.runs.find((entry) => entry.id === 'a2')?.title).toBe(`tick ${tick}`)
-      await vi.advanceTimersByTimeAsync(200)
-      if (firstRead === undefined && queryFn.mock.calls.length > 0) firstRead = tick
+      // Nothing waits for the stream to go quiet: a tick older than one write interval plus one
+      // step is on screen.
+      const due = emitted.filter(([at]) => now - at >= RUNS_INDEX_WRITE_INTERVAL_MS + 50).at(-1)?.[1] ?? 0
+      expect(shownTick()).toBeGreaterThanOrEqual(due)
+      await vi.advanceTimersByTimeAsync(50)
+      if (firstRead === undefined && queryFn.mock.calls.length > 0) firstRead = step
     }
-    // The hold fired 400 ms after the boundary move (tick 5), under sustained events.
-    expect(firstRead).toBeLessThanOrEqual(7)
+    expect(minGap(writes())).toBeGreaterThanOrEqual(RUNS_INDEX_WRITE_INTERVAL_MS)
+    // The boundary move (step 16) is written within one write interval; the reconciliation hold
+    // then fires 400 ms later, under sustained events.
+    expect(firstRead).toBeLessThanOrEqual(16 + (RUNS_INDEX_WRITE_INTERVAL_MS + RUNS_INDEX_RECONCILE_HOLD_MS) / 50 + 1)
     expect(queryFn.mock.calls.length).toBeLessThanOrEqual(2)
     unsubscribe()
   })
