@@ -51,7 +51,7 @@ test('built worker CLI runs without cez on PATH; headless provision stays local 
     await execFile('git', ['config', 'maintenance.auto', 'false'], { cwd: repo });
     await execFile('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: repo });
     const run = await execFile(process.execPath, [cli, 'run', 'mock:cezar-done', '--repo', repo], {
-      cwd, env: { ...cleanEnv, CEZ_DRY_RUN: '1', CEZ_DELEGATION: '1', CEZ_AUTONAME: '0' }, timeout: 60_000,
+      cwd, env: { ...cleanEnv, CEZ_DRY_RUN: '1', CEZ_AUTONAME: '0' }, timeout: 60_000,
     });
     assert.match(run.stdout, /run (done|review)/);
     const records = readPersistedRuns(join(repo, '.ai/cezar'));
@@ -164,7 +164,7 @@ rl.on('line', line => {
 rl.on('close', () => queue.then(() => process.exit(0)));
 `, { mode: 0o755 });
     process.env.CEZ_HOME = join(root, 'cez-home'); process.env.CEZ_DRY_RUN = '1';
-    process.env.CEZ_DELEGATION = '1'; process.env.CEZ_AUTONAME = '0'; process.env.CEZ_REVIEW_GATE = '1';
+    process.env.CEZ_AUTONAME = '0'; process.env.CEZ_REVIEW_GATE = '1';
     process.env.CEZ_CLAUDE_BIN = mock; process.env.CLAUDE_CONFIG_DIR = home;
     delete process.env.CEZ_DELEGATION_TOKEN; delete process.env.CEZ_DELEGATION_URL;
     store = RunStore.open(join(repo, '.ai/cezar'), { keepLive: true });

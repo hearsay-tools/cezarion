@@ -2511,7 +2511,7 @@ migrates.
 
 Provisioning supplies the bundled absolute CLI invocation and fresh environment
 credentials for both parent and worker sessions; it never copies the parent's
-credential to a worker. With delegation disabled/unavailable, the intent is absent
+credential to a worker. With the listener unavailable, the intent is absent
 and ordinary execution keeps its prior settings. Start/Continue/recovery share the
 same provisioner, including nonfinal workflow steps.
 
