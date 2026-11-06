@@ -376,10 +376,10 @@ The moves that make the cockpit worth the browser tab:
   register; the desktop rail switches between them, and **All tasks** shows every
   project's tasks in one table. See
   [Multiple projects, one cockpit](#multiple-projects-one-cockpit).
-- 👥 **Owned workers (opt-in).** With `CEZ_DELEGATION=1`, a task's agent can spawn
-  its own tracked workers — on the same or another runner — message them, and
-  collect their diffs; you still review the result. See
-  [Owned workers](#owned-workers-opt-in).
+- 👥 **Owned workers.** A task's agent can spawn its own tracked workers — on the
+  same or another runner — message them, and collect their diffs; you still review
+  the result. Each task has an **Allow cezar workers** switch, on by default. See
+  [Owned workers](#owned-workers).
 - 📱 **Runs on your coding server, drives from your pocket.** The cockpit is a
   responsive web app streaming over SSE, so the box running Cezarion can be a
   **VPS, cloud, or dedicated server** you never sit in front of. Point a browser
@@ -763,9 +763,18 @@ as a patch. Collect each worker's latest settled revision before finishing. Owne
 keep their ownership, isolation, resource limits and Git cleanup safeguards. There is
 no one-click comparison page, automatic winner selection or automatic loser cleanup.
 
-## Owned workers (opt-in)
+## Owned workers
 
-Start the cockpit or a headless task with `CEZ_DELEGATION=1`. Each eligible parent session receives the absolute bundled Node/CLI invocation and its own environment credentials; no `cez` installation on the agent's PATH, config file, separate daemon, or remembered port is needed. If the private listener cannot start, ordinary tasks keep working without delegation tools. `.env` is never loaded automatically.
+Every task has two settings, both on by default:
+
+- **Allow cezar workers**: the task's agent may start Cezar workers and resume them. Each worker is a separate paid agent session. The worker limits below cap resources, not spending.
+- **Allow task messaging**: the task's agent may list, message and wait on other tasks in this project with `cez message`.
+
+Set them in the new-task form, in the task's header menu at any time, with `cez task start` or `cez run` and `--no-workers` / `--no-messaging`, or in an automation's `task.allowWorkers` / `task.allowMessaging`. A task created before these settings existed counts as on for both. The cockpit and headless `cez run` start one private loopback listener; each eligible session receives the absolute bundled Node/CLI invocation and its own environment credentials. No `cez` installation on the agent's PATH, config file, separate daemon, or remembered port is needed. If the listener cannot start, ordinary tasks keep working without delegation tools.
+
+Turning **Allow cezar workers** off refuses new `spawn` and `--resume` at once, including through a session's existing credential and for a spawn still waiting to be accepted. The task keeps messaging, waiting on, inspecting, collecting, stopping and destroying the workers it already has, and work already accepted finishes. Turning **Allow task messaging** off refuses new peer messages in both directions; a reply to a request accepted earlier still lands, and messages between a task and its own workers are never blocked. A task with both off and no workers gets no credential. Native subagents inside one session are not Cezar workers, and these settings do not change them. These settings are cooperative supervision, not process isolation.
+
+`CEZ_DELEGATION` is retired and has no effect. A caller that set `CEZ_DELEGATION=1` needs no change. A caller that relied on it being unset turns the settings off per task, for example `cez run --no-workers --no-messaging "<task>"`.
 
 The provisioned command has these forms (the session instructions supply the absolute invocation):
 
@@ -846,7 +855,7 @@ An explicit `--url` wins over `CEZ_URL`; `--repo` selects the checkout to discov
 
 `cez task send` is human input. It can answer a pending human question. It refuses
 inside a task (`CEZ_TASK_ID` is set). Agents use `cez message` for task messages,
-including peer and parent/worker conversations; see [Owned workers](#owned-workers-opt-in).
+including peer and parent/worker conversations; see [Owned workers](#owned-workers).
 
 ```bash
 id=$(cez task start --task-file - <<'EOF' | jq -r .id
@@ -1157,7 +1166,7 @@ Useful environment variables:
 
 | Var | Effect |
 |---|---|
-| `CEZ_DELEGATION=1` | Enable owned workers and the private loopback listener for this controller. Off by default; works with the cockpit and headless `cez run`. When disabled, terminal cleanup checkpoints skip conversation/wait history reconciliation; explicit recovery and cleanup termination safeguards remain active. Session instructions and credentials are automatic. |
+| `CEZ_DELEGATION` | Retired (hearsay-tools/cezarion#2784); has no effect. Workers and task messaging are per-task settings, both on by default. See [Owned workers](#owned-workers). |
 | `CEZ_DELEGATION_URL`, `CEZ_DELEGATION_TOKEN` | Internal generated session values; do not configure or copy them. Tokens rotate on Continue/restart and are revoked when the session/controller closes. |
 | `CEZ_UPDATE_CHANNEL` | Managed desktop channel: stable (default), nightly, or development. The version dialog's saved choice takes precedence. |
 | `CEZ_DESKTOP_ENTRY` / `CEZ_DESKTOP_CWD` / `CEZ_DESKTOP_NODE` | Desktop development overrides for the built entry, boot directory and Node executable; otherwise discovered automatically. |
@@ -1356,7 +1365,7 @@ steps:
 ```
 
 Owned workers can compare approaches in separate worktrees. Each worker has its own
-runner and model selection; see [Owned workers](#owned-workers-opt-in).
+runner and model selection; see [Owned workers](#owned-workers).
 
 **Models come from your own machine.** For Claude, Codex, OpenCode, and Pi, the model picker
 is not a list Cezarion ships — it asks the installed CLI what it can actually run

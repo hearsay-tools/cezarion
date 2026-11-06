@@ -7,6 +7,7 @@ import { RunStore, type RunRecord } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 
 /**
  * `PATCH /api/v1/runs/:id` (#389) through the real Hono app. The route touches
@@ -97,7 +98,7 @@ describe('PATCH /api/v1/runs/:id', () => {
 
   // hearsay-tools/cezarion#2784: task access changes at any status, commits at once and survives a reload.
   it.each(['queued', 'running', 'done'] as const)('sets task access on a %s run', async (status) => {
-    store.updateRun(run.id, { status });
+    setRunStatus(store, run.id, status);
     const res = await patch(run.id, { allowWorkers: false, allowMessaging: false });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ allowWorkers: false, allowMessaging: false });

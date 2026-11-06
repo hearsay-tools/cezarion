@@ -157,7 +157,7 @@ real exit (or a failed spawn). After exit, inherited stdout gets a bounded
 250ms drain; remaining pipe handles are closed. Neither a timeout nor sending
 a signal can fabricate an exit or free a still-live session's capacity.
 
-`cez task send` is human input. When `CEZ_TASK_ID` is nonempty, it exits 64 before contacting the cockpit, including with `--resume` or `--notify`. Use `cez message progress <task-id> '<text>' --id <message-UUID> (needs CEZ_DELEGATION=1)` for agent-to-task messaging.
+`cez task send` is human input. When `CEZ_TASK_ID` is nonempty, it exits 64 before contacting the cockpit, including with `--resume` or `--notify`. Use `cez message progress <task-id> '<text>' --id <message-UUID> (needs task messaging on)` for agent-to-task messaging.
 
 **Non-human input (owned workers, 2026-09-06; immediate delivery, hearsay-tools/cezarion#505).** `sendAgentMessage`
 must never resolve a native question or a `cezar_ask` question. False means the caller
@@ -2411,7 +2411,8 @@ the cockpit as a clean end of turn.
 
 ### Governed delegation controls (D1)
 
-hearsay-tools/cezarion#2279. With `CEZ_DELEGATION=1`, root tasks and owned workers may
+hearsay-tools/cezarion#2279. In a governed session (every session the always-on delegation listener
+provisions, hearsay-tools/cezarion#2784), root tasks and owned workers may
 use the native subagents their runner supports, subject to the user's tool settings.
 The two mechanisms have separate purposes: a native subagent does work that needs no
 separate worktree (research, code reading, focused analysis) and needs no Cezar worker,
@@ -2456,13 +2457,13 @@ collect, wait on or clean them up.
 Spec `.ai/specs/2026-10-27-task-communication-protocol.md` § 11 and
 hearsay-tools/cezarion#1994. A runner's native cross-session messages bypass cezar's
 recorded conversations: they carry no ledger, cockpit attribution, receipt or deadline,
-and no protection for human questions. Cezar tasks talk through `cez message` with
-`CEZ_DELEGATION=1`. Every session's instructions (`handoffInstructions` in
+and no protection for human questions. Cezar tasks talk through `cez message` when the
+task's messaging setting is on (hearsay-tools/cezarion#2784). Every session's instructions (`handoffInstructions` in
 `packages/cezar/src/handoff.ts`, "Messaging other tasks") say so at shipped defaults
 and under D1. The table records each runner's entry points, as inspected on the
 installed versions on 2026-10-27.
 
-| Runner (inspected version) | Native cross-session entry points | Shipped default (`CEZ_DELEGATION` unset) | Under D1 |
+| Runner (inspected version) | Native cross-session entry points | Ungoverned session (listener unavailable) | Under D1 |
 | --- | --- | --- | --- |
 | Claude Code 2.1.311 | Outbound: `SendMessage` and `ListAgents`. They reach other local sessions, cloud and Remote Control sessions, and also the session's own subagents, background agents and teammates. Inbound: other sessions' `SendMessage`, governed by the `crossSessionInbound` setting (`accept`, `hold`, `refuse`; unset delivers when the sender's permission-mode class matches). | Inbound refused: every launch passes `--settings {"crossSessionInbound":"refuse"}`. Outbound tools stay callable, because a deny would also stop follow-ups to the session's own subagents and teammates, and break plugin agents and skills that call `SendMessage`. | Inbound refused, as at defaults. Outbound `SendMessage` and `ListAgents` stay callable, as at defaults, because they also reach the session's own subagents (hearsay-tools/cezarion#2279). |
 | Codex 0.164.0 | None at defaults. The `multi_agent` tools (`spawn_agent`, `send_input`, `wait`) reach only agents of the same session. The cross-thread `agent_message_board` feature is "under development" and off by default. | No control: cezar sends no flag for an unstable feature key. | `features.agent_message_board` off (D1); multi-agent tools stay. |
@@ -2497,7 +2498,7 @@ round: their default wire carries no cross-session control. The day cezar adds o
 that exemption must go.
 
 **Compatibility (2026-10-27, deliberate).** The one changed default is Claude's inbound
-refusal. Every Claude launch, with or without `CEZ_DELEGATION=1`, passes the setting, so
+refusal. Every Claude launch, governed or not, passes the setting, so
 the user's other Claude sessions can no longer send `SendMessage` text into a cezar task.
 That path was never a cezar surface: the text bypassed the cockpit, the ledger and the
 handling of human questions. Human input still reaches a task through the cockpit and
@@ -2514,7 +2515,7 @@ credential to a worker. With delegation disabled/unavailable, the intent is abse
 and ordinary execution keeps its prior settings. Start/Continue/recovery share the
 same provisioner, including nonfinal workflow steps.
 
-The governed command protocol is documented with runnable forms in [README](README.md#owned-workers-opt-in).
+The governed command protocol is documented with runnable forms in [README](README.md#owned-workers).
 Spawn supports selected context (`--context` or UTF-8 `--context-file`) and backend/
 model selection; omitted backend follows the active parent, same-backend omitted
 model/account/effort inherit, and mixed-backend defaults resolve independently.

@@ -13,8 +13,7 @@ provides sendAgentMessage with separate asynchronous transport acknowledgement.
 The cockpit renders agent-input independently of human messages.
 
 Extend that foundation with a shared conversation protocol and request selections
-in the existing wait machinery. Keep the existing CEZ_DELEGATION opt-in and its
-default unchanged. No new environment variables, process, scheduler, or provider
+in the existing wait machinery. Keep the existing delegation gate (the per-task setting of ADR 0058 since hearsay-tools/cezarion#2784). No new environment variables, process, scheduler, or provider
 protocol. Parent/worker messaging does not grant spawn or peer-control authority.
 
 Alternatives considered:

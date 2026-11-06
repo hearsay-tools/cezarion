@@ -2627,11 +2627,6 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       }, 60_000);
     }
   });
-          } finally { vi.unstubAllEnvs(); }
-        }, 60_000);
-      }
-    }
-  });
 
   // #473: successful settlement closes intermediate Continues left by idle close.
   describeRunners('multi-continue', 'harness parity — multi-Continue settlement', () => {

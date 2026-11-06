@@ -26,7 +26,7 @@ New state may be **written**, never **required**: `.ai/cezar/`, `~/.cache/cez/`,
 Practical rules:
 
 - When a feature seems to need configuration, the design is wrong. Discover it, or default it.
-- Features that widen exposure or cost (network, other processes) are opt-in behind a `CEZ_*` flag, off by default — the zero-config default is also the safe default.
+- Features that widen exposure or cost (network, other processes) are opt-in behind an off-by-default `CEZ_*` flag, except [ADR 0058](docs/adr/0058-task-workers.md).
 - A missing dependency, an absent peer, a read-only home: degrade to a smaller working cockpit, never fail the boot.
 - Prefer a proxy-free, daemon-free mechanism when one exists — and when it doesn't, keep the mechanism invisible: no process to manage, no port to remember, no file to edit.
 - Never trade a working default for a knob.

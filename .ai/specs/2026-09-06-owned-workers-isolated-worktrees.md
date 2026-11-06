@@ -19,7 +19,8 @@ or automatic review acceptance. Issues hearsay-tools/cezarion#112–hearsay-tool
 
 - Architectural design track, with a written spec and implementation plan.
 - CLI-first over one shared delegation service; defer an MCP adapter.
-- Explicit `CEZ_DELEGATION=1` opt-in, automatic per-session provisioning,
+- Per-task "Allow cezar workers" setting, on by default (hearsay-tools/cezarion#2784,
+  ADR 0058; `CEZ_DELEGATION=1` before it), automatic per-session provisioning,
   server-derived caller identity, persistent ownership and effective permissions.
 - Explicit committed baseline, pinned when spawn is accepted; parent HEAD is
   supported without copying or autosaving dirty parent edits.
@@ -80,9 +81,9 @@ rotate on continuation/restart, and explicitly strip parent delegation variables
 when constructing any worker environment. Each launched session gets only its
 own credential. Centralize provisioning for both execute and runContinuation.
 
-`CEZ_DELEGATION` defaults off. Disabling it rejects new agent operations and
-omits provisioning, but does not disable reconciliation or human cleanup of
-already persisted worker relationships. No optional state needs a user-authored
+Each task's "Allow cezar workers" setting defaults on (ADR 0058; `CEZ_DELEGATION` is
+retired). Turning it off rejects new spawn and resume, but does not disable management,
+reconciliation or human cleanup of already persisted worker relationships. No optional state needs a user-authored
 file or migration to boot.
 
 ### Trust boundary
