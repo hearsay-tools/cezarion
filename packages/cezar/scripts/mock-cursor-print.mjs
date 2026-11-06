@@ -208,7 +208,7 @@ if (silentOrigin) (await import('./mock-silent-tail.mjs')).noteSilentTailPrompt(
 await dispatch([
   { name: 'crash-stderr' },
   { when: () => origin === 'autonomous-cezar-ask-cap' && resumeId && prompt.startsWith('Continue working autonomously until the task is fully complete.'), reply: () => finish('Still working.') },
-  { name: 'autonomous', prompt: () => origin?.startsWith('autonomous') ? `${prompt} mock:${origin}` : prompt },
+  { name: 'autonomous', prompt: () => origin?.startsWith('autonomous') && selectScenario('autonomous') ? `${prompt} mock:${origin}` : prompt },
   { name: 'silent-tail' }, { name: 'tool-tail' },
   { when: () => origin === 'resume-cezar-done' && resumeId, reply: async () => finish(await done('Resumed work finished.')) },
   { name: 'cezar-tool' }, { name: 'ci-wait' },
