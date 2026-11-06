@@ -194,12 +194,11 @@ One code path, `migrateLegacyHome()`, runs at the first boot of the new build an
    window-end cleanup never deletes it; it prints what still uses it.
 
 **`CEZ_HOME` set to a non-default dir** (containers, custom hosts): treat it as
-`<NAME>_HOME` one-root, migrate in place into `config/`, `state/`, and so on. The migration
-also writes a pointer, `home.json` (`{ "root": "<dir>" }`), in the default config dir, and the
-boot warning tells the operator to rename the variable. `resolveHome` uses `<NAME>_HOME`, then
-`CEZ_HOME` during the window, then the pointer, then the default; so a host that still sets
-only `CEZ_HOME`, or no variable, keeps its custom home after P5 removes the fallback. A
-test covers a restart after P5 with an existing custom home.
+`<NAME>_HOME` one-root, migrate in place into `config/`, `state/`, and so on. `CEZ_HOME`
+stays an accepted home variable after P5, unlike the other `CEZ_*` names: `resolveHome` uses
+`<NAME>_HOME`, then `CEZ_HOME`, then the default, and a boot warning asks the operator to
+rename it. So every custom install, container or not, keeps its own home with no pointer
+file. A test covers a restart after P5 with only `CEZ_HOME` set.
 
 **Server installs** (apptension-host serves 12 projects): `<name> server migrate` first stops
 every instance that shares the legacy home, migrates that home once, then for each instance in
@@ -242,6 +241,13 @@ plus one per day for 30 days. `<name> backup list` and `<name> backup restore <f
 zero accounts, the cockpit shows a banner with a one-click restore of the newest backup.
 `config.json.bak` (ADR 0010) becomes the newest entry of this set.
 
+A test or stray process can also write a live file directly, past `HomeStore`. So
+`HomeStore` also stores each version it writes in `backups/` and records that version's hash.
+When it reads a file whose content does not match the last recorded hash, the write came
+from outside: the cockpit keeps the file as found, shows a banner that names the file, and
+offers to restore the last version that `HomeStore` wrote. This is the live-home twin of the
+legacy-home canary. A direct write between two reads is still detected at the next read.
+
 ## 6. Delivery
 
 ### One release, landed dark
@@ -268,7 +274,7 @@ release are the single user-visible change.
 | **P3 Name surfaces** | (a) One env helper: `<NAME>_*` first, `CEZ_*` fallback (additive). (b) `<name>` bin added beside `cezarion` and `cez` (additive). (c) Package `@hearsay-tools/<name>` prepared; publish waits for the switch. (d) Desktop and mobile new IDs and the bridge build, behind the switch. (e) Docs and display names, merged with the switch PR. | Additive names only |
 | **P4 Project dir** | Dual read of `.ai/cezar/` and `.ai/<name>/` (additive). Built in P4, enabled in P5: `<name> migrate-project`: runs only under an exclusive project fence. A cockpit that owns the project (`server/cockpit-ownership.ts`) runs the migration itself: it stops accepting task starts and project reads for that project, waits until no task is live, and holds the fence until every rewrite ends. A CLI run asks the owning cockpit to do it, or, when no cockpit owns the project, takes the ownership lock itself so no cockpit can start on the project meanwhile. Every CLI operation on the project checks the fence. It first writes a journal (`.ai/<name>-migration.json` beside both dirs) that lists every step and every path rewrite: move the dir, `git worktree repair`, rewrite the owned-workspace receipt files under `gitCommonDir(repoRoot)/cezar-owned-workspaces` (`delegation/workspace.ts`; in a linked worktree `.git` is a file), then one run-store transaction for each run's `worktreePath`, `delegation.workspace.path`, cleanup checkpoints, artifact and handoff paths. Each step is idempotent and marks itself done in the journal. Any later start of the cockpit, the CLI or `migrate-project` that finds an unfinished journal resumes it before anything else reads the project, so a crash never leaves receipts, worktrees and the database on different paths. A dry run lists every rewrite first. Tracked files under `.ai/cezar/` (workflows, skills, `context.yaml`) are not moved by the command: it prints the `git mv` for the user to commit. The command ships with P5, after the deprecation window, because an older binary opens `.ai/cezar` directly and would create an empty run store after a move; until then `.ai/cezar` stays a real directory and both names are read. | Command only |
 | **Switch** | Turn `REBRAND_SWITCH` on; deprecation notices start; docs land. Then owner actions: stable release, npm publish and deprecate, repo rename, store listings, apptension-host server migration. | Yes: the release |
-| **P5 Window end** | Remove aliases and `CEZ_*` fallbacks and enable `<name> migrate-project`, two minor releases or 60 days after the release. | Yes |
+| **P5 Window end** | Remove aliases and `CEZ_*` fallbacks (except `CEZ_HOME`, section 4) and enable `<name> migrate-project`, two minor releases or 60 days after the release. | Yes |
 
 Dependencies: P1(a-1) before every other P1 slice and P2; P0(c) before P1(b) and P1(c) (same writers); P1(b) before P1(c) and P1(d); P0(b) before P1(d); P0(c) before P2(b); P2(a) before P2(b–d); P2(b) before
 P2(c); P1(b) before P2(b). P0 and P3(a–b) do not depend on P1 and run in parallel with it.
