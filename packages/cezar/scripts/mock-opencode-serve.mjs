@@ -2,6 +2,7 @@
 import { loadControls } from './mock-controls.mjs';
 import { waitForRelease } from './mock-lifecycle.mjs';
 import { scenarioFor, play } from './mock-scenario.mjs';
+import { isAckOnlyNudge, finalMessageNudgeKind } from './mock-silent-tail.mjs';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync as sessionStoreExists, mkdirSync, readFileSync, writeFileSync as sessionStoreWrite } from 'node:fs';
 import { createServer } from 'node:http';
@@ -18,7 +19,7 @@ let inputClosed = false;
 // response resolves immediately — every part and the closing `session.idle`
 // arrive over SSE afterwards, so a correct stream (v1 and v2 alike) must
 // take its turn-end from `session.idle`, never from the HTTP response.
-const { answerNudgeBody } = await import('./mock-nudge.mjs');
+const { answerNudgeBody, silentNudge } = await import('./mock-nudge.mjs');
 // #872: the first N starts die before listening, the way opencode 1.18.33 did
 // when started within ~2 s of SIGTERM to the previous server on the same DB.
 // Starts are counted across processes in a file, so start N+1 listens normally.
@@ -847,6 +848,7 @@ const TEXT_IDS = {
 /** Wire ids, SSE framing, usage, idle scheduling and steering remain native. */
 function scenarioEncoder(scenario, url, body) {
   const name = scenario?.name;
+  const nudge = silentNudge(promptText(body));
   let textIndex = 0;
   let opened = false;
   const encoder = {
@@ -854,6 +856,10 @@ function scenarioEncoder(scenario, url, body) {
     open(step) {
       if (step.ackOnly) {
         if (name === 'ack-only') heartbeatHold();
+        if (nudge && isAckOnlyNudge(promptText(body))) {
+          const beats = setInterval(() => { if (sse) sse.write(': heartbeat\n\n'); }, 50);
+          beats.unref?.();
+        }
         return;
       }
       if (name === 'deferred-turn-start') { publishUser(url, body); return; }
@@ -864,7 +870,7 @@ function scenarioEncoder(scenario, url, body) {
     reply: () => replyWithOrdinaryTurn(),
     text(step) {
       if (name === 'busy-progress') send({ type: 'message.updated', properties: { info: info({}) } });
-      const id = scenarioTextId(name, textIndex++);
+      const id = scenarioTextId(name, textIndex++, nudge);
       const timed = !['agent-echo', 'ci-wait', 'hold', 'hold-gated'].includes(name);
       let text = '';
       for (const [index, part] of step.parts.entries()) {
@@ -877,7 +883,7 @@ function scenarioEncoder(scenario, url, body) {
     },
     reasoning(step) {
       send({ type: 'message.part.updated', properties: { part: {
-        id: name === 'multi-pr-refs' ? 'multi-reasoning' : 'silent-rsn',
+        id: name === 'multi-pr-refs' ? 'multi-reasoning' : nudge ? 'silent-nudge-rsn' : 'silent-rsn',
         messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'reasoning', text: step.text,
         ...(name === 'multi-pr-refs' ? {} : { time: { start: 1, end: 2 } }),
       } } });
@@ -901,7 +907,10 @@ function scenarioEncoder(scenario, url, body) {
     end(step) {
       if (step.error === 'provider') { sendProviderFailure(); return; }
       if (['hold', 'hold-gated', 'hold-cezar-ask', 'hold-cezar-done', 'cezar-ask', 'cezar-done'].includes(name)) sendUsageThenIdle();
-      else send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+      else {
+        if (name === 'busy-progress') send({ type: 'message.updated', properties: { info: info({ cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } } }) } });
+        send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+      }
     },
   };
   return encoder;
@@ -911,11 +920,11 @@ function scenarioTextTime(name) {
   if (name === 'steer-late') return { start: 1760000000000, end: 1760000000001 };
   return { start: 1, end: 2 };
 }
-function scenarioTextId(name, index) {
+function scenarioTextId(name, index, nudge) {
   if (name === 'turn-messages') return `prt_multi_${++echoSerial}`;
   if (name === 'agent-echo') return `prt_echo_${++echoSerial}`;
   if (name === 'autonomous') return `autonomous-${++autonomousTurn}`;
-  if (name === 'silent-tail') return ['silent-open', 'silent-nudge-done'][index] ?? `silent-text-${index}`;
+  if (name === 'silent-tail') return nudge ? (index === 0 && finalMessageNudgeKind() === 'slow-done' ? 'silent-nudge-prefix' : 'silent-nudge-done') : 'silent-open';
   if (name === 'tool-tail') return 'tool-tail-open';
   return TEXT_IDS[name] ?? `prt_scenario_${index}`;
 }
@@ -926,14 +935,15 @@ function scenarioToolPart(name, call, status) {
   };
   const [id, callID] = ids[name] ?? [call.id, call.id];
   send({ type: 'message.part.updated', properties: { part: {
-    id, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool', tool: call.name, callID,
+    id, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'tool',
+    ...(name === 'multi-pr-refs' ? { tool: call.name, callID } : { callID, tool: call.name }),
     state: { status, input: name === 'multi-pr-refs' ? { filePath: call.input.path } : call.input, ...(status === 'completed' ? { output: call.output } : {}),
       ...(['multi-pr-refs', 'silent-tail', 'tool-tail'].includes(name) ? { time: { start: 1, end: 2 } } : {}) },
   } } });
 }
 function playScenarioChild(step, playChild, encoder) {
   if (step.phase === 'start') send({ type: 'message.updated', properties: { info: { ...info({}), id: 'park-child-msg', sessionID: 'park-child', parentID: SESSION_ID, mode: 'subagent' } } });
-  const part = value => send({ type: 'message.part.updated', properties: { part: { messageID: 'park-child-msg', sessionID: 'park-child', ...value } } });
+  const part = ({ id, ...value }) => send({ type: 'message.part.updated', properties: { part: { id, messageID: 'park-child-msg', sessionID: 'park-child', ...value } } });
   const result = playChild({ ...encoder,
     text: value => part({ id: step.phase === 'start' ? 'early-child' : 'late-child-text', type: 'text', text: value.parts.join(''), time: step.phase === 'start' ? { start: 1, end: 2 } : { start: 3, end: 4 } }),
     toolStart: ({ call }) => part({ id: 'late-read', type: 'tool', tool: call.name, state: { status: 'running', input: call.input } }),
@@ -950,6 +960,16 @@ function sendProviderFailure() {
   setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
 }
 
+async function dispatchNativeReply(body, scenario) {
+  if (body.includes('mock:subagent') && scenario?.name !== 'subagent-after-park') { await replyWithSubagent(body); return true; }
+  if (body.includes('mock:skill-warning')) await replyWithSkillWarning(body);
+  if (replyWithFatalControl(body)) return true;
+  if (body.includes('mock:provider-error-early')) { await replyWithEarlyProviderError(body); return true; }
+  if (await replyWithNativeFailure(body)) return true;
+  if (await dispatchReply(nativeReplies, body)) return true;
+  return false;
+}
+
 async function streamPrompt(url, body) {
   const prompt = promptText(body);
   const scenario = scenarioFor(prompt, scenarioContext);
@@ -959,12 +979,7 @@ async function streamPrompt(url, body) {
   if (scenario?.name !== 'deferred-turn-start') publishUser(url, body);
   if (scenario?.early && await play(scenario, encoder) === 'handled') return;
   if (scenario?.beforeFailure && !scenario.early && await play(scenario, encoder) === 'handled') return;
-  if (body.includes('mock:subagent') && scenario?.name !== 'subagent-after-park') { await replyWithSubagent(body); return; }
-  if (body.includes('mock:skill-warning')) await replyWithSkillWarning(body);
-  if (replyWithFatalControl(body)) return;
-  if (body.includes('mock:provider-error-early')) { await replyWithEarlyProviderError(body); return; }
-  if (await replyWithNativeFailure(body)) return;
-  if (await dispatchReply(nativeReplies, body)) return;
+  if (await dispatchNativeReply(body, scenario)) return;
   if (scenario && !scenario.beforeFailure && await play(scenario, encoder) === 'handled') return;
   replyWithOrdinaryTurn();
 }
