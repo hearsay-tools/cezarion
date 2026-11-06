@@ -11,7 +11,7 @@
       "file": "api/global-events.test.tsx",
       "rule": "short-bound",
       "site": "await vi.waitFor(() =>",
-      "count": 3
+      "count": 1
     },
     {
       "file": "api/global-events.test.tsx",

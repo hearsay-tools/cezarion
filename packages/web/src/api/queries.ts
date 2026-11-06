@@ -3,6 +3,8 @@ import type { ReadPatch } from './run-cache'
 import { useRunCacheWriter } from './use-run-cache-writer'
 import { isCockpitE2e } from '@/lib/e2e-mode'
 import { useLiveRead, subscribeLiveRead } from './live-reads'
+import { mergeRunsIndexRead, RUNS_INDEX_BACKSTOP_MS, RUNS_INDEX_QUERY_KEY, runsIndexSync } from './runs-index-sync'
+export { RUNS_INDEX_BACKSTOP_MS } from './runs-index-sync'
 import { configureLiveSession, resetLiveSession } from './live-coordinator'
 import { getApiBaseUrl } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { normalizeSidebarLimits, runnerModelCatalogResponseSchema } from '@open-mercato/cezar-api-client/contract/workspace'
@@ -271,7 +273,7 @@ export const workspaceQueryKeys = {
   githubOwners: ['workspace', 'github-owners'] as const,
   /** The cross-project task index behind ⌘K. Workspace-led for the same reason the registry is:
    *  it answers for every project at once, so no scope owns it. */
-  runsIndex: ['workspace', 'runs-index'] as const,
+  runsIndex: RUNS_INDEX_QUERY_KEY,
   runsSearch: (q: string) => ['workspace', 'runs-search', q] as const,
   /** `~/.cezar/ui-state.json` via `GET/PUT /api/workspace/ui-state` (step 2.7) — cross-project
    *  GUI prefs, e.g. the sidebar's per-project collapse map (step 3.3), and — since step 3.5 —
@@ -1005,38 +1007,26 @@ export function useRunsSearch(q: string) {
 export const MIN_RUNS_SEARCH_LENGTH = 2
 
 /**
- * Every registered project's recent tasks, slim — the ⌘K palette's cross-project finder.
+ * Every registered project's recent tasks, slim: ⌘K, the sidebar signals and the global Tasks
+ * page. ONE request for the whole registry; N `useProjectRuns` calls would ship full records.
  *
- * `enabled` rather than always-on, and the palette passes `false` in a single-project workspace:
- * there is nothing to aggregate there, and the active project's own `useRuns()` entry (already
- * warm, and stream-patched) answers better than this snapshot could.
- *
- * ONE request for the whole registry, deliberately — the alternative, N `useProjectRuns` calls,
- * ships a full `RunRecord` per run (`steps[]` and all) times the registry, to render a title and
- * a dot. `staleTime` because a task search is a glance, not a live view: the palette mounts on
- * open, and re-opening it seconds later should not re-ask the whole workspace. The active
- * project's rows come from `useRuns()` anyway, so the live half of the list is never this stale.
+ * The workspace stream patches this cache row by row (`runs-index-sync.ts`,
+ * hearsay-tools/cezarion#2729). Every snapshot, from the query function or the shared live read,
+ * passes the sync's fence `merge`. The recurring read is the visible-only backstop for projects
+ * another cezar process runs (D2): `RUNS_INDEX_BACKSTOP_MS` by default, or a shorter interval a
+ * caller passes (the global Tasks page). The shared worker reads the path once, at the shortest
+ * interval any document asks for. No `refetchOnWindowFocus`: `global-events.tsx` reconciles this
+ * key on visibility restore through the same fence.
  */
-export function useRunsIndex(enabled = true, refetchIntervalMs?: number) {
-  useLiveRead('/api/v1/workspace/runs-index', workspaceQueryKeys.runsIndex, liveRefetchInterval(enabled ? refetchIntervalMs ?? false : false))
+export function useRunsIndex(enabled = true, refetchIntervalMs: number = RUNS_INDEX_BACKSTOP_MS) {
+  const sync = runsIndexSync(useQueryClient())
+  useLiveRead('/api/v1/workspace/runs-index', workspaceQueryKeys.runsIndex, liveRefetchInterval(enabled ? refetchIntervalMs : false), mergeRunsIndexRead)
   return useQuery({
     queryKey: workspaceQueryKeys.runsIndex,
-    queryFn: ({ signal }) => getRunsIndex({ signal }),
+    queryFn: ({ signal }) => getRunsIndex({ signal }).then(sync.merge),
     enabled,
     staleTime: 30_000,
-    // The cockpit's default is NO polling, because the run stream says when something changed
-    // (see `createQueryClient`). This index DOES hear the stream — the one `/workspace/events`
-    // connection carries every project's run news, and `global-events.tsx` debounces it into an
-    // invalidation here — so the interval is a backstop for what a stream cannot promise (a
-    // dropped socket, a frozen tab, a run that ended while the connection was down), not the only
-    // freshness mechanism. Only the global Tasks page (a live view rather than a glance) asks for
-    // one; the palette leaves it off and keeps its 30s staleness.
     refetchInterval: false,
-    // No `refetchOnWindowFocus` here on purpose, though the tab-comes-back case is real (the
-    // interval above does not run in a hidden tab). `global-events.tsx` already reconciles this
-    // key on `visibilitychange`, which is the same event with better manners — one reconcile for
-    // every stale cache rather than a per-query refetch, and it fires on the visibility flip
-    // rather than on every window focus.
   })
 }
 
