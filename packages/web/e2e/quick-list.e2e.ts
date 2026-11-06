@@ -470,7 +470,7 @@ describe('tasks table overview', () => {
     const diffs = browser.evaluate(`Object.fromEntries(
       [...document.querySelectorAll('${TABLE_ROW}')].map((tr) => [
         tr.dataset.runId,
-        tr.querySelector('td:nth-child(5)').textContent,
+        tr.querySelector('[role=cell][data-column-id="diff"]').textContent,
       ])
     )`) as Record<string, string>
 

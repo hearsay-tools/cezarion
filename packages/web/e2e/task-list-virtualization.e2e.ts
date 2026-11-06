@@ -1,4 +1,4 @@
-import { waitForSettledSample } from './visual-ready'
+import { settleVisual, waitForSettledSample } from './visual-ready'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { AgentBrowser } from './agent-browser'
 import { createTabFixture } from './tab-fixture'
@@ -23,7 +23,7 @@ it('bounds rows, preserves focused controls and expansion, and follows pathname 
   browser.click(`${row} button[aria-label^="Show resources"]`)
   browser.waitForFunction(`document.querySelector('${row} button[aria-expanded="true"]') !== null`)
   // Keyboard traversal crosses the spanning preview into the next logical run.
-  const next = browser.waitForValue(`document.querySelectorAll('[data-slot="task-summary-row"]')[1]?.dataset.runId`) as string
+  const next = browser.waitForValue(`(() => { const current=document.querySelector('${row}');const index=Number(current.getAttribute('aria-rowindex'))+2;return current.closest('[role="table"]').querySelector('[data-slot="task-summary-row"][aria-rowindex="'+index+'"]')?.dataset.runId })()`) as string
   browser.evaluate(`const detail=document.querySelector('${row}').nextElementSibling;const controls=detail.querySelectorAll('a[href],button:not([disabled]),[tabindex="0"]');controls[controls.length-1].focus()`)
   browser.press('Tab')
   expect(browser.waitForValue(`document.activeElement?.closest('[data-run-id]')?.dataset.runId`)).toBe(next)
@@ -36,11 +36,17 @@ it('bounds rows, preserves focused controls and expansion, and follows pathname 
   browser.waitForFunction(`document.querySelector('${row}') === null`)
   browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop=0`)
   browser.waitForFunction(`document.querySelector('${row} button[aria-expanded="true"]') !== null`)
+  settleVisual(browser, row, { idle: true })
   browser.click(`${row} [data-slot="row-rename"]`)
   browser.fill(`${row} input[aria-label="Task title"]`, 'Pinned rename draft')
   browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop=7000`)
   expect(browser.waitForValue(`document.activeElement?.value`)).toBe('Pinned rename draft')
   browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop=0`)
+  browser.click(`${row} button[aria-label="Cancel rename"]`)
+  settleVisual(browser, row, { idle: true })
+  browser.evaluate(`document.querySelector('${row} [data-slot="row-rename"]').focus()`)
+  browser.press('Enter')
+  browser.waitForFunction(`document.querySelector('${row} input[aria-label="Task title"]') !== null`)
   browser.click(`${row} button[aria-label="Cancel rename"]`)
   // The measurement override is a query change: it must retain the page offset.
   browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop=500`)
