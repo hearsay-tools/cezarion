@@ -377,6 +377,45 @@ describe('useRunHistory', () => {
     vi.unstubAllGlobals()
   })
 
+  // hearsay-tools/cezarion#2588: until the context lands, the current state is the newest page
+  // alone, and a reader that counts agents must know it is partial.
+  it('reports the current state incomplete until the context reaches the newest page', async () => {
+    const late = deferred<RunHistoryContext>()
+    mockHistory.mockResolvedValue(tail(51, 100))
+    mockContext.mockReturnValue(late.promise)
+    const { wrapper } = harness()
+    const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
+
+    await waitFor(() => expect(result.current.isPending).toBe(false))
+    expect(result.current.currentComplete).toBe(false)
+    await act(async () => late.resolve(context()))
+    await waitFor(() => expect(result.current.currentComplete).toBe(true))
+  })
+
+  it('refreshes the context with each compaction, so frames before the new page stay current', async () => {
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const agentStart = { seq: 110, ts: '2026-07-30T00:00:00.000Z', type: 'item.started', item: { kind: 'tool', id: 'agent-1', toolKind: 'task', status: 'running', title: 'Agent: one' } }
+    mockHistory.mockResolvedValueOnce(page(100)).mockResolvedValue(tail(201, 300))
+    mockContext.mockResolvedValueOnce(context())
+      .mockResolvedValue({ contextEvents: [...context().contextEvents, agentStart] as RunHistoryContext['contextEvents'], asOfSeq: 300 })
+    const { wrapper } = harness()
+    const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+
+    act(() => {
+      for (let seq = 101; seq <= 300; seq += 1) {
+        FakeEventSource.instances[0]!.emit('run-event', seq === 110 ? JSON.stringify(agentStart) : note(seq))
+      }
+    })
+
+    await waitFor(() => expect(result.current.visibleEvents[0]?.seq).toBe(201))
+    expect(mockContext).toHaveBeenCalledTimes(2)
+    expect(result.current.currentEvents.map(({ seq }) => seq)).toContain(110)
+    expect(result.current.currentComplete).toBe(true)
+    vi.unstubAllGlobals()
+  })
+
   /**
    * The compaction call is fire-and-forget, so it has no query to carry a rejection (#827).
    * Since the client now REJECTS a malformed history page instead of casting it, this path can

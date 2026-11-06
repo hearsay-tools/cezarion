@@ -8,6 +8,7 @@ import {
   WAIT_PHASE,
   WAIT_SOURCE,
   WAIT_VIA,
+  makeSubagentWait,
 } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -103,8 +104,9 @@ function renderDock(
   relationships: 'ok' | 'error' = 'ok',
   overrides: Record<string, () => Response> = {},
   // Activity starts folded (hearsay-tools/cezarion#1601); most cases read the open card.
-  { open = true, readerScroll, sticky = false }: {
+  { open = true, readerScroll, sticky = false, currentComplete }: {
     open?: boolean
+    currentComplete?: boolean
     readerScroll?: ((listener: ReaderScrollListener) => () => void) | undefined
     sticky?: boolean
   } = {},
@@ -134,7 +136,7 @@ function renderDock(
       <ProjectScopeProvider projectId="sample">
         <MemoryRouter initialEntries={[`/p/sample/tasks/${record.id}`]}>
           <div data-slot="thread-dock" style={sticky ? { position: 'sticky' } : undefined}>
-            <RunActivityDock run={current} currentThread={reduceThread(events)} readerScroll={readerScroll} />
+            <RunActivityDock run={current} currentThread={reduceThread(events)} currentComplete={currentComplete} readerScroll={readerScroll} />
           </div>
         </MemoryRouter>
       </ProjectScopeProvider>
@@ -153,6 +155,43 @@ const sectionHead = (key: string) =>
   document.querySelector<HTMLButtonElement>(`[data-slot="run-activity-${key}"] > button`)!
 const metaOf = (key: string) =>
   document.querySelector(`[data-slot="run-activity-${key}"] [data-slot="run-activity-meta"]`)?.textContent
+
+// hearsay-tools/cezarion#2588: task 4935efd3 started four background agents in one turn. Until the
+// history context loaded, the thread held only the newest page, which began after the first
+// three, so the section read "0 of 1 complete" beside "Waiting for 4 subagents".
+describe('RunActivityDock — subagent counts agree with the subagent wait', () => {
+  const titles = ['Design summary events', 'Design report shelf refresh', 'Design task list rendering', 'Design git probe coalescing']
+  const agentEvents = titles.map((title, index) => line(index + 2, 'item.updated', {
+    item: { kind: 'tool', id: `agent_${index}`, name: 'Agent', toolKind: 'task', title: `Agent: ${title}`, status: TOOL_STATUS.running, background: true },
+  }))
+  const parked = run({
+    status: RUN_STATUS.waiting,
+    waits: [makeSubagentWait({ children: titles.map((_, index) => ({ id: `agent_${index}`, status: 'running' as const })) })],
+  })
+  const statusText = () => document.querySelector('[data-slot="run-activity-status"]')?.textContent
+
+  it('shows four running agents as four rows and "0 of 4 complete" beside "waiting for 4 subagents"', () => {
+    renderDock(parked, [line(1, 'turn.started', { turnId: 'turn_1' }), ...agentEvents], [])
+    expect(statusText()).toBe('Waiting for 4 subagents')
+    expect(metaOf('subagents')).toBe('0 of 4 complete')
+    fireEvent.click(sectionHead('subagents'))
+    expect(document.querySelectorAll('[data-slot="agent-item"]')).toHaveLength(4)
+  })
+
+  it('hides the section while the thread holds only the newest page', () => {
+    renderDock(parked, [agentEvents.at(-1)!], [], 'ok', {}, { currentComplete: false })
+    expect(statusText()).toBe('Waiting for 4 subagents')
+    expect(section('subagents')).toBeNull()
+  })
+
+  it('updates the waiting count and the completion total together when an agent ends', () => {
+    const ended = [...agentEvents, line(9, 'item.completed', { item: { ...(agentEvents[0] as { item: object }).item, status: 'completed' } })]
+    const children = titles.map((_, index) => ({ id: `agent_${index}`, status: index === 0 ? 'completed' as const : 'running' as const }))
+    renderDock(run({ status: RUN_STATUS.waiting, waits: [makeSubagentWait({ children })] }), [line(1, 'turn.started', { turnId: 'turn_1' }), ...ended], [])
+    expect(statusText()).toBe('Waiting for 3 subagents')
+    expect(metaOf('subagents')).toBe('1 of 4 complete')
+  })
+})
 
 describe('RunActivityDock — one card, one row per section', () => {
   it('titles each row and meters it, workflow by its current step name', () => {

@@ -411,6 +411,28 @@ describe('live cursor replay and compact context', () => {
     expect(itemEvents.map(({ seq }) => seq)).toEqual([6, 8]);
     expect(context.contextEvents.at(-1)).toMatchObject({ seq: 9, type: 'plan.updated', entries: [] });
   });
+
+  // hearsay-tools/cezarion#2588: the subagent wait counts a running background agent, so the
+  // context keeps its turn past a settled fan-out, as the Subagents section does.
+  it('keeps a running background agent from before a settled fan-out', async () => {
+    const root = (seq: number, id: string, status: string, type = 'item.started') =>
+      ({ seq, type, item: { kind: 'tool', id, toolKind: 'task', status, background: true, title: `Agent: ${id}` } }) as Partial<RunEvent> & Pick<RunEvent, 'seq' | 'type'>;
+    const settled = fixture([
+      { seq: 1, type: 'turn.started', turnId: 't1' },
+      root(2, 'long', TOOL_STATUS.running),
+      { seq: 3, type: 'turn.started', turnId: 't2' },
+      root(4, 'old', TOOL_STATUS.running),
+      root(5, 'old', 'completed', 'item.completed'),
+      { seq: 6, type: 'turn.started', turnId: 't3' },
+      root(7, 'now', TOOL_STATUS.running),
+      { seq: 8, type: 'turn.started', turnId: 't4' },
+    ]);
+    const context = await deriveRunContextEvents(settled.dataDir, settled.id);
+    const roots = context.contextEvents.filter(({ type }) => type.startsWith('item.')).map((event) => (event as { item: { id: string } }).item.id);
+    expect(roots).toContain('long');
+    expect(roots).toContain('now');
+    expect(roots).not.toContain('old');
+  });
 });
 
 it('compact context keeps the latest agent-browser state however old it is (hearsay-tools/cezarion#784)', async () => {

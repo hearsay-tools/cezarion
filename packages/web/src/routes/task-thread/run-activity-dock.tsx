@@ -78,6 +78,9 @@ type SectionKey = 'status' | 'workflow' | 'subagents' | 'workers' | 'plan' | 'us
 export function RunActivityDock(props: {
   run: ApiRun
   currentThread: ThreadState
+  /** `currentThread` holds the run's whole current state (`RunHistoryState.currentComplete`).
+   *  Absent: it does. */
+  currentComplete?: boolean | undefined
   onOpenWorker?: ((id: string) => void) | undefined
   /** The transcript's reader scroll signals (`useThreadScroll().subscribeReaderScroll`). */
   readerScroll?: ((listener: ReaderScrollListener) => () => void) | undefined
@@ -100,6 +103,7 @@ export function RunActivityDock(props: {
 function SessionActivityCard({
   run,
   currentThread,
+  currentComplete = true,
   onOpenWorker,
   readerScroll,
   prNumbers,
@@ -108,6 +112,7 @@ function SessionActivityCard({
 }: {
   run: ApiRun
   currentThread: ThreadState
+  currentComplete?: boolean | undefined
   onOpenWorker?: ((id: string) => void) | undefined
   readerScroll?: ((listener: ReaderScrollListener) => () => void) | undefined
   prNumbers: number[]
@@ -124,7 +129,7 @@ function SessionActivityCard({
   // and a reader opens the one they came for. Workers are the exception, open by default so
   // their task links stay directly reachable: they are navigation, not detail.
   const [sections, setSections] = useState<Record<string, boolean>>({})
-  const activity = useSessionActivity(run, currentThread, prNumbers)
+  const activity = useSessionActivity(run, currentThread, currentComplete, prNumbers)
   const resume = useResumeInTerminal(run)
 
   const isOpen = (key: SectionKey) => sections[key] ?? openSections.get(`${run.id}:${key}`) ?? key === 'workers'
@@ -185,7 +190,7 @@ interface SectionDisclosure {
 type SessionActivity = ReturnType<typeof useSessionActivity>
 
 /** Everything the header and more than one section read, derived once per render. */
-function useSessionActivity(run: ApiRun, currentThread: ThreadState, prNumbers: number[]) {
+function useSessionActivity(run: ApiRun, currentThread: ThreadState, currentComplete: boolean, prNumbers: number[]) {
   const health = useHealth()
   const metrics = usageMetricVisibility(health.data)
   const runs = useRuns()
@@ -193,7 +198,12 @@ function useSessionActivity(run: ApiRun, currentThread: ThreadState, prNumbers: 
   const line = runStatusLine(run, { queuePosition })
   const conflicts = useConflictingPullRequests(prNumbers)
   const runIsTerminal = !isSessionOpen(run) && run.status !== 'queued'
-  const agents = useMemo(() => collectSubagents(currentThread.turns, runIsTerminal), [currentThread.turns, runIsTerminal])
+  // A partial thread can miss agents the newest page starts after, so the section waits for the
+  // whole current state rather than show a wrong count (hearsay-tools/cezarion#2588).
+  const agents = useMemo(
+    () => currentComplete ? collectSubagents(currentThread.turns, runIsTerminal) : [],
+    [currentComplete, currentThread.turns, runIsTerminal],
+  )
   const planEntries = latestPlanEntries(currentThread) ?? []
   // Mounted for every run so the hook order never changes; it only fetches for a root.
   const workers = useWorkersVerdict(run)

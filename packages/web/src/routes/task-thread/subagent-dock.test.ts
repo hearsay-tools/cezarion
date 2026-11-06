@@ -182,6 +182,19 @@ describe('collectSubagents — Q6 visibility', () => {
     expect(agents.map((agent) => agent.id)).toEqual(['now'])
   })
 
+  // hearsay-tools/cezarion#2588: a background agent (claude, codex) is one the subagent wait
+  // counts while it runs, and its end always arrives, so it is no zombie: the section shows it
+  // past a finished fan-out, and both views name the same running agents.
+  it('keeps a running background agent from before the last finished fan-out', () => {
+    const agents = collectSubagents([
+      turn('turn-1', [task('long', 'running', { background: true }), task('done-early', 'completed', { background: true })]),
+      turn('turn-2', [task('old', 'completed', { background: true })]),
+      turn('turn-3', [task('now', 'running', { background: true })]),
+    ])
+    expect(agents.map((agent) => agent.id)).toEqual(['long', 'done-early', 'now'])
+    expect(subagentCounts(agents)).toEqual({ done: 1, total: 3 })
+  })
+
   it('looks past a steering turn that carries no agents at all', () => {
     const agents = collectSubagents([
       turn('turn-1', [task('a', 'running')]),
