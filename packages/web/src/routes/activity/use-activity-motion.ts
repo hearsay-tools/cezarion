@@ -3,16 +3,17 @@ import type { ActivitySnapshot } from '@open-mercato/cezar-api-client/contract/a
 
 import { usePageActive } from '@/api/live-visibility'
 
-import { diffActivity } from './activity-diff'
-import { feedLine, feedNames, pushFeed, type FeedEntry } from './activity-feed'
-import { EMPTY_MOTION, applyMotion, planMotion, type MotionChange, type MotionState } from './activity-motion'
+import type { FeedEntry } from './activity-feed'
+import { applyMotion, type MotionState } from './activity-motion'
+import { advanceMotion, startMotion, type MotionTracker } from './motion-tracker'
 import { useReducedMotion } from './use-reduced-motion'
 
 /**
  * The motion of one activity view, from the difference between each snapshot and the one before
  * (spec 2026-11-05-live-activity-view, "Live transport"). The first snapshot of a scope never
- * animates. A hidden tab stops the motion: the view drops every running animation, and the first
- * snapshot after the tab returns applies at once (the reconcile), as the first one does.
+ * animates. The motion is planned while the view renders (`advanceMotion`), so the snapshot change
+ * and its motion commit together. A hidden tab and reduced motion turning on drop the running
+ * motion and its timers; the first snapshot after the tab returns applies at once.
  */
 
 export interface ActivityMotion {
@@ -24,78 +25,37 @@ export interface ActivityMotion {
   paused: boolean
 }
 
-type Action = { type: 'apply'; changes: readonly MotionChange[] } | { type: 'reset' }
-
-function reducer(state: MotionState, action: Action): MotionState {
-  return action.type === 'reset' ? EMPTY_MOTION : applyMotion(state, action.changes)
-}
-
-/** Timers that stop together: on hide, on a new scope and on unmount. */
-function useTimers() {
+/** Schedule each plan's timers once; drop them all when the tracker's epoch moves on. */
+function usePlanTimers(tracker: MotionTracker, setTracker: React.Dispatch<React.SetStateAction<MotionTracker>>) {
   const timers = React.useRef(new Set<ReturnType<typeof setTimeout>>())
-  const clear = React.useCallback(() => {
-    for (const timer of timers.current) clearTimeout(timer)
-    timers.current.clear()
-  }, [])
-  const after = React.useCallback((ms: number, run: () => void) => {
-    const timer = setTimeout(() => {
-      timers.current.delete(timer)
-      run()
-    }, ms)
-    timers.current.add(timer)
-  }, [])
-  React.useEffect(() => clear, [clear])
-  return { after, clear }
+  React.useEffect(() => {
+    const pending = timers.current
+    return () => {
+      for (const timer of pending) clearTimeout(timer)
+      pending.clear()
+    }
+  }, [tracker.epoch])
+  React.useEffect(() => {
+    for (const { after, change } of tracker.plan?.timers ?? []) {
+      const timer = setTimeout(() => {
+        timers.current.delete(timer)
+        setTracker((current) => ({ ...current, motion: applyMotion(current.motion, [change]) }))
+      }, after)
+      timers.current.add(timer)
+    }
+    // Keyed by the plan: a re-render with the same plan schedules nothing again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tracker.plan?.key])
 }
 
 export function useActivityMotion(snapshot: ActivitySnapshot | undefined, scopeKey: string): ActivityMotion {
   const reduced = useReducedMotion()
   const active = usePageActive()
-  const [motion, dispatch] = React.useReducer(reducer, EMPTY_MOTION)
-  const [feed, setFeed] = React.useState<FeedEntry[]>([])
-  const { after, clear } = useTimers()
-  const seen = React.useRef<{ scope: string; snapshot: ActivitySnapshot } | undefined>(undefined)
-  const reconcile = React.useRef(false)
-  const seq = React.useRef(0)
-
-  React.useEffect(() => {
-    if (active) return
-    // Hidden: drop the running motion; the next snapshot after the return applies at once.
-    clear()
-    dispatch({ type: 'reset' })
-    reconcile.current = true
-  }, [active, clear])
-
-  React.useEffect(() => {
-    if (scopeKey === seen.current?.scope) return
-    clear()
-    dispatch({ type: 'reset' })
-    setFeed([])
-  }, [scopeKey, clear])
-
-  React.useEffect(() => {
-    if (!snapshot) return
-    const previous = seen.current?.scope === scopeKey ? seen.current.snapshot : undefined
-    seen.current = { scope: scopeKey, snapshot }
-    if (!previous || previous === snapshot || !active) return
-    if (reconcile.current) {
-      reconcile.current = false
-      return
-    }
-    const triggers = diffActivity(previous, snapshot)
-    if (triggers.length === 0) return
-    const at = Date.parse(snapshot.generatedAt)
-    const names = feedNames(previous, snapshot)
-    const lines = triggers.flatMap((trigger) => feedLine(trigger, names, at) ?? [])
-    const first = seq.current + 1
-    seq.current += lines.length + 1
-    if (lines.length > 0) setFeed((current) => pushFeed(current, lines, at, first))
-    const plan = planMotion(triggers, seq.current, reduced)
-    if (plan.changes.length > 0) dispatch({ type: 'apply', changes: plan.changes })
-    for (const timer of plan.timers) after(timer.after, () => dispatch({ type: 'apply', changes: [timer.change] }))
-    // `active` and `reduced` are read at the snapshot's arrival; a change to either alone plans nothing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshot, scopeKey])
-
-  return { motion, feed, reduced, paused: !active }
+  const input = { snapshot, scope: scopeKey, active, reduced }
+  const [tracker, setTracker] = React.useState(() => startMotion(input))
+  const next = advanceMotion(tracker, input)
+  // Derived state: React renders again at once with the advanced tracker, before it commits.
+  if (next !== tracker) setTracker(next)
+  usePlanTimers(next, setTracker)
+  return { motion: next.motion, feed: next.feed, reduced, paused: !active }
 }
