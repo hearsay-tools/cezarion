@@ -8,20 +8,24 @@ export interface FallbackEntry {
   value(value: unknown, error?: string): void
   reset(reason: string, signal: AbortSignal): Promise<void>
 }
+/** The abort reason of a cycle that hit its deadline: a server that does not answer, not a stop. */
+const DEADLINE = new Error('finite cycle deadline')
+
 /**
  * One recurring read for the consumers of `path`. A failed read reaches them as `HTTP <status>`
  * with the answer's JSON body (`HTTP 0`: no answer), as the shared owner reports it, and still
- * throws, so the cycle backs off.
+ * throws, so the cycle backs off. A deadline abort is such a failure; only a stop is silent.
  */
 async function readFor(fetcher: typeof fetch, path: string, consumers: readonly FallbackEntry[], signal: AbortSignal): Promise<void> {
   const deliver = (value: unknown, error?: string) => { for (const consumer of consumers) consumer.value(value, error) }
+  const stopped = () => signal.aborted && signal.reason !== DEADLINE
   const response = await fetcher(path, { credentials: 'include', signal }).catch((error: unknown) => {
-    if (!signal.aborted) deliver(undefined, 'HTTP 0')
+    if (!stopped()) deliver(undefined, 'HTTP 0')
     throw error
   })
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => undefined)
-    signal.throwIfAborted()
+    if (stopped()) signal.throwIfAborted()
     deliver(body, `HTTP ${response.status}`)
     throw new Error(`read HTTP ${response.status}`)
   }
@@ -46,7 +50,7 @@ export function createLiveFallback(
     if (stopped || controller) return
     controller = new AbortController()
     const current = controller
-    deadline = setTimeout(() => current.abort(), 10_000)
+    deadline = setTimeout(() => current.abort(DEADLINE), 10_000)
     let drain = false
     try {
       const active = entries()

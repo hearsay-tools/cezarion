@@ -53,6 +53,38 @@ describe('finite HTTP recovery', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  /** A server that never answers: the request ends only when its signal aborts. */
+  const hung = () => vi.fn((_path: RequestInfo | URL, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason))))
+  const reader = (): FallbackEntry => ({ ...run(), demand: { kind: 'read', path: '/api/v1/workspace/activity?project=shop', intervalMs: 5_000 } })
+
+  it('hands a read the server never answers to its consumers as HTTP 0 at the deadline', async () => {
+    vi.useFakeTimers()
+    const entry = reader()
+    const fetcher = hung()
+    const recovery = createLiveFallback(() => [entry], async () => {}, fetcher)
+    recovery.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(entry.value).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(entry.value).toHaveBeenCalledExactlyOnceWith(undefined, 'HTTP 0')
+    recovery.stop()
+  })
+
+  it('delivers nothing for a read that a stop aborts', async () => {
+    vi.useFakeTimers()
+    const entry = reader()
+    const fetcher = hung()
+    const recovery = createLiveFallback(() => [entry], async () => {}, fetcher)
+    recovery.start()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    recovery.stop()
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(entry.value).not.toHaveBeenCalled()
+  })
+
   it('hands a failed read to its consumers with the status and the answer, then backs off', async () => {
     vi.useFakeTimers()
     const entry: FallbackEntry = { ...run(), demand: { kind: 'read', path: '/api/v1/workspace/activity?project=shop', intervalMs: 5_000 } }
