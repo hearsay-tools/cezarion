@@ -1,66 +1,21 @@
 #!/usr/bin/env node
-// Load only when configured: ordinary mock turns retain their event-loop ordering.
-const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
-  : (await import('./mock-failure-control.mjs')).readFailureControl(['provider', 'usage-limit', 'unread']);
+import { loadControls } from './mock-controls.mjs';
+import { stall, waitForRelease } from './mock-lifecycle.mjs';
+import { closeSync } from 'node:fs';
+import { createInterface } from 'node:readline';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import * as parityGateFs from 'node:fs';
+import { withoutSessionContext } from './mock-session-context.mjs';
 // Claude acknowledges agent input with the local stdin write, so only a held response is native.
-const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
-  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['hold-response']);
-// Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
-import { spawn as watchdogSpawn } from 'node:child_process';
-import { closeSync as watchdogCloseInput, renameSync as watchdogRename, writeFileSync as watchdogWrite } from 'node:fs';
-// Publish a pid atomically (temporary sibling, then rename): a test reading it sees no
-// file or a whole pid, never the empty file whose Number() is 0 (hearsay-tools/cezarion#953).
-function watchdogWritePid(file, pid) { const tmp = `${file}.${process.pid}.tmp`; watchdogWrite(tmp, pid); watchdogRename(tmp, file); }
-function watchdogStall(prompt) {
-  if (!prompt.includes('mock:no-progress')) return false;
-  if (prompt.includes('input-closed')) {
-    watchdogCloseInput(0);
-    watchdogWritePid('input-closed.pid', String(process.pid));
-    setTimeout(() => process.exit(0), 300);
-  }
-  if (prompt.includes('ignore-term')) {
-    process.removeAllListeners('SIGTERM');
-    process.on('SIGTERM', () => {});
-    // Test-cleanup backstop, deliberately longer than the asserted teardown bound.
-    setTimeout(() => process.exit(0), 12_000);
-  }
-  if (prompt.includes('held-pipe')) {
-    watchdogSpawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', process.stdout, process.stderr] });
-  }
-  if (prompt.includes('leftover')) {
-    // hearsay-tools/cezarion#890: one child stays in the session's process group and ignores
-    // SIGTERM; one leaves the group with setsid. Both exit on their own as a cleanup backstop.
-    const leftover = (file) => `process.on('SIGTERM',()=>{}); const fs = require('fs'); fs.writeFileSync(${JSON.stringify(`${file}.tmp`)}, String(process.pid)); fs.renameSync(${JSON.stringify(`${file}.tmp`)}, ${JSON.stringify(file)}); setTimeout(()=>{},20000)`;
-    watchdogSpawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
-    watchdogSpawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
-  }
-  // Publish readiness after mode setup: another process may signal us as soon as it sees it.
-  watchdogWritePid('watchdog.pid', String(process.pid));
-  return true;
-}
-
+const { failureControl, delivery } = await loadControls({ failure: ['provider', 'usage-limit', 'unread'], delivery: ['hold-response'] });
 // Mock `claude` binary for CEZ_DRY_RUN=1 — emits a plausible stream-json
 // session so the engine / store / GUI can be exercised without tokens.
 // Mirrors the real CLI's contract in SESSION mode: keeps reading {type:user}
 // NDJSON lines from stdin, answers each with a scripted turn (assistant
 // events + a terminal `result`), and exits when stdin closes (EOF).
 
-import { createInterface } from 'node:readline';
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
-// Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
 const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 
-import * as parityGateFs from 'node:fs';
-import { withoutSessionContext } from './mock-session-context.mjs';
-async function waitForMockRelease(fallbackMs) {
-  const file = process.env.CEZ_MOCK_RELEASE_FILE;
-  if (!file) { if (fallbackMs) await sleep(fallbackMs); return; }
-  const deadline = Date.now() + 15_000;
-  while (!parityGateFs.existsSync(file)) {
-    if (Date.now() > deadline) throw new Error('CEZ_MOCK_RELEASE_FILE was not created');
-    await sleep(10);
-  }
-}
 
 // #401: let the test observe the actual monitoring park before releasing late wire frames.
 async function afterParityPark(prompt) {
@@ -216,7 +171,7 @@ async function replyAutonomously(userText, uuid) {
 async function replyToFinalMessageNudge(silent, uuid) {
   const kind = silent.finalMessageNudgeKind();
   if (kind === 'ack-only') return;
-  if (kind === 'late') await waitForMockRelease(silent.LATE_REPLY_MS);
+  if (kind === 'late') await waitForRelease(silent.LATE_REPLY_MS);
   if (kind === 'silent') {
     emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: silent.SILENT_TAIL_REASONING }] } });
     emit({ type: 'result', subtype: 'success', result: '', user_message_uuids: [uuid].filter(Boolean), usage: { input_tokens: 10, output_tokens: 5 } });
@@ -386,7 +341,7 @@ async function replyWithBusyProgress(userText, uuid) {
 }
 
 async function replyWithHeldDone(userText, uuid) {
-  await waitForMockRelease(400);
+  await waitForRelease(400);
   const held = 'parity hold-done: content after the pause' + await lifecycle((await tools()).DONE);
   emit({
     type: 'assistant',
@@ -397,7 +352,7 @@ async function replyWithHeldDone(userText, uuid) {
 }
 
 async function replyWithHeldAsk(userText, uuid) {
-  await waitForMockRelease(400);
+  await waitForRelease(400);
   const ask = 'Pick one.' + await lifecycle((await tools()).ask());
   emit({
     type: 'assistant',
@@ -408,7 +363,7 @@ async function replyWithHeldAsk(userText, uuid) {
 }
 
 async function replyWithGatedHold(userText, uuid) {
-  await waitForMockRelease(250);
+  await waitForRelease(250);
   const gated = 'parity hold-gated: content after the pause';
   emit({
     type: 'assistant',
@@ -885,7 +840,7 @@ const earlyReplies = [
 ];
 const timedReplies = [
   [userText => userText.includes('mock:agent-echo'), replyWithEcho],
-  [watchdogStall, acknowledgeStall],
+  [prompt => stall(prompt, { closeInput: () => closeSync(0) }), acknowledgeStall],
   [userText => userText.includes('mock:busy-progress'), replyWithBusyProgress],
   [userText => userText.includes('mock:hold-cezar-done'), replyWithHeldDone],
   [userText => userText.includes('mock:hold-cezar-ask'), replyWithHeldAsk],

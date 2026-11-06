@@ -1,20 +1,13 @@
 #!/usr/bin/env node
-// Load only when configured: ordinary mock turns retain their event-loop ordering.
-const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
-  : (await import('./mock-failure-control.mjs')).readFailureControl();
+import { loadControls } from './mock-controls.mjs';
+import { stall, waitForRelease } from './mock-lifecycle.mjs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 // Print acknowledges an input on its first model work and cannot refuse one, so a held
 // acknowledgement and a held response both hold that first model work.
-const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
-  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['hold-ack', 'hold-response']);
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-// Publish a pid atomically (temporary sibling, then rename): a test reading it sees no
-// file or a whole pid, never the empty file whose Number() is 0 (hearsay-tools/cezarion#953).
-function watchdogWritePid(file, pid) { const tmp = `${file}.${process.pid}.tmp`; writeFileSync(tmp, pid); renameSync(tmp, file); }
-import { spawn } from 'node:child_process';
-import { join } from 'node:path';
-// Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
+const { failureControl, delivery } = await loadControls({ delivery: ['hold-ack', 'hold-response'] });
 const { answerNudge, NO_WAIT_NUDGE_PREFIX } = await import('./mock-nudge.mjs');
-import { randomUUID } from 'node:crypto';
 
 const args = process.argv.slice(2);
 if (args.includes('--version')) { process.stdout.write('2026.10.01-e373342\n'); process.exit(0); }
@@ -76,15 +69,7 @@ const readTool = (content = 'A project') => {
   frame({ type: 'tool_call', subtype: 'completed', call_id: 'read-1', session_id: id,
     tool_call: { readToolCall: { ...call.readToolCall, result: { success: { content } } } } });
 };
-const waitForRelease = async (fallbackMs) => {
-  const file = process.env.CEZ_MOCK_RELEASE_FILE;
-  if (!file) { await new Promise(resolve => setTimeout(resolve, fallbackMs)); return; }
-  const deadline = Date.now() + 15_000;
-  while (!existsSync(file)) {
-    if (Date.now() > deadline) throw new Error('CEZ_MOCK_RELEASE_FILE was not created');
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
-};
+
 const finish = (text) => { assistant(text); result(text); };
 // hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that cezar tool over
 // the --plugin-dir MCP config before its turn ends. Returns '' or a note for the text.
@@ -188,17 +173,7 @@ if (prompt.includes('mock:ci-wait') || process.env.CEZ_MOCK_CI_PR) {
     : JSON.stringify((await probeCiTool('cursor', args)).response);
   finish(response); process.exit(0);
 }
-if (prompt.includes('mock:no-progress')) {
-  if (prompt.includes('ignore-term')) process.on('SIGTERM', () => {});
-  if (prompt.includes('held-pipe')) spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'],
-    { stdio: ['ignore', process.stdout, process.stderr] });
-  if (prompt.includes('leftover')) {
-    const leftover = (file) => `process.on('SIGTERM',()=>{}); const fs = require('fs'); fs.writeFileSync(${JSON.stringify(`${file}.tmp`)}, String(process.pid)); fs.renameSync(${JSON.stringify(`${file}.tmp`)}, ${JSON.stringify(file)}); setTimeout(()=>{},20000)`;
-    spawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
-    spawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
-  }
-  // Publish readiness after mode setup: another process may signal us as soon as it sees it.
-  watchdogWritePid('watchdog.pid', String(process.pid));
+if (stall(prompt)) {
   setInterval(() => {}, 1000);
   await new Promise(() => {});
 }

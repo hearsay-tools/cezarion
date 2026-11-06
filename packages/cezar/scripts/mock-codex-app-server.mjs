@@ -1,43 +1,12 @@
 #!/usr/bin/env node
-// Load only when configured: ordinary mock turns retain their event-loop ordering.
-const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
-  : (await import('./mock-failure-control.mjs')).readFailureControl();
-const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
-  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['reject', 'hold-ack', 'hold-response']);
-// Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
-import { spawn as watchdogSpawn } from 'node:child_process';
-import { closeSync as watchdogCloseInput, renameSync as watchdogRename, writeFileSync as watchdogWrite } from 'node:fs';
-// Publish a pid atomically (temporary sibling, then rename): a test reading it sees no
-// file or a whole pid, never the empty file whose Number() is 0 (hearsay-tools/cezarion#953).
-function watchdogWritePid(file, pid) { const tmp = `${file}.${process.pid}.tmp`; watchdogWrite(tmp, pid); watchdogRename(tmp, file); }
-function watchdogStall(prompt) {
-  if (!prompt.includes('mock:no-progress')) return false;
-  if (prompt.includes('input-closed')) {
-    watchdogCloseInput(0);
-    watchdogWritePid('input-closed.pid', String(process.pid));
-    setTimeout(() => process.exit(0), 300);
-  }
-  if (prompt.includes('ignore-term')) {
-    process.removeAllListeners('SIGTERM');
-    process.on('SIGTERM', () => {});
-    // Test-cleanup backstop, deliberately longer than the asserted teardown bound.
-    setTimeout(() => process.exit(0), 12_000);
-  }
-  if (prompt.includes('held-pipe')) {
-    watchdogSpawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', process.stdout, process.stderr] });
-  }
-  if (prompt.includes('leftover')) {
-    // hearsay-tools/cezarion#890: one child stays in the session's process group and ignores
-    // SIGTERM; one leaves the group with setsid. Both exit on their own as a cleanup backstop.
-    const leftover = (file) => `process.on('SIGTERM',()=>{}); const fs = require('fs'); fs.writeFileSync(${JSON.stringify(`${file}.tmp`)}, String(process.pid)); fs.renameSync(${JSON.stringify(`${file}.tmp`)}, ${JSON.stringify(file)}); setTimeout(()=>{},20000)`;
-    watchdogSpawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
-    watchdogSpawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
-  }
-  // Publish readiness after mode setup: another process may signal us as soon as it sees it.
-  watchdogWritePid('watchdog.pid', String(process.pid));
-  return true;
-}
-
+import { loadControls } from './mock-controls.mjs';
+import { stall, waitForRelease } from './mock-lifecycle.mjs';
+import { closeSync } from 'node:fs';
+import { createInterface } from 'node:readline';
+import { appendFileSync } from 'node:fs';
+import * as parityGateFs from 'node:fs';
+import { withoutSessionContextParts } from './mock-session-context.mjs';
+const { failureControl, delivery } = await loadControls({ delivery: ['reject', 'hold-ack', 'hold-response'] });
 // Bundled dry-run mock of `codex app-server` — speaks just enough JSON-RPC 2.0
 // JSONL (§3 of agent-event-protocols.md) for the runner wiring test in
 // `codex-ui-mapper.test.ts`: initialize/thread/turn handshake, one scripted
@@ -47,13 +16,8 @@ function watchdogStall(prompt) {
 // `MOCK_CODEX_IGNORE_EOF=1` switches to the #703 teardown shape instead: the
 // server stays deaf to stdin EOF (the CLI hang the EOF watchdog exists for)
 // and handles SIGTERM itself, exiting 143 rather than dying from the signal.
-import { createInterface } from 'node:readline';
-import { appendFileSync } from 'node:fs';
-// Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
 const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 
-import * as parityGateFs from 'node:fs';
-import { withoutSessionContextParts } from './mock-session-context.mjs';
 
 // #401: let the test observe the actual monitoring park before releasing late wire frames.
 async function afterParityPark(prompt) {
@@ -131,16 +95,7 @@ async function lifecycle([name, args]) {
 let steerTurn = null;
 let steerSerial = 0;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-async function waitForMockRelease(fallbackMs, suffix = '') {
-  const release = process.env.CEZ_MOCK_RELEASE_FILE;
-  const file = release && `${release}${suffix}`;
-  if (!file) { if (fallbackMs) await sleep(fallbackMs); return; }
-  const deadline = Date.now() + 15_000;
-  while (!parityGateFs.existsSync(file)) {
-    if (Date.now() > deadline) throw new Error('CEZ_MOCK_RELEASE_FILE was not created');
-    await sleep(10);
-  }
-}
+
 const completeSteerTurn = (turnId) => {
   steerTurn = null;
   emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: turnId, status: 'completed' } } });
@@ -190,7 +145,7 @@ const afterSilentReplies = [
   [turnText => turnText.includes('mock:hold-cezar-ask'), replyWithHeldAsk],
   [turnText => turnText.includes('mock:cezar-done'), replyWithDone],
   [turnText => turnText.includes('mock:cezar-ask'), replyWithCezarAsk],
-  [turnText => watchdogStall(turnText), acknowledgeWatchdog],
+  [turnText => stall(turnText, { closeInput: () => closeSync(0) }), acknowledgeWatchdog],
   [turnText => turnText.includes('mock:busy-progress'), replyWithBusyProgress],
   [turnText => turnText.includes('mock:hold-gated'), replyWithGatedHold],
   [turnText => turnText.includes('mock:hold'), replyWithHold],
@@ -568,14 +523,14 @@ function emitMessageTurn(itemId, text) {
 }
 
 async function replyWithHeldDone(turnText, msg) {
-  await waitForMockRelease(400);
+  await waitForRelease(400);
   const full = 'parity hold-done: content after the pause' + await lifecycle((await tools()).DONE);
   emitMessageTurn('item_hd1', full);
   return;
 }
 
 async function replyWithHeldAsk(turnText, msg) {
-  await waitForMockRelease(400);
+  await waitForRelease(400);
   const ask = 'Pick one.' + await lifecycle((await tools()).ask());
   emitMessageTurn('item_ha1', ask);
   return;
@@ -615,7 +570,7 @@ async function replyWithBusyProgress(turnText, msg) {
 }
 
 async function replyWithGatedHold(turnText, msg) {
-  await waitForMockRelease(250);
+  await waitForRelease(250);
   const gated = 'parity hold-gated: content after the pause';
   emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_hg1', text: '' } } });
   emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_hg1', delta: gated } });
@@ -719,7 +674,7 @@ async function replyWithApproval(turnText, msg) {
   // P3/P4: Codex settles the request itself, or ends the turn around it, once the test releases it.
   const resolved = turnText.includes('mock:approval-resolved');
   if (resolved || turnText.includes('mock:approval-turn-end')) {
-    await waitForMockRelease();
+    await waitForRelease();
     await emitSettledApproval(resolved);
   }
   // Otherwise no turn/completed until the matching native JSON-RPC response arrives.
@@ -814,8 +769,8 @@ async function handleTurnStart(msg) {
     silent = await import('./mock-silent-tail.mjs');
     silent.noteSilentTailPrompt(turnText);
     if (silent.isAckOnlyNudge(turnText)) return;
-    if (silent.isLateTurnStartNudge(turnText)) await waitForMockRelease(silent.LATE_REPLY_MS);
-    else if (silent.isLateNudge(turnText)) await waitForMockRelease(silent.LATE_REPLY_MS);
+    if (silent.isLateTurnStartNudge(turnText)) await waitForRelease(silent.LATE_REPLY_MS);
+    else if (silent.isLateNudge(turnText)) await waitForRelease(silent.LATE_REPLY_MS);
   }
   // hearsay-tools/cezarion#1112: the acknowledged turn/start reports turn/started late.
   if (turnText.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
@@ -823,7 +778,7 @@ async function handleTurnStart(msg) {
   emit({ method: 'turn/started', params: { turn: { id: 'turn_mock_1', status: 'inProgress', items: [] } } });
   }
   if (delivery) await delivery.holdResponse(turnText);
-  if (needsLateContentHold(silent, turnText)) await waitForMockRelease(silent.LATE_TURN_START_HOLD_MS, '.content');
+  if (needsLateContentHold(silent, turnText)) await waitForRelease(silent.LATE_TURN_START_HOLD_MS, '.content');
   emitOpeningInput(msg, turnText);
   if (turnText.includes('mock:crash-stderr')) {
     const { crashWithStderr } = await import('./mock-runner-crash.mjs');

@@ -313,6 +313,52 @@ function exitReaping(backend: RunnerId, it: typeof registerTest = registerTest):
 
 function signalReadiness(backend: RunnerId, it: typeof registerTest = registerTest): void {
 
+
+    it(`${backend} an ignore-term stall exits through its own backstop without SIGKILL`, async () => {
+      const preloadDir = mkdtempSync(join(tmpdir(), 'cez-backstop-'));
+      const preload = join(preloadDir, 'short-backstop.mjs');
+      // Shorten only the mock's cleanup backstop. Gate it until the runner has
+      // consumed startup, so host load cannot turn this into a startup-exit test.
+      writeFileSync(preload, `
+import { existsSync } from 'node:fs';
+const original = globalThis.setTimeout;
+globalThis.setTimeout = function(callback, ms, ...args) {
+  if (ms !== 12000) return original(callback, ms, ...args);
+  const poll = () => existsSync('backstop.release') ? callback(...args) : original(poll, 10);
+  return original(poll, 10);
+};
+`);
+      vi.stubEnv('NODE_OPTIONS', `${process.env.NODE_OPTIONS ?? ''} --import=${pathToFileURL(preload).href}`.trim());
+      try {
+        await withChild(backend, async (_session, child, _events, _settled, cwd) => {
+          writeFileSync(join(cwd, 'backstop.release'), '');
+          // bound: wait for the mock's own process exit; failure still reaches withChild cleanup.
+          await vi.waitFor(() => expect(child.exitCode).toBe(0), { timeout: 5000 });
+          expect(child.signalCode).toBeNull();
+        }, 'no-progress-ignore-term');
+      } finally {
+        rmSync(preloadDir, { recursive: true, force: true });
+      }
+    }, 15_000);
+
+    if (backend === 'cursor') {
+      it('cursor input-closed stall exits nonzero and names its unsupported mock', async () => {
+        const cwd = mkdtempSync(join(tmpdir(), 'cez-cursor-input-closed-'));
+        try {
+          const result = await new Promise<{ error: Error | null; stderr: string }>(resolve => {
+            // bound: the unsupported mode must exit; execFile kills a broken fixture at the bound.
+            childProcess.execFile(process.execPath, [HARNESS_ADAPTERS.cursor.mockBin, 'mock:no-progress-input-closed'],
+              { cwd, timeout: 5000 }, (error, _stdout, stderr) => resolve({ error, stderr }));
+          });
+          expect(result.error).toMatchObject({ code: 1 });
+          expect(result.stderr).toContain('mock-cursor-print.mjs');
+          expect(result.stderr).toContain('input-closed');
+        } finally {
+          rmSync(cwd, { recursive: true, force: true });
+        }
+      }, 10_000);
+    }
+
     // hearsay-tools/cezarion#1625: N5 signals as soon as `watchdog.pid` appears. A mock that
     // published it before replacing its SIGTERM handler died from that SIGTERM.
     it(`${backend} an ignore-term stall survives SIGTERM sent as soon as it publishes its pid`, async () => {
