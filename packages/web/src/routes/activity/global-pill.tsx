@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 
 import { LineText } from './activity-card'
 import { lineTexts, recipientName, sentPeerRequests, type RunEntry } from './activity-model'
-import { RunShape } from './activity-tone'
+import { RunShape, ToneWord } from './activity-tone'
 import { isLiveStatus, rootNow, type NowContext } from './now-box'
 import { Heartbeat } from './now-box-view'
 
@@ -76,16 +76,7 @@ export function ActivityPill({ projectId, task, requests, index, ctx }: PillProp
         <Heartbeat rate={task.rate} className="h-3 w-10" />
       </div>
       <p data-slot="activity-pill-line" className="mt-[3px] ml-[19px] truncate text-[11.5px] text-muted-foreground tabular-nums">
-        {/* Each tone's ink as a literal branch, so the cez/card-2-contrast lint checks the small verb. */}
-        <b data-slot="activity-verb" className={cn('font-semibold', {
-          'text-success': box.tone === 'success',
-          'text-signal-word-amber': box.tone === 'pending',
-          'text-signal-word-red': box.tone === 'danger',
-          'text-accent-text': box.tone === 'accent',
-          'text-info': box.tone === 'info',
-          'text-status-running': box.tone === 'running',
-          'text-muted-foreground': box.tone === 'neutral',
-        })}>{box.verb}</b>
+        <ToneWord data-slot="activity-verb" tone={box.tone} className="font-semibold">{box.verb}</ToneWord>
         {' · '}
         <span data-slot="activity-main" className={cn(box.mono && 'font-mono text-[11px]')}>{box.main}</span>
       </p>
