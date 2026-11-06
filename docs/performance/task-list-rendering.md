@@ -64,7 +64,9 @@ and whole-document `[data-run-id]` counts.
 Ten local `/api/v1/projects` probes produce API percentiles. The scroll probe moves
 `[data-slot="main"]` by 64 px per animation frame for 60 frames. Its first frame
 can have a slightly negative delta because the animation timestamp precedes the
-callback's initial clock read; the raw value remains present. Long tasks and Event
+callback's initial clock read. The raw value remains present, but both frame
+percentiles exclude this first value because it is not an interval between
+animation frames. Long tasks and Event
 Timing cover setting changes, loading, streaming, scrolling and interactions.
 Event Timing contains all delivered event entries with a 16 ms observation
 threshold, including multiple entries from one pointer action. It is not an INP
@@ -84,22 +86,47 @@ hidden duplicates in addition to the visible representation named here.
 
 | Scope/width/setting/view | Visible representation | Mounted rows | Fibers | DOM nodes | Commit p50 | Commit p95 | API p50 | API p95 | Frame p95 |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| project/1440/summary/active | summary → summary | 900 → 300 | 43317 → 13623 | 23288 → 7913 | 0.1 → 0.2 | 765.0 → 290.3 | 10.3 → 11.1 | 18.3 → 46.2 | 83.3 → 66.7 |
-| project/1440/summary/archived | summary → summary | 3000 → 1000 | 120318 → 36024 | 64488 → 21413 | 456.8 → 75.3 | 2224.0 → 307.3 | 11.1 → 8.6 | 30.5 → 20.1 | 66.6 → 66.7 |
-| project/1440/detailed/active | resources → resources | 600 → 300 | 30699 → 21398 | 15771 → 10670 | 0.1 → 0.1 | 518.1 → 1165.2 | 6.6 → 15.0 | 15.3 → 43.7 | 183.3 → 183.3 |
-| project/1440/detailed/archived | resources → resources | 2000 → 1000 | 85300 → 61299 | 43471 → 30470 | 302.7 → 214.9 | 1153.1 → 919.8 | 9.5 → 9.6 | 33.0 → 40.0 | 350 → 416.6 |
-| project/360/summary/active | cards → cards | 900 → 300 | 43300 → 10289 | 23273 → 5482 | 0.1 → 0.2 | 410.3 → 121.7 | 5.8 → 6.9 | 9.0 → 10.0 | 50 → 50 |
+| project/1440/summary/active | summary → summary | 900 → 300 | 43317 → 13623 | 23288 → 7913 | 0.1 → 0.2 | 765.0 → 290.3 | 10.3 → 11.1 | 18.3 → 46.2 | 83.4 → 83.4 |
+| project/1440/summary/archived | summary → summary | 3000 → 1000 | 120318 → 36024 | 64488 → 21413 | 456.8 → 75.3 | 2224.0 → 307.3 | 11.1 → 8.6 | 30.5 → 20.1 | 66.7 → 66.7 |
+| project/1440/detailed/active | resources → resources | 600 → 300 | 30699 → 21398 | 15771 → 10670 | 0.1 → 0.1 | 518.1 → 1165.2 | 6.6 → 15.0 | 15.3 → 43.7 | 250 → 183.3 |
+| project/1440/detailed/archived | resources → resources | 2000 → 1000 | 85300 → 61299 | 43471 → 30470 | 302.7 → 214.9 | 1153.1 → 919.8 | 9.5 → 9.6 | 33.0 → 40.0 | 366.7 → 433.3 |
+| project/360/summary/active | cards → cards | 900 → 300 | 43300 → 10289 | 23273 → 5482 | 0.1 → 0.2 | 410.3 → 121.7 | 5.8 → 6.9 | 9.0 → 10.0 | 50 → 50.1 |
 | project/360/summary/archived | cards → cards | 3000 → 1000 | 120301 → 24990 | 64473 → 13382 | 289 → 63.1 | 3074.5 → 223.4 | 6.6 → 7.3 | 13.6 → 14.4 | 50 → 50 |
-| project/360/detailed/active | cards → cards | 600 → 300 | 30682 → 10289 | 15756 → 5482 | 0.1 → 6.8 | 1481.0 → 126.4 | 7.1 → 6.9 | 31.2 → 18.6 | 50 → 66.6 |
-| project/360/detailed/archived | cards → cards | 2000 → 1000 | 85283 → 24990 | 43456 → 13382 | 206.8 → 45.3 | 1520.3 → 210.6 | 6.6 → 6.5 | 21.4 → 16.1 | 50 → 50 |
+| project/360/detailed/active | cards → cards | 600 → 300 | 30682 → 10289 | 15756 → 5482 | 0.1 → 6.8 | 1481.0 → 126.4 | 7.1 → 6.9 | 31.2 → 18.6 | 66.6 → 66.7 |
+| project/360/detailed/archived | cards → cards | 2000 → 1000 | 85283 → 24990 | 43456 → 13382 | 206.8 → 45.3 | 1520.3 → 210.6 | 6.6 → 6.5 | 21.4 → 16.1 | 50 → 50.1 |
 | global/1440/summary/active | summary → summary | 300 → 300 | 26953 → 10513 | 10126 → 6796 | 0.1 → 0.1 | 450.1 → 191.4 | 25.4 → 11.5 | 163.6 → 62.0 | 66.7 → 66.7 |
-| global/1440/summary/archived | summary → summary | 2000 → 2000 | 133246 → 59246 | 62510 → 40510 | 308.2 → 1.4 | 1777.5 → 2030.0 | 8.1 → 7.4 | 121.9 → 16.0 | 99.9 → 66.6 |
-| global/1440/grouped/active | cards → cards | 300 → 300 | 25870 → 25870 | 9603 → 9603 | 0.2 → 0.1 | 722.9 → 339.0 | 18.0 → 22.9 | 168.0 → 191.0 | 83.3 → 50.1 |
-| global/1440/grouped/archived | cards → cards | 2000 → 2000 | 125390 → 125390 | 58603 → 58603 | 375.5 → 271.7 | 1531.1 → 5064.1 | 7.2 → 8.3 | 23.5 → 133.0 | 66.7 → 66.5 |
-| global/360/summary/active | summary → summary | 300 → 300 | 26936 → 10496 | 10111 → 6781 | 0.1 → 0 | 680.0 → 144.1 | 8.8 → 2.0 | 91.0 → 6.7 | 50 → 50 |
-| global/360/summary/archived | summary → summary | 2000 → 2000 | 133229 → 59229 | 62495 → 40495 | 345.1 → 0.2 | 5485.4 → 2738.0 | 5.4 → 11.3 | 41.2 → 162.6 | 50 → 50 |
-| global/360/grouped/active | cards → cards | 300 → 300 | 25853 → 25853 | 9588 → 9588 | 0 → 0.1 | 576.6 → 2716.0 | 10.3 → 11.1 | 93.5 → 80.5 | 50 → 50 |
-| global/360/grouped/archived | cards → cards | 2000 → 2000 | 125373 → 125373 | 58588 → 58588 | 342.5 → 336.4 | 1374.6 → 1184.8 | 6.2 → 8.4 | 24.1 → 113.3 | 50 → 50.1 |
+| global/1440/summary/archived | summary → summary | 2000 → 2000 | 133246 → 59246 | 62510 → 40510 | 308.2 → 1.4 | 1777.5 → 2030.0 | 8.1 → 7.4 | 121.9 → 16.0 | 116.6 → 66.7 |
+| global/1440/grouped/active | cards → cards | 300 → 300 | 25870 → 25870 | 9603 → 9603 | 0.2 → 0.1 | 722.9 → 339.0 | 18.0 → 22.9 | 168.0 → 191.0 | 83.3 → 66.6 |
+| global/1440/grouped/archived | cards → cards | 2000 → 2000 | 125390 → 125390 | 58603 → 58603 | 375.5 → 271.7 | 1531.1 → 5064.1 | 7.2 → 8.3 | 23.5 → 133.0 | 66.8 → 66.6 |
+| global/360/summary/active | summary → summary | 300 → 300 | 26936 → 10496 | 10111 → 6781 | 0.1 → 0 | 680.0 → 144.1 | 8.8 → 2.0 | 91.0 → 6.7 | 50.1 → 50.1 |
+| global/360/summary/archived | summary → summary | 2000 → 2000 | 133229 → 59229 | 62495 → 40495 | 345.1 → 0.2 | 5485.4 → 2738.0 | 5.4 → 11.3 | 41.2 → 162.6 | 50.1 → 50 |
+| global/360/grouped/active | cards → cards | 300 → 300 | 25853 → 25853 | 9588 → 9588 | 0 → 0.1 | 576.6 → 2716.0 | 10.3 → 11.1 | 93.5 → 80.5 | 50.1 → 50 |
+| global/360/grouped/archived | cards → cards | 2000 → 2000 | 125373 → 125373 | 58588 → 58588 | 342.5 → 336.4 | 1374.6 → 1184.8 | 6.2 → 8.4 | 24.1 → 113.3 | 50.1 → 50.1 |
+
+### Frame percentile correction
+
+Review found that the first recorded delta compares two clock reads rather than
+two animation frames. All 160 original frame arrays remain unchanged. Both
+per-case frame percentiles were recomputed from `frames.slice(1)` using the same
+nearest-rank rule. The table's five-run frame p95 medians were then recomputed.
+No workload was rerun. Mount, commit, API, event and memory values are unchanged.
+100 per-case records changed one or both derived percentiles. The changed table
+cells are listed as `old baseline → old branch` then `corrected baseline → corrected branch`:
+
+- project/1440/summary/active: `83.3 → 66.7`; corrected `83.4 → 83.4`
+- project/1440/summary/archived: `66.6 → 66.7`; corrected `66.7 → 66.7`
+- project/1440/detailed/active: `183.3 → 183.3`; corrected `250 → 183.3`
+- project/1440/detailed/archived: `350 → 416.6`; corrected `366.7 → 433.3`
+- project/360/summary/active: `50 → 50`; corrected `50 → 50.1`
+- project/360/detailed/active: `50 → 66.6`; corrected `66.6 → 66.7`
+- project/360/detailed/archived: `50 → 50`; corrected `50 → 50.1`
+- global/1440/summary/archived: `99.9 → 66.6`; corrected `116.6 → 66.7`
+- global/1440/grouped/active: `83.3 → 50.1`; corrected `83.3 → 66.6`
+- global/1440/grouped/archived: `66.7 → 66.5`; corrected `66.8 → 66.6`
+- global/360/summary/active: `50 → 50`; corrected `50.1 → 50.1`
+- global/360/summary/archived: `50 → 50`; corrected `50.1 → 50`
+- global/360/grouped/active: `50 → 50`; corrected `50.1 → 50`
+- global/360/grouped/archived: `50 → 50.1`; corrected `50.1 → 50.1`
 
 ## Long tasks, Event Timing and memory
 

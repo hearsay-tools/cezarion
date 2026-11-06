@@ -185,7 +185,7 @@ export async function runTaskListsBenchmark(values: TaskListBenchmarkOptions = {
           }
           Object.assign(sample, await evaluate('({longTasks:window.__taskListProbe.longTasks,eventTiming:window.__taskListProbe.events})'))
           const memory = stopMemory(); stopMemory = undefined
-          report.cases.push({ memory, scope, ...testCase, loadBefore: before, loadAfter: loadavg(), updatesPublished, streamMs, ...sample, interactions, commitP50: percentile(sample.commits, .5), commitP95: percentile(sample.commits, .95), apiP50: percentile(api, .5), apiP95: percentile(api, .95), scrollFrameP50: percentile(frames, .5), scrollFrameP95: percentile(frames, .95), frames })
+          report.cases.push({ memory, scope, ...testCase, loadBefore: before, loadAfter: loadavg(), updatesPublished, streamMs, ...sample, interactions, commitP50: percentile(sample.commits, .5), commitP95: percentile(sample.commits, .95), apiP50: percentile(api, .5), apiP95: percentile(api, .95), scrollFrameP50: percentile(frames.slice(1), .5), scrollFrameP95: percentile(frames.slice(1), .95), frames })
           save()
           console.log(`${scope} ${setting} ${view} ${repetition}: ${sample.mountedRows} rows, ${sample.fibers} fibers`)
         }

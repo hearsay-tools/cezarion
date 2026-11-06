@@ -58,7 +58,7 @@ const control = createServer(async (req, res) => {
     }
     if (command.summaryStreaming) {
       const selected = [...stores].flatMap(([projectId, target]) => target.listRunIds().slice(0, 30).map(runId => ({ projectId, runId })))
-      timer = setInterval(() => {
+      if (selected.length) timer = setInterval(() => {
         const run = selected[published++ % selected.length]
         stores.get(run.projectId).updateRun(run.runId, { costUsd: published / 1000 })
       }, 50)
