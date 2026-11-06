@@ -598,6 +598,16 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
 
     let source: LiveWorkspaceSource | null = null
     const indexSync = runsIndexSync(queryClient)
+    // A numbered frame that arrives while this document knows no stream generation (its first
+    // `ready` was lost to an epoch change, hearsay-tools/cezarion#2729): the shared source drops
+    // and re-adds its workspace demand, so the worker sends the `ready` and the source reopens
+    // and reconciles. One rejoin until the next accepted `ready`; frames meanwhile wait for it.
+    indexSync.setUnknownGenerationHandler(() => {
+      const rejoin = (source as { rejoin?: () => void } | null)?.rejoin
+      if (typeof rejoin !== 'function') return false
+      rejoin.call(source)
+      return true
+    })
     const runDetailRefresher = createRunDetailRefresher(queryClient)
     const runDetailFetcher = createRunDetailFetcher(queryClient)
     const details = { fetcher: runDetailFetcher, refreshParent: runDetailRefresher.refresh }
@@ -853,6 +863,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
       indexSync.stop()
       runDetailRefresher.cancel()
       runDetailFetcher.cancel()
+      indexSync.setUnknownGenerationHandler(undefined)
       relationshipsRefresher.cancel()
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('pagehide', onPageHide)

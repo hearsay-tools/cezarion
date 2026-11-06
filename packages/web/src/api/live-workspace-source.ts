@@ -6,12 +6,15 @@ export class LiveWorkspaceSource extends EventTarget {
   private release: () => void
   constructor(_url?: string, _options?: { withCredentials?: boolean }) {
     super()
+    this.release = this.subscribe()
+  }
+  private subscribe(): () => void {
     const ready = () => queueMicrotask(() => {
       if (this.readyState !== 0) return
       this.readyState = 1
       this.dispatchEvent(new Event('open'))
     })
-    this.release = subscribeLive({ kind: 'workspace' }, {
+    return subscribeLive({ kind: 'workspace' }, {
       ready,
       reset: () => { if (this.readyState !== 2) { this.readyState = 0; ready() } },
       frame: frame => {
@@ -25,6 +28,17 @@ export class LiveWorkspaceSource extends EventTarget {
         if ('data' in frame) this.dispatchEvent(new MessageEvent(frame.event, { data: frame.data }))
       },
     })
+  }
+  /**
+   * Drop and re-add the workspace demand: the shared worker then treats it as a new subscription
+   * and sends the stream's `ready` before any frame, and this source opens again. For a document
+   * that lost its first `ready` to an epoch change (hearsay-tools/cezarion#2729).
+   */
+  rejoin() {
+    if (this.readyState === 2) return
+    this.release()
+    this.readyState = 0
+    this.release = this.subscribe()
   }
   close() { this.readyState = 2; this.release() }
 }

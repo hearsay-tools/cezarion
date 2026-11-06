@@ -395,6 +395,27 @@ describe('runs index sync: fence matrix', () => {
     unsubscribe()
   })
 
+  it('a frame of unknown generation goes to the handler once per ready, with no reconciliation of its own', async () => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
+    const { queryFn, unsubscribe } = observe(() => SEED())
+    const handler = vi.fn(() => true)
+    sync.setUnknownGenerationHandler(handler)
+    sync.detach()
+    runFrame('a', summary('a2', '2026-01-02'))
+    runFrame('a', summary('a2', '2026-01-02'))
+    g1Usage()
+    await vi.advanceTimersByTimeAsync(RUNS_INDEX_RECONCILE_HOLD_MS * 3)
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(queryFn).not.toHaveBeenCalled()
+    // After the next ready, a new loss asks the handler again.
+    sync.ready('g1', seq)
+    sync.detach()
+    runFrame('a', summary('a2', '2026-01-02'))
+    expect(handler).toHaveBeenCalledTimes(2)
+    sync.setUnknownGenerationHandler(undefined)
+    unsubscribe()
+  })
+
   it('removed-project fence: only restoreProject lifts it', () => {
     sync.dropProject('a')
     expectNoA(sync.merge(withoutA()) && sync.merge(withA()))

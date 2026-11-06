@@ -212,6 +212,23 @@ describe('shared live ownership', () => {
       owner.dispose()
     })
 
+    it('a workspace demand dropped and added again is a new subscription: ready with the current seq', async () => {
+      const owner = createLiveOwner(deps)
+      const port = new Port(); owner.attach(port); port.sync('a', [workspace], 1)
+      await vi.advanceTimersByTimeAsync(0)
+      streams[0]!.frame(ready('g1', 10))
+      streams[0]!.frame({ event: 'ping', data: '', id: '' })
+      streams[0]!.frame(summary(11))
+      // The document rejoins: one sync without the workspace demand, then one with it.
+      port.sync('a', [run()], 2)
+      port.sync('a', [{ id: 'workspace-2', demand: { kind: 'workspace' } }, run()], 3)
+      await vi.advanceTimersByTimeAsync(0)
+      const after = port.frames.filter(message => message.type === 'frame' && message.epoch === 3).map(message => message.frame)
+      expect(after[0]).toEqual(ready('g1', 11))
+      expect(after[1]).toMatchObject({ event: 'ping' })
+      owner.dispose()
+    })
+
     it('an entry that has no ready for the stream generation gets one before its next frame', async () => {
       const owner = createLiveOwner(deps)
       const port = new Port(); owner.attach(port); port.sync('a', [workspace])

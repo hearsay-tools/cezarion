@@ -69,6 +69,13 @@ export interface RunsIndexSync {
   dropProject(project: string): void
   /** The project was added (again): its rows may enter the index. */
   restoreProject(project: string): void
+  /**
+   * Who recovers a frame of unknown generation. The handler returns true when it took the
+   * recovery (the shared workspace source rejoins, which sends the stream's `ready` and reopens),
+   * so the sync asks for no reconciliation of its own. Without a handler, or when it returns
+   * false, the sync asks for one fenced reconciliation.
+   */
+  setUnknownGenerationHandler(handler: (() => boolean) | undefined): void
   /** Fence a snapshot. Every index snapshot passes here before it reaches the cache. */
   merge(snapshot: RunsIndexResponse): RunsIndexResponse
   /**
@@ -135,9 +142,11 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
   const removed = new Set<string>()
   /** A frame of unknown generation arrived since the last `ready`; it asked for a reconciliation. */
   let unknownAsked = false
+  let unknownHandler: (() => boolean) | undefined
   const unknownGeneration = (): void => {
     if (unknownAsked) return
     unknownAsked = true
+    if (unknownHandler?.()) return
     void reconcile({ hold: true })
   }
   const write = (next: RunsIndexResponse): void => {
@@ -259,6 +268,9 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
       if (!data) return
       const next = dropIndexProject(data, project)
       if (next !== data) write(next)
+    },
+    setUnknownGenerationHandler(handler) {
+      unknownHandler = handler
     },
     restoreProject(project) {
       removed.delete(project)

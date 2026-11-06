@@ -7,7 +7,8 @@ import type { RunIndexEntry, RunsIndexResponse, RunSummary } from '@open-mercato
 
 import { createUsageStore } from './events'
 import { useGlobalEvents } from './global-events'
-import { configureLiveSession, resetLiveSession } from './live-coordinator'
+import { configureLiveSession, resetLiveSession, subscribeLive } from './live-coordinator'
+import { createLiveOwner, type LivePort } from './live-owner'
 import { LIVE_PROTOCOL } from './live-protocol'
 import { createQueryClient } from './query-client'
 import { RUNS_INDEX_BACKSTOP_MS, useRunsIndex, workspaceQueryKeys } from './queries'
@@ -171,5 +172,113 @@ describe('runs index: visibility restore', () => {
     await vi.waitFor(() => expect(indexReads().length).toBeGreaterThan(before))
     await act(async () => vi.advanceTimersByTimeAsync(0))
     expect(title()).toBe('renamed')
+  })
+})
+
+/**
+ * The real coordinator wired to the real shared-worker owner. Document-to-worker messages queue
+ * until `toOwner()`, so a test decides what the worker has seen when it sends a frame.
+ */
+function bridgedWorker() {
+  const queue: unknown[] = []
+  let ownerPort!: LivePort
+  let emit!: (frame: unknown) => void
+  const syncs: Array<{ epoch: number; kinds: string[] }> = []
+  const owner = createLiveOwner({
+    stream(kind, _runs, frame, signal) {
+      if (kind === 'workspace') emit = frame as (frame: unknown) => void
+      return new Promise(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
+    },
+    topic: () => () => {},
+    read: async () => ({ value: served }),
+  })
+  class BridgedWorker {
+    port = {
+      onmessage: null as ((event: { data: unknown }) => void) | null,
+      onmessageerror: null as (() => void) | null,
+      postMessage: (data: any) => {
+        if (data?.type === 'sync') syncs.push({ epoch: data.epoch, kinds: data.entries.map((entry: any) => entry.demand.kind) })
+        queue.push(data)
+      },
+      start() {}, close() {},
+    }
+    addEventListener() {}
+    constructor() {
+      const doc = this.port
+      ownerPort = { onmessage: null, onmessageerror: null, postMessage: data => doc.onmessage?.({ data }), start() {}, close() {} }
+      owner.attach(ownerPort)
+    }
+  }
+  vi.stubGlobal('SharedWorker', BridgedWorker)
+  return {
+    owner, syncs,
+    toOwner: () => { for (const data of queue.splice(0)) ownerPort.onmessage?.({ data }) },
+    emit: (event: string, data: unknown) => emit({ event, data: data === '' ? '' : JSON.stringify(data), id: '' }),
+  }
+}
+
+describe('runs index: a first ready lost to an epoch change (review round 5)', () => {
+  const summaryFrame = (seq: number, title: string) => ({ project: 'a', seq, run: summary('a1', { title }), relationships: 'd' })
+
+  it('the document rejoins once, learns the generation, reconciles once and applies later frames', async () => {
+    const worker = bridgedWorker()
+    configureLiveSession({ local: true, bootProject: 'boot', apiBase: '' })
+    const usage = createUsageStore()
+    renderHook(() => { useGlobalEvents(usage); return useRunsIndex() }, { wrapper })
+    await act(async () => { worker.toOwner(); await vi.advanceTimersByTimeAsync(0) })
+    // The document adds a demand (epoch 2) that the worker has not processed yet.
+    subscribeLive({ kind: 'topic', topic: 'health' }, {})
+    // The worker sends the stream's first ready and ping under epoch 1: the document drops both.
+    await act(async () => {
+      worker.emit('ready', { generation: 'g1', seq: 10 })
+      worker.emit('ping', '')
+      worker.toOwner()
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    served = snapshot([{ projectId: 'a', ...summary('a1', { title: 'seq 11' }) }], 11)
+    const readsBefore = indexReads().length
+    // A numbered frame of unknown generation: the document drops and re-adds its workspace demand.
+    await act(async () => {
+      worker.emit('run-summary', summaryFrame(11, 'seq 11'))
+      await vi.advanceTimersByTimeAsync(0)
+      worker.toOwner()
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    const rejoin = worker.syncs.slice(-2).map((sync) => sync.kinds.includes('workspace'))
+    expect(rejoin).toEqual([false, true])
+    await act(async () => {
+      worker.emit('run-summary', summaryFrame(12, 'seq 12'))
+      await vi.advanceTimersByTimeAsync(300)
+    })
+    expect(title()).toBe('seq 12')
+    expect(indexReads().length - readsBefore).toBe(1)
+    worker.owner.dispose()
+  })
+
+  it('an ordinary epoch change after an accepted ready sends no ready and causes no extra read', async () => {
+    const worker = bridgedWorker()
+    configureLiveSession({ local: true, bootProject: 'boot', apiBase: '' })
+    const usage = createUsageStore()
+    renderHook(() => { useGlobalEvents(usage); return useRunsIndex() }, { wrapper })
+    await act(async () => {
+      worker.toOwner()
+      await vi.advanceTimersByTimeAsync(0)
+      worker.emit('ready', { generation: 'g1', seq: 10 })
+      worker.emit('ping', '')
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    const readsBefore = indexReads().length
+    const syncsBefore = worker.syncs.length
+    await act(async () => {
+      subscribeLive({ kind: 'topic', topic: 'health' }, {})
+      worker.toOwner()
+      await vi.advanceTimersByTimeAsync(0)
+      worker.emit('run-summary', summaryFrame(11, 'seq 11'))
+      await vi.advanceTimersByTimeAsync(300)
+    })
+    expect(title()).toBe('seq 11')
+    expect(worker.syncs.slice(syncsBefore).every((sync) => sync.kinds.includes('workspace'))).toBe(true)
+    expect(indexReads().length - readsBefore).toBe(0)
+    worker.owner.dispose()
   })
 })
