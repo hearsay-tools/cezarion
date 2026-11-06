@@ -23,3 +23,10 @@ describe('the shared-read allowlist', () => {
     expect(allowedLiveRead(path)).toBe(false)
   })
 })
+
+it('allows finite report state reads without allowing the report list as recurring work', () => {
+  expect(allowedLiveRead('/api/v1/p/shop/reports/state')).toBe(true)
+  expect(liveDemandSchema.safeParse({ kind: 'read', path: '/api/v1/p/shop/reports/state', intervalMs: 5_000 }).success).toBe(true)
+  expect(allowedLiveRead('/api/v1/p/shop/reports')).toBe(false)
+  expect(allowedLiveRead('/api/v1/p/shop/reports/state/extra')).toBe(false)
+})

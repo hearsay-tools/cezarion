@@ -950,7 +950,7 @@ export class AgentBrowser {
   async withCdp<T>(work: (
     request: (method: string, params?: Record<string, unknown>, sessionId?: string) => Promise<any>,
     subscribe: (listener: (event: { method: string; params: any; sessionId?: string }) => void) => () => void,
-  ) => Promise<T>): Promise<T> {
+  ) => Promise<T>, { requestTimeoutMs = 10_000 }: { requestTimeoutMs?: number } = {}): Promise<T> {
     const { cdpUrl } = this.run(['get', 'cdp-url'])
     if (typeof cdpUrl !== 'string') throw new Error('agent-browser did not expose its CDP URL')
     const socket = new WebSocket(cdpUrl)
@@ -959,7 +959,7 @@ export class AgentBrowser {
     const listeners = new Set<(event: { method: string; params: any; sessionId?: string }) => void>()
     const request = (method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<any> => new Promise((resolve, reject) => {
       const id = ++sequence
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP ${method} timed out`)) }, 10_000)
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP ${method} timed out`)) }, requestTimeoutMs)
       pending.set(id, { method, resolve, reject, timer })
       socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }))
     })

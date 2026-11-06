@@ -1,3 +1,5 @@
+import { createReportFixture } from './reports-fixture.mjs'
+import { reportIo } from './report-fixture-preload.mjs'
 /** Test-only process. Serves the production app; a separate loopback control listener drives
  * deterministic RunStore input and observes publisher demand without adding product routes. */
 import { createServer, request } from 'node:http'
@@ -9,6 +11,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 // specs, packages/cezar for the production-build benchmark).
 const [root, serverPackage = resolve('.ai/qa/build/cezar'), authMode] = process.argv.slice(2)
 const load = file => import(pathToFileURL(resolve(serverPackage, 'dist', file)).href)
+const { publishArtifact, artifactDirectory } = await load('artifacts/store.js')
 const { RunStore } = await load('runs/store.js')
 const { UiEventSink } = await load('runs/ui-event-sink.js')
 const { RunManager } = await load('workflows/run.js')
@@ -36,12 +39,14 @@ const otherContext = await contexts.context('other')
 const stores = new Map([['boot', store], ['other', otherContext.store]])
 const runs = [...stores].flatMap(([projectId, value]) => value.listRunIds().map(runId => ({ projectId, runId })))
 let timer, published = 0, proxy
+const reports = createReportFixture({ stores, projects, root, publishArtifact, artifactDirectory })
 const control = createServer(async (req, res) => {
   let body = ''
   for await (const part of req) { body += part; if (body.length > 16_384) { res.writeHead(413).end(); return } }
   if (req.method === 'POST') {
     const command = JSON.parse(body || '{}')
     clearInterval(timer)
+    await reports.handle(command)
     if (command.streaming) {
       const selected = command.runs ?? runs
       for (const run of selected) stores.get(run.projectId)?.updateRun(run.runId, { status: 'running' })
@@ -63,7 +68,7 @@ const control = createServer(async (req, res) => {
     if (command.publish) for (const run of command.runs ?? runs) stores.get(run.projectId)?.appendEvent(run.runId, { type: 'item.completed', item: { kind: 'message', id: `publish-${++published}`, role: 'assistant', text: command.publish } })
   }
   res.setHeader('content-type', 'application/json')
-  res.end(JSON.stringify({ runs, published, listeners: [...stores].map(([projectId, value]) => ({ projectId, event: value.listenerCount('event'), run: value.listenerCount('run'), deleted: value.listenerCount('deleted') })) }))
+  res.end(JSON.stringify({ runs, published, ...reports.state(), reportIo, listeners: [...stores].map(([projectId, value]) => ({ projectId, event: value.listenerCount('event'), run: value.listenerCount('run'), deleted: value.listenerCount('deleted') })) }))
 })
 control.listen(0, '127.0.0.1', () => console.log(`control → http://127.0.0.1:${control.address().port}`))
 const server = startServer({ repoRoot: root, store, manager, contexts, version: 'tab-fixture', bootProjectId: 'boot' }, 0)
@@ -85,6 +90,7 @@ server.once('listening', () => {
 })
 process.once('SIGTERM', async () => {
   clearInterval(timer)
+  reports.stop()
   proxy?.closeAllConnections(); proxy?.close()
   server.closeAllConnections(); server.close(); control.closeAllConnections(); control.close()
   manager.dispose(); contexts.disposeAll(); store.close()
