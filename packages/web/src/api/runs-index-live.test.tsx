@@ -189,8 +189,12 @@ function bridgedWorker() {
       if (kind === 'workspace') emit = frame as (frame: unknown) => void
       return new Promise(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
     },
-    topic: () => () => {},
-    read: async () => ({ value: served }),
+    topic() {
+      return () => {}
+    },
+    async read() {
+      return { value: served }
+    },
   })
   class BridgedWorker {
     port = {
