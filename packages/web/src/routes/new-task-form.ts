@@ -375,10 +375,18 @@ export function buildCreateRunBody(opts: {
     images: images.length > 0 ? [...images] : undefined,
     worktree: worktree === false ? false : undefined,
     autonomous: autonomous === true ? true : undefined,
-    ...(archiveWhenDone ? { archiveWhenDone: true } : {}),
-    ...(autoMergePr ? { autoMergePr: true } : {}),
-    ...(allowWorkers === false ? { allowWorkers: false } : {}),
-    ...(allowMessaging === false ? { allowMessaging: false } : {}),
+    ...taskOptionFields({ archiveWhenDone, autoMergePr, allowWorkers, allowMessaging }),
+  }
+}
+
+/** The completion and task access keys of a start body (hearsay-tools/cezarion#2784). Each is sent
+ *  only when it differs from the server default: completion controls when on, access when off. */
+export function taskOptionFields(options: { archiveWhenDone?: boolean | undefined; autoMergePr?: boolean | undefined; allowWorkers?: boolean | undefined; allowMessaging?: boolean | undefined }) {
+  return {
+    ...(options.archiveWhenDone ? { archiveWhenDone: true } : {}),
+    ...(options.autoMergePr ? { autoMergePr: true } : {}),
+    ...(options.allowWorkers === false ? { allowWorkers: false } : {}),
+    ...(options.allowMessaging === false ? { allowMessaging: false } : {}),
   }
 }
 

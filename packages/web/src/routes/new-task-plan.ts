@@ -6,7 +6,7 @@ import type {
   WorkflowStepDef,
 } from '@open-mercato/cezar-api-client'
 
-import { runnerOverride } from './new-task-form'
+import { runnerOverride, taskOptionFields } from './new-task-form'
 
 /**
  * Plan-mode logic (spec 008 / Implementation Plan step 14), kept pure so every rule is
@@ -108,9 +108,6 @@ export function buildPlannedRunBody(opts: {
     effort: modelsLocked ? undefined : effort || undefined,
     runner: runnerOverride(runner, defaultRunner, runnerExplicit),
     images: images.length > 0 ? [...images] : undefined,
-    ...(archiveWhenDone ? { archiveWhenDone: true } : {}),
-    ...(autoMergePr ? { autoMergePr: true } : {}),
-    ...(allowWorkers === false ? { allowWorkers: false } : {}),
-    ...(allowMessaging === false ? { allowMessaging: false } : {}),
+    ...taskOptionFields({ archiveWhenDone, autoMergePr, allowWorkers, allowMessaging }),
   }
 }
