@@ -94,12 +94,11 @@ In a fresh task worktree (`.ai/cezar/worktrees/<runId>`), run `pnpm install --fr
 unless `worktreeSetup` already did.
 
 - When Squeal validates this worktree, it runs the unit tests after each edit: read its
-  verdicts and let it run them.
+  verdicts and let it run them. Follow the [wait bound](docs/sdlc/ci.md#squeal-wait-bound).
 - Run Vitest through `npm test -- <args>`, the repo's pinned binary.
 - CI owns the final gate and full-suite runs. Locally, run what the change affects.
 - In a unit test, wait on the product's own signal. A timeout is only a hang guard, with a
   `// bound: <reason>` comment at the call site.
-
 - `npm run typecheck` checks all workspaces without a build or `dist` writes;
   after a build, use `npm run typecheck:package` for packaged tests.
 - Run packaged CLI E2E with `npm run test:package -- <repo-root paths>`; parity with
@@ -107,7 +106,6 @@ unless `worktreeSetup` already did.
 - Select browser specs with `npm run test:e2e:affected`; use `npm run test:e2e` or
   `npm run test:e2e:local` per [the e2e guide](packages/web/e2e/README.md).
 - Changed-test selection: `npm run test:changed -- --help`.
-- Follow the [Squeal wait bound](docs/sdlc/ci.md#squeal-wait-bound).
 
 ### Before opening a PR
 

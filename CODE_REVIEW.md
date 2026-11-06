@@ -64,9 +64,13 @@ and explain its replacement or the authorized reason to drop it.
 
 Diff the shipped-default path: with every new setting at its shipped default,
 what does the old scenario do now? A replacement that ships off is not a replacement.
-Test paths that read `this.active.get(runId)` with no live session. A fail-open
-helper needs a test of empty or absent input. Require
-[regression proof](docs/sdlc/regression-proof.md).
+Test paths that read `this.active.get(runId)` with no live session: the absent
+entry still reaches the required durable outcome and a usable next step. A
+fail-open helper needs a test of empty or absent input.
+
+A regression test must fail without the fix: require
+[regression proof](docs/sdlc/regression-proof.md). Guard tests that pass both ways
+may stay; say which is which.
 
 A change to a shared name, value or default finds and updates every reader, or
 states why a reader stays. For saved data and user-facing messages, search both

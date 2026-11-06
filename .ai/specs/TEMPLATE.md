@@ -21,6 +21,5 @@ show behavior at shipped defaults, and state impossible cases with their reason.
 | Starts a process that outlives the command that started it (`detached-spawn-outside-helper`) | **Process exits**: Case · What stops it · Behavior at shipped defaults | The normal stop; the starting command interrupted by SIGINT or SIGKILL before and after the start; the handle the stop reads, such as a descriptor, deleted or forged. The helper's tests hold the rest: the leader exits first, a member ignores SIGTERM, zombies, an unreadable or reused start identity. |
 | Restores saved client state for an entity | **State restore cases**: Path or trigger · Restored value · Displayed value | Reopen without a selection; switch between two restored entities; entity unavailable after restore; derived display differs from saved state (e.g. provider mask). Derive from one state; never mask in a provider. |
 
-
 The phase tables in [the unified-waits spec](2026-10-17-unified-waits.md#transitions-out-phase-2a)
 show the form. The tables make cases explicit; they do not decide which cases share a policy.
