@@ -193,7 +193,8 @@ async function recordRecipe(runner: RunnerId, scenario: string) {
       cezarTools: { name: 'cezar_ci_evidence', command: process.execPath, args: [new URL('../../packages/cezar/scripts/mock-wire-tools.mjs', import.meta.url).pathname] },
       env: { CEZ_MOCK_WIRE_FILE: file, CEZ_MOCK_NOTES: '0', CEZ_MOCK_RELEASE_FILE: join(cwd, 'release'),
         CEZ_MOCK_STEER_LINES: scenario === 'steer-tool' ? '1' : '0',
-        CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_TOOL_SOCKET: '', CEZ_TOOL_TOKEN: '' },
+        CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_TOOL_SOCKET: '', CEZ_TOOL_TOKEN: '',
+        NODE_V8_COVERAGE: process.env.NODE_V8_COVERAGE ?? '' },
     }, event => events.push(event), { onActivity: () => { activity += 1; }, onUiEvent: event => { if (event.type === 'ask.requested') asked = true; } });
     const settled = session.result.catch(() => undefined);
     await driveRecipe(scenario, runner, session, events, () => activity, cwd, file, observed.exits, () => asked);
