@@ -36,7 +36,7 @@ coordinator a progress message with the SHA and what it moved or changed.
 
 Before the PR, in this order:
 1. Make the change. Grep tests, testkits and browser specs for every name you
-   move, rename or remove (.ai/skills/reader-sweep/SKILL.md).
+   move, rename or remove (CODE_REVIEW.md § Changing working behavior).
 2. Read the applicable AGENTS.md area rules. Run npm run build -w @wjarka/cezarion
    once, then from packages/cezar the three
    tsc configs: tsconfig.json, tsconfig.test.json, tsconfig.scripts.json.

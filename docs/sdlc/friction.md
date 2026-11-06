@@ -330,9 +330,9 @@ the tasks it governs already read:
 | --- | --- |
 | One code area: the runs store, worktrees, skills, the HTTP API, real-time events and the like | That area's doc under `docs/areas/`, or a new one the Task routing row points to |
 | Runners, the event protocol or the parity matrices | `AGENT_PROTOCOL.md`, or `docs/areas/runners.md` for how a runner change is tested |
-| A design rule for changing working behavior, or a new case table | `.ai/skills/load-bearing-change/SKILL.md` |
-| Where a changed name, value or default has readers | `.ai/skills/reader-sweep/SKILL.md` |
-| Running tests, Squeal waits, typecheck, waits in unit tests | `.ai/skills/validation/SKILL.md` |
+| A design rule for changing working behavior, or a new case table | [CODE_REVIEW.md § Changing working behavior](../../CODE_REVIEW.md#changing-working-behavior) and [.ai/specs/TEMPLATE.md § Case tables](../../.ai/specs/TEMPLATE.md#case-tables) |
+| Where a changed name, value or default has readers | [CODE_REVIEW.md § Changing working behavior](../../CODE_REVIEW.md#changing-working-behavior) |
+| Running tests, Squeal waits, typecheck, waits in unit tests | [AGENTS.md § Validation](../../AGENTS.md#validation) and [docs/sdlc/ci.md](ci.md) |
 | Browser specs and the e2e environment | `packages/web/e2e/README.md` |
 | CI, workflows or investigating a CI failure | `docs/sdlc/ci.md` |
 | Regression proof | `docs/sdlc/regression-proof.md` |

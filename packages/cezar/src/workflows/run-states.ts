@@ -1,6 +1,6 @@
 /**
  * Every run state, every trigger out of it and every wait kind, as data (hearsay-tools/cezarion#1804).
- * This file is the Transitions out table of .ai/skills/load-bearing-change § Case tables: a change that adds or changes
+ * This file is the Transitions out table of .ai/specs/TEMPLATE.md § Case tables: a change that adds or changes
  * a run state declares its triggers here first.
  *
  * Two levels. An exit (`RUN_EXITS`, in `runs/run-exits.ts`) is one kind of status write, with the

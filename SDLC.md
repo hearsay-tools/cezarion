@@ -107,8 +107,8 @@ active `in-progress` claim.
 
 Use affected local checks. When Squeal validates the worktree, use its background
 results and follow its installed skill. The repo's
-[validation skill](.ai/skills/validation/SKILL.md) owns test selection, Squeal
-waits, browser checks and packaged CLI checks.
+[AGENTS.md § Validation](AGENTS.md#validation) and the [CI guide](docs/sdlc/ci.md)
+own test selection, Squeal waits, browser checks and packaged CLI checks.
 
 **The final gate and full-suite runs belong in CI.** Do not run the complete
 local gate just to finish a task, commit, open a PR or complete a review. A full

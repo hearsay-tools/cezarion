@@ -115,7 +115,7 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     await until(() => (store.getRun(run.id)?.waits ?? []).some((entry: Wait) => entry.kind === 'human' && entry.via === 'budget'));
   });
 
-  // .ai/skills/load-bearing-change "Test the path with no live session": the cap at a resolution after a clean close.
+  // CODE_REVIEW.md § Changing working behavior (no live session): the cap at a resolution after a clean close.
   it('a resolution at the spent budget with no live session is cancelled and opens the budget human wait', async () => {
     const external = processes();
     const run = await waitingParent();

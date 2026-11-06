@@ -1762,8 +1762,8 @@ For iteration, run affected test files or `npm run test:changed` (inspect with
 `-- --plan`; override the local main comparison with `-- --base=<ref>`).
 The changed-test command includes staged, unstaged and untracked changes and
 falls back to full Vitest on shared/configuration/unknown input or missing Git
-history. It is not a substitute for final verification. See `.ai/skills/validation/SKILL.md`
-for targeted browser commands and the final-gate/evidence-reuse policy.
+history. It is not a substitute for final verification. See [AGENTS.md § Validation](AGENTS.md#validation)
+for targeted browser commands and the [CI guide](docs/sdlc/ci.md) for the final-gate/evidence-reuse policy.
 
 `npm run typecheck` checks all four workspaces from source without writing build
 output. `npm run typecheck:web` checks the cockpit and reads the server route types

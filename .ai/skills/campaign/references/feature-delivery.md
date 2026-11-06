@@ -62,8 +62,8 @@ scope and evidence. Request a coordinator decision before changing approved
 behavior, a shared contract, acceptance criteria or a dependency. Wait for an
 explicit reply; keep any independent in-scope work moving meanwhile.
 
-Run the applicable checks from .ai/skills/validation/SKILL.md and
-.ai/skills/reader-sweep/SKILL.md. Use Squeal for
+Run the applicable checks from AGENTS.md § Validation and
+CODE_REVIEW.md § Changing working behavior. Use Squeal for
 covered suites, and run build, typecheck and packaged checks when required.
 For a regression fix, prove the regression fails at proof_base and passes
 with the fix. Record preserved guarantees when changing a test's expectation.
