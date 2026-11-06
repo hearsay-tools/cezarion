@@ -54,7 +54,7 @@ export function createRunDetailFetcher(queryClient: QueryClient) {
       entry.owed = false
       return
     }
-    if (query.getObserversCount() === 0) {
+    if (!query.isActive()) {
       entry.owed = false
       void queryClient.invalidateQueries({ queryKey: entry.key, exact: true, refetchType: 'none' })
       return
