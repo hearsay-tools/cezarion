@@ -96,7 +96,7 @@ export async function benchmarkReports(buildRoot: string, output: string, quick:
         off(); await request('Target.closeTarget', { targetId })
         console.log(JSON.stringify({ iteration, requests: sample.reportRequests, scans: sample.io.scans, correct }))
         if (!correct) throw new Error('report workload correctness mismatch')
-      })
+      }, { requestTimeoutMs: 60_000 })
     } finally { browser.close(); await fixture.stop() }
   }
 }
