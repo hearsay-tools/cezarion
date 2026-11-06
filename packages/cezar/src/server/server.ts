@@ -669,7 +669,7 @@ async function probeWritableDir(dir: string, create: boolean): Promise<string | 
     return err instanceof Error ? err.message : String(err);
   }
 }
-
+function writeErrorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 // The return type is INFERRED on purpose: it is the chained app type built at the bottom of
 // this function, and `AppType` (src/server/app-type.ts) is `ReturnType<typeof createApp>`.
 // Annotating it `Hono` here would erase every route from the type and leave the typed client
@@ -1742,7 +1742,7 @@ export function createApp(deps: ServerDeps) {
             updated = entry;
           }, deps.home);
         } catch (err) {
-          return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+          return c.json({ error: writeErrorMessage(err) }, 500);
         }
         if (!updated) return c.json({ error: `unknown account: ${id}` }, 404);
         // The dir may have moved under a cached probe — drop THIS account's answer so the response
@@ -2168,7 +2168,7 @@ export function createApp(deps: ServerDeps) {
         }, deps.home);
       } catch (err) {
         // e.g. a read-only home — nothing was persisted (atomic tmp+rename).
-        return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+        return c.json({ error: writeErrorMessage(err) }, 500);
       }
       // Raced with a concurrent removal between the read and the write.
       if (!updated) return c.json({ error: `unknown project: ${id}` }, 404);
