@@ -370,9 +370,7 @@ describe('task quick-list', () => {
 describe('tasks table overview', () => {
   const TABLE_ROW = '[data-slot="task-table-row"]'
   function showResourceTable() {
-    if (!browser.count('[data-slot="tasks-table"]')) return
-    const visible = browser.evaluate(`document.querySelector('[data-slot="tasks-table"]').checkVisibility()`)
-    if (visible) return
+    if (browser.count('[data-slot="tasks-table"]')) return
     browser.click('[data-slot="task-columns-trigger"]')
     browser.waitForFunction(`document.querySelector('[data-slot="popover-content"]')?.textContent.includes('Resource columns') === true`)
     browser.click('[data-slot="popover-content"] button:last-child')
@@ -610,8 +608,8 @@ describe('tasks table overview', () => {
     ).toBe(scoped('/new'))
     // The table is the desktop framing — at phone width the cards replace it, not join it.
     expect(
-      browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="tasks-table"]')).display`)
-    ).toBe('none')
+      browser.evaluate(`document.querySelector('[data-slot="tasks-table"]') === null`)
+    ).toBe(true)
     // Nothing forces the page wider than the phone.
     expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
     expect(
@@ -716,8 +714,7 @@ describe('the tasks table under worst-case row content', () => {
   ]
 
   function showResourceTable() {
-    if (!browser.count('[data-slot="tasks-table"]')) return
-    if (browser.evaluate(`document.querySelector('[data-slot="tasks-table"]').checkVisibility()`)) return
+    if (browser.count('[data-slot="tasks-table"]')) return
     browser.click('[data-slot="task-columns-trigger"]')
     browser.waitForFunction(`document.querySelector('[data-slot="popover-content"]')?.textContent.includes('Resource columns') === true`)
     browser.click('[data-slot="popover-content"] button:last-child')

@@ -1,3 +1,5 @@
+import { useTaskListFocus } from '@/lib/use-task-list-focus'
+import { DESKTOP_MEDIA_QUERY, useIsDesktop } from '@/lib/use-desktop'
 import { useRunCacheWriter } from '@/api/use-run-cache-writer'
 import { projectAddress } from '@/api/run-address'
 import './task-lists.css'
@@ -181,6 +183,14 @@ export function TasksOverview({
   React.useEffect(() => { onArchivedSearch?.(query.trim()) }, [onArchivedSearch, query])
   const [origin, setOrigin] = useOriginOrOwn(originProp, onOriginChange)
   const [detailedTable, setDetailedTable] = React.useState(false)
+  const desktop = useIsDesktop()
+  const listFocus = useTaskListFocus(`${desktop}:${detailedTable}`)
+  const [expandedRuns, setExpandedRuns] = React.useState<Set<string>>(() => new Set())
+  const toggleExpandedRun = (id: string) => setExpandedRuns((current) => {
+    const next = new Set(current)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
   const headerRef = React.useRef<HTMLElement>(null)
   const all = runs ?? []
   const derived = useProjectTaskGroups({ all, view, query, origin, archivedPages, archivedTotal, automationName })
@@ -196,7 +206,7 @@ export function TasksOverview({
   // drop the task at the top of the active list by a click that looked like it did nothing.
   const pinToggle = view === 'archived' ? undefined : onTogglePin
   return (
-    <div data-route="tasks" data-presentation={detailedTable ? 'resources' : 'summary'} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+    <div {...listFocus} data-route="tasks" data-presentation={detailedTable ? 'resources' : 'summary'} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
       {/* One set of search/view controls across breakpoints keeps query and selection intact.
           Mobile places search above the list filters; the shell already supplies its title. */}
       <header ref={headerRef} className="flex shrink-0 flex-col gap-[22px]">
@@ -245,7 +255,6 @@ export function TasksOverview({
         </div>
         <TaskOriginRow origin={origin} counts={derived.originTotals} onChange={setOrigin} labels={groups.map((group) => group.label)} onSetAll={folds.setAll} />
       </header>
-
       <div className="flex min-w-0 flex-1 flex-col">
         {runs === undefined ? (
           <TasksLoading error={error} onRetry={onRetry} />
@@ -260,6 +269,9 @@ export function TasksOverview({
             groups={groups}
             folds={folds}
             grouped={{
+              desktop,
+              expandedRuns,
+              toggleExpandedRun,
               detailedTable,
               columns,
               expandedColumns,
@@ -274,17 +286,14 @@ export function TasksOverview({
             }}
           />
         )}
-
         {view === 'archived' && archivedPages ? <ArchivedOlder pages={archivedPages} /> : null}
       </div>
     </div>
   )
 }
-
 /** Hands the search text to the page; the page calls `written` with each trimmed text its
  *  debounced write puts in the URL. */
 type TasksQueryWriter = (query: string, written: (query: string) => void) => void
-
 /**
  * The search box's text. It starts from the URL's, follows the URL when something else changes
  * it (a link, Back), and keeps what is being typed while the page's own debounced, trimmed write
@@ -315,20 +324,17 @@ function useUrlQuery(urlQuery: string, onQueryChange: TasksQueryWriter | undefin
   }, [onQueryChange, query])
   return [query, setQuery] as const
 }
-
 function TasksHeading({ projectName, detailedTable }: { projectName?: string | undefined; detailedTable: boolean }) {
   return (
     <div className="flex flex-col gap-2"><h1 className="text-[30px] font-semibold tracking-tight">Project tasks</h1><p className="text-[13px] text-muted-foreground">{projectName ? `${projectName} · ` : ''}{detailedTable ? 'Every resource column shown. Fold columns without losing the saved view.' : 'Review runs, pull requests and resource usage.'}</p></div>
   )
 }
-
 /** The caller's origin when it holds one (the route keeps it in the URL); otherwise the page's
  *  own, starting at All. */
 function useOriginOrOwn(origin: TaskOrigin | undefined, onChange: ((origin: TaskOrigin) => void) | undefined) {
   const [own, setOwn] = React.useState<TaskOrigin>('all')
   return [origin ?? own, onChange ?? setOwn] as const
 }
-
 /**
  * The list's derived state: what the filters leave in each status group, and the counts the
  * tabs, chips, caption and bulk actions show. Pure arithmetic over the props, kept out of the
@@ -378,7 +384,6 @@ function useProjectTaskGroups({ all, view, query, origin, archivedPages, archive
     unread: unreadDoneCount(scoped),
   }
 }
-
 /**
  * The Archived tab's count. For All it is the server's total, or the window with a `+` while
  * none is known; for one origin it is what has loaded, with a `+` while the plain archive has
@@ -398,11 +403,9 @@ function archivedTabCount(
   // Whether the plain archive has older pages; a search's own paging says nothing about that.
   return full && archivedPages?.plainHasMore !== false ? `${loaded}+` : loaded
 }
-
 function resultCaption(count: number, incomplete: boolean, needle: string): string {
   return `${count} ${count === 1 ? 'task' : 'tasks'}${incomplete ? ' loaded' : ''}${needle ? ` matching “${needle}”` : ''}`
 }
-
 /**
  * Mark all read and Archive finished, both scoped to the origin by the caller. Below `md` Mark
  * all read moves into the actions menu, after Archive finished.
@@ -422,7 +425,7 @@ function BulkActions({ view, unread, finished, archivePending, headerRef, onMark
   const sweepable = finished > 0 || archivePending
   // A CSS-hidden Radix menu would keep its modal focus trap after a desktop resize.
   React.useEffect(() => {
-    const media = window.matchMedia?.('(min-width: 768px)')
+    const media = window.matchMedia?.(DESKTOP_MEDIA_QUERY)
     if (!media) return
     const closeOnDesktop = () => { if (media.matches) setActionsOpen(false) }
     closeOnDesktop()
@@ -487,7 +490,7 @@ function BulkActions({ view, unread, finished, archivePending, headerRef, onMark
             onCloseAutoFocus={(event) => {
               // The successful mutation removes its trigger. Return to the stable filter,
               // without focusing search and summoning the phone keyboard.
-              if (archiveSelected.current || window.matchMedia?.('(min-width: 768px)').matches) {
+              if (archiveSelected.current || window.matchMedia?.(DESKTOP_MEDIA_QUERY).matches) {
                 event.preventDefault()
                 archiveSelected.current = false
                 headerRef.current?.querySelector<HTMLButtonElement>('[data-view="active"]')?.focus()
@@ -518,7 +521,6 @@ function BulkActions({ view, unread, finished, archivePending, headerRef, onMark
     </>
   )
 }
-
 function ColumnsPopover({ columns, expandedColumns, columnsPending, onToggleColumn, detailedTable, onToggleDetailed }: {
   columns: ReturnType<typeof taskColumnsForCapabilities>
   expandedColumns: NormalizedExpandedColumns
@@ -536,7 +538,6 @@ function ColumnsPopover({ columns, expandedColumns, columnsPending, onToggleColu
   </PopoverContent></Popover>
   )
 }
-
 /**
  * What the loaded list leaves on screen: the empty state for how it got empty, or the result
  * caption and each status group with its rows.
@@ -582,7 +583,6 @@ function ProjectTaskResults({ view, query, origin, onShowAll, caption, captionOn
     </>
   )
 }
-
 function TasksLoading({ error, onRetry }: { error?: string | undefined; onRetry?: (() => void) | undefined }) {
   return error ? (
     <div role="alert" className="rounded-xl border border-border bg-card p-6"><h2 className="text-lg">Could not load tasks</h2><p className="mt-2 text-sm text-muted-foreground">{error}</p><Button variant="outline" className="mt-4" onClick={onRetry}>Retry</Button></div>
@@ -590,7 +590,6 @@ function TasksLoading({ error, onRetry }: { error?: string | undefined; onRetry?
     <div role="status" aria-label="Loading tasks" className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Loading tasks…</div>
   )
 }
-
 /** Older archived history below the list: a retry after a failed page, or the next page. */
 function ArchivedOlder({ pages }: { pages: ArchivedPages }) {
   if (pages.failed) {
@@ -614,7 +613,6 @@ function ArchivedOlder({ pages }: { pages: ArchivedPages }) {
     </Button>
   )
 }
-
 /**
  * What an empty list honestly means, given how it got empty — as a CenteredState, one variant
  * per cause. Only the no-tasks-at-all state is a hero moment and gets the twinkle backdrop
@@ -664,10 +662,9 @@ function TasksEmptyState({ view, query, origin = 'all', onShowAll }: { view: Lis
     </div>
   )
 }
-
 /** Frame 4: five scan columns, with resources disclosed per task. The optional detailed table
  * above still owns workspace column preferences, so switching presentation never rewrites them. */
-function SummaryTasksTable({ rows, onRename, onTogglePin, now, showTokens, showCost, automationName }: {
+function SummaryTasksTable({ rows, onRename, onTogglePin, now, showTokens, showCost, automationName, expandedRuns, toggleExpandedRun }: TaskExpansion & {
   rows: readonly GroupedTask[]
   onRename: (id: string, title: string) => void
   onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
@@ -676,8 +673,7 @@ function SummaryTasksTable({ rows, onRename, onTogglePin, now, showTokens, showC
   showCost: boolean
   automationName: (automationId: string) => string | undefined
 }) {
-  const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set())
-  return <div data-slot="tasks-summary" className="hidden md:block"><div className="rounded-lg border border-border bg-card p-5">
+  return <div data-slot="tasks-summary"><div className="rounded-lg border border-border bg-card p-5">
     <table className="w-full table-fixed border-collapse">
       <colgroup><col /><col className="w-[136px]" /><col className="w-[106px]" /><col className="w-[116px]" /><col className="w-[70px]" /></colgroup>
       <thead><tr>{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <th key={label} className="h-8 border-b border-border text-left text-[12px] font-medium uppercase text-muted-foreground">{label}</th>)}</tr></thead>
@@ -685,17 +681,16 @@ function SummaryTasksTable({ rows, onRename, onTogglePin, now, showTokens, showC
         const attention = deriveAttention(run)
         const scheduled = scheduledResume(run)
         const reference = taskReference(run)
-        const open = expanded.has(run.id)
+        const open = expandedRuns.has(run.id)
         const detailId = `task-resources-${run.id}`
         return <React.Fragment key={run.id}>
-          <tr data-status={run.status} data-slot="task-summary-row" className="group/row border-b border-border last:border-0">
+          <tr data-status={run.status} data-slot="task-summary-row" data-run-id={run.id} className="group/row border-b border-border last:border-0">
             <td className="py-5 pr-4 align-top">
               <TitleCell run={run} to={`/tasks/${run.id}`} onRename={onRename} onTogglePin={onTogglePin} />
               <div className="mt-1"><RunOriginLine run={run} automationName={automationName} /></div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <button type="button" aria-label={`${open ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} aria-expanded={open} aria-controls={detailId} aria-describedby={`summary-status-${run.id}`} onClick={() => setExpanded((current) => { const next = new Set(current); if (open) next.delete(run.id); else next.add(run.id); return next })} className="inline-flex min-h-[26px] items-center gap-1 rounded-md p-0 text-[11px] text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"><Pill id={`summary-status-${run.id}`} dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>{attention.label}{scheduled ? ` ${scheduled.label}` : ''}</Pill></button>
+                <button type="button" data-task-control="resources" aria-label={`${open ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} aria-expanded={open} aria-controls={detailId} aria-describedby={`summary-status-${run.id}`} onClick={() => toggleExpandedRun(run.id)} className="inline-flex min-h-[26px] items-center gap-1 rounded-md p-0 text-[11px] text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"><Pill id={`summary-status-${run.id}`} dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>{attention.label}{scheduled ? ` ${scheduled.label}` : ''}</Pill></button>
                 {run.status === 'queued' && queuePosition !== null ? <span className="text-xs text-muted-foreground">#{queuePosition} in queue</span> : null}
-
               </div>
             </td>
             <td className="truncate pr-3 text-xs text-muted-foreground" title={workflowLabel(run)}>{workflowLabel(run)}</td>
@@ -713,15 +708,20 @@ function SummaryTasksTable({ rows, onRename, onTogglePin, now, showTokens, showC
     </div>
   </div>
 }
-
 /** One row of a status group's tables. */
 type GroupedTask = { run: RunSummary; queuePosition: number | null }
-
+type TaskExpansion = {
+  expandedRuns: ReadonlySet<string>
+  toggleExpandedRun: (id: string) => void
+}
 /**
  * One status group's tasks in every presentation the page has: the summary table, the detailed
  * table with the saved column choices, and the phone cards.
  */
 function GroupedTasks({
+  desktop,
+  expandedRuns,
+  toggleExpandedRun,
   group,
   detailedTable,
   columns,
@@ -735,6 +735,7 @@ function GroupedTasks({
   showCost,
   automationName,
 }: {
+  desktop: boolean
   group: TaskStatusGroup<RunSummary>
   detailedTable: boolean
   columns: readonly TaskColumnDefinition[]
@@ -747,18 +748,17 @@ function GroupedTasks({
   showTokens: boolean
   showCost: boolean
   automationName: (automationId: string) => string | undefined
-}) {
+} & TaskExpansion) {
   const rows: GroupedTask[] = group.rows.flatMap((row) =>
     rowTasks(row).map((run) => ({ run, queuePosition: run.status === 'queued' ? row.queuePosition : null })),
   )
   return (
     <>
-      {!detailedTable ? <SummaryTasksTable rows={rows} onRename={onRename} onTogglePin={onTogglePin} now={now} showTokens={showTokens} showCost={showCost} automationName={automationName} /> : null}
+      {desktop && !detailedTable ? <SummaryTasksTable expandedRuns={expandedRuns} toggleExpandedRun={toggleExpandedRun} rows={rows} onRename={onRename} onTogglePin={onTogglePin} now={now} showTokens={showTokens} showCost={showCost} automationName={automationName} /> : null}
       {/* The detailed table retains every saved column preference. */}
-      <div
+      {desktop && detailedTable ? <div
         data-slot="tasks-table"
-        hidden={!detailedTable}
-        className={cn('hidden overflow-x-auto rounded-lg border border-border bg-card', detailedTable && 'md:block')}
+        className="overflow-x-auto rounded-lg border border-border bg-card"
       >
         <TooltipProvider>
           <table className="w-full table-fixed border-collapse">
@@ -782,17 +782,16 @@ function GroupedTasks({
             </tbody>
           </table>
         </TooltipProvider>
-      </div>
-      {/* <md: the same runs as stacked cards. */}
-      <div data-slot="task-cards" className="flex flex-col rounded-lg border border-border bg-card p-5 md:hidden">
+      </div> : null}
+      {/* Phones mount cards only, regardless of saved desktop columns. */}
+      {!desktop ? <div data-slot="task-cards" className="flex flex-col rounded-lg border border-border bg-card p-5">
         {rows.map(({ run, queuePosition }) => (
-          <TaskCard key={run.id} run={run} queuePosition={queuePosition} now={now} showTokens={showTokens} showCost={showCost} onTogglePin={onTogglePin} automationName={automationName} />
+          <TaskCard key={run.id} resourcesOpen={expandedRuns.has(run.id)} onToggleResources={() => toggleExpandedRun(run.id)} run={run} queuePosition={queuePosition} now={now} showTokens={showTokens} showCost={showCost} onTogglePin={onTogglePin} automationName={automationName} />
         ))}
-      </div>
+      </div> : null}
     </>
   )
 }
-
 function TaskResourceDetails({ run, showTokens, showCost }: { run: RunSummary; showTokens: boolean; showCost: boolean }) {
   const sample = useRunUsage(run.id)
   const usage = usageCells(run, sample)
@@ -804,7 +803,6 @@ function TaskResourceDetails({ run, showTokens, showCost }: { run: RunSummary; s
     {run.branch ? <div className="col-span-2"><dt className="text-muted-foreground">Branch</dt><dd className="mt-1 break-all">{run.branch}</dd></div> : null}
   </dl>
 }
-
 function OverviewTab({
   view,
   current,
@@ -839,7 +837,6 @@ function OverviewTab({
     </button>
   )
 }
-
 function Th({
   children,
   right = false,
@@ -1320,6 +1317,8 @@ function BoundedMetric({ text, accessibleText }: { text: string; accessibleText?
 
 /** One run, one card — the `<md` framing of the same row. */
 function TaskCard({
+  resourcesOpen,
+  onToggleResources,
   run,
   queuePosition,
   now,
@@ -1328,6 +1327,8 @@ function TaskCard({
   onTogglePin,
   automationName,
 }: {
+  resourcesOpen: boolean
+  onToggleResources: () => void
   run: RunSummary
   queuePosition: number | null
   now: number
@@ -1337,7 +1338,6 @@ function TaskCard({
   automationName: (automationId: string) => string | undefined
 }) {
   const navigate = useNavigate()
-  const [resourcesOpen, setResourcesOpen] = React.useState(false)
   const attention = deriveAttention(run)
   const scheduled = scheduledResume(run)
   const to = `/tasks/${run.id}`
@@ -1360,7 +1360,7 @@ function TaskCard({
       className="cursor-pointer border-b border-border py-5 first:pt-0 last:border-0 last:pb-0"
     >
       <div className="flex flex-wrap items-start gap-2.5">
-        <button data-slot="mobile-resources-toggle" type="button" aria-controls={`mobile-resources-${run.id}`} aria-describedby={`mobile-status-${run.id}`} aria-label={resourcesOpen ? 'Hide resources' : 'Show resources'} title={resourcesOpen ? 'Hide resources' : 'Show resources'} aria-expanded={resourcesOpen} onClick={() => setResourcesOpen((value) => !value)}><Pill id={`mobile-status-${run.id}`} dot={attention.tone} shape={attention.shape} pulse={attention.pulse} className="mt-px shrink-0" title={scheduled?.title}>
+        <button data-slot="mobile-resources-toggle" data-task-control="resources" type="button" aria-controls={`mobile-resources-${run.id}`} aria-describedby={`mobile-status-${run.id}`} aria-label={resourcesOpen ? 'Hide resources' : 'Show resources'} title={resourcesOpen ? 'Hide resources' : 'Show resources'} aria-expanded={resourcesOpen} onClick={onToggleResources}><Pill id={`mobile-status-${run.id}`} dot={attention.tone} shape={attention.shape} pulse={attention.pulse} className="mt-px shrink-0" title={scheduled?.title}>
           {attention.label}
           {scheduled ? <span className="tabular-nums">{scheduled.label}</span> : null}
         </Pill></button>

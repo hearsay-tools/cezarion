@@ -57,7 +57,6 @@
 @media (min-width: 768px) {
   [data-presentation="summary"] [data-slot="global-task-diff"] { display: block; }
   [data-presentation="summary"] [data-slot="global-task-row"] { min-height: 102px; }
-  [data-presentation="summary"] [data-slot="global-task-row"][data-expanded="false"] [data-slot="global-task-actions"] { display: none; }
   [data-presentation="summary"] [data-slot="global-task-title"] button { min-height: 26px; }
   [data-slot="tasks-table"] table { min-width: 1240px; }
   [data-slot="tasks-table"] col[data-column-id="workflow"][data-expanded="true"] { width: 120px !important; }
@@ -110,7 +109,6 @@
   [data-presentation="summary"] [data-slot="global-task-diff"] { display: block; grid-column: 2; grid-row: 2; }
   [data-presentation="summary"] [data-slot="global-task-age"] { grid-column: 3; grid-row: 2; }
   [data-presentation="summary"] [data-slot="global-task-references"] { grid-column: 1 / -1; grid-row: 3; }
-  [data-presentation="summary"] [data-slot="global-task-row"][data-expanded="false"] [data-slot="global-task-actions"] { display: none; }
   [data-route="global-tasks"][data-presentation="summary"] > header > div:has(input) { align-items: start; flex-direction: column; }
   [data-slot="other-projects"] a { border: 1px solid var(--border); min-height: 44px; color: var(--foreground); }
 }

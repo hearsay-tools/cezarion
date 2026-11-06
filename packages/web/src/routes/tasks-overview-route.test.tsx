@@ -1,4 +1,4 @@
-import { ago, run, tableRow } from './tasks-overview.testkit'
+import { ago, run, tableRow as detailedTableRow } from './tasks-overview.testkit'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -13,6 +13,9 @@ import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { TasksOverviewRoute } from '@/routes/tasks-overview'
 
 afterEach(cleanup)
+
+// Route checks preserve row inclusion in the selected representation.
+const tableRow = (id: string) => detailedTableRow(id) ?? document.querySelector(`[data-slot="task-summary-row"][data-run-id="${id}"]`)
 
 describe('TasksOverviewRoute — wired to the app', () => {
   const fetchMock = vi.fn<typeof fetch>()

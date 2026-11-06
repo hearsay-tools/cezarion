@@ -49,12 +49,12 @@ const scoped = (path: string) => `/p/${project}${path}`
 const prepare = (width: number, theme: string, idle = true) => {
   // Appearance hydration can overwrite a cold-navigation override after the route mounts.
   if (idle) browser.waitForStable(`window.__cezIdle === true`, { holdMs: 200 })
-  browser.setViewport(width, 1000)
+  browser.setViewport(width, width < 768 ? 640 : 900)
   browser.evaluate(`document.documentElement.classList.toggle('light', '${theme}' === 'light'); document.documentElement.classList.toggle('dark', '${theme}' === 'dark'); document.documentElement.dataset.width = 'wide'`)
 }
 it('renders assigned task flows at 1440 Wide, 402 and 360 in both themes without page overflow', () => {
   const pages: Array<[string, string, string]> = [
-    ['project', scoped('/'), '[data-slot="tasks-table"]'], ['global', '/tasks?group=project', '[data-slot="global-task-row"]'],
+    ['project', scoped('/'), '[data-slot="tasks-summary"], [data-slot="task-cards"]'], ['global', '/tasks?group=project', '[data-slot="global-task-row"]'],
     ['inbox', scoped('/inbox'), '[data-route="inbox"]'], ['automations', scoped('/automations'), '[data-route="automations"] [data-slot="automation-card"]'],
     ['editor', scoped(`/automations/${automationId}`), '#automation-name'],
   ]
@@ -71,7 +71,7 @@ it('renders assigned task flows at 1440 Wide, 402 and 360 in both themes without
 }, 180_000)
 it('persists column choices, filters projects, and expands mobile resources through real controls', async () => {
   browser.goto(base + scoped('/')); prepare(1440, 'light')
-  browser.waitForFunction(`document.querySelector('[data-slot="tasks-table"]') !== null`)
+  browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="task-cards"]') !== null`)
   browser.click('[data-slot="task-columns-trigger"]')
   browser.click('[data-column-toggle="branch"]')
   browser.press('Escape')
@@ -124,7 +124,7 @@ it('renders loading, retryable error, and filtered-empty states in both themes a
       browser.screenshot(join(artifacts, `error-${width}-${theme}.png`))
       writeFileSync(faultFile, 'none')
       browser.click('[data-route="tasks"] [role="alert"] button')
-      browser.waitForFunction(`document.querySelector('[data-slot="tasks-table"]') !== null`)
+      browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="task-cards"]') !== null`)
       expect(browser.url()).toContain(scoped('/'))
       browser.fill('[aria-label="Search tasks"]', 'nothing-matches-this-fixture')
       browser.waitForFunction(`document.body.textContent.includes('No matching tasks')`)

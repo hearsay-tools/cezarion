@@ -1460,7 +1460,7 @@ it('says until when a process wait waits, in the meta line', () => {
 
 function stubMedia({ noHover, desktop }: { noHover: boolean; desktop: boolean }) {
   vi.stubGlobal('matchMedia', (query: string) => ({
-    matches: query === '(hover: none)' ? noHover : query === '(min-width: 768px)' ? desktop : false,
+    matches: query === '(hover: none)' ? noHover : query === '(min-width: 48rem)' ? desktop : false,
     media: query, onchange: null,
     addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
   }))

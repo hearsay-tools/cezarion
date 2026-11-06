@@ -1,4 +1,4 @@
-import { NOW, ago, run, renderOverview, location, tableRow, card, cellsOf } from './tasks-overview.testkit'
+import { NOW, ago, run, renderOverview, setOverviewDesktop, location, tableRow, card, cellsOf } from './tasks-overview.testkit'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
@@ -10,7 +10,7 @@ import { createQueryClient } from '@/api/query-client'
 import type { ProcessUsage, RunSummary } from '@open-mercato/cezar-api-client'
 import { TasksOverview } from '@/routes/tasks-overview'
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 function expectCompactResourceCells(
   tokens: HTMLElement | null | undefined,
@@ -459,6 +459,7 @@ describe('TasksOverview — the table', () => {
     )
     expect(allHeaders.filter((header) => header === 'IN / OUT' || header === 'Cost')).toEqual(headers)
     const rowText = tableRow('visibility')?.textContent ?? ''
+    setOverviewDesktop(false)
     const mobile = card('visibility') as HTMLElement
     expect(mobile.textContent).not.toContain('184.7k')
     fireEvent.click(within(mobile).getByRole('button', { name: 'Show resources' }))
@@ -614,6 +615,7 @@ describe('TasksOverview — inline rename from the table (spec step 15)', () => 
 
   it('offers no rename affordance on the mobile cards — hover pencils do not exist on touch', () => {
     renderOverview({ runs: [run({ id: 'e6' })] })
+    setOverviewDesktop(false)
     expect(within(card('e6') as HTMLElement).queryByRole('button', { name: 'Rename task' })).toBeNull()
   })
 })
@@ -644,6 +646,7 @@ describe('TasksOverview — pinned tasks (#935)', () => {
     expect(onTogglePin.mock.calls[0]?.[1]).toBe(false)
     expect(onTogglePin.mock.calls[0]?.[0]).toMatchObject({ id: 'kept' })
 
+    setOverviewDesktop(false)
     fireEvent.click(within(card('kept') as HTMLElement).getByRole('button', { name: 'Unpin task' }))
     expect(onTogglePin).toHaveBeenCalledTimes(2)
   })
@@ -657,6 +660,7 @@ describe('TasksOverview — pinned tasks (#935)', () => {
 
   it('a pin click does not also open the task — the control owns its click', () => {
     renderOverview({ runs: [run({ id: 'kept', status: RUN_STATUS.done })], onTogglePin: vi.fn() })
+    setOverviewDesktop(false)
     fireEvent.click(within(card('kept') as HTMLElement).getByRole('button', { name: 'Pin task' }))
     expect(location()).toBe('/')
   })
@@ -747,6 +751,9 @@ describe('TasksOverview — usage cells', () => {
         </GlobalEventsProvider>
       </QueryClientProvider>
     )
+    fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
   }
 
   const usageCell = (id: string, column: 'cpu' | 'mem') =>
@@ -843,6 +850,7 @@ describe('TasksOverview — header', () => {
   it('paints an unread failed row\'s marker red, on the table and on the mobile card (#617)', () => {
     renderOverview({ runs: [run({ id: 'boom', status: RUN_STATUS.failed, finishedAt: ago(60_000) })] })
     expect(tableRow('boom')?.querySelector('[aria-label="unread"]')?.getAttribute('data-tone')).toBe('danger')
+    setOverviewDesktop(false)
     expect(card('boom')?.querySelector('[aria-label="unread"]')?.getAttribute('data-tone')).toBe('danger')
   })
 
@@ -934,14 +942,14 @@ describe('TasksOverview — empty and loading states', () => {
 })
 
 describe('TasksOverview — mobile cards and FAB', () => {
+  beforeEach(() => setOverviewDesktop(false))
   it('keeps mobile metadata unchanged when its desktop columns are folded', () => {
     renderOverview({
       expandedColumns: { workflow: false, branch: false },
       runs: [run({ id: 'folded-mobile', workflow: 'autofix', branch: 'feat/mobile-stays' })],
     })
 
-    expect(tableRow('folded-mobile')?.querySelector('td[data-column-id="workflow"]')?.textContent).toBe('')
-    expect(tableRow('folded-mobile')?.querySelector('td[data-column-id="branch"]')?.textContent).toBe('')
+    expect(tableRow('folded-mobile')).toBeNull()
     expect(card('folded-mobile')?.textContent).toContain('autofix')
     fireEvent.click(within(card('folded-mobile') as HTMLElement).getByRole('button', { name: 'Show resources' }))
     expect(card('folded-mobile')?.textContent).toContain('feat/mobile-stays')
@@ -961,7 +969,8 @@ describe('TasksOverview — mobile cards and FAB', () => {
     const cardIds = [...document.querySelectorAll('[data-slot="task-card"]')].map((el) =>
       el.getAttribute('data-run-id')
     )
-    expect(cardIds).toEqual(rowIds)
+    expect(rowIds).toEqual([])
+    expect(cardIds).toEqual(['rev1', 'done1', 'q1'])
   })
 
   it('packs a card with the pill, the meta row and the age', () => {
@@ -1015,8 +1024,12 @@ describe('TasksOverview — mobile cards and FAB', () => {
       { projectId: 'api', repoBase: 'https://github.com/o/r' },
     )
     const hrefOf = (container: Element | null) => container?.querySelector('[data-slot="pr-chip"]')?.getAttribute('href')
-    expect(hrefOf(tableRow('own'))).toBe('/p/api/tasks/own/pr/402')
     expect(hrefOf(card('own'))).toBe('/p/api/tasks/own/pr/402')
+    expect(hrefOf(card('foreign'))).toBe('https://github.com/x/y/pull/8')
+    setOverviewDesktop(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
+    expect(hrefOf(tableRow('own'))).toBe('/p/api/tasks/own/pr/402')
     expect(hrefOf(tableRow('foreign'))).toBe('https://github.com/x/y/pull/8')
   })
 
@@ -1086,7 +1099,7 @@ describe('design frame 4 task summary', () => {
     renderOverview({ runs: [run({ id: 'summary', title: 'Review layout', inputTokens: 123, outputTokens: 45, costUsd: 0.2, peakRssBytes: 1024 ** 3 })] }, false)
     const summary = document.querySelector('[data-slot="tasks-summary"]') as HTMLElement
     expect([...summary.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['Task', 'Workflow', 'Changes', 'Pull request', 'Started'])
-    expect(document.querySelector('[data-slot="tasks-table"]')?.hasAttribute('hidden')).toBe(true)
+    expect(document.querySelector('[data-slot="tasks-table"]')).toBeNull()
     const toggle = within(summary).getByRole('button', { name: 'Show resources for Review layout' })
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(toggle)
@@ -1116,6 +1129,7 @@ it('opens the full resource table and exposes saved column choices', () => {
 
 it('expands real mobile resource facts without opening a task', () => {
   renderOverview({ runs: [run({ id: 'mobile-resource', title: 'Mobile resource', peakRssBytes: 1024 ** 3 })] })
+  setOverviewDesktop(false)
   const mobile = card('mobile-resource') as HTMLElement
   fireEvent.click(within(mobile).getByRole('button', { name: 'Show resources' }))
   expect(within(mobile).getByText('Memory')).not.toBeNull()
@@ -1142,4 +1156,44 @@ it('offers explicit save and cancel for an inline table rename', () => {
   fireEvent.change(within(row).getByLabelText('Task title'), { target: { value: 'Saved title' } })
   fireEvent.click(within(row).getByRole('button', { name: 'Save title' }))
   expect(onRename).toHaveBeenCalledWith('buttons', 'Saved title')
+})
+
+it('mounts one row representation and switches it on a live md resize', () => {
+  setOverviewDesktop(true)
+  renderOverview({ runs: [run({ id: 'exclusive', title: 'One tree' })] }, false)
+  expect(document.querySelectorAll('[data-slot="task-summary-row"]')).toHaveLength(1)
+  expect(document.querySelector('[data-slot="tasks-table"]')).toBeNull()
+  expect(document.querySelector('[data-slot="task-cards"]')).toBeNull()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Resource columns' }))
+  fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
+  expect(document.querySelector('[data-slot="tasks-summary"]')).toBeNull()
+  expect(document.querySelectorAll('[data-slot="task-table-row"]')).toHaveLength(1)
+  expect(document.querySelector('[data-slot="task-cards"]')).toBeNull()
+
+  setOverviewDesktop(false)
+  expect(document.querySelector('[data-slot="tasks-summary"]')).toBeNull()
+  expect(document.querySelector('[data-slot="tasks-table"]')).toBeNull()
+  expect(document.querySelectorAll('[data-slot="task-card"]')).toHaveLength(1)
+  setOverviewDesktop(true)
+  expect(document.querySelectorAll('[data-slot="task-table-row"]')).toHaveLength(1)
+  expect(document.querySelector('[data-slot="task-cards"]')).toBeNull()
+})
+
+
+it('keeps expanded resources and their focused control across a breakpoint flip', () => {
+  setOverviewDesktop(true)
+  renderOverview({ runs: [run({ id: 'restore', title: 'Keep resources' })] }, false)
+  const toggle = screen.getByRole('button', { name: 'Show resources for Keep resources' })
+  toggle.focus()
+  fireEvent.click(toggle)
+  setOverviewDesktop(false)
+  const mobile = screen.getByRole('button', { name: 'Hide resources' })
+  expect(document.activeElement).toBe(mobile)
+  expect(mobile.getAttribute('aria-expanded')).toBe('true')
+  setOverviewDesktop(true)
+  const desktop = screen.getByRole('button', { name: 'Hide resources for Keep resources' })
+  expect(document.activeElement).toBe(desktop)
+  expect(desktop.getAttribute('aria-expanded')).toBe('true')
 })
