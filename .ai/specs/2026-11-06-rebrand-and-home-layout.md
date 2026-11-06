@@ -23,7 +23,7 @@ into the live `~/.cezar` on apptension-host:
 | `agent-accounts.json` (accounts `second`, `third`), `claude-second/`, `claude-third/` | upstream `agent-fallback-run.test.ts:39-48` (`registerAccounts`) |
 | `tracker-connections/aaaa….env` (0 bytes) | upstream `packages/cezar/src/feature-telemetry.test.ts:80` |
 | `~/Library/LaunchAgents/ai.cezar.ngrok.plist` | upstream `server-install/platforms/macosx-ngrok.ts:18` (`homedir()`) |
-| `tmp/agent/` (353 dirs) | upstream agent temp fallback under the home |
+| `tmp/agent/` (353 dirs) | upstream's agent temp fallback under the home (ours is per project, `runs/agent-tmpdir.ts`) |
 
 "Upstream" is `open-mercato/cezar` at `origin/main` `aad51073`, checked out in the registered
 project `/home/agent/projects/open-mercato-cezar`.
@@ -106,7 +106,7 @@ Resolved once, at the process entry point, from the platform. No setting is requ
 | state | `ui-state.json`, `server.json`, `server-instances/`, `backups/`, migration log | `$XDG_STATE_HOME/skein` (`~/.local/state/skein`) | `~/Library/Application Support/Skein/state` | `%LOCALAPPDATA%\Skein\state` |
 | data | managed install `versions/`, `bin/` | `$XDG_DATA_HOME/skein` (`~/.local/share/skein`) | `~/Library/Application Support/Skein/data` | `%LOCALAPPDATA%\Skein\data` |
 | cache | skills cache (now `~/.cache/cez`), `dry-cache/`, `dry-prefix/` | `$XDG_CACHE_HOME/skein` | `~/Library/Caches/Skein` | `%LOCALAPPDATA%\Skein\cache` |
-| runtime | locks, sockets, agent temp fallback (now `~/.cezar/tmp/agent`) | `$XDG_RUNTIME_DIR/skein`, else `<state>/run` | `$TMPDIR/skein` | `%LOCALAPPDATA%\Skein\run` |
+| runtime | locks, leases, sockets (install locks are under `~/.cezar` today) | `$XDG_RUNTIME_DIR/skein`, else `<state>/run` | `$TMPDIR/skein` | `%LOCALAPPDATA%\Skein\run` |
 
 `SKEIN_HOME=<dir>` keeps a one-root layout (`<dir>/config`, `state`, `data`, `cache`,
 `run`) for containers, tests and hosts that want one directory.
@@ -231,16 +231,16 @@ release are the single user-visible change.
 
 | Phase | Slices (one PR each unless noted) | Visible before the switch? |
 | --- | --- | --- |
-| **P0 Safety** | (a) `buildChildEnv` never forwards `CEZ_HOME` (or any later home variable); In-task commands that read the home today (`cez artifact publish` reads the registry at `artifacts/cli.ts:45` to build its link) get what they need from the task context or the cockpit API instead, so a host with a custom home keeps working. (`CEZ_HOME` reached agents only through the blanket `CEZ_*` allowance added in `fedab0ed1`, not by design.) (b) The guard compares against `os.userInfo().homedir` (passwd, not `$HOME`), runs for every env object, and covers `node:test`; `test:unit` and `test:package` load the sandbox setup. (c) Rotating backups for `config.json` and `agent-accounts.json`. (d) Issue to `apptension/toolkit-dev`: audit-agent-readiness probes run foreign suites with a scrubbed env and a temp `HOME`. | No: backups appear in the state dir only |
-| **P1 Home object** | (a) `Home` type and `resolveHome` (legacy layout while the switch is off), passed down from entry points; no ambient `cezarHomeDir()`. (b) `HomeStore` writer with `install.json` marker (written into the legacy home too), test-runner refusal and lease. (c) Backups and restore command for every registry-type file; shrink banner. (d) Lint: test code writes only through `Home.sandbox`. ADR superseding the "literal `~/.cezar`" rule. | No (backup restore command is new) |
-| **P2 Layout and migration** | (a) XDG / macOS / Windows / `SKEIN_HOME` resolver. (b) `migrateLegacyHome` with backup, `MOVED.json`, canary. (c) Server migration for systemd units and nginx sites, with rollback. (d) launchd label move. All behind the switch. | No |
+| **P0 Safety** | (a) `buildChildEnv`, check steps (`workflows/run/step-loop.ts:508`, full `process.env` today) and the draft-PR `git push` never pass `CEZ_HOME` (or any later home variable); In-task commands that read the home today (`cez artifact publish` reads the registry at `artifacts/cli.ts:45` to build its link) get what they need from the task context or the cockpit API instead, so a host with a custom home keeps working. (`CEZ_HOME` reached agents only through the blanket `CEZ_*` allowance added in `fedab0ed1`, not by design.) (b) The guard compares against `os.userInfo().homedir` (passwd, not `$HOME`), runs for every env object, and covers `node:test`; `test:unit` and `test:package` load the sandbox setup. (c) Rotating backups for `config.json` and `agent-accounts.json`, and `cez backup list|restore`. (d) Issue to `apptension/toolkit-dev`: audit-agent-readiness probes run foreign suites with a scrubbed env and a temp `HOME`. | Only the new `cez backup` command |
+| **P1 Home object** | (a-1) `Home` type and `resolveHome` (legacy layout while the switch is off), passed down from entry points; `cezarHomeDir()` stays as a thin shim. (a-2) Remove the shim; tests use `Home.sandbox`; lint for `homedir()` and `cezarHomeDir()`. (b) `HomeStore` writer with `install.json` marker (written into the legacy home too), test-runner refusal and lease. (c) Backups and restore command for every registry-type file; shrink banner. (d) Lint: test code writes only through `Home.sandbox`. ADR superseding the "literal `~/.cezar`" rule. | Only the reset banner, which appears after a reset |
+| **P2 Layout and migration** | (a) XDG / macOS / Windows / `SKEIN_HOME` resolver. (b) `migrateLegacyHome` with backup, `MOVED.json`, canary; it carries `~/.cezar/backups/` into `<state>/backups/`. (c) Server migration for systemd units and nginx sites, with rollback. (d) launchd label move. All behind the switch. | No |
 | **P3 Name surfaces** | (a) One env helper: `SKEIN_*` first, `CEZ_*` fallback (additive). (b) `skein` bin added beside `cezarion` and `cez` (additive). (c) Package `@hearsay-tools/skein` prepared; publish waits for the switch. (d) Desktop and mobile new IDs and the bridge build, behind the switch. (e) Docs and display names, merged with the switch PR. | Additive names only |
 | **P4 Project dir** | Dual read of `.ai/cezar/` and `.ai/skein/` (additive); `skein migrate-project`: refuses while a task is live; moves the dir; runs `git worktree repair`; then, in one run-store transaction, rewrites every stored absolute path under the old dir (each run's `worktreePath`, owned-workspace receipts, artifact and handoff paths), so Continue and retained workers find their worktrees. A dry run lists every rewrite first. | Command only |
 | **Switch** | Turn `SKEIN_SWITCH` on; deprecation notices start; docs land. Then owner actions: stable release, npm publish and deprecate, repo rename, store listings, apptension-host server migration. | Yes: the release |
 | **P5 Window end** | Remove aliases and `CEZ_*` fallbacks, two minor releases or 60 days after the release. | Yes |
 
-Dependencies: P1(a) before every other P1 slice and P2; P2(a) before P2(b–d); P2(b) before
+Dependencies: P1(a-1) before every other P1 slice and P2; P0(c) before P1(b) and P1(c) (same writers); P1(b) before P1(c) and P1(d); P0(b) before P1(d); P0(c) before P2(b); P2(a) before P2(b–d); P2(b) before
 P2(c); P1(b) before P2(b). P0 and P3(a–b) do not depend on P1 and run in parallel with it.
 The switch needs P0 to P4 accepted on `main`; P5 follows the release.
 
-Every slice updates `BACKWARD_COMPATIBILITY.md`, `.env.example` and the area docs it touches.
+Every slice follows `BACKWARD_COMPATIBILITY.md` and updates `.env.example`, the README env table and the area docs it touches.
