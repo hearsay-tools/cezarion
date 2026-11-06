@@ -254,7 +254,7 @@ Large-list A timings were measured at `5a32a5816`. Later commits remove work on
 those paths: unchanged observer callbacks bail out,
 focus no longer reruns route derivations, and owner lookup no longer mounts every
 row before virtualization. They also add row-size hints and bounded initialization.
-The A timings are not pre-rebase-source numbers. The mount-count and small-list checks
+The A timings are not pre-rebase source numbers. The mount-count and small-list checks
 below were repeated at pre-rebase source `6608d3696`.
 
 Large global groups do less scroll work with virtualization. In paired runs on the
@@ -381,7 +381,7 @@ a reduction greater than 1 ms to avoid rounding ties.
 
 ### Small global group under summary events
 
-Both modes mount 50 rows. The pre-rebase-source repeat uses five runs per build at
+Both modes mount 50 rows. The pre-rebase source repeat uses five runs per build at
 `6608d3696026bcf9fac60bbae0b684861bf8aa31` and baseline `fdf9cf7dd`.
 Row renders per published event fall from 3.51 to 0.39 (89%). Commit p95 falls
 from 25.8 to 16.7 ms; p50 stays 0.1 ms. Event Timing p95 rises from 80 to 96 ms.
@@ -409,7 +409,7 @@ and `a960638d2507fa30dfedd9e5517a5ce3cd8551ef9aec25dd03a635263210335e`
 respectively. The final indexes retain both hashes and all host samples.
 Load1 ranges were 13.39–14.07 for branch C, 14.00–15.04 for baseline C,
 and 14.40–23.07 for the mount recheck. The original C samples remain in the
-original 85-run raw data; this table replaces their pre-rebase-source claim.
+original 85-run raw data; this table replaces their pre-rebase source claim.
 
 ### API, long tasks and interactions
 
@@ -525,3 +525,28 @@ fixed before the final runs. Intermediate results, including the rejected one-ro
 mount sample, do not contribute to the final tables. The final 20 cases completed
 with the same updated harness on both builds. The historical A raw files and hash
 remain unchanged.
+
+### Cross-group anchor and focus follow-up
+
+At source `806418730`, the page boundary retains the pre-update visible row through
+later ResizeObserver and start-margin corrections. It releases that anchor after
+two quiet frames; wheel, touch, pointer and keyboard input take precedence.
+The browser regression reproduced a 114 px global desktop shift and a 217 px
+phone shift before this correction. The fixed project and global cases stay within
+2 px at both widths. Unit guards cover delayed growth, shrink and folding above.
+
+The S3a flat baseline `fdf9cf7dd` already kept the anchor in the matched cases:
+project desktop/phone deltas were 0/0.80 px; global desktop/phone deltas were
+0.50/0.50 px. The global fixture has two projects with 1000 active rows each;
+120 boot rows start finished and secondary-project recovery contributes failed
+rows to the earlier Finished group. The measured change moves a visible boot
+row below the anchor from running to done. [Raw geometry](task-list-rendering/s3b/cross-group-anchor.json).
+
+Focus retry now checks the list's logical membership before scanning, clears
+records for removed rows, and cancels on pointer or keyboard intent. Tests cover
+an absent run with repeated unrelated mutations and an empty-space press before
+a matching delayed mount. Delayed virtual controls still regain focus.
+
+This membership and anchor bookkeeping adds work on list updates and scrolling.
+The pre-rebase timing tables do not measure it. A separate final-head check follows;
+it is a bounded sanity check, not a replacement for the paired study above.

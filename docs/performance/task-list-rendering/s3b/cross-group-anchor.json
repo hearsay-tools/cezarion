@@ -1,0 +1,63 @@
+{
+  "baseline": "fdf9cf7ddf851670204a4141c59fbabfc2c89a8f",
+  "source": "806418730ac490d40a97281d8e69d53a5f28c337",
+  "flatBaseline": [
+    {
+      "scope": "project",
+      "width": 1440,
+      "before": {
+        "id": "a5d318a5-8454-4886-b53b-5580dac3b1d4",
+        "move": "c13c6a3a-8434-434c-9363-1da5992aa6f0",
+        "top": 21
+      },
+      "after": 21,
+      "delta": 0
+    },
+    {
+      "scope": "project",
+      "width": 360,
+      "before": {
+        "id": "9bc6950d-27c6-44c8-bd9d-c492300cc516",
+        "move": "501ec9c8-fe67-49a6-8412-8ebb31a9710b",
+        "top": -110.484375
+      },
+      "after": -109.6875,
+      "delta": 0.796875
+    },
+    {
+      "scope": "global",
+      "width": 1440,
+      "before": {
+        "id": "598f86c9-bbd7-426e-b472-b87d9c88f363",
+        "move": "968c4b72-efc8-48ad-a669-60d15662c0e3",
+        "project": "boot",
+        "top": -46.5
+      },
+      "after": -46,
+      "delta": 0.5
+    },
+    {
+      "scope": "global",
+      "width": 360,
+      "before": {
+        "id": "ca272227-d8e2-4226-953d-bc017b3e558b",
+        "move": "671aed8a-1996-4925-97f0-36ebb1c4d868",
+        "project": "boot",
+        "top": -50.5
+      },
+      "after": -50,
+      "delta": 0.5
+    }
+  ],
+  "virtualRegressionBeforePx": {
+    "global1440": 114,
+    "global360": 217
+  },
+  "virtualAfterBoundPx": 2,
+  "fixture": {
+    "projectActive": 310,
+    "globalActivePerProject": 1000,
+    "globalProjects": 2,
+    "initialDoneBoot": 120
+  }
+}
