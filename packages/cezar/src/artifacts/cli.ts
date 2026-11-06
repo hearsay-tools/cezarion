@@ -1,29 +1,4 @@
-import { realpathSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { workspaceConfigPath } from '../paths.ts';
-import { loadWorkspaceConfig } from '../workspace/config.ts';
-import { artifactDirectory, publishArtifact } from './store.ts';
-
-/** Canonicalize one side of the ownership comparison: the physical path when the directory
- * exists, the lexical `resolve` spelling when it does not (an absent project's storage can
- * still be named by the registry, and it must simply never match). */
-function canonicalDirectory(path: string): string {
-  try { return realpathSync(path); } catch { return resolve(path); }
-}
-
-/**
- * Resolve the artifact storage owner by exact canonical equality of both candidate and task
- * directories. A path alias may match; a non-owner project must not.
- */
-export function owningProjectId(
-  projects: ReadonlyArray<{ id: string; root: string }>,
-  artifactsDir: string,
-  runId: string,
-): string | undefined {
-  return projects.find(project =>
-    canonicalDirectory(artifactDirectory(join(project.root, '.ai/cezar'), runId)) === canonicalDirectory(artifactsDir),
-  )?.id;
-}
+import { publishArtifact } from './store.ts';
 
 const HELP = `Usage: cez artifact publish <path>
 Publish an immutable local file snapshot from an active task. Returns JSON
@@ -40,11 +15,7 @@ export async function runArtifactCommand(argv: string[], env: NodeJS.ProcessEnv)
     if (!env.CEZ_ARTIFACTS_DIR || !env.CEZ_TASK_ID) throw new Error('Artifact task context is missing. Run this command inside an active Cezar task with CEZ_ARTIFACTS_DIR and CEZ_TASK_ID.');
     if (argv.length !== 2 || argv[0] !== 'publish') throw new Error(HELP);
     const metadata = await publishArtifact(env.CEZ_ARTIFACTS_DIR, env.CEZ_TASK_ID, argv[1]!);
-    // The task's storage identifies its owner even after an agent changes cwd.
-    // Registry discovery is read-only and missing ownership retains legacy links.
-    const config = await loadWorkspaceConfig(workspaceConfigPath(env));
-    const owner = owningProjectId(config.projects, env.CEZ_ARTIFACTS_DIR!, metadata.runId);
-    const prefix = owner ? `/p/${owner}` : '';
+    const prefix = env.CEZ_PROJECT_ID ? `/p/${env.CEZ_PROJECT_ID}` : '';
     const link = `${prefix}/tasks/${metadata.runId}/files?artifact=${metadata.id}`;
     const label = metadata.name.replace(/[\r\n\u0000-\u001f\u007f]/g, ' ').replace(/[\\`*_{}[\]()#+.!|<>~-]/g, '\\$&');
     console.log(JSON.stringify({ ...metadata, link, markdown: `[${label}](${link})` }));

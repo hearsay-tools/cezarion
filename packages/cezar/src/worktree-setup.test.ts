@@ -237,3 +237,10 @@ describe('worktree setup copy', () => {
     expect(worktreeSetupRecordError(invalid)).toBe('invalid config: commands: Expected array, received string');
   });
 });
+
+it.each(['0', '1'])('worktree setup removes the cockpit home in full-env=%s', (full) => {
+  const env = worktreeSetupEnv({ projectRoot: '/project', runId: 'task', tmpEnv: { TMPDIR: '/task/tmp' },
+    source: { CEZ_HOME: '/live/home', CEZ_AGENT_ENV_FULL: full, CEZ_ENV_PASSTHROUGH: 'CEZ_HOME,KEEP', KEEP: 'yes' } });
+  expect(env.CEZ_HOME).toBeUndefined();
+  expect(env).toMatchObject({ KEEP: 'yes', CEZ_PROJECT_ROOT: '/project', CEZ_TASK_ID: 'task', TMPDIR: '/task/tmp' });
+});

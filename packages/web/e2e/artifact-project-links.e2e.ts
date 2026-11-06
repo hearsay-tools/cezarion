@@ -2,7 +2,7 @@ import { execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
@@ -42,7 +42,7 @@ beforeAll(async () => {
   const publish = (project: string, runId: string) => JSON.parse(execFileSync(process.execPath,
     [cezarCli, 'artifact', 'publish', source], {
       // Deliberately publish from the boot cwd even when the owner is the other project.
-      cwd: boot, env: { ...env, CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${runId}-artifacts`) },
+      cwd: boot, env: { ...env, CEZ_PROJECT_ID: basename(project), CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${runId}-artifacts`) },
       encoding: 'utf8',
     }))
   publication = publish(owner, ownerRun)

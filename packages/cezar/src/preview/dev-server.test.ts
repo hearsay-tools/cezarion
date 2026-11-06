@@ -233,6 +233,21 @@ describe('DevServer', () => {
     }
   });
 
+  it.each(['0', '1'])('preview process strips the cockpit home with full-env=%s', async (full) => {
+    vi.stubEnv('CEZ_HOME', '/live/home');
+    vi.stubEnv('CEZ_AGENT_ENV_FULL', full);
+    vi.stubEnv('CEZ_ENV_PASSTHROUGH', 'CEZ_HOME');
+    try {
+      const port = await freePort();
+      const server: PreviewServer = { port, command: 'echo "home=${CEZ_HOME-unset}"', label: 'home test', registeredAt: '2026-11-06T10:00:00Z', answeredAtRegistration: false };
+      const supervisor = new DevServer({ server, worktreePath: root, dir: join(root, 'preview') });
+      supervisors.push(supervisor);
+      supervisor.start();
+      await until(() => supervisor.state === 'exited');
+      expect(supervisor.logTail()).toEqual(['home=unset']);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it('a leader that exits on its own takes its SIGTERM-ignoring holder with it, and keeps the pid record until the group is gone', async () => {
     const port = await freePort();
     const supervisor = supervise(port, ['--fork', '--leader-exits', '--ignore-term'], { probeMs: 50 });

@@ -33,7 +33,7 @@ beforeAll(async () => {
   writeFileSync(source, '<title>Quarterly report</title><h1>Published results</h1>')
   const dir = join(project, '.ai/cezar/runs')
   const publication = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {
-    cwd: project, env: { ...env, CEZ_TASK_ID: runIds[0], CEZ_ARTIFACTS_DIR: join(dir, `${runIds[0]}-artifacts`) }, encoding: 'utf8',
+    cwd: project, env: { ...env, CEZ_PROJECT_ID: 'shelf', CEZ_TASK_ID: runIds[0], CEZ_ARTIFACTS_DIR: join(dir, `${runIds[0]}-artifacts`) }, encoding: 'utf8',
   })) as { artifact: { sha256: string; size: number }; id: string }
   // The first snapshot uses the real CLI. Seed the remaining owned snapshots explicitly:
   // each is a different task/id with the same filename and bytes, and a known publication date.

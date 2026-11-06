@@ -28,7 +28,7 @@ describe('session provisioning', () => {
     second.revoke(); expect(f.credentials.authenticate(second.env.CEZ_DELEGATION_TOKEN!)).toBeUndefined();
     expect(old.runId).toBe(f.parent.id);
   });
-  it.each(RUNNER_IDS)('passes only session-specific env to %s even with full parent env', backend => {
+  it.each(RUNNER_IDS.flatMap(backend => ['0', '1'].map(full => ({ backend, full }))))('passes only session-specific env to $backend with full-env=$full', ({ backend, full }) => {
     const session = provision()!;
     expect(session.instructions).toContain('inbox remains a fallback read during an active turn; it acknowledges only the messages it returns');
     // #505: messages reach a live session mid-turn; nothing promises turn-boundary delivery.
@@ -36,7 +36,8 @@ describe('session provisioning', () => {
     expect(session.instructions).not.toContain('next safe turn boundary');
     expect(session.instructions).toContain('receipts report queued, delivered and consumed separately');
     expect(session.instructions).toContain('conversation <recipient-run-id> [--before <cursor>] for history or investigation; it does not acknowledge messages');
-    const env = buildChildEnv({ backend, source: { CEZ_AGENT_ENV_FULL: '1', CEZ_DELEGATION_TOKEN: 'parent-token', CEZ_DELEGATION_URL: 'http://evil' }, extraEnv: session.env });
+    const env = buildChildEnv({ backend, source: { CEZ_HOME: '/live/home', CEZ_ENV_PASSTHROUGH: 'CEZ_HOME', CEZ_AGENT_ENV_FULL: full, CEZ_DELEGATION_TOKEN: 'parent-token', CEZ_DELEGATION_URL: 'http://evil' }, extraEnv: session.env });
+    expect(env.CEZ_HOME).toBeUndefined();
     expect(env.CEZ_DELEGATION_TOKEN).toBe(session.env.CEZ_DELEGATION_TOKEN); expect(env.CEZ_DELEGATION_URL).toBe('http://127.0.0.1:12345/api/v1/delegation');
   });
   // hearsay-tools/cezarion#632: parents learn one spelling. `--backend` stays a CLI alias, but the

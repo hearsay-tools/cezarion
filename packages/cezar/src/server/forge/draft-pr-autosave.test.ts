@@ -44,19 +44,23 @@ describe('createDraftPr pre-PR autosave (#471 follow-up)', () => {
     rmSync(repo, { recursive: true, force: true });
   });
 
-  it('disables terminal credential prompts for raw git pushes', async () => {
+  it.each(['0', '1'])('strips the cockpit home but preserves git push env with full-env=%s', async (full) => {
     vi.stubEnv('CEZ_DRY_RUN', '0');
     vi.stubEnv('GIT_TERMINAL_PROMPT', '1');
+    vi.stubEnv('CEZ_HOME', '/live/home');
+    vi.stubEnv('CEZ_AGENT_ENV_FULL', full);
+    vi.stubEnv('CEZ_ENV_PASSTHROUGH', 'CEZ_HOME');
+    vi.stubEnv('PUSH_SECRET', 'preserved');
     const remote = mkdtempSync(join(tmpdir(), 'cez-push-remote-'));
     try {
       await run('git', ['init', '--bare', '-q', remote]);
       await git(['remote', 'add', 'origin', remote]);
       await git(['branch', 'cez/abc123']);
       writeFileSync(join(repo, '.git', 'hooks', 'pre-push'),
-        '#!/bin/sh\necho "prompt-setting=$GIT_TERMINAL_PROMPT" >&2\nexit 1\n', { mode: 0o755 });
+        '#!/bin/sh\necho "prompt-setting=$GIT_TERMINAL_PROMPT home=${CEZ_HOME-unset} secret=$PUSH_SECRET full=$CEZ_AGENT_ENV_FULL passthrough=$CEZ_ENV_PASSTHROUGH" >&2\nexit 1\n', { mode: 0o755 });
       const outcome = await createDraftPr(input());
       expect(outcome.ok).toBe(false);
-      expect(outcome.ok === false && outcome.error).toContain('prompt-setting=0');
+      expect(outcome.ok === false && outcome.error).toContain(`prompt-setting=0 home=unset secret=preserved full=${full} passthrough=CEZ_HOME`);
     } finally {
       rmSync(remote, { recursive: true, force: true });
     }

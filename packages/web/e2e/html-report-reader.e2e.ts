@@ -217,7 +217,7 @@ beforeAll(async () => {
     const source = join(root, name)
     writeFileSync(source, html)
     const published = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {
-      cwd: project, env: { ...env, CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${runId}-artifacts`) }, encoding: 'utf8',
+      cwd: project, env: { ...env, CEZ_PROJECT_ID: 'reader', CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${runId}-artifacts`) }, encoding: 'utf8',
     }))
     rmSync(source)
     return published
