@@ -60,9 +60,17 @@ export async function benchmarkReports(buildRoot: string, output: string, quick:
           const response = await request('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, sessionId)
           return response.result.value
         }
+        const navigationStarted = performance.now()
         await request('Page.navigate', { url: `${fixture.origin}/p/boot/reports` }, sessionId)
         await request('Target.activateTarget', { targetId })
-        await pollFor(async () => await evaluate('document.querySelectorAll("[data-slot=report-row]").length') > 0 ? true : undefined, () => 'report shelf did not mount', { timeoutMs: 30_000, intervalMs: 100, tries: 300 })
+        const mountStarted = performance.now()
+        try {
+          await pollFor(async () => await evaluate('document.querySelectorAll("[data-slot=report-row]").length') > 0 ? true : undefined, () => 'report shelf did not mount', { timeoutMs: 60_000, requestTimeoutMs: 60_000, intervalMs: 100, tries: 600 })
+        } catch (error) {
+          console.error(JSON.stringify({ iteration, phase: 'mount', navigationMs: mountStarted - navigationStarted, mountElapsedMs: performance.now() - mountStarted }))
+          throw error
+        }
+        console.log(JSON.stringify({ iteration, phase: 'mounted', navigationMs: mountStarted - navigationStarted, mountElapsedMs: performance.now() - mountStarted }))
         await pause(2_000)
         await fixture.control({ resetIo: true, reportsStart: true })
         const start = performance.now(), ticks = cpuTicks(fixture.server.pid!)
