@@ -151,9 +151,11 @@ Resolved once, at the process entry point, from the platform. No setting is requ
 One code path, `migrateLegacyHome()`, runs at the first boot of the new build and as
 `skein migrate [--dry-run]`.
 
-1. Take `~/.cezar/.migrating` with `O_EXCL` first; a second migration waits or stops. While
-   that file exists, every `HomeStore` writer refuses to write the legacy home (it checks
-   before it takes `write.lock`), and a cockpit refuses to start on it. Then make sure no
+1. Take `~/.cezar/.migrating` with `O_EXCL` first; a second migration waits or stops. Then
+   take `write.lock`, which drains any writer already in its critical section, and hold it
+   until step 5 ends. Every `HomeStore` writer checks `.migrating` inside its own
+   `write.lock` section, after it acquires the lock, and refuses to write the legacy home when
+   the file exists. A cockpit refuses to start on a home with `.migrating`. Then make sure no
    cockpit still serves the legacy home: every instance that shares it (on a server, every
    instance in `server.json` and `server-instances/` with the same home) is stopped, and the
    migration aborts, removing `.migrating`, when a live presence lease remains. It names the
@@ -235,7 +237,7 @@ release are the single user-visible change.
 | **P1 Home object** | (a-1) `Home` type and `resolveHome` (legacy layout while the switch is off), passed down from entry points; `cezarHomeDir()` stays as a thin shim. (a-2) Remove the shim; tests use `Home.sandbox`; lint for `homedir()` and `cezarHomeDir()`. (b) `HomeStore` writer with `install.json` marker (written into the legacy home too), test-runner refusal and lease. (c) Backups and restore command for every registry-type file; shrink banner. (d) Lint: test code writes only through `Home.sandbox`. ADR superseding the "literal `~/.cezar`" rule. | Only the reset banner, which appears after a reset |
 | **P2 Layout and migration** | (a) XDG / macOS / Windows / `SKEIN_HOME` resolver. (b) `migrateLegacyHome` with backup, `MOVED.json`, canary; it carries `~/.cezar/backups/` into `<state>/backups/`. (c) Server migration for systemd units and nginx sites, with rollback. (d) launchd label move. All behind the switch. | No |
 | **P3 Name surfaces** | (a) One env helper: `SKEIN_*` first, `CEZ_*` fallback (additive). (b) `skein` bin added beside `cezarion` and `cez` (additive). (c) Package `@hearsay-tools/skein` prepared; publish waits for the switch. (d) Desktop and mobile new IDs and the bridge build, behind the switch. (e) Docs and display names, merged with the switch PR. | Additive names only |
-| **P4 Project dir** | Dual read of `.ai/cezar/` and `.ai/skein/` (additive); `skein migrate-project`: refuses while a task is live; moves the dir; runs `git worktree repair`; then, in one run-store transaction, rewrites every stored absolute path under the old dir (each run's `worktreePath`, owned-workspace receipts, artifact and handoff paths), so Continue and retained workers find their worktrees. A dry run lists every rewrite first. | Command only |
+| **P4 Project dir** | Dual read of `.ai/cezar/` and `.ai/skein/` (additive); `skein migrate-project`: refuses while a task is live. It first writes a journal (`.ai/skein-migration.json` beside both dirs) that lists every step and every path rewrite: move the dir, `git worktree repair`, rewrite the owned-workspace receipt files in `.git/cezar-owned-workspaces` (`delegation/workspace.ts`), then one run-store transaction for each run's `worktreePath`, artifact and handoff paths. Each step is idempotent and marks itself done in the journal. Any later start of the cockpit, the CLI or `migrate-project` that finds an unfinished journal resumes it before anything else reads the project, so a crash never leaves receipts, worktrees and the database on different paths. A dry run lists every rewrite first. | Command only |
 | **Switch** | Turn `SKEIN_SWITCH` on; deprecation notices start; docs land. Then owner actions: stable release, npm publish and deprecate, repo rename, store listings, apptension-host server migration. | Yes: the release |
 | **P5 Window end** | Remove aliases and `CEZ_*` fallbacks, two minor releases or 60 days after the release. | Yes |
 
