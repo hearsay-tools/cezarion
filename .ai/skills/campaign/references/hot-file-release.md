@@ -30,12 +30,13 @@ release condition passes, even if there is no patch overlap.
    `<merge-base>` is `git merge-base <base> <head>`. Treat paths as NUL-delimited
    data, not shell words or newline-delimited names. Confirm Git commands
    succeeded; empty output from a failed command is not an empty patch.
-2. If a pair shares no changed path, its patch hold can clear after the semantic
-   checks. Renames appear as deletion plus addition with `--no-renames`, so both
-   paths participate. This path-set shortcut needs complete evidence from both
-   branches; it does not require rewriting either live branch.
-3. For shared paths, compare both complete patches on the same current-main
-   base. Make disposable local clones outside worker worktrees, with no checkout
+2. The early disjoint-path shortcut is valid only when both merge-bases equal
+   `base`: both branches already contain the captured current main. Otherwise
+   a main-side rename can map an old path onto a peer's new path; the original
+   path sets do not prove independence. Renames appear as deletion plus addition
+   with `--no-renames`, so both paths participate.
+3. For any pair not cleared by that shortcut, normalize both complete patches
+   onto the same current-main base before deciding even path independence. Make disposable local clones outside worker worktrees, with no checkout
    hooks, and import the captured commits from the local repository. Check out
    each head detached and trial-rebase its branch-only commits onto `base`
    (`git rebase --onto <base> <merge-base>`, with hooks disabled). Never rebase a
@@ -45,6 +46,9 @@ release condition passes, even if there is no patch overlap.
 4. In each successful trial, inspect
    `git diff --no-ext-diff --no-textconv --no-renames --unified=0 <base> <trial-head>`.
    Use the **old-side** hunk coordinates: both diffs now describe the same base.
+   Recompute the NUL-delimited changed path sets against `base` using the trial
+   heads. Only these normalized paths can clear a previously stale pair as
+   disjoint. Preserve both the original and normalized path evidence.
    Check name/status as well. Shared creation/deletion, rename-related paths,
    binary changes, mode/type changes or other whole-file operations require
    explicit resolution; do not automatically clear them from text hunks. Track
@@ -101,7 +105,8 @@ release. Older ledger entries without comparison evidence remain unverified.
 
 | Complete patches on the same base | Patch decision (semantic checks still apply) |
 |---|---|
-| No shared changed path | Release |
+| No shared changed path on current main | Release |
+| Original paths disjoint but either branch predates main | Normalize first; a main-side rename may make them overlap |
 | Same short file: replace line 10 vs line 20 | Release; no distance threshold |
 | Both consume line 10 | Release the eligible predecessor; hold its successor |
 | Both insert after line 10 | Release the eligible predecessor; hold its successor |
