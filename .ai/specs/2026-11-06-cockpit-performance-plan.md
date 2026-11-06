@@ -129,7 +129,11 @@ time; client parse and zod time; with detail open and closed.
    `q=''` pages and invalidates `q≠''` shelves. A changed `metadataGeneration` seen only in a
    snapshot or a twin read (reconnect, remote mode) invalidates `[P,'reports']`. Both
    transports compare all three counters. Delete `global-events.tsx:119`. Keep
-   `refetchOnWindowFocus`.
+   `refetchOnWindowFocus`. An invalidation received during an in-flight request must
+   survive its response: use a trailing fetch or a generation fence, including the first
+   search-shelf fetch. Preserve or replay metadata patches across in-flight responses;
+   a stale response must not replace newer task fields. A `q=''` metadata frame still
+   causes no list read.
 
 Workload: extend `benchmark-tabs.ts --workload reports`: project P with 60 settled runs × 2
 HTML reports, 5 live P runs, 5 live Q runs, title updates at 5 Hz; count `/reports`
@@ -287,6 +291,9 @@ the first merges. S3 only rebases at `global-tasks.tsx:206`. S4 touches no share
 | Reconnect or missed event | No report reconcile until the next run event | Resubscribe snapshot; mismatch refetches |
 | Hidden tab | No events; focus refetch | Topic released; snapshot plus focus refetch on restore |
 | Remote mode | No run frames; refetch only on mount and focus | 5 s twin read; refetch when a counter moves |
+| Content change during a fetch | A stale response may clear the invalidation | Trailing fetch or generation fence preserves the change |
+| Search metadata change during the first fetch | Invalidation may be lost | Trailing fetch or generation fence returns matching rows |
+| Metadata patch during a fetch, `q=''` | A stale response may overwrite task fields | Preserve or replay the patch; no extra list read |
 | No shelf open | Startup backfill and live-to-terminal reconcile (`onRun`) only | Same; watch off |
 
 ### S3: task lists
