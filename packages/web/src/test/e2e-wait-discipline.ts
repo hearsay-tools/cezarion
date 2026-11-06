@@ -318,14 +318,22 @@ function lineOf(source: string, offset: number): number {
 }
 
 /** Every browser-driving `.ts` under `packages/web/e2e`, scanned. */
-export function scanSuite(dir = e2eDir, packaged = dir === e2eDir ? resolve(e2eDir, '../../cezar/test/e2e') : undefined): Site[] {
+export function scanSuite(dir = e2eDir, packaged = dir === e2eDir ? resolve(e2eDir, '../../cezar/test/e2e') : undefined, onFile?: (path: string) => void): Site[] {
   const browserSites = readdirSync(dir)
     .filter((name) => name.endsWith('.ts') && !excluded.has(name))
     .sort()
-    .flatMap((name) => scanSource(name, readFileSync(join(dir, name), 'utf8')))
+    .flatMap((name) => {
+      const path = join(dir, name)
+      onFile?.(path)
+      return scanSource(name, readFileSync(path, 'utf8'))
+    })
   if (!packaged) return browserSites
   return [...browserSites, ...readdirSync(packaged).filter(name => name.endsWith('.ts')).sort()
-    .flatMap(name => scanSource(`packages/cezar/test/e2e/${name}`, readFileSync(join(packaged, name), 'utf8')))]
+    .flatMap(name => {
+      const path = join(packaged, name)
+      onFile?.(path)
+      return scanSource(`packages/cezar/test/e2e/${name}`, readFileSync(path, 'utf8'))
+    })]
 }
 
 export { compareToBaseline, tally } from './wait-baseline'

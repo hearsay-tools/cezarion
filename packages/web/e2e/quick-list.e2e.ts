@@ -370,9 +370,7 @@ describe('task quick-list', () => {
 describe('tasks table overview', () => {
   const TABLE_ROW = '[data-slot="task-table-row"]'
   function showResourceTable() {
-    if (!browser.count('[data-slot="tasks-table"]')) return
-    const visible = browser.evaluate(`document.querySelector('[data-slot="tasks-table"]').checkVisibility()`)
-    if (visible) return
+    if (browser.count('[data-slot="tasks-table"]')) return
     browser.click('[data-slot="task-columns-trigger"]')
     browser.waitForFunction(`document.querySelector('[data-slot="popover-content"]')?.textContent.includes('Resource columns') === true`)
     browser.click('[data-slot="popover-content"] button:last-child')
@@ -384,7 +382,7 @@ describe('tasks table overview', () => {
   beforeEach(() => {
     browser.setViewport(1440, 900)
     browser.goto(`${baseUrl}${scoped('/')}`)
-    browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+    browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)
     showResourceTable()
   })
 
@@ -426,7 +424,8 @@ describe('tasks table overview', () => {
     } finally {
       browser.setViewport(1440, 900)
       browser.goto(`${baseUrl}${scoped('/')}`)
-      browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+      browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)
+      showResourceTable()
     }
   })
 
@@ -518,12 +517,13 @@ describe('tasks table overview', () => {
     browser.waitForFunction(`location.pathname === '${scoped('/tasks/fix-done')}'`)
     expect(browser.url()).toContain(scoped('/tasks/fix-done'))
     browser.goto(`${baseUrl}${scoped('/')}`)
-    browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+    browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)
+    showResourceTable()
   })
 
   it('keeps task metadata AA-readable on normal and hovered rows with visible title focus', () => {
     browser.goto(`${baseUrl}${scoped('/')}`)
-    browser.waitForFunction(`document.querySelectorAll('${TABLE_ROW}').length > 0`)
+    browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)
     showResourceTable()
     try {
       for (const variant of contrastQaVariants) {
@@ -610,8 +610,8 @@ describe('tasks table overview', () => {
     ).toBe(scoped('/new'))
     // The table is the desktop framing — at phone width the cards replace it, not join it.
     expect(
-      browser.evaluate(`getComputedStyle(document.querySelector('[data-slot="tasks-table"]')).display`)
-    ).toBe('none')
+      browser.evaluate(`document.querySelector('[data-slot="tasks-table"]') === null`)
+    ).toBe(true)
     // Nothing forces the page wider than the phone.
     expect(waitForSettledSample(browser, `document.documentElement.scrollWidth <= window.innerWidth`)).toBe(true)
     expect(
@@ -716,8 +716,7 @@ describe('the tasks table under worst-case row content', () => {
   ]
 
   function showResourceTable() {
-    if (!browser.count('[data-slot="tasks-table"]')) return
-    if (browser.evaluate(`document.querySelector('[data-slot="tasks-table"]').checkVisibility()`)) return
+    if (browser.count('[data-slot="tasks-table"]')) return
     browser.click('[data-slot="task-columns-trigger"]')
     browser.waitForFunction(`document.querySelector('[data-slot="popover-content"]')?.textContent.includes('Resource columns') === true`)
     browser.click('[data-slot="popover-content"] button:last-child')
@@ -747,11 +746,12 @@ describe('the tasks table under worst-case row content', () => {
     expect(response.ok).toBe(true)
     browser.setViewport(1440, 900)
     browser.goto(`${worstUrl}/p/${worstProject}/`)
-    browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)
     browser.evaluate(`localStorage.removeItem('cez-sidebar-width')`)
     browser.goto(`${worstUrl}/p/${worstProject}/`)
-    browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)
     showResourceTable()
+    browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
   })
 
   afterAll(async () => {
@@ -1021,8 +1021,9 @@ describe('the tasks table under worst-case row content', () => {
 
     browser.evaluate(`localStorage.setItem('cez-sidebar-width', '360')`)
     browser.goto(`${worstUrl}/p/${worstProject}/`)
-    browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)
     showResourceTable()
+    browser.waitForFunction(`document.querySelector('${wrappingRow}') !== null`)
     const resized = waitForSettledSample(browser, `({
       preference: localStorage.getItem('cez-sidebar-width'),
       sidebarWidth: document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width,

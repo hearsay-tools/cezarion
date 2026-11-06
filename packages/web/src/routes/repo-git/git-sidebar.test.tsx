@@ -32,7 +32,7 @@ afterEach(() => {
 })
 
 function setDesktop(desktop: boolean) {
-  vi.stubGlobal('matchMedia', (query: string) => ({ matches: desktop && query === '(min-width: 768px)', addEventListener() {}, removeEventListener() {} }))
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: desktop && query === '(min-width: 48rem)', addEventListener() {}, removeEventListener() {} }))
 }
 
 const json = (body: unknown, status = 200) =>

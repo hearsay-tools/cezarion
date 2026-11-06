@@ -1,7 +1,7 @@
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { summaryOf } from '@/test/run-summary-fixture'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import type { ComponentProps } from 'react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { vi } from 'vitest'
@@ -16,6 +16,20 @@ vi.mock('@/api/live-workspace-source', () => ({ LiveWorkspaceSource: class {
     return typeof globalThis.EventSource === 'function' ? new globalThis.EventSource(url, options) : { readyState: 2, addEventListener() {}, close() {} }
   }
 } }))
+
+const desktopListeners = new Set<() => void>()
+let desktop = true
+
+/** Drive the real layout subscription; tests inspect one mounted presentation at a time. */
+export function setOverviewDesktop(value: boolean) {
+  desktop = value
+  vi.stubGlobal('matchMedia', () => ({
+    get matches() { return desktop },
+    addEventListener: (_: string, listener: () => void) => desktopListeners.add(listener),
+    removeEventListener: (_: string, listener: () => void) => desktopListeners.delete(listener),
+  }))
+  act(() => { for (const listener of desktopListeners) listener() })
+}
 
 export const NOW = Date.parse('2026-07-14T12:00:00.000Z')
 
@@ -49,6 +63,7 @@ export function renderOverview(
   detailed = true,
   repo?: { projectId: string; repoBase: string },
 ) {
+  if (typeof window.matchMedia !== 'function') setOverviewDesktop(true)
   const onViewChange = props.onViewChange ?? vi.fn()
   const onArchiveFinished = props.onArchiveFinished ?? vi.fn()
   const onMarkAllRead = props.onMarkAllRead ?? vi.fn()

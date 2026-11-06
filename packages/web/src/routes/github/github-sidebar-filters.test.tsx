@@ -123,7 +123,7 @@ const numbers = () => [...document.querySelectorAll<HTMLElement>('[data-slot="gh
 const where = () => screen.getByTestId('where').textContent
 const hrefs = () => [...document.querySelectorAll<HTMLAnchorElement>('[data-slot="gh-row"]')].map((a) => a.getAttribute('href'))
 function setDesktop(desktop: boolean) {
-  vi.stubGlobal('matchMedia', (query: string) => ({ matches: desktop && query === '(min-width: 768px)', addEventListener() {}, removeEventListener() {} }))
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: desktop && query === '(min-width: 48rem)', addEventListener() {}, removeEventListener() {} }))
 }
 
 describe('Issues filters in the URL', () => {
