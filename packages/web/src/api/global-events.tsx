@@ -599,14 +599,12 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
     let source: LiveWorkspaceSource | null = null
     const indexSync = runsIndexSync(queryClient)
     // A numbered frame that arrives while this document knows no stream generation (its first
-    // `ready` was lost to an epoch change, hearsay-tools/cezarion#2729): the shared source drops
-    // and re-adds its workspace demand, so the worker sends the `ready` and the source reopens
-    // and reconciles. One rejoin until the next accepted `ready`; frames meanwhile wait for it.
+    // `ready` was lost to an epoch change, hearsay-tools/cezarion#2729): the shared source asks its
+    // worker for the `ready` again. One request until the next accepted `ready`; that `ready`
+    // reads the index once for the frames skipped meanwhile.
     indexSync.setUnknownGenerationHandler(() => {
-      const rejoin = (source as { rejoin?: () => void } | null)?.rejoin
-      if (typeof rejoin !== 'function') return false
-      rejoin.call(source)
-      return true
+      const requestReady = (source as { requestReady?: () => boolean } | null)?.requestReady
+      return typeof requestReady === 'function' && requestReady.call(source)
     })
     const runDetailRefresher = createRunDetailRefresher(queryClient)
     const runDetailFetcher = createRunDetailFetcher(queryClient)
@@ -687,8 +685,14 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           const parsed = parseWorkspaceEvent(name, (event as MessageEvent<string>).data)
           if (!parsed) return
           if (parsed.event.type === 'ready') {
-            seqFence.ready(parsed.event.seq)
+            // A ready past the last accepted frame (a requested ready, which does not reopen)
+            // means frames were lost: reconcile as after any other gap.
+            const lost = seqFence.ready(parsed.event.seq)
             indexSync.ready(parsed.event.generation, parsed.event.seq)
+            if (lost) {
+              runListBatcher.flush()
+              void reconcile(queryClient)
+            }
             return
           }
           // A jump in `seq` means this document lost frames: apply this one, then reconcile as

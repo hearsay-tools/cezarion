@@ -12,7 +12,7 @@ import { createLiveOwner, type LivePort } from './live-owner'
 import { LIVE_PROTOCOL } from './live-protocol'
 import { createQueryClient } from './query-client'
 import { RUNS_INDEX_BACKSTOP_MS, useRunsIndex, workspaceQueryKeys } from './queries'
-import { runsIndexSync } from './runs-index-sync'
+import { RUNS_INDEX_RECONCILE_HOLD_MS, runsIndexSync } from './runs-index-sync'
 
 /**
  * The runs index through the real live coordinator (hearsay-tools/cezarion#2729): the shared
@@ -183,7 +183,7 @@ function bridgedWorker() {
   const queue: unknown[] = []
   let ownerPort!: LivePort
   let emit!: (frame: unknown) => void
-  const syncs: Array<{ epoch: number; kinds: string[] }> = []
+  const syncs: Array<{ epoch: number; kinds: string[]; workspaceReady?: boolean }> = []
   const owner = createLiveOwner({
     stream(kind, _runs, frame, signal) {
       if (kind === 'workspace') emit = frame as (frame: unknown) => void
@@ -197,7 +197,7 @@ function bridgedWorker() {
       onmessage: null as ((event: { data: unknown }) => void) | null,
       onmessageerror: null as (() => void) | null,
       postMessage: (data: any) => {
-        if (data?.type === 'sync') syncs.push({ epoch: data.epoch, kinds: data.entries.map((entry: any) => entry.demand.kind) })
+        if (data?.type === 'sync') syncs.push({ epoch: data.epoch, kinds: data.entries.map((entry: any) => entry.demand.kind), workspaceReady: data.workspaceReady })
         queue.push(data)
       },
       start() {}, close() {},
@@ -220,7 +220,7 @@ function bridgedWorker() {
 describe('runs index: a first ready lost to an epoch change (review round 5)', () => {
   const summaryFrame = (seq: number, title: string) => ({ project: 'a', seq, run: summary('a1', { title }), relationships: 'd' })
 
-  it('the document rejoins once, learns the generation, reconciles once and applies later frames', async () => {
+  it('the document asks for the ready once, learns the generation, reads the index once and applies later frames', async () => {
     const worker = bridgedWorker()
     configureLiveSession({ local: true, bootProject: 'boot', apiBase: '' })
     const usage = createUsageStore()
@@ -237,18 +237,20 @@ describe('runs index: a first ready lost to an epoch change (review round 5)', (
     })
     served = snapshot([{ projectId: 'a', ...summary('a1', { title: 'seq 11' }) }], 11)
     const readsBefore = indexReads().length
-    // A numbered frame of unknown generation: the document drops and re-adds its workspace demand.
+    // A numbered frame of unknown generation: the document asks its worker for the ready again.
     await act(async () => {
       worker.emit('run-summary', summaryFrame(11, 'seq 11'))
       await vi.advanceTimersByTimeAsync(0)
       worker.toOwner()
       await vi.advanceTimersByTimeAsync(0)
     })
-    const rejoin = worker.syncs.slice(-2).map((sync) => sync.kinds.includes('workspace'))
-    expect(rejoin).toEqual([false, true])
+    // The workspace demand stays (the shared stream does not restart); the sync carries the ask.
+    expect(worker.syncs.at(-1)).toMatchObject({ workspaceReady: true })
+    expect(worker.syncs.every((sync) => sync.kinds.includes('workspace'))).toBe(true)
     await act(async () => {
       worker.emit('run-summary', summaryFrame(12, 'seq 12'))
-      await vi.advanceTimersByTimeAsync(300)
+      // The ready that ended the rejoin reads the index once, after the reconciliation hold.
+      await vi.advanceTimersByTimeAsync(RUNS_INDEX_RECONCILE_HOLD_MS + 300)
     })
     expect(title()).toBe('seq 12')
     expect(indexReads().length - readsBefore).toBe(1)
@@ -277,7 +279,7 @@ describe('runs index: a first ready lost to an epoch change (review round 5)', (
       await vi.advanceTimersByTimeAsync(300)
     })
     expect(title()).toBe('seq 11')
-    expect(worker.syncs.slice(syncsBefore).every((sync) => sync.kinds.includes('workspace'))).toBe(true)
+    expect(worker.syncs.slice(syncsBefore).every((sync) => sync.kinds.includes('workspace') && !sync.workspaceReady)).toBe(true)
     expect(indexReads().length - readsBefore).toBe(0)
     worker.owner.dispose()
   })

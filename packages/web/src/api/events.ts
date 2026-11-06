@@ -119,7 +119,9 @@ export function parseWorkspaceEvent(
  * (the shared worker now sends a late subscriber its own `ready`), the first numbered frame sets it.
  */
 export function createWorkspaceSeqFence(): {
-  ready: (seq: number) => void
+  /** True when the `ready` names a later frame than the last one this fence accepted: frames in
+   *  between were lost (a document that rejoined the shared feed without reopening). */
+  ready: (seq: number) => boolean
   /** True when the frame proves that frames before it were lost. */
   frame: (seq: number) => boolean
   reset: () => void
@@ -127,7 +129,9 @@ export function createWorkspaceSeqFence(): {
   let last: number | undefined
   return {
     ready(seq) {
+      const gap = last !== undefined && seq > last
       last = seq
+      return gap
     },
     frame(seq) {
       const gap = last !== undefined && seq !== last + 1

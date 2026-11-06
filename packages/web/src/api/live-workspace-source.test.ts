@@ -2,9 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LiveHandlers } from './live-coordinator'
 
 let handlers: LiveHandlers | undefined
-let subscriptions = 0
+const requestWorkspaceReady = vi.fn(() => true)
+const workspaceReadyReceived = vi.fn()
 vi.mock('./live-coordinator', () => ({
-  subscribeLive: (_demand: unknown, next: LiveHandlers) => { subscriptions += 1; handlers = next; return () => { handlers = undefined } },
+  subscribeLive: (_demand: unknown, next: LiveHandlers) => { handlers = next; return () => { handlers = undefined } },
+  requestWorkspaceReady: () => requestWorkspaceReady(),
+  workspaceReadyReceived: () => workspaceReadyReceived(),
 }))
 const { LiveWorkspaceSource } = await import('./live-workspace-source')
 
@@ -27,21 +30,18 @@ describe('LiveWorkspaceSource', () => {
     source.close()
   })
 
-  it('rejoins: releases the workspace demand, subscribes again and opens again (hearsay-tools/cezarion#2729)', async () => {
+  it('asks the coordinator for the stream ready without reopening, and a ready frame ends the request (hearsay-tools/cezarion#2729)', async () => {
     const source = new LiveWorkspaceSource()
     const seen: string[] = []
-    source.addEventListener('open', () => seen.push(`open:${source.readyState}`))
+    source.addEventListener('open', () => seen.push('open'))
     handlers!.ready!()
     await Promise.resolve()
-    const before = subscriptions
-    source.rejoin()
-    expect(subscriptions).toBe(before + 1)
-    expect(source.readyState).toBe(0)
-    handlers!.ready!()
-    await Promise.resolve()
-    expect(seen).toEqual(['open:1', 'open:1'])
+    expect(source.requestReady()).toBe(true)
+    expect(requestWorkspaceReady).toHaveBeenCalledTimes(1)
+    expect(seen).toEqual(['open'])
+    handlers!.frame!({ event: 'ready', data: JSON.stringify({ generation: 'g1', seq: 3 }), id: '' })
+    expect(workspaceReadyReceived).toHaveBeenCalledTimes(1)
     source.close()
-    source.rejoin()
-    expect(subscriptions).toBe(before + 1)
+    expect(source.requestReady()).toBe(false)
   })
 })

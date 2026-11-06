@@ -397,7 +397,8 @@ describe('runs index sync: fence matrix', () => {
 
   it('a frame of unknown generation goes to the handler once per ready, with no reconciliation of its own', async () => {
     client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
-    const { queryFn, unsubscribe } = observe(() => SEED())
+    // A read includes every frame up to now, as the server's eventSeq does.
+    const { queryFn, unsubscribe } = observe(() => snapshot(SEED().runs, { eventSeq: seq }))
     const handler = vi.fn(() => true)
     sync.setUnknownGenerationHandler(handler)
     sync.detach()
@@ -407,8 +408,11 @@ describe('runs index sync: fence matrix', () => {
     await vi.advanceTimersByTimeAsync(RUNS_INDEX_RECONCILE_HOLD_MS * 3)
     expect(handler).toHaveBeenCalledTimes(1)
     expect(queryFn).not.toHaveBeenCalled()
-    // After the next ready, a new loss asks the handler again.
+    // The ready the rejoin brings reads the index once, for the frames skipped meanwhile.
     sync.ready('g1', seq)
+    await vi.advanceTimersByTimeAsync(RUNS_INDEX_RECONCILE_HOLD_MS)
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    // After that ready, a new loss asks the handler again.
     sync.detach()
     runFrame('a', summary('a2', '2026-01-02'))
     expect(handler).toHaveBeenCalledTimes(2)

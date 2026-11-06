@@ -1,4 +1,4 @@
-import { subscribeLive } from './live-coordinator'
+import { requestWorkspaceReady, subscribeLive, workspaceReadyReceived } from './live-coordinator'
 
 /** Named-event adapter lets the workspace reducers keep their existing wire contract. */
 export class LiveWorkspaceSource extends EventTarget {
@@ -25,20 +25,18 @@ export class LiveWorkspaceSource extends EventTarget {
           if (this.readyState === 1) { this.readyState = 0; this.dispatchEvent(new Event('error')) }
           return
         }
+        if ('data' in frame && frame.event === 'ready') workspaceReadyReceived()
         if ('data' in frame) this.dispatchEvent(new MessageEvent(frame.event, { data: frame.data }))
       },
     })
   }
   /**
-   * Drop and re-add the workspace demand: the shared worker then treats it as a new subscription
-   * and sends the stream's `ready` before any frame, and this source opens again. For a document
-   * that lost its first `ready` to an epoch change (hearsay-tools/cezarion#2729).
+   * Ask the shared worker for the workspace stream's `ready` again, for a document that lost it
+   * (for example to an epoch change, hearsay-tools/cezarion#2729). The demand stays, so the
+   * shared stream never restarts. False without a shared worker.
    */
-  rejoin() {
-    if (this.readyState === 2) return
-    this.release()
-    this.readyState = 0
-    this.release = this.subscribe()
+  requestReady(): boolean {
+    return this.readyState !== 2 && requestWorkspaceReady()
   }
   close() { this.readyState = 2; this.release() }
 }

@@ -127,6 +127,24 @@ describe('worker recovery boundaries', () => {
     expect(worker.port.close).toHaveBeenCalled()
     expect(frame).not.toHaveBeenCalled()
   })
+  it('asks the worker for the workspace ready on every sync until one is received; not in finite mode (hearsay-tools/cezarion#2729)', async () => {
+    coordinator.configure(local)
+    coordinator.subscribe({ kind: 'workspace' }, {})
+    const worker = Worker.all[0]!
+    const syncs = () => worker.port.postMessage.mock.calls.map(([message]) => message as { type: string; workspaceReady?: boolean }).filter(message => message.type === 'sync')
+    expect(syncs().at(-1)!.workspaceReady).toBeUndefined()
+    expect(coordinator.requestWorkspaceReady()).toBe(true)
+    expect(syncs().at(-1)!.workspaceReady).toBe(true)
+    // A later epoch change (another demand) still asks: the answer to the first may be lost.
+    coordinator.subscribe({ kind: 'topic', topic: 'health' }, {})
+    expect(syncs().at(-1)!.workspaceReady).toBe(true)
+    coordinator.workspaceReadyReceived()
+    coordinator.subscribe({ kind: 'topic', topic: 'other' }, {})
+    expect(syncs().at(-1)!.workspaceReady).toBeUndefined()
+    coordinator.resetSession()
+    coordinator.configure({ ...local, local: false })
+    expect(coordinator.requestWorkspaceReady()).toBe(false)
+  })
   it('clears shared delivery and uses document authentication after an authorization failure', async () => {
     const frame = vi.fn()
     coordinator.configure(local)

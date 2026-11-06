@@ -71,9 +71,9 @@ export interface RunsIndexSync {
   restoreProject(project: string): void
   /**
    * Who recovers a frame of unknown generation. The handler returns true when it took the
-   * recovery (the shared workspace source rejoins, which sends the stream's `ready` and reopens),
-   * so the sync asks for no reconciliation of its own. Without a handler, or when it returns
-   * false, the sync asks for one fenced reconciliation.
+   * recovery (the shared workspace source asks its worker for the stream's `ready`); the sync
+   * then reads the index once when that `ready` arrives. Without a handler, or when it returns
+   * false, the sync asks for one fenced reconciliation at once.
    */
   setUnknownGenerationHandler(handler: (() => boolean) | undefined): void
   /** Fence a snapshot. Every index snapshot passes here before it reaches the cache. */
@@ -143,10 +143,16 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
   /** A frame of unknown generation arrived since the last `ready`; it asked for a reconciliation. */
   let unknownAsked = false
   let unknownHandler: (() => boolean) | undefined
+  /** The handler took a recovery: the `ready` it brings reads the index once for the frames
+   *  skipped meanwhile. */
+  let awaitingReady = false
   const unknownGeneration = (): void => {
     if (unknownAsked) return
     unknownAsked = true
-    if (unknownHandler?.()) return
+    if (unknownHandler?.()) {
+      awaitingReady = true
+      return
+    }
     void reconcile({ hold: true })
   }
   const write = (next: RunsIndexResponse): void => {
@@ -237,6 +243,10 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
     ready(generation, seq) {
       overlayReady(overlay, generation, seq)
       unknownAsked = false
+      if (awaitingReady) {
+        awaitingReady = false
+        void reconcile({ hold: true })
+      }
     },
     detach() {
       overlayDetach(overlay)

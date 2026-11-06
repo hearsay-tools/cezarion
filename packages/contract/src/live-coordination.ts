@@ -28,7 +28,12 @@ export type LiveDemand = z.infer<typeof liveDemandSchema>
 export const liveEntrySchema = z.object({ id: z.string().min(1).max(128), demand: liveDemandSchema })
 const envelope = z.object({ version: z.literal(LIVE_PROTOCOL), documentId: z.string().min(1).max(128), epoch: z.number().int().nonnegative() })
 export const ownerInputSchema = z.discriminatedUnion('type', [
-  envelope.extend({ type: z.literal('sync'), entries: z.array(liveEntrySchema).max(64) }).refine(value => new Set(value.entries.map(e => e.id)).size === value.entries.length),
+  envelope.extend({
+    type: z.literal('sync'), entries: z.array(liveEntrySchema).max(64),
+    /** The document knows no workspace stream generation (its `ready` was lost, for example to
+     *  an epoch change): send it the stream's `ready` again (hearsay-tools/cezarion#2729). */
+    workspaceReady: z.literal(true).optional(),
+  }).refine(value => new Set(value.entries.map(e => e.id)).size === value.entries.length),
   envelope.extend({ type: z.literal('ack'), id: z.string(), seq: z.number().int().nonnegative() }),
   envelope.extend({ type: z.literal('refresh'), id: z.string() }),
 ])

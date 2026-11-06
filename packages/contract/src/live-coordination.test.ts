@@ -20,6 +20,9 @@ describe('protocol version (hearsay-tools/cezarion#2729)', () => {
     expect(ownerOutputSchema.safeParse({ type: 'hello', version: 2 }).success).toBe(false)
     expect(ownerOutputSchema.safeParse({ type: 'hello', version: 3 }).success).toBe(true)
     expect(ownerInputSchema.safeParse({ version: 2, documentId: 'tab', epoch: 1, type: 'sync', entries: [] }).success).toBe(false)
+    // A document that lost the workspace ready asks for it on its sync.
+    expect(ownerInputSchema.safeParse({ version: 3, documentId: 'tab', epoch: 1, type: 'sync', entries: [], workspaceReady: true }).success).toBe(true)
+    expect(ownerInputSchema.safeParse({ version: 3, documentId: 'tab', epoch: 1, type: 'sync', entries: [], workspaceReady: false }).success).toBe(false)
   })
 })
 

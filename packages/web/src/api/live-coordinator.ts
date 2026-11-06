@@ -74,11 +74,14 @@ export function createLiveCoordinator() {
     try { worker.port.postMessage({ version: LIVE_PROTOCOL, documentId, epoch, ...payload }) }
     catch { failWorker() }
   }
+  /** Set until a `ready` reaches the workspace source: every sync asks the worker for it, so an
+   *  answer lost to a later epoch change is answered again (hearsay-tools/cezarion#2729). */
+  let workspaceReadyWanted = false
   const sync = () => {
     if (!active || restoration) return
     const entries = available().map(entry => ({ id: entry.id, demand: entry.demand }))
     if (!entries.length) { disconnect(); return }
-    post({ type: 'sync', entries })
+    post({ type: 'sync', entries, ...(workspaceReadyWanted ? { workspaceReady: true } : {}) })
   }
   const disconnect = () => {
     clearInterval(renewal); renewal = undefined
@@ -220,7 +223,17 @@ export function createLiveCoordinator() {
     window.addEventListener('online', onOnline)
   }
   return {
-    resetSession() { stop(); session = undefined; workerFailed = false; setTransport(undefined) },
+    resetSession() { stop(); session = undefined; workerFailed = false; workspaceReadyWanted = false; setTransport(undefined) },
+    /** Ask the shared worker for the workspace stream's `ready` again. False without a worker
+     *  (finite HTTP): there is no stream to answer. */
+    requestWorkspaceReady(): boolean {
+      if (!worker || transport !== 'topics') return false
+      workspaceReadyWanted = true
+      sync()
+      return true
+    },
+    /** The workspace source received a `ready`: stop asking. */
+    workspaceReadyReceived() { workspaceReadyWanted = false },
     /** The transport the last start chose; undefined before the authenticated bootstrap. */
     transport: () => transport,
     /** Called after each transport change; returns the release. */
@@ -284,3 +297,5 @@ export const liveTransport = coordinator.transport
 export const onLiveTransport = coordinator.onTransport
 
 export const resetLiveSession = coordinator.resetSession
+export const requestWorkspaceReady = coordinator.requestWorkspaceReady
+export const workspaceReadyReceived = coordinator.workspaceReadyReceived

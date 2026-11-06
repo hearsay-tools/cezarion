@@ -250,7 +250,22 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
     try { doc.port.close() } catch { /* already detached */ }
     schedule()
   }
-  const holdsWorkspace = (doc: DocumentPort) => [...doc.entries.values()].some(entry => entry.demand.kind === 'workspace')
+  /**
+   * Before a sync's entries are rebuilt. Returns whether the workspace subscription is new (the
+   * document held no workspace demand). A document that lost the stream's `ready` asks for it
+   * (`workspaceReady`): it is then owed one again, sent before any greeting ping.
+   */
+  const startSync = (doc: DocumentPort, workspaceReadyWanted: true | undefined) => {
+    if (workspaceReadyWanted) doc.readyGeneration = undefined
+    return ![...doc.entries.values()].some(entry => entry.demand.kind === 'workspace')
+  }
+  /** After a sync: a document owed the current generation's `ready` gets it now, naming the last
+   *  frame the stream delivered (a frame it dropped meanwhile shows as a gap there). In the same
+   *  generation, an ordinary epoch change owes nothing. */
+  const ensureReady = (doc: DocumentPort, entries: Map<string, Entry>) => {
+    const entry = [...entries.values()].find(candidate => candidate.demand.kind === 'workspace' && !candidate.paused)
+    if (entry) workspaceReadyFor(doc, entry)
+  }
   const newEntry = (item: { id: string; demand: LiveDemand }): Entry => {
     const afterSeq = item.demand.kind === 'run' ? item.demand.afterSeq : 0
     return { ...item, sent: afterSeq, ack: afterSeq, unacked: [], bytes: 0, paused: false }
@@ -288,13 +303,14 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
         const epochChanged = doc.epoch !== message.epoch
         doc.epoch = message.epoch; doc.seenAt = Date.now()
         const next = new Map<string, Entry>()
-        const fresh = !holdsWorkspace(doc)
+        const fresh = startSync(doc, message.workspaceReady)
         for (const item of message.entries) {
           const old = epochChanged ? undefined : doc.entries.get(item.id)
           const entry: Entry = old ?? newEntry(item)
           next.set(item.id, entry)
           if (!old) greetNewEntry(doc, entry, fresh)
         }
+        ensureReady(doc, next)
         doc.entries = next
         if (!next.size) { release(doc); return }
         send(doc, { type: 'alive', version: LIVE_PROTOCOL, epoch: doc.epoch })
