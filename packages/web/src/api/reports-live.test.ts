@@ -11,9 +11,10 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 describe('report shelf fence', () => {
   it('patches unfiltered cached pages and marks search shelves stale without touching another project', () => {
     const client = new QueryClient()
+    const fence = new ReportsFence(client, 'P'); fence.receive(snapshot)
     for (const project of ['P', 'Q']) for (const q of ['', 'Old']) client.setQueryData([project, 'reports', q], { pages: [page()], pageParams: [undefined] })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const fence = new ReportsFence(client, 'P'); fence.receive(snapshot); fence.receive(metadata())
+    fence.receive(metadata())
     expect(client.getQueryData<any>(['P', 'reports', '']).pages[0].reports[0].taskTitle).toBe('New')
     expect(client.getQueryState(['P', 'reports', ''])?.isInvalidated).toBe(false)
     expect(client.getQueryState(['P', 'reports', 'Old'])?.isInvalidated).toBe(true)
@@ -58,12 +59,13 @@ describe('report shelf fence', () => {
   })
   it.each([{ ...snapshot, epoch: 'b38758b1-daa2-48e0-a9ac-021da66a264e' }, { ...snapshot, generation: 1 }, { ...snapshot, metadataGeneration: 1 }])('reconciles changed state counters on snapshots', async next => {
     const client = new QueryClient(), fence = new ReportsFence(client, 'P')
+    fence.receive(snapshot)
     const started = deferred<void>()
     const fetch = vi.fn(async () => { started.resolve(); return page() })
     client.setQueryData(['P', 'reports', ''], page())
     const observer = new QueryObserver(client, { queryKey: ['P', 'reports', ''], queryFn: fetch, staleTime: Infinity })
     const off = observer.subscribe(() => {})
-    fence.receive(snapshot); fence.receive(next)
+    fence.receive(next)
     await started.promise
     expect(fetch).toHaveBeenCalledTimes(1)
     off(); client.clear()
@@ -114,5 +116,13 @@ it('checks settled external edits on topic reconnect even with equal counters, w
   expect(invalidate).not.toHaveBeenCalled()
   fence.receive(snapshot, true)
   expect(invalidate).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ['P', 'reports'], refetchType: 'active' }), { cancelRefetch: false })
+  client.clear()
+})
+
+it('reconciles a first snapshot that arrives after the initial list response already landed', () => {
+  const client = new QueryClient(), fence = new ReportsFence(client, 'P')
+  client.setQueryData(['P', 'reports', ''], { pages: [page()], pageParams: [undefined] })
+  fence.receive({ ...snapshot, metadataGeneration: 1 })
+  expect(client.getQueryState(['P', 'reports', ''])?.isInvalidated).toBe(true)
   client.clear()
 })

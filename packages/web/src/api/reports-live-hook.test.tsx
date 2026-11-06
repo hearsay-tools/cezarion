@@ -27,22 +27,28 @@ it('demands only its project topic and releases it on unmount; other project cha
   act(() => live.topics.get('reports:project:Q')?.({ ...state, type: 'content', generation: 1 }))
   expect(fetch).toHaveBeenCalledTimes(1)
   act(() => live.topics.get('reports:project:P')?.({ ...state, type: 'snapshot' }))
-  act(() => live.topics.get('reports:project:P')?.({ ...state, type: 'content', generation: 1 }))
+  // bound: React must deliver the snapshot reconciliation to its observer.
+  await waitFor(() => expect(client.getQueryState(['P', 'reports', ''])?.fetchStatus).toBe('idle'))
+  const mountedReads = fetch.mock.calls.length
+  act(() => live.topics.get('reports:project:P')?.({ ...state, type: 'metadata', metadataGeneration: 1, runs: [{ runId: state.epoch, taskTitle: 'Updated', taskStatus: 'done' }] }))
+  expect(fetch).toHaveBeenCalledTimes(mountedReads)
+  act(() => live.topics.get('reports:project:P')?.({ ...state, type: 'content', generation: 1, metadataGeneration: 1 }))
   // bound: React must deliver the completed query to its observer.
-  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(mountedReads + 1))
   unmount(); expect(live.topics.size).toBe(0); client.clear()
 })
 it('uses the finite state twin every five seconds and releases its read', async () => {
   live.mode = 'finite'
-  const fetch = vi.fn(async () => new Response(JSON.stringify({ reports: [], total: 0, nextCursor: null })))
+  const fetch = vi.fn(async (path: unknown) => new Response(JSON.stringify(String(path).includes('/reports/state') ? state : { reports: [], total: 0, nextCursor: null })))
   vi.stubGlobal('fetch', fetch)
   const { client, result, unmount } = shelf()
-  // bound: React must deliver the completed query to its observer.
-  await waitFor(() => expect(result.current.isSuccess).toBe(true))
+  // bound: React must deliver both initial finite reads to its observer.
+  await waitFor(() => expect(result.current.isSuccess && !result.current.isFetching).toBe(true))
+  expect(fetch.mock.calls.some(([path]) => String(path).includes('/reports/state'))).toBe(true)
   expect([...live.reads.keys()]).toEqual(['/api/v1/p/P/reports/state'])
-  act(() => live.reads.get('/api/v1/p/P/reports/state')?.(state))
+  const mountedReads = fetch.mock.calls.length
   act(() => live.reads.get('/api/v1/p/P/reports/state')?.({ ...state, metadataGeneration: 1 }))
   // bound: React must deliver the completed query to its observer.
-  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThan(mountedReads))
   unmount(); expect(live.reads.size).toBe(0); client.clear()
 })

@@ -4,6 +4,7 @@ import { reportsFrameSchema, reportsStateSchema, type ReportsFrame, type Reports
 import { liveTransport, onLiveTransport } from './live-coordinator'
 import { subscribeLiveRead } from './live-reads'
 import { subscribeTopic } from './ws'
+import { cez, init, unwrap } from './client'
 
 type Shelf = InfiniteData<ReportsResponse, string | undefined>
 const clients = new WeakMap<QueryClient, Map<string, ReportsFence>>()
@@ -53,6 +54,7 @@ export class ReportsFence {
     if (!old && frame.type === 'snapshot') {
       this.state = frame
       this.content++ // Fence a mount read started before the first subscription snapshot.
+      if (this.client.getQueryCache().findAll({ queryKey: [this.project, 'reports'] }).some(query => query.state.data !== undefined)) this.invalidate(true)
       return
     }
     const change = compareState(old, frame)
@@ -93,6 +95,11 @@ export function reportsFence(client: QueryClient, project: string): ReportsFence
   return fence
 }
 
+async function getReportsState(projectId: string, signal: AbortSignal): Promise<ReportsState> {
+  const response = await cez.api.v1.p[':projectId'].reports.state.$get({ param: { projectId } }, init({ signal }))
+  return reportsStateSchema.parse(await unwrap(response, '/reports/state'))
+}
+
 export function useReportsLive(project: string): ReportsFence {
   const client = useQueryClient()
   const fence = reportsFence(client, project)
@@ -102,16 +109,25 @@ export function useReportsLive(project: string): ReportsFence {
       if (parsed.success) fence.receive(parsed.data, parsed.data.type === 'snapshot')
     })
     let offRead: (() => void) | undefined
+    let firstRead: AbortController | undefined
     const follow = () => {
-      if (liveTransport() === 'finite' && !offRead) offRead = subscribeLiveRead({ path: `/api/v1/p/${encodeURIComponent(project)}/reports/state`, intervalMs: 5_000 }, (value, error) => {
-        const parsed = reportsStateSchema.safeParse(value)
-        if (!error && parsed.success) fence.receive({ type: 'snapshot', ...parsed.data })
-      })
-      else if (liveTransport() !== 'finite') { offRead?.(); offRead = undefined }
+      if (liveTransport() === 'finite' && !offRead) {
+        // Recurring reads wait one interval before their first request. Lease watch demand now,
+        // so a quiet publication just after mount does not wait for a second five-second cycle.
+        firstRead = new AbortController()
+        const signal = firstRead.signal
+        void getReportsState(project, signal).then(state => {
+          if (!signal.aborted) fence.receive({ type: 'snapshot', ...state })
+        }).catch(() => undefined) // The recurring read retries; the shelf retains its last page.
+        offRead = subscribeLiveRead({ path: `/api/v1/p/${encodeURIComponent(project)}/reports/state`, intervalMs: 5_000 }, (value, error) => {
+          const parsed = reportsStateSchema.safeParse(value)
+          if (!error && parsed.success) fence.receive({ type: 'snapshot', ...parsed.data })
+        })
+      } else if (liveTransport() !== 'finite') { firstRead?.abort(); offRead?.(); offRead = undefined }
     }
     follow()
     const offTransport = onLiveTransport(follow)
-    return () => { offTransport(); offRead?.(); offTopic() }
+    return () => { offTransport(); firstRead?.abort(); offRead?.(); offTopic() }
   }, [fence, project])
   return fence
 }
