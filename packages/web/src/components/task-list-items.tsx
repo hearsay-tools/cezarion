@@ -80,12 +80,25 @@ function VirtualTaskItems<T>({ items, keys, handle, scroll, margin, focused, edi
   children: (item: T, index: number) => ReactElement
 }) {
   const previous = useRef(keys)
+  const [measured, setMeasured] = useState(false)
+  useLayoutEffect(() => {
+    const owner = scroll.current
+    if (!owner) return
+    const observer = new ResizeObserver((entries) => {
+      if (entries.some((entry) => entry.contentRect.height > 0)) {
+        setMeasured(true)
+        observer.disconnect()
+      }
+    })
+    observer.observe(owner)
+    return () => observer.disconnect()
+  }, [scroll])
   // Virtua's shift path preserves the visible anchor for prepends, including size corrections.
   const added = keys.length - previous.current.length
   const shift = added > 0 && previous.current.every((key, index) => keys[index + added] === key)
   useLayoutEffect(() => { previous.current = keys })
-  return <TaskListScrollAnchor revision={keys} keys={keys} scroll={scroll} handle={handle} shifting={shift}><Virtualizer ref={handle} ssrCount={1} {...(itemSize === undefined ? {} : { itemSize })} scrollRef={scroll} startMargin={margin} shift={shift}
-    keepMounted={[...new Set([...taskListKeepMounted(keys, focused), ...taskListKeepMounted(keys, editing)])]} data={items}>
+  return <TaskListScrollAnchor revision={keys} keys={keys} scroll={scroll} handle={handle} shifting={shift}><Virtualizer ref={handle} {...(itemSize === undefined ? {} : { itemSize })} scrollRef={scroll} startMargin={margin} shift={shift}
+    keepMounted={[...new Set([...(!measured && items.length ? [0] : []), ...taskListKeepMounted(keys, focused), ...taskListKeepMounted(keys, editing)])]} data={items}>
     {(item, index) => <div key={keys[index]} data-task-item={keys[index]} data-first={index === 0} data-last={index === items.length - 1}>{children(item, index)}</div>}
   </Virtualizer></TaskListScrollAnchor>
 }

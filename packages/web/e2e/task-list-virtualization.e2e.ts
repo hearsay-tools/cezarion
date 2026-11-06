@@ -131,3 +131,24 @@ it.each([['summary', 2], ['detailed', 2], ['phone', 34], ['global', 8]] as const
     }
   } finally { await archived.stop() }
 })
+
+it.each([[1440, 900], [360, 640]] as const)('fills a large global list before any scroll at %s px', async (width, height) => {
+  const large = await createTabFixture(process.cwd(), { taskList: 'global' })
+  try {
+    browser.setViewport(width, height)
+    browser.goto(`${large.origin}/tasks?tasks=virtual`)
+    browser.waitForFunction(`document.querySelector('[data-view="archived"]') !== null && window.__cezIdle`)
+    browser.click('[data-view="archived"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="global-task-row"]') !== null && window.__cezIdle`)
+    const sample = waitForSettledSample<{ mounted: number; expected: number; covered: boolean; scrollTop: number }>(browser, `(() => {
+      const owner=document.querySelector('[data-slot="main"]'), viewport=owner.getBoundingClientRect();
+      const rows=[...document.querySelectorAll('[data-slot="global-task-row"]')].map(e=>e.getBoundingClientRect());
+      const first=rows[0], available=Math.max(0,viewport.bottom-Math.max(first.top,viewport.top));
+      return {mounted:rows.length,expected:Math.ceil(available/first.height),covered:available===0||Math.max(...rows.map(r=>r.bottom))>=viewport.bottom,scrollTop:owner.scrollTop};
+    })()`)
+    expect(sample.scrollTop).toBe(0)
+    expect(sample.mounted).toBeGreaterThan(1)
+    expect(sample.mounted).toBeGreaterThanOrEqual(sample.expected)
+    expect(sample.covered).toBe(true)
+  } finally { await large.stop() }
+})

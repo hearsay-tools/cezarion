@@ -44,15 +44,23 @@ it('bounds mounted rows with the real virtualizer and keeps a focused row when s
   expect(document.activeElement).toBe(first)
 })
 
-it('never renders the full virtual-eligible group during owner lookup', () => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+it('never renders the full virtual-eligible group during owner lookup', async () => {
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(private callback: ResizeObserverCallback) {}
+    observe(element: HTMLElement) {
+      Object.defineProperty(element, 'offsetParent', { configurable: true, get: () => document.body })
+      queueMicrotask(() => this.callback([{ target: element, contentRect: { width: 1000, height: element.dataset.slot === 'main' ? 300 : 60 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver))
+    }
+    unobserve() {} disconnect() {}
+  })
   const rendered = new Set<string>()
   render(<MemoryRouter><div data-slot="main"><TaskListItems items={items} itemKey={(id) => id}>{(id) => {
     rendered.add(id)
     return <button>{id}</button>
   }}</TaskListItems></div></MemoryRouter>)
   expect(rendered.size).toBeLessThan(items.length)
-  // render flushes layout effects synchronously, before the browser can paint.
+  // Virtua attaches its scroll owner in a microtask; those and layout effects finish before paint.
+  await act(async () => {})
   expect(screen.getAllByRole('button').length).toBeGreaterThan(0)
 })
 it('skips unchanged observed margins but applies an earlier group size change', () => {
