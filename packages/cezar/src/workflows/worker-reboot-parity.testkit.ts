@@ -32,7 +32,6 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (hear
   if (settleVia !== 'reuse') it.each(GROUPS[settleVia])(`%s ${settleVia} settles and clears parent Finish; after restart, cleanup completes while an unreadable holder runs`, async runner => {
     // Service collection is opt-in; useWorkerWaitFixture restores the caller's environment.
     // Explicit opt-in: this recovery fixture seeds an inactive parent and registers the rebuilt runtime.
-    process.env.CEZ_DELEGATION = '1';
     const adapter = HARNESS_ADAPTERS[runner];
     process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [{ id: 'task', kind: STEP_KIND.agent, name: 'Task' }] });
@@ -144,7 +143,6 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (hear
     } finally { detach(); credentials.close(); if (!holderClosed) await holder.close(); vi.useRealTimers(); }
   });
   if (settleVia === 'reuse') it.each(GROUPS[settleVia])('%s refuses reuse until the real holder exits and a stale cleanup wake preserves the next native execution', async runner => {
-    process.env.CEZ_DELEGATION = '1';
     const adapter = HARNESS_ADAPTERS[runner];
     process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [{ id: 'task', kind: STEP_KIND.agent, name: 'Task' }] });

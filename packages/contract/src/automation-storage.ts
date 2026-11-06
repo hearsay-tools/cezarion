@@ -44,6 +44,8 @@ export const storedAutomationTaskSchema = z
     autonomous: z.boolean().optional(),
     archiveWhenDone: z.boolean().optional(),
     autoMergePr: z.boolean().optional(),
+    allowWorkers: z.boolean().optional(),
+    allowMessaging: z.boolean().optional(),
     systemPrompt: z.string().max(100_000).optional(),
   })
   .passthrough()

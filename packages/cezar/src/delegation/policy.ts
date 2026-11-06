@@ -1,5 +1,6 @@
 import { delegationStateSchema } from '@open-mercato/cezar-contract/delegation';
 import type { DelegationErrorResponse, WorkerOperation, WorkerCollectedResult, ModelChoices } from '@open-mercato/cezar-contract';
+import { messagingAllowed, workersAllowed } from '@open-mercato/cezar-contract';
 import type { RunRecord } from '../runs/store.ts';
 import { isAuthenticatedCaller, type Caller } from './credentials.ts';
 import { capacityError, workerCapacity } from './capacity.ts';
@@ -11,6 +12,16 @@ export class DelegationPolicyError extends Error {
     super(message);
     this.name = 'DelegationPolicyError';
   }
+}
+
+/** Task access (hearsay-tools/cezarion#2784): the human's per-task switches, read at every call. */
+export const WORKERS_OFF = 'Cezar workers are off for this task. A human can turn them on in the task menu.';
+export const MESSAGING_OFF = 'Task messaging is off for this task. A human can turn it on in the task menu.';
+export function requireWorkersAllowed(parent: RunRecord): void {
+  if (!workersAllowed(parent)) throw new DelegationPolicyError('incompatible_state', WORKERS_OFF);
+}
+export function requireMessagingAllowed(run: RunRecord): void {
+  if (!messagingAllowed(run)) throw new DelegationPolicyError('incompatible_state', MESSAGING_OFF);
 }
 
 function denyScope(): never {
@@ -75,6 +86,9 @@ export function authorizeSpawnReplay(caller: Caller, parent: RunRecord | undefin
 export function authorizeSpawn(caller: Caller, parent: RunRecord | undefined, projectId: string, getRun: (id: string) => RunRecord | undefined): void {
   authorizeSpawnReplay(caller, parent, projectId);
   if (parent?.delegation?.role !== 'root') denyScope();
+  // Read again at the serial queue head and just before acceptance: a switch turned off while a
+  // spawn waited refuses it. A replayed request ID skips this, as accepted work finishes.
+  requireWorkersAllowed(parent);
   const refusal = capacityError(workerCapacity(parent, getRun));
   if (refusal) throw new DelegationPolicyError('capacity_limit', refusal);
 }

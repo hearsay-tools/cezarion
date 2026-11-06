@@ -51,6 +51,9 @@ export interface StartRunInput {
   autonomous?: boolean | undefined;
   archiveWhenDone?: boolean | undefined;
   autoMergePr?: boolean | undefined;
+  /** Task access (hearsay-tools/cezarion#2784). Omitted = on; the record stores the explicit value. */
+  allowWorkers?: boolean | undefined;
+  allowMessaging?: boolean | undefined;
   /** Task webhook opt-in (#589). Persisted on the record at creation; read from there after. */
   notify?: boolean | undefined;
   /** Attachments from the queued prompt stack (#472), re-encoded from disk by

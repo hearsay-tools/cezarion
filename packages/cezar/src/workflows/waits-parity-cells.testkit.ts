@@ -3172,7 +3172,6 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
     // question, as the plain park it replaced let it through: it reaches the wire, the routed request
     // gets an outcome, and the parent's done is no longer blocked by the question.
     it(`${runner} U25 an automatic message supersedes a worker's fallback question`, async () => {
-      process.env.CEZ_DELEGATION = '1';
       nativeWire(runner);
       const p = await parent(HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
       await until(() => store.getRun(p.id)?.status === 'waiting');

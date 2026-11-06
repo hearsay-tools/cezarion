@@ -79,6 +79,8 @@ Options:
       --repo <dir>            repo to operate on (default: cwd)
       --workflow <name>       workflow for \`run\` (default: quick-task)
       --model <model>         model override for \`run\`
+      --no-workers            \`run\`: the task cannot start or resume Cezar workers
+      --no-messaging          \`run\`: the task cannot message other tasks
       --no-open               don't open the browser
       --platform <id>         server-install target (ubuntu-vps | macosx-ngrok)
       --domain <host>         server-install (ubuntu-vps): host a SECOND, independent
@@ -120,6 +122,8 @@ async function main(): Promise<void> {
       repo: { type: 'string' },
       workflow: { type: 'string' },
       model: { type: 'string' },
+      'no-workers': { type: 'boolean', default: false },
+      'no-messaging': { type: 'boolean', default: false },
       'no-open': { type: 'boolean', default: false },
       platform: { type: 'string' },
       domain: { type: 'string' },
@@ -157,7 +161,8 @@ async function main(): Promise<void> {
       await serveCommand(repoRoot, Number(values.port), !values['no-open'], values['bind-host'], Boolean(values['restart-exact']));
       return;
     case 'run':
-      await runCommand(repoRoot, positionals.slice(1).join(' ').trim(), values.workflow, values.model);
+      await runCommand(repoRoot, positionals.slice(1).join(' ').trim(), values.workflow, values.model,
+        { allowWorkers: !values['no-workers'], allowMessaging: !values['no-messaging'] });
       return;
     case 'init':
       initCommand(repoRoot);
@@ -438,20 +443,24 @@ function hintRunningCockpit(repoRoot: string): () => void {
   return () => { stopped = true; stop?.(); };
 }
 
+/** Task access for a headless run (hearsay-tools/cezarion#2784): both on unless a --no-* flag says otherwise. */
+type TaskAccess = { allowWorkers: boolean; allowMessaging: boolean };
+
 async function runCommand(
   repoRoot: string,
   task: string,
   workflowName: string | undefined,
   model: string | undefined,
+  access: TaskAccess,
 ): Promise<void> {
   if (!task) {
-    console.error('usage: cez run "<task>" [--workflow name] [--model model]');
+    console.error('usage: cez run "<task>" [--workflow name] [--model model] [--no-workers] [--no-messaging]');
     process.exitCode = 1;
     return;
   }
   const stopHint = hintRunningCockpit(repoRoot);
   try {
-    await runHeadless(repoRoot, task, workflowName, model);
+    await runHeadless(repoRoot, task, workflowName, model, access);
   } finally {
     stopHint();
   }
@@ -462,6 +471,7 @@ async function runHeadless(
   task: string,
   workflowName: string | undefined,
   model: string | undefined,
+  access: TaskAccess,
 ): Promise<void> {
   await initWorkspace(repoRoot);
   const { workflows, issues } = await loadWorkflows(repoRoot);
@@ -559,7 +569,7 @@ async function runHeadless(
       }
     });
 
-    const run = manager.startRun(workflow, { task, model });
+    const run = manager.startRun(workflow, { task, model, ...access });
     // `review` is terminal here too (spec 009) — headless runs must not hang on
     // the GUI's review gate; the diff waits on the task branch/cockpit instead.
     const final = await new Promise<string>((resolveStatus) => {

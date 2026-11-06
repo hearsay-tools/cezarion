@@ -34,7 +34,6 @@ import type { RunStore as RunStoreInstance } from '../src/runs/store.ts';
 import type { RunManager as RunManagerInstance } from '../src/workflows/run.ts';
 
 process.env.CEZ_DRY_RUN = '1';
-process.env.CEZ_DELEGATION = '1';
 process.env.CEZ_AUTONAME = '0';
 // The repo's own sandbox for ~/.cezar, so a benchmark never touches the user's registry; one this
 // run creates is removed with the rest of its teardown.

@@ -2031,6 +2031,8 @@ export class RunStore extends EventEmitter {
     autonomous?: boolean | undefined;
     archiveWhenDone?: boolean | undefined;
     autoMergePr?: boolean | undefined;
+    allowWorkers?: boolean | undefined;
+    allowMessaging?: boolean | undefined;
     /** Task webhook opt-in (#589), set at creation so the first transition is already covered. */
     notify?: boolean | undefined;
     worktree?: false | undefined;
@@ -2076,6 +2078,8 @@ export class RunStore extends EventEmitter {
       autonomous: input.autonomous,
       archiveWhenDone: input.archiveWhenDone,
       autoMergePr: input.autoMergePr,
+      ...(input.allowWorkers === undefined ? {} : { allowWorkers: input.allowWorkers }),
+      ...(input.allowMessaging === undefined ? {} : { allowMessaging: input.allowMessaging }),
       ...(input.notify ? { notify: true } : {}),
       worktree: input.worktree,
       groupId: input.groupId,
@@ -2689,14 +2693,16 @@ export class RunStore extends EventEmitter {
     return moved;
   }
 
-  /** A write that is not a run exit. It commits at once when it changes handoff records or a
-   *  completion option, else the next save writes it. A status in the patch, which only test
+  /** A write that is not a run exit. It commits at once when it changes handoff records, a
+   *  completion option or task access, else the next save writes it. A status in the patch, which only test
    *  fixtures still write, takes the exit's record rule (`doneCommits`). */
   updateRun(id: string, patch: RunPatch): RunRecord | undefined {
     const run = this.record(id);
     if (!run) return undefined;
     const committed = (patch.status === 'done' && doneCommits(run)) || patch.handoffRecords !== undefined ||
-      patch.archiveWhenDone !== undefined || patch.autoMergePr !== undefined;
+      patch.archiveWhenDone !== undefined || patch.autoMergePr !== undefined ||
+      // A disabled task access must be durable before the next delegated call reads it (#2784).
+      patch.allowWorkers !== undefined || patch.allowMessaging !== undefined;
     return this.writeRun(id, run, patch, committed ? 'committed' : 'debounced');
   }
 

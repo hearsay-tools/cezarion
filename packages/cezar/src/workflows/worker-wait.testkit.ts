@@ -253,17 +253,14 @@ export function grantSteer(rootId: string): void {
   if (delegation?.role !== 'root') throw Error('missing root');
   if (!delegation.permissions.includes('steer')) store.commitDelegation([{ id: rootId, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer'] } }]);
 }
-/** Low-level root builder. It does not enable `CEZ_DELEGATION`: use `delegatingParent`
- *  for service calls. Recovery and inactive-parent tests may keep explicit service setup. */
+/** Low-level root builder. Use `delegatingParent` for service calls. Recovery and inactive-parent tests may keep explicit service setup. */
 export function parent(task = 'mock:hold', runner: RunnerId = 'claude') {
   return startParent(task, runner, ['spawn', 'wait']);
 }
 
 /** A service-ready root with exactly the test's permissions, scoped callers and automatic cleanup.
- *  Call before creating workers: their native sessions inherit the delegation opt-in too.
  *  A restart needs a new registration for its new store/manager, not this old service. */
 export async function delegatingParent(options: { permissions: WorkerOperation[]; task?: string; runner?: RunnerId }) {
-  process.env.CEZ_DELEGATION = '1';
   const p = await startParent(options.task ?? 'mock:hold', options.runner ?? 'claude', [...options.permissions]);
   const service = new DelegationService();
   const detach = service.registerProject({ id: 'project', root, store, manager });

@@ -375,7 +375,7 @@ export class WakeAdmission {
     if (!this.context.disposed()) this.host.waitRegistry.resolvePeerWaits(runsAwaitingPeer(runId, () => this.context.store.listRuns()));
     // A peer's open requests to the deleted run settle `deleted` (spec 2026-10-27 § 5): each ledger
     // that holds one is reconciled, live or settled.
-    if (this.context.disposed() || process.env.CEZ_DELEGATION !== '1') return;
+    if (this.context.disposed()) return;
     try { for (const id of rootsAwaitingPeer(this.context.store, runId)) this.host.reconcileWorkerWaits(id); } catch { /* the next reconcile settles them */ }
   };
 

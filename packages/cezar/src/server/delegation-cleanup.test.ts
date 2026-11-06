@@ -10,11 +10,11 @@ import { workerDestroyResultSchema } from '@open-mercato/cezar-contract/delegati
 
 describe('human owned-worker cleanup', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); f = fixture(); });
   afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   it('rejects malformed human cleanup without state or intent changes and accepts absent or empty bodies', async () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
-    vi.stubEnv('CEZ_DELEGATION', '0');
+    f.store.updateRun(f.parent.id, { allowWorkers: false, allowMessaging: false });
     const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
     const before = structuredClone(f.store.getRun(workerId)); const events = f.store.readEvents(workerId);
     const url = `http://127.0.0.1/api/v1/runs/${workerId}/worker-destroy`;
@@ -25,9 +25,9 @@ describe('human owned-worker cleanup', () => {
       expect((await app.request(url, { method: 'POST', headers: { host: '127.0.0.1', 'content-type': 'application/json' }, ...(body === undefined ? {} : { body }) })).status).toBe(200);
     }
   });
-  it('uses the scoped chained route and boot alias with delegation off, retaining completed records', async () => {
+  it('uses the scoped chained route and boot alias with the parent switches off, retaining completed records', async () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
-    vi.stubEnv('CEZ_DELEGATION', '0');
+    f.store.updateRun(f.parent.id, { allowWorkers: false, allowMessaging: false });
     const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
     for (const prefix of ['/api/v1', '/api/v1/p/project', '/api/v1/p/default']) {
       const response = await app.request(`http://127.0.0.1${prefix}/runs/${workerId}/worker-destroy`, { method: 'POST', headers: { host: '127.0.0.1', 'content-type': 'application/json' }, body: '{}' });

@@ -100,10 +100,10 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     }
     expect(sessions).toHaveLength(mode === 'continue' ? 2 : 1);
   });
-  it('keeps ordinary native Claude state-file discovery unchanged while delegation is off', async () => {
+  it('keeps ordinary native Claude state-file discovery unchanged while workers and messaging are off', async () => {
     const home = join(f.root, 'ordinary-home'); mkdirSync(join(home, '.claude'), { recursive: true });
-    vi.stubEnv('HOME', home); vi.stubEnv('CLAUDE_CONFIG_DIR', undefined); vi.stubEnv('CEZ_DELEGATION', '0');
-    const run = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'ordinary', runner: 'claude', worktree: false });
+    vi.stubEnv('HOME', home); vi.stubEnv('CLAUDE_CONFIG_DIR', undefined);
+    const run = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'ordinary', runner: 'claude', worktree: false, allowWorkers: false, allowMessaging: false });
     await until(() => sessions.length === 1);
     expect(claudeState(sessions[0]!.spec)).toBe(join(home, '.claude.json')); expect(sessions[0]!.spec.env?.CLAUDE_CONFIG_DIR).toBeUndefined();
     expect(f.store.getRun(run.id)?.delegation).toBeUndefined();

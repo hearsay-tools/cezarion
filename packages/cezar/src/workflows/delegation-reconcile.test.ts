@@ -29,7 +29,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
   let a: ReturnType<typeof seedSettledFamily>;
   let b: ReturnType<typeof seedSettledFamily>;
   beforeEach(() => {
-    vi.stubEnv('CEZ_DELEGATION', '1');
+
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     root = mkdtempSync(join(tmpdir(), 'cez-reconcile-'));
     store = RunStore.open(join(root, '.ai/cezar'));
@@ -50,19 +50,6 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     for (const id of [a.parentId, a.workerId]) {
       expect(store.readEvents(id).some(e => e.type === 'conversation-message' && e.projectionId === `conversation-message:${a.messageId}:not-delivered`)).toBe(true);
     }
-  });
-
-  it.each(['0', undefined])('does not enter checkpoint reconciliation when CEZ_DELEGATION=%s', flag => {
-    vi.stubEnv('CEZ_DELEGATION', flag);
-    const reconcile = vi.spyOn(manager, 'reconcileWorkerWaits');
-    const reads = vi.spyOn(store, 'readEvents');
-    cleanupCheckpoint(store, a.workerId);
-    // Retained-result publication updates the terminal parent through this same
-    // checkpoint channel; it must not restart global projection either.
-    store.commitDelegation([{ id: a.parentId, delegation: store.getRun(a.parentId)!.delegation! }]);
-    expect(reconcile).not.toHaveBeenCalled();
-    expect(reads).not.toHaveBeenCalled();
-    expect(store.getRun(a.workerId)?.delegation).toHaveProperty('destroy.phase', 'terminating');
   });
 
   it('retains global reconciliation for recovery and explicit callers', async () => {

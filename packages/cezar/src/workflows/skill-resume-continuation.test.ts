@@ -79,7 +79,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     });
     vi.stubEnv('CEZ_DRY_RUN', '1');
     vi.stubEnv('CEZ_AUTONAME', '0');
-    vi.stubEnv('CEZ_DELEGATION', '1');
+
     launches = [];
     sessions = [];
     releases = [];

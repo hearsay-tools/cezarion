@@ -6,16 +6,16 @@ import { runRelationshipsSchema, type WorkerSpawnResult } from '@open-mercato/ce
 import { createApp } from './server.ts';
 import { fixture } from '../delegation/service.testkit.ts';
 let f: ReturnType<typeof fixture>;
-beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+beforeEach(() => { f = fixture(); });
 afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 // Exercise all 32 real durable creations; this is not a 5s filesystem throughput assertion.
-it('reads all owned workers including archived records through each human project alias with delegation off', { timeout: 30_000 }, async () => {
+it('reads all owned workers including archived records through each human project alias with the parent workers switch off', { timeout: 30_000 }, async () => {
   const workers: WorkerSpawnResult[] = [];
   for (let i = 0; i < 32; i++) workers.push(await f.service.spawn(f.caller, { task: `worker ${i}`, baseline: 'HEAD', requestId: randomUUID() }));
   const owned = f.store.getRun(workers[0]!.workerId)!.delegation;
   if (owned?.role !== 'worker') throw new Error('missing worker fixture');
   setRunStatus(f.store, workers[0]!.workerId, RUN_STATUS.cancelled, { archived: true, delegation: { ...owned, destroy: { requestedAt: '2026-09-06T00:00:00.000Z', phase: 'incomplete', remaining: ['branch'], error: 'Branch checked out' } } });
-  vi.stubEnv('CEZ_DELEGATION', '0');
+  f.store.updateRun(f.parent.id, { allowWorkers: false, allowMessaging: false });
   const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
   let expected: unknown;
   for (const prefix of ['/api/v1', '/api/v1/p/project', '/api/v1/p/default']) {

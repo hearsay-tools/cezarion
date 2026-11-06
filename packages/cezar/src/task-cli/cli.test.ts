@@ -214,6 +214,17 @@ describe('cez task', () => {
       expect(record[flag === '--archive-when-done' ? 'autoMergePr' : 'archiveWhenDone']).not.toBe(true);
     });
 
+    // hearsay-tools/cezarion#2784: both task access switches default on; each --no-* flag turns one off.
+    it.each([
+      [[], { allowWorkers: true, allowMessaging: true }],
+      [['--no-workers'], { allowWorkers: false, allowMessaging: true }],
+      [['--no-messaging'], { allowWorkers: true, allowMessaging: false }],
+      [['--no-workers', '--no-messaging'], { allowWorkers: false, allowMessaging: false }],
+    ] as const)('saves task access from %j', async (flags, expected) => {
+      expect(await run(['start', 'access this task', ...flags])).toBe(0);
+      expect(store.getRun(last().id as string)).toMatchObject(expected);
+    });
+
     it.each(['positional', 'file', 'stdin', 'workflow', 'skill'] as const)('preserves %s task input with both completion controls', async (source) => {
       const text = 'multi\nline "quoted" `code` $HOME';
       const taskPath = join(harness.repoRoot, 'task.md');
@@ -1160,7 +1171,7 @@ describe('cez task', () => {
       ['wait', 'mode until timeout-seconds'], ['send', 'text-file'], ['notify', 'message message-file'],
     ].flatMap(([operation, flags]) => flags!.split(' ').map((flag) => ({ operation: operation!, flag })));
     const booleanFlags = [
-      ['start', 'autonomous archive-when-done auto-merge-pr no-worktree wait notify no-notify'],
+      ['start', 'autonomous archive-when-done auto-merge-pr no-worktree no-workers no-messaging wait notify no-notify'],
       ['list', 'all full'], ['status', 'full'], ['log', 'follow'], ['send', 'resume notify'],
       ['notify', 'off'], ['diff', 'stat'], ['open', 'no-open'],
     ].flatMap(([operation, flags]) => flags!.split(' ').map((flag) => ({ operation: operation!, flag })));

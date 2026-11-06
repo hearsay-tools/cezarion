@@ -147,7 +147,7 @@ describe('request validation bounds (#429)', () => {
     { name: 'empty attachment data', body: { ...inlineBody, images: [{ mediaType: 'text/plain', data: '' }] }, status: 400 },
     { name: 'too many attachments', body: { ...inlineBody, images: Array.from({ length: 5 }, () => ({ mediaType: 'text/plain', data: 'eA==' })) }, status: 400 },
     { name: 'unknown keys stripped', body: { ...inlineBody, unknown: true }, status: 201 },
-    ...['model', 'worktree', 'autonomous', 'archiveWhenDone', 'autoMergePr', 'notify'].map((key) => ({
+    ...['model', 'worktree', 'autonomous', 'archiveWhenDone', 'autoMergePr', 'allowWorkers', 'allowMessaging', 'notify'].map((key) => ({
       name: `invalid ${key} type`, body: { ...inlineBody, [key]: 1 }, status: 400,
     })),
   ];

@@ -21,7 +21,7 @@ describe('cez discover', () => {
   let origin: string;
   let output: string[];
   beforeEach(async () => {
-    vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); output = [];
+    f = fixture(); output = [];
     const models = new RunnerModelCatalog({ adapters: { codex: { discover: async () => [
       { id: 'current', label: 'Current', description: '', effortLevels: ['low', 'high'] },
       { id: 'unknown-efforts', label: 'Unknown', description: '' },

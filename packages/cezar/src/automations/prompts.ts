@@ -85,6 +85,8 @@ Top-level keys:
 - "autonomous": never park to ask; an automation has no one watching (recommended: true).
 - "archiveWhenDone": boolean (default false). Archive each launched task after Done. Without a PR, archive on Done even when autoMergePr is true.
 - "autoMergePr": boolean (default false). After Done, merge the task's PR only when current-head CI and GitHub rules pass. This may mark a draft ready. With archiveWhenDone, merge before archive. Pending or blocked actions show a reason on the task. These settings apply to future tasks; editing the automation does not change tasks it already launched.
+- "allowWorkers": boolean (default true). Agents in each launched task may start and resume Cezar workers, each a separate paid agent session.
+- "allowMessaging": boolean (default true). Agents in each launched task may message other tasks in this project.
 - "systemPrompt": extra guidance for every launched run.
 
 For a GitHub poll, name, events and task are required; for a schedule, name, kind, schedule and task.
@@ -102,7 +104,7 @@ The CLI is ${command}. Every command prints one JSON object:
 
   ${command} schema                                   the definition shape, every key, every bound, the prompt placeholders
   ${command} create --file <def.json> [--enable]      create one from JSON (paused unless --enable); --json '<json>' or stdin work too
-  ${command} add --name <n> (--cron "0 4 * * *" | --on <event> --every 5m) --prompt <p> [--workflow w] [--runner r] [--model m] [--no-autonomous] [--archive-when-done] [--auto-merge-pr] [--label l] [--author a] [--changed-label l] [--include-existing] [--enable]
+  ${command} add --name <n> (--cron "0 4 * * *" | --on <event> --every 5m) --prompt <p> [--workflow w] [--runner r] [--model m] [--no-autonomous] [--archive-when-done] [--auto-merge-pr] [--no-workers] [--no-messaging] [--label l] [--author a] [--changed-label l] [--include-existing] [--enable]
   ${command} check <id> [--execute]                   GitHub poll: preview what the filter matches right now (launches nothing without --execute)
   ${command} add --name <n> (--at <YYYY-MM-DDTHH:MM> --tz <zone> | --in <30m|6h|7d>) [--latest-start 6h] --prompt <p> [--enable]
                                                       a one-time schedule: one task at that time, then archived

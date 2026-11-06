@@ -39,7 +39,7 @@ vi.mock('node:fs', async original => {
 // without polling. Timeout matches the suite's 15s git/manager waits rather than the 5s default.
 describe('verified destruction retains results through explicit history deletion', { timeout: 15_000 }, () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); f = fixture(); });
   afterEach(async () => {
     for (const run of f.store.listRuns()) f.manager.cancel(run.id);
     vi.restoreAllMocks(); await f.close(); vi.unstubAllEnvs();

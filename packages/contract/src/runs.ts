@@ -268,6 +268,11 @@ export const runRecordSchema = z.object({
   /** Opt-in completion controls. Missing values are off. */
   archiveWhenDone: z.boolean().optional(),
   autoMergePr: z.boolean().optional(),
+  /** Task access (hearsay-tools/cezarion#2784): may this task's agents start Cezar workers and
+   *  resume them, and may they message peer tasks. New runs store an explicit value; a missing
+   *  value is on. Read them through `workersAllowed` / `messagingAllowed`. */
+  allowWorkers: z.boolean().optional(),
+  allowMessaging: z.boolean().optional(),
   completionAction: completionActionSchema.optional(),
   archiveBlocker: z.object({
     message: z.string(), runId: z.string().optional(), pullRequestUrl: z.string().optional(),
@@ -418,6 +423,10 @@ export const runRecordSchema = z.object({
   handoffRecords: handoffRecordsSchema.optional(),
 });
 export type RunRecord = z.infer<typeof runRecordSchema>;
+
+/** Task access (hearsay-tools/cezarion#2784): a missing value is on, the default for new tasks. */
+export const workersAllowed = (run: Pick<RunRecord, 'allowWorkers'>): boolean => run.allowWorkers !== false;
+export const messagingAllowed = (run: Pick<RunRecord, 'allowMessaging'>): boolean => run.allowMessaging !== false;
 
 /**
  * What `GET /runs` and `GET /runs/:id` answer: the stored record plus host-derived fields.
@@ -919,6 +928,9 @@ export const createRunInputBaseSchema = z
     autonomous: z.boolean().optional(),
     archiveWhenDone: z.boolean().optional(),
     autoMergePr: z.boolean().optional(),
+    /** Task access (hearsay-tools/cezarion#2784). Omit for on. */
+    allowWorkers: z.boolean().optional(),
+    allowMessaging: z.boolean().optional(),
     /** Per-run system-prompt override. Wins over the config default; whitespace-only is absent. */
     systemPrompt: z
       .string()
@@ -980,6 +992,8 @@ export const patchRunInputSchema = z.object({
   task: z.string().trim().min(1).max(100_000).optional(),
   archiveWhenDone: z.boolean().optional(),
   autoMergePr: z.boolean().optional(),
+  allowWorkers: z.boolean().optional(),
+  allowMessaging: z.boolean().optional(),
 });
 export type PatchRunInput = z.input<typeof patchRunInputSchema>;
 

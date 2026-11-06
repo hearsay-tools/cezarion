@@ -2217,10 +2217,10 @@ starts and idle-closes or remains queued behind capacity. Continue acceptance
 supersedes that settlement before scheduling; returning to no active session must
 not let the earlier Finish close the newer execution or its steps.
 
-R20/R21 (hearsay-tools/cezarion#661) complete an owned worker over each native mock wire, then commit a
-cleanup checkpoint. Enabled delegation reads only that worker's family; disabled
-delegation enters no terminal-checkpoint reconciliation and reads no histories.
-The persisted execution proof remains complete in both cases.
+R20 (hearsay-tools/cezarion#661) completes an owned worker over each native mock wire, then commits a
+cleanup checkpoint. The checkpoint reads only that worker's family, and the persisted
+execution proof remains complete. R21 covered the retired `CEZ_DELEGATION` off path
+(hearsay-tools/cezarion#2784) and is no longer a criterion.
 
 R24/R25 (hearsay-tools/cezarion#495, `core/harness-autosave.test.ts`) retain writer
 protection across stalled autosave Git commands on initial and Continue sessions

@@ -324,7 +324,9 @@ export const openWaitSchema = z.discriminatedUnion('kind', [
 export type OpenWait = z.infer<typeof openWaitSchema>;
 
 export const waitErrorCodeSchema = z.enum([...ciWaitErrorCodeSchema.options, 'timers_disabled', 'wake_budget_spent', 'denied_scope',
-  'exit_file_outside', 'process_not_allowed', 'process_not_owned', 'duplicate_deadline', 'operation_conflict', 'outcome_unknown']);
+  'exit_file_outside', 'process_not_allowed', 'process_not_owned', 'duplicate_deadline', 'operation_conflict', 'outcome_unknown',
+  // hearsay-tools/cezarion#2784: a peer wait on a task whose messaging switch is off.
+  'messaging_off']);
 export type WaitErrorCode = z.infer<typeof waitErrorCodeSchema>;
 
 /** The bound on every wait and done refusal's `message`; the run manager fits its own to it. */

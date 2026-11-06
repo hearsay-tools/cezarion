@@ -25,7 +25,7 @@ vi.mock('node:fs', async importOriginal => {
 
 describe('parent-owned collected worker results', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); f = fixture(); });
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   async function worker() {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'HEAD', requestId: randomUUID() });
@@ -216,7 +216,7 @@ describe('parent-owned collected worker results', () => {
 
 describe('unchanged worker results (hearsay-tools/cezarion#879)', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); f = fixture(); });
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   async function collected() {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'HEAD', requestId: randomUUID() });

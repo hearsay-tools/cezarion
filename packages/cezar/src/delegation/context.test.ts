@@ -27,7 +27,7 @@ describe('explicit owned worker context', () => {
     const dir = join(f.root, '.ai/cezar/runs', `${f.parent.id}-images`); mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, name), content); return join(dir, name);
   };
-  beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { f = fixture(); });
   afterEach(async () => { openHook.current = undefined; await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   const swapAttachmentAncestorDuringOpen = (source: string, content: string) => {
     const outside = join(f.root, 'outside-attachments');
@@ -171,7 +171,7 @@ describe('parent-file references', () => {
       return () => { unlinkSync(join(f.root, 'qa')); renameSync(join(f.root, 'qa.real'), join(f.root, 'qa')); };
     };
   };
-  beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { f = fixture(); });
   afterEach(async () => { openHook.current = undefined; await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
   it('snapshots ignored parent files with worker-worktree recipe paths', async () => {

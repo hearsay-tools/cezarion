@@ -24,7 +24,7 @@ describe('delegation paths read no transcript (#880)', () => {
   let familyPaths: (path: string) => boolean;
   beforeEach(() => {
     // This index-only fixture seeds a settled family; it must not start a parent session.
-    vi.stubEnv('CEZ_DELEGATION', '1');
+
     root = mkdtempSync(join(tmpdir(), 'cez-transcript-reads-'));
     store = RunStore.open(join(root, '.ai/cezar'));
     family = seedSettledFamily(store, root);

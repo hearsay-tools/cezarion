@@ -35,7 +35,7 @@ export function registerRestartGroup(group: keyof typeof RESTART_GROUPS): void {
   if (group === 'starting-proof') {
 it.each(RUNNER_IDS)('%s R60 cold terminal starting-proof recovery repairs execution without a synchronous facts join', async runner => {
     // Explicit opt-in: this recovery fixture seeds an inactive parent and registers the rebuilt runtime.
-    process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
+    process.env.CEZ_DRY_RUN = '0';
     const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
     setRunStatus(store, p.id, RUN_STATUS.waiting, { delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
@@ -83,7 +83,7 @@ it.each(RUNNER_IDS)('%s R60 cold terminal starting-proof recovery repairs execut
   if (group === 'destroy-absent-ledger' || group === 'destroy-incomplete-ledger') {
    const ledgerKind = group === 'destroy-absent-ledger' ? 'absent' : 'incomplete';
     it.each(RUNNER_IDS)(`%s completes destroy once the readable holder exits, while an unreadable process runs (${ledgerKind} ledger)`, async runner => {
-      process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
+      process.env.CEZ_DRY_RUN = '0';
       const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
       const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
       setRunStatus(store, p.id, RUN_STATUS.waiting, { delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
@@ -149,7 +149,7 @@ it.each(RUNNER_IDS)('%s R60 cold terminal starting-proof recovery repairs execut
  }
  if (group === 'same-boot-crash-lock') {
 it.each(RUNNER_IDS)('%s settles a same-boot crash as gone once recorded processes exit, whatever unreadable process runs, and keeps cleanup locks bounded', async runner => {
-    process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
+    process.env.CEZ_DRY_RUN = '0';
     const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [{ id: 'task', kind: STEP_KIND.agent, name: 'Task' }] });
     setRunStatus(store, p.id, RUN_STATUS.waiting, { currentStepId: 'task', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });

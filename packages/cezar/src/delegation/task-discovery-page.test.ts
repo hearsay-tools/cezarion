@@ -9,7 +9,7 @@ import { fixture } from './service.testkit.ts';
 
 describe('bounded peer discovery pages', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { f = fixture(); });
   afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   const tasks = async (all = false, offset = 0) => discoveredTasksSchema.parse(await f.service.discover(f.caller, { kind: 'tasks', all, offset }));
 

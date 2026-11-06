@@ -18,7 +18,6 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   beforeEach(() => { f = context.f; controller = context.controller; });
 
   it.each(PROVISION_ROWS.governedIntent)('provisions governed intent for $backend on $mode', async ({ backend, mode }) => {
-    if (mode === 'off') vi.stubEnv('CEZ_DELEGATION', '0');
     const workflow = mode === 'noninteractive'
       ? { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!, id: 'preflight' }, QUICK_TASK_WORKFLOW.steps[0]!] }
       : QUICK_TASK_WORKFLOW;
@@ -26,7 +25,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     if (mode === 'recovery') {
       run = f.store.createRun({ title: 'queued', task: 'recover', workflow: 'quick-task', runner: backend, steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
       await f.manager.recover();
-    } else run = f.manager.startRun(workflow, { task: 'parent', runner: backend, worktree: false });
+    } else run = f.manager.startRun(workflow, { task: 'parent', runner: backend, worktree: false, ...(mode === 'off' ? { allowWorkers: false, allowMessaging: false } : {}) });
     await until(() => sessions.length === 1);
     const initial = sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN;
     if (mode === 'continue') {
@@ -37,8 +36,10 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     }
     const spec = sessions.at(-1)!.spec;
     if (mode === 'off') {
-      expect(spec.restrictCrossSessionMessaging).toBeUndefined();
+      // hearsay-tools/cezarion#2784: both switches off issue no credential; native cross-session tools stay off.
+      expect(spec.restrictCrossSessionMessaging).toBe(true);
       expect(spec.env?.CEZ_DELEGATION_TOKEN).toBeUndefined();
+      expect(spec.systemPrompt).toContain('Cezar workers and task messaging are off for this task');
     } else {
       expect(spec.restrictCrossSessionMessaging).toBe(true);
       expect(spec.systemPrompt).toContain('cezar');

@@ -87,6 +87,8 @@ export const OPERATIONS: Record<string, Operation> = {
       'archive-when-done': { type: 'boolean', help: '  Archive after Done (default off); with --auto-merge-pr, merge first.' },
       'auto-merge-pr': { type: 'boolean', help: '      Merge the task PR after Done when current-head CI and GitHub rules pass (default off); may mark a draft ready.' },
       'no-worktree': { type: 'boolean', help: '      Run in the repo working tree, not a worktree.' },
+      'no-workers': { type: 'boolean', help: '       Do not let this task start or resume Cezar workers (default on).' },
+      'no-messaging': { type: 'boolean', help: '     Do not let this task message other tasks (default on).' },
       wait: { type: 'boolean', help: '               Then wait until the task needs you or ends (see wait).' },
       until: UNTIL_FLAG,
       'timeout-seconds': TIMEOUT_FLAG,
@@ -457,6 +459,18 @@ async function pendingQuestion(cockpit: Cockpit, id: string): Promise<PendingAsk
 }
 
 type Values = Record<string, string | boolean | undefined>;
+
+/** The boolean start flags, each sent only when given, so an absent flag keeps the server default. */
+function startToggles(values: Values) {
+  return {
+    ...(values.autonomous ? { autonomous: true } : {}),
+    ...(values['archive-when-done'] ? { archiveWhenDone: true } : {}),
+    ...(values['auto-merge-pr'] ? { autoMergePr: true } : {}),
+    ...(values['no-worktree'] ? { worktree: false } : {}),
+    ...(values['no-workers'] ? { allowWorkers: false } : {}),
+    ...(values['no-messaging'] ? { allowMessaging: false } : {}),
+  };
+}
 type Printer = (value: unknown) => void;
 
 async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string, print: Printer): Promise<number> {
@@ -498,10 +512,7 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
       runner,
       model: values.model,
       effort: values.effort,
-      ...(values.autonomous ? { autonomous: true } : {}),
-      ...(values['archive-when-done'] ? { archiveWhenDone: true } : {}),
-      ...(values['auto-merge-pr'] ? { autoMergePr: true } : {}),
-      ...(values['no-worktree'] ? { worktree: false } : {}),
+      ...startToggles(values),
       notify,
       clientRequestId: requestId,
     },
@@ -675,7 +686,7 @@ async function execute(
   }
 }
 
-export const AGENT_TASK_SEND_REMEDY = "cez message progress <task-id> '<text>' --id <message-UUID> (needs CEZ_DELEGATION=1)";
+export const AGENT_TASK_SEND_REMEDY = "cez message progress <task-id> '<text>' --id <message-UUID> (needs task messaging on)";
 
 function refuseAgentSend(name: string, env: NodeJS.ProcessEnv): void {
   if (name === 'send' && env.CEZ_TASK_ID?.trim()) {

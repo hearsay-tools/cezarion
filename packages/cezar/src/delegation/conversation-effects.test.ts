@@ -6,7 +6,7 @@ import { fixture } from './service.testkit.ts';
 
 describe('committed message effects', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { f = fixture(); });
   afterEach(async () => { vi.restoreAllMocks(); await f.close(); vi.unstubAllEnvs(); });
 
   async function worker() {

@@ -17,7 +17,6 @@ import { ANSWER_DELIVERY_CRITERIA, HARNESS_ADAPTERS, exemptionFor, promptFor, wa
 // turn-end for crash recovery. The checkpoint must not hold worker conversation input arriving
 // through the ordinary send path while the answer runs. The answer is the parent's reply, which
 // reopens the closed session: a worker's question has one addressee (hearsay-tools/cezarion#2410).
-beforeEach(() => vi.stubEnv('CEZ_DELEGATION', '1'));
 afterEach(() => vi.unstubAllEnvs());
 
 interface AnswerFixture {

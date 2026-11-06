@@ -3491,6 +3491,13 @@ export function createApp(deps: ServerDeps) {
           ...(parsed.data.autoMergePr === undefined ? {} : { autoMergePr: parsed.data.autoMergePr }),
         });
       }
+      if (parsed.data.allowWorkers !== undefined || parsed.data.allowMessaging !== undefined) {
+        // Task access (hearsay-tools/cezarion#2784): any status; the delegation service reads it per call.
+        store.updateRun(id, {
+          ...(parsed.data.allowWorkers === undefined ? {} : { allowWorkers: parsed.data.allowWorkers }),
+          ...(parsed.data.allowMessaging === undefined ? {} : { allowMessaging: parsed.data.allowMessaging }),
+        });
+      }
       return c.json(store.getRun(id));
     })
 

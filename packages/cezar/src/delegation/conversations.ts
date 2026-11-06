@@ -99,7 +99,7 @@ function projectOutcome(store: Pick<import('../runs/store.ts').RunStore, 'append
 export const rootDelegation = (): DelegationState => ({ role: 'root', permissions: [...workerOperationSchema.options], receipts: [] });
 
 /** A root task: a root delegation record, or a top-level run with no record yet, which has not
- *  opened a session under `CEZ_DELEGATION=1` (spec 2026-10-27-task-communication-protocol § 2). */
+ *  opened a delegation session yet (spec 2026-10-27-task-communication-protocol § 2). */
 export function isRootTask(run: RunRecord | undefined): run is RunRecord {
   return !!run && (run.delegation?.role === 'root' || run.delegation === undefined);
 }

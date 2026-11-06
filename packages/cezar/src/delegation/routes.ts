@@ -9,7 +9,7 @@ import { workerListQuerySchema, workerCancelWaitRequestSchema, workerSpawnReques
 import { jsonZodValidator, paramZodValidator, queryZodValidator } from '../server/validators.ts';
 import { isLoopbackHostHeader } from '../server/capabilities.ts';
 import { CredentialRegistry, type Caller } from './credentials.ts';
-import { delegationEnabled, type DelegationService } from './service.ts';
+import type { DelegationService } from './service.ts';
 import { DelegationPolicyError } from './policy.ts';
 
 type Env = { Variables: { caller: Caller } };
@@ -34,7 +34,6 @@ export function createDelegationRoutes(service: DelegationService, credentials: 
     if (!isLoopbackHostHeader(host ?? '') || !originOK || c.req.header('sec-fetch-site') === 'cross-site') {
       return c.json({ code: 'denied_scope' as const, error: 'Worker scope denied' }, 403);
     }
-    if (!delegationEnabled()) return c.json({ code: 'unavailable_transport' as const, error: 'Delegation is unavailable' }, 503);
     const authorization = c.req.header('authorization');
     const token = authorization?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
     const caller = token ? credentials.authenticate(token) : undefined;

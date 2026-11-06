@@ -8,7 +8,7 @@ import * as runners from '../core/runner-factory.ts';
 import { fixture } from './service.testkit.ts';
 
 it('accepts a queued worker after release while two running parents fill the default slots', async () => {
-  vi.stubEnv('CEZ_DELEGATION', '1');
+
   vi.stubEnv('CEZ_DRY_RUN', '1');
   vi.stubEnv('CEZ_AUTONAME', '0');
   let opened = 0;

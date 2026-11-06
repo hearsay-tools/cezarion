@@ -7,7 +7,7 @@ import { discoveredTasksSchema } from '@open-mercato/cezar-contract/discovery';
 
 describe('peer discovery lifecycle', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { f = fixture(); });
   afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   const create = () => f.store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', steps: [] });
   const tasks = async () => discoveredTasksSchema.parse(await f.service.discover(f.caller, { kind: 'tasks' })).tasks;

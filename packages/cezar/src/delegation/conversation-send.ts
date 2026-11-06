@@ -1,5 +1,6 @@
 import type { AgentInput, ConversationMessage, ConversationSendRequest, ConversationState, RequestOutcome } from '@open-mercato/cezar-contract';
 import { MAX_CONVERSATION_REQUEST_SECONDS } from '@open-mercato/cezar-contract/conversations';
+import { messagingAllowed } from '@open-mercato/cezar-contract';
 import type { RunRecord } from '../runs/store.ts';
 import type { DelegationProject } from './service.ts';
 import { finishing, notDeliveredInstruction } from './conversations.ts';
@@ -31,7 +32,9 @@ export function sendAdmission(pair: ConversationPair, root: RunRecord, request: 
   const peer = relationship === 'peer';
   const destroyed = recipient.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete';
   // A peer whose Finish is pending takes nothing more: Finish would settle it unread (spec § 5).
-  const resumable = !['queued', 'running', 'waiting'].includes(recipient.status) || !!recipient.stopping || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy) || (peer && finishing(recipient));
+  // A peer that turned task messaging off takes no new message; a reply to its own request still lands (#2784).
+  const closed = peer && request.kind !== 'reply' && !messagingAllowed(recipient);
+  const resumable = closed || !['queued', 'running', 'waiting'].includes(recipient.status) || !!recipient.stopping || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy) || (peer && finishing(recipient));
   const resume = !!request.resume && resumable;
   // The extended bound belongs to a new continuation, not merely the flag.
   // Exact retries have already returned above, even if that continuation is now active.
@@ -40,6 +43,7 @@ export function sendAdmission(pair: ConversationPair, root: RunRecord, request: 
   }
   assertSendResume(recipient, resume, destroyed);
   const instruction = destroyed ? 'Not delivered: this worker was destroyed. Spawn a new worker for further work.'
+    : closed ? 'Not delivered: this task does not accept task messages.'
     : resumable && !resume ? notDeliveredInstruction(pair, root) : undefined;
   return { destroyed, resumable, resume, instruction };
 }

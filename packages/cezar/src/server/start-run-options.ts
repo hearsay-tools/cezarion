@@ -152,6 +152,8 @@ export function startRunInput(body: StartRunOptions): StartRunInput {
     autonomous: body.autonomous,
     archiveWhenDone: body.archiveWhenDone,
     autoMergePr: body.autoMergePr,
+    allowWorkers: body.allowWorkers,
+    allowMessaging: body.allowMessaging,
   };
 }
 

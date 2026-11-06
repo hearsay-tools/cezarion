@@ -38,9 +38,7 @@ export class FamilyReconciler {
     if (!this.context.disposed() && source === undefined) this.host.reapTerminalScratch(run.id);
     if (!this.context.disposed() && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.host.cancelOpenWaits(run.id);
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.host.active(run.id)?.liveSession.revokeDelegation?.();
-    // Cleanup checkpoints emit terminal records too. With delegation disabled,
-    // these observations must not replay the project's conversation histories.
-    if (this.context.disposed() || this.host.recoveringRun(run) || (source === 'delegation-checkpoint' && process.env.CEZ_DELEGATION !== '1')) return;
+    if (this.context.disposed() || this.host.recoveringRun(run)) return;
     // A destroy retry changes nothing the family reconcile reads (#880).
     if (source === 'delegation-destroy-progress') return;
     if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {

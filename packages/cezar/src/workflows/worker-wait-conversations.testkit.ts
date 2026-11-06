@@ -2,7 +2,6 @@ import { type RunnerId } from '../core/agent-runner.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 import { delegatingParent, manager, spendWorkerBudget, store, until, worker } from './worker-wait.testkit.ts';
 
-// `delegatingParent` sets CEZ_DELEGATION, so these tests do not depend on the host (hearsay-tools/cezarion#1752).
 type ConversationParent = Awaited<ReturnType<typeof delegatingParent>>;
 type ConversationPair = ConversationParent & {
   w: Awaited<ReturnType<typeof worker>>;

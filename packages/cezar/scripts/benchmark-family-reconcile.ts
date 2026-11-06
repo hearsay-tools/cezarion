@@ -31,7 +31,6 @@ import { parseArgs } from 'node:util';
 import type { ConversationMessage } from '@open-mercato/cezar-contract';
 
 process.env.CEZ_DRY_RUN = '1';
-process.env.CEZ_DELEGATION = '1';
 process.env.CEZ_AUTONAME = '0';
 process.env.CEZ_PROJECT_WARMUP = '0';
 const ownHome = process.env.CEZ_HOME ? undefined : mkdtempSync(join(tmpdir(), 'cez-bench-home-'));

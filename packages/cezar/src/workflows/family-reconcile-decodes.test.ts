@@ -27,7 +27,7 @@ describe('family reconcile decodes each cold run once per pass', () => {
   let family: ReturnType<typeof seedSettledFamily>;
 
   beforeEach(() => {
-    vi.stubEnv('CEZ_DELEGATION', '1');
+
     root = mkdtempSync(join(tmpdir(), 'cez-reconcile-decodes-'));
     const seeding = RunStore.open(join(root, '.ai/cezar'));
     family = seedSettledFamily(seeding, root);

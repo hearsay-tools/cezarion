@@ -21,7 +21,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
   let f: ReturnType<typeof fixture>, transport: Awaited<ReturnType<typeof startDelegationTransport>>;
   let output: ReturnType<typeof vi.spyOn>, env: NodeJS.ProcessEnv;
   beforeEach(async () => {
-    vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture();
+    f = fixture();
     transport = await startDelegationTransport(createDelegationApp(createDelegationRoutes(f.service, f.credentials)));
     env = { CEZ_DELEGATION_URL: transport.url, CEZ_DELEGATION_TOKEN: f.token };
     output = vi.spyOn(console, 'log').mockImplementation(() => {});

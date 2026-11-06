@@ -1521,7 +1521,7 @@ export async function withSkillParentRun(
   const accountHome = join(repoRoot, 'account');
   mkdirSync(accountHome);
   const overrides = { ...env, ...profileEnv(backend, accountHome), CEZ_HOME: join(repoRoot, 'workspace-home'),
-    [adapter.binEnv]: adapter.mockBin, CEZ_DELEGATION: '1', CEZ_AUTONAME: '0' };
+    [adapter.binEnv]: adapter.mockBin, CEZ_AUTONAME: '0' };
   const saved = Object.keys({ ...overrides, CEZ_DRY_RUN: '' }).map(name => [name, process.env[name]] as const);
   Object.assign(process.env, overrides);
   delete process.env.CEZ_DRY_RUN;

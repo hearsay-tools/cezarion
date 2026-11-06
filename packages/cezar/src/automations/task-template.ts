@@ -114,6 +114,8 @@ function startRun(manager: Pick<RunManager, 'startRun'>, workflow: WorkflowDef, 
     autonomous: definition.task.autonomous,
     archiveWhenDone: definition.task.archiveWhenDone,
     autoMergePr: definition.task.autoMergePr,
+    allowWorkers: definition.task.allowWorkers,
+    allowMessaging: definition.task.allowMessaging,
   };
   return manager.startRun(workflow, input);
 }

@@ -48,7 +48,7 @@ export function provisionWorkflowFixture() {
   const recoveredStores: RunStore[] = [];
   const sessions: Array<{ spec: AgentRunSpec; session: AgentSession; emit(event: AgentEvent): void; finish(text?: string): void }> = [];
   beforeEach(async () => {
-    vi.stubEnv('CEZ_DELEGATION', '1'); vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
+    vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     f = fixture(); await f.releaseAdmission(); vi.restoreAllMocks();
     toolSessions.clear(); observeTools(f.manager);
     onTestFinished(scopeFixtureProcesses());

@@ -94,4 +94,21 @@ describe('PATCH /api/v1/runs/:id', () => {
     expect(body.title).toBe('fix the login bug');
     expect(body.titleSummary).toBeUndefined();
   });
+
+  // hearsay-tools/cezarion#2784: task access changes at any status, commits at once and survives a reload.
+  it.each(['queued', 'running', 'done'] as const)('sets task access on a %s run', async (status) => {
+    store.updateRun(run.id, { status });
+    const res = await patch(run.id, { allowWorkers: false, allowMessaging: false });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ allowWorkers: false, allowMessaging: false });
+    const reopened = RunStore.open(join(repoRoot, '.ai/cezar'));
+    expect(reopened.getRun(run.id)).toMatchObject({ allowWorkers: false, allowMessaging: false });
+    reopened.flush();
+    expect(await (await patch(run.id, { allowWorkers: true })).json()).toMatchObject({ allowWorkers: true, allowMessaging: false });
+  });
+
+  it('refuses a non-boolean task access value', async () => {
+    expect((await patch(run.id, { allowWorkers: 'no' })).status).toBe(400);
+    expect(store.getRun(run.id)?.allowWorkers).toBeUndefined();
+  });
 });

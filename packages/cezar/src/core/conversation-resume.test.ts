@@ -7,7 +7,6 @@ import { RUNNER_IDS } from './agent-runner.ts';
 import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 
 // This suite enters through the opt-in service, unlike the manager-only fixtures.
-beforeEach(() => vi.stubEnv('CEZ_DELEGATION', '1'));
 afterEach(() => vi.unstubAllEnvs());
 
 for (const backend of RUNNER_IDS) {

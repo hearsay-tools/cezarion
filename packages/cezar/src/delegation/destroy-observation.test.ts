@@ -13,7 +13,7 @@ import { ensureOwnedWorkspace, gitCommonDir } from './workspace.ts';
 
 describe('destroy observation (hearsay-tools/cezarion#879)', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { scopeFixtureProcesses(); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
+  beforeEach(() => { scopeFixtureProcesses(); f = fixture(); });
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
   /** A settled worker with a real worktree, the shape a stuck destroy has. */
