@@ -5,6 +5,7 @@ export interface ScenarioContext {
   lifecycle: Lifecycle;
   session: { resumeAfterAsk?: boolean; malformedFrame?: string };
   unsupported?: readonly string[];
+  nativeFailureControl?: boolean;
 }
 export interface ToolCall {
   id: string;

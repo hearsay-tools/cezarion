@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 import { loadControls } from './mock-controls.mjs';
-import { stall, waitForRelease } from './mock-lifecycle.mjs';
+import { scenarioFor, play } from './mock-scenario.mjs';
 import { closeSync } from 'node:fs';
 import readline from 'node:readline';
-import { appendFileSync, existsSync as promptAckReleased } from 'node:fs';
+import { appendFileSync } from 'node:fs';
 import { rawMessage, stripCommandMessage } from './mock-session-context.mjs';
 const { failureControl, delivery } = await loadControls({ delivery: ['reject', 'hold-ack', 'hold-response'] });
-const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const { answerNudge } = await import('./mock-nudge.mjs');
 
 if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(process.argv.slice(2))}\n`);
 
@@ -30,7 +29,8 @@ let activeTurn = null;
 let steeringMode = 'one-at-a-time';
 // The prompt a queued handler is running; pi records it as the turn's user message.
 let currentPrompt;
-let resumeAfterAsk = false;
+const scenarioContext = { runner: 'pi', lifecycle, session: { malformedFrame: '{"type":"tool_execution_update","toolCallId":"truncated' }, unsupported: ['subagent-after-park'], nativeFailureControl: Boolean(failureControl) };
+const deferredStart = message => scenarioFor(message, scenarioContext)?.name === 'deferred-turn-start';
 const sendNow = (value) => {
   if (value?.type === 'turn_start' && !activeTurn) {
     activeTurn = { steers: [], late: false };
@@ -96,13 +96,9 @@ async function handleControlled(command) {
   for (const frame of frames) send(frame);
 }
 
-/** The card the `mock:cezar-ask` scenario sends (spec #473). */
-const ASK_QUESTIONS = [{ header: 'Library', question: 'Which test library?', multiSelect: false, options: [{ label: 'Vitest', description: 'Use the existing test runner' }, { label: 'Node test', description: 'Use node:test' }] }];
-// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that cezar tool through
-// the session's --extension before its turn ends. Returns '' or a note for the text.
+// Tool execution stays on the native pi extension. Scenario scripts decide when to call it.
 const tools = () => import('./mock-ci-tool.mjs');
-const lifecycle = async (call) => (await tools()).lifecycleCall('pi', process.argv.slice(2), ...call);
-const done = async (text) => text + await lifecycle((await tools()).DONE);
+async function lifecycle(call) { return (await tools()).lifecycleCall('pi', process.argv.slice(2), ...call); }
 
 /** The text_start / text_delta* / text_end trio pi streams for one assistant block. */
 function sendText(deltas) {
@@ -136,7 +132,7 @@ rl.on('line', (line) => {
   // hearsay-tools/cezarion#1112: a late-ack steer is admitted into the running turn after its
   // last model call: pi acknowledges it now, with the turn open, and reads it as its next
   // prompt once that turn settles (the `mock:steer-late` ordering), starting that run late.
-  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && command.message.includes('mock:deferred-turn-start:late-ack')) {
+  if (command.type === 'prompt' && command.streamingBehavior === 'steer' && deferredStart(command.message) && command.message.includes(':late-ack')) {
     const admit = () => {
       if (!activeTurn) { setTimeout(admit, 5); return; }
       if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: rawMessage(command), imageCount: 0, streamingBehavior: 'steer' })}\n`);
@@ -150,7 +146,7 @@ rl.on('line', (line) => {
   // hearsay-tools/cezarion#1112: a deferred-start steer is not admitted into the running turn;
   // pi acknowledges it as its next prompt once that turn settles, with no turn open.
   if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn &&
-    !command.message.includes('mock:deferred-turn-start')) {
+    !deferredStart(command.message)) {
     if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: rawMessage(command), imageCount: 0, streamingBehavior: 'steer' })}\n`);
     activeTurn.steers.push(command.message);
     write({ id: command.id, type: 'response', command: 'prompt', success: true });
@@ -162,52 +158,6 @@ rl.on('close', () => { queue.then(() => process.exit(0)); });
 
 function handle(command) {
   return delivery && command.type === 'prompt' ? handleControlled(command) : handleCommand(command);
-}
-
-async function respondAutonomous(command) {
-  const { autonomousReply } = await import('./mock-autonomous.mjs');
-  // Recorded like every other prompt, so a test can count the autonomous nudges pi received.
-  if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: rawMessage(command), imageCount: 0 })}\n`);
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' });
-  send({ type: 'turn_start' });
-  sendText([await autonomousReply(command.message, lifecycle)]);
-  sendTurnEnd();
-  return;
-}
-
-async function respondSilentTail(command) {
-  const silent = await import('./mock-silent-tail.mjs');
-  silent.noteSilentTailPrompt(command.message);
-  if (silent.isFinalMessageNudge(command.message)) return respondFinalNudge(command, silent);
-  if (silent.isSilentTailScenario(command.message)) {
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    sendText([silent.SILENT_TAIL_OPENING]);
-    send({ type: 'tool_execution_start', toolCallId: 'tool-silent-gh', toolName: 'bash', args: { command: 'gh issue create' } });
-    send({ type: 'tool_execution_end', toolCallId: 'tool-silent-gh', toolName: 'bash', result: { content: [{ type: 'text', text: 'created' }] }, isError: false });
-    sendThinking(silent.SILENT_TAIL_REASONING, 1);
-    sendTurnEnd();
-    return;
-  }
-  if (silent.isToolTailScenario(command.message)) {
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    sendText([silent.TOOL_TAIL_OPENING]);
-    send({ type: 'tool_execution_start', toolCallId: 'tool-tail-git', toolName: 'bash', args: { command: 'git status --short' } });
-    send({ type: 'tool_execution_end', toolCallId: 'tool-tail-git', toolName: 'bash', result: { content: [{ type: 'text', text: ' M src/example.ts' }] }, isError: false });
-    sendTurnEnd();
-    return;
-  }
-  return false;
-}
-
-async function respondCrash(command) {
-  const { crashWithStderr } = await import('./mock-runner-crash.mjs');
-  if (crashWithStderr(command.message, '{"type":"tool_execution_update","toolCallId":"truncated')) return;
-  return false;
 }
 
 function respondState(command) {
@@ -230,70 +180,6 @@ function respondState(command) {
   });
 }
 
-async function respondCezarTool(command) {
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' }); send({ type: 'turn_start' });
-  const { toolPrompt } = await import('./mock-ci-tool.mjs');
-  sendText([await toolPrompt('pi', process.argv.slice(2), command.message)]);
-  sendTurnEnd();
-}
-
-async function respondCiWait(command) {
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' }); send({ type: 'turn_start' });
-  const { ciPrompt } = await import('./mock-ci-tool.mjs');
-  sendText([await ciPrompt('pi', process.argv.slice(2), command.message)]);
-  sendTurnEnd();
-}
-
-async function respondSteerTool(command) {
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' }); send({ type: 'turn_start' });
-  send({ type: 'tool_execution_start', toolCallId: 'tool-steer', toolName: 'bash', args: { command: 'wait' } });
-  await sleep(Number(process.env.CEZ_MOCK_STEER_MS ?? 600));
-  send({ type: 'tool_execution_end', toolCallId: 'tool-steer', toolName: 'bash', result: { content: [{ type: 'text', text: 'waited' }] }, isError: false });
-  sendText(['steer tool done']);
-  sendTurnEnd();
-}
-
-async function respondSteerLate(command) {
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' }); send({ type: 'turn_start' });
-  sendText(['late window: final message already sent']);
-  activeTurn.late = true;
-  await sleep(300);
-  sendTurnEnd();
-}
-
-async function respondMultiPrRefs(command) {
-  const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' }); send({ type: 'turn_start' });
-  send({ type: 'tool_execution_start', toolCallId: 'multi-read', toolName: 'read', args: { path: 'other.txt' } });
-  send({ type: 'tool_execution_end', toolCallId: 'multi-read', toolName: 'read', result: { content: [{ type: 'text', text: unrelatedPr }] }, isError: false });
-  send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'thinking', thinking: unrelatedPr }], stopReason: 'stop' } });
-  const text = await multiPrText(command.message, lifecycle);
-  sendText([text.slice(0, 5), text.slice(5)]);
-  sendTurnEnd();
-}
-
-async function respondTurnMessages(command) {
-  const { turnMessages } = await import('./mock-turn-messages.mjs');
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' }); send({ type: 'turn_start' });
-  for (const text of turnMessages(command.message)) sendText([text]);
-  sendTurnEnd();
-}
-
-function respondAgentEcho(command) {
-  // rpc-lifecycle.ndjson's normal prompt/assistant/settled sequence.
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' });
-  send({ type: 'turn_start' });
-  sendText([command.message]);
-  sendTurnEnd();
-}
-
 function respondProviderError(command) {
   // An assistant `message_end` whose stopReason is `error`, carrying the
   // transport diagnostic — wire shape copied from
@@ -303,6 +189,10 @@ function respondProviderError(command) {
   send({ id: command.id, type: 'response', command: 'prompt', success: true });
   send({ type: 'agent_start' });
   send({ type: 'turn_start' });
+  sendProviderError();
+}
+
+function sendProviderError() {
   send({ type: 'message_end', message: {
     role: 'assistant',
     content: [],
@@ -317,95 +207,10 @@ function respondProviderError(command) {
   send({ type: 'agent_settled' });
 }
 
-/** Acknowledge the prompt, hold until released, then end the turn on the text `reply` makes. */
-async function respondHeld(command, reply) {
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' });
-  send({ type: 'turn_start' });
-  await waitForRelease(400);
-  sendText([await reply()]);
-  sendTurnEnd();
-}
-
-const respondHoldDone = command => respondHeld(command, () => done('parity hold-done: content after the pause'));
-const respondHoldAsk = command => respondHeld(command, async () => 'Pick one.' + await lifecycle((await tools()).ask()));
-
-async function respondDone(command) {
-  resumeAfterAsk = false;
-  // Calls cezar_done so the run reaches cezar's review gate; a turn-end with
-  // no tool call correctly parks as `waiting` instead (harness parity R1).
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' });
-  send({ type: 'turn_start' });
-  sendText([await done('parity done: the task is complete')]);
-  sendTurnEnd();
-}
-
-async function respondAsk(command) {
-  resumeAfterAsk = command.message.includes('mock:resume-cezar-done');
-  // Pi has no native ask wire, so cezar_ask (through the extension) is its ask path.
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' });
-  send({ type: 'turn_start' });
-  sendText(['Pick one.' + await lifecycle((await tools()).ask(ASK_QUESTIONS))]);
-  sendTurnEnd();
-}
-
-async function respondProgress(command) {
-  const gated = command.message.includes('mock:gate-prompt-ack');
-  if (gated) {
-    stall(command.message, { closeInput: () => closeSync(0) });
-    while (!promptAckReleased('input-ack.release')) await sleep(10);
-  }
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' }); send({ type: 'turn_start' });
-  if (!gated) stall(command.message, { closeInput: () => closeSync(0) });
-  if (command.message.includes('mock:busy-progress')) {
-    return respondBusyProgress();
-  }
-}
-
-async function respondBusyProgress() {
-  for (let i = 0; i < 24; i++) { send({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'working' }] } }); await sleep(100); }
-  sendText([await done('busy complete')]);
-  sendTurnEnd();
-}
-
-async function respondHoldGated(command) {
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' });
-  send({ type: 'turn_start' });
-  await waitForRelease(250);
-  sendText(['parity hold-gated: content after the pause']);
-  await sleep(250);
-  sendTurnEnd();
-}
-
-async function respondHold(command) {
-  // The `response` below is the ack. Holding the content AND the terminal
-  // quartet behind it is what makes harness parity S2 meaningful: a runner
-  // deriving turn-end from the ack reports it before this content arrives
-  // (the #4 failure mode on pi's wire).
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' });
-  send({ type: 'turn_start' });
-  await sleep(250);
-  sendText(['parity hold: content after the pause']);
-  await sleep(250);
-  sendTurnEnd();
-}
-
 async function respondDefault(command) {
-  const waiting = command.message.includes('mock:cezar-wait');
-  const responseText = `Investigating: ${command.message}${waiting ? await lifecycle((await tools()).wait()) : ''}`;
+  const responseText = `Investigating: ${command.message}`;
   send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late. A late-ack
-  // steer's run reports agent_start first: pi's mapper reports no turn for it, so the hold
-  // must outlast it until the run's first activity.
-  const lateAck = command.message.includes('mock:deferred-turn-start:late-ack');
-  if (lateAck) send({ type: 'agent_start' });
-  if (command.message.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
-  if (!lateAck) send({ type: 'agent_start' });
+  send({ type: 'agent_start' });
   send({ type: 'turn_start' });
   send({
     type: 'message_update',
@@ -440,7 +245,7 @@ async function respondDefault(command) {
     result: { content: [{ type: 'text', text: 'mock file' }] },
     isError: false,
   });
-  if (!waiting) sendText(['Done with the first pass.']);
+  sendText(['Done with the first pass.']);
   send({
     type: 'message_end',
     message: {
@@ -512,26 +317,6 @@ function respondSteeringMode(command) {
   send({ ...(command.id ? { id: command.id } : {}), type: 'response', command: 'set_steering_mode', success: true });
 }
 
-async function respondFinalNudge(command, silent) {
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  const kind = silent.finalMessageNudgeKind();
-  if (kind === 'ack-only') return;
-  if (kind === 'late') await waitForRelease(silent.LATE_REPLY_MS);
-  send({ type: 'agent_start' });
-  send({ type: 'turn_start' });
-  return finishFinalNudge(silent, kind);
-}
-
-async function finishFinalNudge(silent, kind) {
-  if (kind === 'silent') sendThinking(silent.SILENT_TAIL_REASONING);
-  else if (kind === 'slow-done') {
-    sendText([silent.SLOW_DONE_PREFIX]);
-    await silent.sleep(silent.SLOW_DONE_TAIL_MS);
-    sendText([await silent.finalNudgeText('done', lifecycle)]);
-  } else sendText([await silent.finalNudgeText(kind, lifecycle)]);
-  sendTurnEnd();
-}
-
 function recordPrompt(command) {
   // Testability hook, mirroring mock-claude: CEZ_MOCK_STDIN_FILE=<path> appends
   // each inbound prompt's text and image count, so tests can assert what the
@@ -545,57 +330,49 @@ function recordPrompt(command) {
   }
 }
 
-// These scenarios run before recording or rewriting an ordinary prompt.
-// Silent-tail and clean crashes may fall through. Keep their original priority.
-const earlyPromptScenarios = [
-  { matches: command => command.message.includes('mock:autonomous') || command.message.startsWith('Continue working autonomously until the task is fully complete.'), respond: respondAutonomous },
-  { matches: command => command.message.includes('mock:silent-tail') || command.message.includes('mock:tool-tail') || silentNudge(command.message), respond: respondSilentTail },
-  { matches: command => command.message.includes('mock:crash-stderr'), respond: respondCrash },
-];
-
-// First match wins. These scenarios run before the configured failure control.
-const promptScenarios = [
-  { matches: command => command.message.includes('mock:cezar-tool'), respond: respondCezarTool },
-  { matches: command => command.message.includes('mock:ci-wait'), respond: respondCiWait },
-  { matches: command => command.message.includes('mock:steer-tool'), respond: respondSteerTool },
-  { matches: command => command.message.includes('mock:steer-late'), respond: respondSteerLate },
-  { matches: command => command.message.includes('mock:multi-pr-refs'), respond: respondMultiPrRefs },
-  { matches: command => command.message.includes('mock:turn-messages:'), respond: respondTurnMessages },
-  { matches: command => command.message.includes('mock:agent-echo'), respond: respondAgentEcho },
-];
-
-// A provider failure takes priority over these trailing scenarios.
-const tailPromptScenarios = [
-  { matches: command => command.message.includes('mock:hold-cezar-done'), respond: respondHoldDone },
-  { matches: command => command.message.includes('mock:hold-cezar-ask'), respond: respondHoldAsk },
-  { matches: command => (command.message.includes('mock:cezar-done') || (resumeAfterAsk && command.message.trim() === 'Library: Vitest')), respond: respondDone },
-  { matches: command => command.message.includes('mock:cezar-ask'), respond: respondAsk },
-  { matches: command => /mock:(no-progress|busy-progress)/.test(command.message), respond: respondProgress },
-  { matches: command => command.message.includes('mock:hold-gated'), respond: respondHoldGated },
-  { matches: command => command.message.includes('mock:hold'), respond: respondHold },
-];
+/** Pi alone owns acknowledgements, native ids, usage and steering admission. */
+function scenarioEncoder(command) {
+  return {
+    closeInput: () => closeSync(0),
+    open(step) {
+      if (!step.acknowledged) send({ id: command.id, type: 'response', command: 'prompt', success: true });
+      if (step.ackOnly) {
+        if (step.agentStart) send({ type: 'agent_start' });
+        return;
+      }
+      if (!step.agentStarted) send({ type: 'agent_start' });
+      send({ type: 'turn_start' });
+    },
+    text: step => sendText(step.parts),
+    reasoning(step) {
+      if (step.complete) send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'thinking', thinking: step.text }], stopReason: 'stop' } });
+      else sendThinking(step.text, step.index);
+    },
+    toolStart: ({ call }) => send({ type: 'tool_execution_start', toolCallId: call.id, toolName: call.name, args: call.input }),
+    toolEnd: ({ call }) => send({ type: 'tool_execution_end', toolCallId: call.id, toolName: call.name, result: { content: [{ type: 'text', text: call.output }] }, isError: call.isError }),
+    child() { throw new Error('Pi has no child wire'); },
+    progress: () => send({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'working' }] } }),
+    // Pi reads admitted steers in sendNow's settlement path, in native order.
+    readSteers(step) { if (step.late) activeTurn.late = true; },
+    end(step) {
+      if (step.error === 'provider') sendProviderError();
+      else sendTurnEnd();
+    },
+  };
+}
 
 async function handlePromptCommand(command) {
-  for (const scenario of earlyPromptScenarios) {
-    if (!scenario.matches(command)) continue;
-    const result = scenario.respond(command);
-    const handled = result instanceof Promise ? await result : result;
-    if (handled !== false) return;
+  const early = scenarioFor(command.message, scenarioContext);
+  if (early?.early) {
+    if (early.name === 'autonomous' && process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: rawMessage(command), imageCount: 0 })}\n`);
+    if (await play(early, scenarioEncoder(command)) !== 'continue') return;
   }
   recordPrompt(command);
   command.message = answerNudge(command.message);
-  // `mock:ack-only` accepts the prompt without opening a native agent turn.
-  if (command.message.includes('mock:ack-only')) {
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    return;
-  }
-  const scenario = promptScenarios.find(scenario => scenario.matches(command));
-  if (scenario) return scenario.respond(command);
-  if (failureControl ? (await failureControl.failureFor(command.message)) === 'provider' : command.message.includes('mock:provider-error')) {
-    return respondProviderError(command);
-  }
-  const tail = tailPromptScenarios.find(scenario => scenario.matches(command));
-  if (tail) return tail.respond(command);
+  const scenario = scenarioFor(command.message, { ...scenarioContext, unsupported: [...scenarioContext.unsupported, ...(early?.early ? [early.name] : [])] });
+  if (scenario?.beforeFailure) return play(scenario, scenarioEncoder(command));
+  if (failureControl && (await failureControl.failureFor(command.message)) === 'provider') return respondProviderError(command);
+  if (scenario) return play(scenario, scenarioEncoder(command));
   return respondDefault(command);
 }
 

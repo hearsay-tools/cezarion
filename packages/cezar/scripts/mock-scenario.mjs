@@ -194,22 +194,20 @@ function beforeFailureScenario(prompt, context) {
 }
 
 function trailingScenario(prompt, context) {
+  if (has(prompt, 'provider-error') && !context.nativeFailureControl) return scenario('provider-error', [open(), end({ error: 'provider' })]);
   if (has(prompt, 'hold-cezar-done')) return scenario('hold-cezar-done', held(done(context, 'parity hold-done: content after the pause')));
   if (has(prompt, 'hold-cezar-ask')) return scenario('hold-cezar-ask', held(ask(context)));
   if (has(prompt, 'cezar-done') || context.session.resumeAfterAsk && prompt.trim() === 'Library: Vitest') {
-    context.session.resumeAfterAsk = false;
-    return scenario('cezar-done', [open(), text(done(context, 'parity done: the task is complete')), end()]);
+    return scenario('cezar-done', [textLoader(() => { context.session.resumeAfterAsk = false; }), open(), text(done(context, 'parity done: the task is complete')), end()]);
   }
   if (has(prompt, 'cezar-ask')) {
-    context.session.resumeAfterAsk = has(prompt, 'resume-cezar-done');
-    return scenario('cezar-ask', [open(), text(ask(context, QUESTIONS)), end()]);
+    return scenario('cezar-ask', [textLoader(() => { context.session.resumeAfterAsk = has(prompt, 'resume-cezar-done'); }), open(), text(ask(context, QUESTIONS)), end()]);
   }
   if (has(prompt, 'busy-progress')) return scenario('busy-progress', busy(prompt, context));
   if (has(prompt, 'no-progress')) return scenario('no-progress', progress(prompt));
   if (has(prompt, 'hold-gated')) return scenario('hold-gated', hold(true));
   if (has(prompt, 'hold')) return scenario('hold', hold(false));
   if (has(prompt, 'subagent-after-park')) return scenario('subagent-after-park', parkedChild(prompt, context));
-  if (has(prompt, 'provider-error')) return scenario('provider-error', [open(), end({ error: 'provider' })]);
   if (has(prompt, 'deferred-turn-start')) return scenario('deferred-turn-start', defaultScenario(prompt, context, true));
   if (has(prompt, 'cezar-wait')) return scenario('cezar-wait', defaultScenario(prompt, context, false));
 }
