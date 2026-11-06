@@ -34,3 +34,42 @@ so the file that runs the guard and the single-runner cells must not register
 a `describe` whose body holds only runner cells; `describeRunners` in
 `core/harness-parity-cells.testkit.ts` is the example
 (hearsay-tools/cezarion#1375).
+
+## Native mock wire evidence
+
+Build the service once (`npm run build -w @wjarka/cezarion`), then run:
+
+```sh
+npm run mock:wire -- .ai/qa/wire-a
+npm run mock:wire -- .ai/qa/wire-b
+diff -ru .ai/qa/wire-a .ai/qa/wire-b
+```
+
+The collector drives the real runners through `HARNESS_ADAPTERS`. Its explicit
+recipes live in `.ai/scripts/mock-wire-evidence.ts`; they use direct native mock
+tokens, not the parity catalog's aliases. Optional trailing arguments select a
+runner and a scenario, for example `npm run mock:wire -- .ai/qa/wire claude untokened`.
+Its separate Vitest config keeps it out of the default unit suite.
+
+Each runner/scenario pair produces normalized NDJSON. `summary.json` lists the
+transcript count per runner and every unsupported recipe with its reason. The
+collector overwrites the selected transcripts; use a fresh directory for each
+comparison. Transcripts are PR evidence, not committed fixtures. This recorder
+slice compares two runs on its head. Later encoder slices record on their base
+and head and explain every difference.
+
+`CEZ_MOCK_WIRE_FILE` enables recording in the native mocks. With it unset, no
+recorder import runs. Records name stdout, stderr, SSE or the HTTP response
+(status and body). Normalization replaces process-local identities, timestamps,
+temporary paths, pids and allocated ports. It keeps frame and write order.
+The evidence endpoint uses the real cezar tool definitions with stable
+unavailable receipts; it creates no waits and makes no GitHub requests. Parity
+tests continue to verify tool effects through the real workflow controller.
+
+A recipe ends on its last expected record. Child-after-park recipes release the
+park gate after the parent's turn end and consume the late child output.
+OpenCode delayed-ack recipes consume the HTTP acknowledgement after the SSE
+turn events. Stalled recipes stop after the native acknowledgement or pid file.
+Terminating crash recipes record the leader's exit code or signal; clean crash
+diagnostics end on the native turn end. Held-pipe children keep their inherited
+stdio; only the mock's own writes and its leader exit enter that transcript.
