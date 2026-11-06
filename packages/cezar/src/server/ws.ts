@@ -174,15 +174,14 @@ export function createSocketHub(options: SocketHubOptions = {}): SocketHub {
   const resolveMember = (family: TopicFamily, topic: string): Promise<TopicPublisher | undefined> => {
     const inFlight = resolving.get(topic);
     if (inFlight) return inFlight;
-    const resolution = (async () => {
-      try {
-        return await family.resolve(topic.slice(family.prefix.length));
-      } catch {
-        return undefined; // a resolver that throws names no topic
-      } finally {
-        resolving.delete(topic);
-      }
-    })();
+    // The resolver runs after the resolution is registered, so its cleanup always follows the
+    // registration, also when it throws synchronously. A resolver that throws names no topic.
+    const resolution: Promise<TopicPublisher | undefined> = Promise.resolve()
+      .then(() => family.resolve(topic.slice(family.prefix.length)))
+      .catch(() => undefined)
+      .finally(() => {
+        if (resolving.get(topic) === resolution) resolving.delete(topic);
+      });
     resolving.set(topic, resolution);
     return resolution;
   };

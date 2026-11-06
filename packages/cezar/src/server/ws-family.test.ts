@@ -165,6 +165,24 @@ describe('a topic family', () => {
     client.ws.close();
   });
 
+  it('calls the resolver again after one that threw synchronously', async () => {
+    const family = makeFamily(['shop']);
+    let calls = 0;
+    const url = await boot((suffix) => {
+      calls++;
+      if (calls === 1) throw new Error('registry unreadable');
+      return family.resolve(suffix);
+    });
+    const client = await connect(url);
+
+    client.send({ type: 'subscribe', topic: 'activity:project:shop' });
+    expect(await client.next()).toEqual({ type: 'error', topic: 'activity:project:shop', error: 'unknown topic' });
+    client.send({ type: 'subscribe', topic: 'activity:project:shop' });
+    expect(await client.next()).toEqual({ type: 'event', topic: 'activity:project:shop', data: { project: 'shop' } });
+    expect(calls).toBe(2);
+    client.ws.close();
+  });
+
   it('refuses a registration that overlaps the family', () => {
     const hub = createSocketHub();
     const publisher: TopicPublisher = { snapshot: async () => null, start: () => () => undefined };
