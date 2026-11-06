@@ -7,7 +7,8 @@
 
 import type { SelfUpdateDevelopment, SelfUpdateJob, SelfUpdateStatus, UpdateChannel } from '@open-mercato/cezar-contract';
 
-import { cezarHomeDir } from '../paths.ts';
+import { resolveHome } from '../home/resolve.ts';
+import type { Home } from '../home/home.ts';
 import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { installFromLocal, installFromRegistry } from './installer.ts';
 import { buildCheckout, discoverCheckouts } from './checkouts.ts';
@@ -19,6 +20,7 @@ import { classifyVersion, isNewer } from './semver.ts';
 const LOG_CAP = 200;
 
 export interface SelfUpdateDeps {
+  home?: Home | undefined;
   pkgName: string;
   version: string;
   /** The running entry file (`process.argv[1]`). */
@@ -50,13 +52,15 @@ export class SelfUpdateBusyError extends Error {
 export class SelfUpdateService {
   readonly installKind: InstallKind;
   private readonly registry: RegistryCache;
+  private readonly home: Home;
   private readonly env: NodeJS.ProcessEnv;
   private job: SelfUpdateJob | null = null;
   private readonly pulls: OpenPullsCache;
 
   constructor(private readonly deps: SelfUpdateDeps) {
     this.env = deps.env ?? process.env;
-    this.installKind = detectInstallKind(deps.entry, this.env);
+    this.home = deps.home ?? resolveHome({ purpose: 'compatibility', env: this.env });
+    this.installKind = detectInstallKind(deps.entry, this.env, this.home);
     this.registry = deps.registry ?? new RegistryCache(deps.pkgName);
     this.pulls = new OpenPullsCache(deps.pulls ?? (() => fetchOpenPulls(CEZAR_REPO, { env: this.env })));
   }
@@ -93,7 +97,7 @@ export class SelfUpdateService {
     const doc = await this.statusDocument(opts.refresh);
     const channel = await this.channel();
     const trim = !!(opts.registryOnly || this.deps.trimPaths?.());
-    const installed = listInstalled(this.env).filter(entry => !trim || entry.source === 'registry');
+    const installed = listInstalled(this.env, this.home).filter(entry => !trim || entry.source === 'registry');
     const installedIds = new Set(installed.map((entry) => entry.id));
     const stable = doc?.distTags.latest ?? null;
     const nightly = doc?.distTags.nightly ?? null;
@@ -133,7 +137,7 @@ export class SelfUpdateService {
    *  Windows separators. */
   private jobView(trim: boolean): SelfUpdateStatus['job'] {
     if (!this.job || !trim) return this.job;
-    const home = cezarHomeDir(this.env);
+    const home = this.home.root;
     const redact = (line: string) => [home, home.replaceAll('\\', '/')]
       .reduce((text, path) => text.replaceAll(path, '[cezar home]'), line);
     return {
@@ -156,7 +160,7 @@ export class SelfUpdateService {
       this.pulls.get(opts.refresh),
       opts.refresh ? this.registry.refresh() : this.registry.get(),
     ]);
-    const installedIds = new Set(listInstalled(this.env).map((entry) => entry.id));
+    const installedIds = new Set(listInstalled(this.env, this.home).map((entry) => entry.id));
     const publishedAt = (version: string) => doc?.versions.find((entry) => entry.version === version)?.publishedAt ?? null;
     const prByBranch = new Map(pulls.items.map((pull) => [pull.branch, pull.number]));
     return {
@@ -226,7 +230,7 @@ export class SelfUpdateService {
   }
 
   private registryTargetRefusal(target: string, doc = this.registry.current()): string | null {
-    const installed = findInstalled(target, this.env);
+    const installed = findInstalled(target, this.env, this.home);
     if (!doc?.versions.some(entry => entry.version === target) ||
         (installed && (installed.source !== 'registry' || installed.id !== target || installed.version !== target))) {
       return 'Hosted updates require a published registry version; switch local builds on the host with `cez use <id>`.';
@@ -278,12 +282,12 @@ export class SelfUpdateService {
     };
     void (async () => {
       try {
-        const installed = findInstalled(target, this.env);
+        const installed = findInstalled(target, this.env, this.home);
         // A linked checkout goes through discovery too: it may need a rebuild before it runs.
         const linked = !registryOnly && (!installed || installed.source === 'link') ? await this.linkDiscovered(target, log) : null;
-        const id = linked ?? installed?.id ?? (await installFromRegistry(target, { onLog: log, env: this.env })).id;
+        const id = linked ?? installed?.id ?? (await installFromRegistry(target, { onLog: log, env: this.env, home: this.home })).id;
         if (installed && !linked) log(`${id} is already installed`);
-        activate(id, this.env);
+        activate(id, this.env, this.home);
         log(`activated ${id}`);
         job.status = 'restarting';
         job.finishedAt = new Date().toISOString();
@@ -313,14 +317,14 @@ export class SelfUpdateService {
       await (this.deps.buildCheckout ?? buildCheckout)(checkout, log);
     }
     log(`linking ${checkout.packageRoot} (${checkout.branch})`);
-    return linkCheckout(checkout.packageRoot, checkout.branch, this.env, checkout.id).id;
+    return linkCheckout(checkout.packageRoot, checkout.branch, this.env, checkout.id, this.home).id;
   }
 
   /** `cezar install` from a checkout or the npx cache: pack the running package into the managed
    *  layout and activate it. Headless — the CLI prints the log. */
   async installSelf(onLog: (line: string) => void): Promise<{ id: string; entry: string }> {
-    const result = await installFromLocal(packageRootOf(this.deps.entry), { onLog, env: this.env });
-    activate(result.id, this.env);
+    const result = await installFromLocal(packageRootOf(this.deps.entry), { onLog, env: this.env, home: this.home });
+    activate(result.id, this.env, this.home);
     return result;
   }
 }

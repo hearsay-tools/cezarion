@@ -1,3 +1,4 @@
+import { withServerHome } from './home.ts';
 import { reportsRoutes } from './reports-api.ts';
 import { writeMergedConfig } from './config-merge.ts';
 import { automationCreateSchema, automationUpdateSchema, automationCheckRequestSchema, automationLogQuerySchema } from '@open-mercato/cezar-contract/automation-requests';
@@ -675,6 +676,7 @@ async function probeWritableDir(dir: string, create: boolean): Promise<string | 
 // Annotating it `Hono` here would erase every route from the type and leave the typed client
 // with nothing to offer. See the `routed` assembly at the end of the function.
 export function createApp(deps: ServerDeps) {
+  deps = withServerHome(deps);
   const { version, update, bindHost, bootProjectId } = deps;
   const resolveProjectForge = (info: Awaited<ReturnType<typeof getRepoInfo>>) => resolveForge(info, deps.forgeFactory);
   // Boot singletons keep DELIBERATELY distinct names (`boot*`): every
@@ -5172,15 +5174,14 @@ export function cockpitOriginFor(bindHost: string | undefined, port: number): st
 const webhookNameTakenError = (name: string) => `this project already has a webhook named "${name.trim()}" — pick another name`;
 
 export function startServer(deps: ServerDeps, port: number, listener?: Server): ServerType & { shutdownForRestart: () => Promise<void> } {
+  deps = withServerHome(deps);
   const workspaceEvents = deps.workspaceEvents ?? new WorkspaceEventBus();
-  // The subscription hub rides the same HTTP server (one port, zero config):
-  // createApp registers the topics, the `upgrade` hook below owns the socket.
+  // createApp registers topics; the same HTTP server owns socket upgrades.
   const socketHub = deps.socketHub ?? createSocketHub();
   // `cezar_preview_serve` refuses the cockpit's own port: the one the listener BOUND (`--port 0`).
   let listeningPort: number | undefined;
   const cezarPort = deps.cezarPort ?? (() => listeningPort);
   const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot: deps.repoRoot, bootProjectId: deps.bootProjectId, bindHost: deps.bindHost });
-  // Every registry reader below sees what createApp sees: single-project mode hides other projects.
   const visibleProjects = () => workspaceProjects.listVisibleProjects();
   const automationCoordinator = new AutomationCoordinator({ listProjects: visibleProjects });
   const bootProjectId = deps.bootProjectId ?? 'default';
@@ -5229,7 +5230,6 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     },
     head: (project, branch) => getBranchHead(project.root, branch),
   });
-  // Injected contexts (tests) skip `prepareManager`.
   sharedContexts.onContextBuilt(addressManager);
   // #801: Automations can be disabled. Off, the flag must remove the BEHAVIOR and not merely
   // the UI — no scheduler, no GitHub polling, no launched runs — so every entry point into the

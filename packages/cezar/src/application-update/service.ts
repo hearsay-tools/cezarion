@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { createHash } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
 import { access, cp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -42,6 +43,7 @@ export interface ApplicationUpdateOptions {
   npmCache: string;
   npmBin?: string | undefined;
   home: string;
+  resolvedHome?: Home;
   targetVersion: () => string | undefined;
   runNpm?: (args: string[], signal?: AbortSignal) => Promise<void>;
   armRestart?: (plan: RestartPlan) => Promise<number | void>;
@@ -138,7 +140,7 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
     this.installation = discoverInstallation({ prefix: options.npmPrefix, cache: options.npmCache, packageRoot: options.packageRoot, launchEntry: options.launchEntry });
     const identity = this.installation.kind === 'unsupported' ? resolve(options.packageRoot)
       : `${this.installation.kind}\0${this.installation.installRoot}\0${this.installation.outerPackage}`;
-    this.dir = join(options.home, 'application-updates', createHash('sha256').update(identity).digest('hex'));
+    this.dir = join(options.resolvedHome?.applicationUpdates ?? join(options.home, 'application-updates'), createHash('sha256').update(identity).digest('hex'));
     this.recordPath = join(this.dir, 'state.json');
     this.recoveryPackage = this.installation.kind === 'global' && this.installation.outerPackage === 'cezarion'
       && this.installation.packageRoot === join(dirname(this.installation.outerRoot), PACKAGE)

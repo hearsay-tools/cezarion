@@ -6,7 +6,8 @@
 
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { cezarHomeDir } from '../paths.ts';
+import { resolveHome } from '../home/resolve.ts';
+import type { Home } from '../home/home.ts';
 
 import { branchOf, cezarPackageRoot, discoverCheckouts } from './checkouts.ts';
 import { activate, activeId, findInstalled, linkCheckout, listInstalled, listLinks, removeInstalled } from './layout.ts';
@@ -18,6 +19,7 @@ import { SelfUpdateService } from './service.ts';
 
 export interface SelfUpdateCliOptions {
   service: SelfUpdateService;
+  home?: Home;
   channel?: string;
   version?: string;
   modifyPath: boolean;
@@ -29,13 +31,15 @@ const MANAGED_COMMANDS = ['install', 'update', 'versions', 'use', 'link', 'unlin
 
 /** Run `argv[0]` when it names a managed-install command and answer its exit code; anything else
  *  is not ours. Runs before the global parseArgs: these flags are not cockpit flags. */
-export async function runManagedCommand(argv: string[], identity: { pkgName: string; version: string; entry: string }): Promise<number | undefined> {
+export async function runManagedCommand(argv: string[], identity: { pkgName: string; version: string; entry: string }, getHome = () => resolveHome({ purpose: 'cli' })): Promise<number | undefined> {
   const [command, ...rest] = argv;
   if (!command || !MANAGED_COMMANDS.includes(command)) return undefined;
   const { values, positionals } = parseArgs({ args: rest, allowPositionals: true,
     options: { channel: { type: 'string' }, version: { type: 'string' }, use: { type: 'boolean' }, 'no-modify-path': { type: 'boolean' } } });
+  const home = getHome();
   return runSelfUpdateCommand(command, positionals, {
-    service: new SelfUpdateService({ ...identity, restart: () => {} }),
+    home,
+    service: new SelfUpdateService({ ...identity, home, restart: () => {} }),
     ...(values.channel !== undefined ? { channel: values.channel } : {}),
     ...(values.version !== undefined ? { version: values.version } : {}),
     ...(values.use !== undefined ? { use: values.use } : {}),
@@ -50,13 +54,13 @@ export async function runSelfUpdateCommand(command: string, args: string[], opts
     case 'update':
       return updateCommand(opts);
     case 'versions':
-      return versionsCommand();
+      return versionsCommand(opts.home);
     case 'use':
-      return useCommand(args[0]);
+      return useCommand(args[0], opts.home);
     case 'link':
-      return linkCommand(args[0], opts.use === true);
+      return linkCommand(args[0], opts.use === true, opts.home);
     case 'unlink':
-      return unlinkCommand(args[0]);
+      return unlinkCommand(args[0], opts.home);
     default:
       return 1;
   }
@@ -64,10 +68,10 @@ export async function runSelfUpdateCommand(command: string, args: string[], opts
 
 async function installCommand(opts: SelfUpdateCliOptions): Promise<number> {
   const { service } = opts;
-  console.log(`\n  cez install — managed layout under ${cezarHomeDir()} (this build: ${service.installKind})\n`);
+  console.log(`\n  cez install — managed layout under ${(opts.home ?? resolveHome({ purpose: 'compatibility' })).root} (this build: ${service.installKind})\n`);
   try {
     const result = await service.installSelf((line) => console.log(`  · ${line}`));
-    const dir = writeLaunchers();
+    const dir = writeLaunchers(process.env, opts.home);
     console.log(`\n  ✓ installed ${result.id} and made it current`);
     console.log(`  ✓ launchers: ${dir}/cezarion, ${dir}/cez`);
     if (isOnPath(dir)) {
@@ -112,12 +116,12 @@ function printDevelopmentChannelHelp(): void {
 }
 
 /** Install `target` unless it is already installed, make it current, and write the launchers. */
-async function activateTarget(target: string): Promise<number> {
+async function activateTarget(target: string, home?: Home): Promise<number> {
   try {
-    const installed = findInstalled(target);
-    const id = installed ? installed.id : (await installFromRegistry(target, { onLog: (line) => console.log(`  · ${line}`) })).id;
-    activate(id);
-    const dir = writeLaunchers();
+    const installed = findInstalled(target, process.env, home);
+    const id = installed ? installed.id : (await installFromRegistry(target, { home, onLog: (line) => console.log(`  · ${line}`) })).id;
+    activate(id, process.env, home);
+    const dir = writeLaunchers(process.env, home);
     console.log(`\n  ✓ ${id} is now current — start it with: ${isOnPath(dir) ? 'cez' : `${dir}/cezarion`}\n`);
     return 0;
   } catch (error) {
@@ -154,11 +158,11 @@ async function updateCommand(opts: SelfUpdateCliOptions): Promise<number> {
     // Not managed: install the target into the managed layout anyway, then explain the switch.
     console.log(`  ${status.reason ?? ''}\n  installing ${target} into the managed layout so \`cezarion\` can run it:\n`);
   }
-  return activateTarget(target);
+  return activateTarget(target, opts.home);
 }
 
-async function versionsCommand(): Promise<number> {
-  const installed = listInstalled();
+async function versionsCommand(home?: Home): Promise<number> {
+  const installed = listInstalled(process.env, home);
   if (installed.length === 0) {
     console.log('\n  no managed versions — run: cez install (or `cez link` in a built cez checkout)\n');
     return 0;
@@ -183,23 +187,23 @@ async function versionsCommand(): Promise<number> {
   return 0;
 }
 
-async function useCommand(id: string | undefined): Promise<number> {
+async function useCommand(id: string | undefined, home?: Home): Promise<number> {
   if (!id) {
     console.error('  usage: cez use <id>   (see: cez versions)');
     return 1;
   }
-  const installed = listInstalled();
+  const installed = listInstalled(process.env, home);
   const match = installed.find((entry) => entry.id === id) ?? installed.find((entry) => entry.version === id);
   if (!match) {
     console.error(`  ✗ ${id} is not installed — see: cez versions`);
     return 1;
   }
-  activate(match.id);
+  activate(match.id, process.env, home);
   console.log(`  ✓ now using ${match.id}`);
   return 0;
 }
 
-async function linkCommand(dir: string | undefined, use: boolean): Promise<number> {
+async function linkCommand(dir: string | undefined, use: boolean, home?: Home): Promise<number> {
   const target = resolve(dir ?? process.cwd());
   const packageRoot = cezarPackageRoot(target);
   if (!packageRoot) {
@@ -208,10 +212,10 @@ async function linkCommand(dir: string | undefined, use: boolean): Promise<numbe
   }
   try {
     const branch = await branchOf(target);
-    const result = linkCheckout(packageRoot, branch);
+    const result = linkCheckout(packageRoot, branch, process.env, undefined, home);
     console.log(`\n  ✓ linked ${result.id}  → ${packageRoot}`);
     if (use) {
-      activate(result.id);
+      activate(result.id, process.env, home);
       console.log(`  ✓ now using ${result.id}`);
       console.log('    the desktop app picks it up on its next start (Cmd+Q, reopen) — a running cockpit keeps its version');
     } else {
@@ -225,21 +229,21 @@ async function linkCommand(dir: string | undefined, use: boolean): Promise<numbe
   }
 }
 
-async function unlinkCommand(id: string | undefined): Promise<number> {
+async function unlinkCommand(id: string | undefined, home?: Home): Promise<number> {
   if (!id) {
     console.error('  usage: cez unlink <id>   (see: cez versions)');
     return 1;
   }
-  const match = listLinks().find((entry) => entry.id === id || entry.checkout === resolve(id));
+  const match = listLinks(process.env, home).find((entry) => entry.id === id || entry.checkout === resolve(id));
   if (!match) {
     console.error(`  ✗ ${id} is not a linked checkout — see: cez versions`);
     return 1;
   }
-  if (match.id === activeId()) {
+  if (match.id === activeId(process.env, home)) {
     console.error(`  ✗ ${match.id} is the active version — \`cez use <another id>\` first`);
     return 1;
   }
-  removeInstalled(match.id);
+  removeInstalled(match.id, process.env, home);
   console.log(`  ✓ unlinked ${match.id} (${match.checkout ?? 'checkout'} is untouched)`);
   return 0;
 }

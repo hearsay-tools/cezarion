@@ -1,7 +1,9 @@
+import { resolveHome } from '../home/resolve.ts';
+import type { Home } from '../home/home.ts';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { workspaceUiStateSchema } from '@open-mercato/cezar-contract/workspace';
-import { cezarHomeDir, workspaceConfigPath } from '../paths.ts';
+import { workspaceConfigPath } from '../paths.ts';
 import { readUiState } from '../ui-state.ts';
 import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from './config.ts';
 import { mergeWriteWorkspaceUiState } from './ui-state.ts';
@@ -145,12 +147,13 @@ export const WORKSPACE_MIGRATIONS: readonly WorkspaceMigration[] = [migration001
  * `migrations` is injectable for tests only; production callers pass nothing.
  */
 export async function runMigrations(
-  opts: { bootRepoRoot: string | null },
+  opts: { bootRepoRoot: string | null; home?: Home },
   migrations: readonly WorkspaceMigration[] = WORKSPACE_MIGRATIONS,
 ): Promise<void> {
-  const home = cezarHomeDir();
+  const resolvedHome = opts.home ?? resolveHome({ purpose: 'compatibility' });
+  const home = resolvedHome.root;
   const ordered = [...migrations].sort((a, b) => a.to - b.to);
-  let current = (await loadWorkspaceConfig()).schemaVersion;
+  let current = (await loadWorkspaceConfig(resolvedHome.workspaceConfig)).schemaVersion;
   for (const migration of ordered) {
     if (migration.to <= current) continue;
     try {

@@ -1,3 +1,5 @@
+import { resolveHome } from '../home/resolve.ts';
+import type { Home } from '../home/home.ts';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -43,8 +45,9 @@ export const realFs: ChromiumFs = {
 };
 
 /** `~/.cache/cez`: the root the skills cache already uses. */
-export function cezCacheDir(home = homedir()): string {
-  return join(home, '.cache', 'cez');
+export function cezCacheDir(home?: string | Home): string {
+  if (typeof home === 'string') return join(home, '.cache', 'cez');
+  return (home ?? resolveHome({ purpose: 'compatibility' })).cache;
 }
 
 /** Google Chrome first: a distro `chromium` is often a snap shim (Ubuntu) or a build that never

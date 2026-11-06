@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 /**
  * Installing one version into the managed layout. npm does the heavy lifting — download,
  * integrity check, dependency resolution — through `npm install --prefix <dir> <spec>`, which is
@@ -35,6 +36,7 @@ function readJson(path: string): unknown {
 export interface InstallOptions {
   onLog?: (line: string) => void;
   env?: NodeJS.ProcessEnv;
+  home?: Home | undefined;
   /** The npm runner; tests substitute one that touches no network. */
   runNpm?: typeof runNpm;
 }
@@ -49,12 +51,12 @@ export interface InstallResult {
 export async function installFromRegistry(version: string, opts: InstallOptions = {}): Promise<InstallResult> {
   const env = opts.env ?? process.env;
   const id = installId(version, 'registry');
-  if (existsSync(versionEntry(id, env))) {
+  if (existsSync(versionEntry(id, env, opts.home))) {
     opts.onLog?.(`${id} is already installed`);
-    return { id, version, entry: versionEntry(id, env) };
+    return { id, version, entry: versionEntry(id, env, opts.home) };
   }
   await installSpec(id, `${PACKAGE_NAME}@${version}`, { version, source: 'registry' }, opts);
-  return { id, version, entry: versionEntry(id, env) };
+  return { id, version, entry: versionEntry(id, env, opts.home) };
 }
 
 /** Pack the package at `packageRoot` (must be built) and install the tarball as `<version>+local`. */
@@ -79,7 +81,7 @@ export async function installFromLocal(packageRoot: string, opts: InstallOptions
   } finally {
     rmSync(packDir, { recursive: true, force: true });
   }
-  return { id, version, entry: versionEntry(id, env) };
+  return { id, version, entry: versionEntry(id, env, opts.home) };
 }
 
 async function installSpec(
@@ -91,7 +93,7 @@ async function installSpec(
   const env = opts.env ?? process.env;
   // Both callers validate before they get here, but the staging path is built from `id` and
   // recursively removed — make that invariant structural rather than a property of call order.
-  const staging = join(versionsDir(env), `.staging-${assertSafeId(id)}-${process.pid}`);
+  const staging = join(versionsDir(env, opts.home), `.staging-${assertSafeId(id)}-${process.pid}`);
   assertCezarHomeWriteIsSandboxed(staging, env);
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(staging, { recursive: true });
@@ -106,11 +108,11 @@ async function installSpec(
     if (!existsSync(entry)) throw new Error('install finished but the entry file is missing');
     // A stale complete install of the same id (registry re-install after a manual delete of
     // the manifest, say) is replaced wholesale.
-    const destination = versionDir(id, env);
+    const destination = versionDir(id, env, opts.home);
     assertCezarHomeWriteIsSandboxed(destination, env);
     rmSync(destination, { recursive: true, force: true });
     renameSync(staging, destination);
-    writeManifest(id, { ...manifest, installedAt: new Date().toISOString() }, env);
+    writeManifest(id, { ...manifest, installedAt: new Date().toISOString() }, env, opts.home);
     opts.onLog?.(`installed ${id}`);
   } catch (error) {
     rmSync(staging, { recursive: true, force: true });

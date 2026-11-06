@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { randomBytes } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -52,6 +53,7 @@ export type DevServerLike = Pick<DevServer, 'state' | 'attempts' | 'exitCode' | 
 };
 
 export type PreviewHostDeps = {
+  home?: Home;
   probe?: (port: number) => Promise<boolean>;
   createServer?: (opts: { server: PreviewServer; worktreePath: string; dir: string }) => DevServerLike;
   launchBrowser?: (profileDir: string) => Promise<BrowserHandle>;
@@ -120,7 +122,7 @@ export class PreviewHost implements PreviewHostLike {
   private readonly stopping = new Map<DevServerLike, Promise<void>>();
   private readonly entries = new Map<string, RunEntry>();
   private readonly grants = new Map<string, GrantEntry>();
-  private readonly deps: Required<Omit<PreviewHostDeps, 'env' | 'platform' | 'arch'>> & { env: NodeJS.ProcessEnv; platform: string; arch: string };
+  private readonly deps: Required<Omit<PreviewHostDeps, 'env' | 'platform' | 'arch' | 'home'>> & { env: NodeJS.ProcessEnv; platform: string; arch: string };
   /** Chromium lands in one shared cache, so there is one download for the whole host. */
   private download?: { controller: AbortController; promise: Promise<string>; watchers: Set<RunEntry> } | undefined;
 
@@ -130,7 +132,7 @@ export class PreviewHost implements PreviewHostLike {
       probe: deps.probe ?? probePort,
       createServer: deps.createServer ?? (opts => new DevServer(opts)),
       launchBrowser: deps.launchBrowser ?? (profileDir => launchBrowser(profileDir, env)),
-      download: deps.download ?? (opts => downloadChromium(opts)),
+      download: deps.download ?? (opts => downloadChromium({ ...opts, ...(deps.home ? { cacheDir: deps.home.cache } : {}) })),
       osRelease: deps.osRelease ?? readOsRelease,
       env,
       platform: deps.platform ?? process.platform,
