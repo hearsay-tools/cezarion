@@ -15,14 +15,15 @@ export function useTaskListFocus(layout: string) {
   useLayoutEffect(() => {
     const previous = focused.current
     if (!previous || previous.element.isConnected || document.activeElement !== document.body) return
-    const row = [...(ref.current?.querySelectorAll<HTMLElement>('[data-run-id]') ?? [])]
-      .find((element) => element.dataset.runId === previous.runId)
-    const controls = [...(row?.querySelectorAll<HTMLElement>('a,button,input') ?? [])]
+    const rows = [...(ref.current?.querySelectorAll<HTMLElement>('[data-run-id]') ?? [])]
+      .filter((element) => element.dataset.runId === previous.runId)
+    const controls = rows.flatMap((row) => [...row.querySelectorAll<HTMLElement>('a,button,input')])
     const same = controls.find((element) => previous.control
       ? element.dataset.taskControl === previous.control
       : element.tagName === previous.tag && element.getAttribute('aria-label') === previous.label)
     // Phone cards have no inline rename control; their task link remains the way into editing.
-    ;(same ?? controls.find((element) => element.tagName === 'A'))?.focus()
+    const next = same ?? controls.find((element) => element.tagName === 'A')
+    next?.focus()
   }, [layout])
   return { ref, onFocusCapture }
 }

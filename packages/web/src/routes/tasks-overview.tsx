@@ -698,8 +698,8 @@ function SummaryTasksTable({ rows, onRename, onTogglePin, now, showTokens, showC
             <td className="pr-2">{reference ? <TaskReferenceChip run={run} reference={reference} compact /> : <Dash />}</td>
             <td className="text-xs text-muted-foreground">{shortAge(run.startedAt ?? run.createdAt, now)}</td>
           </tr>
-          {open ? <tr><td colSpan={5} className="border-b border-border pb-5"><div id={detailId} className="flex flex-col gap-3">
-            <TaskPreview runId={run.id} status={attention.label} error={run.error} open={<Button asChild variant="outline" className="min-h-11"><Link to={`/tasks/${run.id}`}>Open task<span className="sr-only">: {runTitle(run)}</span></Link></Button>} />
+          {open ? <tr data-run-id={run.id}><td colSpan={5} className="border-b border-border pb-5"><div id={detailId} className="flex flex-col gap-3">
+            <TaskPreview runId={run.id} status={attention.label} error={run.error} open={<Button asChild variant="outline" className="min-h-11"><Link data-task-control="open" to={`/tasks/${run.id}`}>Open task<span className="sr-only">: {runTitle(run)}</span></Link></Button>} />
             <div className="rounded-md bg-muted/50 p-4"><TaskResourceDetails run={run} showTokens={showTokens} showCost={showCost} /></div>
           </div></td></tr> : null}
         </React.Fragment>
@@ -1211,7 +1211,7 @@ function TitleCell({
   return (
     <span className="flex min-w-0 items-center gap-1.5">
       {run.delegation?.role === 'worker' ? <span className="shrink-0 text-xs text-muted-foreground">Worker</span> : null}
-      <Link
+      <Link data-task-control="title"
         to={to}
         title={title}
         className={cn(
@@ -1364,7 +1364,7 @@ function TaskCard({
           {attention.label}
           {scheduled ? <span className="tabular-nums">{scheduled.label}</span> : null}
         </Pill></button>
-        <Link
+        <Link data-task-control="title"
           to={to}
           className={cn(
             'order-first w-full min-w-0 rounded-sm text-[14px] leading-[1.35] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
@@ -1402,7 +1402,7 @@ function TaskCard({
       </div>
       {reference ? <div className="mt-3"><TaskReferenceChip run={run} reference={reference} /></div> : null}
       {resourcesOpen ? <>
-        <div className="mt-3"><TaskPreview runId={run.id} status={attention.label} error={run.error} open={<Button asChild variant="outline" className="min-h-11"><Link to={to}>Open task<span className="sr-only">: {runTitle(run)}</span></Link></Button>} /></div>
+        <div className="mt-3"><TaskPreview runId={run.id} status={attention.label} error={run.error} open={<Button asChild variant="outline" className="min-h-11"><Link data-task-control="open" to={to}>Open task<span className="sr-only">: {runTitle(run)}</span></Link></Button>} /></div>
         <MobileResources run={run} showTokens={showTokens} showCost={showCost} />
       </> : null}
     </div>

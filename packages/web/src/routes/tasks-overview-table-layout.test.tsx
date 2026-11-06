@@ -1196,4 +1196,8 @@ it('keeps expanded resources and their focused control across a breakpoint flip'
   const desktop = screen.getByRole('button', { name: 'Hide resources for Keep resources' })
   expect(document.activeElement).toBe(desktop)
   expect(desktop.getAttribute('aria-expanded')).toBe('true')
+  const open = screen.getByRole('link', { name: 'Open task: Keep resources' })
+  open.focus()
+  setOverviewDesktop(false)
+  expect(document.activeElement).toBe(screen.getByRole('link', { name: 'Open task: Keep resources' }))
 })
