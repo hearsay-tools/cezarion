@@ -164,7 +164,20 @@ export async function runIndexWorkload(options: {
           return { main: await evaluate('!!document.querySelector("[data-slot=main]")') }
         })
         await measure('update', async () => {
-          const target = otherRoots[0]!
+          let target = otherRoots[0]!
+          if (view === 'all-tasks') {
+            // Read the cold phase's existing index response, without another request or a scroll.
+            const coldIndex = [...requests].filter(([key, row]) => key.startsWith(`${sessionId}/`) && row.url.includes('/workspace/runs-index') && row.durationMs !== undefined).at(-1)
+            if (!coldIndex) throw new Error('Index update workload has no cold index response')
+            const response = await request('Network.getResponseBody', { requestId: coldIndex[0].slice(sessionId.length + 1) }, sessionId)
+            const index = JSON.parse(response.base64Encoded ? Buffer.from(response.body, 'base64').toString() : response.body) as { runs: Array<{ id: string; projectId: string }> }
+            // Fixture other-project roots share status and pin state, so index order is display order.
+            const first = index.runs.find(row => row.projectId === 'other' && otherRoots.some(root => root.runId === row.id))
+            if (!first || !await evaluate(`!!document.querySelector('[data-route="global-tasks"] [data-project="other"][data-run-id="${first.id}"]')`)) {
+              throw new Error('Index update workload needs the first other-project root in display order to be mounted')
+            }
+            target = { projectId: first.projectId, runId: first.id }
+          }
           const title = `Renamed ${Date.now()}`
           const at = performance.now()
           await fixture.control({ update: [{ projectId: target.projectId, runId: target.runId, patch: { title } }] })

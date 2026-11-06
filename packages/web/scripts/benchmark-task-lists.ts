@@ -79,12 +79,12 @@ export async function runTaskListsBenchmark(values: TaskListBenchmarkOptions = {
   })();`
   function casesFor(scope: 'project' | 'global') {
     if (values.study) {
-      if (values.study === 'small' && scope !== 'global') return []
-      const cases = values.study === 'small' ? [{ width: 1440, height: 900, setting: 'summary', view: 'active' }] : scope === 'project'
+      if ((values.study === 'small' || values.study === 'head') && scope !== 'global') return []
+      const cases = values.study === 'small' || values.study === 'head' ? [{ width: 1440, height: 900, setting: 'summary', view: 'active' }] : scope === 'project'
         ? [{ width: 1440, height: 900, setting: 'summary', view: 'archived' }, { width: 1440, height: 900, setting: 'detailed', view: 'archived' }, { width: 360, height: 640, setting: 'summary', view: 'archived' }]
         : [{ width: 1440, height: 900, setting: 'summary', view: 'archived' }, { width: 360, height: 640, setting: 'summary', view: 'archived' }]
       return Array.from({ length: values.quick ? 1 : 5 }, (_, repetition) => cases.flatMap((entry) =>
-        (values.study === 'branch' ? repetition % 2 ? ['virtual', 'flat'] : ['flat', 'virtual'] : ['flat']).map(tier => ({ ...entry, repetition, tier })))).flat()
+        (values.study === 'branch' || values.study === 'head' ? repetition % 2 ? ['virtual', 'flat'] : ['flat', 'virtual'] : ['flat']).map(tier => ({ ...entry, repetition, tier })))).flat()
     }
     const repetitions = Array.from({ length: values.quick || values.smoke ? 1 : 5 }, (_, i) => i)
     const viewports = values.quick ? [[1440, 900]] : [[1440, 900], [360, 640]]

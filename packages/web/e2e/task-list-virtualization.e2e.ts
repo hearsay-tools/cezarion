@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { settleVisual, waitForSettledSample } from './visual-ready'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { AgentBrowser } from './agent-browser'
@@ -165,5 +166,24 @@ it.each(['project', 'global'] as const)('restores ordinary %s virtual-row focus 
       browser.setViewport(width!, height!)
       browser.waitForFunction(`document.activeElement?.tagName === 'A' && document.activeElement.closest('[data-run-id]')?.dataset.runId === ${JSON.stringify(id)}`)
     }
+  } finally { await large.stop() }
+})
+
+it.each([['project', 1440, 900], ['project', 360, 640], ['global', 1440, 900], ['global', 360, 640]] as const)('anchors %s at %s px after a run moves into an earlier group', async (scope, width, height) => {
+  const large = await createTabFixture(process.cwd(), { taskList: scope, taskListSizes: { active: scope === 'global' ? 1000 : 310, archived: 0, projects: scope === 'global' ? 2 : 1 } })
+  try {
+    await large.control({ update: large.runs.slice(0, 120).map(run => ({ ...run, patch: { status: RUN_STATUS.done } })) })
+    browser.setViewport(width, height)
+    browser.goto(`${large.origin}${scope === 'project' ? '/p/boot/' : '/tasks'}?tasks=virtual`)
+    browser.waitForFunction(`document.querySelector('[data-virtualized="true"] [data-run-id]') !== null && window.__cezIdle`)
+    const route = `[data-route="${scope === 'project' ? 'tasks' : 'global-tasks'}"]`
+    const finished = Number(browser.evaluate(`document.querySelector('${route} [data-bucket="Finished"] [data-slot="status-group-toggle"]').getAttribute('aria-label').match(/\\d+/)[0]`))
+    browser.evaluate(`(() => {const owner=document.querySelector('[data-slot="main"]'),group=document.querySelector('${route} [data-bucket="Working"]');owner.scrollTop+=group.getBoundingClientRect().top-owner.getBoundingClientRect().top+${scope === 'global' ? 90445 : 6500}})()`)
+    const sample = `(() => {const owner=document.querySelector('[data-slot="main"]'),edge=owner.getBoundingClientRect().top;const rows=[...document.querySelectorAll('${route} [data-run-id]')].filter(e=>e.getBoundingClientRect().bottom>edge&&e.getBoundingClientRect().top<edge+owner.clientHeight);return rows.length>1?{id:rows[0].dataset.runId,top:rows[0].getBoundingClientRect().top,move:rows[rows.length-1].dataset.runId,project:rows[rows.length-1].dataset.project}:null})()`
+    const before = waitForSettledSample(browser, sample) as { id: string; top: number; move: string; project?: string }
+    await large.control({ update: [{ projectId: before.project ?? 'boot', runId: before.move, patch: { status: RUN_STATUS.done } }] })
+    browser.waitForFunction(`document.querySelector('${route} [data-bucket="Finished"] [data-slot="status-group-toggle"]')?.getAttribute('aria-label')?.startsWith('Finished ${finished + 1}') && window.__cezIdle`)
+    const after = waitForSettledSample(browser, `(() => {const row=document.querySelector('${route} [data-run-id="${before.id}"]');return row?row.getBoundingClientRect().top:null})()`) as number
+    expect(Math.abs(after - before.top)).toBeLessThanOrEqual(2)
   } finally { await large.stop() }
 })

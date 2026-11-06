@@ -1,16 +1,24 @@
-import { createContext, useLayoutEffect, useMemo, useRef, useState, type FocusEvent } from 'react'
+import { createContext, useCallback, useLayoutEffect, useMemo, useRef, useState, type FocusEvent } from 'react'
 
 /** A layout swap replaces row controls. Restore focus only if that swap removed its owner. */
-export const TaskListFocusContext = createContext<{ focused: string | null; revision: unknown } | null>(null)
+export const TaskListFocusContext = createContext<{ focused: string | null; revision: unknown; registerList: ((id: symbol, keys: readonly string[] | null) => void) | undefined } | null>(null)
 
-export function useTaskListFocusState(layout: string, revision: unknown) {
+export function useTaskListFocusState(layout: string, revision: unknown, trackMembership = false) {
   const [focused, setFocused] = useState<string | null>(null)
-  const props = useTaskListFocus(layout, revision, setFocused)
-  const value = useMemo(() => ({ focused, revision }), [focused, revision])
+  const lists = useRef(new Map<symbol, readonly string[]>())
+  const registerList = useCallback((id: symbol, keys: readonly string[] | null) => {
+    if (keys) lists.current.set(id, keys)
+    else lists.current.delete(id)
+  }, [])
+  const contains = useCallback((key: string) => [...lists.current.values()].some(keys => keys.includes(key)), [])
+  const props = useTaskListFocus(layout, revision, setFocused, trackMembership ? contains : undefined)
+  const value = useMemo(() => ({ focused, revision, registerList: trackMembership ? registerList : undefined }), [focused, revision, registerList, trackMembership])
   return { props, value }
 }
 
-export function useTaskListFocus(layout: string, revision?: unknown, onFocused?: (key: string | null) => void) {
+export function useTaskListFocus(layout: string, revision?: unknown, onFocused?: (key: string | null) => void, contains?: (key: string) => boolean) {
+  const membership = useRef(contains)
+  membership.current = contains
   const ref = useRef<HTMLDivElement>(null)
   const focused = useRef<{ element: HTMLElement; runId: string; project: string | undefined; control: string | null; label: string | null; tag: string } | null>(null)
   const onFocusCapture = (event: FocusEvent<HTMLDivElement>) => {
@@ -36,9 +44,14 @@ export function useTaskListFocus(layout: string, revision?: unknown, onFocused?:
   useLayoutEffect(() => {
     const previous = focused.current
     if (!previous || previous.element.isConnected || document.activeElement !== document.body) return
+    const clear = () => {
+      if (focused.current === previous) { focused.current = null; onFocused?.(null) }
+    }
     const restore = () => {
+      const key = previous.project ? `${previous.project}/${previous.runId}` : previous.runId
+      if (membership.current && !membership.current(key)) { clear(); return true }
       // A user focus move takes precedence over a pending layout restoration.
-      if (document.activeElement !== document.body || previous.element.isConnected) return true
+      if (document.activeElement !== document.body || previous.element.isConnected) { clear(); return true }
       const rows = [...(ref.current?.querySelectorAll<HTMLElement>('[data-run-id]') ?? [])]
         .filter((element) => element.dataset.runId === previous.runId && element.dataset.project === previous.project)
       const controls = rows.flatMap((row) => [...row.querySelectorAll<HTMLElement>('a,button,input')])
@@ -53,9 +66,17 @@ export function useTaskListFocus(layout: string, revision?: unknown, onFocused?:
     if (restore() || !ref.current) return
     // Virtual rows mount after their owner geometry resolves, in a child-only update.
     // Retry only during that gap; do not make route derivations depend on row mounts.
-    const observer = new MutationObserver(() => { if (restore()) observer.disconnect() })
+    const stop = () => {
+      observer.disconnect()
+      document.removeEventListener('pointerdown', cancel, true)
+      document.removeEventListener('keydown', cancel, true)
+    }
+    const cancel = () => { clear(); stop() }
+    const observer = new MutationObserver(() => { if (restore()) stop() })
+    document.addEventListener('pointerdown', cancel, true)
+    document.addEventListener('keydown', cancel, true)
     observer.observe(ref.current, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] })
-    return () => observer.disconnect()
+    return stop
   }, [layout, revision])
   return { ref, onFocusCapture, onBlurCapture }
 }

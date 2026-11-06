@@ -18,7 +18,7 @@ it('falls back to a complete flat list without a main scroll owner', () => {
   expect(document.querySelector('[data-last="true"]')?.textContent).toBe('run-119')
 })
 it('honours flat mode even with a scroll owner and large group', () => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   render(<List search="?tasks=flat" />)
   expect(screen.getAllByRole('button')).toHaveLength(120)
 })

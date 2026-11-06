@@ -22,7 +22,12 @@ export function TaskListItems<T>({ items, itemKey, children, itemSize }: {
   const keys = items.map(itemKey)
   const eligible = virtualizeTaskList(items.length, params.get('tasks'))
   const virtual = geometry.available === true && eligible
-  const focus = useTaskListFocus(String(virtual))
+  const listId = useRef(Symbol('task-list'))
+  useLayoutEffect(() => {
+    pageFocus?.registerList?.(listId.current, keys)
+    return () => pageFocus?.registerList?.(listId.current, null)
+  })
+  const focus = useTaskListFocus(String(virtual), undefined, undefined, (key) => keys.includes(key))
   const root = focus.ref
   // Resolve the owner and mount visible rows before paint; no empty state is displayed.
   useLayoutEffect(() => {
@@ -66,7 +71,7 @@ export function TaskListItems<T>({ items, itemKey, children, itemSize }: {
 
 /** Keep focus updates below the route's filtering and grouping work. */
 export function TaskListFocusBoundary({ layout, revision, children, ...props }: ComponentProps<'div'> & { layout: string; revision: unknown }) {
-  const focus = useTaskListFocusState(layout, revision)
+  const focus = useTaskListFocusState(layout, revision, true)
   return <TaskListFocusContext value={focus.value}><TaskListScrollAnchor revision={revision}>
     <div {...props} {...focus.props}>{children}</div>
   </TaskListScrollAnchor></TaskListFocusContext>
@@ -108,9 +113,54 @@ export class TaskListScrollAnchor extends Component<{
   revision: unknown; keys?: readonly string[]; scroll?: React.RefObject<HTMLElement | null>; shifting?: boolean; handle?: React.RefObject<VirtualizerHandle | null>; children: ReactNode
 }, object, { key: string; top: number; offset: number } | null> {
   private root = { current: null as HTMLDivElement | null }
-  override getSnapshotBeforeUpdate(previous: Readonly<typeof this.props>) {
-    if (this.props.shifting) return null
-    if (previous.revision === this.props.revision) return null
+  private anchor: { key: string; top: number; offset: number } | null = null
+  private pendingAnchor = false
+  private finishUpdate: (() => void) | undefined
+  private stopObserving: (() => void) | undefined
+  override componentDidMount() {
+    // Only the page boundary owns cross-group corrections. Inner anchors handle item changes.
+    if (this.props.keys) return
+    const root = this.root.current
+    const owner = root?.closest<HTMLElement>('[data-slot="main"]')
+    if (!root || !owner) return
+    let capturedScrollTop = owner.scrollTop
+    const capture = () => { this.anchor = this.capture(); capturedScrollTop = owner.scrollTop }
+    let frame = 0
+    const settle = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => { this.pendingAnchor = false; capture() }) })
+    }
+    this.finishUpdate = settle
+    const observer = new ResizeObserver(() => {
+      if (this.pendingAnchor || owner.scrollTop === capturedScrollTop) this.restore(this.anchor)
+      if (!this.pendingAnchor) capture()
+      settle()
+    })
+    const observed = new Set<Element>()
+    const observe = () => {
+      for (const node of observed) if (!node.isConnected) { observer.unobserve(node); observed.delete(node) }
+      for (const list of root.querySelectorAll('[data-slot="task-list-items"]')) {
+        for (let node: Element | null = list; node && node !== root; node = node.parentElement) {
+          if (!observed.has(node)) { observed.add(node); observer.observe(node) }
+        }
+      }
+    }
+    const mutations = new MutationObserver(observe)
+    mutations.observe(root, { childList: true, subtree: true })
+    observe()
+    capture()
+    const scrolled = () => { if (!this.pendingAnchor) capture() }
+    const intent = () => { this.pendingAnchor = false; cancelAnimationFrame(frame) }
+    owner.addEventListener('scroll', scrolled, { passive: true })
+    for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown']) owner.addEventListener(event, intent, { passive: true })
+    this.stopObserving = () => {
+      observer.disconnect(); mutations.disconnect(); cancelAnimationFrame(frame)
+      owner.removeEventListener('scroll', scrolled)
+      for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown']) owner.removeEventListener(event, intent)
+    }
+  }
+  override componentWillUnmount() { this.stopObserving?.() }
+  private capture(keys = this.props.keys) {
     const owner = this.props.scroll?.current ?? this.root.current?.closest<HTMLElement>('[data-slot="main"]')
     if (!owner) return null
     const viewport = owner.getBoundingClientRect()
@@ -118,9 +168,20 @@ export class TaskListScrollAnchor extends Component<{
       .find((element) => { const rect = element.getBoundingClientRect(); return rect.bottom > viewport.top && rect.top < viewport.bottom })
     if (!first) return null
     const key = first.dataset.taskItem!
-    return { key, top: first.getBoundingClientRect().top, offset: this.props.handle?.current?.getItemOffset(previous.keys?.indexOf(key) ?? -1) ?? 0 }
+    return { key, top: first.getBoundingClientRect().top, offset: this.props.handle?.current?.getItemOffset(keys?.indexOf(key) ?? -1) ?? 0 }
+  }
+  override getSnapshotBeforeUpdate(previous: Readonly<typeof this.props>) {
+    if (this.props.shifting) return null
+    if (previous.revision === this.props.revision) return null
+    const snapshot = this.capture(previous.keys)
+    if (!this.props.keys) { this.anchor = snapshot; this.pendingAnchor = true }
+    return snapshot
   }
   override componentDidUpdate(_previous: Readonly<typeof this.props>, _state: object, snapshot: { key: string; top: number; offset: number } | null) {
+    this.restore(snapshot)
+    if (!this.props.keys && this.pendingAnchor) this.finishUpdate?.()
+  }
+  private restore(snapshot: { key: string; top: number; offset: number } | null) {
     if (!snapshot) return
     const owner = this.props.scroll?.current ?? this.root.current?.closest<HTMLElement>('[data-slot="main"]')
     const next = [...(this.root.current?.querySelectorAll<HTMLElement>('[data-task-item]') ?? [])].find((element) => element.dataset.taskItem === snapshot.key)
