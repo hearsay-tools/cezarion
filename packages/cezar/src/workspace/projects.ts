@@ -6,6 +6,7 @@ import { PROJECT_TAGS_MAX, PROJECT_TAG_MAX_LENGTH } from '@open-mercato/cezar-co
 import type { ProjectWebhook, WebhookTrigger } from '@open-mercato/cezar-contract';
 import { projectWebhooks, redactWebhook } from './webhooks.ts';
 import { forgeKindOfRemote, forgeWebRoot, type ForgeKind } from '../server/forge/index.ts';
+import { createRootProbeCache } from './root-probe-cache.ts';
 import { getRepoInfo } from '../server/git.ts';
 import {
   mergeWriteWorkspaceConfig,
@@ -124,6 +125,7 @@ export async function registerProject(
   const real = await normalizeRoot(root);
   const now = new Date().toISOString();
   let entry: WorkspaceProject | undefined;
+  let added = false;
   await mergeWriteWorkspaceConfig((config) => {
     const existing = config.projects.find((p) => p.root === real);
     if (existing) {
@@ -131,6 +133,7 @@ export async function registerProject(
       entry = existing;
       return;
     }
+    added = true;
     entry = {
       id: allocateProjectSlug(real, config.projects.map((p) => p.id)),
       root: real,
@@ -143,6 +146,7 @@ export async function registerProject(
   });
   // The mutator always runs, so `entry` is always set — this satisfies TS.
   if (!entry) throw new Error('registerProject: merge-write did not run the mutator');
+  if (added) invalidateProjectProbe(real);
   return entry;
 }
 
@@ -240,7 +244,11 @@ export function toProjectListEntry(project: WorkspaceProject, probe: RootProbe):
 /** Probe TTL — long enough to coalesce a burst of sidebar renders, short
  *  enough that a deleted repo shows as `missing` on the next real look. */
 const PROBE_TTL_MS = 5_000;
-const probeCache = new Map<string, { at: number; probe: RootProbe }>();
+const probeCache = createRootProbeCache({ compute: computeProbe, now: () => Date.now(), ttlMs: PROBE_TTL_MS });
+
+export function invalidateProjectProbe(root: string): void {
+  probeCache.invalidate(root);
+}
 
 /** Test hook: drop cached probes so status changes are visible immediately. */
 export function clearProjectProbeCache(): void {
@@ -275,11 +283,7 @@ async function computeProbe(root: string): Promise<RootProbe> {
 }
 
 async function probeRoot(root: string): Promise<RootProbe> {
-  const cached = probeCache.get(root);
-  if (cached && Date.now() - cached.at < PROBE_TTL_MS) return cached.probe;
-  const probe = await computeProbe(root);
-  probeCache.set(root, { at: Date.now(), probe });
-  return probe;
+  return probeCache.get(root);
 }
 
 /**
@@ -324,10 +328,13 @@ export async function listProjects(selector?: ProjectListSelector): Promise<Proj
  */
 export async function removeProject(id: string): Promise<boolean> {
   let removed = false;
+  let removedRoot: string | undefined;
   await mergeWriteWorkspaceConfig((config) => {
+    removedRoot = config.projects.find((p) => p.id === id)?.root;
     const next = config.projects.filter((p) => p.id !== id);
     removed = next.length !== config.projects.length;
     config.projects = next;
   });
+  if (removedRoot) invalidateProjectProbe(removedRoot);
   return removed;
 }

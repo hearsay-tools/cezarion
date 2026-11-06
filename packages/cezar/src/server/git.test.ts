@@ -79,6 +79,20 @@ describe('getRepoInfo — remote discovery', () => {
     expect(info?.remote).toBeUndefined();
   });
 
+  it('keeps detached HEAD and insteadOf remote expansion', async () => {
+    g(dir, 'checkout', '--detach', '-q');
+    g(dir, 'config', 'url.https://github.com/.insteadOf', 'fixture:');
+    g(dir, 'remote', 'add', 'origin', 'fixture:acme/demo.git');
+    expect(await getRepoInfo(dir)).toEqual({ root: g(dir, 'rev-parse', '--show-toplevel').trim(), branch: 'HEAD', remote: 'https://github.com/acme/demo.git' });
+  });
+
+  it('returns null for a missing directory or an unborn HEAD', async () => {
+    expect(await getRepoInfo(join(dir, 'missing'))).toBeNull();
+    const unborn = join(dir, 'unborn');
+    g(dir, 'init', '-q', unborn);
+    expect(await getRepoInfo(unborn)).toBeNull();
+  });
+
   it('pins the current commit as a full SHA', async () => {
     expect(await getHeadCommit(dir)).toBe(g(dir, 'rev-parse', 'HEAD').trim());
   });

@@ -42,7 +42,8 @@
     "test:package": "node ../../scripts/test-package.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.scripts.json",
     "typecheck:package": "tsc --noEmit -p tsconfig.package.json",
-    "postbuild": "node scripts/inline-contract.mjs"
+    "postbuild": "node scripts/inline-contract.mjs",
+    "bench:project-probes": "node --import tsx scripts/benchmark-project-probes.mjs"
   },
   "dependencies": {
     "@clack/prompts": "^0.11.0",
