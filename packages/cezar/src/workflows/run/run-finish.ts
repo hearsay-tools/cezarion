@@ -92,7 +92,7 @@ export class RunFinish {
     // A late success callback has no authority to reopen a stopped/reviewing root.
     if (['done', 'review', 'failed', 'cancelled'].includes(parent.status)) return 'held';
     const state = this.completionGateHost.active.get(runId);
-    const pendingAsk = hasPendingHumanAsk(runId, id => this.completionGateHost.pendingHumanAskSeq(id)) || state?.boundary.pendingHumanAsk;
+    const pendingAsk = this.familyQuestionPending(runId, parent.delegation.receipts.length, state);
     if (!pendingAsk && this.completionMayPass(runId)) return 'accept';
     if (parent.delegation.finishRequestedAt) {
       // Legacy accepted Finish cannot strand the new gate behind an execution ban.
@@ -115,6 +115,13 @@ export class RunFinish {
       this.line.releaseSlot();
     }
     return 'held';
+  }
+
+  /** Only a root with workers keeps its pending question through completion
+   *  (hearsay-tools/cezarion#2784): every task is a root once provisioned. */
+  private familyQuestionPending(runId: string, receipts: number, state: ActiveRun | undefined): boolean {
+    if (receipts === 0) return false;
+    return hasPendingHumanAsk(runId, id => this.completionGateHost.pendingHumanAskSeq(id)) || !!state?.boundary.pendingHumanAsk;
   }
 
   /** Human Finish keeps the worker guarantees and bypasses request obligations only. */
@@ -176,6 +183,9 @@ export class RunFinish {
     if (decision.action === 'root') {
       try { this.context.store.commitRootFinishIntent(runId); this.host.reconcileWorkerWaits(runId); }
       catch { return false; }
+      // A root without workers may Finish with a question pending (hearsay-tools/cezarion#2784):
+      // close it first, so the completion gate does not park the task on it again.
+      this.closeQuestionOnFinish(runId);
       void this.settleRequestedRootFinish(runId);
       return true;
     }
@@ -209,8 +219,8 @@ export class RunFinish {
   }
 
   /** Finish ends the task, so an unanswered question is closed rather than left answerable on a
-   * finished run (hearsay-tools/cezarion#1260). A root never gets here with one pending: its Finish
-   * is refused until the question is answered. Stop keeps the question, which a human may still
+   * finished run (hearsay-tools/cezarion#1260). A root with workers never gets here with one pending:
+   * its Finish is refused until the question is answered. Stop keeps the question, which a human may still
    * answer to reopen the run (open-mercato/cezar#505). */
   private closeQuestionOnFinish(runId: string): void {
     const askSeq = this.completionGateHost.pendingHumanAskSeq(runId);

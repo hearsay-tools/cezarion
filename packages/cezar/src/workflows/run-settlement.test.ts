@@ -128,9 +128,11 @@ describe('successful run settlement (#473)', () => {
     const ask = () => store.appendEvent(id, { type: 'ask.requested', requestId: randomUUID(), questions: [{
       header: 'Choice', question: 'Which option?', options: [{ label: 'One' }, { label: 'Two' }],
     }] });
+    const family = () => store.commitDelegation([{ id, delegation: { role: 'root', permissions: [], receipts: [{ requestId: randomUUID(), workerId: randomUUID(), requestHash: 'b'.repeat(64) }] } }]);
     if (timing === 'before diff') ask();
-    else vi.mocked(worktreeDiff).mockImplementationOnce(async () => { ask(); return 'changed'; });
-    if (timing === 'before diff') expect(manager.finish(id)).toBe(false);
+    // The question holds completion only for a root with workers (hearsay-tools/cezarion#2784).
+    else vi.mocked(worktreeDiff).mockImplementationOnce(async () => { family(); ask(); return 'changed'; });
+    if (timing === 'before diff') { family(); expect(manager.finish(id)).toBe(false); }
     else await settle(id, true);
     expect(store.getRun(id)?.status).toBe('waiting');
     expect(store.getRun(id)?.finishedAt).toBeUndefined();

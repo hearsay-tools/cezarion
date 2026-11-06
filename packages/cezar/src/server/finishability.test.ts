@@ -74,6 +74,10 @@ describe('authoritative finishability (#449)', () => {
     if (blocked) expect(verdict).toMatch(/pending human question/);
     else expect(verdict).toBeNull();
     expect((await apiRequest(app(), `/api/v1/runs/${p.id}/finish`, { method: 'POST' })).status).toBe(blocked ? 409 : 200);
+    if (blocked) return;
+    // The accepted Finish settles the task and closes its question, root or not.
+    await until(() => ['done', 'review'].includes(store.getRun(p.id)?.status ?? ''));
+    expect(hasPendingAsk(store, p.id)).toBe(false);
   });
 
   it.each(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled'] as const)(
