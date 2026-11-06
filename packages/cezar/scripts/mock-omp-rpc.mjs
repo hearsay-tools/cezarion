@@ -386,7 +386,7 @@ async function respondDefault(command, message) {
   assistantText([`Investigating: `, message]);
   write({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'read', args: { path: 'README.md' } });
   write({ type: 'tool_execution_end', toolCallId: 'tool-1', toolName: 'read', result: { content: [{ type: 'text', text: 'mock file' }] }, isError: false });
-    assistantText(['Done with the first pass.'], { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } } });
+  assistantText(['Done with the first pass.'], { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } } });
   endTurn();
   if (message.includes('mock:wake-after-settle')) {
     // OMP resumes on its own after settling (async work finished): a new agent run, no prompt.
@@ -461,6 +461,7 @@ function scenarioEncoder(command, ack, state = { acknowledged: false, opened: fa
       return delivery?.holdResponse(command.message);
     },
     text: ({ parts }) => assistantText(parts),
+    reply: () => respondDefault(command, command.message),
     reasoning: ({ text }) => assistantThinking(text),
     toolStart: ({ call }) => write(toolFrame('start', call)),
     toolEnd: ({ call }) => write(toolFrame('end', call)),
@@ -496,6 +497,10 @@ async function prompt(command, sent = command.message) {
     return;
   }
 
+  return respondScenarios(command, message, ack);
+}
+
+async function respondScenarios(command, message, ack) {
   const state = { acknowledged: false, opened: false };
   const encoder = scenarioEncoder(command, ack, state);
   const early = scenarioFor(message, scenarioContext);
