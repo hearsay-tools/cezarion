@@ -1,4 +1,4 @@
-import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { QueryClientProvider, QueryObserver, type QueryClient } from '@tanstack/react-query'
 import { openHumanWait } from '@/test/run-summary-fixture'
 import { act, cleanup, render, renderHook, waitFor } from '@testing-library/react'
 import { Profiler, type ReactNode } from 'react'
