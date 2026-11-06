@@ -1,4 +1,5 @@
 import type { DiscoveredTasks, DiscoveryRequest } from '@open-mercato/cezar-contract/discovery';
+import { messagingAllowed } from '@open-mercato/cezar-contract/task-options';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import type { RunStore } from '../runs/store.ts';
 import { finishing, isRootTask } from './conversations.ts';
@@ -13,11 +14,12 @@ export function discoverTasks(store: RunStore, callerId: string, request: Extrac
     const current = store.getRun(run.id);
     if (!isRootTask(current) || (current.delegation?.role === 'root' && current.delegation.historyDeletion)) return [];
     const attention = deriveAttention(run);
-    const accepts = ['queued', 'running', 'waiting'].includes(current.status) && !current.stopping && !finishing(current);
+    const open = messagingAllowed(current);
+    const accepts = open && ['queued', 'running', 'waiting'].includes(current.status) && !current.stopping && !finishing(current);
     const state = current.stopping ? 'stopping' : finishing(current) ? 'finishing' : current.status;
     return [{ id: run.id, title: run.titleSummary ?? run.title, ...(run.runner === undefined ? {} : { runner: run.runner }),
       status: run.status, attention: attention.bucket, attentionLabel: attention.label, accepts,
-      ...(accepts ? {} : { reason: `${state}: only its human can continue it` }) }];
+      ...(accepts ? {} : { reason: open ? `${state}: only its human can continue it` : 'task messaging is off: it does not accept task messages' }) }];
   });
   return { tasks, ...(page.nextOffset === undefined ? {} : { nextOffset: page.nextOffset }) };
 }

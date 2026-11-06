@@ -131,6 +131,19 @@ describe('task access', () => {
       expect(reply.delivery).not.toBe('not-delivered');
       expect(f.store.getRun(b.id)?.agentInputs?.some(input => input.id === reply.message.id)).toBe(true);
     });
+    it('an exact retry of a message accepted before messaging went off returns its receipt', async () => {
+      const b = peer();
+      const request = message(b.id);
+      const sent = await f.service.send(f.caller, request);
+      access(f.parent.id, { allowMessaging: false });
+      await expect(f.service.send(f.caller, request)).resolves.toMatchObject({ message: { id: sent.message.id }, effect: 'unchanged' });
+    });
+    it('discovery lists a peer with messaging off as not accepting', async () => {
+      const b = peer();
+      access(b.id, { allowMessaging: false });
+      const { tasks } = await f.service.discover(f.caller, { kind: 'tasks' }) as { tasks: Array<{ id: string; accepts: boolean; reason?: string }> };
+      expect(tasks.find(task => task.id === b.id)).toMatchObject({ accepts: false, reason: 'task messaging is off: it does not accept task messages' });
+    });
     it('messaging off does not touch family messages', async () => {
       const { workerId } = await f.service.spawn(f.caller, spawnInput());
       setRunStatus(f.store, workerId, RUN_STATUS.running);

@@ -293,6 +293,9 @@ export class DelegationService {
     const state = this.currentConversation(project, root);
     const existing = state.messages.find(message => message.id === request.id);
     if (existing) return this.retrySend(pair, root, existing, requestHash);
+    // Messaging off refuses new peer sends (hearsay-tools/cezarion#2784). An exact retry of an accepted
+    // message returned above; a reply to a request accepted earlier still passes.
+    if (pair.relationship === 'peer' && request.kind !== 'reply' && !messagingAllowed(sender)) throw new DelegationPolicyError('incompatible_state', MESSAGING_OFF);
     const { original, settled } = sendRequestContext(state, request, sender, recipient);
     const now = new Date().toISOString();
     const { destroyed, resumable, resume, instruction } = sendAdmission(pair, root, request);
@@ -328,8 +331,6 @@ export class DelegationService {
     if (request.resume && (peer || sender.id !== root.id || recipient.delegation?.role !== 'worker')) {
       throw new DelegationPolicyError('denied_scope', 'Only an active parent may use --resume for its owned worker');
     }
-    // Messaging off refuses new peer sends; a reply to a request accepted earlier still passes.
-    if (peer && request.kind !== 'reply' && !messagingAllowed(sender)) throw new DelegationPolicyError('incompatible_state', MESSAGING_OFF);
     if (project.store.containsSessionSecret(JSON.stringify(request))) throw new DelegationPolicyError('invalid_input', 'Credentials cannot be included in delegated input');
   }
   private retrySend(pair: ConversationPair, root: RunRecord, existing: ConversationMessage, requestHash: string): ConversationSendResult {
