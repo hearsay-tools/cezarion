@@ -59,7 +59,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
   const owesRequests = open.sent.length + open.incoming.length > 0;
   const workersOn = workersAllowed(run);
   const messagingOn = messagingAllowed(run);
-  // hearsay-tools/cezarion#2784: with both switches off, no worker to manage and no open request, the session gets no
+  // hearsay-tools/cezarion#2784: with both switches off, no worker receipt (a deleted worker's counts) and no open request, the session gets no
   // credential; it keeps the governed-session cross-session controls (runner-specific, D1). The endpoint
   // alone marks it as a controller-bound session, so `cez discover` refuses instead of falling
   // back to the cockpit, as it does for any partial credential.
