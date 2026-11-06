@@ -12,6 +12,16 @@ export function useTaskListFocus(layout: string) {
       label: element.getAttribute('aria-label'), tag: element.tagName,
     } : null
   }
+  const onBlurCapture = (event: FocusEvent<HTMLDivElement>) => {
+    const element = event.target as HTMLElement
+    const container = event.currentTarget
+    // Removal can emit blur before React detaches the old control. Check after the swap.
+    queueMicrotask(() => {
+      if (focused.current?.element === element && element.isConnected && !container.contains(document.activeElement)) {
+        focused.current = null
+      }
+    })
+  }
   useLayoutEffect(() => {
     const previous = focused.current
     if (!previous || previous.element.isConnected || document.activeElement !== document.body) return
@@ -25,5 +35,5 @@ export function useTaskListFocus(layout: string) {
     const next = same ?? controls.find((element) => element.tagName === 'A')
     next?.focus()
   }, [layout])
-  return { ref, onFocusCapture }
+  return { ref, onFocusCapture, onBlurCapture }
 }

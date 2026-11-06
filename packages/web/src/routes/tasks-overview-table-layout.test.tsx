@@ -1218,3 +1218,17 @@ it.each([false, true])('restores an unsaved title draft and editor focus after d
   fireEvent.keyDown(input, { key: 'Enter' })
   expect(onRename).toHaveBeenCalledExactlyOnceWith('draft-resize', 'Unsaved title draft')
 })
+
+
+it('does not restore a row control after the user blurs it before a breakpoint flip', async () => {
+  setOverviewDesktop(true)
+  renderOverview({ runs: [run({ id: 'blurred', title: 'Leave focus' })] }, false)
+  const toggle = screen.getByRole('button', { name: 'Show resources for Leave focus' })
+  toggle.focus()
+  await act(async () => { toggle.blur() })
+  expect(document.activeElement).toBe(document.body)
+  setOverviewDesktop(false)
+  expect(document.activeElement).toBe(document.body)
+  setOverviewDesktop(true)
+  expect(document.activeElement).toBe(document.body)
+})
