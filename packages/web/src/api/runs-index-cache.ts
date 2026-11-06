@@ -191,52 +191,67 @@ export function dropIndexProject(index: RunsIndexResponse, project: string): Run
   return { ...index, runs, truncated, referenceStatuses }
 }
 
+/** A recorded frame and the generation of the stream that delivered it. */
+export type OverlayEntry = IndexChange & { generation: string }
+
 /**
- * The frames this document heard, kept until a snapshot includes them.
+ * The frames this document heard, kept until a snapshot of their generation includes them.
  *
- * - `generation` is the server process the frames came from: the stream's `ready`, or the first
- *   snapshot when this document joined the shared feed after its `ready`.
- * - `floor`: every frame above it is in `changes`. Undefined until the stream sets a baseline.
- * - `changes`: the newest frame per row key, deletes included (tombstones).
+ * - `stream`: the generation of the stream delivering frames now, from its `ready`. Undefined
+ *   from a new attachment (`overlayDetach`) until its `ready`: a frame then has no known
+ *   generation and is not recorded.
+ * - `lastStream`: the last generation a `ready` named. `floor` belongs to it.
+ * - `floor`: within `lastStream`, every frame above it is in `changes`.
+ * - `changes`: the newest frame per row key, deletes included (tombstones), each with its own
+ *   generation. A merge uses only the entries of the snapshot's generation.
  */
 export interface IndexOverlay {
-  generation: string | undefined
-  /** True when `generation` came from the stream's `ready`, not from a snapshot. */
-  streamGeneration: boolean
+  stream: string | undefined
+  lastStream: string | undefined
   /** The last snapshot generation that disagreed with the stream's. It asks for one
    *  reconciliation, not one per snapshot: the stream's next `ready` settles which is current. */
   mismatch: string | undefined
   floor: number | undefined
-  changes: Map<string, IndexChange>
+  changes: Map<string, OverlayEntry>
 }
 
 export function createIndexOverlay(): IndexOverlay {
-  return { generation: undefined, streamGeneration: false, mismatch: undefined, floor: undefined, changes: new Map() }
+  return { stream: undefined, lastStream: undefined, mismatch: undefined, floor: undefined, changes: new Map() }
 }
 
-/** A stream attachment. Another generation is a reset. In the same generation, frames up to
- *  `seq` may have passed while detached, so the overlay covers only frames above it. */
+/** A stream `ready`. Another generation than the last one is a reset: frames of other
+ *  generations leave. In the same generation, frames up to `seq` may have passed while
+ *  detached, so the overlay covers only frames above it. */
 export function overlayReady(overlay: IndexOverlay, generation: string, seq: number): void {
-  if (overlay.generation !== generation) {
-    overlay.changes.clear()
-    overlay.generation = generation
-    overlay.floor = seq
-  } else {
+  if (overlay.lastStream === generation) {
     overlay.floor = Math.max(overlay.floor ?? seq, seq)
+  } else {
+    for (const [key, entry] of overlay.changes) if (entry.generation !== generation) overlay.changes.delete(key)
+    overlay.floor = seq
   }
-  overlay.streamGeneration = true
+  overlay.stream = generation
+  overlay.lastStream = generation
   overlay.mismatch = undefined
 }
 
+/** A new attachment: until its `ready`, the stream's generation is unknown. */
+export function overlayDetach(overlay: IndexOverlay): void {
+  overlay.stream = undefined
+}
+
 /**
- * Record one frame. `gap` says frames before it were lost: the overlay then covers only frames
- * from this one on. The first frame without a `ready` sets the baseline the same way.
+ * Record one frame of the current stream generation. `gap` says frames before it were lost: the
+ * overlay then covers only frames from this one on. Returns false, recording nothing, while the
+ * stream's generation is unknown.
  */
-export function overlayRecord(overlay: IndexOverlay, change: IndexChange, gap = false): void {
+export function overlayRecord(overlay: IndexOverlay, change: IndexChange, gap = false): boolean {
+  const generation = overlay.stream
+  if (generation === undefined) return false
   if (overlay.floor === undefined || gap) overlay.floor = change.seq - 1
-  const key = indexKey(change.project, changeId(change))
+  const key = JSON.stringify([generation, change.project, changeId(change)])
   const held = overlay.changes.get(key)
-  if (!held || held.seq < change.seq) overlay.changes.set(key, change)
+  if (!held || held.seq < change.seq) overlay.changes.set(key, { ...change, generation })
+  return true
 }
 
 /** A removed project's frames must not bring its rows back at the next snapshot. */
@@ -252,14 +267,13 @@ function hasFence(snapshot: RunsIndexResponse): boolean {
  * Fence a snapshot against the frames this document already applied. Every snapshot passes
  * here: the query function, the shared live read and each reconciliation.
  *
- * - Another generation: when the overlay's generation came from the stream, the snapshot is from
- *   a process this stream does not hear (yet). It is kept unpatched and asks for one
- *   reconciliation per such generation, so a stream that stays down cannot cause a read loop.
- *   Otherwise the overlay resets to the snapshot's generation.
- * - A frame above `eventSeq` is newer than the snapshot and is laid over it.
- * - A frame at or below `eventSeq` is in the snapshot and leaves the overlay.
- * - A snapshot older than the overlay's floor misses frames the overlay no longer holds: the
- *   result asks for one more reconciliation.
+ * - Another generation than the stream's: the snapshot is from a process this stream does not
+ *   hear. It is kept unpatched and asks for one reconciliation per such generation, so a stream
+ *   that stays down cannot cause a read loop.
+ * - Only frames of the snapshot's own generation touch it: one above `eventSeq` is newer and is
+ *   laid over it; one at or below `eventSeq` is in the snapshot and leaves the overlay.
+ * - A snapshot of the last stream generation older than the overlay's floor misses frames the
+ *   overlay no longer holds: the result asks for one more reconciliation.
  */
 export function mergeIndexSnapshot(
   overlay: IndexOverlay,
@@ -267,27 +281,24 @@ export function mergeIndexSnapshot(
   registry?: ReadonlySet<string>,
 ): IndexPatch {
   if (!hasFence(snapshot)) return { index: snapshot, reconcile: false }
-  if (overlay.generation !== undefined && overlay.generation !== snapshot.generation) {
-    if (overlay.streamGeneration) {
-      const first = overlay.mismatch !== snapshot.generation
-      overlay.mismatch = snapshot.generation
-      return { index: snapshot, reconcile: first }
-    }
-    overlay.changes.clear()
-    overlay.floor = undefined
+  const { generation, eventSeq } = snapshot
+  if (overlay.stream !== undefined && overlay.stream !== generation) {
+    const first = overlay.mismatch !== generation
+    overlay.mismatch = generation
+    return { index: snapshot, reconcile: first }
   }
-  overlay.generation = snapshot.generation
-  const eventSeq = snapshot.eventSeq
-  const missed = overlay.floor !== undefined && eventSeq < overlay.floor
+  const covered = overlay.lastStream === generation && overlay.floor !== undefined
+  const missed = covered && eventSeq < overlay.floor!
   let index = snapshot
   let reconcile = missed
-  const newer = [...overlay.changes.values()].filter((change) => change.seq > eventSeq).sort((a, b) => a.seq - b.seq)
+  const own = [...overlay.changes.entries()].filter(([, entry]) => entry.generation === generation)
+  const newer = own.map(([, entry]) => entry).filter((entry) => entry.seq > eventSeq).sort((a, b) => a.seq - b.seq)
   for (const change of newer) {
     const patch = applyIndexChange(index, change, registry)
     index = patch.index
     reconcile ||= patch.reconcile
   }
-  for (const [key, change] of overlay.changes) if (change.seq <= eventSeq) overlay.changes.delete(key)
-  if (!missed && overlay.floor !== undefined) overlay.floor = eventSeq
+  for (const [key, entry] of own) if (entry.seq <= eventSeq) overlay.changes.delete(key)
+  if (covered && !missed) overlay.floor = eventSeq
   return { index, reconcile }
 }

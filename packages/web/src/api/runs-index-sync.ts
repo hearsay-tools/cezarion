@@ -8,6 +8,7 @@ import {
   createIndexOverlay,
   dropIndexProject,
   mergeIndexSnapshot,
+  overlayDetach,
   overlayDropProject,
   overlayReady,
   overlayRecord,
@@ -57,7 +58,7 @@ type QueuedPatch =
 export interface RunsIndexSync {
   /** The stream attached: `ready` names its generation and last frame number. */
   ready(generation: string, seq: number): void
-  /** A new stream attachment: frames may have passed unheard until its `ready` or first frame. */
+  /** A new stream attachment: its generation is unknown until its `ready`. */
   detach(): void
   /** One run frame of `project`. `gap` is true when the stream's seq fence saw lost frames. */
   run(project: string, event: WorkspaceRunEvent, gap?: boolean): void
@@ -121,15 +122,24 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
   let trailing = false
   let lastWrite = -Infinity
   /**
-   * Two fences hold every input. Generation: a queued patch (`run`, `usage`) applies only under
-   * the stream generation it came from; `ready` with another generation resets the overlay, so
-   * `merge` (query function, shared read, reconciliation) never lays an old frame over a new
-   * snapshot. Removed project: `run` and `usage` are ignored, `flush` skips queued patches, and
+   * Two fences hold every input. Generation: every frame records the generation of the stream
+   * that delivered it (its `ready`; the shared worker sends one to a late subscriber too). A frame
+   * of unknown generation is not applied and asks for one fenced reconciliation. A queued patch
+   * (`run`, `usage`) applies only to data of its own generation (`data.generation`), and `merge`
+   * (query function, shared read, reconciliation) lays only frames of the snapshot's own
+   * generation over it. Removed project: `run` and `usage` are ignored, `flush` skips queued patches, and
    * `merge` strips the project from every snapshot; only `restoreProject` lifts it, because the
    * document read and the shared read are independent sources that can answer out of order.
    * `detach` and `reconcile` pass through these same paths.
    */
   const removed = new Set<string>()
+  /** A frame of unknown generation arrived since the last `ready`; it asked for a reconciliation. */
+  let unknownAsked = false
+  const unknownGeneration = (): void => {
+    if (unknownAsked) return
+    unknownAsked = true
+    void reconcile({ hold: true })
+  }
   const write = (next: RunsIndexResponse): void => {
     lastWrite = Date.now()
     queryClient.setQueryData<RunsIndexResponse>(RUNS_INDEX_QUERY_KEY, next)
@@ -181,19 +191,18 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
     const data = cached()
     if (!data || patches.length === 0) return
     const registry = registryOf(queryClient)
-    // Frames the cached snapshot already includes would only move a row back in time.
-    const fenced = data.generation === overlay.generation ? data.eventSeq : undefined
     let next = data
     let needsReconcile = false
     for (const patch of patches) {
-      // A frame from another server generation says nothing about this snapshot's rows.
-      if (patch.generation !== overlay.generation) continue
+      // A frame from another server generation says nothing about these rows.
+      if (patch.generation !== data.generation) continue
       if (patch.type === 'usage') {
         if (!removed.has(patch.project)) next = applyIndexUsage(next, patch.project, patch.usage)
         continue
       }
       if (removed.has(patch.change.project)) continue
-      if (fenced !== undefined && patch.change.seq <= fenced) continue
+      // Frames the cached snapshot already includes would only move a row back in time.
+      if (patch.change.seq <= data.eventSeq) continue
       const result = applyIndexChange(next, patch.change, registry)
       next = result.index
       needsReconcile ||= result.reconcile
@@ -218,20 +227,28 @@ export function createRunsIndexSync(queryClient: QueryClient): RunsIndexSync {
   return {
     ready(generation, seq) {
       overlayReady(overlay, generation, seq)
+      unknownAsked = false
     },
     detach() {
-      overlay.floor = undefined
+      overlayDetach(overlay)
     },
     run(project, event, gap = false) {
       if (removed.has(project)) return
       const change = toChange(project, event)
-      overlayRecord(overlay, change, gap)
-      queue.push({ type: 'change', change, generation: overlay.generation })
+      if (!overlayRecord(overlay, change, gap)) {
+        unknownGeneration()
+        return
+      }
+      queue.push({ type: 'change', change, generation: overlay.stream })
       schedule()
     },
     usage(project, usage) {
       if (removed.has(project)) return
-      queue.push({ type: 'usage', project, usage, generation: overlay.generation })
+      if (overlay.stream === undefined) {
+        unknownGeneration()
+        return
+      }
+      queue.push({ type: 'usage', project, usage, generation: overlay.stream })
       schedule()
     },
     dropProject(project) {

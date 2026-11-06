@@ -145,6 +145,12 @@ function stampedRun(record: RunRecord, project = BOOT, seq = ++frameSeq): string
   return JSON.stringify({ project, seq, run: toRunSummary(record), relationships: relationshipsDigestOf(record) })
 }
 
+/** The stream's `ready`: its generation and the last frame number before this connection. The
+ *  runs index applies only frames of a known generation (hearsay-tools/cezarion#2729). */
+function streamReady(generation = 'g1'): string {
+  return JSON.stringify({ generation, seq: frameSeq })
+}
+
 /** A numbered `run-deleted` frame. */
 function stampedDeleted(id: string, project = BOOT, seq = ++frameSeq): string {
   return JSON.stringify({ project, seq, id })
@@ -1131,6 +1137,7 @@ describe('useGlobalEvents — run events', () => {
     })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
+    source.emit('ready', streamReady())
 
     source.emit('run-summary', stampedRun(runRecord('r9', { status: RUN_STATUS.done, title: 'renamed' }), 'some-other-project'))
     act(() => { for (const callback of frames.splice(0)) callback() })
@@ -1177,6 +1184,7 @@ describe('useGlobalEvents — run events', () => {
     const writes = vi.spyOn(client, 'setQueryData')
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
+    source.emit('ready', streamReady())
 
     for (const status of ['queued', 'running', 'done'] as const) {
       source.emit('run-summary', stampedRun(runRecord('r1', { status })))
@@ -1982,6 +1990,7 @@ describe('useGlobalEvents — runs index patches (hearsay-tools/cezarion#2729)',
   it('a removed project leaves the index whole at once, with no request', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
+    source.emit('ready', streamReady())
     source.emit('project-removed', JSON.stringify({ id: 'other' }))
     expect(index()?.runs.map((row) => row.id)).toEqual(['b1'])
     expect(index()?.truncated).toEqual([])
@@ -1992,6 +2001,7 @@ describe('useGlobalEvents — runs index patches (hearsay-tools/cezarion#2729)',
 
   it('a removed project stays out of a late snapshot; added again, it may return', () => {
     const { source } = mount()
+    source.emit('ready', streamReady())
     const stale = client.getQueryData<RunsIndexResponse>(workspaceQueryKeys.runsIndex)!
     source.emit('project-removed', JSON.stringify({ id: 'other' }))
     // A read that started before the removal answers afterwards.
@@ -2003,6 +2013,7 @@ describe('useGlobalEvents — runs index patches (hearsay-tools/cezarion#2729)',
   it('a new project reconciles the index after the hold', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
+    source.emit('ready', streamReady())
     source.emit('project-added', JSON.stringify({ project: { id: 'third' } }))
     expect(indexInvalidations(invalidate)).toBe(0)
     act(() => void vi.advanceTimersByTime(400))
@@ -2011,6 +2022,7 @@ describe('useGlobalEvents — runs index patches (hearsay-tools/cezarion#2729)',
 
   it('usage ticks of any project patch that project\u2019s index rows; an empty tick clears them', () => {
     const { source } = mount()
+    source.emit('ready', streamReady())
     source.emit('usage', JSON.stringify({ project: 'other', usage: { o1: SAMPLE } }))
     runFrames()
     expect(index()?.runs[0]?.usage).toEqual(SAMPLE)
@@ -2023,6 +2035,7 @@ describe('useGlobalEvents — runs index patches (hearsay-tools/cezarion#2729)',
 
   it('a worker frame never enters the index, and a create inserts by createdAt', () => {
     const { source } = mount()
+    source.emit('ready', streamReady())
     source.emit('run-summary', stampedRun({ ...workerRecord(PARENT_ID, 'w1'), createdAt: '2026-07-15T00:00:00.000Z' }, BOOT))
     source.emit('run-summary', stampedRun(runRecord('b2', { createdAt: '2026-07-14T10:30:00.000Z' }), BOOT))
     runFrames()
@@ -2032,6 +2045,7 @@ describe('useGlobalEvents — runs index patches (hearsay-tools/cezarion#2729)',
   it('a delete removes the row; in a truncated project an archived one also reconciles', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
+    source.emit('ready', streamReady())
     source.emit('run-deleted', stampedDeleted('b1', BOOT))
     runFrames()
     expect(index()?.runs.map((row) => row.id)).toEqual(['o1'])

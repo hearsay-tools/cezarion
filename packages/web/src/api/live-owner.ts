@@ -22,6 +22,8 @@ interface Entry {
   unacked: Array<{ seq: number; bytes: number }>
   bytes: number
   paused: boolean
+  /** Workspace demand: the stream generation whose `ready` this entry has received. */
+  readyGeneration?: string | undefined
 }
 interface DocumentPort { port: LivePort; id: string; epoch: number; seenAt: number; entries: Map<string, Entry> }
 interface Lane { signature: string; controller?: AbortController | undefined; retry?: ReturnType<typeof setTimeout> | undefined; lastFrame: number }
@@ -42,6 +44,30 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
   // at once (`disconnect`), so the next start still owes them a `reconnect` (hearsay-tools/cezarion#1069).
   let workspaceDropped = false
   let generation: string | undefined
+  /** The workspace stream's generation (its `ready`) and the last frame number it delivered. A
+   *  document that joins the shared stream late, or rejoins after a server restart, gets a `ready`
+   *  with both before any other frame, so it learns the generation of every frame it receives. */
+  let workspaceGeneration: string | undefined
+  let workspaceSeq = 0
+  const workspaceReadyFor = (doc: DocumentPort, entry: Entry, seq = workspaceSeq) => {
+    if (workspaceGeneration === undefined || entry.readyGeneration === workspaceGeneration) return
+    entry.readyGeneration = workspaceGeneration
+    deliver(doc, entry, { event: 'ready', data: JSON.stringify({ generation: workspaceGeneration, seq }), id: '' })
+  }
+  /** Track the workspace stream's own `ready` and numbered frames. */
+  const observeWorkspace = (frame: LiveFrame): string | undefined => {
+    if (!('data' in frame) || !['ready', 'run-summary', 'run-deleted'].includes(frame.event)) return undefined
+    try {
+      const data = JSON.parse(frame.data) as { generation?: unknown; seq?: unknown }
+      if (frame.event === 'ready' && typeof data.generation === 'string' && typeof data.seq === 'number') {
+        workspaceGeneration = data.generation
+        workspaceSeq = data.seq
+        return data.generation
+      }
+      if (typeof data.seq === 'number') workspaceSeq = Math.max(workspaceSeq, data.seq)
+    } catch { /* ignore malformed frames */ }
+    return undefined
+  }
   const held = (kind?: LiveDemand['kind']) => [...documents].flatMap(doc => [...doc.entries.values()]
     .filter(entry => !entry.paused && (!kind || entry.demand.kind === kind)).map(entry => ({ doc, entry })))
   const send = (doc: DocumentPort, message: OwnerOutput) => {
@@ -109,8 +135,13 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
         try { const data = JSON.parse(frame.data) as { generation?: unknown }; if (typeof data.generation === 'string') onGeneration(data.generation) } catch { /* ignore malformed control */ }
       }
       if (kind === 'workspace' && 'event' in frame && frame.event === 'ping') workspaceReady = true
+      // A numbered frame's own seq is counted below; a `ready` sent before it names the one before.
+      const seqBefore = workspaceSeq
+      const readyGeneration = kind === 'workspace' ? observeWorkspace(frame) : undefined
       for (const { doc, entry } of held(kind === 'workspace' ? 'workspace' : 'run')) {
         if (entry.demand.kind === 'run' && 'type' in frame && 'runId' in frame && runKey(frame) !== runKey(entry.demand)) continue
+        if (readyGeneration !== undefined) entry.readyGeneration = readyGeneration
+        else if (kind === 'workspace') workspaceReadyFor(doc, entry, seqBefore)
         deliver(doc, entry, frame)
       }
     }, controller.signal).catch(failure).finally(() => {
@@ -230,6 +261,9 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
             send(doc, { type: 'value', version: LIVE_PROTOCOL, epoch: doc.epoch, id: entry.id, value: topicValues.get(item.demand.topic) })
           }
           if (!old && item.demand.kind === 'workspace' && workspaceReady) {
+            // The `ready` names the generation and the last frame already delivered; the ping
+            // that follows still marks the attachment live (#795).
+            workspaceReadyFor(doc, entry)
             deliver(doc, entry, { event: 'ping', data: '', id: '' })
           }
 

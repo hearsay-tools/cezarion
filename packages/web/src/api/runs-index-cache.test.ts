@@ -8,6 +8,7 @@ import {
   createIndexOverlay,
   dropIndexProject,
   mergeIndexSnapshot,
+  overlayDetach,
   overlayDropProject,
   overlayReady,
   overlayRecord,
@@ -298,15 +299,23 @@ describe('mergeIndexSnapshot: the fence', () => {
     expect(mergeIndexSnapshot(overlay, projectA({ generation: 'g3', eventSeq: 0 })).reconcile).toBe(true)
   })
 
-  it('without a stream generation, a snapshot of another generation resets the overlay', () => {
+  it('without a stream generation, a frame is not recorded and a snapshot passes unpatched', () => {
     const overlay = createIndexOverlay()
-    // A document that joined the shared feed after its `ready`: the first snapshot names it.
-    mergeIndexSnapshot(overlay, projectA({ generation: 'g1', eventSeq: 5 }))
-    overlayRecord(overlay, runChange('a', summary('a4', '2026-01-04', { title: 'g1' }), 6))
-    const next = projectA({ generation: 'g2', eventSeq: 0 })
-    expect(mergeIndexSnapshot(overlay, next)).toEqual({ index: next, reconcile: false })
+    expect(overlayRecord(overlay, runChange('a', summary('a4', '2026-01-04', { title: 'unknown' }), 6))).toBe(false)
+    const value = projectA({ generation: 'g1', eventSeq: 5 })
+    expect(mergeIndexSnapshot(overlay, value)).toEqual({ index: value, reconcile: false })
+  })
+
+  it('a merge uses only the frames of the snapshot\'s own generation', () => {
+    const overlay = createIndexOverlay()
+    overlayReady(overlay, 'g1', 10)
+    overlayRecord(overlay, runChange('a', summary('a4', '2026-01-04', { title: 'g1 frame' }), 11))
+    overlayDetach(overlay)
+    // Detached: the stream's generation is unknown, so a g2 snapshot is not a mismatch, and the
+    // g1 frame, numbered in another sequence, never patches it.
+    expect(mergeIndexSnapshot(overlay, projectA({ generation: 'g2', eventSeq: 0 })).index.runs[0]?.title).toBe('a4')
+    overlayReady(overlay, 'g2', 0)
     expect(overlay.changes.size).toBe(0)
-    expect(overlay.generation).toBe('g2')
   })
 
   it('a snapshot older than the overlay\'s floor misses frames: one more reconciliation', () => {
@@ -330,9 +339,13 @@ describe('mergeIndexSnapshot: the fence', () => {
     expect(result.index.runs[0]?.title).toBe('after gap')
   })
 
-  it('the first frame without a ready sets the baseline', () => {
+  it('a frame after detach is not recorded until the next ready', () => {
     const overlay = createIndexOverlay()
-    overlayRecord(overlay, runChange('a', summary('a4', '2026-01-04'), 30))
+    overlayReady(overlay, 'g1', 10)
+    overlayDetach(overlay)
+    expect(overlayRecord(overlay, runChange('a', summary('a4', '2026-01-04'), 30))).toBe(false)
+    overlayReady(overlay, 'g1', 29)
+    expect(overlayRecord(overlay, runChange('a', summary('a4', '2026-01-04'), 30))).toBe(true)
     expect(overlay.floor).toBe(29)
   })
 

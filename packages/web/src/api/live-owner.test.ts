@@ -141,6 +141,63 @@ describe('shared live ownership', () => {
     owner.dispose()
   })
 
+  describe('workspace generation for late subscribers (hearsay-tools/cezarion#2729)', () => {
+    const frames = (p: Port) => p.frames.filter(frame => frame.type === 'frame').map(frame => frame.frame.data ? `${frame.frame.event} ${frame.frame.data}` : frame.frame.event)
+    const ready = (generation: string, seq: number) => ({ event: 'ready', data: JSON.stringify({ generation, seq }), id: '' })
+    const summary = (seq: number) => ({ event: 'run-summary', data: JSON.stringify({ project: 'boot', seq, run: { id: 'r' }, relationships: 'd' }), id: '' })
+
+    it('sends a late subscriber a ready with the generation and the last delivered seq, then the barrier ping', async () => {
+      const owner = createLiveOwner(deps)
+      const first = new Port(); owner.attach(first); first.sync('a', [workspace])
+      await vi.advanceTimersByTimeAsync(0)
+      streams[0]!.frame(ready('g1', 10))
+      streams[0]!.frame({ event: 'ping', data: '', id: '' })
+      streams[0]!.frame(summary(11)); streams[0]!.frame(summary(12))
+      const late = new Port(); owner.attach(late); late.sync('b', [workspace])
+      await vi.advanceTimersByTimeAsync(0)
+      expect(frames(late)).toEqual([`ready ${JSON.stringify({ generation: 'g1', seq: 12 })}`, 'ping'])
+      streams[0]!.frame(summary(13))
+      expect(frames(late).at(-1)).toContain('"seq":13')
+      // The first subscriber saw the stream's own ready and no synthetic one.
+      expect(frames(first).filter(frame => frame.startsWith('ready'))).toEqual([`ready ${JSON.stringify({ generation: 'g1', seq: 10 })}`])
+      owner.dispose()
+    })
+
+    it('a document that rejoins after a server restart learns the new generation before any frame', async () => {
+      const owner = createLiveOwner(deps)
+      const port = new Port(); owner.attach(port); port.sync('a', [workspace])
+      await vi.advanceTimersByTimeAsync(0)
+      streams[0]!.frame(ready('g1', 10))
+      streams[0]!.frame({ event: 'ping', data: '', id: '' })
+      // The server restarted: the held entry is reset and the new ready reaches nobody.
+      streams[0]!.frame(ready('g2', 0))
+      expect(port.frames.some(frame => frame.type === 'reset')).toBe(true)
+      streams[0]!.frame(summary(1))
+      // The document recovers (it was hidden, or it rejoins after the reset) with a new epoch.
+      const before = port.frames.length
+      port.sync('a', [workspace], 2)
+      await vi.advanceTimersByTimeAsync(0)
+      const rejoined = port.frames.slice(before).filter(frame => frame.type === 'frame').map(frame => frame.frame)
+      expect(rejoined[0]).toEqual(ready('g2', 1))
+      expect(rejoined[1]).toMatchObject({ event: 'ping' })
+      owner.dispose()
+    })
+
+    it('an entry that has no ready for the stream generation gets one before its next frame', async () => {
+      const owner = createLiveOwner(deps)
+      const port = new Port(); owner.attach(port); port.sync('a', [workspace])
+      await vi.advanceTimersByTimeAsync(0)
+      // Joined before the barrier: no ping yet, so the late-subscriber branch sent nothing.
+      streams[0]!.frame(ready('g1', 4))
+      const late = new Port(); owner.attach(late); late.sync('b', [workspace])
+      await vi.advanceTimersByTimeAsync(0)
+      expect(frames(late)).toEqual([])
+      streams[0]!.frame(summary(5))
+      expect(frames(late)).toEqual([`ready ${JSON.stringify({ generation: 'g1', seq: 4 })}`, expect.stringContaining('"seq":5')])
+      owner.dispose()
+    })
+  })
+
   it('delivers the latest topic snapshot to a late subscriber without another socket', async () => {
     let publish!: (value: unknown) => void
     deps.topic = vi.fn((_topic, listener) => { publish = listener; return () => {} })

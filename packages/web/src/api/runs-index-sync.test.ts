@@ -215,6 +215,11 @@ describe('runs index sync: review round 1', () => {
  * | reconcile              | through merge                            | through merge                      |
  * | ready / detach         | ready resets; detach keeps tags          | fence survives both                |
  * | dropProject / restore  | not generation-scoped                    | only restoreProject lifts it       |
+ *
+ * Round 3 rules: a frame records the generation of the stream that delivered it (`ready`; the
+ * shared worker sends one to a late or rejoining subscriber), a frame of unknown generation is not
+ * applied and asks for one reconciliation, a patch applies only to data of its own generation,
+ * and a merge uses only overlay frames of the snapshot's generation.
  */
 describe('runs index sync: fence matrix', () => {
   const g2 = () => snapshot([row('a', 'a2', '2026-01-02', { title: 'from g2' }), row('b', 'b1', '2026-01-01')], { generation: 'g2', eventSeq: 0 })
@@ -306,6 +311,87 @@ describe('runs index sync: fence matrix', () => {
     sync.dropProject('a')
     await sync.reconcile()
     expectNoA(cached())
+    unsubscribe()
+  })
+
+  it('D1: a g1 patch queued before a g2 snapshot lands is not applied to it', async () => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
+    const { unsubscribe } = observe(() => g2())
+    runFrame('a', summary('a2', '2026-01-02', { title: 'from g1' }))
+    // The query function answers g2 before the frame's animation frame.
+    await sync.reconcile()
+    runAnimationFrames()
+    expect(cached()?.generation).toBe('g2')
+    expect(titles()).toEqual(['from g2', 'b1'])
+    unsubscribe()
+  })
+
+  it('D1: a g1 usage tick queued before a g2 snapshot lands is not applied to it', async () => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
+    const { unsubscribe } = observe(() => g2())
+    g1Usage()
+    await sync.reconcile()
+    runAnimationFrames()
+    expect(cached()?.runs.some((entry) => entry.usage)).toBe(false)
+    unsubscribe()
+  })
+
+  it('D2, the reviewer order: ready(g1), detach, g2 snapshot, a frame with no ready, an older g2 snapshot: no title goes back', () => {
+    sync.detach()
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, sync.merge(g2()))
+    seq = 0
+    runFrame('a', summary('a2', '2026-01-02', { title: 'g2 frame' }))
+    runAnimationFrames()
+    const shown = [titles()?.[0]]
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, sync.merge(g2()))
+    shown.push(titles()?.[0])
+    // The frame's generation is unknown, so it never shows; nothing appears and then reverts.
+    expect(shown).toEqual(['from g2', 'from g2'])
+  })
+
+  it('D2: after detach, the g2 ready from the shared worker keeps a g2 frame over an older g2 snapshot', () => {
+    sync.detach()
+    sync.merge(g2())
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, g2())
+    // The worker sends a late or rejoining subscriber the stream's ready before any frame.
+    sync.ready('g2', 0)
+    seq = 0
+    runFrame('a', summary('a2', '2026-01-02', { title: 'g2 frame' }))
+    runAnimationFrames()
+    expect(titles()?.[0]).toBe('g2 frame')
+    // An older g2 read (eventSeq 0) lands later: the g2 frame stays on top of it.
+    expect(sync.merge(g2()).runs[0]?.title).toBe('g2 frame')
+  })
+
+  it('D2: a frame of unknown generation is not applied and asks for one reconciliation', async () => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
+    const { queryFn, unsubscribe } = observe(() => g2())
+    sync.detach()
+    runFrame('a', summary('a2', '2026-01-02', { title: 'unknown generation' }))
+    runFrame('a', summary('a2', '2026-01-02', { title: 'unknown generation 2' }))
+    g1Usage()
+    runAnimationFrames()
+    expect(titles()?.[0]).toBe('a2')
+    await vi.advanceTimersByTimeAsync(RUNS_INDEX_RECONCILE_HOLD_MS * 3)
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    unsubscribe()
+  })
+
+  it('a late subscriber rejoins after a restart while hidden: frames apply to the g2 data only', async () => {
+    client.setQueryData(RUNS_INDEX_QUERY_KEY, SEED())
+    // Hidden during the restart: the document detached; the coordinator reconciles before it
+    // rejoins, so a g2 snapshot lands first.
+    sync.detach()
+    const { unsubscribe } = observe(() => g2())
+    await sync.reconcile()
+    // On rejoin the shared worker sends the stream's ready (g2, last delivered seq 7), then frames.
+    sync.ready('g2', 7)
+    seq = 7
+    runFrame('a', summary('a2', '2026-01-02', { title: 'g2 seq 8' }))
+    runAnimationFrames()
+    expect(titles()).toEqual(['g2 seq 8', 'b1'])
+    // A late g1 read (another source) changes nothing and asks for one reconciliation at most.
+    expect(sync.merge(SEED()).runs[0]?.title).toBe('a2')
     unsubscribe()
   })
 
