@@ -58,6 +58,26 @@ release condition passes, even if there is no patch overlap.
    boundaries. Unclear mappings stay held. Different hunks less than 40 lines
    apart can clear when these ranges/anchors and semantic checks are disjoint.
 
+## Preserve progress when patches overlap
+
+Do not turn pairwise overlap into mutual holds. Use the schedule's existing
+topological slot order to name a predecessor among otherwise eligible ready
+branches; record the choice before replying. An already released/open PR keeps
+precedence. If neither is released, the earlier eligible item may open its PR
+while the later item keeps the patch hold. This clears only the predecessor's
+patch hold: its own semantic prerequisites, complete evidence, review and other
+gates must still pass. Record a directed predecessor-to-successor edge for each
+overlap; a successor waits for all its overlapping predecessors to merge and
+pass integrated acceptance, then reruns the check on current main. Disjoint
+branches need no such edge. A missing or unfinished peer cannot be used to infer
+non-overlap or manufacture a new release; keep its unresolved hold and use the
+recorded schedule to identify the prerequisite owner. A semantic cycle returns
+to planning; never choose precedence that bypasses a semantic prerequisite.
+
+The coordinator owns releasing each predecessor, so the first overlapping PR
+can reach landing. Reconcile existing PRs and saved edges before resuming;
+never reverse precedence while its predecessor PR remains outstanding.
+
 Trial rebases are comparison evidence, not reviewed replacement heads. If a live
 branch needs rebasing before PR opening or landing, request it from its owner.
 A settled worker requires explicit resume. Its new head needs fresh review,
@@ -83,9 +103,9 @@ release. Older ledger entries without comparison evidence remain unverified.
 |---|---|
 | No shared changed path | Release |
 | Same short file: replace line 10 vs line 20 | Release; no distance threshold |
-| Both consume line 10 | Hold |
-| Both insert after line 10 | Hold |
-| Insert after line 9 or 10 vs consume line 10 | Hold; edit boundary |
+| Both consume line 10 | Release the eligible predecessor; hold its successor |
+| Both insert after line 10 | Release the eligible predecessor; hold its successor |
+| Insert after line 9 or 10 vs consume line 10 | Order predecessor/successor; edit boundary |
 | Insert after line 11 vs consume line 10 | Release |
 | Main deleted earlier lines | Use rebased old-side coordinates, never pre-rebase line numbers |
 | Shared binary, rename, file deletion or mode change | Hold for explicit resolution |
@@ -97,7 +117,8 @@ release. Older ledger entries without comparison evidence remain unverified.
 | Situation | Exit trigger and owner | Recovery with no live session |
 |---|---|---|
 | Missing complete evidence | Worker supplies committed patch and readiness | Collect saved result; explicitly resume worker for gaps; restore wait |
-| Patch overlap or semantic hold | Prerequisite merges and integrated acceptance passes, or approved scope changes | Reconcile main/GitHub and ledger, then recompute |
+| Patch overlap | Coordinator releases the eligible predecessor; successors wait for predecessor merge and integrated acceptance | Reconcile existing PRs and directed order; recompute on current main |
+| Semantic hold | Prerequisite passes its release condition, or approved scope changes | Reconcile main/GitHub and ledger, then recompute |
 | Comparison/rebase failure | Named owner resolves missing evidence or worker resolves conflict | Keep original branch and reason; resume settled worker for repair |
 | Independent patches held | Coordinator records evidence and replies with release | Recompute current identities before sending or reusing reply |
 | Released evidence changes | Coordinator/worker invalidates release and returns to review/check | Reconcile heads, base and readiness; do not reuse stale approval |

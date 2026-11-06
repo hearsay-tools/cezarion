@@ -16,7 +16,8 @@ Record these fields:
   results, landing outcome and merge SHA, integrated acceptance SHA/results,
   before/after metrics when relevant, preserved artifacts.
 - **Patch release:** candidate and all compared worker/PR heads, fetched main SHA,
-  readiness confirmations, actual paths/ranges and semantic checks, decision and
+  readiness confirmations, actual paths/ranges and semantic checks, directed
+  overlap precedence (existing PR first, otherwise eligible schedule order), decision and
   reply/request id. A hold names its reason, owner, next action and wake source.
   A changed head, base, scope or readiness invalidates the release; retain the
   superseded evidence and recompute. Older entries without this evidence are
