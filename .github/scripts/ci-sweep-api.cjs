@@ -52,16 +52,14 @@ function createSweepApi({github,now=Date.now,limits={},fetchImpl=fetch}) {
   async function paginate(route,args={}) {
     const all=[],seen=new Set();let expected;
     function gap() {problem('pagination-gap');throw new SweepError('pagination-gap');}
-    for(let page=1;;page++) {
-      const response=await request(route,{...args,per_page:100,page});
-      const data=response.data;
-      const rows=Array.isArray(data) ? data : data?.jobs ?? data?.workflow_runs ?? data?.workflows;
-      if(!Array.isArray(rows)) {problem('invalid-page');throw new SweepError('invalid-page');}
-      if(data?.total_count!==undefined) {
-        if(!Number.isSafeInteger(data.total_count)||data.total_count<0)gap();
-        if(expected!==undefined && expected!==data.total_count)gap();
-        expected=data.total_count;
-      }
+    const rowsOf=data=>Array.isArray(data) ? data : data?.jobs ?? data?.workflow_runs ?? data?.workflows;
+    function trackExpected(data) {
+      if(data?.total_count===undefined)return;
+      if(!Number.isSafeInteger(data.total_count)||data.total_count<0)gap();
+      if(expected!==undefined && expected!==data.total_count)gap();
+      expected=data.total_count;
+    }
+    function acceptRows(rows) {
       const before=all.length;
       for(const row of rows) {
         if(!row || typeof row!=='object' || Array.isArray(row)) {problem('invalid-page');throw new SweepError('invalid-page');}
@@ -69,6 +67,15 @@ function createSweepApi({github,now=Date.now,limits={},fetchImpl=fetch}) {
         if(key!==undefined) {if(seen.has(key))continue;seen.add(key);}
         all.push(row);
       }
+      return before;
+    }
+    for(let page=1;;page++) {
+      const response=await request(route,{...args,per_page:100,page});
+      const data=response.data;
+      const rows=rowsOf(data);
+      if(!Array.isArray(rows)) {problem('invalid-page');throw new SweepError('invalid-page');}
+      trackExpected(data);
+      const before=acceptRows(rows);
       const next=/(?:^|,)\s*<[^>]+>;\s*rel="next"/.test(response.headers?.link || '');
       if(expected!==undefined) {
         if(all.length===expected && !next)return all;
