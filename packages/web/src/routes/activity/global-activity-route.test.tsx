@@ -1,13 +1,15 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter, Route, Routes, useParams } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
+import { ProjectScopeProvider } from '@/api/project-scope-context'
 import { jsonResponse } from '@/test/fetch-routes'
 
 import { ACTIVITY_WAIT_KIND, RUN_STATUS, iso, project, request, run, snapshot, worker } from './activity.testkit'
 import { GlobalActivityRoute } from './global-activity-route'
+import { ProjectActivityRoute } from './activity-route'
 
 const fetchMock = vi.fn<typeof fetch>()
 
@@ -41,19 +43,31 @@ const registryEntry = (id: string) => ({ id, name: id, root: `/home/me/${id}`, a
 
 function serve({ body = SNAPSHOT, status = 200, order = ['gamma', 'alpha'] }: { body?: unknown; status?: number; order?: string[] } = {}) {
   fetchMock.mockImplementation(async (input) => {
-    const path = new URL(String(input), 'http://cockpit.test').pathname
-    if (path === '/api/v1/workspace/activity') return jsonResponse(body, status)
+    const url = new URL(String(input), 'http://cockpit.test')
+    const path = url.pathname
+    if (path === '/api/v1/workspace/activity') {
+      const id = url.searchParams.get('project')
+      return jsonResponse(id ? snapshot(...SNAPSHOT.projects.filter((project) => project.projectId === id)) : body, status)
+    }
     if (path === '/api/v1/projects') return jsonResponse({ projects: ['alpha', 'beta', 'gamma', 'delta', 'eps'].map(registryEntry), bootProject: 'alpha', projectsDir: '~/projects' })
     if (path === '/api/v1/workspace/ui-state') return jsonResponse({ sidebar: { projectOrder: order } })
     return jsonResponse({ error: 'not found' }, 404)
   })
 }
 
-function renderRoute() {
+function ScopedActivity() {
+  const { projectId = '' } = useParams()
+  return <ProjectScopeProvider projectId={projectId}><ProjectActivityRoute /></ProjectScopeProvider>
+}
+
+function renderRoute(pathname = '/activity', state?: unknown) {
   return render(
     <QueryClientProvider client={createQueryClient()}>
-      <MemoryRouter initialEntries={['/activity']}>
-        <GlobalActivityRoute />
+      <MemoryRouter initialEntries={[{ pathname, state }]}>
+        <Routes>
+          <Route path="/activity" element={<GlobalActivityRoute />} />
+          <Route path="/p/:projectId/activity" element={<ScopedActivity />} />
+        </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   )
@@ -66,6 +80,34 @@ const chip = (label: string) => document.querySelector(`[data-chip="${label}"]`)
 const lineText = (el: HTMLElement) => Array.from(el.querySelectorAll('[data-slot="activity-line-text"] li')).map((li) => li.textContent)
 
 describe('GlobalActivityRoute', () => {
+  it.each(['gamma', 'delta'])('returns to %s after switching to All projects, rather than boot project alpha', async (projectId) => {
+    serve()
+    renderRoute(`/p/${projectId}/activity`)
+    await screen.findByRole('heading', { level: 1, name: `Activity · ${projectId}` })
+
+    fireEvent.click(screen.getByRole('link', { name: 'All projects' }))
+    await screen.findByRole('heading', { level: 1, name: 'Activity · All projects' })
+    const back = await screen.findByRole('link', { name: 'This project' })
+    expect(back.getAttribute('href')).toBe(`/p/${projectId}/activity`)
+    fireEvent.click(back)
+    expect(await screen.findByRole('heading', { level: 1, name: `Activity · ${projectId}` })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'This project' }).getAttribute('aria-current')).toBe('page')
+  })
+
+  it('restores the originating project from the global history entry', async () => {
+    serve()
+    renderRoute('/activity', { activityProjectId: 'gamma' })
+    await screen.findByRole('heading', { level: 2, name: 'gamma' })
+    expect(screen.getByRole('link', { name: 'This project' }).getAttribute('href')).toBe('/p/gamma/activity')
+  })
+
+  it.each([null, 'gamma', { activityProjectId: 123 }, { activityProjectId: 'removed' }])('keeps the boot fallback for unusable history state %j', async (state) => {
+    serve()
+    renderRoute('/activity', state)
+    await screen.findByRole('heading', { level: 2, name: 'gamma' })
+    expect(screen.getByRole('link', { name: 'This project' }).getAttribute('href')).toBe('/p/alpha/activity')
+  })
+
   it('shows one panel per project with work or a notice, in project-rail order', async () => {
     serve()
     renderRoute()
