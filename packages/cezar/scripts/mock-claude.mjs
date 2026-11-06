@@ -138,7 +138,12 @@ async function respond(userText, imageCount, uuid) {
     return;
   }
   if (await replyToScenario('crash-stderr', userText, uuid)) return;
-  if (await replyToScenario('deferred-turn-start', userText, uuid)) return;
+  if (await replyToScenario('deferred-turn-start', userText, uuid, imageCount)) return;
+  return respondRead(userText, imageCount, uuid);
+}
+
+/** Input is read after any native refusal, crash or deferred-start gate. */
+async function respondRead(userText, imageCount, uuid) {
   emitReplay(uuid, userText);
   // Early scenarios do not advance the ordinary turn counter.
   if (await dispatchReply(earlyReplies, userText, uuid)) return;
@@ -619,14 +624,14 @@ function namedScenario(name, prompt) {
   }
 }
 
-async function replyToScenario(name, prompt, uuid) {
+async function replyToScenario(name, prompt, uuid, imageCount = 0) {
   const scenario = namedScenario(name, prompt);
   if (!scenario) return false;
-  return await play(scenario, scenarioEncoder(scenario, prompt, uuid)) !== 'continue';
+  return await play(scenario, scenarioEncoder(scenario, prompt, uuid, undefined, imageCount)) !== 'continue';
 }
 
 /** Stream-json keeps its own envelopes, usage, replay acknowledgements and tool ids. */
-function scenarioEncoder(scenario, prompt, uuid, parent) {
+function scenarioEncoder(scenario, prompt, uuid, parent, imageCount = 0) {
   const name = scenario.name;
   let texts = [];
   let acknowledgedOnly = false;
@@ -636,18 +641,16 @@ function scenarioEncoder(scenario, prompt, uuid, parent) {
   return {
     closeInput: () => closeSync(0),
     open(step) {
+      if (['cezar-done', 'cezar-ask', 'cezar-wait'].includes(name) && turn === 1 && !step.acknowledged) {
+        writeNotesTrace(prompt);
+        writeHandoff();
+      }
       if (name === 'ack-only' && uuid) heldUuids.push(uuid);
       if (name === 'silent-tail' && step.ackOnly) acknowledgedOnly = true;
       if (name === 'steer-tool') steering = [];
-      if (name === 'deferred-turn-start' && !step.ackOnly) emitReplay(uuid, prompt);
     },
     hold: () => holdSteerTool(),
-    async reply() {
-      turn += 1;
-      const markers = await markersFor(prompt);
-      if (turn === 1) await replyWithFirstTurn(prompt, markers);
-      else await replyWithFollowup(prompt, 0, markers);
-    },
+    reply: () => respondRead(prompt, imageCount, uuid),
     text(step) {
       const value = step.parts.join('') + (['cezar-done', 'cezar-ask', 'cezar-wait'].includes(name) ? referenceMarkers(prompt) : '');
       texts.push(value);
@@ -656,7 +659,10 @@ function scenarioEncoder(scenario, prompt, uuid, parent) {
         for (const line of value.split('\n')) frame('assistant', [{ type: 'text', text: line }]);
       } else frame('assistant', [{ type: 'text', text: value }], usage);
     },
-    reasoning(step) { frame('assistant', [{ type: 'thinking', thinking: step.text }]); },
+    reasoning(step) {
+      if (name === 'multi-pr-refs') emit({ type: 'assistant', parent_tool_use_id: 'multi-read', message: { role: 'assistant', content: [{ type: 'text', text: step.text }] } });
+      frame('assistant', [{ type: 'thinking', thinking: step.text }]);
+    },
     toolStart({ call }) {
       const native = nativeScenarioTool(call);
       frame('assistant', [{ type: 'tool_use', id: native.id, name: native.name, input: native.input }]);
