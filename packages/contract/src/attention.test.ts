@@ -571,6 +571,13 @@ describe('attention boundary cases', () => {
     expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [makeSubagentWait({ phase: WAIT_PHASE.resolved })] }).rung).toBe('waiting-for-capacity');
   });
 
+  // hearsay-tools/cezarion#2588: a child two open entries name is one running subagent.
+  it('counts each running subagent once across open subagent waits', () => {
+    const first = makeSubagentWait({ children: [{ id: 'a', status: SUBAGENT_STATUS.running }] });
+    const second = makeSubagentWait({ id: '66666666-6666-4666-8666-666666666662', children: [{ id: 'a', status: SUBAGENT_STATUS.running }, { id: 'b', status: SUBAGENT_STATUS.running }] });
+    expect(computeWaitingOn({ waits: [first, second] })).toEqual({ kind: 'subagents', count: 2 });
+  });
+
   it.each([0, 1, 2])('labels %i peer tasks and preserves the webhook catch-all', count => {
     const input: AttentionInput = { status: RUN_STATUS.waiting, waitingOn: { kind: 'peers', count } };
     expect(deriveAttention(input).label).toBe(['waiting on tasks', 'waiting on 1 task', 'waiting on 2 tasks'][count]);

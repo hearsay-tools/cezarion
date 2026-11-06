@@ -579,7 +579,8 @@ export function computeWaitingOn(run: WaitingOnInput): WaitingOn | undefined {
   const peerWaits = open.filter((wait): wait is PeerWaitEntry => wait.kind === 'peer');
   if (peerWaits.length) return { kind: 'peers', count: new Set(peerWaits.flatMap((wait) => wait.peerIds)).size };
   const subagentWaits = open.filter((wait): wait is SubagentWaitEntry => wait.kind === 'subagent');
-  if (subagentWaits.length) return { kind: 'subagents', count: subagentWaits.reduce((sum, wait) => sum + runningSubagents(wait), 0) };
+  // Each running child once, however many open entries name it (hearsay-tools/cezarion#2588).
+  if (subagentWaits.length) return { kind: 'subagents', count: new Set(subagentWaits.flatMap((wait) => wait.children.filter((child) => child.status === 'running').map((child) => child.id))).size };
   const pr = earliest(open.filter((wait): wait is PrWaitEntry => wait.kind === 'pr'));
   if (pr) {
     return { kind: 'pr', until: pr.until, waitId: pr.id, prUrl: pr.prUrl, repository: pr.repository, prNumber: pr.prNumber, deadline: pr.deadline };

@@ -85,9 +85,11 @@ function humanWait(run: RunRecord): ActivityWait {
 }
 
 /** Completion and reply waits, both kind `worker`. `owed` is `computeWaitingOn`'s count; the bar
- *  sums the same per-entry targets. A mode is shown only for one entry. */
+ *  counts the same targets, each worker or request once however many entries name it
+ *  (hearsay-tools/cezarion#2588). A mode is shown only for one entry. */
 function workersWait(entries: readonly WorkerWaitEntry[], owed: number, replies: boolean, ledger: ConversationState | undefined): ActivityWait {
-  const total = entries.reduce((sum, entry) => sum + (entry.workerIds ?? entry.requestIds ?? []).length, 0);
+  const total = new Set(entries.flatMap((entry) => entry.requestIds
+    ? entry.requestIds.map((id) => `request:${id}`) : (entry.workerIds ?? []).map((id) => `worker:${id}`))).size;
   const recipients = new Map((ledger?.messages ?? []).map((message) => [message.id, message.recipientRunId]));
   const recipientRunIds = new Set<string>();
   for (const entry of entries) {
