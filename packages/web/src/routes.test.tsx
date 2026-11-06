@@ -521,6 +521,8 @@ describe('legacy flat URLs redirect to the boot project', () => {
     referenceStatuses: {},
     perProjectLimit: 50,
     truncated: [],
+    generation: 'test-generation',
+    eventSeq: 0,
   })
 
   it('resolves the owning project for a flat task link of a non-boot run', () => {

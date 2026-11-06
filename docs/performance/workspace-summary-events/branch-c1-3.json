@@ -1,0 +1,301 @@
+{
+  "benchmark": "workspace-events",
+  "at": "2026-11-06T10:06:35.622Z",
+  "node": "v24.22.1",
+  "cpus": 24,
+  "cpuModel": "AMD Ryzen 9 5950X 16-Core Processor",
+  "summaryModeSupported": true,
+  "options": {
+    "children": 6,
+    "events": 300,
+    "rate": 40,
+    "connections": 1,
+    "parentKb": 256,
+    "childKb": 16
+  },
+  "sizes": {
+    "parentRecordBytes": 264675,
+    "workerRecordBytes": 17312,
+    "parentSummaryBytes": 250
+  },
+  "phases": [
+    {
+      "name": "none",
+      "url": null,
+      "detailOpen": false,
+      "events": 300,
+      "connections": 0,
+      "frameKinds": [],
+      "loadavgBefore": [
+        21.9,
+        39.33,
+        40.59
+      ],
+      "loadavgAfter": [
+        21.03,
+        38.86,
+        40.43
+      ],
+      "serverDispatchMs": {
+        "n": 300,
+        "p50": 0.101,
+        "p95": 0.188,
+        "total": 37.887
+      },
+      "processCpuMs": 234.062,
+      "eventBytes": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "total": 0
+      },
+      "clientParseMs": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "total": 0
+      },
+      "detailFetches": {
+        "count": 0,
+        "bytes": 0,
+        "latencyMs": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "total": 0
+        }
+      },
+      "totalBytes": 0,
+      "runsIndexLatencyMs": {
+        "n": 33,
+        "p50": 1.614,
+        "p95": 2.991,
+        "total": 56.304
+      }
+    },
+    {
+      "name": "full/detail-closed",
+      "url": "/api/v1/workspace/events",
+      "detailOpen": false,
+      "events": 300,
+      "connections": 1,
+      "frameKinds": [
+        "run"
+      ],
+      "loadavgBefore": [
+        21.03,
+        38.86,
+        40.43
+      ],
+      "loadavgAfter": [
+        20.21,
+        38.11,
+        40.17
+      ],
+      "serverDispatchMs": {
+        "n": 300,
+        "p50": 0.207,
+        "p95": 1.195,
+        "total": 107.252
+      },
+      "processCpuMs": 460.7,
+      "eventBytes": {
+        "n": 300,
+        "p50": 17372,
+        "p95": 264760,
+        "total": 14612234
+      },
+      "clientParseMs": {
+        "n": 300,
+        "p50": 0.023,
+        "p95": 0.457,
+        "total": 27.562
+      },
+      "detailFetches": {
+        "count": 0,
+        "bytes": 0,
+        "latencyMs": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "total": 0
+        }
+      },
+      "totalBytes": 14612234,
+      "runsIndexLatencyMs": {
+        "n": 33,
+        "p50": 1.915,
+        "p95": 5.244,
+        "total": 77.823
+      }
+    },
+    {
+      "name": "full/detail-open",
+      "url": "/api/v1/workspace/events",
+      "detailOpen": true,
+      "events": 300,
+      "connections": 1,
+      "frameKinds": [
+        "run"
+      ],
+      "loadavgBefore": [
+        20.21,
+        38.11,
+        40.17
+      ],
+      "loadavgAfter": [
+        21.51,
+        37.79,
+        40.04
+      ],
+      "serverDispatchMs": {
+        "n": 300,
+        "p50": 0.201,
+        "p95": 1.143,
+        "total": 107.281
+      },
+      "processCpuMs": 484.883,
+      "eventBytes": {
+        "n": 300,
+        "p50": 17372,
+        "p95": 264760,
+        "total": 14612234
+      },
+      "clientParseMs": {
+        "n": 300,
+        "p50": 0.023,
+        "p95": 0.425,
+        "total": 20.995
+      },
+      "detailFetches": {
+        "count": 1,
+        "bytes": 264723,
+        "latencyMs": {
+          "n": 1,
+          "p50": 2.551,
+          "p95": 2.551,
+          "total": 2.551
+        }
+      },
+      "totalBytes": 14876957,
+      "runsIndexLatencyMs": {
+        "n": 33,
+        "p50": 1.848,
+        "p95": 5.672,
+        "total": 80.271
+      }
+    },
+    {
+      "name": "summary/detail-closed",
+      "url": "/api/v1/workspace/events?runs=summary",
+      "detailOpen": false,
+      "events": 300,
+      "connections": 1,
+      "frameKinds": [
+        "run-summary"
+      ],
+      "loadavgBefore": [
+        21.51,
+        37.79,
+        40.04
+      ],
+      "loadavgAfter": [
+        21.46,
+        37.51,
+        39.94
+      ],
+      "serverDispatchMs": {
+        "n": 300,
+        "p50": 0.253,
+        "p95": 0.441,
+        "total": 83.167
+      },
+      "processCpuMs": 319.645,
+      "eventBytes": {
+        "n": 300,
+        "p50": 412,
+        "p95": 412,
+        "total": 122901
+      },
+      "clientParseMs": {
+        "n": 300,
+        "p50": 0.022,
+        "p95": 0.047,
+        "total": 14.038
+      },
+      "detailFetches": {
+        "count": 0,
+        "bytes": 0,
+        "latencyMs": {
+          "n": 0,
+          "p50": null,
+          "p95": null,
+          "total": 0
+        }
+      },
+      "totalBytes": 122901,
+      "runsIndexLatencyMs": {
+        "n": 33,
+        "p50": 1.96,
+        "p95": 5.308,
+        "total": 78.822
+      }
+    },
+    {
+      "name": "summary/detail-open",
+      "url": "/api/v1/workspace/events?runs=summary",
+      "detailOpen": true,
+      "events": 300,
+      "connections": 1,
+      "frameKinds": [
+        "run-summary"
+      ],
+      "loadavgBefore": [
+        21.46,
+        37.51,
+        39.94
+      ],
+      "loadavgAfter": [
+        23.07,
+        37.33,
+        39.85
+      ],
+      "serverDispatchMs": {
+        "n": 300,
+        "p50": 0.274,
+        "p95": 0.474,
+        "total": 93.372
+      },
+      "processCpuMs": 664.26,
+      "eventBytes": {
+        "n": 300,
+        "p50": 412,
+        "p95": 412,
+        "total": 122920
+      },
+      "clientParseMs": {
+        "n": 300,
+        "p50": 0.023,
+        "p95": 0.05,
+        "total": 18.477
+      },
+      "detailFetches": {
+        "count": 21,
+        "bytes": 5559175,
+        "latencyMs": {
+          "n": 21,
+          "p50": 2.179,
+          "p95": 4.211,
+          "total": 54.464
+        }
+      },
+      "totalBytes": 5682095,
+      "runsIndexLatencyMs": {
+        "n": 32,
+        "p50": 2.288,
+        "p95": 9.279,
+        "total": 153.751
+      }
+    }
+  ]
+}

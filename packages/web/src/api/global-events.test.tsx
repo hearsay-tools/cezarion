@@ -16,7 +16,7 @@ import { TaskQuickList } from '../components/task-quick-list'
 import { HandoffAction } from '../routes/task-thread/handoff-action'
 import { RunNotifications } from '../components/run-notifications'
 import { TasksOverview } from '../routes/tasks-overview'
-import type { ApiRun, ProviderStatusResponse, RunRecord } from '@open-mercato/cezar-api-client'
+import type { ApiRun, ProviderStatusResponse, RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
 
 // Reducer/lifecycle tests control named frames at the adapter seam. Actual ownership and
 // finite fallback are tested in live-coordinator and the browser suite.
@@ -128,10 +128,25 @@ const CONNECTED_PROVIDERS: ProviderStatusResponse = {
   ],
 }
 
-/** A `run` frame as the workspace stream sends it (step 2.8): the record with a `project`
- *  stamp riding along, which the parser strips back off before the reducers see it. */
-function stampedRun(record: RunRecord, project = BOOT): string {
-  return JSON.stringify({ ...record, project })
+/** The workspace stream's process-wide frame number (hearsay-tools/cezarion#2730). Every helper
+ *  frame takes the next one, so a test sees contiguous numbers unless it skips one on purpose. */
+let frameSeq = 0
+
+/** The digest a server computes is opaque; this one changes exactly when the fields the
+ *  relationships route renders change, which is all the refresher compares. */
+function relationshipsDigestOf(record: RunRecord): string {
+  return JSON.stringify([record.status, record.currentStepId, record.delegation])
+}
+
+/** A `run-summary` frame as the summary-mode workspace stream sends it: the record's list row,
+ *  its project stamp, the next `seq` and the relationships digest. */
+function stampedRun(record: RunRecord, project = BOOT, seq = ++frameSeq): string {
+  return JSON.stringify({ project, seq, run: toRunSummary(record), relationships: relationshipsDigestOf(record) })
+}
+
+/** A numbered `run-deleted` frame. */
+function stampedDeleted(id: string, project = BOOT, seq = ++frameSeq): string {
+  return JSON.stringify({ project, seq, id })
 }
 
 let client: QueryClient
@@ -192,10 +207,10 @@ afterEach(() => {
 })
 
 describe('useGlobalEvents — connection', () => {
-  it('opens exactly one stream, at /api/v1/workspace/events', () => {
+  it('opens exactly one stream, at /api/v1/workspace/events in summary mode', () => {
     mount()
     expect(FakeEventSource.instances).toHaveLength(1)
-    expect(FakeEventSource.last.url).toBe('/api/v1/workspace/events')
+    expect(FakeEventSource.last.url).toBe('/api/v1/workspace/events?runs=summary')
     expect(FakeEventSource.last.init).toEqual({ withCredentials: true })
   })
 
@@ -233,11 +248,11 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const second = deferredResponse()
     vi.mocked(fetch).mockReturnValueOnce(first.promise).mockReturnValue(second.promise)
     const { source } = mount()
-    source.emit('run', stampedRun({ ...a, archived: true }))
+    source.emit('run-summary', stampedRun({ ...a, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...a }, { ...b }])
     act(() => vi.advanceTimersByTime(50))
     expect(fetch).toHaveBeenCalledTimes(1)
-    source.emit('run', stampedRun({ ...b, tokensUsed: 42 }))
+    source.emit('run-summary', stampedRun({ ...b, tokensUsed: 42 }))
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
 
     list.unmount()
@@ -256,7 +271,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const run = runRecord('r1')
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
     const { source } = mount()
-    source.emit('run', stampedRun({ ...run, archived: true }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...run }])
     act(() => vi.advanceTimersByTime(50))
     await act(async () => { await client.resetQueries({ queryKey: queryKeys.runs.list(), exact: true }) })
@@ -284,9 +299,9 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const { source } = mount()
     await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) })
     expect(fetch).toHaveBeenCalledTimes(1)
-    source.emit('run', stampedRun({ ...a, archived: true }))
+    source.emit('run-summary', stampedRun({ ...a, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [a, { ...b, seenAt: '2026-09-28T01:00:00.000Z' }])
-    source.emit('run', stampedRun({ ...b, seenAt: '2026-09-28T01:00:00.000Z', tokensUsed: 42 }))
+    source.emit('run-summary', stampedRun({ ...b, seenAt: '2026-09-28T01:00:00.000Z', tokensUsed: 42 }))
 
     expect(fetch).toHaveBeenCalledTimes(2)
     expect(vi.mocked(fetch).mock.calls[0]?.[1]?.signal?.aborted).toBe(true)
@@ -306,7 +321,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const run = runRecord('r1')
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
     const { source } = mount()
-    source.emit('run', stampedRun({ ...run, archived: true }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...run }])
     act(() => vi.advanceTimersByTime(50))
     client.removeQueries({ queryKey: queryKeys.runs.list(), exact: true })
@@ -318,7 +333,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     renderHook(() => useRuns(), { wrapper })
     await act(async () => fresh.resolve(json([{ ...run, archived: true }])))
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(false)
-    source.emit('run', stampedRun({ ...run, archived: true, status: RUN_STATUS.done }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true, status: RUN_STATUS.done }))
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(false)
     expect(fetch).toHaveBeenCalledTimes(1)
   })
@@ -334,14 +349,14 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     renderHook(() => useRuns(), { wrapper })
     vi.mocked(fetch).mockRejectedValueOnce(new Error('offline'))
     const { source } = mount()
-    source.emit('run', stampedRun({ ...a, archived: true }))
+    source.emit('run-summary', stampedRun({ ...a, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...a }, { ...b }])
     await act(async () => { await vi.advanceTimersByTimeAsync(50) })
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
 
     const fresh = deferredResponse()
     vi.mocked(fetch).mockReturnValue(fresh.promise)
-    source.emit('run', stampedRun({ ...b, tokensUsed: 42 }))
+    source.emit('run-summary', stampedRun({ ...b, tokensUsed: 42 }))
     expect(fetch).toHaveBeenCalledTimes(2)
     await act(async () => fresh.resolve(json([{ ...a, archived: true }, b])))
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(false)
@@ -361,17 +376,17 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     renderHook(() => useRuns(), { wrapper })
     vi.mocked(fetch).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise).mockReturnValue(trailing.promise)
     const { source } = mount()
-    source.emit('run', stampedRun({ ...a, archived: true }))
+    source.emit('run-summary', stampedRun({ ...a, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...a }, b, c])
     act(() => vi.advanceTimersByTime(50))
     expect(fetch).toHaveBeenCalledTimes(1)
 
-    source.emit('run', stampedRun({ ...c, archived: true }))
+    source.emit('run-summary', stampedRun({ ...c, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [a, { ...b, seenAt: '2026-09-28T01:00:00.000Z' }, c])
-    source.emit('run', stampedRun({ ...b, tokensUsed: 42 }))
+    source.emit('run-summary', stampedRun({ ...b, tokensUsed: 42 }))
     expect(fetch).toHaveBeenCalledTimes(2)
     expect(vi.mocked(fetch).mock.calls[0]?.[1]?.signal?.aborted).toBe(true)
-    source.emit('run', stampedRun({ ...b, tokensUsed: 43 }))
+    source.emit('run-summary', stampedRun({ ...b, tokensUsed: 43 }))
     expect(fetch).toHaveBeenCalledTimes(2)
 
     await act(async () => first.resolve(json([a, b, c])))
@@ -393,10 +408,10 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const b = runRecord('b')
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [a, b])
     const { source } = mount()
-    source.emit('run', stampedRun({ ...a, archived: true }))
+    source.emit('run-summary', stampedRun({ ...a, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...a }, { ...b }])
-    source.emit('run', stampedRun({ ...a, status: RUN_STATUS.done, archived: true }))
-    source.emit('run', stampedRun({ ...b, tokensUsed: 42 }))
+    source.emit('run-summary', stampedRun({ ...a, status: RUN_STATUS.done, archived: true }))
+    source.emit('run-summary', stampedRun({ ...b, tokensUsed: 42 }))
     act(() => vi.advanceTimersByTime(50))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(false)
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
@@ -421,13 +436,13 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const trailing = deferredResponse()
     vi.mocked(fetch).mockReturnValueOnce(fresh.promise).mockReturnValue(trailing.promise)
     const { source } = mount()
-    source.emit('run', stampedRun({ ...a, archived: true }))
+    source.emit('run-summary', stampedRun({ ...a, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...a }, { ...b }])
     act(() => vi.advanceTimersByTime(50))
     expect(fetch).toHaveBeenCalledTimes(1)
 
     for (let tokensUsed = 40; tokensUsed <= 42; tokensUsed++) {
-      source.emit('run', stampedRun({ ...b, tokensUsed }))
+      source.emit('run-summary', stampedRun({ ...b, tokensUsed }))
     }
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(vi.mocked(fetch).mock.calls[0]?.[1]?.signal?.aborted).toBe(false)
@@ -443,7 +458,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[1]?.tokensUsed).toBe(42)
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(false)
 
-    source.emit('run', stampedRun({ ...b, tokensUsed: 43 }))
+    source.emit('run-summary', stampedRun({ ...b, tokensUsed: 43 }))
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
@@ -453,7 +468,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const run = runRecord('r1')
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
     const { source, unmount } = mount()
-    source.emit('run', stampedRun({ ...run, archived: true }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...run, tokensUsed: 1 }])
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     unmount() // flushes the ambiguous archive, then removes the cache subscription
@@ -476,7 +491,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const count = client.getQueryState(queryKeys.runs.list())?.dataUpdateCount
     renderHook(() => useRuns(), { wrapper })
     const { source } = mount()
-    source.emit('run', stampedRun({ ...run, archived: true, archivedAt: '2026-09-28T00:00:00.000Z' }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true, archivedAt: '2026-09-28T00:00:00.000Z' }))
 
     await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) })
     await act(async () => response.resolve(json([{ ...run }])))
@@ -495,7 +510,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const list = [run]
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), list)
     const { source } = mount()
-    source.emit('run', stampedRun({ ...run, archived: true }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true }))
     client.removeQueries({ queryKey: queryKeys.runs.list(), exact: true })
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), list)
 
@@ -512,11 +527,11 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const run = runRecord('r1', { status: RUN_STATUS.running })
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
     const { source } = mount()
-    source.emit('run', stampedRun({ ...run, archived: true }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...run, archived: true, title: 'REST title' }])
     const invalidate = vi.spyOn(client, 'invalidateQueries')
 
-    source.emit('run', stampedRun({ ...run, archived: true, status: RUN_STATUS.done, title: 'Worker finished' }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true, status: RUN_STATUS.done, title: 'Worker finished' }))
     act(() => vi.advanceTimersByTime(100))
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]).toMatchObject({
@@ -533,7 +548,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const run = runRecord('r1', { status: RUN_STATUS.done })
     client.setQueryData(queryKeys.runs.list(), [run])
     const { source } = mount()
-    source.emit('run', stampedRun({ ...run, archived: true }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true }))
     client.setQueryData(queryKeys.runs.list(), [])
 
     act(() => vi.advanceTimersByTime(50))
@@ -548,7 +563,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const run = runRecord('r1', { status: RUN_STATUS.done })
     client.setQueryData(queryKeys.runs.list(), [run])
     const { source } = mount()
-    source.emit('run', stampedRun({ ...run, archived: true }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true }))
     client.setQueryData(queryKeys.runs.list(), [{ ...run, title: 'Renamed after unarchive', archived: false }])
 
     act(() => vi.advanceTimersByTime(50))
@@ -570,7 +585,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) }) // starts before the event
     expect(fetch).toHaveBeenCalledTimes(1)
     const { source } = mount()
-    source.emit('run', stampedRun({ ...run, archived: true }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true }))
 
     await act(async () => stale.resolve(json([{ ...run, tokensUsed: 42 }])))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.tokensUsed).toBe(42)
@@ -617,7 +632,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     render(<QueryClientProvider client={client}><LiveOverview /></QueryClientProvider>)
     const baseline = overviewCommits
 
-    for (const run of runs) FakeEventSource.last.emit('run', stampedRun({ ...run, archived: true }))
+    for (const run of runs) FakeEventSource.last.emit('run-summary', stampedRun({ ...run, archived: true }))
     await act(async () => {})
     expect(overviewCommits).toBe(baseline)
     await waitFor(() => expect(overviewCommits - baseline).toBeGreaterThanOrEqual(1))
@@ -645,7 +660,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const baseline = renders
 
     for (const run of original) {
-      FakeEventSource.last.emit('run', stampedRun({ ...run, archived: true, archivedAt: '2026-09-28T00:00:00.000Z' }))
+      FakeEventSource.last.emit('run-summary', stampedRun({ ...run, archived: true, archivedAt: '2026-09-28T00:00:00.000Z' }))
     }
     await act(async () => {})
     expect(listWrites).toBe(0)
@@ -665,10 +680,12 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     client.setQueryData(queryKeys.runs.detail('r1'), { ...run, finishBlocked: null })
     const { source, unmount } = mount()
 
-    source.emit('run', stampedRun({ ...run, archived: true }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true }))
 
-    expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.archived).toBe(true)
+    // The detail drops its verdict at once; the record itself comes from its own GET, never
+    // from the summary (hearsay-tools/cezarion#2730).
     expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeUndefined()
+    expect(client.getQueryState(queryKeys.runs.detail('r1'))?.isInvalidated).toBe(true)
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(false)
     unmount()
   })
@@ -680,8 +697,8 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
     const { source } = mount()
 
-    source.emit('run', stampedRun({ ...run, archived: true }))
-    source.emit('run-deleted', JSON.stringify({ id: run.id, project: BOOT }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true }))
+    source.emit('run-deleted', stampedDeleted(run.id, BOOT))
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
     await new Promise(resolve => setTimeout(resolve, 70))
@@ -695,9 +712,9 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     client.setQueryData<ApiRun[]>(['other-project', 'runs', 'list'], [])
     const { source, unmount } = mount()
 
-    source.emit('run', stampedRun(runRecord('boot-run', { archived: true }), BOOT))
+    source.emit('run-summary', stampedRun(runRecord('boot-run', { archived: true }), BOOT))
     setApiScope('other-project')
-    source.emit('run', stampedRun(runRecord('other-run', { archived: true }), 'other-project'))
+    source.emit('run-summary', stampedRun(runRecord('other-run', { archived: true }), 'other-project'))
     unmount() // cleanup must commit pending updates, not leave stale cache behind
 
     expect(client.getQueryData<ApiRun[]>(['default', 'runs', 'list'])?.map(run => run.id)).toEqual(['boot-run'])
@@ -712,7 +729,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const { source } = mount()
     source.open()
 
-    source.emit('run', stampedRun({ ...run, archived: true }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true }))
     source.drop()
     source.open()
 
@@ -727,7 +744,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const { source } = mount()
 
     setVisibility('hidden')
-    source.emit('run', stampedRun({ ...run, archived: true }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true }))
     setVisibility('visible')
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(true)
@@ -739,7 +756,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const run = runRecord('r1', { status: RUN_STATUS.done })
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
     const { source } = mount()
-    source.emit('run', stampedRun({ ...run, archived: true, archivedAt: '2026-09-28T00:00:00.000Z' }))
+    source.emit('run-summary', stampedRun({ ...run, archived: true, archivedAt: '2026-09-28T00:00:00.000Z' }))
 
     // The mutation's authoritative refetch may finish before the animation frame.
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{
@@ -759,7 +776,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [worker])
     const { source } = mount()
 
-    source.emit('run', stampedRun({ ...worker, status: RUN_STATUS.done, title: 'Worker finished' }))
+    source.emit('run-summary', stampedRun({ ...worker, status: RUN_STATUS.done, title: 'Worker finished' }))
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.status).toBe('done')
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.title).toBe('Worker finished')
@@ -798,7 +815,7 @@ describe('useGlobalEvents — back/forward cache', () => {
     firePageShow(true)
 
     expect(FakeEventSource.instances).toHaveLength(1)
-    expect(FakeEventSource.last.url).toBe('/api/v1/workspace/events')
+    expect(FakeEventSource.last.url).toBe('/api/v1/workspace/events?runs=summary')
   })
 
   it('does nothing on the pageshow of a normal load', () => {
@@ -810,12 +827,22 @@ describe('useGlobalEvents — back/forward cache', () => {
   })
 })
 
+/** A delegation parent's id: the worker's slim delegation names its parent by UUID. */
+const PARENT_ID = '7d4b2f0e-3c1a-4e5b-9f6d-2a8c0b1e4d3f'
+
+function workerRecord(parentRunId: string, id = 'worker'): RunRecord {
+  return runRecord(id, {
+    delegation: { role: 'worker', parentRunId, permissions: [],
+      workspace: { ownerRunId: id, resourceId: id, kind: 'owned-isolated', path: `/${id}`, branch: id, baselineSha: 'a'.repeat(40) } },
+  })
+}
+
 describe('useGlobalEvents — run events', () => {
   it('upserts a run into the list cache without refetching', () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('r1', { status: RUN_STATUS.queued })))
+    source.emit('run-summary', stampedRun(runRecord('r1', { status: RUN_STATUS.queued })))
 
     // A list row is the summary of the streamed record (#817), never the record itself.
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([
@@ -825,7 +852,7 @@ describe('useGlobalEvents — run events', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it.each(['own', 'worker'])('coalesces %s detail updates and keeps stale permission hidden during a burst', async kind => {
+  it('fetches an observed detail at once, then at most one trailing fetch per 400 ms under a burst (D1)', async () => {
     vi.useFakeTimers()
     try {
       const run = { ...runRecord('r1', { status: RUN_STATUS.waiting }), finishBlocked: null }
@@ -833,53 +860,82 @@ describe('useGlobalEvents — run events', () => {
       vi.mocked(fetch).mockImplementation(async () => json(run))
       renderHook(() => useRun('r1'), { wrapper })
       const { source } = mount()
-      for (let i = 0; i < 20; i++) {
-        source.emit('run', stampedRun(kind === 'own' ? runRecord('r1', { status: RUN_STATUS.waiting }) : runRecord('worker', {
-          delegation: { role: 'worker', parentRunId: 'r1', permissions: [],
-            workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated', path: '/worker', branch: 'worker', baselineSha: 'a'.repeat(40) } },
-        })))
+      const detailGets = () => vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/runs/r1')).length
+
+      source.emit('run-summary', stampedRun(runRecord('r1', { status: RUN_STATUS.waiting })))
+      // About one round trip after the event, not after the burst settles.
+      expect(detailGets()).toBe(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(20) })
+      // That fetch started after the latest event, so its verdict stands.
+      expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeNull()
+      for (let i = 1; i < 20; i++) {
+        source.emit('run-summary', stampedRun(runRecord('r1', { status: RUN_STATUS.waiting, tokensUsed: i })))
         await act(async () => { await vi.advanceTimersByTimeAsync(20) })
-        expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeUndefined()
+        // Every later event hides Finish until a fetch started after it answers.
+        if (i < 19) expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeUndefined()
       }
-      expect(fetch).not.toHaveBeenCalled()
-      await act(async () => { await vi.advanceTimersByTimeAsync(400) })
-      expect(fetch).toHaveBeenCalledTimes(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+      // 400 ms of sustained events: the immediate fetch plus one trailing fetch.
+      expect(detailGets()).toBe(2)
       expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeNull()
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it.each(['own', 'worker'] as const)('preserves cached detail during an in-flight %s event and debounces the replacement', async kind => {
-    const id = kind === 'own' ? 'r1' : 'parent'
-    const key = queryKeys.runs.detail(id)
-    const before = { ...runRecord(id, { status: RUN_STATUS.running }), finishBlocked: null, usage: SAMPLE }
+  it('keeps a fetch in flight at an event, never restores its verdict, and follows it with one fetch', async () => {
+    const key = queryKeys.runs.detail('r1')
+    const before = { ...runRecord('r1', { status: RUN_STATUS.running }), finishBlocked: null, usage: SAMPLE }
     const stale = deferredResponse()
     const fresh = deferredResponse()
     client.setQueryData<ApiRun>(key, before)
     vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise)
-    const { result } = renderHook(() => useRun(id), { wrapper })
+    const { result } = renderHook(() => useRun('r1'), { wrapper })
+    const { source } = mount()
+    void client.refetchQueries({ queryKey: key })
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+
+    source.emit('run-summary', stampedRun(runRecord('r1', { status: RUN_STATUS.waiting, tokensUsed: 42 })))
+    // The verdict is gone at once; the record stays the last fetched one, never the summary.
+    expect(client.getQueryData<ApiRun>(key)).toMatchObject({ status: RUN_STATUS.running, tokensUsed: 0, usage: SAMPLE })
+    expect(client.getQueryData<ApiRun>(key)?.finishBlocked).toBeUndefined()
+    // The fetch in flight is kept, not cancelled and not doubled.
+    expect(client.getQueryState(key)?.fetchStatus).toBe('fetching')
+    expect(fetch).toHaveBeenCalledTimes(1)
+
+    await act(async () => stale.resolve(json({ ...before, status: RUN_STATUS.waiting, finishBlocked: null })))
+    // It started before the event: its record lands, its verdict does not.
+    await waitFor(() => expect(client.getQueryData<ApiRun>(key)?.status).toBe('waiting'))
+    expect(client.getQueryData<ApiRun>(key)?.finishBlocked).toBeUndefined()
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+    await act(async () => fresh.resolve(json({ ...before, status: RUN_STATUS.waiting, finishBlocked: 'Wait for the worker.' })))
+    await waitFor(() => expect(client.getQueryData<ApiRun>(key)?.finishBlocked).toBe('Wait for the worker.'))
+    expect(result.current.isError).toBe(false)
+  })
+
+  it('keeps today\'s trailing parent refresh for a worker event while the parent fetch is in flight', async () => {
+    const key = queryKeys.runs.detail(PARENT_ID)
+    const before = { ...runRecord(PARENT_ID, { status: RUN_STATUS.running }), finishBlocked: null, usage: SAMPLE }
+    const stale = deferredResponse()
+    const fresh = deferredResponse()
+    client.setQueryData<ApiRun>(key, before)
+    vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise)
+    const { result } = renderHook(() => useRun(PARENT_ID), { wrapper })
     const { source } = mount()
     void client.refetchQueries({ queryKey: key })
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
     expect(client.getQueryState(key)?.fetchStatus).toBe('fetching')
 
-    source.emit('run', stampedRun(kind === 'own'
-      ? runRecord(id, { status: RUN_STATUS.waiting, tokensUsed: 42 })
-      : runRecord('worker', {
-        delegation: { role: 'worker', parentRunId: id, permissions: [],
-          workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated', path: '/worker', branch: 'worker', baselineSha: 'a'.repeat(40) } },
-      })))
+    source.emit('run-summary', stampedRun(workerRecord(PARENT_ID)))
 
     // A cancelled fetch must not become an error (the run-detail error flash), and cancelling
-    // must not roll back the event's patch or the last successful GET's usage sample.
+    // must not roll back the last successful GET's usage sample.
     await act(async () => {})
     expect(result.current.isError).toBe(false)
     expect(client.getQueryState(key)?.status).toBe('success')
     expect(client.getQueryState(key)?.fetchStatus).toBe('idle')
-    expect(client.getQueryData<ApiRun>(key)).toMatchObject({ id, usage: SAMPLE,
-      status: kind === 'own' ? 'waiting' : 'running',
-      tokensUsed: kind === 'own' ? 42 : 0 })
+    expect(client.getQueryData<ApiRun>(key)).toMatchObject({ id: PARENT_ID, usage: SAMPLE, status: RUN_STATUS.running })
     expect(client.getQueryData<ApiRun>(key)?.finishBlocked).toBeUndefined()
     await act(async () => stale.resolve(json({ ...before, finishBlocked: null })))
     expect(client.getQueryData<ApiRun>(key)?.finishBlocked).toBeUndefined()
@@ -897,7 +953,7 @@ describe('useGlobalEvents — run events', () => {
       client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), { ...runRecord('r1'), finishBlocked: null })
       const invalidate = vi.spyOn(client, 'invalidateQueries')
       const { source, unmount } = mount()
-      source.emit('run', stampedRun(runRecord('r1')))
+      source.emit('run-summary', stampedRun(runRecord('r1')))
       unmount()
       invalidate.mockClear()
       await act(async () => { await vi.advanceTimersByTimeAsync(500) })
@@ -907,44 +963,57 @@ describe('useGlobalEvents — run events', () => {
     }
   })
 
-  it.each(['own', 'worker'])('an %s event during initial loading replaces the stale in-flight verdict', async kind => {
+  it('an own event during initial loading keeps the load, drops its verdict and fetches once more', async () => {
     const stale = deferredResponse()
     const fresh = deferredResponse()
     vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockReturnValue(fresh.promise)
     renderHook(() => useRun('r1'), { wrapper })
     const { source } = mount()
-    source.emit('run', stampedRun(kind === 'own' ? runRecord('r1', { status: RUN_STATUS.waiting }) : runRecord('worker', {
-      delegation: { role: 'worker', parentRunId: 'r1', permissions: [],
-        workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated', path: '/worker', branch: 'worker', baselineSha: 'a'.repeat(40) } },
-    })))
-    // Initial loading has no last good result to restore: stay pending (not error), and do
-    // not let the pre-event response install an obsolete Finish permission.
-    await act(async () => {})
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    source.emit('run-summary', stampedRun(runRecord('r1', { status: RUN_STATUS.waiting })))
+    // No summary seeds the detail; the initial load stays pending, not error.
+    expect(client.getQueryData(queryKeys.runs.detail('r1'))).toBeUndefined()
     expect(client.getQueryState(queryKeys.runs.detail('r1'))?.status).toBe('pending')
-    expect(client.getQueryState(queryKeys.runs.detail('r1'))?.fetchStatus).toBe('idle')
-    expect(client.getQueryData(queryKeys.runs.detail('r1'))).toBeUndefined()
     stale.resolve(json({ ...runRecord('r1', { status: RUN_STATUS.waiting }), finishBlocked: null }))
-    await act(async () => {})
-    expect(client.getQueryData(queryKeys.runs.detail('r1'))).toBeUndefined()
-    expect(fetch).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.status).toBe('waiting'))
+    expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeUndefined()
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
     fresh.resolve(json({ ...runRecord('r1', { status: RUN_STATUS.waiting }), finishBlocked: 'Answer the pending human question.' }))
     await waitFor(() => expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBe('Answer the pending human question.'))
   })
 
+  it('a worker event during the parent\'s initial loading replaces the stale in-flight verdict', async () => {
+    const stale = deferredResponse()
+    const fresh = deferredResponse()
+    vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockReturnValue(fresh.promise)
+    renderHook(() => useRun(PARENT_ID), { wrapper })
+    const { source } = mount()
+    source.emit('run-summary', stampedRun(workerRecord(PARENT_ID)))
+    // Initial loading has no last good result to restore: stay pending (not error), and do
+    // not let the pre-event response install an obsolete Finish permission.
+    await act(async () => {})
+    expect(client.getQueryState(queryKeys.runs.detail(PARENT_ID))?.status).toBe('pending')
+    expect(client.getQueryState(queryKeys.runs.detail(PARENT_ID))?.fetchStatus).toBe('idle')
+    expect(client.getQueryData(queryKeys.runs.detail(PARENT_ID))).toBeUndefined()
+    stale.resolve(json({ ...runRecord(PARENT_ID, { status: RUN_STATUS.waiting }), finishBlocked: null }))
+    await act(async () => {})
+    expect(client.getQueryData(queryKeys.runs.detail(PARENT_ID))).toBeUndefined()
+    expect(fetch).toHaveBeenCalledTimes(1)
+    fresh.resolve(json({ ...runRecord(PARENT_ID, { status: RUN_STATUS.waiting }), finishBlocked: 'Answer the pending human question.' }))
+    await waitFor(() => expect(client.getQueryData<ApiRun>(queryKeys.runs.detail(PARENT_ID))?.finishBlocked).toBe('Answer the pending human question.'))
+  })
+
   it('clears stale Finish permission and refreshes the mounted parent on a worker update', async () => {
-    const parent = { ...runRecord('parent', { status: RUN_STATUS.waiting }), finishBlocked: null }
-    client.setQueryData<ApiRun>(queryKeys.runs.detail('parent'), parent)
+    const parent = { ...runRecord(PARENT_ID, { status: RUN_STATUS.waiting }), finishBlocked: null }
+    client.setQueryData<ApiRun>(queryKeys.runs.detail(PARENT_ID), parent)
     const response = deferredResponse()
     vi.mocked(fetch).mockReturnValue(response.promise)
-    renderHook(() => useRun('parent'), { wrapper })
+    renderHook(() => useRun(PARENT_ID), { wrapper })
     const { source } = mount()
-    source.emit('run', stampedRun(runRecord('worker', {
-      delegation: { role: 'worker', parentRunId: 'parent', permissions: [],
-        workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated', path: '/worker', branch: 'worker', baselineSha: 'a'.repeat(40) } },
-    })))
-    expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('parent'))?.finishBlocked).toBeUndefined()
+    source.emit('run-summary', stampedRun(workerRecord(PARENT_ID)))
+    expect(client.getQueryData<ApiRun>(queryKeys.runs.detail(PARENT_ID))?.finishBlocked).toBeUndefined()
     response.resolve(json({ ...parent, finishBlocked: 'Collect the latest worker result.' }))
-    await waitFor(() => expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('parent'))?.finishBlocked).toBe('Collect the latest worker result.'))
+    await waitFor(() => expect(client.getQueryData<ApiRun>(queryKeys.runs.detail(PARENT_ID))?.finishBlocked).toBe('Collect the latest worker result.'))
   })
 
   it('refreshes the mounted run after its own event without refetching the list', async () => {
@@ -953,7 +1022,7 @@ describe('useGlobalEvents — run events', () => {
     vi.mocked(fetch).mockReturnValue(response.promise)
     renderHook(() => useRun('r1'), { wrapper })
     const { source } = mount()
-    source.emit('run', stampedRun(runRecord('r1', { status: RUN_STATUS.waiting })))
+    source.emit('run-summary', stampedRun(runRecord('r1', { status: RUN_STATUS.waiting })))
     response.resolve(json({ ...runRecord('r1', { status: RUN_STATUS.waiting }), finishBlocked: null }))
     await waitFor(() => expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeNull())
     expect(vi.mocked(fetch).mock.calls.every(([input]) => String(input).replace('?archived=recent', '').endsWith('/runs/r1'))).toBe(true)
@@ -963,9 +1032,9 @@ describe('useGlobalEvents — run events', () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('r1', { status: RUN_STATUS.queued })))
-    source.emit('run', stampedRun(runRecord('r1', { status: RUN_STATUS.running, tokensUsed: 42 })))
-    source.emit('run', stampedRun(runRecord('r1', { status: RUN_STATUS.done, tokensUsed: 99 })))
+    source.emit('run-summary', stampedRun(runRecord('r1', { status: RUN_STATUS.queued })))
+    source.emit('run-summary', stampedRun(runRecord('r1', { status: RUN_STATUS.running, tokensUsed: 42 })))
+    source.emit('run-summary', stampedRun(runRecord('r1', { status: RUN_STATUS.done, tokensUsed: 99 })))
 
     const list = client.getQueryData<ApiRun[]>(queryKeys.runs.list())
     expect(list).toHaveLength(1)
@@ -973,27 +1042,55 @@ describe('useGlobalEvents — run events', () => {
     expect(list?.[0]?.tokensUsed).toBe(99)
   })
 
-  it('patches a run detail cache that exists, and creates none that does not', () => {
-    client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), { ...runRecord('r1'), usage: SAMPLE })
+  it('never writes a summary into a detail: an unobserved cached detail loses its verdict and goes stale', () => {
+    client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), { ...runRecord('r1'), usage: SAMPLE, finishBlocked: null })
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('r1', { status: RUN_STATUS.done })))
-    source.emit('run', stampedRun(runRecord('r2', { status: RUN_STATUS.done })))
+    source.emit('run-summary', stampedRun(runRecord('r1', { status: RUN_STATUS.done })))
+    source.emit('run-summary', stampedRun(runRecord('r2', { status: RUN_STATUS.done })))
 
     const detail = client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))
-    expect(detail?.status).toBe('done')
-    // The live sample the GET attached survives an event that never carried one.
-    expect(detail?.usage).toEqual(SAMPLE)
+    // The record is still the fetched one; only the verdict is gone, so a remount never shows
+    // Finish or Accept from it.
+    expect(detail).toMatchObject({ status: RUN_STATUS.running, task: 'do it', usage: SAMPLE })
+    expect(detail?.finishBlocked).toBeUndefined()
+    // Marked stale for its next mount, without a fetch nobody is looking at.
+    expect(client.getQueryState(queryKeys.runs.detail('r1'))?.isInvalidated).toBe(true)
+    expect(fetch).not.toHaveBeenCalled()
     // r2 was never opened: a summary must not masquerade as a fetched detail.
     expect(client.getQueryData(queryKeys.runs.detail('r2'))).toBeUndefined()
   })
 
-  it('refreshes an opened Cursor detail for its server-resolved resume command', async () => {
+  it.each([
+    ['disabled', false, 0],
+    ['enabled', true, 1],
+  ] as const)('a detail whose only reader is %s fetches only when that reader can fetch', (_, enabled, fetches) => {
+    const run = { ...runRecord('r1', { status: RUN_STATUS.waiting }), finishBlocked: null }
+    client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), run)
+    vi.mocked(fetch).mockImplementation(async () => json(run))
+    const queryFn = vi.fn(async () => run)
+    const observer = new QueryObserver<ApiRun>(client, { queryKey: queryKeys.runs.detail('r1'), queryFn, enabled })
+    const unsubscribe = observer.subscribe(() => undefined)
+    try {
+      const { source } = mount()
+      source.emit('run-summary', stampedRun(runRecord('r1', { status: RUN_STATUS.waiting, tokensUsed: 5 })))
+      expect(queryFn).toHaveBeenCalledTimes(fetches)
+      if (!enabled) {
+        // A disabled reader cannot refetch: the detail drops its verdict and waits stale.
+        expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeUndefined()
+        expect(client.getQueryState(queryKeys.runs.detail('r1'))?.isInvalidated).toBe(true)
+      }
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it('refreshes an opened Cursor detail for its server-resolved resume command', () => {
     client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), runRecord('r1', { runner: 'claude' }))
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
-    source.emit('run', stampedRun(runRecord('r1', { runner: 'claude', status: RUN_STATUS.done, steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, backend: 'cursor', sessionId: 's1' }] })))
-    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.detail('r1') }))
+    source.emit('run-summary', stampedRun(runRecord('r1', { runner: 'claude', status: RUN_STATUS.done, steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, backend: 'cursor', sessionId: 's1' }] })))
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.detail('r1'), exact: true, refetchType: 'none' })
   })
 
   it('invalidates the changes cache on a run event so an ended run’s final writes appear (#488)', () => {
@@ -1003,7 +1100,7 @@ describe('useGlobalEvents — run events', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('r1', { status: RUN_STATUS.done })))
+    source.emit('run-summary', stampedRun(runRecord('r1', { status: RUN_STATUS.done })))
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.changes('r1') })
   })
@@ -1014,7 +1111,7 @@ describe('useGlobalEvents — run events', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('r2', { status: RUN_STATUS.done })))
+    source.emit('run-summary', stampedRun(runRecord('r2', { status: RUN_STATUS.done })))
 
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: queryKeys.runs.changes('r2') })
   })
@@ -1027,7 +1124,7 @@ describe('useGlobalEvents — run events', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('r9', { status: RUN_STATUS.done }), 'some-other-project'))
+    source.emit('run-summary', stampedRun(runRecord('r9', { status: RUN_STATUS.done }), 'some-other-project'))
 
     // Debounced: one run emits many events, and a busy workspace emits from everywhere at once.
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.runsIndex })
@@ -1056,7 +1153,7 @@ describe('useGlobalEvents — run events', () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('r9', { status: RUN_STATUS.done }), 'some-other-project'))
+    source.emit('run-summary', stampedRun(runRecord('r9', { status: RUN_STATUS.done }), 'some-other-project'))
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
   })
@@ -1066,7 +1163,7 @@ describe('useGlobalEvents — run events', () => {
     const { source } = mount()
 
     for (const status of ['queued', 'running', 'done'] as const) {
-      source.emit('run', stampedRun(runRecord('r1', { status })))
+      source.emit('run-summary', stampedRun(runRecord('r1', { status })))
     }
 
     await vi.waitFor(() =>
@@ -1089,11 +1186,11 @@ describe('useGlobalEvents — run events', () => {
     const unsubscribe = observer.subscribe(() => {})
     const { source } = mount()
     try {
-      for (const status of [RUN_STATUS.queued, RUN_STATUS.running, RUN_STATUS.done]) source.emit('run', stampedRun(runRecord('reports-source', { status })))
+      for (const status of [RUN_STATUS.queued, RUN_STATUS.running, RUN_STATUS.done]) source.emit('run-summary', stampedRun(runRecord('reports-source', { status })))
       expect(active).not.toHaveBeenCalled()
       await waitFor(() => expect(active).toHaveBeenCalledTimes(1))
       expect(dormant).not.toHaveBeenCalled()
-      source.emit('run-deleted', JSON.stringify({ project: 'default', id: 'reports-source' }))
+      source.emit('run-deleted', stampedDeleted('reports-source', 'default'))
       await waitFor(() => expect(active).toHaveBeenCalledTimes(2))
       expect(dormant).not.toHaveBeenCalled()
     } finally { unsubscribe() }
@@ -1103,11 +1200,13 @@ describe('useGlobalEvents — run events', () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
 
-    source.emit('run', 'not json{')
-    source.emit('run', '{"no":"id"}')
+    source.emit('run-summary', 'not json{')
+    source.emit('run-summary', '{"no":"id"}')
+    // The legacy full record is not a summary-mode frame.
+    source.emit('run', JSON.stringify({ ...runRecord('r0'), project: BOOT }))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
 
-    source.emit('run', stampedRun(runRecord('r1')))
+    source.emit('run-summary', stampedRun(runRecord('r1')))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toHaveLength(1)
   })
 
@@ -1117,7 +1216,7 @@ describe('useGlobalEvents — run events', () => {
     client.setQueryData(queryKeys.runs.diff('r1'), { files: [] })
     const { source } = mount()
 
-    source.emit('run-deleted', JSON.stringify({ id: 'r1', project: BOOT }))
+    source.emit('run-deleted', stampedDeleted('r1', BOOT))
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.map((r) => r.id)).toEqual(['r2'])
     // Removed, not emptied: anything still mounted on them must go ask the server and get its 404.
@@ -1133,29 +1232,41 @@ describe('useGlobalEvents — run events', () => {
     const state = () => client.getQueryState(queryKeys.runs.archived(''))
 
     // A row the pages hold is patched in place: no refetch for a title change.
-    source.emit('run', stampedRun(runRecord('r2', { title: 'Renamed', archived: true })))
+    source.emit('run-summary', stampedRun(runRecord('r2', { title: 'Renamed', archived: true })))
     type Pages = { pages: { runs: { id: string; title: string; archived: boolean }[] }[] }
     expect(client.getQueryData<Pages>(queryKeys.runs.archived(''))?.pages[0]?.runs.find((r) => r.id === 'r2')?.title).toBe('Renamed')
     expect(state()?.isInvalidated).toBe(false)
 
     // Unarchiving one changes the total: patched, and marked stale for a refetch.
-    source.emit('run', stampedRun(runRecord('r1', { archived: false })))
+    source.emit('run-summary', stampedRun(runRecord('r1', { archived: false })))
     expect(client.getQueryData<Pages>(queryKeys.runs.archived(''))?.pages[0]?.runs.find((r) => r.id === 'r1')?.archived).toBe(false)
     expect(state()?.isInvalidated).toBe(true)
+  })
+
+  it('replaces an archived row whole from the summary, live usage included (hearsay-tools/cezarion#2730)', () => {
+    const page = { runs: [{ ...toRunSummary(runRecord('r1', { archived: true })), usage: SAMPLE }], nextCursor: null, total: 1 }
+    client.setQueryData(queryKeys.runs.archived(''), { pages: [page], pageParams: [undefined] })
+    const { source } = mount()
+    const row = () => client.getQueryData<{ pages: { runs: RunSummary[] }[] }>(queryKeys.runs.archived(''))?.pages[0]?.runs[0]
+    source.emit('run-summary', stampedRun(runRecord('r1', { archived: true, titleSummary: 'Named', prNumber: 4, status: RUN_STATUS.done })))
+    expect(row()).toEqual(toRunSummary(runRecord('r1', { archived: true, titleSummary: 'Named', prNumber: 4, status: RUN_STATUS.done })))
+    const live = { ...toRunSummary(runRecord('r1', { archived: true })), usage: { ...SAMPLE, cpuPct: 50 } }
+    source.emit('run-summary', JSON.stringify({ project: BOOT, seq: ++frameSeq, run: live, relationships: 'd' }))
+    expect(row()?.usage).toEqual({ ...SAMPLE, cpuPct: 50 })
   })
 
   it('marks a search\'s archived pages stale when a row they hold changes (#864)', () => {
     const page = { runs: [{ ...runRecord('r1'), archived: true }], nextCursor: null, total: 1 }
     client.setQueryData(queryKeys.runs.archived('needle'), { pages: [page], pageParams: [undefined] })
     const { source } = mount()
-    source.emit('run', stampedRun(runRecord('r1', { title: 'No longer matches', archived: true })))
+    source.emit('run-summary', stampedRun(runRecord('r1', { title: 'No longer matches', archived: true })))
     expect(client.getQueryState(queryKeys.runs.archived('needle'))?.isInvalidated).toBe(true)
   })
 
   it('marks archived pages stale when a run they do not hold is archived (#864)', () => {
     client.setQueryData(queryKeys.runs.archived(''), { pages: [{ runs: [], nextCursor: null, total: 0 }], pageParams: [undefined] })
     const { source } = mount()
-    source.emit('run', stampedRun(runRecord('fresh', { archived: true })))
+    source.emit('run-summary', stampedRun(runRecord('fresh', { archived: true })))
     expect(client.getQueryState(queryKeys.runs.archived(''))?.isInvalidated).toBe(true)
   })
 
@@ -1165,7 +1276,7 @@ describe('useGlobalEvents — run events', () => {
     client.setQueryData(queryKeys.runs.archived('#864'), { pages: [page(['r1'])], pageParams: [undefined] })
     const { source } = mount()
 
-    source.emit('run-deleted', JSON.stringify({ id: 'r1', project: BOOT }))
+    source.emit('run-deleted', stampedDeleted('r1', BOOT))
 
     type Pages = { pages: { runs: { id: string }[] }[] }
     expect(client.getQueryData<Pages>(queryKeys.runs.archived(''))?.pages[0]?.runs.map((r) => r.id)).toEqual(['r2'])
@@ -1190,6 +1301,14 @@ describe('useGlobalEvents — usage', () => {
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toBe(list)
     expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.usage).toBeUndefined()
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('clears the samples on the empty tick that follows a project\'s last live row (hearsay-tools/cezarion#2730)', () => {
+    const { source } = mount()
+    source.emit('usage', JSON.stringify({ project: BOOT, usage: { r1: SAMPLE } }))
+    expect(usage.get()).toEqual({ r1: SAMPLE })
+    source.emit('usage', JSON.stringify({ project: BOOT, usage: {} }))
+    expect(usage.get()).toEqual({})
   })
 
   it('ignores ping — it is a keep-alive, not news', () => {
@@ -1494,7 +1613,7 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('theirs'), 'other-project'))
+    source.emit('run-summary', stampedRun(runRecord('theirs'), 'other-project'))
     source.emit('todos', JSON.stringify({ project: 'other-project', items: [{ id: 't9' }] }))
     source.emit('usage', JSON.stringify({ project: 'other-project', usage: { theirs: SAMPLE } }))
 
@@ -1507,9 +1626,9 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
 
-    // The pre-workspace wire shape. Applying it unattributed is exactly the bleed the
-    // envelope exists to prevent.
-    source.emit('run', JSON.stringify(runRecord('r1')))
+    // No project stamp. Applying it unattributed is exactly the bleed the envelope exists to
+    // prevent.
+    source.emit('run-summary', JSON.stringify({ seq: ++frameSeq, run: toRunSummary(runRecord('r1')), relationships: 'd' }))
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
   })
@@ -1520,12 +1639,12 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
     const { source } = mount()
 
     // Harmless by the doctrine: at boot the authoritative queries are fetching right now.
-    source.emit('run', stampedRun(runRecord('r1')))
+    source.emit('run-summary', stampedRun(runRecord('r1')))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
 
     // Health answered — from here on the boot project's events flow.
     client.setQueryData(queryKeys.health, { bootProject: BOOT })
-    source.emit('run', stampedRun(runRecord('r1')))
+    source.emit('run-summary', stampedRun(runRecord('r1')))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toHaveLength(1)
   })
 
@@ -1535,10 +1654,10 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('boot-run'), BOOT))
+    source.emit('run-summary', stampedRun(runRecord('boot-run'), BOOT))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
 
-    source.emit('run', stampedRun(runRecord('theirs'), 'other-project'))
+    source.emit('run-summary', stampedRun(runRecord('theirs'), 'other-project'))
     source.emit('usage', JSON.stringify({ project: 'other-project', usage: { theirs: SAMPLE } }))
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.map((r) => r.id)).toEqual(['theirs'])
@@ -1555,7 +1674,7 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
     client.setQueryData<ApiRun[]>(['other-project', 'runs', 'list'], [otherRun])
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('boot-run'), BOOT))
+    source.emit('run-summary', stampedRun(runRecord('boot-run'), BOOT))
 
     expect(client.getQueryData<ApiRun[]>(['other-project', 'runs', 'list'])?.map((r) => r.id)).toEqual([
       'theirs',
@@ -1570,7 +1689,7 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
     client.setQueryData<ApiRun[]>(['other-project', 'runs', 'list'], [])
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('theirs'), 'other-project'))
+    source.emit('run-summary', stampedRun(runRecord('theirs'), 'other-project'))
 
     expect(client.getQueryData<ApiRun[]>(['default', 'runs', 'list'])?.map((r) => r.id)).toEqual([
       'boot-run',
@@ -1589,7 +1708,7 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
     client.setQueryData<ApiRun[]>(['other-project', 'runs', 'list'], [runRecord('theirs')])
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('boot-run'), BOOT))
+    source.emit('run-summary', stampedRun(runRecord('boot-run'), BOOT))
 
     expect(client.getQueryData<ApiRun[]>(['other-project', 'runs', 'list'])?.map((r) => r.id)).toEqual([
       'theirs',
@@ -1608,7 +1727,7 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
     client.setQueryData<ApiRun[]>([BOOT, 'runs', 'list'], [])
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('boot-run'), BOOT))
+    source.emit('run-summary', stampedRun(runRecord('boot-run'), BOOT))
 
     expect(client.getQueryData<ApiRun[]>(['default', 'runs', 'list'])?.map((r) => r.id)).toEqual([
       'boot-run',
@@ -1633,10 +1752,10 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     source.open()
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const branchScans = () => invalidatedKeys(invalidate).filter((key) => JSON.stringify(key) === JSON.stringify(queryKeys.repoBranches)).length
-    source.emit('run', stampedRun({ ...runRecord('r1'), status: RUN_STATUS.done }))
+    source.emit('run-summary', stampedRun({ ...runRecord('r1'), status: RUN_STATUS.done }))
     act(() => vi.advanceTimersByTime(REPO_BRANCHES_COALESCE_MS))
     expect(branchScans()).toBe(1)
-    source.emit('run-deleted', JSON.stringify({ id: 'r1', project: BOOT }))
+    source.emit('run-deleted', stampedDeleted('r1', BOOT))
     act(() => vi.advanceTimersByTime(REPO_BRANCHES_COALESCE_MS))
     expect(branchScans()).toBe(2)
   })
@@ -1647,8 +1766,8 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     source.open()
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const branchScans = () => invalidatedKeys(invalidate).filter((key) => JSON.stringify(key) === JSON.stringify(queryKeys.repoBranches)).length
-    for (let i = 0; i < 20; i++) source.emit('run', stampedRun({ ...runRecord(`r${i}`), status: i % 2 ? RUN_STATUS.done : RUN_STATUS.running }))
-    source.emit('run-deleted', JSON.stringify({ id: 'r1', project: BOOT }))
+    for (let i = 0; i < 20; i++) source.emit('run-summary', stampedRun({ ...runRecord(`r${i}`), status: i % 2 ? RUN_STATUS.done : RUN_STATUS.running }))
+    source.emit('run-deleted', stampedDeleted('r1', BOOT))
     expect(branchScans()).toBe(0)
     act(() => vi.advanceTimersByTime(REPO_BRANCHES_COALESCE_MS))
     expect(branchScans()).toBe(1)
@@ -1665,7 +1784,7 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     const branchKeys = () => invalidatedKeys(invalidate).filter((key) => JSON.stringify(key).includes('"branches"'))
 
     // An event for the boot project, then a switch before the window closes and nothing else.
-    source.emit('run', stampedRun({ ...runRecord('r1'), status: RUN_STATUS.done }))
+    source.emit('run-summary', stampedRun({ ...runRecord('r1'), status: RUN_STATUS.done }))
     setApiScope('other-project')
     act(() => vi.advanceTimersByTime(REPO_BRANCHES_COALESCE_MS))
     expect(branchKeys()).toEqual([['default', 'repo', 'branches']])
@@ -1675,10 +1794,10 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     // Events for both projects in one window: each project refreshes once.
     invalidate.mockClear()
     setApiScope(null)
-    source.emit('run', stampedRun({ ...runRecord('r2'), status: RUN_STATUS.done }))
-    source.emit('run', stampedRun({ ...runRecord('r3'), status: RUN_STATUS.done }))
+    source.emit('run-summary', stampedRun({ ...runRecord('r2'), status: RUN_STATUS.done }))
+    source.emit('run-summary', stampedRun({ ...runRecord('r3'), status: RUN_STATUS.done }))
     setApiScope('other-project')
-    source.emit('run', stampedRun({ ...runRecord('r4'), status: RUN_STATUS.done }, 'other-project'))
+    source.emit('run-summary', stampedRun({ ...runRecord('r4'), status: RUN_STATUS.done }, 'other-project'))
     act(() => vi.advanceTimersByTime(REPO_BRANCHES_COALESCE_MS))
     expect(branchKeys()).toEqual([['default', 'repo', 'branches'], ['other-project', 'repo', 'branches']])
   })
@@ -1782,6 +1901,61 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     setVisibility('visible')
 
     expect(invalidate).not.toHaveBeenCalled()
+  })
+})
+
+describe('useGlobalEvents — seq fence (hearsay-tools/cezarion#2730)', () => {
+  const reconciled = (invalidate: { mock: { calls: unknown[][] } }) =>
+    invalidate.mock.calls.some(([filters]) => JSON.stringify((filters as { queryKey?: unknown } | undefined)?.queryKey) === JSON.stringify(workspaceQueryKeys.projects))
+
+  function attached() {
+    client.setQueryData<RunSummary[]>(queryKeys.runs.list(), [])
+    const { source } = mount()
+    source.open()
+    source.emit('ping', '')
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    return { source, invalidate }
+  }
+
+  it('accepts contiguous frames across projects without reconciling', () => {
+    const { source, invalidate } = attached()
+    source.emit('ready', JSON.stringify({ generation: 'g1', seq: 10 }))
+    source.emit('run-summary', stampedRun(runRecord('r1'), BOOT, 11))
+    source.emit('run-summary', stampedRun(runRecord('x1'), 'other', 12))
+    source.emit('run-deleted', stampedDeleted('x1', 'other', 13))
+    expect(reconciled(invalidate)).toBe(false)
+  })
+
+  it('applies the frame after a jump, then reconciles as after a reconnect', async () => {
+    const { source, invalidate } = attached()
+    source.emit('ready', JSON.stringify({ generation: 'g1', seq: 10 }))
+    source.emit('run-summary', stampedRun(runRecord('r1'), BOOT, 11))
+    // 12 and 13 never arrived.
+    source.emit('run-summary', stampedRun(runRecord('r2'), BOOT, 14))
+    expect(client.getQueryData<RunSummary[]>(queryKeys.runs.list())?.map((row) => row.id)).toContain('r2')
+    await waitFor(() => expect(reconciled(invalidate)).toBe(true))
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.runsIndex })
+  })
+
+  it('treats a new generation as a reset, not a gap', () => {
+    const { source, invalidate } = attached()
+    source.emit('ready', JSON.stringify({ generation: 'g1', seq: 10 }))
+    source.emit('run-summary', stampedRun(runRecord('r1'), BOOT, 11))
+    source.emit('ready', JSON.stringify({ generation: 'g2', seq: 0 }))
+    source.emit('run-summary', stampedRun(runRecord('r1'), BOOT, 1))
+    expect(reconciled(invalidate)).toBe(false)
+  })
+
+  it('takes a new baseline when the connection reopens, so a reconnect is not also a gap', async () => {
+    const { source, invalidate } = attached()
+    source.emit('run-summary', stampedRun(runRecord('r1'), BOOT, 5))
+    source.drop()
+    source.open()
+    await waitFor(() => expect(reconciled(invalidate)).toBe(true))
+    invalidate.mockClear()
+    source.emit('run-summary', stampedRun(runRecord('r1'), BOOT, 40))
+    source.emit('run-summary', stampedRun(runRecord('r1'), BOOT, 41))
+    expect(reconciled(invalidate)).toBe(false)
   })
 })
 
@@ -1893,8 +2067,10 @@ function workerOf(parent: string, id: string, over: Partial<RunRecord> = {}): Ru
 }
 
 describe('relationships refresh (#659)', () => {
-  const key = ['default', 'runs', 'relationships', 'parent']
-  const otherKey = ['other', 'runs', 'relationships', 'parent']
+  // A worker's slim delegation names its parent by UUID; anything else parses as no delegation.
+  const PARENT = '0f1cbcbf-84b2-4978-8381-c9dfbe9339b5'
+  const key = ['default', 'runs', 'relationships', PARENT]
+  const otherKey = ['other', 'runs', 'relationships', PARENT]
   const siblingKey = ['default', 'runs', 'relationships', 'sibling']
 
   function seed(): void {
@@ -1910,9 +2086,9 @@ describe('relationships refresh (#659)', () => {
     source.open()
     // Opening reconciles; establish a fresh snapshot before the event being tested.
     seed()
-    if (event === 'run') source.emit('run', stampedRun(workerOf('parent', 'off-page')))
+    if (event === 'run') source.emit('run-summary', stampedRun(workerOf(PARENT, 'off-page')))
     // Never seen on this stream, so no parent is known: the whole family refreshes, once.
-    else if (event === 'run-deleted') source.emit('run-deleted', JSON.stringify({ id: 'off-page', project: BOOT }))
+    else if (event === 'run-deleted') source.emit('run-deleted', stampedDeleted('off-page', BOOT))
     else { source.drop(); source.open() }
     if (event !== 'reconnect') {
       // Debounced: nothing fires on the event itself.
@@ -1929,8 +2105,8 @@ describe('relationships refresh (#659)', () => {
     const { source } = mount()
     source.open()
     seed()
-    source.emit('run', stampedRun(runRecord('ordinary')))
-    source.emit('run', stampedRun(workerOf('parent', 'w1')))
+    source.emit('run-summary', stampedRun(runRecord('ordinary')))
+    source.emit('run-summary', stampedRun(workerOf(PARENT, 'w1')))
     await act(async () => { await vi.advanceTimersByTimeAsync(400) })
     expect(invalidated(key)).toBe(true)
     expect(invalidated(siblingKey)).toBe(false)
@@ -1943,16 +2119,16 @@ describe('relationships refresh (#659)', () => {
     const { source } = mount()
     source.open()
     seed()
-    source.emit('run', stampedRun(workerOf('parent', 'w1', { tokensUsed: 1 })))
+    source.emit('run-summary', stampedRun(workerOf(PARENT, 'w1', { tokensUsed: 1 })))
     await act(async () => { await vi.advanceTimersByTimeAsync(400) })
     expect(invalidated(key)).toBe(true)
     seed()
     // Same status, step, activity and delegation: the relationships answer cannot have moved.
-    source.emit('run', stampedRun(workerOf('parent', 'w1', { tokensUsed: 2 })))
-    source.emit('run', stampedRun(workerOf('parent', 'w1', { tokensUsed: 3, title: 'renamed' })))
+    source.emit('run-summary', stampedRun(workerOf(PARENT, 'w1', { tokensUsed: 2 })))
+    source.emit('run-summary', stampedRun(workerOf(PARENT, 'w1', { tokensUsed: 3, title: 'renamed' })))
     await act(async () => { await vi.advanceTimersByTimeAsync(400) })
     expect(invalidated(key)).toBe(false)
-    source.emit('run', stampedRun(workerOf('parent', 'w1', { tokensUsed: 4, status: RUN_STATUS.done })))
+    source.emit('run-summary', stampedRun(workerOf(PARENT, 'w1', { tokensUsed: 4, status: RUN_STATUS.done })))
     await act(async () => { await vi.advanceTimersByTimeAsync(400) })
     expect(invalidated(key)).toBe(true)
   })
@@ -1965,7 +2141,7 @@ describe('relationships refresh (#659)', () => {
     seed()
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     for (let i = 0; i < 20; i++) {
-      source.emit('run', stampedRun(workerOf('parent', 'w1', { currentStepId: `step-${i}` })))
+      source.emit('run-summary', stampedRun(workerOf(PARENT, 'w1', { currentStepId: `step-${i}` })))
       await act(async () => { await vi.advanceTimersByTimeAsync(20) })
     }
     await act(async () => { await vi.advanceTimersByTimeAsync(400) })
@@ -1979,14 +2155,14 @@ describe('relationships refresh (#659)', () => {
     vi.useFakeTimers()
     seed()
     const workerKey = ['default', 'runs', 'relationships', 'w1']
-    client.setQueryData(workerKey, { parentRunId: 'parent', workers: [] })
+    client.setQueryData(workerKey, { parentRunId: PARENT, workers: [] })
     const { source } = mount()
     source.open()
     seed()
-    source.emit('run', stampedRun(workerOf('parent', 'w1')))
+    source.emit('run-summary', stampedRun(workerOf(PARENT, 'w1')))
     await act(async () => { await vi.advanceTimersByTimeAsync(400) })
     seed()
-    source.emit('run-deleted', JSON.stringify({ id: 'w1', project: BOOT }))
+    source.emit('run-deleted', stampedDeleted('w1', BOOT))
     await act(async () => { await vi.advanceTimersByTimeAsync(400) })
     expect(invalidated(key)).toBe(true)
     expect(invalidated(siblingKey)).toBe(false)
@@ -2007,9 +2183,9 @@ it('delivers a secondary-project structured ASK waiting transition to browser no
   setVisibility('hidden')
 
   // The server's cezar_ask turn-end path publishes this run summary on the workspace stream.
-  source.emit('run', stampedRun({ ...live, status: RUN_STATUS.waiting, waits: [openHumanWait(1)] }, 'secondary'))
+  source.emit('run-summary', stampedRun({ ...live, status: RUN_STATUS.waiting, waits: [openHumanWait(1)] }, 'secondary'))
   expect(notifications).toEqual(['structured-ask'])
-  source.emit('run', stampedRun({ ...live, status: RUN_STATUS.waiting, waits: [openHumanWait(1)], tokensUsed: 42 }, 'secondary'))
+  source.emit('run-summary', stampedRun({ ...live, status: RUN_STATUS.waiting, waits: [openHumanWait(1)], tokensUsed: 42 }, 'secondary'))
   expect(notifications).toHaveLength(1)
 })
 
@@ -2045,12 +2221,12 @@ describe('live run list responses overlapping newer workspace events (#795)', ()
     const glyph = () => document.querySelector('[data-run-id="desktop"] [data-slot="task-row-notify"]')
     const source = FakeEventSource.last
     await waitFor(() => expect(glyph()).not.toBeNull())
-    source.emit('run', stampedRun(off, project))
+    source.emit('run-summary', stampedRun(off, project))
     await waitFor(() => expect(glyph()).toBeNull())
     await act(async () => { void client.invalidateQueries({ queryKey: key, exact: true }) })
     expect(client.getQueryState(key)?.fetchStatus).toBe('fetching')
     vi.mocked(fetch).mockImplementation(input => String(input).replace('?archived=recent', '').endsWith('/run-summaries') ? fresh.promise : Promise.resolve(json(record)))
-    source.emit('run', stampedRun(record, project))
+    source.emit('run-summary', stampedRun(record, project))
     await waitFor(() => expect(glyph()).not.toBeNull())
     await act(async () => stale.resolve(json([off])))
     // Detail cancellation already preserves its live event. The list must do the same.
@@ -2076,8 +2252,8 @@ describe('ordinary run events while authoritative lists are fetching (#795)', ()
     const list = renderHook(() => useRuns(), { wrapper })
     if (kind.startsWith('warm')) await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) })
     const { source } = mount()
-    if (deleted) source.emit('run-deleted', JSON.stringify({ id: record.id, project: BOOT }))
-    else source.emit('run', stampedRun(newer))
+    if (deleted) source.emit('run-deleted', stampedDeleted(record.id, BOOT))
+    else source.emit('run-summary', stampedRun(newer))
     if (kind.startsWith('cold')) expect(list.result.current.data).toBeUndefined() // do not invent a partial list
     else await waitFor(() => expect(list.result.current.data).toEqual(deleted ? [] : [newerRow]))
     await act(async () => stale.resolve(json([record])))
@@ -2092,10 +2268,10 @@ describe('ordinary run events while authoritative lists are fetching (#795)', ()
     client.setQueryData([BOOT, 'runs', 'list'], [record])
     setApiScope('other')
     const { source } = mount()
-    source.emit('run', stampedRun({ ...record, notify: true }))
+    source.emit('run-summary', stampedRun({ ...record, notify: true }))
     expect(client.getQueryData<ApiRun[]>(['default', 'runs', 'list'])?.[0]?.notify).toBe(true)
     expect(client.getQueryData<ApiRun[]>([BOOT, 'runs', 'list'])?.[0]?.notify).toBe(true)
-    source.emit('run-deleted', JSON.stringify({ id: record.id, project: BOOT }))
+    source.emit('run-deleted', stampedDeleted(record.id, BOOT))
     expect(client.getQueryData(['default', 'runs', 'list'])).toEqual([])
     expect(client.getQueryData([BOOT, 'runs', 'list'])).toEqual([])
     expect(fetch).not.toHaveBeenCalled()
@@ -2109,9 +2285,9 @@ describe('ordinary run events while authoritative lists are fetching (#795)', ()
     const list = renderHook(() => useRuns(), { wrapper })
     await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) })
     const { source } = mount()
-    source.emit('run', stampedRun({ ...record, tokensUsed: 1 }))
+    source.emit('run-summary', stampedRun({ ...record, tokensUsed: 1 }))
     await act(async () => {})
-    for (let tokensUsed = 2; tokensUsed <= 60; tokensUsed++) source.emit('run', stampedRun({ ...record, tokensUsed }))
+    for (let tokensUsed = 2; tokensUsed <= 60; tokensUsed++) source.emit('run-summary', stampedRun({ ...record, tokensUsed }))
     await act(async () => stale.resolve(json([record])))
     expect(fetch).toHaveBeenCalledTimes(2)
     expect(list.result.current.data?.[0]?.tokensUsed).toBe(60)
@@ -2130,7 +2306,7 @@ describe('ordinary run events while authoritative lists are fetching (#795)', ()
     const list = renderHook(() => useRuns(), { wrapper })
     await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) })
     const { source } = mount()
-    source.emit('run', stampedRun({ ...record, notify: true }))
+    source.emit('run-summary', stampedRun({ ...record, notify: true }))
     await act(async () => {})
     list.unmount()
     await act(async () => stale.resolve(json([record])))
@@ -2148,11 +2324,11 @@ describe('cold recovery obligations recorded at event receipt (#795)', () => {
     vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockReturnValueOnce(replacement.promise).mockReturnValue(trailing.promise)
     const list = renderHook(() => useRuns(), { wrapper })
     const { source } = mount()
-    source.emit('run', stampedRun({ ...record, tokensUsed: 1 }))
+    source.emit('run-summary', stampedRun({ ...record, tokensUsed: 1 }))
     await act(async () => {})
     expect(list.result.current.data).toBeUndefined()
-    if (kind === 'delete') source.emit('run-deleted', JSON.stringify({ id: record.id, project: BOOT }))
-    else source.emit('run', stampedRun({ ...record, tokensUsed: 2 }))
+    if (kind === 'delete') source.emit('run-deleted', stampedDeleted(record.id, BOOT))
+    else source.emit('run-summary', stampedRun({ ...record, tokensUsed: 2 }))
     expect(list.result.current.data).toBeUndefined()
     await act(async () => stale.resolve(json([record])))
     await act(async () => replacement.resolve(json([{ ...record, tokensUsed: 1 }])))
@@ -2172,7 +2348,7 @@ describe('cold recovery obligations recorded at event receipt (#795)', () => {
     const list = renderHook(() => useRuns(), { wrapper })
     await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) })
     const { source } = mount()
-    source.emit('run', stampedRun(newer))
+    source.emit('run-summary', stampedRun(newer))
     await waitFor(() => expect(list.result.current.data?.map(row => row.id)).toEqual(['newer', 'first']))
     await act(async () => stale.resolve(json([first])))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.map(row => row.id)).toEqual(['newer', 'first'])
@@ -2242,7 +2418,7 @@ describe('requested list attachment and recovery lifecycle (#795)', () => {
     const list = renderHook(() => useRuns(), { wrapper })
     await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) })
     const { source } = mount()
-    source.emit('run', stampedRun({ ...record, notify: true }))
+    source.emit('run-summary', stampedRun({ ...record, notify: true }))
     await waitFor(() => expect(list.result.current.fetchStatus).toBe('idle'))
     await act(async () => stale.resolve(json([record])))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.notify).toBe(true)
@@ -2263,7 +2439,7 @@ describe('requested list attachment and recovery lifecycle (#795)', () => {
     const list = renderHook(() => useRuns(), { wrapper })
     await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) })
     const { source } = mount()
-    source.emit('run', stampedRun({ ...record, notify: true }))
+    source.emit('run-summary', stampedRun({ ...record, notify: true }))
     await act(async () => {})
     list.unmount()
     client.removeQueries({ queryKey: queryKeys.runs.list(), exact: true })
@@ -2305,7 +2481,7 @@ describe('archive flush and failed recovery freshness (#795)', () => {
     if (!cold) await act(async () => { void client.invalidateQueries({ queryKey: key, exact: true }) })
     expect(fetch).toHaveBeenCalledTimes(1)
     const stream = mount()
-    stream.source.emit('run', stampedRun(final[0]!, project))
+    stream.source.emit('run-summary', stampedRun(final[0]!, project))
     flushFrame() // Never release the stale GET until the archive batch has written.
     if (cold) expect(client.getQueryData(key)).toBeUndefined()
     else expect(client.getQueryData<ApiRun[]>(key)?.[0]?.archived).toBe(true)
@@ -2329,10 +2505,10 @@ describe('archive flush and failed recovery freshness (#795)', () => {
     const list = renderHook(() => useRuns(), { wrapper })
     if (temperature === 'warm') await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) })
     const { source } = mount()
-    for (const record of final.slice(0, 15)) source.emit('run', stampedRun(record))
+    for (const record of final.slice(0, 15)) source.emit('run-summary', stampedRun(record))
     flushFrame()
     expect(fetch).toHaveBeenCalledTimes(2)
-    for (const record of final.slice(15)) source.emit('run', stampedRun(record))
+    for (const record of final.slice(15)) source.emit('run-summary', stampedRun(record))
     flushFrame()
     expect(fetch).toHaveBeenCalledTimes(2)
     if (temperature === 'cold') expect(client.getQueryData(queryKeys.runs.list())).toBeUndefined()
@@ -2351,8 +2527,8 @@ describe('archive flush and failed recovery freshness (#795)', () => {
     const flushFrame = captureFrame()
     const list = renderHook(() => useRuns(), { wrapper })
     const { source } = mount()
-    source.emit('run', stampedRun({ ...record, notify: true }))
-    source.emit('run', stampedRun({ ...record, archived: true }))
+    source.emit('run-summary', stampedRun({ ...record, notify: true }))
+    source.emit('run-summary', stampedRun({ ...record, archived: true }))
     expect(client.getQueryData(queryKeys.runs.list())).toBeUndefined()
     // Recovery completes before the archive frame. Receipt itself must retain its obligation.
     await act(async () => replacement.resolve(json([{ ...record, notify: true }])))
@@ -2376,15 +2552,15 @@ describe('archive flush and failed recovery freshness (#795)', () => {
     expect(list.result.current.data).toEqual(kind.startsWith('warm') ? [record, unrelated] : undefined)
     if (kind.startsWith('warm')) await act(async () => { void client.invalidateQueries({ queryKey: queryKeys.runs.list() }) })
     const { source } = mount()
-    source.emit('run', stampedRun({ ...record, notify: true }))
+    source.emit('run-summary', stampedRun({ ...record, notify: true }))
     await waitFor(() => expect(list.result.current.isError).toBe(true))
     await act(async () => stale.resolve(json([record, unrelated])))
     expect(fetch).toHaveBeenCalledTimes(2)
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
     const newer = { ...record, notify: true, title: 'New name', archived: kind.endsWith('archive') }
     const final = kind.endsWith('delete') ? [unrelated] : [newer, unrelated]
-    if (kind.endsWith('delete')) source.emit('run-deleted', JSON.stringify({ id: record.id, project: BOOT }))
-    else source.emit('run', stampedRun(newer))
+    if (kind.endsWith('delete')) source.emit('run-deleted', stampedDeleted(record.id, BOOT))
+    else source.emit('run-summary', stampedRun(newer))
     if (kind.endsWith('archive')) flushFrame()
     await act(async () => {})
     expect(fetch).toHaveBeenCalledTimes(3)
@@ -2405,10 +2581,10 @@ describe('failed cold recovery with no enabled reader (#795)', () => {
     const list = renderHook(({ enabled }) => useProjectRuns(BOOT, enabled, true), { wrapper, initialProps: { enabled: true } })
     expect(list.result.current.data).toBeUndefined() // subscribe to data as well as the error state
     const { source } = mount()
-    source.emit('run', stampedRun({ ...record, notify: true }))
+    source.emit('run-summary', stampedRun({ ...record, notify: true }))
     await waitFor(() => expect(list.result.current.isError).toBe(true))
     list.rerender({ enabled: false })
-    source.emit('run', stampedRun({ ...record, notify: true, title: 'Latest' }))
+    source.emit('run-summary', stampedRun({ ...record, notify: true, title: 'Latest' }))
     await act(async () => stale.resolve(json([record])))
     expect(fetch).toHaveBeenCalledTimes(2)
     expect(client.getQueryData(queryKeys.runs.list())).toBeUndefined()
@@ -2450,8 +2626,8 @@ describe('incomplete inactive snapshots remain stale across live patches (#795)'
     await act(async () => {})
     expect(client.getQueryState(key)?.isInvalidated).toBe(true)
     expect(fetch).not.toHaveBeenCalled()
-    if (kind === 'delete') source.emit('run-deleted', JSON.stringify({ id: record.id, project: BOOT }))
-    else source.emit('run', stampedRun(newer))
+    if (kind === 'delete') source.emit('run-deleted', stampedDeleted(record.id, BOOT))
+    else source.emit('run-summary', stampedRun(newer))
     if (kind === 'archive') {
       expect(frame).toBeTypeOf('function')
       act(() => frame?.(performance.now()))
@@ -2480,17 +2656,17 @@ describe('exhausted cold recovery remains event driven (#795)', () => {
     const list = renderHook(() => useRuns(), { wrapper })
     expect(list.result.current.data).toBeUndefined()
     const { source } = mount()
-    source.emit('run', stampedRun({ ...record, tokensUsed: 1 }))
+    source.emit('run-summary', stampedRun({ ...record, tokensUsed: 1 }))
     await waitFor(() => expect(list.result.current.isError).toBe(true))
     expect(fetch).toHaveBeenCalledTimes(2)
-    for (let tokensUsed = 2; tokensUsed <= 30; tokensUsed++) source.emit('run', stampedRun({ ...record, tokensUsed }))
+    for (let tokensUsed = 2; tokensUsed <= 30; tokensUsed++) source.emit('run-summary', stampedRun({ ...record, tokensUsed }))
     await waitFor(() => expect(client.getQueryState(queryKeys.runs.list())?.errorUpdateCount).toBe(2))
     expect(fetch).toHaveBeenCalledTimes(3)
     expect(list.result.current.data).toBeUndefined()
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(true)
     await act(async () => stale.resolve(json([record, unrelated])))
     expect(fetch).toHaveBeenCalledTimes(3) // Exhaustion itself has no retry timer or self-loop.
-    source.emit('run', stampedRun({ ...record, tokensUsed: 31 }))
+    source.emit('run-summary', stampedRun({ ...record, tokensUsed: 31 }))
     expect(fetch).toHaveBeenCalledTimes(4)
     await act(async () => fresh.resolve(json([{ ...record, tokensUsed: 31 }, unrelated])))
     await waitFor(() => expect(list.result.current.data).toEqual([{ ...record, tokensUsed: 31 }, unrelated]))

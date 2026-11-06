@@ -44,6 +44,7 @@ export * from './live.ts';
 export * from './activity.ts';
 export * from './live-limits.ts';
 export * from './live-coordination.ts';
+export * from './workspace-events.ts';
 
 export * from './permissions.ts';
 export * from './defined.ts';
