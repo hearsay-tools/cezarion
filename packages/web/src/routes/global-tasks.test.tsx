@@ -321,6 +321,18 @@ const rowIds = () =>
   )
 
 describe('global tasks page', () => {
+it('mounts summary actions only while the row is expanded', async () => {
+  stubFetch()
+  renderPage()
+  await screen.findByText('Bump the runner')
+  const row = document.querySelector('[data-slot="global-task-row"][data-run-id="i1"]')!
+  expect(row.querySelector('[data-slot="global-task-actions"]')).toBeNull()
+  fireEvent.click(within(row as HTMLElement).getByRole('button', { name: 'Show resources for Bump the runner' }))
+  expect(row.querySelector('[data-slot="global-task-actions"]')).not.toBeNull()
+  fireEvent.click(within(row as HTMLElement).getByRole('button', { name: 'Hide resources for Bump the runner' }))
+  expect(row.querySelector('[data-slot="global-task-actions"]')).toBeNull()
+})
+
   it('lists every project’s tasks and links each into its OWN project', async () => {
     stubFetch()
     renderPage()
@@ -1000,6 +1012,7 @@ describe('global tasks page', () => {
       // The outcome colour, not violet (#617 decision 2).
       expect(document.querySelector('[aria-label="unread"]')?.getAttribute('data-tone')).toBe('success')
 
+      fireEvent.click(screen.getByRole('button', { name: 'Show resources for Bump the runner' }))
       const markRead = screen.getByRole('button', { name: /Mark Bump the runner read/ })
       expect(markRead.className).toContain('text-accent-icon')
       fireEvent.click(markRead)
@@ -1020,6 +1033,7 @@ describe('global tasks page', () => {
       await screen.findByText('Bump the runner')
       expect(document.querySelectorAll('[aria-label="unread"]')).toHaveLength(0)
 
+      fireEvent.click(screen.getByRole('button', { name: 'Show resources for Bump the runner' }))
       fireEvent.click(screen.getByRole('button', { name: /Mark Bump the runner unread/ }))
 
       await waitFor(() =>
@@ -1051,6 +1065,7 @@ describe('global tasks page', () => {
     const row = document.querySelector('[data-slot="global-task-row"][data-run-id="a1"]')!
     expect(row.querySelector('[data-action="archive-run"]')).toBeNull()
 
+    fireEvent.click(screen.getByRole('button', { name: 'Show resources for Bump the runner' }))
     fireEvent.click(
       document
         .querySelector('[data-slot="global-task-row"][data-run-id="i1"]')!
@@ -1076,6 +1091,7 @@ describe('global tasks page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Archived' }))
     await waitFor(() => expect(rowIds()).toEqual(['i1']))
 
+    fireEvent.click(screen.getByRole('button', { name: 'Show resources for Bump the runner' }))
     fireEvent.click(document.querySelector<HTMLButtonElement>('[data-action="unarchive-run"]')!)
     await waitFor(() =>
       expect(sent.find((request) => request.method === 'POST')?.body).toEqual({ archived: false }),
@@ -1088,6 +1104,7 @@ describe('global tasks page', () => {
     renderPage()
     await screen.findByText('Bump the runner')
 
+    fireEvent.click(screen.getByRole('button', { name: 'Show resources for Bump the runner' }))
     fireEvent.click(
       document
         .querySelector('[data-slot="global-task-row"][data-run-id="i1"]')!

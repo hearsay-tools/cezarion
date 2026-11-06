@@ -2712,8 +2712,11 @@ To be first-class:
 8. **Harness parity** — add the runner to `HARNESS_ADAPTERS`
    (`packages/cezar/src/core/harness-parity.testkit.ts`): the env var that points it at an
    offline mock, and a prompt for every name in the shared scenario catalog (§7). Then make
-   that mock answer them, in the backend's own wire shape. Use
-   `scripts/mock-lifecycle.mjs` for the no-progress stall and release wait. **Every matrix row must pass** —
+   that mock a wire encoder over `scripts/mock-scenario.mjs`: shared scenario
+   selection and scripts belong to that module; the encoder emits the backend's
+   native frames. Keep acknowledgement, delivery control, failure control and
+   steering admission in the mock. Declare genuine wire gaps in `unsupported`.
+   The player uses `scripts/mock-lifecycle.mjs` for the no-progress stall and release wait. **Every matrix row must pass** —
    the guard tests fail the suite until each `(criterion, runner)` cell is a live row or a
    declared `PARITY_EXEMPTIONS` entry naming the wire limitation. Never an `it.skip`, and
    never "not implemented yet".

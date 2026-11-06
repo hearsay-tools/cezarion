@@ -18,6 +18,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 
+import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
+
 import { assertSafeId, installId, PACKAGE_NAME, versionDir, versionEntry, versionsDir, writeManifest } from './layout.ts';
 
 const packageJsonSchema = z.object({ name: z.string(), version: z.string().min(1) }).passthrough();
@@ -90,6 +92,7 @@ async function installSpec(
   // Both callers validate before they get here, but the staging path is built from `id` and
   // recursively removed — make that invariant structural rather than a property of call order.
   const staging = join(versionsDir(env), `.staging-${assertSafeId(id)}-${process.pid}`);
+  assertCezarHomeWriteIsSandboxed(staging, env);
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(staging, { recursive: true });
   try {
@@ -103,8 +106,10 @@ async function installSpec(
     if (!existsSync(entry)) throw new Error('install finished but the entry file is missing');
     // A stale complete install of the same id (registry re-install after a manual delete of
     // the manifest, say) is replaced wholesale.
-    rmSync(versionDir(id, env), { recursive: true, force: true });
-    renameSync(staging, versionDir(id, env));
+    const destination = versionDir(id, env);
+    assertCezarHomeWriteIsSandboxed(destination, env);
+    rmSync(destination, { recursive: true, force: true });
+    renameSync(staging, destination);
     writeManifest(id, { ...manifest, installedAt: new Date().toISOString() }, env);
     opts.onLog?.(`installed ${id}`);
   } catch (error) {

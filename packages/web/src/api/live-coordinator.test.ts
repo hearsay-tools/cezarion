@@ -216,3 +216,20 @@ it('restores live delivery from an older server whose health lacks newer capabil
   await vi.advanceTimersByTimeAsync(0)
   expect(Worker.all).toHaveLength(2)
 })
+
+it('keeps report-state reads in the finite document transport and sends only the opaque topic to an existing worker', async () => {
+  coordinator.configure(local)
+  const offTopic = coordinator.subscribe({ kind: 'topic', topic: 'reports:project:P' }, {})
+  const worker = Worker.all[0]!
+  const sync = worker.port.postMessage.mock.calls.at(-1)![0] as any
+  expect(sync.entries.map((entry: any) => entry.demand)).toEqual([{ kind: 'topic', topic: 'reports:project:P' }])
+  expect(fetch).not.toHaveBeenCalled()
+  coordinator.configure({ ...local, local: false })
+  const offRead = coordinator.subscribe({ kind: 'read', path: '/api/v1/p/P/reports/state', intervalMs: 5_000 }, {})
+  await vi.advanceTimersByTimeAsync(5_000)
+  expect(fetch).toHaveBeenCalledWith('/api/v1/p/P/reports/state', expect.objectContaining({ credentials: 'include' }))
+  expect(Worker.all).toHaveLength(1)
+  expect(worker.port.close).toHaveBeenCalled()
+  expect(worker.port.postMessage.mock.calls.every(([message]) => !message.entries?.some((entry: any) => entry.demand.kind === 'read'))).toBe(true)
+  offRead(); offTopic()
+})

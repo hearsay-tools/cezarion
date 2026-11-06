@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { reportsResponseSchema, REPORTS_QUERY_MAX } from '@open-mercato/cezar-contract/reports';
+import { reportsResponseSchema, reportsStateSchema, REPORTS_QUERY_MAX } from '@open-mercato/cezar-contract/reports';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { artifactDirectory, publishArtifact, readArtifact } from '../artifacts/store.ts';
@@ -32,6 +32,15 @@ describe('project reports', () => {
   };
   const get = (query = '', project = 'default') => apiRequest(createApp({ repoRoot: root, store, manager: {} as RunManager, version: 'test' }), `/api/v1/p/${project}/reports${query}`);
   const page = async (query = '') => reportsResponseSchema.parse(await (await get(query)).json());
+
+  it('serves the project state twin and marks finite watch demand', async () => {
+    const index = store.reports;
+    const mark = vi.spyOn(index, 'markRead');
+    const response = await get('/state');
+    expect(response.status).toBe(200);
+    expect(reportsStateSchema.parse(await response.json())).toEqual(index.state());
+    expect(mark).toHaveBeenCalledOnce();
+  });
 
   it('backfills HTML from archived and terminal tasks, records completion, and preserves files after worktree removal', async () => {
     const run = task();

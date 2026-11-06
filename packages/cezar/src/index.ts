@@ -58,6 +58,8 @@ Usage:
   cez projects              list the projects this cockpit serves
                             (also: projects add [<dir>] · projects remove|rm <id> ·
                              projects tag <id> [<tag>…])
+  cez backup list [<file>]   list rotating registry and account backups
+  cez backup restore <file> [--at <time>] restore JSON from a backup
   cez discover              list host runners, models, and advertised effort levels
   cez worker                manage owned workers (see: worker --help)
   cez message               message tasks (see: message --help)

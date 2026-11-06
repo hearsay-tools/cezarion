@@ -165,7 +165,7 @@ describe('the GitHub tab lists', () => {
   it('routes wheel input over the panes to main until the workspace docks (#523)', async () => {
     stubFetch()
     vi.stubGlobal('matchMedia', (query: string) => ({
-      matches: query === '(min-width: 768px)', addEventListener() {}, removeEventListener() {},
+      matches: query === '(min-width: 48rem)' || query === '(min-width: 768px)', addEventListener() {}, removeEventListener() {},
     }))
     const clientWidth = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')!.get!
     const clientHeight = Object.getOwnPropertyDescriptor(Element.prototype, 'clientHeight')!.get!

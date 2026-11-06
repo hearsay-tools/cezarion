@@ -39,7 +39,7 @@
     "server-uninstall": "tsx src/index.ts server-uninstall",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:unit": "node --import ../../scripts/test-git-env.mjs --import tsx --test test/unit/*.test.ts",
+    "test:unit": "node --import ../../scripts/test-home-env.mjs --import tsx --test test/unit/*.test.ts",
     "test:package": "node ../../scripts/test-package.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.scripts.json",
     "typecheck:package": "tsc --noEmit -p tsconfig.package.json",

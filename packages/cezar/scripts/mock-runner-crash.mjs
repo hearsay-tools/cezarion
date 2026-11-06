@@ -1,7 +1,13 @@
 // Synthetic Node uncaught-exception diagnostic matching #499's property/footer layout.
 // Native transports call this when a prompt arrives, optionally before its ACK.
 import { spawn } from 'node:child_process';
-import { writeSync } from 'node:fs';
+import { writeSync as rawWriteSync } from 'node:fs';
+const recorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
+  : await import('./mock-wire-recorder.mjs');
+function writeSync(fd, data) {
+  recorder?.recordWire(fd === 1 ? 'stdout' : 'stderr', data);
+  return rawWriteSync(fd, data);
+}
 export function crashWithStderr(prompt, malformedFrame) {
   if (!prompt.includes('mock:crash-stderr')) return false;
   if (prompt.includes('mock:crash-stderr-clean')) {

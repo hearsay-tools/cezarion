@@ -26,6 +26,10 @@ async function afterParityPark(prompt) {
   while (!parityGateFs.existsSync(gate)) await new Promise(resolve => setTimeout(resolve, 10));
 }
 
+// No import or await on the ordinary mock path.
+const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
+  : await import('./mock-wire-recorder.mjs');
+wireRecorder?.installWireRecorder();
 const write = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 // #505: like the real app-server, any active main-thread turn accepts `turn/steer`.
 // Steers accepted by an ordinary scripted turn are read just before it completes:

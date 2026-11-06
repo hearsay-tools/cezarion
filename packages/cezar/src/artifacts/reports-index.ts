@@ -1,3 +1,4 @@
+import { ReportsWatch, reportMetadataKey } from './reports-watch.ts';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { matchesRunSearch } from '@open-mercato/cezar-contract/run-search';
@@ -34,6 +35,14 @@ export class ReportsIndex {
   private started = false;
   private live = new Set<string>();
   private runsRoot?: string;
+  private changes: ReportsWatch;
+  private settlements = new Set<string>();
+  state() { return this.changes.state(); }
+  watch() { return this.changes.watch(); }
+  markRead() { this.changes.markRead(); }
+  onChange(listener: Parameters<ReportsWatch['onChange']>[0]) { return this.changes.onChange(listener); }
+  private onDeleted = (id: string): void => { this.changes.deleted(id); this.live.delete(id); };
+
 
   private root(): string { return this.runsRoot ??= artifactRunsRoot(this.dataDir); }
   private async storage<T>(runId: string, read: (directory: string) => Promise<T>) {
@@ -42,16 +51,46 @@ export class ReportsIndex {
   }
 
   constructor(private db: RunDatabase, private store: RunStore, private dataDir: string) {
+    this.changes = new ReportsWatch(
+      id => this.serial(async () => {
+        if (!this.changes.watching()) return;
+        if (!this.changes.due(id)) { this.changes.schedule(id); return; }
+        this.store.flush(); await this.indexRun(id); this.settlements.delete(id);
+      }),
+      before => this.serial(async () => {
+        if (!this.changes.watching()) return;
+        this.store.flush();
+        const ids = new Set(this.db.reports.dirty());
+        for (const row of this.db.listLive()) if (this.changes.quiet(row.id, before)) ids.add(row.id);
+        for (const id of ids) if (this.changes.due(id) && this.supportedRun(id)) await this.indexRun(id);
+      }),
+      () => {
+        // Closing the last shelf must not cancel the existing terminal reconciliation guarantee.
+        if (this.settlements.size) {
+          this.settlements.clear();
+          void this.reconcile(false).catch(error => console.warn('[cez] Reports settlement failed:', error));
+        }
+      },
+    );
     store.flush();
+    for (const row of db.reports.summaries()) {
+      const summary = parseStoredSummary(row.summary);
+      this.changes.seed(row.runId, summary ? reportMetadataKey(summary) : undefined);
+    }
     this.live = new Set(db.listLive().map(row => row.id));
     store.on('run', this.onRun);
-    store.once('closed', () => { this.closed = true; store.off('run', this.onRun); });
+    store.on('deleted', this.onDeleted);
+    store.once('closed', () => { this.closed = true; this.changes.close(); store.off('run', this.onRun); store.off('deleted', this.onDeleted); });
   }
 
   private onRun = (run: RunRecord): void => {
-    if (isLiveStatus(run.status)) { this.live.add(run.id); return; }
+    const wasLive = this.live.has(run.id);
+    if (wasLive && !isLiveStatus(run.status) && this.changes.watching()) this.settlements.add(run.id);
+    const live = isLiveStatus(run.status);
+    this.changes.run(run, live || wasLive, this.db.reports.forRun(run.id).length > 0);
+    if (live) { this.live.add(run.id); return; }
     const settled = this.live.delete(run.id);
-    if (this.started && settled) void this.reconcile(false, run.id).catch(error => console.warn('[cez] Reports reconciliation failed:', error));
+    if (this.started && settled && !this.changes.watching()) void this.reconcile(false, run.id).catch(error => console.warn('[cez] Reports reconciliation failed:', error));
   };
 
   /** Only the post-listen boot hook and already-served lazy contexts call this. */
@@ -91,6 +130,7 @@ export class ReportsIndex {
   }
   private async indexRun(runId: string): Promise<boolean> {
     if (!this.supportedRun(runId)) return true;
+    this.changes.scanned(runId);
     const previous = this.db.reports.forRun(runId);
     const revision = this.db.revisionOf(runId);
     const scan = await this.storage(runId, directory => scanArtifactsForIndex(directory, runId));
@@ -106,6 +146,15 @@ export class ReportsIndex {
     if (!complete) console.warn(`[cez] Report read could not be completed: ${runId}`);
     if (this.closed) return false;
     this.db.reports.replace(runId, artifacts, revision, complete);
+    const current = this.db.reports.forRun(runId);
+    const stable = (rows: IndexedArtifact[]) => JSON.stringify(rows.slice().sort((a, b) => a.id.localeCompare(b.id)));
+    if (stable(previous) !== stable(current)) this.changes.content();
+    if (current.length) {
+      const row = this.db.getSummaries([runId])[0];
+      const summary = row && parseStoredSummary(row.summary);
+      if (summary) this.changes.updateMetadata(summary);
+      else this.changes.seed(runId);
+    } else this.changes.forget(runId);
     const kept = new Set(artifacts.map(a => a.id));
     for (const missing of previous) if (!kept.has(missing.id)) console.warn(`[cez] Report missing or deleted: ${runId}/${missing.id}`);
     return complete;
@@ -120,6 +169,8 @@ export class ReportsIndex {
     }
     if (check.state === 'read' && check.value) return true;
     this.db.reports.drop(row.id);
+    if (!this.db.reports.forRun(row.runId).length) this.changes.forget(row.runId);
+    this.changes.content();
     console.warn(`[cez] Report missing or deleted: ${row.runId}/${row.id}`);
     return false;
   }

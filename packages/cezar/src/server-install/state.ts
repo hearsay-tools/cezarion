@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import {
+  assertCezarHomeWriteIsSandboxed,
   DEFAULT_SERVER_INSTANCE,
   serverInstancesDir,
   serverLockPath,
@@ -82,6 +83,7 @@ export function nextFreeInstancePort(startAt = 4321): number {
 /** Atomically persist state as `0600`, creating its dir (`0700`) if needed. */
 export function saveServerState(state: ServerState, instance: string = DEFAULT_SERVER_INSTANCE): void {
   const path = serverStatePath(instance);
+  assertCezarHomeWriteIsSandboxed(path);
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const tmp = `${path}.tmp`;
@@ -103,6 +105,7 @@ export function saveServerState(state: ServerState, instance: string = DEFAULT_S
  */
 export function deleteServerState(instance: string): void {
   if (instance === DEFAULT_SERVER_INSTANCE) return;
+  assertCezarHomeWriteIsSandboxed(serverStatePath(instance));
   try {
     rmSync(serverStatePath(instance), { force: true });
   } catch {
@@ -132,6 +135,7 @@ export class LockHeldError extends Error {}
  */
 export function acquireLock(instance: string = DEFAULT_SERVER_INSTANCE): () => void {
   const path = serverLockPath(instance);
+  assertCezarHomeWriteIsSandboxed(path);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 
   // `wx` makes creation atomic — a plain exists-then-write check would let two
@@ -143,6 +147,7 @@ export function acquireLock(instance: string = DEFAULT_SERVER_INSTANCE): () => v
       let released = false;
       return () => {
         if (released) return;
+        assertCezarHomeWriteIsSandboxed(path);
         released = true;
         try {
           if (existsSync(path) && readLockPid(path) === process.pid) rmSync(path);

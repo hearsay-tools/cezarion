@@ -28,6 +28,10 @@ function startupError(code, message) {
   process.exit(code);
 }
 
+// No import or await on the ordinary mock path.
+const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
+  : await import('./mock-wire-recorder.mjs');
+wireRecorder?.installWireRecorder();
 const flags = new Map();
 const extensions = [];
 // An older or different omp build without some flag: CEZ_MOCK_OMP_UNKNOWN_FLAGS=--add-dir.

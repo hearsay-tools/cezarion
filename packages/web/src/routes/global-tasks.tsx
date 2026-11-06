@@ -74,7 +74,6 @@ import { useTaskListFolds } from '@/lib/use-task-list-folds'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useNow } from '@/lib/use-now'
 import { cn } from '@/lib/utils'
-
 /**
  * The global Tasks page at `/tasks` — every registered project's work in one table.
  *
@@ -102,16 +101,13 @@ import { cn } from '@/lib/utils'
  * Presentational logic lives in `lib/global-tasks.ts`; what is here is markup, the router and the
  * local filter state.
  */
-
 /** How often the page re-reads the cross-project index ON TOP of the stream's invalidations —
  *  the cover for a dropped socket, a frozen tab, or a run that ended while the connection was
  *  down. Slow enough that a forty-project workspace is not re-scanned every few seconds. */
 const RUNS_INDEX_POLL_MS = 15_000
-
 /** How long the search box waits before writing the URL. Long enough that a typed word is one
  *  history write rather than eight, short enough that a paste-and-share feels immediate. */
 const QUERY_DEBOUNCE_MS = 250
-
 /** How many reference chips a row paints before the rest collapse into a `+N`.
  *
  *  ONE. Two fit on a line but cost ~90px of a column that Task wants more, and nothing is lost
@@ -119,7 +115,6 @@ const QUERY_DEBOUNCE_MS = 250
  *  second one is a pointer-move away rather than a click. The strongest reference — the PR a task
  *  created, else the one it is about, else its issue — is the one worth the row's own space. */
 const MAX_VISIBLE_REFERENCES = 1
-
 /** What "finished" means for the archive affordance — outcomes, not gates. A `review` run still
  *  wants a human, so it is not swept away, exactly as the per-project broom decides it. */
 const ARCHIVABLE_STATUSES: ReadonlySet<string> = new Set(['done', 'failed', 'cancelled'])
@@ -468,7 +463,7 @@ function GroupedTaskLists({ groupBy, view, statusGroups, groups, folds, row }: {
             collapsed={folds.isCollapsed(group.label)}
             onToggle={() => folds.toggle(group.label)}
           >
-            <TaskList tasks={group.rows.flatMap(rowTasks)} showProject {...row} />
+            <TaskList summary tasks={group.rows.flatMap(rowTasks)} showProject {...row} />
           </StatusGroupSection>
         )
       }) : groups.map((group) => (
@@ -764,6 +759,7 @@ function FilterBar({
 
 /** Each group owns a list of task cards, with the same scoped actions on desktop and mobile. */
 function TaskList({
+  summary = false,
   tasks,
   now,
   showProject,
@@ -773,6 +769,7 @@ function TaskList({
   showCost,
   automationName,
 }: {
+  summary?: boolean
   tasks: readonly GlobalTask[]
   now: number
   showProject: boolean
@@ -793,6 +790,7 @@ function TaskList({
               <TaskRow
                 key={`${task.run.projectId}/${task.run.id}`}
                 task={task}
+                summary={summary}
                 now={now}
                 showProject={showProject}
                 onArchive={onArchive}
@@ -815,6 +813,7 @@ function TaskList({
  * prefix with, and each row points at a DIFFERENT project anyway.
  */
 function TaskRow({
+  summary,
   task,
   now,
   showProject,
@@ -824,6 +823,7 @@ function TaskRow({
   showCost,
   automationName,
 }: {
+  summary: boolean
   task: GlobalTask
   now: number
   showProject: boolean
@@ -926,12 +926,12 @@ function TaskRow({
       <div data-slot="global-task-age" className="text-right text-xs text-soft-foreground tabular-nums">
         {shortAge(run.startedAt ?? run.createdAt, now)}
       </div>
-      <div data-slot="global-task-actions">
+      {!summary || resourcesOpen ? <div data-slot="global-task-actions">
         <span className="inline-flex items-center gap-0.5">
           <ReadToggle task={task} busy={busy} onSetRead={onSetRead} />
           <ArchiveToggle task={task} busy={busy} onArchive={onArchive} /><Button asChild variant="outline"><Link to={to}>Open task</Link></Button>
         </span>
-      </div>
+      </div> : null}
     {resourcesOpen ? <div data-slot="global-task-resources" className="col-span-full flex flex-col gap-3">
       <TaskPreview projectId={run.projectId} runId={run.id} status={attention.label} error={run.error} open={<Button asChild variant="outline" className="min-h-11"><Link to={to}>Open task<span className="sr-only">: {runTitle(run)}</span></Link></Button>} />
       <dl className="grid grid-cols-2 gap-4 rounded-md bg-muted/50 p-4 text-xs md:grid-cols-3">

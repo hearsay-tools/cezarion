@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 
+/** Tailwind's md breakpoint. Keep tree selection aligned with md: styles. */
+export const DESKTOP_MEDIA_QUERY = '(min-width: 48rem)'
+
 /**
  * md-and-up, live: the "phones force unified+wrap" rule (spec §"Session git view — Changes &
  * Files tabs (#390)") must follow a rotation/resize, not the first render. jsdom (no
@@ -9,12 +12,13 @@ import { useEffect, useState } from 'react'
  */
 export function useIsDesktop(): boolean {
   const [desktop, setDesktop] = useState(
-    () => typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 768px)').matches,
+    () => typeof window.matchMedia !== 'function' || window.matchMedia(DESKTOP_MEDIA_QUERY).matches,
   )
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return
-    const query = window.matchMedia('(min-width: 768px)')
-    const onChange = (event: MediaQueryListEvent) => setDesktop(event.matches)
+    const query = window.matchMedia(DESKTOP_MEDIA_QUERY)
+    const onChange = () => setDesktop(query.matches)
+    onChange()
     query.addEventListener('change', onChange)
     return () => query.removeEventListener('change', onChange)
   }, [])

@@ -1,3 +1,4 @@
+import { backupBeforeWrite } from './backups.ts';
 import { randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -251,7 +252,7 @@ const disabledProvidersSchema = z
     return PROVIDER_IDS.filter((provider) => seen.has(provider));
   });
 
-const workspaceConfigSchema = z
+export const workspaceConfigSchema = z
   .object({
     /** Migration cursor (src/workspace/migrations.ts). Absent/bad → 0, which
      *  means "run every migration" — each one is idempotent, so that is safe. */
@@ -416,6 +417,7 @@ export async function mergeWriteWorkspaceConfig(
   const path = workspaceConfigPath();
   const current = await loadWorkspaceConfig(path);
   const next = mutator(current) ?? current;
+  backupBeforeWrite(path, next);
   atomicWriteJsonSync(path, next);
   // Refresh after empty writes too, so recovery cannot resurrect removed projects.
   try {

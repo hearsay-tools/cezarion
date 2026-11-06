@@ -22,6 +22,7 @@
     "cez/contract-root-import": "error",
     "cez/design-guardian": "error",
     "cez/mock-lifecycle-boundary": "error",
+    "cez/mock-scenario-boundary": "error",
     "cez/native-mock-source": "error",
     "cez/raw-query-setter": "error",
     "cez/run-fact-reader": "error",

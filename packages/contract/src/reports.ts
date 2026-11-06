@@ -23,3 +23,20 @@ export const reportsResponseSchema = z.object({
 export type Report = z.infer<typeof reportSchema>;
 export type ReportsResponse = z.infer<typeof reportsResponseSchema>;
 export type ReportsQuery = z.infer<typeof reportsQuerySchema>;
+
+/** Process-local counters. A new epoch requires a shelf reconciliation. */
+export const reportsStateSchema = z.object({
+  epoch: z.uuid(), generation: z.number().int().nonnegative(),
+  metadataGeneration: z.number().int().nonnegative(),
+}).strict();
+export const reportsMetadataSchema = z.object({
+  runId: z.uuid(), taskTitle: z.string(), taskStatus: runStatusSchema,
+}).strict();
+export const reportsFrameSchema = z.discriminatedUnion('type', [
+  reportsStateSchema.extend({ type: z.literal('snapshot') }),
+  reportsStateSchema.extend({ type: z.literal('content') }),
+  reportsStateSchema.extend({ type: z.literal('metadata'), runs: z.array(reportsMetadataSchema) }),
+]);
+export type ReportsState = z.infer<typeof reportsStateSchema>;
+export type ReportsMetadata = z.infer<typeof reportsMetadataSchema>;
+export type ReportsFrame = z.infer<typeof reportsFrameSchema>;

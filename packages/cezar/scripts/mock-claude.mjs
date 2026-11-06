@@ -61,6 +61,10 @@ async function holdSteerTool() {
 // every line one turn consumed (#505).
 let heldUuids = [];
 let respondingUuid;
+// No import or await on the ordinary mock path.
+const wireRecorder = process.env.CEZ_MOCK_WIRE_FILE === undefined ? undefined
+  : await import('./mock-wire-recorder.mjs');
+wireRecorder?.installWireRecorder();
 const emit = (obj) => {
   if (obj?.type === 'result' && heldUuids.length) obj = { ...obj, user_message_uuids: [...heldUuids.splice(0), ...(obj.user_message_uuids ?? [respondingUuid].filter(Boolean))] };
   process.stdout.write(`${JSON.stringify(obj)}\n`);
