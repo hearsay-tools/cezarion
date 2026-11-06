@@ -111,3 +111,21 @@ it.each([['restore', '../config.json'], ['restore', 'config.json', '--at', 'inva
   vi.spyOn(console, 'error').mockImplementation(() => {});
   expect(await runBackupCommand(args, process.env)).toBe(1);
 });
+
+
+it('orders same-clock writes and keeps a snapshot for repeated content', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-11-01T00:00:00Z'));
+  await mergeWriteAgentAccounts((store) => { store.marker = 'a'; });
+  await mergeWriteAgentAccounts((store) => { store.marker = 'b'; });
+  await mergeWriteAgentAccounts((store) => { store.marker = 'a'; });
+  await mergeWriteAgentAccounts((store) => { store.marker = 'c'; });
+  const snapshots = listBackups('agent-accounts.json');
+  expect(snapshots).toHaveLength(3);
+  expect(snapshots.map((entry) => JSON.parse(readFileSync(entry.path, 'utf8')).marker)).toEqual(['a', 'b', 'a']);
+  expect(new Set(snapshots.map((entry) => entry.time)).size).toBe(3);
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  expect(await runBackupCommand(['restore', 'agent-accounts.json'], process.env)).toBe(0);
+  expect((await loadAgentAccounts()).marker).toBe('a');
+  expect(listBackups('agent-accounts.json')).toHaveLength(4);
+});

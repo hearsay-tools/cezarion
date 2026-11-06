@@ -61,19 +61,31 @@ export function backupBeforeWrite(path: string, next: unknown): void {
     const root = join(home, 'backups');
     const dir = join(root, file);
     const now = new Date();
+    const latest = entries(home, file)[0];
+    const timestamp = new Date(Math.max(now.getTime(), latest ? Date.parse(latest.time) + 1 : 0));
     const sha = createHash('sha256').update(raw).digest('hex').slice(0, 8);
-    const target = join(dir, `${now.toISOString().replaceAll(':', '-')}-${sha}.json`);
     for (const directory of [root, dir]) {
       assertCezarHomeWriteIsSandboxed(directory);
       mkdirSync(directory, { recursive: true, mode: 0o700 });
     }
-    assertCezarHomeWriteIsSandboxed(target);
-    // Exclusive creation never truncates a snapshot from another writer in the same millisecond.
-    try { writeFileSync(target, raw, { mode: 0o600, flag: 'wx' }); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
+    writeSnapshot(dir, timestamp, sha, raw);
     prune(home, file, now);
   } catch (error) { warn(path, error); }
+}
+
+/** Keep serialized writes ordered even with a coarse or adjusted clock. */
+function writeSnapshot(dir: string, timestamp: Date, sha: string, raw: Buffer): void {
+  for (;;) {
+    const target = join(dir, `${timestamp.toISOString().replaceAll(':', '-')}-${sha}.json`);
+    assertCezarHomeWriteIsSandboxed(target);
+    try {
+      writeFileSync(target, raw, { mode: 0o600, flag: 'wx' });
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      timestamp.setTime(timestamp.getTime() + 1);
+    }
+  }
 }
 
 function warn(path: string, error: unknown): void {
