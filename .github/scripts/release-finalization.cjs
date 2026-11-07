@@ -25,6 +25,69 @@ function failed(core, error) {
   core.setFailed(reason);
 }
 
+function collectBumpTree() {
+  command('pnpm', ['install', '--lockfile-only', '--ignore-scripts', '--no-frozen-lockfile']);
+  // Use Git pathspecs, not a shell. Stage all stamped workspaces and the alias.
+  git('add', 'packages/*/package.json', 'alias-cezarion/package.json', 'pnpm-lock.yaml');
+  const changed = git('diff', '--cached', '--name-only').split('\n').filter(Boolean);
+  if (changed.some((file) => !isReleaseBumpFile(file))) {
+    throw new Error('Unexpected staged changes; refusing to include them in the version-bump branch.');
+  }
+  return git('write-tree');
+}
+
+async function reuseReleasePr({ core, pr, sha, branch, base, context, matches, conflict, startCi }) {
+  // A merged bump can have had its branch deleted. Verify its original head
+  // without resurrecting the branch or opening a second PR.
+  if (!sha && pr.merged_at) {
+    git('fetch', '--no-tags', 'origin', pr.head.sha);
+    sha = git('rev-parse', 'FETCH_HEAD');
+    if (!matches(sha)) throw conflict();
+  }
+  const fullName = `${context.repo.owner}/${context.repo.repo}`;
+  if (!sha || pr.head.sha !== sha || pr.head.ref !== branch || pr.base.ref !== base
+    || pr.head.repo?.full_name !== fullName || pr.base.repo?.full_name !== fullName
+    || (pr.state !== 'open' && !pr.merged_at)) throw conflict();
+  core.setOutput('status', 'reused');
+  core.setOutput('url', pr.html_url);
+  if (!pr.merged_at) await startCi(pr, sha);
+  else core.setOutput('ci_status', 'not-needed');
+}
+
+function pushBumpBranch({ branch, context, tree, version, fetchBranch }) {
+  // Commit-tree leaves HEAD at the published source and varies freely with
+  // time. Matching retries reuse the remote SHA, not the new candidate SHA.
+  git('config', 'user.name', 'github-actions[bot]');
+  git('config', 'user.email', 'github-actions[bot]@users.noreply.github.com');
+  const sha = git('commit-tree', tree, '-p', context.sha, '-m', `chore(release): v${version}`);
+  try {
+    // An explicit empty lease means CREATE ONLY, even when a concurrently
+    // created ref could fast-forward. It cannot overwrite an existing ref.
+    git('push', `--force-with-lease=refs/heads/${branch}:`, 'origin', `${sha}:refs/heads/${branch}`);
+  } catch (error) {
+    // Another attempt may have pushed between lookup and push. Verify it.
+    const concurrent = fetchBranch();
+    if (!concurrent) throw error;
+    return concurrent;
+  }
+  return sha;
+}
+
+async function createBumpPullRequest({ github, prGithub, context, core, branch, base, version, recovery, sha, startCi }) {
+  let pr;
+  try {
+    pr = (await (prGithub || github).rest.pulls.create({
+      ...context.repo, base, head: branch, title: `chore(release): v${version}`,
+      body: `Record the \`v${version}\` version bump that the Release workflow published to npm \`latest\`. Merge to keep \`${base}\`'s manifests in sync with the published version.`,
+    })).data;
+  } catch (error) {
+    throw new Error(`${message(error)}. PR creation requires the release App installed on this repository with Pull requests: write. For legacy GITHUB_TOKEN callers, check pull-requests: write and Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests (${repoUrl(context)}/settings/actions); an organization policy may also need administrator approval. Open the PR manually: ${recovery}`);
+  }
+  core.setOutput('status', 'created');
+  core.setOutput('url', pr.html_url);
+  await startCi(pr, sha);
+}
+
 async function bumpPr({ github, prGithub, context, core, nativeCi = false, sleep }) {
   const startCi = async (pr, sha) => {
     try {
@@ -45,14 +108,7 @@ async function bumpPr({ github, prGithub, context, core, nativeCi = false, sleep
   try {
     if (!/^\d+\.\d+\.\d+$/.test(version ?? '') || !base) throw new Error('Missing or invalid release version/base branch.');
     if (git('rev-parse', 'HEAD') !== context.sha) throw new Error('Checkout does not match the published source commit.');
-    command('pnpm', ['install', '--lockfile-only', '--ignore-scripts', '--no-frozen-lockfile']);
-    // Use Git pathspecs, not a shell. Stage all stamped workspaces and the alias.
-    git('add', 'packages/*/package.json', 'alias-cezarion/package.json', 'pnpm-lock.yaml');
-    const changed = git('diff', '--cached', '--name-only').split('\n').filter(Boolean);
-    if (changed.some((file) => !isReleaseBumpFile(file))) {
-      throw new Error('Unexpected staged changes; refusing to include them in the version-bump branch.');
-    }
-    const tree = git('write-tree');
+    const tree = collectBumpTree();
     const conflict = () => new Error(`Conflicting release branch or PR for ${branch}. Remote work was not overwritten. Inspect ${recovery} and resolve the mismatch manually before retrying.`);
     const matches = (sha) => git('rev-parse', `${sha}^{tree}`) === tree
       && git('show', '-s', '--format=%P', sha) === context.sha;
@@ -72,53 +128,11 @@ async function bumpPr({ github, prGithub, context, core, nativeCi = false, sleep
     if (prs.length > 1) throw conflict();
     let sha = fetchBranch();
     if (prs.length) {
-      const pr = prs[0];
-      // A merged bump can have had its branch deleted. Verify its original head
-      // without resurrecting the branch or opening a second PR.
-      if (!sha && pr.merged_at) {
-        git('fetch', '--no-tags', 'origin', pr.head.sha);
-        sha = git('rev-parse', 'FETCH_HEAD');
-        if (!matches(sha)) throw conflict();
-      }
-      const fullName = `${context.repo.owner}/${context.repo.repo}`;
-      if (!sha || pr.head.sha !== sha || pr.head.ref !== branch || pr.base.ref !== base
-        || pr.head.repo?.full_name !== fullName || pr.base.repo?.full_name !== fullName
-        || (pr.state !== 'open' && !pr.merged_at)) throw conflict();
-      core.setOutput('status', 'reused');
-      core.setOutput('url', pr.html_url);
-      if (!pr.merged_at) await startCi(pr, sha);
-      else core.setOutput('ci_status', 'not-needed');
+      await reuseReleasePr({ core, pr: prs[0], sha, branch, base, context, matches, conflict, startCi });
       return;
     }
-    if (!sha) {
-      // Commit-tree leaves HEAD at the published source and varies freely with
-      // time. Matching retries reuse the remote SHA, not the new candidate SHA.
-      git('config', 'user.name', 'github-actions[bot]');
-      git('config', 'user.email', 'github-actions[bot]@users.noreply.github.com');
-      sha = git('commit-tree', tree, '-p', context.sha, '-m', `chore(release): v${version}`);
-      try {
-        // An explicit empty lease means CREATE ONLY, even when a concurrently
-        // created ref could fast-forward. It cannot overwrite an existing ref.
-        git('push', `--force-with-lease=refs/heads/${branch}:`, 'origin', `${sha}:refs/heads/${branch}`);
-      } catch (error) {
-        // Another attempt may have pushed between lookup and push. Verify it.
-        const concurrent = fetchBranch();
-        if (!concurrent) throw error;
-        sha = concurrent;
-      }
-    }
-    let pr;
-    try {
-      pr = (await (prGithub || github).rest.pulls.create({
-        ...context.repo, base, head: branch, title: `chore(release): v${version}`,
-        body: `Record the \`v${version}\` version bump that the Release workflow published to npm \`latest\`. Merge to keep \`${base}\`'s manifests in sync with the published version.`,
-      })).data;
-    } catch (error) {
-      throw new Error(`${message(error)}. PR creation requires the release App installed on this repository with Pull requests: write. For legacy GITHUB_TOKEN callers, check pull-requests: write and Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests (${repoUrl(context)}/settings/actions); an organization policy may also need administrator approval. Open the PR manually: ${recovery}`);
-    }
-    core.setOutput('status', 'created');
-    core.setOutput('url', pr.html_url);
-    await startCi(pr, sha);
+    if (!sha) sha = pushBumpBranch({ branch, context, tree, version, fetchBranch });
+    await createBumpPullRequest({ github, prGithub, context, core, branch, base, version, recovery, sha, startCi });
   } catch (error) { failed(core, error); }
 }
 
