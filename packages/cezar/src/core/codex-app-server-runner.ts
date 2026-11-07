@@ -15,7 +15,7 @@ import type {
   AgentRunSpecSupport,
   InputDelivery,
 } from './agent-runner.ts';
-import { isSignalTerminationExit, prependSystemPrompt, trackChildExit } from './agent-runner.ts';
+import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import { codexToolGrantFields } from './runner-tool-grants.ts';
 import { signalSession } from './session-process.ts';
 import {
@@ -27,7 +27,7 @@ import {
 } from './runner-runtime.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
 import { readNdjson } from './ndjson.ts';
-import { drainsAfterClose, isServerRequest, isStaleTurnOutcome, parseNativeLine, stringField, turnIdOf } from './codex-native-frames.ts';
+import { drainsAfterClose, isServerRequest, isStaleTurnOutcome, parseNativeLine, sessionExitKind, sessionStderrIsUnexpected, startupCrashOwnsFailure, stringField, turnIdOf } from './codex-native-frames.ts';
 import { V1TextCoalescer } from './v1-text-coalescer.ts';
 import { InputSubmissions } from './input-submissions.ts';
 import { codexStreamError } from './codex-stream-error.ts';
@@ -143,6 +143,9 @@ export class CodexAppServerRunner implements AgentRunner {
     return session;
   }
 }
+
+type TurnTextInput = { type: 'text'; text: string; text_elements: never[] }[];
+type TurnClientIds = { clientUserMessageId?: string };
 
 interface PendingUserInput {
   readonly rpcId: number | string;
@@ -291,95 +294,91 @@ class CodexSession implements AgentSession {
     this.ready = this.bootstrap();
     const reader = this.readNativeOutput();
 
-    this.result = (async (): Promise<AgentRunResult> => {
-      let exitCode: number | null;
-      try {
-        try {
-          await Promise.all([this.ready, reader]);
-        } catch (err) {
-          if (this.stdinOpen && !hasExited()) this.fail(err instanceof Error ? err : new Error(String(err)));
-        }
-        // RPC cancellation is not a receipt for process termination. Keep the
-        // TERM→KILL watchdog alive until this independently owned promise settles.
-        exitCode = await exited;
-        await reader;
-      } finally {
-        if (deadline) clearTimeout(deadline);
-        cancelDrain?.();
-        if (this.stopKillTimer) clearTimeout(this.stopKillTimer);
-        if (this.eofTermTimer) clearTimeout(this.eofTermTimer);
-        if (this.eofKillTimer) clearTimeout(this.eofKillTimer);
-        this.closeInput('codex app-server exited');
-        this.child.stdin.destroy();
-        this.child.stderr.destroy();
-      }
+    this.result = this.finishSession(hasExited, exited, reader, deadline, () => cancelDrain?.(), stderrChunks, limitMs, spec);
+  }
 
-      if (this.spawnFailed) throw this.spawnFailed;
-      // Preserve diagnostics even when an RPC/startup failure already owns the error.
-      const stderr = stderrChunks.join('');
-      if (stderr.trim() && (this.failure || (!this.timedOut && exitCode !== 0 && exitCode !== null &&
-        !(this.terminatedByCezar && isSignalTerminationExit(exitCode))))) {
-        this.emit({ type: 'note', message: `codex app-server stderr:\n${stderr}` });
-      }
-      if (this.failure) {
-        // Before the first prompt ACK, process/pipe closure can own the failure
-        // before the ordinary crash branch. Keep its phase context and expose
-        // the drained terminal exception on the same v1 error seam as later exits.
-        if (!this.startupComplete && !this.timedOut && stderr.trim() && exitCode !== null && exitCode !== 0 &&
-          !(this.terminatedByCezar && isSignalTerminationExit(exitCode))) {
-          const detail = summarizeRunnerStderr(stderr);
-          const message = `codex app-server exited with code ${exitCode}${detail ? ` — ${detail}` : ''} (${this.failure.message})`;
-          this.emit({ type: 'error', message });
-          throw new Error(message);
-        }
-        throw this.failure;
-      }
-
-      // Timeout/interrupt can end the read loop mid-item — recover buffered prose.
-      this.textCoalescer.flush();
-      const text = this.textChunks.join('\n').trim();
-      const base: AgentRunResult = {
-        text,
-        toolCalls: this.toolCalls,
-        tokensUsed: this.tokensUsed,
-        sessionId: this.threadId ?? spec.sessionId,
-      };
-
-      if (this.timedOut) {
-        const mins = Math.round((limitMs / 60_000) * 10) / 10;
-        this.emit({ type: 'error', message: `codex app-server timed out after ${mins}m and was killed` });
-        this.emit({ type: 'done' });
-        return base;
-      }
-
+  /** Wait out the child, then map its exit onto the v1 result. */
+  private async finishSession(
+    hasExited: () => boolean, exited: Promise<number | null>, reader: Promise<void>,
+    deadline: NodeJS.Timeout | undefined, cancelDrain: () => void,
+    stderrChunks: string[], limitMs: number, spec: AgentRunSpec,
+  ): Promise<AgentRunResult> {
+    let exitCode: number | null;
+    try {
+      exitCode = await this.awaitSessionExit(hasExited, exited, reader);
+    } finally {
+      if (deadline) clearTimeout(deadline);
+      cancelDrain();
+      this.releaseSession();
+    }
+    return this.resultFromExit(exitCode, stderrChunks.join(''), limitMs, spec);
+  }
+  private async awaitSessionExit(hasExited: () => boolean, exited: Promise<number | null>, reader: Promise<void>): Promise<number | null> {
+    try {
+      await Promise.all([this.ready, reader]);
+    } catch (err) {
+      if (this.stdinOpen && !hasExited()) this.fail(err instanceof Error ? err : new Error(String(err)));
+    }
+    // RPC cancellation is not a receipt for process termination. Keep the
+    // TERM→KILL watchdog alive until this independently owned promise settles.
+    const exitCode = await exited;
+    await reader;
+    return exitCode;
+  }
+  private releaseSession(): void {
+    if (this.stopKillTimer) clearTimeout(this.stopKillTimer);
+    if (this.eofTermTimer) clearTimeout(this.eofTermTimer);
+    if (this.eofKillTimer) clearTimeout(this.eofKillTimer);
+    this.closeInput('codex app-server exited');
+    this.child.stdin.destroy();
+    this.child.stderr.destroy();
+  }
+  private resultFromExit(exitCode: number | null, stderr: string, limitMs: number, spec: AgentRunSpec): AgentRunResult {
+    if (this.spawnFailed) throw this.spawnFailed;
+    // Preserve diagnostics even when an RPC/startup failure already owns the error.
+    if (stderr.trim() && (this.failure || sessionStderrIsUnexpected(exitCode, this.timedOut, this.terminatedByCezar))) {
+      this.emit({ type: 'note', message: `codex app-server stderr:\n${stderr}` });
+    }
+    // Before the first prompt ACK, process/pipe closure can own the failure
+    // before the ordinary crash branch.
+    if (this.failure) this.throwOwnedFailure(stderr, exitCode, this.startupComplete, this.timedOut, this.terminatedByCezar);
+    return this.resultFromCleanExit(exitCode, stderr, limitMs, spec);
+  }
+  private throwOwnedFailure(stderr: string, exitCode: number | null, startupComplete: boolean, timedOut: boolean, terminatedByCezar: boolean): never {
+    if (!startupCrashOwnsFailure({ startupComplete, timedOut, terminatedByCezar }, stderr, exitCode)) throw this.failure;
+    const detail = summarizeRunnerStderr(stderr);
+    const message = `codex app-server exited with code ${exitCode}${detail ? ` — ${detail}` : ''} (${this.failure!.message})`;
+    this.emit({ type: 'error', message });
+    throw new Error(message);
+  }
+  private resultFromCleanExit(exitCode: number | null, stderr: string, limitMs: number, spec: AgentRunSpec): AgentRunResult {
+    // Timeout/interrupt can end the read loop mid-item — recover buffered prose.
+    this.textCoalescer.flush();
+    const base: AgentRunResult = {
+      text: this.textChunks.join('\n').trim(), toolCalls: this.toolCalls,
+      tokensUsed: this.tokensUsed, sessionId: this.threadId ?? spec.sessionId,
+    };
+    const kind = sessionExitKind({ timedOut: this.timedOut, terminatedByCezar: this.terminatedByCezar, exitCode, signalCode: this.child.signalCode });
+    if (kind === 'timeout') {
+      const mins = Math.round((limitMs / 60_000) * 10) / 10;
+      this.emit({ type: 'error', message: `codex app-server timed out after ${mins}m and was killed` });
+    } else if (kind === 'cezar-teardown') {
       // Our own EOF watchdog / cancel signal coming back as 143/137 — the
       // teardown cezar asked for, not a codex failure (#703).
-      if (this.terminatedByCezar && (isSignalTerminationExit(exitCode) || (exitCode === null && this.child.signalCode !== null))) {
-        this.emit({
-          type: 'note',
-          message: `codex app-server did not exit on its own after close; terminated by cezar (${exitCode === null ? this.child.signalCode : `code ${exitCode}`})`,
-        });
-        this.emit({ type: 'done' });
-        return base;
-      }
-
-      if (exitCode === null && this.child.signalCode !== null) {
-        const message = `codex app-server was killed by signal ${this.child.signalCode}`;
-        this.emit({ type: 'error', message });
-        throw new Error(message);
-      }
-
-      if (exitCode !== 0 && exitCode !== null) {
-        const summary = summarizeRunnerStderr(stderr);
-        const detail = summary ? ` — ${summary}` : '';
-        const message = `codex app-server exited with code ${exitCode}${detail}`;
-        this.emit({ type: 'error', message });
-        throw new Error(message);
-      }
-
-      this.emit({ type: 'done' });
-      return base;
-    })();
+      const how = exitCode === null ? this.child.signalCode : `code ${exitCode}`;
+      this.emit({ type: 'note', message: `codex app-server did not exit on its own after close; terminated by cezar (${how})` });
+    } else if (kind === 'signal') {
+      const message = `codex app-server was killed by signal ${this.child.signalCode}`;
+      this.emit({ type: 'error', message });
+      throw new Error(message);
+    } else if (kind === 'nonzero') {
+      const summary = summarizeRunnerStderr(stderr);
+      const message = `codex app-server exited with code ${exitCode}${summary ? ` — ${summary}` : ''}`;
+      this.emit({ type: 'error', message });
+      throw new Error(message);
+    }
+    this.emit({ type: 'done' });
+    return base;
   }
 
   get open(): boolean {
@@ -706,74 +705,81 @@ class CodexSession implements AgentSession {
     this.assertOpen();
     if (!this.threadId) throw new Error('codex app-server did not return a thread id');
     this.agentInputReady = false;
-    const input = [{ type: 'text', text, text_elements: [] }];
+    const input: TurnTextInput = [{ type: 'text', text, text_elements: [] }];
     // Echoed as the consumed userMessage item's `clientId` (#505).
     const ids = clientUserMessageId ? { clientUserMessageId } : {};
     const humanId = clientUserMessageId && this.humanSteerIds.has(clientUserMessageId) ? clientUserMessageId : undefined;
+    if (this.activeTurnId && await this.steerLiveTurn(input, ids, clientUserMessageId, humanId, text)) return;
+    await this.startTurn(input, ids, clientUserMessageId, humanId);
+  }
+
+  /** True when the live steer settled this input. False falls through to turn/start. */
+  private async steerLiveTurn(
+    input: TurnTextInput, ids: TurnClientIds, clientUserMessageId: string | undefined, humanId: string | undefined, text: string,
+  ): Promise<boolean> {
+    const boundary = this.turnBoundaryVersion;
     const onSteerId = humanId ? (id: number) => this.trackHumanRpc(id, humanId, 'steer') : undefined;
-    const onStartId = humanId ? (id: number) => this.trackHumanRpc(id, humanId, 'start') : undefined;
-    if (this.activeTurnId) {
-      const boundary = this.turnBoundaryVersion;
-      try {
-        await this.rpc.request('turn/steer', {
-          threadId: this.threadId,
-          input,
-          expectedTurnId: this.activeTurnId,
-          ...ids,
-        }, onSteerId);
-        // Accepted, but the turn completed before the model read it: nothing will read
-        // it now, so start a turn with it under the same client id (#505). Human steers
-        // get the same restart so a coalesced steer+completed chunk cannot drop them (#486).
-        // Skip when the turn already echoed this client id — it was read in-turn.
-        const echoed = clientUserMessageId !== undefined && this.echoedHuman.has(clientUserMessageId);
-        const stranded = clientUserMessageId !== undefined && this.turnBoundaryVersion !== boundary &&
-          !this.activeTurnId && !echoed &&
-          (this.submissions.has(clientUserMessageId) || this.humanSteerIds.has(clientUserMessageId));
-        if (!stranded) {
-          // Admission is not a read: keep a human steer held until echo or turn end.
-          if (humanId && this.activeTurnId && !echoed) {
-            this.holdUnreadHumanSteer(humanId, text);
-            return;
-          }
-          if (humanId) this.releaseHumanPrompt(humanId);
-          return;
-        }
-      } catch (err) {
-        // Only a definitive refusal falls back: the server answered with an error AND
-        // the turn ended meanwhile. A timeout or closed transport is ambiguous — the
-        // steer may have landed — so it rejects without a retry (#505).
-        if (!(err instanceof CodexRpcResponseError) || this.turnBoundaryVersion === boundary || this.activeTurnId) throw err;
-        if (clientUserMessageId && this.echoedHuman.has(clientUserMessageId)) {
-          if (humanId) this.releaseHumanPrompt(humanId);
-          return;
-        }
-      }
+    try {
+      await this.rpc.request('turn/steer', { threadId: this.threadId, input, expectedTurnId: this.activeTurnId, ...ids }, onSteerId);
+      return this.steerWasRead(clientUserMessageId, humanId, text, boundary);
+    } catch (err) {
+      return this.steerRefusalSettled(err, clientUserMessageId, humanId, boundary);
     }
+  }
+
+  /** Accepted, but a turn that ended unread falls through so turn/start can carry the same client id (#505, #486). */
+  private steerWasRead(clientUserMessageId: string | undefined, humanId: string | undefined, text: string, boundary: number): boolean {
+    const echoed = clientUserMessageId !== undefined && this.echoedHuman.has(clientUserMessageId);
+    const stranded = clientUserMessageId !== undefined && this.turnBoundaryVersion !== boundary && !this.activeTurnId && !echoed
+      && (this.submissions.has(clientUserMessageId) || this.humanSteerIds.has(clientUserMessageId));
+    if (stranded) return false;
+    // Admission is not a read: keep a human steer held until echo or turn end.
+    if (humanId && this.activeTurnId && !echoed) this.holdUnreadHumanSteer(humanId, text);
+    else if (humanId) this.releaseHumanPrompt(humanId);
+    return true;
+  }
+
+  /** Only a definitive refusal falls back. A timeout or closed transport may have landed, so it rejects (#505). */
+  private steerRefusalSettled(err: unknown, clientUserMessageId: string | undefined, humanId: string | undefined, boundary: number): boolean {
+    if (!(err instanceof CodexRpcResponseError) || this.turnBoundaryVersion === boundary || this.activeTurnId) throw err;
+    if (clientUserMessageId && this.echoedHuman.has(clientUserMessageId)) {
+      if (humanId) this.releaseHumanPrompt(humanId);
+      return true;
+    }
+    return false;
+  }
+
+  private async startTurn(
+    input: TurnTextInput, ids: TurnClientIds, clientUserMessageId: string | undefined, humanId: string | undefined,
+  ): Promise<void> {
     // Ask the app-server for reasoning summaries; without this the model runs
     // with its default (no summary), so the reasoning thread stays empty even
     // though the mapper and UI can render it. The override persists for this
     // turn and every subsequent turn, so seeding it on turn/start is enough.
     const boundaryVersion = this.turnBoundaryVersion;
     const completionsBefore = this.turnCompletions;
+    const onStartId = humanId ? (id: number) => this.trackHumanRpc(id, humanId, 'start') : undefined;
     const res = await this.rpc.request('turn/start', {
       threadId: this.threadId,
       input,
       ...ids,
       ...codexTurnStartExtras(this.spec),
     }, humanId && !this.activeTurnId ? onStartId : undefined);
-    if (clientUserMessageId) {
-      // This turn's own input: its completion proves the model processed it (#505). A response
-      // can arrive after that turn already completed; settle it from the recorded outcome.
-      const startedTurn = turnIdOf(res);
-      const outcome = startedTurn && this.turnCompletions > completionsBefore ? this.completedTurns.get(startedTurn) : undefined;
-      if (outcome === undefined) this.turnStartSubmissions.add(clientUserMessageId);
-      else {
-        const settled = this.submissions.consume(clientUserMessageId);
-        if (settled.length && outcome) this.opts.onAgentInputConsumed?.(settled);
-        else if (settled.length) this.emit({ type: 'input-unconsumed', inputIds: settled });
-      }
-    }
+    if (clientUserMessageId) this.recordStartedSubmission(clientUserMessageId, res, completionsBefore);
     if (this.turnBoundaryVersion === boundaryVersion) this.activeTurnId = turnIdOf(res) ?? this.activeTurnId;
+  }
+
+  /** This turn's own input: its completion proves the model processed it (#505). A late response settles from the recorded outcome. */
+  private recordStartedSubmission(clientUserMessageId: string, res: Record<string, unknown>, completionsBefore: number): void {
+    const startedTurn = turnIdOf(res);
+    const outcome = startedTurn && this.turnCompletions > completionsBefore ? this.completedTurns.get(startedTurn) : undefined;
+    if (outcome === undefined) {
+      this.turnStartSubmissions.add(clientUserMessageId);
+      return;
+    }
+    const settled = this.submissions.consume(clientUserMessageId);
+    if (settled.length && outcome) this.opts.onAgentInputConsumed?.(settled);
+    else if (settled.length) this.emit({ type: 'input-unconsumed', inputIds: settled });
   }
 
   /** Native stdout reader. Every stage runs inside this one try, so a stage
@@ -987,132 +993,126 @@ class CodexSession implements AgentSession {
     if (this.streamRetryTimer && this.isCurrentTurn(params) && isStreamProgress(method, params)) {
       this.clearStreamRetry();
     }
-    switch (method) {
-      case 'serverRequest/resolved': {
-        if (params.threadId !== this.threadId) break;
-        for (const [requestId, approval] of this.pendingApprovals) {
-          if (approval.rpcId === params.requestId) this.expireApproval(requestId, 'resolved by Codex', false);
-        }
-        break;
-      }
-      case 'error':
-        this.handleStreamError(params);
-        break;
-      case 'warning':
-        if (typeof params.message === 'string' && params.message.trim()) this.emit({ type: 'note', message: params.message.trim() });
-        break;
-      case 'turn/started': {
-        if (!this.isForeignThreadTurn(params)) this.turnBoundaryVersion += 1;
-        if (this.isForeignThreadTurn(params)) break; // sub-agent child thread — not our turn (#600)
-        if (this.threadId && turnIdOf(params)) {
-          this.firstTurnStarted = true;
-          this.checkStartupComplete();
-        }
-        if (turnIdOf(params) !== this.activeTurnId) {
-          this.clearStreamRetry();
-          this.expireApprovals('a new turn started');
-        }
-        this.activeTurnId = turnIdOf(params) ?? this.activeTurnId;
-        if (this.humanReadyOnTurnStart) {
-          this.humanReadyOnTurnStart = false;
-          // emitUi already ran (clears atTurnBoundary); hint now that the hold dropped.
-          this.notifyHumanInputDrained();
-        }
-        break;
-      }
-      case 'item/agentMessage/delta': {
-        // Child text belongs only to v2; buffering it here would pollute the
-        // parent's marker parse when the coalescer flushes at turn-end (#149).
-        if (this.isForeignThreadTurn(params)) break;
-        const delta = typeof params.delta === 'string' ? params.delta : '';
-        if (delta) this.textCoalescer.append(stringField(params, 'itemId'), delta);
-        break;
-      }
-      case 'item/started': {
-        const item = (params.item as Record<string, unknown>) ?? {};
-        const type = stringField(item, 'type');
-        if (type === 'userMessage' && !this.isForeignThreadTurn(params)) {
-          // The model received this input now; `clientId` names our submission (#505).
-          const clientId = stringField(item, 'clientId');
-          if (clientId) this.noteHumanEcho(clientId);
-          const ids = clientId ? this.submissions.consume(clientId) : [];
-          if (ids.length) this.opts.onAgentInputConsumed?.(ids);
-        }
-        // Only tool-like items become tool events; message/reasoning stream as text.
-        if (type && !NON_TOOL_ITEMS.has(type)) {
-          const id = stringField(item, 'id') ?? `item-${this.rpc.allocateId()}`;
-          this.toolCalls.push({ id, name: type, input: item });
-          this.emit({ type: 'tool-call', id, tool: type, input: item });
-        }
-        break;
-      }
-      case 'item/completed': {
-        const item = (params.item as Record<string, unknown>) ?? {};
-        const type = stringField(item, 'type');
-        const id = stringField(item, 'id') ?? '';
-        if (type === 'agentMessage') {
-          if (this.isForeignThreadTurn(params)) break;
-          // One v1 `text` per finished message — the snapshot's full text when
-          // present (also covers turns that send no deltas), else the deltas.
-          this.textCoalescer.complete(id || undefined, typeof item.text === 'string' ? item.text : undefined);
-        } else if (type && !NON_TOOL_ITEMS.has(type) && id) {
-          this.emit({
-            type: 'tool-result',
-            toolCallId: id,
-            result: safeStringify(item),
-            isError: /error|failed/i.test(stringField(item, 'status') ?? ''),
-          });
-        }
-        break;
-      }
-      case 'thread/tokenUsage/updated': {
-        const total = tokenTotal(params);
-        if (total > 0) {
-          this.tokensUsed = total;
-          this.emit({ type: 'token-usage', tokensUsed: this.tokensUsed });
-        }
-        break;
-      }
-      case 'turn/completed':
-      case 'turn/failed': {
-        if (this.isForeignThreadTurn(params)) break; // don't end the parent turn on a child turn (#600)
-        if (this.activeTurnId && turnIdOf(params) && turnIdOf(params) !== this.activeTurnId) break;
-        if (this.isCurrentTurn(params)) this.clearStreamRetry();
-        this.expireApprovals('turn ended');
-        this.turnBoundaryVersion += 1;
-        this.pendingUserInput = undefined;
-        this.activeTurnId = undefined;
-        // An interrupted/failed item never sees item/completed — surface its
-        // partial prose before the turn boundary (run.ts reads markers there).
-        this.textCoalescer.flush();
-        const outcome = codexTurnOutcome(method, params);
-        const completedId = turnIdOf(params);
-        if (completedId) {
-          this.completedTurns.set(completedId, outcome.error === undefined);
-          if (this.completedTurns.size > 32) this.completedTurns.delete(this.completedTurns.keys().next().value!);
-        }
-        this.turnCompletions += 1;
-        if (outcome.error !== undefined && !this.terminatedByCezar) {
-          this.emit({ type: 'error', message: outcome.error });
-        }
-        this.agentInputReady = this.open;
-        // A completed turn processed its own input; a failed one may never have reached the
-        // model, so its input stays pending and is reported unconsumed below.
-        const started = outcome.error === undefined ? [...this.turnStartSubmissions].flatMap(id => this.submissions.consume(id)) : [];
-        this.turnStartSubmissions.clear();
-        if (started.length) this.opts.onAgentInputConsumed?.(started);
-        // An in-flight steer is owned by its RPC outcome, not by this boundary.
-        const inFlight = this.inFlightSubmissionId ? this.submissions.consume(this.inFlightSubmissionId) : [];
-        const unconsumedInputIds = this.submissions.takeUnconsumed();
-        if (this.inFlightSubmissionId && inFlight.length) this.submissions.accept(this.inFlightSubmissionId, inFlight, '');
-        this.emit(unconsumedInputIds.length ? { type: 'turn-end', unconsumedInputIds } : { type: 'turn-end' });
-        if (this.unreadHumanSteers.size) this.restartUnreadHumanSteers();
-        else this.scheduleAutoEnd();
-        break;
-      }
-      default:
-        break;
+    if (method === 'serverRequest/resolved') this.noteServerRequestResolved(params);
+    else if (method === 'error') this.handleStreamError(params);
+    else if (method === 'warning' && typeof params.message === 'string' && params.message.trim()) this.emit({ type: 'note', message: params.message.trim() });
+    else if (method === 'turn/started') this.noteTurnStarted(params);
+    else if (method === 'item/agentMessage/delta') this.noteAgentDelta(params);
+    else if (method === 'item/started') this.noteItemStarted(params);
+    else if (method === 'item/completed') this.noteItemCompleted(params);
+    else if (method === 'thread/tokenUsage/updated') {
+      const total = tokenTotal(params);
+      if (total > 0) { this.tokensUsed = total; this.emit({ type: 'token-usage', tokensUsed: total }); }
     }
+    else if (method === 'turn/completed' || method === 'turn/failed') this.noteTurnEnded(method, params);
+  }
+
+  private noteServerRequestResolved(params: Record<string, unknown>): void {
+    if (params.threadId !== this.threadId) return;
+    for (const [requestId, approval] of this.pendingApprovals) {
+      if (approval.rpcId === params.requestId) this.expireApproval(requestId, 'resolved by Codex', false);
+    }
+  }
+
+  private noteTurnStarted(params: Record<string, unknown>): void {
+    if (!this.isForeignThreadTurn(params)) this.turnBoundaryVersion += 1;
+    if (this.isForeignThreadTurn(params)) return; // sub-agent child thread — not our turn (#600)
+    if (this.threadId && turnIdOf(params)) {
+      this.firstTurnStarted = true;
+      this.checkStartupComplete();
+    }
+    if (turnIdOf(params) !== this.activeTurnId) {
+      this.clearStreamRetry();
+      this.expireApprovals('a new turn started');
+    }
+    this.activeTurnId = turnIdOf(params) ?? this.activeTurnId;
+    if (this.humanReadyOnTurnStart) {
+      this.humanReadyOnTurnStart = false;
+      // emitUi already ran (clears atTurnBoundary); hint now that the hold dropped.
+      this.notifyHumanInputDrained();
+    }
+  }
+
+  private noteAgentDelta(params: Record<string, unknown>): void {
+    // Child text belongs only to v2; buffering it here would pollute the
+    // parent's marker parse when the coalescer flushes at turn-end (#149).
+    if (this.isForeignThreadTurn(params)) return;
+    const delta = typeof params.delta === 'string' ? params.delta : '';
+    if (delta) this.textCoalescer.append(stringField(params, 'itemId'), delta);
+  }
+
+  private noteItemStarted(params: Record<string, unknown>): void {
+    const item = (params.item as Record<string, unknown>) ?? {};
+    const type = stringField(item, 'type');
+    if (type === 'userMessage' && !this.isForeignThreadTurn(params)) {
+      // The model received this input now; `clientId` names our submission (#505).
+      const clientId = stringField(item, 'clientId');
+      if (clientId) this.noteHumanEcho(clientId);
+      const ids = clientId ? this.submissions.consume(clientId) : [];
+      if (ids.length) this.opts.onAgentInputConsumed?.(ids);
+    }
+    // Only tool-like items become tool events; message/reasoning stream as text.
+    if (!type || NON_TOOL_ITEMS.has(type)) return;
+    const id = stringField(item, 'id') ?? `item-${this.rpc.allocateId()}`;
+    this.toolCalls.push({ id, name: type, input: item });
+    this.emit({ type: 'tool-call', id, tool: type, input: item });
+  }
+
+  private noteItemCompleted(params: Record<string, unknown>): void {
+    const item = (params.item as Record<string, unknown>) ?? {};
+    const type = stringField(item, 'type');
+    const id = stringField(item, 'id') ?? '';
+    if (type === 'agentMessage') {
+      if (this.isForeignThreadTurn(params)) return;
+      // One v1 `text` per finished message — the snapshot's full text when
+      // present (also covers turns that send no deltas), else the deltas.
+      this.textCoalescer.complete(id || undefined, typeof item.text === 'string' ? item.text : undefined);
+    } else if (type && !NON_TOOL_ITEMS.has(type) && id) {
+      this.emit({
+        type: 'tool-result',
+        toolCallId: id,
+        result: safeStringify(item),
+        isError: /error|failed/i.test(stringField(item, 'status') ?? ''),
+      });
+    }
+  }
+
+  private noteTurnEnded(method: string, params: Record<string, unknown>): void {
+    if (this.isForeignThreadTurn(params)) return; // don't end the parent turn on a child turn (#600)
+    if (this.activeTurnId && turnIdOf(params) && turnIdOf(params) !== this.activeTurnId) return;
+    if (this.isCurrentTurn(params)) this.clearStreamRetry();
+    this.expireApprovals('turn ended');
+    this.turnBoundaryVersion += 1;
+    this.pendingUserInput = undefined;
+    this.activeTurnId = undefined;
+    // An interrupted/failed item never sees item/completed — surface its
+    // partial prose before the turn boundary (run.ts reads markers there).
+    this.textCoalescer.flush();
+    const outcome = codexTurnOutcome(method, params);
+    const completedId = turnIdOf(params);
+    if (completedId) {
+      this.completedTurns.set(completedId, outcome.error === undefined);
+      if (this.completedTurns.size > 32) this.completedTurns.delete(this.completedTurns.keys().next().value!);
+    }
+    this.turnCompletions += 1;
+    this.emitTurnEnd(outcome.error);
+  }
+
+  private emitTurnEnd(error: string | undefined): void {
+    if (error !== undefined && !this.terminatedByCezar) this.emit({ type: 'error', message: error });
+    this.agentInputReady = this.open;
+    // A completed turn processed its own input; a failed one may never have reached the
+    // model, so its input stays pending and is reported unconsumed below.
+    const started = error === undefined ? [...this.turnStartSubmissions].flatMap(id => this.submissions.consume(id)) : [];
+    this.turnStartSubmissions.clear();
+    if (started.length) this.opts.onAgentInputConsumed?.(started);
+    // An in-flight steer is owned by its RPC outcome, not by this boundary.
+    const inFlight = this.inFlightSubmissionId ? this.submissions.consume(this.inFlightSubmissionId) : [];
+    const unconsumedInputIds = this.submissions.takeUnconsumed();
+    if (this.inFlightSubmissionId && inFlight.length) this.submissions.accept(this.inFlightSubmissionId, inFlight, '');
+    this.emit(unconsumedInputIds.length ? { type: 'turn-end', unconsumedInputIds } : { type: 'turn-end' });
+    if (this.unreadHumanSteers.size) this.restartUnreadHumanSteers();
+    else this.scheduleAutoEnd();
   }
 
   private emit(event: AgentEvent): void {
