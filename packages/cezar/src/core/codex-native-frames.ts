@@ -1,3 +1,4 @@
+import { isSignalTerminationExit } from './agent-runner.ts';
 import type { CodexAppServerMessage } from './codex-app-server-transport.ts';
 
 /** Pure reads of native Codex app-server frames, for the session's stdout reader. */
@@ -46,4 +47,52 @@ export function stringField(obj: Record<string, unknown>, key: string): string |
 export function turnIdOf(obj: Record<string, unknown>): string | undefined {
   const turn = obj.turn as { id?: unknown } | undefined;
   return typeof turn?.id === 'string' ? turn.id : stringField(obj, 'turnId');
+}
+
+/** A non-zero exit that is not cezar's own signal teardown still carries stderr. */
+export function sessionStderrIsUnexpected(exitCode: number | null, timedOut: boolean, terminatedByCezar: boolean): boolean {
+  return !timedOut && exitCode !== 0 && exitCode !== null && !(terminatedByCezar && isSignalTerminationExit(exitCode));
+}
+
+/** Startup died on a real non-signal exit, so the drained stderr owns the failure text. */
+export function startupCrashOwnsFailure(
+  session: { startupComplete: boolean; timedOut: boolean; terminatedByCezar: boolean },
+  stderr: string,
+  exitCode: number | null,
+): boolean {
+  return !session.startupComplete && !session.timedOut && !!stderr.trim() && exitCode !== null && exitCode !== 0
+    && !(session.terminatedByCezar && isSignalTerminationExit(exitCode));
+}
+
+/** 143/137, or a signal with no code, is the teardown cezar asked for. */
+export function cezarAskedForExit(exitCode: number | null, signalCode: NodeJS.Signals | null): boolean {
+  return isSignalTerminationExit(exitCode) || (exitCode === null && signalCode !== null);
+}
+
+export interface SessionExit {
+  timedOut: boolean;
+  terminatedByCezar: boolean;
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+  limitMs: number;
+  stderrSummary: string;
+}
+
+/** The one event a settled exit emits before `done`, or the error it throws. `undefined` is a clean exit. */
+export function sessionExitEvent(exit: SessionExit): { event: 'error' | 'note'; message: string } | { failure: string } | undefined {
+  if (exit.timedOut) {
+    const mins = Math.round((exit.limitMs / 60_000) * 10) / 10;
+    return { event: 'error', message: `codex app-server timed out after ${mins}m and was killed` };
+  }
+  // Our own EOF watchdog / cancel signal coming back as 143/137 — the
+  // teardown cezar asked for, not a codex failure (#703).
+  if (exit.terminatedByCezar && cezarAskedForExit(exit.exitCode, exit.signalCode)) {
+    const how = exit.exitCode === null ? exit.signalCode : `code ${exit.exitCode}`;
+    return { event: 'note', message: `codex app-server did not exit on its own after close; terminated by cezar (${how})` };
+  }
+  if (exit.exitCode === null && exit.signalCode !== null) return { failure: `codex app-server was killed by signal ${exit.signalCode}` };
+  if (exit.exitCode !== 0 && exit.exitCode !== null) {
+    return { failure: `codex app-server exited with code ${exit.exitCode}${exit.stderrSummary ? ` — ${exit.stderrSummary}` : ''}` };
+  }
+  return undefined;
 }
