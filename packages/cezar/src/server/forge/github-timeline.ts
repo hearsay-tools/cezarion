@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import type { ForgeTimelineEvent, ForgeTimelineEventKind } from './types.ts';
 
+// ---- timeline events (hearsay-tools/cezarion#525) -------------------------------------------------
+// The thread's non-comment history — commits, label changes, assignments, merges, force-pushes,
+// cross-references. Sourced from `/issues/{n}/timeline`, which returns comments AND events in one
+// chronological stream, so the `commented` rows keep flowing through `normalizeComments` unchanged
+// and `comments[]` keeps its existing shape.
+
 /** The event kinds rendered in v1 — an allowlist, so a new GitHub event type is dropped rather
  *  than rendered and can never crash or clutter the thread. Real timelines carry plenty that
  *  github.com itself doesn't surface (`subscribed`, `mentioned`, `review_requested`).

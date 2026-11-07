@@ -1985,15 +1985,6 @@ export interface RefStatusBatch {
   reason?: string;
 }
 
-/**
- * Status per NUMBER, resolved to whatever that number actually is.
- *
- * Batched and aliased like `fetchPrChecks`: one subprocess per chunk, each alias resolving
- * independently, and a number the forge does not have simply staying absent from `resolved` (its
- * chip then renders neutral, as it did before this seam existed). A failed chunk costs only its
- * own numbers, and says so rather than letting them look absent. Exported for tests; `runGraphql`
- * is injected so this is testable without shelling out.
- */
 function refStatusGraphqlClean(
   raw: { errors?: unknown },
   repository: Record<string, unknown>,
@@ -2112,6 +2103,15 @@ async function fetchRefStatusChunk(
   }
 }
 
+/**
+ * Status per NUMBER, resolved to whatever that number actually is.
+ *
+ * Batched and aliased like `fetchPrChecks`: one subprocess per chunk, each alias resolving
+ * independently, and a number the forge does not have simply staying absent from `resolved` (its
+ * chip then renders neutral, as it did before this seam existed). A failed chunk costs only its
+ * own numbers, and says so rather than letting them look absent. Exported for tests; `runGraphql`
+ * is injected so this is testable without shelling out.
+ */
 export async function fetchRefStatuses(
   runGraphql: GraphqlRunner,
   owner: string,
