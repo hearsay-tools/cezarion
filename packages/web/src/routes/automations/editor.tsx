@@ -93,6 +93,37 @@ function KindFields({ draft, patch, forge, timeZone, automation }: {
     : <GithubFields draft={draft} onChange={patch} {...(forge.available ? {} : { disabledReason: forge.reason ?? 'no GitHub access' })} />
 }
 
+/** The task a run launches: the prompt with its placeholders, engine pills and access controls. */
+function TaskFields({ draft, patch, saving, automation }: {
+  draft: AutomationDraft
+  patch: (next: Partial<AutomationDraft>) => void
+  saving: boolean
+  automation?: AutomationDefinition | undefined
+}) {
+  return (
+    <>
+      <div className="grid gap-2">
+        <Label htmlFor="automation-prompt">Prompt</Label>
+        <Textarea id="automation-prompt" value={draft.prompt} onChange={(event) => patch({ prompt: event.target.value })} rows={4} required />
+        <p className="text-xs break-words text-muted-foreground">
+          {draft.kind === 'schedule'
+            ? <>Available: {'{{date}}'} {'{{time}}'} {'{{project}}'} {'{{automation}}'}. A run-context block is appended automatically.</>
+            : <>Available: {'{{github.number}}'} {'{{github.title}}'} {'{{github.url}}'} {'{{github.labels}}'}. GitHub content is appended as untrusted context.</>}
+        </p>
+      </div>
+      <EnginePills draft={draft} patch={patch} />
+      <label className="flex min-h-11 items-center gap-3 text-sm">
+        <Switch aria-label="Autonomous" checked={draft.autonomous} onCheckedChange={(autonomous) => patch({ autonomous })} />
+        <span>Autonomous <span className="text-muted-foreground">· runs without waiting for answers</span></span>
+      </label>
+      <p className="text-xs break-words text-muted-foreground">Each run is an ordinary task in its own worktree, queued behind the parallel cap.</p>
+      <CompletionControls archiveWhenDone={draft.archiveWhenDone} autoMergePr={draft.autoMergePr} onChange={patch} disabled={saving} />
+      <TaskAccessControls allowWorkers={draft.allowWorkers} allowMessaging={draft.allowMessaging} onChange={patch} disabled={saving} />
+      {automation ? <p className="text-xs text-muted-foreground">These settings apply to future tasks. Existing tasks keep their settings.</p> : null}
+    </>
+  )
+}
+
 export function AutomationEditor({ automation, forge, timeZone, onSaved, onReload }: {
   automation?: AutomationDefinition
   forge: { available: boolean; reason?: string | undefined }
@@ -190,24 +221,7 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
           </Section>
 
           <Section title="What to run" section="run" failure={failure}>
-            <div className="grid gap-2">
-              <Label htmlFor="automation-prompt">Prompt</Label>
-              <Textarea id="automation-prompt" value={draft.prompt} onChange={(event) => patch({ prompt: event.target.value })} rows={4} required />
-              <p className="text-xs break-words text-muted-foreground">
-                {isSchedule
-                  ? <>Available: {'{{date}}'} {'{{time}}'} {'{{project}}'} {'{{automation}}'}. A run-context block is appended automatically.</>
-                  : <>Available: {'{{github.number}}'} {'{{github.title}}'} {'{{github.url}}'} {'{{github.labels}}'}. GitHub content is appended as untrusted context.</>}
-              </p>
-            </div>
-            <EnginePills draft={draft} patch={patch} />
-            <label className="flex min-h-11 items-center gap-3 text-sm">
-              <Switch aria-label="Autonomous" checked={draft.autonomous} onCheckedChange={(autonomous) => patch({ autonomous })} />
-              <span>Autonomous <span className="text-muted-foreground">· runs without waiting for answers</span></span>
-            </label>
-            <p className="text-xs break-words text-muted-foreground">Each run is an ordinary task in its own worktree, queued behind the parallel cap.</p>
-            <CompletionControls archiveWhenDone={draft.archiveWhenDone} autoMergePr={draft.autoMergePr} onChange={patch} disabled={saving} />
-            <TaskAccessControls allowWorkers={draft.allowWorkers} allowMessaging={draft.allowMessaging} onChange={patch} disabled={saving} />
-            {automation ? <p className="text-xs text-muted-foreground">These settings apply to future tasks. Existing tasks keep their settings.</p> : null}
+            <TaskFields draft={draft} patch={patch} saving={saving} automation={automation} />
           </Section>
 
           <Section title="Enable" section="enable" failure={failure}>
