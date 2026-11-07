@@ -454,7 +454,7 @@ function nothingMatchesOf(noneMatches: boolean, groups: {
   )
 }
 
-/** The "No skill" row's match signal: "none" and the built-in workflow's own name (#263). */
+/** The "No skill" row's match signal: "none" and the built-in workflow's own name. */
 function noneMatchesFor(quickTask: WorkflowDef | undefined, search: string): boolean {
   return queryScore('no skill', `none plain ${QUICK_TASK} ${quickTask?.description ?? ''}`, search) > 0
 }
