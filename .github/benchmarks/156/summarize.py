@@ -98,82 +98,103 @@ def valid_steps(steps):
     return bool(steps) and all(isinstance(step, dict) and required <= step.keys() for step in steps)
 
 
-def summarize(root):
-    root = Path(root)
-    jobs = job_rows(root)
-    artifacts = artifact_rows(root)
-    indexed_jobs = {
+METRIC_NAMES = ('verificationSeconds', 'installSeconds', 'vitestSeconds',
+                'cpuSeconds', 'peakMaxChildRssKiB', 'jobRunnerSeconds')
+
+
+def job_index(jobs):
+    indexed = {
         (row['variant'], row['repetition'], row['phase']): row
         for row in jobs if not row['paired']
     }
     for row in jobs:
         if row['paired']:
             for variant in ('baseline', 'combined'):
-                indexed_jobs[(variant, row['repetition'], row['phase'])] = row
-    keys = sorted(set(artifacts) | set(indexed_jobs))
-    variants = {}
-    for variant, repetition, phase in keys:
-        artifact = artifacts.get((variant, repetition, phase))
-        job = indexed_jobs.get((variant, repetition, phase))
-        sample = {
-            'variant': variant, 'repetition': repetition, 'phase': phase,
-            'artifact': str(artifact['path']) if artifact else None,
-            # A paired job runs both collectors sequentially. Keep its elapsed
-            # time as shared evidence rather than charging it to both samples.
-            'jobRunnerSeconds': (
-                job.get('jobRunnerSeconds') if job and not job['paired'] else None
-            ),
-            'sharedJobRunnerSeconds': (
-                job.get('jobRunnerSeconds') if job and job['paired'] else None
-            ),
-            'jobStatus': job.get('status') if job else None,
-            'jobConclusion': job.get('conclusion') if job else None,
-        }
-        summary = read_json(artifact['path'] / 'summary.json') if artifact else None
-        if (not isinstance(summary, dict) or not isinstance(summary.get('steps'), list)
-                or not valid_steps(summary['steps'])):
-            sample.update(status='missing', reason='missing or invalid summary.json')
-        else:
-            steps = summary['steps']
-            sample['steps'] = steps
-            sample['metrics'] = sample_metrics(steps)
-            failed_steps = [step for step in steps if step.get('exitCode') != 0]
-            if job is None:
-                sample.update(status='missing', reason='missing GitHub job')
-            elif job.get('status') != 'completed' or job.get('conclusion') is None:
-                sample.update(status='missing', reason='GitHub job is not complete')
-            elif failed_steps or (not job['paired'] and job.get('conclusion') != 'success'):
-                sample.update(status='failure', failedSteps=[step.get('name') for step in failed_steps])
-            else:
-                sample['status'] = 'success'
-        variants.setdefault(variant, []).append(sample)
+                indexed[(variant, row['repetition'], row['phase'])] = row
+    return indexed
 
+
+def sample_header(variant, repetition, phase, artifact, job):
+    return {
+        'variant': variant, 'repetition': repetition, 'phase': phase,
+        'artifact': str(artifact['path']) if artifact else None,
+        # A paired job runs both collectors sequentially. Keep its elapsed
+        # time as shared evidence rather than charging it to both samples.
+        'jobRunnerSeconds': (
+            job.get('jobRunnerSeconds') if job and not job['paired'] else None
+        ),
+        'sharedJobRunnerSeconds': (
+            job.get('jobRunnerSeconds') if job and job['paired'] else None
+        ),
+        'jobStatus': job.get('status') if job else None,
+        'jobConclusion': job.get('conclusion') if job else None,
+    }
+
+
+def classify_sample(sample, artifact, job):
+    summary = read_json(artifact['path'] / 'summary.json') if artifact else None
+    if (not isinstance(summary, dict) or not isinstance(summary.get('steps'), list)
+            or not valid_steps(summary['steps'])):
+        sample.update(status='missing', reason='missing or invalid summary.json')
+        return
+    steps = summary['steps']
+    sample['steps'] = steps
+    sample['metrics'] = sample_metrics(steps)
+    failed_steps = [step for step in steps if step.get('exitCode') != 0]
+    if job is None:
+        sample.update(status='missing', reason='missing GitHub job')
+    elif job.get('status') != 'completed' or job.get('conclusion') is None:
+        sample.update(status='missing', reason='GitHub job is not complete')
+    elif failed_steps or (not job['paired'] and job.get('conclusion') != 'success'):
+        sample.update(status='failure', failedSteps=[step.get('name') for step in failed_steps])
+    else:
+        sample['status'] = 'success'
+
+
+def metric_value(sample, name):
+    return sample.get('jobRunnerSeconds') if name == 'jobRunnerSeconds' else sample['metrics'].get(name)
+
+
+def variant_aggregate(samples):
+    successful = [sample for sample in samples if sample['status'] == 'success']
+    failures = [sample for sample in samples if sample['status'] == 'failure']
+    metrics = {}
+    for name in METRIC_NAMES:
+        values = []
+        for sample in successful:
+            value = metric_value(sample, name)
+            if value is not None:
+                values.append(value)
+        metrics[name] = stats(values)
+    return {
+        'successes': len(successful),
+        'failures': len(failures),
+        'missing': sum(sample['status'] == 'missing' for sample in samples),
+        'metrics': metrics,
+        'allMeasuredVitestSeconds': stats([
+            sample['metrics']['vitestSeconds'] for sample in samples
+            if sample.get('metrics', {}).get('vitestSeconds') is not None
+        ]),
+        'failureSamples': failures,
+        'samples': samples,
+    }
+
+
+def summarize(root):
+    root = Path(root)
+    jobs = job_rows(root)
+    artifacts = artifact_rows(root)
+    indexed = job_index(jobs)
+    variants = {}
+    for variant, repetition, phase in sorted(set(artifacts) | set(indexed)):
+        artifact = artifacts.get((variant, repetition, phase))
+        job = indexed.get((variant, repetition, phase))
+        sample = sample_header(variant, repetition, phase, artifact, job)
+        classify_sample(sample, artifact, job)
+        variants.setdefault(variant, []).append(sample)
     aggregates = {}
-    metric_names = ('verificationSeconds', 'installSeconds', 'vitestSeconds',
-                    'cpuSeconds', 'peakMaxChildRssKiB', 'jobRunnerSeconds')
     for variant, samples in variants.items():
-        successful = [sample for sample in samples if sample['status'] == 'success']
-        failures = [sample for sample in samples if sample['status'] == 'failure']
-        metrics = {}
-        for name in metric_names:
-            values = []
-            for sample in successful:
-                value = sample.get('jobRunnerSeconds') if name == 'jobRunnerSeconds' else sample['metrics'].get(name)
-                if value is not None:
-                    values.append(value)
-            metrics[name] = stats(values)
-        aggregates[variant] = {
-            'successes': len(successful),
-            'failures': len(failures),
-            'missing': sum(sample['status'] == 'missing' for sample in samples),
-            'metrics': metrics,
-            'allMeasuredVitestSeconds': stats([
-                sample['metrics']['vitestSeconds'] for sample in samples
-                if sample.get('metrics', {}).get('vitestSeconds') is not None
-            ]),
-            'failureSamples': failures,
-            'samples': samples,
-        }
+        aggregates[variant] = variant_aggregate(samples)
     return {'variants': aggregates, 'jobs': jobs}
 
 

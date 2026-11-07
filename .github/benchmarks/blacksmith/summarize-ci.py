@@ -18,15 +18,19 @@ def elapsed(start, end):
     return (timestamp(end) - timestamp(start)).total_seconds()
 
 
-def summarize_run(run, log):
-    if run['status'] != 'completed':
-        return {'runId': run['databaseId'], 'status': run['status']}
+def verification_aggregate(run):
     verify = [job for job in run['jobs'] if job['name'] == VERIFY]
     if len(verify) > 1:
         raise ValueError('Ambiguous verification aggregate')
-    verification = verify[0] if verify and verify[0]['status'] == 'completed' else None
-    jobs = [job for job in run['jobs'] if job['status'] == 'completed' and
+    return verify[0] if verify and verify[0]['status'] == 'completed' else None
+
+
+def timed_jobs(run):
+    return [job for job in run['jobs'] if job['status'] == 'completed' and
             job['conclusion'] != 'skipped' and job.get('startedAt') and job.get('completedAt')]
+
+
+def shard_log_counts(log):
     tests, files, failures = {}, {}, []
     for line in ANSI.sub('', log).splitlines():
         name = line.split('\t')[0]
@@ -40,6 +44,15 @@ def summarize_run(run, log):
             files[name] = int(count[1])
         if re.search(r'\bFAIL\s', line):
             failures.append(line.split('\t')[-1].strip())
+    return tests, files, failures
+
+
+def summarize_run(run, log):
+    if run['status'] != 'completed':
+        return {'runId': run['databaseId'], 'status': run['status']}
+    verification = verification_aggregate(run)
+    jobs = timed_jobs(run)
+    tests, files, failures = shard_log_counts(log)
     return {
         'runId': run['databaseId'], 'headSha': run['headSha'], 'url': run['url'],
         'status': run['status'], 'conclusion': run['conclusion'],
