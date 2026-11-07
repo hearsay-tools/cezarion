@@ -13,7 +13,7 @@ import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, 
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID, createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
@@ -22,7 +22,6 @@ import {
   inboxClaimSchema,
   delegationStateSchema,
   workerCreationReceiptSchema,
-  workerCollectedResultSchema,
   workerResultFileSchema,
   workerDestroyRetrySchema,
 } from '@open-mercato/cezar-contract/delegation';
@@ -81,6 +80,7 @@ import { ColdReadCache, storedRow, type StoredRow } from './cold-reads.ts';
 import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
 import { RunStoreOpenError, toRunStoreOpenError } from './store-open-error.ts';
 import { claimStoreFamilies } from './claim-families.ts';
+import { commitStoreWorkerResult } from './worker-result-commit.ts';
 import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } from './run-claims.ts';
 
 /** Per-store persistence adapter; the second argument is the normal fenced transaction. */
@@ -639,17 +639,6 @@ function isDestroyProgress(before: RunRecord['delegation'], after: DelegationSta
   if (before?.role !== 'worker' || after.role !== 'worker' || !before.destroy || !after.destroy) return false;
   if (before.destroy.phase === 'complete' || after.destroy.phase === 'complete') return false;
   return isDeepStrictEqual({ ...before, destroy: undefined }, { ...after, destroy: undefined });
-}
-
-/**
- * Two collected worker results carry the same evidence: equal but for when they were observed and
- * which snapshot file holds them, and, with `ignoreCleanup`, the cleanup phase. A retried destroy
- * that observed nothing new then rewrites and fsyncs nothing (hearsay-tools/cezarion#879).
- */
-function sameWorkerResult(a: WorkerCollectedResult, b: WorkerCollectedResult, opts: { ignoreCleanup?: boolean }): boolean {
-  const comparable = (value: WorkerCollectedResult) => ({ ...value, observedAt: undefined, ...(opts.ignoreCleanup ? { cleanup: undefined } : {}),
-    diff: value.diff.state === 'available' ? { ...value.diff, snapshotId: undefined, path: undefined } : value.diff });
-  return isDeepStrictEqual(comparable(a), comparable(b));
 }
 
 /** NDJSON transcript text to events; a damaged line is skipped, never fatal. */
@@ -2079,47 +2068,18 @@ export class RunStore extends EventEmitter {
     return this.readWorkerResultFile(parentId, workerId)?.diffSnapshot;
   }
 
-  /** Publish a pointer only after its redacted immutable snapshot reaches disk. Failed index writes retain the old evidence.
-   * A result whose evidence is already stored returns the stored one and writes nothing; `ignoreCleanup` is for a
-   * caller that only needs the payload durable, whatever cleanup phase the stored copy names. */
+  /** Publish a pointer only after its redacted immutable snapshot reaches disk. */
   commitWorkerResult(parentId: string, value: WorkerCollectedResult, diffSnapshot?: string, opts: { ignoreCleanup?: boolean } = {}): WorkerCollectedResult {
-    const result = workerCollectedResultSchema.parse(this.redact({ type: 'worker-result', seq: 0, ts: value.observedAt, result: value }).result);
-    const parent = this.peek(parentId);
-    const worker = this.peek(result.workerId);
-    if (parent?.delegation?.role !== 'root' || result.parentRunId !== parentId ||
-      !parent.delegation.receipts.some(receipt => receipt.workerId === result.workerId)) throw new Error('missing result ownership');
-    if (worker && (worker.delegation?.role !== 'worker' || worker.delegation.parentRunId !== parentId ||
-      worker.delegation.workspace.ownerRunId !== worker.id || (worker.delegation.executionRevision ?? 0) !== result.revision || worker.status !== result.status)) throw new Error('worker result revision changed');
-    const old = parent.delegation.results?.find(entry => entry.workerId === result.workerId);
-    const stored = old && this.readWorkerResultFile(parentId, result.workerId);
-    if (stored && sameWorkerResult(stored.result, result, opts) &&
-      stored.diffSnapshot === (diffSnapshot === undefined ? undefined : this.redactText(diffSnapshot))) return stored.result;
-    if ((!worker && !this.readWorkerResult(parentId, result.workerId)) || (old && (old.revision > result.revision || (old.revision === result.revision && old.observedAt > result.observedAt)))) throw new Error('worker result is obsolete');
-    const snapshotId = result.diff.state === 'available' ? result.diff.snapshotId : randomUUID();
-    if (result.diff.state === 'available') result.diff.path = this.workerResultSnapshotPath(parentId, result.workerId, snapshotId);
-    if (result.diff.state === 'available' && diffSnapshot === undefined) throw new Error('missing diff snapshot');
-    const file = workerResultFileSchema.parse({ result, ...(diffSnapshot === undefined ? {} : { diffSnapshot: this.redactText(diffSnapshot) }) });
-    const dir = this.workerResultsDir(parentId);
-    const path = join(dir, `${result.workerId}.${snapshotId}.json`);
-    if (existsSync(path)) throw new Error('worker result snapshot identity already exists');
-    const temp = `${path}.${randomUUID()}.tmp`;
-    try {
-      const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      try { writeFileSync(fd, JSON.stringify(file)); fsyncSync(fd); } finally { closeSync(fd); }
-      renameSync(temp, path);
-      const reference = { workerId: result.workerId, revision: result.revision, observedAt: result.observedAt, snapshotId,
-        lastExecutionOutcome: result.lastExecutionOutcome,
-        ...(old ? { previous: old.revision === result.revision ? old.previous : { revision: old.revision, observedAt: old.observedAt, lastExecutionOutcome: old.lastExecutionOutcome } } : {}),
-      };
-      this.commitDelegation([{ id: parentId, delegation: { ...parent.delegation,
-        results: [...(parent.delegation.results ?? []).filter(entry => entry.workerId !== result.workerId), reference],
-      } }]);
-    } catch (error) { rmSync(temp, { force: true }); if (old?.snapshotId !== snapshotId) rmSync(path, { force: true }); throw error; }
-    // Keep the latest payload only; bounded previous outcome metadata lives in the pointer.
-    for (const name of readdirSync(dir)) if (name.startsWith(`${result.workerId}.`) && name !== `${result.workerId}.${snapshotId}.json`) {
-      try { rmSync(join(dir, name), { force: true }); } catch { /* retry on next collection */ }
-    }
-    return result;
+    return commitStoreWorkerResult({
+      redactResult: (result) => this.redact({ type: 'worker-result', seq: 0, ts: result.observedAt, result }).result,
+      peek: (id) => this.peek(id),
+      readWorkerResultFile: (id, workerId) => this.readWorkerResultFile(id, workerId),
+      readWorkerResult: (id, workerId) => this.readWorkerResult(id, workerId),
+      redactText: (text) => this.redactText(text),
+      workerResultSnapshotPath: (id, workerId, snapshotId) => this.workerResultSnapshotPath(id, workerId, snapshotId),
+      workerResultsDir: (id) => this.workerResultsDir(id),
+      commitDelegation: (patches) => this.commitDelegation(patches),
+    }, parentId, value, diffSnapshot, opts);
   }
 
   /**
