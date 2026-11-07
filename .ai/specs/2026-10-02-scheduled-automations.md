@@ -93,7 +93,9 @@ web routes/automations/*: route shell, list, editor (+ schedule / github fields)
    `reschedule()`. With nothing due, a scheduler with at least one registered project keeps an idle
    wake at the 60 s cap — even before any project has a definitions file — so a schedule enabled,
    edited or created by another process (which may have exited since) arms here within one cap;
-   a workspace with no registered project arms no timer at all.
+   a workspace that has never had a registered project arms no timer. One that had a project keeps
+   the idle wake when a later registry read lists none, so a briefly empty or unreadable registry
+   cannot stop the only timer (it would never be armed again).
 2. `schedule()` collects due items: github → `state.nextCheckAt`; schedule → `ScheduleRunner.dueAt`,
    which returns `state.nextRunAt` or computes `nextOccurrence(schedule, now, tz)` and persists it,
    so every process agrees on the instant. A `PUT` that changes `schedule` (or resumes through

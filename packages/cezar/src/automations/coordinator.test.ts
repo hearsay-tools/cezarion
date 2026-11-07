@@ -42,6 +42,24 @@ describe('AutomationCoordinator', () => {
     expect(coordinator.hasProjects()).toBe(false);
   });
 
+  it('hasSeenProject stays true after a later refresh lists no project', async () => {
+    const root = await project();
+    let projects: { id: string; root: string; status: 'ok' }[] = [];
+    const coordinator = new AutomationCoordinator({ listProjects: async () => projects });
+    await coordinator.refresh();
+    expect(coordinator.hasSeenProject()).toBe(false);
+    projects = [{ id: 'one', root, status: 'ok' }];
+    await coordinator.refresh();
+    expect(coordinator.hasSeenProject()).toBe(true);
+    projects = [];
+    await coordinator.refresh();
+    expect(coordinator.hasProjects()).toBe(true);
+    projects = [{ id: 'one', root, status: 'missing' as never }];
+    await coordinator.refresh();
+    expect(coordinator.hasProjects()).toBe(false);
+    expect(coordinator.hasSeenProject()).toBe(true);
+  });
+
   it('drops removed and gone projects without failing other handles', async () => {
     const root = await project();
     await mkdir(join(root, '.ai/cezar'), { recursive: true });
