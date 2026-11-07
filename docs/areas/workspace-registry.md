@@ -160,7 +160,9 @@ decision: a v1 record with `files: []` and `backup: ''`, then the marker with
 legacy directory exists; a new install never creates `~/.cezar`. A later
 older-binary write to the legacy home then never re-runs migration: step 3
 returns `unchanged`, and P2b-2 treats a legacy file absent from `files` as a
-legacy change.
+legacy change. The fresh branch refuses while the target holds a pending or
+rolled-back copy (`install.json.failed`): that copy may be the only one left,
+so its record and backup reference stay for recovery.
 
 `installMarkerSchema.state` is `pending | committed | undefined`.
 `writeMigrationMarker` is the migration's only marker writer; ordinary marker

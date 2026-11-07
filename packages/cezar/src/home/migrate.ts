@@ -207,9 +207,20 @@ function settleCopies(legacy: Home, target: Home, options: MigrationOptions, rec
   throw new Error('Unreachable migration state');
 }
 
+/** A pending or rolled-back copy may be the only copy left once the legacy registry is gone.
+ *  Never commit it as a fresh home, and keep its record and backup reference for recovery. */
+function assertNoAbandonedCopy(target: Home): void {
+  const pending = readInstallMarker(target.config)?.state === 'pending';
+  if (!pending && !existsSync(join(target.config, 'install.json.failed'))) return;
+  const backup = readMigrationRecord(target)?.backup;
+  throw new Error(`The legacy home is empty, but ${target.config} holds a ${pending ? 'pending' : 'rolled-back'} migration copy`
+    + ` (backup ${backup || 'none recorded'}). Restore the legacy home from that backup and retry, or move the copy aside to start a fresh home.`);
+}
+
 /** An empty legacy home commits an explicit decision with an empty inventory. Later legacy
  *  writes by older binaries then belong to the canary (P2b-2), never to another migration. */
 function recordFreshDecision(legacy: Home, target: Home, plan: MigrationPlan, env: NodeJS.ProcessEnv | undefined): MigrationRecord {
+  assertNoAbandonedCopy(target);
   createInstallMarker(target.config, underTestRunner() ? 'test' : 'live');
   const record: MigrationRecord = { ...migrationRecordFor(plan), files: [], backup: '', deferredAccounts: [], notMoved: [] };
   // The record publishes before the committed marker: a committed home always has a record.

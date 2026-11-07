@@ -91,6 +91,20 @@ it.each(['absent', 'empty'])('step 1: an %s legacy home commits a fresh decision
   if (kind === 'absent') expect(existsSync(old)).toBe(false);
 });
 
+it.each(['pending', 'rolled-back'] as const)('a %s copy is never committed as a fresh home after the legacy registry disappears', state => {
+  const { legacy, target } = migrationFixture();
+  migrateLegacyHome(legacy, target, { commit: false });
+  if (state === 'rolled-back') rollbackLegacyMigration(target);
+  const record = readFileSync(join(target.state, 'migration.json'));
+  rmSync(legacy.workspaceConfig);
+  rmSync(`${legacy.workspaceConfig}.bak`, { force: true });
+  expect(planLegacyMigration(legacy, target).empty).toBe(true);
+  expect(() => migrateLegacyHome(legacy, target)).toThrow(new RegExp(`legacy home is empty.*${state} migration copy.*backup`, 's'));
+  expect(readFileSync(join(target.state, 'migration.json'))).toEqual(record);
+  expect(readInstallMarker(target.config)?.state).toBe(state === 'pending' ? 'pending' : undefined);
+  expect(json(target.workspaceConfig).saved).toBe('original');
+});
+
 it('T1: after a fresh boot, an older binary that writes legacy config.json does not block the next boot', () => {
   const root = storeRoot(), old = join(root, 'legacy');
   const legacy = homePaths(old, join(root, 'cache'), old);
