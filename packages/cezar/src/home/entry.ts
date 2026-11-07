@@ -26,7 +26,9 @@ export function operatorHomeEntry(argv: readonly string[]): string | undefined {
 export function prepareOperatorHome(home: Home, command: string | undefined, env = process.env, migration?: MigrationBootOptions): Home {
   command ??= 'serve';
   if (!entries.includes(command)) return home;
-  if (prepareMigrationHome(home, env, migration)) return home;
+  const boot = prepareMigrationHome(home, env, migration);
+  if (boot.kind === 'staged') return home;
+  if (boot.kind === 'legacy') home = boot.home;
   authorizeHomeEntry(home, command, markerKind(command, env));
   try {
     if (['serve', 'init', 'run', 'backup'].includes(command) || registryFiles(home).some(path => existsSync(path))) {
@@ -62,7 +64,7 @@ export function serverInstanceForPort(home: Home, port: number): string {
 
 /** Prepare before server consumers read, then hold presence only for the listener's lifetime. */
 export function prepareHomeLifecycle(home: Home, instance?: string, { rebrand = REBRAND_SWITCH } = {}): (server: ServerType) => void {
-  prepareOperatorHome(home, 'serve');
+  prepareOperatorHome(home, 'serve', process.env, { enabled: rebrand });
   return server => {
     const listening = () => {
       const address = server.address();
