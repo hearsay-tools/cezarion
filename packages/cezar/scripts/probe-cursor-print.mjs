@@ -164,55 +164,70 @@ async function discoverSafeAllowedTools() {
   return { catalogRun, names, safeAllowedTools };
 }
 
+function writeCanary(name) {
+  const canary = randomBytes(16).toString('hex');
+  writeFileSync(join(checkout, name), `${canary}\n`, { mode: 0o600 });
+  return canary;
+}
+
+const delegationPrompt = name => `Use the native Read tool to read ${name}, then reply with its exact contents. Do not use any other tool.`;
+
+async function delegationReadTurn(args) {
+  return runAgent(['-p', '--force', '--trust', '--output-format', 'stream-json',
+    '--model', values.model, ...args], checkout, 45_000);
+}
+
+function delegationTurnFacts(frames, canary) {
+  return { tools: toolKindsOf(frames), sawCanary: String(resultOf(frames)?.result ?? '').includes(canary) };
+}
+
+function sameDelegationSession(firstId, secondFrames, thirdFrames) {
+  return Boolean(firstId && firstId === resultOf(secondFrames)?.session_id
+    && firstId === resultOf(thirdFrames)?.session_id);
+}
+
+function delegationCatalogVerified(catalogRun, names, noDelegationEntriesInAllowlist) {
+  return catalogRun.code === 1 && !catalogRun.timedOut
+    && names.includes('task_tool_call') && names.includes('create_agent_tool_call')
+    && nativeDelegationEntries.every(name => names.includes(name)) && noDelegationEntriesInAllowlist;
+}
+
+function delegationTurnVerified(run, facts, toolExpected) {
+  return run?.code === 0 && !run.timedOut && !run.truncated
+    && facts.tools.includes('readToolCall') === toolExpected && facts.sawCanary === toolExpected;
+}
+
+function delegationOutcome(catalogRun, names, noDelegationEntriesInAllowlist, first, firstFacts, second, secondFacts, third, thirdFacts, sameSession) {
+  return delegationCatalogVerified(catalogRun, names, noDelegationEntriesInAllowlist)
+    && delegationTurnVerified(first, firstFacts, true)
+    && delegationTurnVerified(second, secondFacts, false)
+    && delegationTurnVerified(third, thirdFacts, true)
+    && sameSession ? 'pass' : 'blocked';
+}
+
 async function probeDelegation(version) {
   const { catalogRun, names, safeAllowedTools } = await discoverSafeAllowedTools();
 
-  const firstCanary = randomBytes(16).toString('hex');
-  writeFileSync(join(checkout, 'probe-first.txt'), `${firstCanary}\n`, { mode: 0o600 });
-  const prompt = name => `Use the native Read tool to read ${name}, then reply with its exact contents. Do not use any other tool.`;
-  const first = await runAgent([
-    '-p', '--force', '--trust', '--output-format', 'stream-json',
-    '--model', values.model, '--allowed-tools', 'read_tool_call', prompt('probe-first.txt'),
-  ], checkout, 45_000);
+  const firstCanary = writeCanary('probe-first.txt');
+  const first = await delegationReadTurn(['--allowed-tools', 'read_tool_call', delegationPrompt('probe-first.txt')]);
   const firstFrames = framesOf(first.stdout);
   const firstId = resultOf(firstFrames)?.session_id;
 
-  const secondCanary = randomBytes(16).toString('hex');
-  writeFileSync(join(checkout, 'probe-second.txt'), `${secondCanary}\n`, { mode: 0o600 });
-  const second = firstId ? await runAgent([
-    '-p', '--force', '--trust', '--output-format', 'stream-json',
-    '--model', values.model, '--resume', firstId,
-    '--allowed-tools', 'read_todos_tool_call', prompt('probe-second.txt'),
-  ], checkout, 45_000) : undefined;
+  const secondCanary = writeCanary('probe-second.txt');
+  const second = firstId ? await delegationReadTurn(['--resume', firstId,
+    '--allowed-tools', 'read_todos_tool_call', delegationPrompt('probe-second.txt')]) : undefined;
   const secondFrames = second ? framesOf(second.stdout) : [];
 
-  const thirdCanary = randomBytes(16).toString('hex');
-  writeFileSync(join(checkout, 'probe-third.txt'), `${thirdCanary}\n`, { mode: 0o600 });
-  const third = firstId && second ? await runAgent([
-    '-p', '--force', '--trust', '--output-format', 'stream-json',
-    '--model', values.model, '--resume', firstId,
-    '--allowed-tools', safeAllowedTools.join(','), prompt('probe-third.txt'),
-  ], checkout, 45_000) : undefined;
+  const thirdCanary = writeCanary('probe-third.txt');
+  const third = firstId && second ? await delegationReadTurn(['--resume', firstId,
+    '--allowed-tools', safeAllowedTools.join(','), delegationPrompt('probe-third.txt')]) : undefined;
   const thirdFrames = third ? framesOf(third.stdout) : [];
 
-  const firstTools = toolKindsOf(firstFrames);
-  const secondTools = toolKindsOf(secondFrames);
-  const firstSawCanary = String(resultOf(firstFrames)?.result ?? '').includes(firstCanary);
-  const secondSawCanary = String(resultOf(secondFrames)?.result ?? '').includes(secondCanary);
-  const thirdTools = toolKindsOf(thirdFrames);
-  const thirdSawCanary = String(resultOf(thirdFrames)?.result ?? '').includes(thirdCanary);
-  const sameSession = Boolean(firstId && firstId === resultOf(secondFrames)?.session_id
-    && firstId === resultOf(thirdFrames)?.session_id);
+  const firstFacts = delegationTurnFacts(firstFrames, firstCanary);
+  const secondFacts = delegationTurnFacts(secondFrames, secondCanary);
+  const thirdFacts = delegationTurnFacts(thirdFrames, thirdCanary);
+  const sameSession = sameDelegationSession(firstId, secondFrames, thirdFrames);
   const noDelegationEntriesInAllowlist = nativeDelegationEntries.every(name => !safeAllowedTools.includes(name));
-  const genericFilterVerified = catalogRun.code === 1 && !catalogRun.timedOut
-    && names.includes('task_tool_call') && names.includes('create_agent_tool_call')
-    && nativeDelegationEntries.every(name => names.includes(name)) && noDelegationEntriesInAllowlist
-    && first.code === 0 && !first.timedOut && !first.truncated
-    && firstTools.includes('readToolCall') && firstSawCanary
-    && second?.code === 0 && !second.timedOut && !second.truncated
-    && !secondTools.includes('readToolCall') && !secondSawCanary
-    && third?.code === 0 && !third.timedOut && !third.truncated
-    && thirdTools.includes('readToolCall') && thirdSawCanary && sameSession;
   return {
     schema: 1,
     case: 'delegation',
@@ -222,16 +237,16 @@ async function probeDelegation(version) {
     catalogValidatedBeforeInference: catalogRun.code === 1 && names.includes('task_tool_call'),
     nativeDelegationEntries,
     safeAllowedTools,
-    freshReadToolCalled: firstTools.includes('readToolCall'),
-    freshReadSucceeded: firstSawCanary,
-    resumedReadToolCalled: secondTools.includes('readToolCall'),
-    resumedReadSucceeded: secondSawCanary,
-    fullAllowlistReadToolCalled: thirdTools.includes('readToolCall'),
-    fullAllowlistReadSucceeded: thirdSawCanary,
+    freshReadToolCalled: firstFacts.tools.includes('readToolCall'),
+    freshReadSucceeded: firstFacts.sawCanary,
+    resumedReadToolCalled: secondFacts.tools.includes('readToolCall'),
+    resumedReadSucceeded: secondFacts.sawCanary,
+    fullAllowlistReadToolCalled: thirdFacts.tools.includes('readToolCall'),
+    fullAllowlistReadSucceeded: thirdFacts.sawCanary,
     noDelegationEntriesInAllowlist,
     sameNativeSession: sameSession,
     directTaskCallAttempted: false,
-    outcome: genericFilterVerified ? 'pass' : 'blocked',
+    outcome: delegationOutcome(catalogRun, names, noDelegationEntriesInAllowlist, first, firstFacts, second, secondFacts, third, thirdFacts, sameSession),
   };
 }
 
