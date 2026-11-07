@@ -59,6 +59,50 @@ export async function watchWindowsAutosave() {
   let diagnostic = 'Windows process inspection pending';
   let rootExitTicks: bigint | undefined;
   const ticksNow = () => (BigInt(Date.now()) + 62135596800000n) * 10000n;
+  // The leader can exit while CIM is taking its snapshot. Without an
+  // observed incarnation this row might already be a reused PID. Retry
+  // without claiming ownership or signalling that process.
+  const observeLeader = (root: number, exited: boolean, leader: Process | undefined): boolean => {
+    if (exited && leader && !leaderObserved) { latest = []; diagnostic = `Windows leader PID ${root} incarnation uncertain`; return false; }
+    if (!exited && leader && !leaderObserved) { owned.set(key(leader), { ...leader, signalable: true }); leaderObserved = true; }
+    return true;
+  };
+  /** Parent IDs persist after exit. Birth order separates old ancestry from a later process that reused the same ID. */
+  const plausibleAncestor = (entry: Process, parents: (Process & { signalable: boolean })[], replacement: Process | undefined) =>
+    parents.some(parent => {
+      if (parent.token && entry.token && BigInt(entry.token) < BigInt(parent.token)) return false;
+      return !replacement || replacement.token === parent.token ||
+        (!!entry.token && !!replacement.token && BigInt(entry.token) < BigInt(replacement.token));
+    });
+  // Unproven ancestry may hold the guard, but never authorizes a kill.
+  // In particular, an already-exited, never-observed root PID could
+  // have been reused by an unrelated intermediate between snapshots.
+  const maySignal = (entry: Process, parents: (Process & { signalable: boolean })[], current: Map<number, Process>, exited: boolean, root: number) =>
+    (entry.parent !== root || !exited) && parents.some(parent =>
+      parent.signalable && !!parent.token && !!entry.token && BigInt(parent.token) <= BigInt(entry.token) &&
+      current.get(parent.pid)?.token === parent.token);
+  const admitEntry = (entry: Process, current: Map<number, Process>, root: number, exited: boolean): boolean => {
+    if (owned.has(key(entry)) || (entry.token && before.get(entry.pid) === entry.token)) return false;
+    const parents = [...owned.values()].filter(parent => parent.pid === entry.parent);
+    if (entry.parent !== root && !parents.length) return false;
+    if (entry.parent === root && exited && entry.token && BigInt(entry.token) > rootExitTicks!) return false;
+    const replacement = current.get(entry.parent);
+    if (parents.length && !plausibleAncestor(entry, parents, replacement)) return false;
+    owned.set(key(entry), { ...entry, signalable: maySignal(entry, parents, current, exited, root) });
+    return true;
+  };
+  /** Fixed point: children admitted in one pass can make their own children admissible in the next. */
+  const admitRetained = (entries: Process[], current: Map<number, Process>, root: number, exited: boolean) => {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const entry of entries) {
+        if (admitEntry(entry, current, root, exited)) changed = true;
+      }
+    }
+  };
+  const retainsGuard = (entries: Process[]) => entries.some(entry => owned.has(key(entry)) ||
+    [...owned.values()].some(recorded => recorded.pid === entry.pid && (!recorded.token || !entry.token)));
   const signal = async () => {
     if (stopping === undefined || signalling.has(stopping)) return;
     const force = stopping;
@@ -88,42 +132,12 @@ export async function watchWindowsAutosave() {
       if (exited) rootExitTicks ??= ticksNow();
       latest = entries;
       const current = new Map(entries.map(entry => [entry.pid, entry]));
-      const leader = current.get(root);
-      // The leader can exit while CIM is taking its snapshot. Without an
-      // observed incarnation this row might already be a reused PID. Retry
-      // without claiming ownership or signalling that process.
-      if (exited && leader && !leaderObserved) { latest = []; diagnostic = `Windows leader PID ${root} incarnation uncertain`; return true; }
-      if (!exited && leader && !leaderObserved) { owned.set(key(leader), { ...leader, signalable: true }); leaderObserved = true; }
-      let changed = true;
-      while (changed) {
-        changed = false;
-        for (const entry of entries) {
-          if (owned.has(key(entry)) || (entry.token && before.get(entry.pid) === entry.token)) continue;
-          const parents = [...owned.values()].filter(parent => parent.pid === entry.parent);
-          if (entry.parent !== root && !parents.length) continue;
-          if (entry.parent === root && exited && entry.token && BigInt(entry.token) > rootExitTicks!) continue;
-          const replacement = current.get(entry.parent);
-          // Parent IDs persist after exit. Birth order separates old ancestry
-          // from a later process that reused the same ID.
-          if (parents.length && !parents.some(parent => {
-            if (parent.token && entry.token && BigInt(entry.token) < BigInt(parent.token)) return false;
-            return !replacement || replacement.token === parent.token ||
-              (!!entry.token && !!replacement.token && BigInt(entry.token) < BigInt(replacement.token));
-          })) continue;
-          // Unproven ancestry may hold the guard, but never authorizes a kill.
-          // In particular, an already-exited, never-observed root PID could
-          // have been reused by an unrelated intermediate between snapshots.
-          const signalable = (entry.parent !== root || !exited) && parents.some(parent =>
-            parent.signalable && !!parent.token && !!entry.token && BigInt(parent.token) <= BigInt(entry.token) &&
-            current.get(parent.pid)?.token === parent.token);
-          owned.set(key(entry), { ...entry, signalable }); changed = true;
-        }
-      }
+      if (!observeLeader(root, exited, current.get(root))) return true;
+      admitRetained(entries, current, root, exited);
       const pids = entries.filter(entry => owned.has(key(entry))).map(entry => entry.pid);
       diagnostic = `Windows retained autosave PIDs: ${pids.join(', ') || 'none'}${!exited ? '; leader termination uncertain' : ''}`;
       void signal();
-      return !exited || entries.some(entry => owned.has(key(entry)) ||
-        [...owned.values()].some(recorded => recorded.pid === entry.pid && (!recorded.token || !entry.token)));
+      return !exited || retainsGuard(entries);
     },
   };
 }
