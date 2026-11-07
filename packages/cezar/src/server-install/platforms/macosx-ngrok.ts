@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CANCEL, PreflightError, type InstallContext, type InstallStep, type PlatformStrategy, type StepArtifact } from '../types.ts';
+import { CANCEL, PreflightError, type InstallContext, type InstallStep, type PlatformStrategy, type StepArtifact, type StepCreated } from '../types.ts';
 import { brewInstallTool, brewRemoveHint, depCheckStep, HOSTNAME_RE, owned, shared, StepAborted, StepCancelled, verifyCommand } from '../steps.ts';
 import { REBRAND_SWITCH } from '../../home/switch.ts';
 import { migrateLaunchd, rollbackLaunchdMigration } from './macosx-migration.ts';
@@ -25,11 +25,37 @@ function labelFor(agent: 'ngrok' | 'cockpit', rebrand: boolean): string {
   return `${rebrand ? 'tools.hearsay.squawk' : 'ai.cezar'}.${agent}`;
 }
 
-function agentArtifact(ctx: InstallContext, step: string, rebrand: boolean, created = ctx.state.steps[step]?.created): StepArtifact & { name: string; path: string } {
+type LaunchAgent = StepArtifact & { name: string; path: string };
+
+function agentCandidates(ctx: InstallContext, step: string, rebrand: boolean, created: StepCreated | undefined): LaunchAgent[] {
+  const agent = step === 'ngrok' ? 'ngrok' : 'cockpit';
+  const selected = labelFor(agent, rebrand);
+  const artifact = (name: string): LaunchAgent => ({ kind: 'owned', type: 'launchd', name, path: join(launchAgentsDir(ctx), `${name}.plist`) });
+  const candidates = [artifact(selected)];
+  if (rebrand) candidates.push(artifact(labelFor(agent, false)));
   const recorded = created?.artifacts.find((a) => a.kind === 'owned' && a.type === 'launchd');
-  const name = recorded?.name ?? labelFor(step === 'ngrok' ? 'ngrok' : 'cockpit', rebrand);
-  return { ...recorded, kind: 'owned', type: 'launchd', name,
-    path: recorded?.path ?? join(launchAgentsDir(ctx), `${name}.plist`) };
+  if (recorded) {
+    const fallback = artifact(recorded.name ?? selected);
+    candidates.unshift({ ...recorded, ...fallback, path: recorded.path ?? fallback.path });
+  }
+  return candidates.filter((a, i) => candidates.findIndex((b) => b.name === a.name && b.path === a.path) === i);
+}
+
+function agentArtifact(ctx: InstallContext, step: string, rebrand: boolean): LaunchAgent {
+  const candidates = agentCandidates(ctx, step, rebrand, ctx.state.steps[step]?.created);
+  return candidates.find((a) => existsSync(a.path)) ?? candidates[0]!;
+}
+
+async function removeAgents(ctx: InstallContext, step: string, rebrand: boolean, created: StepCreated): Promise<void> {
+  const candidates = agentCandidates(ctx, step, rebrand, created);
+  const existing = candidates.filter((a) => existsSync(a.path));
+  // Keep the historical bootout even when the plist was already removed.
+  const targets = existing.length > 0 ? existing : [candidates[0]!];
+  const uid = process.getuid ? process.getuid() : 0;
+  for (const { name, path } of targets) {
+    await ctx.runner.capture('launchctl', ['bootout', `gui/${uid}/${name}`]);
+    rmSync(path, { force: true });
+  }
 }
 
 /**
@@ -45,6 +71,18 @@ async function bootstrapVerified(ctx: InstallContext, uid: number, label: string
       `launchctl could not load ${what} (bootstrap exit ${code}) — inspect it with: launchctl print gui/${uid}/${label}`,
     );
   }
+}
+
+/** Both agents use private plists; ngrok's plist contains plaintext credentials. */
+async function installAgent(ctx: InstallContext, name: string, path: string, xml: string, what: string): Promise<void> {
+  mkdirSync(launchAgentsDir(ctx), { recursive: true });
+  writeFileSync(path, xml, { encoding: 'utf8', mode: 0o600 });
+  // mode only applies on create; protect re-installs over an existing 0644 plist too.
+  chmodSync(path, 0o600);
+  const uid = process.getuid ? process.getuid() : 0;
+  // Modern launchctl avoids legacy load's EIO on current macOS. Unload before re-install.
+  await ctx.runner.capture('launchctl', ['bootout', `gui/${uid}/${name}`]);
+  await bootstrapVerified(ctx, uid, name, path, what);
 }
 
 /** Escape a value for inclusion in plist XML text. */
@@ -153,19 +191,7 @@ const ngrokStep = (rebrand: boolean): InstallStep => ({
       // Silicon (/opt/homebrew/bin) and Intel (/usr/local/bin) Macs.
       const ngrokBin = (await ctx.runner.capture('bash', ['-lc', 'command -v ngrok'])).stdout.trim() || '/opt/homebrew/bin/ngrok';
 
-      mkdirSync(launchAgentsDir(ctx), { recursive: true });
-      // 0600: unlike the Linux htpasswd (a hash, 0640 root:www-data), this file
-      // embeds the PLAINTEXT basic-auth credentials. `mode` only applies on
-      // create, so chmod too for re-installs over an existing 0644 plist.
-      writeFileSync(path, launchdPlist(ctx.state.primaryPort, basicAuth, domain, ngrokBin, rebrand), { encoding: 'utf8', mode: 0o600 });
-      chmodSync(path, 0o600);
-
-      // Use the modern launchctl API — the legacy `launchctl load` returns
-      // error 5 (EIO) on recent macOS versions.
-      const uid = process.getuid ? process.getuid() : 0;
-      // Bootout any prior instance so re-installs don't collide.
-      await ctx.runner.capture('launchctl', ['bootout', `gui/${uid}/${name}`]);
-      await bootstrapVerified(ctx, uid, name, path, 'the ngrok tunnel agent');
+      await installAgent(ctx, name, path, launchdPlist(ctx.state.primaryPort, basicAuth, domain, ngrokBin, rebrand), 'the ngrok tunnel agent');
     }
 
     if (domain) {
@@ -186,13 +212,10 @@ const ngrokStep = (rebrand: boolean): InstallStep => ({
   async undo(ctx, created) {
     // Prefer the recorded identity; check() can leave created:null, so keep the
     // selected-label fallback to remove credential-bearing agents in that case.
-    const { name, path } = agentArtifact(ctx, 'ngrok', rebrand, created);
     if (ctx.dryRun) {
       ctx.ui.info('DRY RUN — would launchctl bootout and remove the ngrok agent.');
     } else {
-      const uid = process.getuid ? process.getuid() : 0;
-      await ctx.runner.capture('launchctl', ['bootout', `gui/${uid}/${name}`]);
-      rmSync(path, { force: true });
+      await removeAgents(ctx, 'ngrok', rebrand, created);
     }
     const cfg = (created?.artifacts ?? []).find((a) => a.type === 'ngrok-config');
     if (cfg) {
@@ -297,24 +320,16 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
     if (ctx.dryRun) {
       ctx.ui.info(`DRY RUN — would write ${path} and launchctl bootstrap it.`);
     } else {
-      mkdirSync(launchAgentsDir(ctx), { recursive: true });
-      writeFileSync(path, cezarLaunchdPlist(ctx.repoRoot, ctx.state.primaryPort, argv, rebrand), { encoding: 'utf8', mode: 0o600 });
-      chmodSync(path, 0o600);
-      const uid = process.getuid ? process.getuid() : 0;
-      await ctx.runner.capture('launchctl', ['bootout', `gui/${uid}/${name}`]);
-      await bootstrapVerified(ctx, uid, name, path, 'the cezar cockpit agent');
+      await installAgent(ctx, name, path, cezarLaunchdPlist(ctx.repoRoot, ctx.state.primaryPort, argv, rebrand), 'the cezar cockpit agent');
     }
     return { artifacts: [owned('launchd', { name, path })] };
   },
   async undo(ctx, created) {
     // Recorded identity, with the same null-ledger fallback as ngrok.
-    const { name, path } = agentArtifact(ctx, 'autostart', rebrand, created);
     if (ctx.dryRun) {
       ctx.ui.info('DRY RUN — would launchctl bootout and remove the cezar agent.');
     } else {
-      const uid = process.getuid ? process.getuid() : 0;
-      await ctx.runner.capture('launchctl', ['bootout', `gui/${uid}/${name}`]);
-      rmSync(path, { force: true });
+      await removeAgents(ctx, 'autostart', rebrand, created);
     }
   },
 });

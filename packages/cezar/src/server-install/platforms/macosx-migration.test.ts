@@ -202,6 +202,41 @@ describe('macOS launchd migration', () => {
     expect(loaded.size).toBe(0);
   });
 
+  it('checks, deploys and uninstalls legacy agents when pre-switch check() recorded created:null', async () => {
+    const oldCockpit = plant('cockpit', false, ['/usr/bin/node', '/usr/local/bin/cezarion']);
+    const oldNgrok = plant('ngrok', false);
+    const steps = strategy.steps(ctx);
+    for (const id of ['autostart', 'ngrok']) {
+      expect(await steps.find((s) => s.id === id)!.check(ctx)).toBe(true);
+      expect(commands.at(-1)).toEqual(['test', '-f', id === 'ngrok' ? oldNgrok.path! : oldCockpit.path!]);
+    }
+    await strategy.redeploy!(ctx);
+    expect(commands.filter((c) => c[1] === 'kickstart').map((c) => c[3])).toEqual([
+      `gui/${process.getuid?.() ?? 0}/ai.cezar.cockpit`, `gui/${process.getuid?.() ?? 0}/ai.cezar.ngrok`,
+    ]);
+    for (const id of ['ngrok', 'autostart']) await steps.find((s) => s.id === id)!.undo(ctx, null);
+    expect(existsSync(oldCockpit.path!)).toBe(false);
+    expect(existsSync(oldNgrok.path!)).toBe(false);
+    expect(commands.filter((c) => c[1] === 'bootout').map((c) => c[2])).toEqual([
+      `gui/${process.getuid?.() ?? 0}/ai.cezar.ngrok`, `gui/${process.getuid?.() ?? 0}/ai.cezar.cockpit`,
+    ]);
+    expect(loaded.size).toBe(0);
+  });
+
+  it('prefers the selected static agent and removes both static plists on undo with no ledger', async () => {
+    const old = plant('ngrok', false);
+    const path = join(dir, 'tools.hearsay.squawk.ngrok.plist');
+    writeFileSync(path, launchdPlist(4321, 'ops:secret', undefined, '/n/ngrok', true));
+    loaded.add('tools.hearsay.squawk.ngrok');
+    const step = strategy.steps(ctx).find((s) => s.id === 'ngrok')!;
+    await step.check(ctx);
+    expect(commands.at(-1)).toEqual(['test', '-f', path]);
+    await step.undo(ctx, null);
+    expect(existsSync(old.path!)).toBe(false);
+    expect(existsSync(path)).toBe(false);
+    expect(loaded.size).toBe(0);
+  });
+
   it('creates fresh switch-on plists with only the new labels', async () => {
     ctx.ui = { ...ctx.ui, password: async () => 'secret', text: async (opts) => opts.message.includes('domain') ? '' : 'ops' };
     const capture = ctx.runner.capture;
