@@ -128,3 +128,113 @@ describe('automation CLI input boundaries', () => {
     }
   });
 });
+
+describe('automation CLI response boundaries', () => {
+  it('lists poll triggers, fallback intervals, next checks and availability reasons', async () => {
+    const cli = client(async () => ({ status: 200, data: {
+      available: false, reason: 'No GitHub remote', automations: [
+        { id: 'poll', name: 'Poll', kind: 'github', enabled: true, events: ['issue.opened', 'pull_request.opened'], intervalSeconds: 600, state: { nextCheckAt: '2030-01-01T04:00:00Z' }, counts: { launched: 2 } },
+        { id: 'pending', name: 'Pending', kind: 'github', enabled: true, counts: {} },
+        { ...definition, id: 'schedule', enabled: true, nextRunAt: '2030-01-01T05:00:00Z', counts: {} },
+        { id: 'paused', name: 'Paused', kind: 'github', enabled: false, state: { nextCheckAt: '2030-01-01T04:00:00Z' }, counts: {} },
+      ],
+    } }));
+    expect(await cli.run(['list', '--archived', 'include'])).toBe(EXIT.ok);
+    expect(cli.last()).toEqual({ available: false, reason: 'No GitHub remote', automations: [
+      { id: 'poll', name: 'Poll', kind: 'github', enabled: true, trigger: 'every 600s on issue.opened,pull_request.opened', counts: { launched: 2 }, next: '2030-01-01T04:00:00Z', url: `${env.CEZ_COCKPIT_URL}/p/project/automations/poll` },
+      { id: 'pending', name: 'Pending', kind: 'github', enabled: true, trigger: 'every 300s on ', counts: {}, url: `${env.CEZ_COCKPIT_URL}/p/project/automations/pending` },
+      { id: 'schedule', name: 'Nightly', kind: 'schedule', enabled: true, trigger: 'every day at 04:00', counts: {}, next: '2030-01-01T05:00:00Z', url: `${env.CEZ_COCKPIT_URL}/p/project/automations/schedule` },
+      { id: 'paused', name: 'Paused', kind: 'github', enabled: false, trigger: 'every 300s on ', counts: {}, url: `${env.CEZ_COCKPIT_URL}/p/project/automations/paused` },
+    ] });
+  });
+
+  it.each([199, 300, 404])('refuses a failed delete with HTTP %s', async status => {
+    const cli = client(async () => ({ status, data: { error: 'Cannot delete' } }));
+    expect(await cli.run(['delete', 'a1'])).toBe(EXIT.refused);
+    expect(cli.last()).toEqual({ code: 'refused', status, error: 'Cannot delete' });
+  });
+
+  it.each([200, 204, 299])('accepts a successful delete with HTTP %s', async status => {
+    const cli = client(async () => ({ status, data: {} }));
+    expect(await cli.run(['delete', 'a1'])).toBe(EXIT.ok);
+    expect(cli.last()).toEqual({ id: 'a1', deleted: true });
+  });
+
+  it.each([undefined, 42])('uses UTC when the cockpit has no string time zone (%s)', async timeZone => {
+    const http = vi.fn<NonNullable<AutomationIo['http']>>(async (_url, init) => init?.method === 'POST'
+      ? { status: 201, data: { automation: definition } }
+      : { status: 200, data: { timeZone } });
+    const cli = client(http, { now: () => Date.parse('2030-01-01T00:00:00Z') });
+    expect(await cli.run(['add', '--name', 'Later', '--in', '1h', '--prompt', 'Go'])).toBe(EXIT.ok);
+    expect(http.mock.calls[1]?.[1]?.body).toMatchObject({ schedule: { type: 'once', at: '2030-01-01T01:00', timeZone: 'UTC' } });
+  });
+
+  it('stops before creating when the cockpit time-zone lookup fails', async () => {
+    const http = vi.fn<NonNullable<AutomationIo['http']>>().mockResolvedValue({ status: 403, data: { error: 'No access' } });
+    const cli = client(http);
+    expect(await cli.run(['add', '--name', 'Later', '--in', '1h', '--prompt', 'Go'])).toBe(EXIT.refused);
+    expect(cli.last()).toEqual({ code: 'refused', status: 403, error: 'No access' });
+    expect(http).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves an unzoned wall time in the cockpit zone and keeps an explicit zone', async () => {
+    const http = vi.fn<NonNullable<AutomationIo['http']>>(async (_url, init) => init?.method === 'POST'
+      ? { status: 201, data: { automation: definition } }
+      : { status: 200, data: { timeZone: 'Europe/Warsaw' } });
+    const cli = client(http);
+    expect(await cli.run(['add', '--name', 'Later', '--at', '2030-01-01T09:00', '--prompt', 'Go'])).toBe(EXIT.ok);
+    expect(http.mock.calls[1]?.[1]?.body).toMatchObject({ schedule: { timeZone: 'Europe/Warsaw' } });
+    http.mockClear();
+    expect(await cli.run(['add', '--name', 'Later', '--at', '2030-01-01T09:00', '--tz', 'UTC', '--prompt', 'Go'])).toBe(EXIT.ok);
+    expect(http).toHaveBeenCalledTimes(1);
+    expect(http.mock.calls[0]?.[1]?.body).toMatchObject({ schedule: { timeZone: 'UTC' } });
+  });
+
+  it('omits due fields for a once schedule without a valid instant', async () => {
+    const cli = client(async () => ({ status: 200, data: { automation: { ...definition, schedule: { type: 'once', at: '2030-01-01T09:00' } } } }));
+    expect(await cli.run(['show', 'a1'])).toBe(EXIT.ok);
+    expect(cli.last()).not.toHaveProperty('dueAt');
+    expect(cli.last()).not.toHaveProperty('timeZone');
+  });
+
+  it('applies an explicit enabled update and preserves unrelated task keys', async () => {
+    const http = vi.fn<NonNullable<AutomationIo['http']>>().mockResolvedValue({ status: 200, data: { automation: { ...definition, enabled: true } } });
+    const cli = client(http);
+    expect(await cli.run(['update', 'a1', '--json', '{"enabled":false}'])).toBe(EXIT.ok);
+    expect(http.mock.calls[1]?.[1]?.body).toMatchObject({ enabled: false, expectedRevision: 1, task: { prompt: 'Go' } });
+    expect(cli.last().schedule).toBe('every day at 04:00');
+  });
+
+  it.each([true, false])('reports a completed check with truncated=%s', async truncated => {
+    const cli = client(async url => url.endsWith('/check')
+      ? { status: 202, data: { checkId: 'chk' } }
+      : { status: 200, data: { status: 'complete', matches: 2, truncated } });
+    expect(await cli.run(['check', 'a1'])).toBe(EXIT.ok);
+    expect(cli.last()).toMatchObject({ matches: 2, truncated });
+  });
+
+  it('retries a startup response with the default sleep', async () => {
+    vi.useFakeTimers();
+    const http = vi.fn<NonNullable<AutomationIo['http']>>()
+      .mockResolvedValueOnce({ status: 503, data: 'Cockpit is starting' })
+      .mockResolvedValue({ status: 200, data: { available: true, automations: [] } });
+    const cli = client(http);
+    const result = cli.run(['list']);
+    await vi.runAllTimersAsync();
+    expect(await result).toBe(EXIT.ok);
+    expect(cli.last()).toEqual({ available: true, automations: [] });
+  });
+
+  it('polls a running check with the default sleep and clock', async () => {
+    vi.useFakeTimers();
+    const http = vi.fn<NonNullable<AutomationIo['http']>>()
+      .mockResolvedValueOnce({ status: 202, data: { checkId: 'chk' } })
+      .mockResolvedValueOnce({ status: 200, data: { status: 'running' } })
+      .mockResolvedValue({ status: 200, data: { status: 'complete', matches: 1 } });
+    const cli = client(http);
+    const result = cli.run(['check', 'a1']);
+    await vi.runAllTimersAsync();
+    expect(await result).toBe(EXIT.ok);
+    expect(cli.last()).toMatchObject({ status: 'complete', matches: 1, truncated: false });
+  });
+});
