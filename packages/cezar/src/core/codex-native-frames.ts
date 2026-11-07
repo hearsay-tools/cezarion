@@ -84,7 +84,8 @@ export function sessionExitEvent(exit: SessionExit): { event: 'error' | 'note'; 
     const mins = Math.round((exit.limitMs / 60_000) * 10) / 10;
     return { event: 'error', message: `codex app-server timed out after ${mins}m and was killed` };
   }
-  // 143/137 from our own EOF watchdog or cancel is the teardown cezar asked for (#703).
+  // Our own EOF watchdog / cancel signal coming back as 143/137 — the
+  // teardown cezar asked for, not a codex failure (#703).
   if (exit.terminatedByCezar && cezarAskedForExit(exit.exitCode, exit.signalCode)) {
     const how = exit.exitCode === null ? exit.signalCode : `code ${exit.exitCode}`;
     return { event: 'note', message: `codex app-server did not exit on its own after close; terminated by cezar (${how})` };
