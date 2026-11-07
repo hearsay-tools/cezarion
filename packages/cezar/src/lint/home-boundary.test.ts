@@ -66,8 +66,37 @@ describe('explicit Home boundaries', () => {
     'process.env.CEZ_HOME++',
     "vi.stubEnv('CEZ_HOME', dir)",
     "vi['stubEnv']('CEZ_HOME', dir)",
+    "vi.stubEnv?.('CEZ_HOME', dir)",
+    "vi?.stubEnv('CEZ_HOME', dir)",
+    "[process.env.CEZ_HOME] = [dir]",
+    "({ a: process.env.CEZ_HOME } = source)",
+    "({ a: [process.env.CEZ_HOME = dir] } = source)",
+    "[...process.env.CEZ_HOME] = dirs",
+    "({ ...process.env.CEZ_HOME } = source)",
+    "for (process.env.CEZ_HOME of dirs) {}",
+    "for (process.env.CEZ_HOME in dirs) {}",
+    "for ([process.env[\"CEZ_HOME\"]] of dirs) {}",
+    "delete process?.env?.[\"CEZ_HOME\"]",
+    "Object.assign(process.env, { CEZ_HOME })",
+    "Object.assign(process[\"env\"], {}, { [\"CEZ_HOME\"]: dir })",
+    "Reflect.set(process.env, \"CEZ_HOME\", dir)",
+    "Reflect.defineProperty(process.env, \"CEZ_HOME\", { value: dir })",
+    "Object.defineProperty(process.env, \"CEZ_HOME\", { value: dir })",
   ])('rejects test home selection outside setup: %s', source => {
     expect(scanHomeBoundary(test, source, [])).toEqual([expect.objectContaining({ kind: 'test-selection' })]);
+  });
+
+  it.each([
+    '[value = process.env.CEZ_HOME] = []',
+    '({ [process.env.CEZ_HOME]: value } = source)',
+    'for (const value of process.env.CEZ_HOME) {}',
+    'Object.assign(other, { CEZ_HOME: dir })',
+    'Object.assign(process.env, { OTHER: dir })',
+    'Reflect.set(other, "CEZ_HOME", dir)',
+    'Reflect.set(process.env, "OTHER", dir)',
+    'Reflect.defineProperty(other, "CEZ_HOME", { value: dir })',
+  ])('allows reads and writes outside the selected home: %s', source => {
+    expect(scanHomeBoundary(test, source, [])).toEqual([]);
   });
 
   it('allows resolver entry points and the home module', () => {

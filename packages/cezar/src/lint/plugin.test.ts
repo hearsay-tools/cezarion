@@ -167,7 +167,34 @@ describe('the cez rules under oxlint', () => {
     ].map(source => {
       return ['packages/cezar/src/ambient.ts', source];
     }),
-    ['packages/cezar/src/ambient.test.ts', 'process.env.CEZ_HOME = dir;'],
+    ...[
+      "process.env.CEZ_HOME = dir",
+      "process.env[\"CEZ_HOME\"] = dir",
+      "process[\"env\"].CEZ_HOME ||= dir",
+      "(process.env.CEZ_HOME as string) = dir",
+      "delete process.env.CEZ_HOME",
+      "process.env.CEZ_HOME++",
+      "vi.stubEnv(\"CEZ_HOME\", dir)",
+      "vi[\"stubEnv\"](\"CEZ_HOME\", dir)",
+      "vi.stubEnv?.('CEZ_HOME', dir)",
+      "vi?.stubEnv('CEZ_HOME', dir)",
+      "[process.env.CEZ_HOME] = [dir]",
+      "({ a: process.env.CEZ_HOME } = source)",
+      "({ a: [process.env.CEZ_HOME = dir] } = source)",
+      "[...process.env.CEZ_HOME] = dirs",
+      "({ ...process.env.CEZ_HOME } = source)",
+      "for (process.env.CEZ_HOME of dirs) {}",
+      "for (process.env.CEZ_HOME in dirs) {}",
+      "for ([process.env[\"CEZ_HOME\"]] of dirs) {}",
+      "delete process?.env?.[\"CEZ_HOME\"]",
+      "Object.assign(process.env, { CEZ_HOME })",
+      "Object.assign(process[\"env\"], {}, { [\"CEZ_HOME\"]: dir })",
+      "Reflect.set(process.env, \"CEZ_HOME\", dir)",
+      "Reflect.defineProperty(process.env, \"CEZ_HOME\", { value: dir })",
+      "Object.defineProperty(process.env, \"CEZ_HOME\", { value: dir })",
+    ].map(source => {
+      return ['packages/cezar/src/ambient.test.ts', source];
+    }),
   ])('oxlint refuses ambient home access in %s: %s', async (file, source) => {
     expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
   }, OXLINT_TIMEOUT_MS);

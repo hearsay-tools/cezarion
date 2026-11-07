@@ -64,18 +64,53 @@ function callsHomedir(node: Node, aliases: Set<string>): boolean {
   return homedirRef(callee, aliases);
 }
 
-function homeEnv(node: Node): boolean {
+function processEnv(node: Node | null | undefined): boolean {
+  if (!node) return false;
+  const env = unwrapped(node);
+  return (env.type === 'MemberExpression' || env.type === 'OptionalMemberExpression')
+    && property(env) === 'env' && name(unwrapped(env.object)) === 'process';
+}
+
+function homeWriteTarget(node: Node | null): boolean {
+  if (!node) return false;
   const target = unwrapped(node);
-  if (target.type !== 'MemberExpression' || property(target) !== 'CEZ_HOME') return false;
-  const env = unwrapped(target.object);
-  return env.type === 'MemberExpression' && property(env) === 'env' && name(env.object) === 'process';
+  if (target.type === 'ArrayPattern') return target.elements.some(homeWriteTarget);
+  if (target.type === 'ObjectPattern') return target.properties.some(field => {
+    return homeWriteTarget(field.type === 'RestElement' ? field.argument : field.value);
+  });
+  if (target.type === 'AssignmentPattern') return homeWriteTarget(target.left);
+  if (target.type === 'RestElement') return homeWriteTarget(target.argument);
+  return (target.type === 'MemberExpression' || target.type === 'OptionalMemberExpression')
+    && property(target) === 'CEZ_HOME' && processEnv(target.object);
+}
+
+function homeProperty(node: Node): boolean {
+  const source = unwrapped(node);
+  return source.type === 'ObjectExpression' && source.properties.some(field => {
+    return (field.type === 'ObjectProperty' || field.type === 'ObjectMethod')
+      && (!field.computed || field.key.type === 'StringLiteral') && name(field.key) === 'CEZ_HOME';
+  });
+}
+
+function selectsHomeCall(node: Node): boolean {
+  if (node.type !== 'CallExpression' && node.type !== 'OptionalCallExpression') return false;
+  const callee = unwrapped(node.callee);
+  const method = property(callee);
+  if (method === 'stubEnv') return name(node.arguments[0]) === 'CEZ_HOME';
+  if (callee.type !== 'MemberExpression' && callee.type !== 'OptionalMemberExpression') return false;
+  if (!processEnv(node.arguments[0])) return false;
+  const owner = name(unwrapped(callee.object));
+  if (owner === 'Object' && method === 'assign') return node.arguments.slice(1).some(homeProperty);
+  const key = node.arguments[1];
+  return ['Reflect.set', 'Reflect.defineProperty', 'Object.defineProperty'].includes(`${owner}.${method}`)
+    && key?.type === 'StringLiteral' && key.value === 'CEZ_HOME';
 }
 
 function selectsHome(node: Node): boolean {
-  if (node.type === 'AssignmentExpression') return homeEnv(node.left);
-  if (node.type === 'UpdateExpression') return homeEnv(node.argument);
-  if (node.type === 'UnaryExpression' && node.operator === 'delete') return homeEnv(node.argument);
-  return node.type === 'CallExpression' && property(node.callee) === 'stubEnv' && name(node.arguments[0]) === 'CEZ_HOME';
+  if (node.type === 'AssignmentExpression' || node.type === 'ForInStatement' || node.type === 'ForOfStatement') return homeWriteTarget(node.left);
+  if (node.type === 'UpdateExpression') return homeWriteTarget(node.argument);
+  if (node.type === 'UnaryExpression' && node.operator === 'delete') return homeWriteTarget(node.argument);
+  return selectsHomeCall(node);
 }
 
 /** Parse failures propagate to lint. Strings and comments cannot hide or create sites. */
