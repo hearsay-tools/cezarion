@@ -111,3 +111,15 @@ it('keeps remote grants read-only even in the local cockpit and gives the host C
   expect(screen.getByText('cez backup restore remote-settings/4321.json')).toBeTruthy()
   expect(screen.getByText('Only the host operator can restore or accept this file.', { exact: false })).toBeTruthy()
 })
+
+it.each(['pending', 'error'] as const)('keeps capability-dependent actions unset while health is %s', status => {
+  state([file('config.json'), file('remote-settings/4321.json', 'outside-write')])
+  vi.mocked(useHealth).mockReturnValue({ data: undefined, status } as ReturnType<typeof useHealth>)
+  render(<HomeRecoveryBanner />)
+  const rows = screen.getAllByRole('status')
+  expect(rows).toHaveLength(2)
+  expect(rows[0]!.textContent).toBe('The project registry was reset. Restore the previous projects?')
+  expect(screen.queryByRole('button')).toBeNull()
+  expect(screen.getAllByText('Only the host operator can restore or accept this file.', { exact: false })).toHaveLength(1)
+  expect(screen.getByText('cez backup restore remote-settings/4321.json')).toBeTruthy()
+})

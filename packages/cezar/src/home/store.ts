@@ -1,4 +1,5 @@
 import type { Home } from './home.ts';
+import { existsSync } from 'node:fs';
 import { homeFileSchema } from '@open-mercato/cezar-contract/home-recovery';
 import { registryCount } from './registry-content.ts';
 import { homeChanged } from './changes.ts';
@@ -7,7 +8,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { backupBeforeWrite } from '../workspace/backups.ts';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 import { assertHomeWritable, createInstallMarker, readInstallMarker, underTestRunner } from './install-marker.ts';
-import { OUTSIDE_WRITE_ENFORCEMENT, readBytes, VersionLog, type OutsideWrite } from './version-log.ts';
+import { digest, OUTSIDE_WRITE_ENFORCEMENT, readBytes, VersionLog, type OutsideWrite } from './version-log.ts';
 import { withHomeLock } from './write-lock.ts';
 import { assertHomePaths } from './boundary.ts';
 import { homeEntryAuthorization, registryFiles, seedHomeRegistry } from './entry-authorization.ts';
@@ -102,33 +103,38 @@ export class HomeStore {
     throw Object.assign(new Error(`ENOENT: no such file, open '${path}'`), { code: 'ENOENT' });
   }
 
-  writeJson(path: string, value: unknown): void {
-    this.replace(path, Buffer.from(`${JSON.stringify(value, null, 2)}\n`));
+  writeJson(path: string, value: unknown, recoveredBase?: Buffer): void {
+    this.replace(path, Buffer.from(`${JSON.stringify(value, null, 2)}\n`), recoveredBase);
   }
 
-  replace(path: string, bytes: Buffer | null): void {
+  replace(path: string, bytes: Buffer | null, recoveredBase?: Buffer): void {
     const unavailable = this.assertBoundary([path], true).get(path);
     this.transaction(() => {
       const log = this.journal(path);
       const previous = readBytes(path);
-      this.checkOutside(path, log, previous);
+      const restoredDeletion = this.checkOutside(path, log, previous, recoveredBase);
       backupBeforeWrite(path, bytes, { home: this.home, unavailable });
-      const keepAcceptance = registryCount(log.relativePath, previous) === 0 && log.accepted(previous);
-      log.reset(); // Finish any reset whose primary committed before a crash.
+      const reset = log.reset(); // Finish any reset whose primary committed before a crash.
+      const keepAcceptance = !reset && registryCount(log.relativePath, previous) === 0 && log.accepted(previous);
       flagResetOnWrite(log, previous, bytes);
       log.replace(path, bytes);
       log.reset(); // The durable reset now survives later ordinary writes.
-      if (keepAcceptance) log.clearRecovery(bytes);
+      if (keepAcceptance || restoredDeletion) log.clearRecovery(bytes);
       homeChanged(this.root);
     });
   }
 
-  private checkOutside(path: string, log: VersionLog, previous: Buffer | null): void {
+  private checkOutside(path: string, log: VersionLog, previous: Buffer | null, recoveredBase?: Buffer): boolean {
     const outside = log.inspect(previous);
     if (outside && OUTSIDE_WRITE_ENFORCEMENT) {
+      // Only the registry loader self-heals deletions. Prove its unmodified backup base is
+      // the pinned version before permitting the merged save; outside content still refuses.
+      if (log.relativePath === 'config.json' && previous === null && recoveredBase !== undefined
+        && digest(recoveredBase) === outside.restoreHash) return true;
       homeChanged(this.root);
       throw new HomeOutsideWriteError(path);
     }
+    return false;
   }
 
   outsideWrite(path: string): OutsideWrite | undefined {
@@ -159,6 +165,8 @@ export class HomeStore {
   recovery(path: string): { reason: 'outside-write' | 'reset'; detectedAt: string; canRestore: boolean; restoreHash: string | null } | undefined {
     if (!this.canJournal()) return;
     this.assertBoundary([path]);
+    // Observing a never-created optional file must not create its first journal.
+    if (!existsSync(path) && !existsSync(this.journal(path).directory)) return;
     return this.transaction(() => {
       const log = this.journal(path);
       const bytes = readBytes(path);
@@ -171,7 +179,7 @@ export class HomeStore {
     });
   }
 
-  /** Explicit restore is the sole replacement that can bypass an unresolved outside write. */
+  /** Explicit restore resolves any incident; normal writes only self-heal a proven registry deletion. */
   restoreFile(path: string, bytes: Buffer | null, keepReset = false): void {
     const unavailable = this.assertBoundary([path], true).get(path);
     this.transaction(() => {

@@ -331,7 +331,7 @@ function parseWorkspaceConfig(raw: string): WorkspaceConfig | null {
 
 /** The snapshot is only worth restoring while it still holds projects — an
  *  empty one carries no information the defaults do not already have. */
-function loadWorkspaceConfigBackup(path: string): WorkspaceConfig | null {
+function loadWorkspaceConfigBackup(path: string, recovery?: { base?: Buffer }): WorkspaceConfig | null {
   let raw: string;
   try {
     raw = readHomeFile(workspaceConfigBackupPath(path));
@@ -339,6 +339,7 @@ function loadWorkspaceConfigBackup(path: string): WorkspaceConfig | null {
     return null;
   }
   const parsed = parseWorkspaceConfig(raw);
+  if (recovery && parsed && parsed.projects.length > 0) recovery.base = Buffer.from(raw);
   return parsed && parsed.projects.length > 0 ? parsed : null;
 }
 
@@ -347,7 +348,7 @@ function loadWorkspaceConfigBackup(path: string): WorkspaceConfig | null {
  * backup; preserve a valid empty primary. Failures degrade to defaults. Merge writers pass their
  * once-resolved path.
  */
-function loadWorkspaceConfigSync(path: string): WorkspaceConfig {
+function loadWorkspaceConfigSync(path: string, recovery?: { base?: Buffer }): WorkspaceConfig {
   let raw: string | null = null;
   try {
     raw = readHomeFile(path);
@@ -358,7 +359,7 @@ function loadWorkspaceConfigSync(path: string): WorkspaceConfig {
     const parsed = parseWorkspaceConfig(raw);
     if (parsed) return parsed;
   }
-  const restored = loadWorkspaceConfigBackup(path);
+  const restored = loadWorkspaceConfigBackup(path, recovery);
   if (restored) {
     const cause = raw === null ? 'is missing' : 'is empty or corrupt';
     console.warn(
@@ -401,9 +402,10 @@ export async function mergeWriteWorkspaceConfig(
   }
   return store.transaction(() => {
     const path = home.workspaceConfig;
-    const current = loadWorkspaceConfigSync(path);
+    const recovery: { base?: Buffer } = {};
+    const current = loadWorkspaceConfigSync(path, recovery);
     const next = mutator(current) ?? current;
-    store.writeJson(path, next);
+    store.writeJson(path, next, recovery.base);
     // Refresh after empty writes too, so recovery cannot resurrect removed projects.
     if (snapshotReady) try { store.writeJson(backup, next); } catch (error) {
       warnSnapshot(backup, error); // The primary is already safely committed.

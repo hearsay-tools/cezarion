@@ -10,7 +10,7 @@ function recoveryMessage(file: HomeRecoveryFile): string {
     : 'The account list was reset. Restore the previous accounts?'
 }
 
-function HomeRecoveryRow({ file, editable }: { file: HomeRecoveryFile; editable: boolean }) {
+function HomeRecoveryRow({ file, editable }: { file: HomeRecoveryFile; editable: boolean | undefined }) {
   const restore = useRestoreHomeRecovery()
   const accept = useAcceptHomeRecovery()
   const busy = restore.isPending || accept.isPending
@@ -29,7 +29,7 @@ function HomeRecoveryRow({ file, editable }: { file: HomeRecoveryFile; editable:
       {editable ? <div className="flex flex-wrap gap-2">
         <Button type="button" data-action="restore" disabled={busy || !file.canRestore} onClick={() => run('restore')}>Restore</Button>
         <Button type="button" variant="outline" data-action="accept" disabled={busy} onClick={() => run('accept')}>Accept as found</Button>
-      </div> : <p className="basis-full">Only the host operator can restore or accept this file.
+      </div> : editable === false && <p className="basis-full">Only the host operator can restore or accept this file.
         {file.file.startsWith('remote-settings/') && <> <code>cez backup restore {file.file}</code></>}
       </p>}
       {editable && error && <p role="alert" className="basis-full text-danger">{error.message}</p>}
@@ -40,11 +40,11 @@ function HomeRecoveryRow({ file, editable }: { file: HomeRecoveryFile; editable:
 /** Empty successful state remains observable without adding a visible banner or placeholder. */
 export function HomeRecoveryBanner() {
   const recovery = useHomeRecovery()
-  const editable = useHealth().data?.capabilities?.localHandoff === true
+  const editable = useHealth().data?.capabilities?.localHandoff
   return (
     <div data-slot="home-recovery-state" data-state={recovery.isSuccess ? 'ready' : recovery.isError ? 'error' : 'pending'}>
       {recovery.data?.files.map(file => <HomeRecoveryRow key={file.file} file={file}
-        editable={editable && !file.file.startsWith('remote-settings/')} />)}
+        editable={file.file.startsWith('remote-settings/') ? false : editable} />)}
     </div>
   )
 }

@@ -86,7 +86,7 @@ it('flags a replayed older version and restores the newer committed version', as
 
 it('restores absence when an outside writer creates a previously absent file', async () => {
   const home = Home.sandbox(storeRoot());
-  getHomeRecovery(home); // Seed an absent HEAD before the outside create.
+  Home.seedBytes(home, home.workspaceUiState, null); // Explicitly track absence before the outside create.
   writeFileSync(home.workspaceUiState, '{}'); // Deliberate outside creation.
   expect(getHomeRecovery(home).files).toContainEqual(expect.objectContaining({ file: 'ui-state.json', reason: 'outside-write' }));
   await restoreHomeRecovery(home, 'ui-state.json');

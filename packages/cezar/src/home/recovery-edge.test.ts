@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Home } from './home.ts';
@@ -10,6 +10,16 @@ import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { cleanStoreRoots, storeRoot } from './store.testkit.ts';
 
 afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
+
+it('leaves absent optional files untracked during repeated recovery snapshots', () => {
+  const home = Home.sandbox(storeRoot());
+  Home.seed(home, home.workspaceConfig, { projects: [{ id: 'normal', root: '/normal' }] });
+  expect(getHomeRecovery(home)).toEqual({ files: [] });
+  expect(getHomeRecovery(home)).toEqual({ files: [] });
+  for (const file of ['agent-accounts.json', 'ui-state.json', 'server.json', 'server.install.lock']) {
+    expect(existsSync(join(home.root, '.versions', file))).toBe(false);
+  }
+});
 
 it.each(['before pending', 'after pending'] as const)('does not report a reset when a write fails %s and leaves the registry unchanged', phase => {
   const home = Home.sandbox(storeRoot());
@@ -59,6 +69,27 @@ it('keeps acceptance across settings writes to an empty registry and still detec
   store.writeJson(home.workspaceConfig, { projects: [{ id: 'new', root: '/new' }] });
   store.writeJson(home.workspaceConfig, { projects: [], settingsChanged: 'again' });
   expect(getHomeRecovery(home).files).toContainEqual(expect.objectContaining({ file: 'config.json', reason: 'reset' }));
+});
+
+it.each(['projects', 'accounts'] as const)('preserves a later %s reset when a crash leaves an earlier empty acceptance', async key => {
+  const home = Home.sandbox(storeRoot());
+  const path = key === 'projects' ? home.workspaceConfig : home.agentAccounts;
+  const file = key === 'projects' ? 'config.json' : 'agent-accounts.json';
+  const store = new HomeStore(home);
+  Home.seed(home, path, { [key]: [] });
+  store.acceptOutsideWrite(path);
+  vi.spyOn(VersionLog.prototype, 'clearRecovery').mockImplementationOnce(() => { throw new Error('crash before acceptance advances'); });
+  expect(() => store.writeJson(path, { [key]: [{ id: 'preserved' }] })).toThrow('crash');
+  vi.restoreAllMocks();
+  const original = readFileSync(path);
+  store.writeJson(path, { [key]: [] });
+  const incident = getHomeRecovery(home).files.find(entry => entry.file === file)!;
+  expect(incident).toMatchObject({ reason: 'reset', canRestore: true });
+  store.writeJson(path, { [key]: [], settingsChanged: true });
+  expect(getHomeRecovery(home).files).toContainEqual(incident);
+  await restoreHomeRecovery(home, file, incident.detectedAt);
+  expect(readFileSync(path)).toEqual(original);
+  expect(getHomeRecovery(home)).toEqual({ files: [] });
 });
 
 it.each(['missing', 'corrupt'] as const)('invalidates cached restore availability when pinned content becomes %s', async fault => {

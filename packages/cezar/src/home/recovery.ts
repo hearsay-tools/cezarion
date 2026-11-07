@@ -11,7 +11,7 @@ interface CachedFile { fingerprint: string; state: HomeRecoveryFile | undefined;
 const caches = new Map<string, Map<HomeFile, CachedFile>>();
 
 function stamp(path: string): string {
-  try { const s = statSync(path); return `${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`; }
+  try { const s = statSync(path, { bigint: true }); return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`; }
   catch { return 'unavailable'; }
 }
 

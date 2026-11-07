@@ -1,4 +1,3 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -6,6 +5,7 @@ import { clickAppearanceControl } from './appearance-control'
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, readTestEnv } from './agent-browser'
 import { waitForServerAppearance } from './poll'
+import { snapshotSharedHome } from './workspace-registry'
 
 /**
  * Global settings shell + Appearance (R6 Step 1.3; moved to the global area in the
@@ -26,24 +26,20 @@ const DESKTOP = { width: 1440, height: 900 }
 // Appearance persists in the WORKSPACE ui-state since step 3.5. `.ai/scripts/test-env-up.sh`
 // pins `CEZ_HOME` under `.ai/qa/cez-home`, so that — not the developer's `~/.cezar`, and not
 // the repo's `.ai/cezar` — is the file this suite reads and restores.
-const cezHomeDir = resolve(import.meta.dirname, '../../../.ai/qa/cez-home')
-const uiStateFile = resolve(cezHomeDir, 'ui-state.json')
-
 let browser: AgentBrowser
 let baseUrl: string
-let previousUiState: string | null = null
+let restoreUiState: () => void
 
 beforeAll(() => {
   baseUrl = readTestEnv().baseUrl
-  previousUiState = existsSync(uiStateFile) ? readFileSync(uiStateFile, 'utf8') : null
+  restoreUiState = snapshotSharedHome('ui-state.json')
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(DESKTOP.width, DESKTOP.height)
 })
 
 afterAll(() => {
   // Never leave a developer's cockpit wearing this test's appearance.
-  if (previousUiState === null) rmSync(uiStateFile, { force: true })
-  else writeFileSync(uiStateFile, previousUiState, 'utf8')
+  restoreUiState?.()
   browser?.close()
 })
 

@@ -182,6 +182,15 @@ Exclusive lock publication uses the same check. Restore and acceptance are expli
 resolution operations under the same lock. Restore preserves the previous pinned
 bytes; acceptance makes the found bytes HEAD without changing their mtime.
 
+The owner approved automatic recovery of registry deletions on 2026-11-07.
+The existing registry loader can recover missing `config.json` from its nonempty
+`.bak`. It carries the exact recovered bytes into the merge writer. If the primary
+is still absent and those bytes match the pinned restore hash, the merge writer
+commits the recovered base plus its mutation and clears the incident. It never
+uses outside content as a base. A different backup, a save without that recovered
+base, or any outside change that leaves primary bytes still refuses. Other
+HomeStore families have no equivalent loader recovery and keep refusing deletions.
+
 A per-file `RESET` record pins the last nonempty project/account collection when a
 HomeStore write empties it. Recovery demand also checks the newest registry backup
 for an empty registry. `ACCEPTED` records the resolved content hash before flags
@@ -196,6 +205,7 @@ The CLI and HTTP recovery actions share the same restore implementation.
 | Nonempty projects/accounts become empty | RESET pins the prior version |
 | Empty registry, newest backup holds projects | RESET pins that backup |
 | Outside write followed by a merge or exclusive write | Refuse; keep found bytes and pinned HEAD |
+| Deleted config.json, merge starts from .bak equal to pinned HEAD | Commit recovered registry plus mutation; clear flag |
 | Restore reset/outside flag | Back up found bytes, restore pinned bytes, clear flags |
 | Accept found bytes | Store as HEAD, record acceptance, clear flags |
 | Another cockpit resolves a flag | Demand-bound journal watch refreshes the snapshot |
