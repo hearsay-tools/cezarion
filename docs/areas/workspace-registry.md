@@ -171,6 +171,9 @@ permits reads and cockpit leases. Boot detects `install.json.state ===
 'pending'` with a staged record and skips migration and seeding so P2c can
 check the group read-only.
 `prepareHomeLifecycle(home, instance?)` passes the instance into its lease.
+With the switch on and no instance given, the lease names the server record
+whose `primaryPort` the cockpit listens on (`serverInstanceForPort`), else
+`default`.
 
 For P2c, `migrateLegacyHome(..., { commit: false })` leaves a pending copy.
 `commitLegacyMigration(target, env?)` rechecks the legacy hashes, commits the
@@ -180,6 +183,23 @@ Profile symlinks stay intact; a profile inside the legacy home stays unchanged
 with a warning. `rollbackLegacyMigration(target)` renames a
 pending marker to `install.json.failed`; the next explicit migration overwrites
 the recorded pending destinations. Rollback never rewrites legacy registry data.
+
+`cez server-migrate` (`server-install/group-migrate.ts`, registered only with
+the switch on) is that caller. It holds every instance's install lock in the
+records home, sorted, for the whole run. Before the first platform move it
+writes `<state>/server-migrate.json` (version 1: `phase`, `stagedHome`, and per
+instance the dry-run `planned` report and the returned `moved` report). The
+home commits after every health check passes and before the journal says
+`committing`, so a commit refusal (a legacy file changed during the checks)
+rolls the whole group back. Like
+`migration.json`, it is a migration-owned private write that a pending home
+permits. A `migrating` or `rolling-back` journal is recovered by rolling back
+every planned move from disk state, then the pending home. A `committing`
+journal, or a `migrating` one over a home it staged and whose marker
+committed, finishes the commit, then applies each `moved` report to the copied
+server records. The journal is removed when the group commits or rolls back
+completely. A failed compensation keeps it and the pending home for the next
+run.
 
 `home/migration-record.ts` owns `migrationRecordSchema` (version 1) and the
 private `readMigrationRecord(home)` / `writeMigrationRecord(home, record)` pair.

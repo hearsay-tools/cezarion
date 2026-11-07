@@ -7,6 +7,9 @@ import { CANCEL, PreflightError, type InstallContext, type InstallStep, type Pla
 import { depCheckStep, generatePassword, owned, shared, shquote, StepAborted, StepCancelled, StepSkipped, sudoStep, verifyCommand } from '../steps.ts';
 import { isForeignNpxExecStart, isNpxExecStart, refreshNpxCacheForRedeploy } from '../npx-cache.ts';
 import { failedRestart, freshRestartOrFail, readExecStart, resolveRedeployScope, restartSystemService, restartUserService, serviceDiagnostics, serviceSnapshot } from './ubuntu-vps-redeploy.ts';
+import { recordedSite, recordedUnit, sitePathsToRemove, unitHint } from './ubuntu-vps-names.ts';
+import { migrateUbuntu, rollbackUbuntuMigration, startUbuntuService, stopUbuntuService } from './ubuntu-vps-migration.ts';
+import { REBRAND_SWITCH } from '../../home/switch.ts';
 
 export { isForeignNpxExecStart, isNpxExecStart, refreshNpxCacheForRedeploy };
 
@@ -18,34 +21,6 @@ export { isForeignNpxExecStart, isNpxExecStart, refreshNpxCacheForRedeploy };
  * Phase 1 ships deps → nginx+htpasswd → identity-verify (and their `undo`s).
  * Phase 2 appends the optional SSL and autostart steps to `steps()`.
  */
-
-/**
- * Instance-scoped artifact paths. The `default` instance (a host with no
- * `--domain`, i.e. every pre-multi-instance install) keeps the original,
- * un-suffixed names so it upgrades in place; a named (domain-keyed) instance
- * suffixes the nginx site, htpasswd, and systemd unit with its slug so several
- * cockpits coexist on one host without colliding. `undefined`/`'default'` both
- * resolve to the legacy names.
- */
-function inst(ctx: InstallContext): string {
-  return ctx.instance && ctx.instance !== 'default' ? ctx.instance : 'default';
-}
-function vhostAvailable(ctx: InstallContext): string {
-  const i = inst(ctx);
-  return i === 'default' ? '/etc/nginx/sites-available/cezar' : `/etc/nginx/sites-available/cezar-${i}`;
-}
-function vhostEnabled(ctx: InstallContext): string {
-  const i = inst(ctx);
-  return i === 'default' ? '/etc/nginx/sites-enabled/cezar' : `/etc/nginx/sites-enabled/cezar-${i}`;
-}
-function htpasswdPath(ctx: InstallContext): string {
-  const i = inst(ctx);
-  return i === 'default' ? '/etc/cezar/htpasswd' : `/etc/cezar/htpasswd-${i}`;
-}
-function unitName(ctx: InstallContext): string {
-  const i = inst(ctx);
-  return i === 'default' ? 'cezar.service' : `cezar-${i}.service`;
-}
 
 /** Best-effort current OS username, suggested as the default cockpit login. */
 function currentUsername(): string {
@@ -239,13 +214,13 @@ function writeFileStep(
   });
 }
 
-const nginxProxyStep: InstallStep = {
+const nginxProxyStep = (rebrand: boolean): InstallStep => ({
   id: 'nginx-proxy',
   title: 'Reverse proxy (nginx + htpasswd)',
   async check(ctx) {
     if (ctx.dryRun) return false;
     const nginxOk = await verifyCommand(ctx, 'nginx', ['-v']);
-    const vhostOk = await verifyCommand(ctx, 'test', ['-f', vhostEnabled(ctx)]);
+    const vhostOk = await verifyCommand(ctx, 'test', ['-f', recordedSite(ctx, rebrand).vhostEnabled]);
     return nginxOk && vhostOk;
   },
   async run(ctx): Promise<{ artifacts: StepArtifact[] }> {
@@ -340,11 +315,11 @@ const nginxProxyStep: InstallStep = {
     // every request 500. 0640 root:www-data: readable by nginx, not by others.
     // The credential line travels on STDIN (`cat > file`), never in argv — the
     // apr1 hash is offline-crackable, and argv is world-readable via `ps`.
-    const htpasswd = htpasswdPath(ctx);
+    const { htpasswd, vhostAvailable: vhostAvail, vhostEnabled: vhostEnbl } = recordedSite(ctx, rebrand);
     await sudoStep(ctx, {
       description: 'Write the htpasswd identity file that nginx checks on every request.',
       note: `${htpasswd}\n\n${user}:<apr1 hash of your password>`,
-      command: `install -d -m 0755 /etc/cezar && cat > ${htpasswd} && chown root:www-data ${htpasswd} && chmod 0640 ${htpasswd}`,
+      command: `install -d -m 0755 ${htpasswd.slice(0, htpasswd.lastIndexOf('/'))} && cat > ${htpasswd} && chown root:www-data ${htpasswd} && chmod 0640 ${htpasswd}`,
       input: `${user}:${hash}\n`,
       inputLabel: 'credential line (username:hash)',
       verify: (c) => verifyCommand(c, 'test', ['-f', htpasswd]),
@@ -358,8 +333,6 @@ const nginxProxyStep: InstallStep = {
     //    stamp it into server_name from the start (Host-based routing works
     //    immediately and certbot --nginx can find the vhost later). The default
     //    instance keeps the catch-all `_` until the SSL step sets a domain.
-    const vhostAvail = vhostAvailable(ctx);
-    const vhostEnbl = vhostEnabled(ctx);
     const nginxVersion = await installedNginxVersion(ctx);
     const vhost = nginxVhost(ctx.state.primaryPort, ctx.state.domain ?? '_', htpasswd, nginxVersion);
     await writeFileStep(ctx, {
@@ -438,25 +411,26 @@ const nginxProxyStep: InstallStep = {
         'Installed for cezar but possibly used elsewhere — remove manually if unwanted',
       );
     }
-    // rmdir /etc/cezar only succeeds when empty, so removing one instance's
+    // rmdir only succeeds when empty, so removing one instance's
     // htpasswd never nukes another instance's credentials in the same dir.
-    const vhostEnbl = vhostEnabled(ctx);
+    const { files, dirs } = sitePathsToRemove(ctx, rebrand);
+    const vhostEnbl = files[0]!;
     await sudoStep(ctx, {
       description: 'Remove the cezar nginx site + htpasswd, reload nginx.',
       command:
-        `rm -f ${vhostEnbl} ${vhostAvailable(ctx)} ${htpasswdPath(ctx)}` +
+        `rm -f ${files.join(' ')}` +
         restoreClause +
-        ` && { rmdir /etc/cezar 2>/dev/null || true; }` +
+        ` && { rmdir ${dirs.join(' ')} 2>/dev/null || true; }` +
         ` && { nginx -t && systemctl reload nginx || true; }`,
       verify: (c) => verifyCommand(c, 'sh', ['-c', `! test -f ${vhostEnbl}`]),
     });
   },
-};
+});
 
 const HOSTNAME_RE = /^(?=.{1,253}$)([a-z0-9](-?[a-z0-9])*\.)+[a-z]{2,}$/i;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-const sslStep: InstallStep = {
+const sslStep = (rebrand: boolean): InstallStep => ({
   id: 'ssl',
   title: 'Domain + SSL (Let’s Encrypt)',
   optional: true,
@@ -507,8 +481,7 @@ const sslStep: InstallStep = {
     // (and the nginx server_name) all agree on it, even for the default instance
     // that entered its domain here rather than up front.
     ctx.state.domain = trimmedDomain;
-    const vhostAvail = vhostAvailable(ctx);
-    const vhostEnbl = vhostEnabled(ctx);
+    const { vhostAvailable: vhostAvail, vhostEnabled: vhostEnbl, htpasswd } = recordedSite(ctx, rebrand);
     const vhostHasTls = await verifyCommand(ctx, 'sh', ['-c', `grep -qs ssl_certificate ${vhostAvail}`]);
     const nginxVersion = await installedNginxVersion(ctx);
     if (vhostHasTls) {
@@ -519,7 +492,7 @@ const sslStep: InstallStep = {
           verifyCommand(c, 'sh', ['-c', `grep -qF ${shquote(`server_name ${trimmedDomain}`)} ${vhostAvail}`]),
       });
     } else {
-      const domainVhost = nginxVhost(ctx.state.primaryPort, trimmedDomain, htpasswdPath(ctx), nginxVersion);
+      const domainVhost = nginxVhost(ctx.state.primaryPort, trimmedDomain, htpasswd, nginxVersion);
       await writeFileStep(ctx, {
         description: `Point the nginx site at ${trimmedDomain} so certbot can configure TLS for it.`,
         path: vhostAvail,
@@ -604,7 +577,7 @@ const sslStep: InstallStep = {
     }
     // The vhost (with certbot’s edits) is removed by the nginx-proxy step’s undo.
   },
-};
+});
 
 /**
  * systemd unit that runs cezar loopback-bound with CEZ_REMOTE=1.
@@ -715,7 +688,7 @@ async function resolveExecStart(ctx: InstallContext): Promise<string> {
   return serviceExecStart({ node, pkgRoot, entry, entryExists: existsSync(entry), npxPath, globalBin });
 }
 
-const autostartStep: InstallStep = {
+const autostartStep = (rebrand: boolean): InstallStep => ({
   id: 'autostart',
   // Required: after install the cockpit must actually be serving, so cezar runs
   // as a systemd service — started now AND enabled on boot. (id kept as
@@ -725,7 +698,7 @@ const autostartStep: InstallStep = {
     return false; // always (re)assert the service is installed and running
   },
   async run(ctx): Promise<{ artifacts: StepArtifact[] }> {
-    const UNIT_NAME = unitName(ctx);
+    const UNIT_NAME = recordedUnit(ctx, rebrand).name, hint = unitHint(ctx, rebrand);
     const execStart = await resolveExecStart(ctx);
     // Prefer a rootless `systemd --user` service + linger; fall back to a system
     // unit (via sudoStep) when the user bus is not reachable. `show-environment`
@@ -736,7 +709,7 @@ const autostartStep: InstallStep = {
     if (userBus) {
       const unitPath = join(homedir(), '.config', 'systemd', 'user', UNIT_NAME);
       if (ctx.dryRun) {
-        ctx.ui.info(`DRY RUN — would write ${unitPath} and enable it (systemctl --user enable --now cezar).`);
+        ctx.ui.info(`DRY RUN — would write ${unitPath} and enable it (systemctl --user enable --now ${hint}).`);
       } else {
         mkdirSync(join(homedir(), '.config', 'systemd', 'user'), { recursive: true });
         writeFileSync(
@@ -747,7 +720,7 @@ const autostartStep: InstallStep = {
         await ctx.runner.interactive('systemctl', ['--user', 'daemon-reload']);
         await ctx.runner.interactive('systemctl', ['--user', 'enable', '--now', UNIT_NAME]);
         if ((await ctx.runner.capture('systemctl', ['--user', 'is-enabled', UNIT_NAME])).code !== 0) {
-          ctx.ui.warn('The user service did not enable cleanly — check `systemctl --user status cezar`.');
+          ctx.ui.warn(`The user service did not enable cleanly — check \`systemctl --user status ${hint}\`.`);
         }
       }
       // Linger lets the user service survive logout / start at boot — usually
@@ -766,7 +739,7 @@ const autostartStep: InstallStep = {
             r.stdout.includes('Linger=yes'),
           ),
       });
-      await confirmCezarRunning(ctx, 'systemctl --user status cezar', 'journalctl --user -u cezar -n 50 --no-pager');
+      await confirmCezarRunning(ctx, `systemctl --user status ${hint}`, `journalctl --user -u ${hint} -n 50 --no-pager`);
       const artifacts: StepArtifact[] = [owned('service', { name: UNIT_NAME, scope: 'user', path: unitPath })];
       if (!lingerWasOn) artifacts.push(owned('linger', { name: osUser }));
       return { artifacts };
@@ -780,12 +753,12 @@ const autostartStep: InstallStep = {
       extra: `systemctl daemon-reload && systemctl enable --now ${UNIT_NAME}`,
       verify: (c) => verifyCommand(c, 'systemctl', ['is-enabled', UNIT_NAME]),
     });
-    await confirmCezarRunning(ctx, 'sudo systemctl status cezar', 'sudo journalctl -u cezar -n 50 --no-pager');
+    await confirmCezarRunning(ctx, `sudo systemctl status ${hint}`, `sudo journalctl -u ${hint} -n 50 --no-pager`);
     return { artifacts: [owned('service', { name: UNIT_NAME, scope: 'system', path: `/etc/systemd/system/${UNIT_NAME}` })] };
   },
   async undo(ctx, created) {
-    const UNIT_NAME = unitName(ctx);
     const svc = (created?.artifacts ?? []).find((a) => a.type === 'service');
+    const UNIT_NAME = recordedUnit(ctx, rebrand).name;
     // Reverse linger only when install recorded that it enabled it.
     const linger = (created?.artifacts ?? []).find((a) => a.type === 'linger');
     if (svc?.scope === 'user') {
@@ -814,7 +787,7 @@ const autostartStep: InstallStep = {
       });
     }
   },
-};
+});
 
 /**
  * `--external-proxy` verification: confirm the cockpit is listening on the
@@ -822,7 +795,7 @@ const autostartStep: InstallStep = {
  * cezar ships no auth of its own, so this is also where we say — unmissably —
  * that the front they own has to enforce it.
  */
-async function verifyBehindExternalProxy(ctx: InstallContext): Promise<{ artifacts: StepArtifact[] }> {
+async function verifyBehindExternalProxy(ctx: InstallContext, unit: string): Promise<{ artifacts: StepArtifact[] }> {
   const port = ctx.state.primaryPort;
   const host = upstreamHost(ctx);
   const target = `http://${host}:${port}`;
@@ -837,7 +810,7 @@ async function verifyBehindExternalProxy(ctx: InstallContext): Promise<{ artifac
     ctx.ui.error(
       `cezar is not answering on ${target}.\n\n` +
         `Diagnostics on the server:\n` +
-        `  • systemctl --user status ${unitName(ctx)}   (or: sudo systemctl status ${unitName(ctx)})\n` +
+        `  • systemctl --user status ${unit}   (or: sudo systemctl status ${unit})\n` +
         `  • sudo ss -ltnp | grep :${port}\n` +
         (host === '127.0.0.1'
           ? ''
@@ -881,7 +854,7 @@ async function verifyBehindExternalProxy(ctx: InstallContext): Promise<{ artifac
   return { artifacts: [] };
 }
 
-const identityStep: InstallStep = {
+const identityStep = (rebrand: boolean): InstallStep => ({
   id: 'identity',
   title: 'Verify the cockpit end-to-end (auth + HTTPS reach cezar)',
   async check() {
@@ -891,7 +864,7 @@ const identityStep: InstallStep = {
     // External proxy: cezar installed no nginx, so there is no auth challenge of
     // ours to probe. All we can (and should) verify is that the cockpit is
     // actually listening where the operator's proxy will look for it.
-    if (ctx.state.externalProxy) return verifyBehindExternalProxy(ctx);
+    if (ctx.state.externalProxy) return verifyBehindExternalProxy(ctx, recordedUnit(ctx, rebrand).name);
     if (ctx.dryRun) {
       ctx.ui.info('DRY RUN — would verify auth (401 for anon) AND that an authenticated request reaches cezar.');
       return { artifacts: [] };
@@ -955,7 +928,7 @@ const identityStep: InstallStep = {
       `The cockpit is NOT fully working yet:\n` +
         problems.map((p) => `  • ${p}`).join('\n') +
         `\n\nDiagnostics on the server:\n` +
-        `  • systemctl --user status cezar   (or: sudo systemctl status cezar)\n` +
+        `  • systemctl --user status ${unitHint(ctx, rebrand)}   (or: sudo systemctl status ${unitHint(ctx, rebrand)})\n` +
         `  • sudo systemctl status nginx && sudo nginx -t\n` +
         `  • sudo ss -ltnp | grep -E ':80|:443|:${port}'\n` +
         `  • ports 80/443 open in ufw AND any cloud firewall (Hetzner/AWS)`,
@@ -968,89 +941,99 @@ const identityStep: InstallStep = {
   async undo() {
     // nothing created
   },
-};
+});
 
-export const ubuntuVps: PlatformStrategy = {
-  id: 'ubuntu-vps',
-  label: 'Ubuntu/Debian VPS',
-  async preflight(ctx: InstallContext) {
-    if (ctx.dryRun) {
-      ctx.ui.info('DRY RUN — skipping OS/privilege preflight.');
-      return;
-    }
-    const uname = await ctx.runner.capture('uname', ['-s']);
-    if (!uname.stdout.includes('Linux')) {
-      throw new PreflightError('ubuntu-vps requires Linux. On macOS use --platform macosx-ngrok.');
-    }
-    if ((await ctx.runner.capture('apt-get', ['--version'])).code !== 0) {
-      throw new PreflightError('ubuntu-vps requires apt (Debian/Ubuntu).');
-    }
-    if ((await ctx.runner.capture('id', ['-u'])).stdout.trim() === '0') {
-      throw new PreflightError('run server-install as a normal sudo-capable user, not root.');
-    }
-    // Someone else already owns the HTTP front (Dokploy/Traefik, Coolify, Caddy,
-    // a hand-rolled nginx)? Installing ours would fight it for :80/:443 and the
-    // proxy step would fail with a confusing bind error — point at the mode that
-    // actually fits instead.
-    if (!ctx.state.externalProxy) {
-      const holder = await portListener(ctx, 80);
-      if (holder && !/nginx/i.test(holder)) {
-        ctx.ui.warn(
-          `Port 80 is already served by "${holder}" on this host.\n` +
-            `cezar's ubuntu-vps install wants :80/:443 for its own nginx, so these will collide.\n\n` +
-            `If that is a reverse proxy you rely on (Dokploy/Traefik, Coolify, Caddy), re-run with:\n` +
-            `  cez server-install --platform ubuntu-vps --external-proxy${ctx.state.domain ? ` --domain ${ctx.state.domain}` : ''} [--bind-host 172.17.0.1]\n` +
-            `That installs the cezar service only and lets your proxy front it.`,
-        );
+export function createUbuntuVps({ rebrand = REBRAND_SWITCH } = {}): PlatformStrategy {
+  const steps = { proxy: nginxProxyStep(rebrand), ssl: sslStep(rebrand), autostart: autostartStep(rebrand), identity: identityStep(rebrand) };
+  const health = { identity: steps.identity, waitForCezar };
+  return {
+    id: 'ubuntu-vps',
+    label: 'Ubuntu/Debian VPS',
+    async preflight(ctx: InstallContext) {
+      if (ctx.dryRun) {
+        ctx.ui.info('DRY RUN — skipping OS/privilege preflight.');
+        return;
       }
-    }
-  },
-  steps(ctx: InstallContext): InstallStep[] {
-    // `--external-proxy`: the box already has a front owning :80/:443 (Dokploy/
-    // Traefik, Coolify, Caddy, an existing nginx). Installing our own nginx
-    // there would fight it for the ports, so we ship the service only and let
-    // that proxy terminate TLS + auth.
-    if (ctx.state.externalProxy) return [depCheckStep(), autostartStep, identityStep];
-    // deps → proxy → (optional) ssl → autostart → identity.
-    return [depCheckStep(), nginxProxyStep, sslStep, autostartStep, identityStep];
-  },
-  async redeploy(ctx: InstallContext) {
-    const UNIT_NAME = unitName(ctx);
-    // Restart the systemd service so it picks up the new cezar (a fresh local
-    // build the unit runs from, or a newly published cezarion via npx), then
-    // re-run the same end-to-end verify install uses.
-    const scope = resolveRedeployScope(ctx,
-      // No recorded artifact (older record, or the step was check()-satisfied):
-      // prefer the scope whose unit file actually exists — the user unit is the
-      // install default, so defaulting to `system` would sudo-restart a unit
-      // that was never installed.
-      existsSync(join(homedir(), '.config', 'systemd', 'user', UNIT_NAME)));
-    // #696: an npx-launched unit re-execs its cached build on restart, so a
-    // deploy that doesn't invalidate the npx cache never actually updates.
-    // Clear the cezarion cache first (read the live ExecStart to know the
-    // launch form); a checkout / global unit is left alone.
-    refreshNpxCacheForRedeploy(ctx, await readExecStart(ctx, scope, UNIT_NAME));
-    if (ctx.dryRun) {
-      ctx.ui.info(`DRY RUN — would reload+restart the cezar ${scope} service and re-verify the cockpit.`);
-      return;
-    }
-    const before = await serviceSnapshot(ctx, scope, UNIT_NAME);
-    const sudo = { used: false };
-    const fail = (reason: string): Promise<never> => failedRestart(ctx, scope, UNIT_NAME, reason, sudo.used);
-    ctx.ui.info(`Redeploying — restarting the cezar ${scope} service to pick up the new version.`);
-    const after = scope === 'user'
-      ? await restartUserService(ctx, UNIT_NAME, fail)
-      : await restartSystemService(ctx, UNIT_NAME, before, sudo, fail);
-    await freshRestartOrFail(before, after, fail);
-    const { statusCmd, logsCmd } = serviceDiagnostics(scope, UNIT_NAME);
-    await confirmCezarRunning(ctx, statusCmd, logsCmd);
-    try {
-      await identityStep.run(ctx);
-    } catch (err) {
-      if (!(err instanceof StepAborted)) throw err;
-      const current = await serviceSnapshot(ctx, scope, UNIT_NAME);
-      await fail(`cockpit verification failed: ${err.message}; service is ${current.active ?? 'unreadable'}`);
-    }
-    await freshRestartOrFail(before, await serviceSnapshot(ctx, scope, UNIT_NAME), fail);
-  },
-};
+      const uname = await ctx.runner.capture('uname', ['-s']);
+      if (!uname.stdout.includes('Linux')) {
+        throw new PreflightError('ubuntu-vps requires Linux. On macOS use --platform macosx-ngrok.');
+      }
+      if ((await ctx.runner.capture('apt-get', ['--version'])).code !== 0) {
+        throw new PreflightError('ubuntu-vps requires apt (Debian/Ubuntu).');
+      }
+      if ((await ctx.runner.capture('id', ['-u'])).stdout.trim() === '0') {
+        throw new PreflightError('run server-install as a normal sudo-capable user, not root.');
+      }
+      // Someone else already owns the HTTP front (Dokploy/Traefik, Coolify, Caddy,
+      // a hand-rolled nginx)? Installing ours would fight it for :80/:443 and the
+      // proxy step would fail with a confusing bind error — point at the mode that
+      // actually fits instead.
+      if (!ctx.state.externalProxy) {
+        const holder = await portListener(ctx, 80);
+        if (holder && !/nginx/i.test(holder)) {
+          ctx.ui.warn(
+            `Port 80 is already served by "${holder}" on this host.\n` +
+              `cezar's ubuntu-vps install wants :80/:443 for its own nginx, so these will collide.\n\n` +
+              `If that is a reverse proxy you rely on (Dokploy/Traefik, Coolify, Caddy), re-run with:\n` +
+              `  cez server-install --platform ubuntu-vps --external-proxy${ctx.state.domain ? ` --domain ${ctx.state.domain}` : ''} [--bind-host 172.17.0.1]\n` +
+              `That installs the cezar service only and lets your proxy front it.`,
+          );
+        }
+      }
+    },
+    steps(ctx: InstallContext): InstallStep[] {
+      // `--external-proxy`: the box already has a front owning :80/:443 (Dokploy/
+      // Traefik, Coolify, Caddy, an existing nginx). Installing our own nginx
+      // there would fight it for the ports, so we ship the service only and let
+      // that proxy terminate TLS + auth.
+      if (ctx.state.externalProxy) return [depCheckStep(), steps.autostart, steps.identity];
+      // deps → proxy → (optional) ssl → autostart → identity.
+      return [depCheckStep(), steps.proxy, steps.ssl, steps.autostart, steps.identity];
+    },
+    async redeploy(ctx: InstallContext) {
+      const UNIT_NAME = recordedUnit(ctx, rebrand).name;
+      // Restart the systemd service so it picks up the new cezar (a fresh local
+      // build the unit runs from, or a newly published cezarion via npx), then
+      // re-run the same end-to-end verify install uses.
+      const scope = resolveRedeployScope(ctx,
+        // No recorded artifact (older record, or the step was check()-satisfied):
+        // prefer the scope whose unit file actually exists — the user unit is the
+        // install default, so defaulting to `system` would sudo-restart a unit
+        // that was never installed.
+        existsSync(join(homedir(), '.config', 'systemd', 'user', UNIT_NAME)));
+      // #696: an npx-launched unit re-execs its cached build on restart, so a
+      // deploy that doesn't invalidate the npx cache never actually updates.
+      // Clear the cezarion cache first (read the live ExecStart to know the
+      // launch form); a checkout / global unit is left alone.
+      refreshNpxCacheForRedeploy(ctx, await readExecStart(ctx, scope, UNIT_NAME));
+      if (ctx.dryRun) {
+        ctx.ui.info(`DRY RUN — would reload+restart the cezar ${scope} service and re-verify the cockpit.`);
+        return;
+      }
+      const before = await serviceSnapshot(ctx, scope, UNIT_NAME);
+      const sudo = { used: false };
+      const fail = (reason: string): Promise<never> => failedRestart(ctx, scope, UNIT_NAME, reason, sudo.used);
+      ctx.ui.info(`Redeploying — restarting the cezar ${scope} service to pick up the new version.`);
+      const after = scope === 'user'
+        ? await restartUserService(ctx, UNIT_NAME, fail)
+        : await restartSystemService(ctx, UNIT_NAME, before, sudo, fail);
+      await freshRestartOrFail(before, after, fail);
+      const { statusCmd, logsCmd } = serviceDiagnostics(scope, UNIT_NAME);
+      await confirmCezarRunning(ctx, statusCmd, logsCmd);
+      try {
+        await steps.identity.run(ctx);
+      } catch (err) {
+        if (!(err instanceof StepAborted)) throw err;
+        const current = await serviceSnapshot(ctx, scope, UNIT_NAME);
+        await fail(`cockpit verification failed: ${err.message}; service is ${current.active ?? 'unreadable'}`);
+      }
+      await freshRestartOrFail(before, await serviceSnapshot(ctx, scope, UNIT_NAME), fail);
+    },
+    migrate: (ctx) => migrateUbuntu(ctx, rebrand),
+    rollbackMigration: (ctx, report) => rollbackUbuntuMigration(ctx, report, rebrand),
+    stopService: (ctx) => stopUbuntuService(ctx, rebrand),
+    startService: (ctx, opts) => startUbuntuService(ctx, health, rebrand, opts),
+  };
+}
+
+export const ubuntuVps: PlatformStrategy = createUbuntuVps();

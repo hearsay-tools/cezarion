@@ -266,6 +266,8 @@ export interface PlatformMigrationReport {
   moved: Array<{ stepId: string; from: StepArtifact; to: StepArtifact; backup?: StepArtifact }>;
   leftAloneForeign: StepArtifact[];
   errors: Array<{ artifact: StepArtifact; message: string }>;
+  /** Display-only dry-run lines, such as carried environment variable names. Never values. */
+  details?: string[];
 }
 
 export interface PlatformStrategy {
@@ -287,6 +289,11 @@ export interface PlatformStrategy {
   migrate?(ctx: InstallContext): Promise<PlatformMigrationReport>;
   /** Reverse successful moves after a group failure; repeat calls are safe. */
   rollbackMigration?(ctx: InstallContext, report: PlatformMigrationReport): Promise<PlatformMigrationReport>;
+  /** `server-migrate`: stop the service the ledger records. */
+  stopService?(ctx: InstallContext): Promise<void>;
+  /** `server-migrate`: start the recorded service and check its health; throw `StepAborted` when it fails.
+   *  `probeAuth` also proves that the recorded credential file is the one the proxy reads. */
+  startService?(ctx: InstallContext, opts?: { probeAuth?: boolean }): Promise<void>;
 }
 
 /** Thrown by `preflight` to stop with a clean, user-facing reason (no stack). */
