@@ -13,7 +13,7 @@ import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, 
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID, createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
@@ -21,8 +21,6 @@ import {
   agentInputSchema,
   inboxClaimSchema,
   delegationStateSchema,
-  workerCreationReceiptSchema,
-  workerCollectedResultSchema,
   workerResultFileSchema,
   workerDestroyRetrySchema,
 } from '@open-mercato/cezar-contract/delegation';
@@ -50,7 +48,6 @@ import { LiveItemSnapshots } from './live-item-snapshots.ts';
 import { emptyFacts, stampOf, TranscriptFactsIndex, type TranscriptFacts } from './transcript-facts.ts';
 import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
-import { capacityError, workerCapacity } from '../delegation/capacity.ts';
 import { inspectGeneration, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
@@ -80,6 +77,10 @@ import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.
 import { ColdReadCache, storedRow, type StoredRow } from './cold-reads.ts';
 import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
 import { RunStoreOpenError, toRunStoreOpenError } from './store-open-error.ts';
+import { archiveStoreFamily } from './archive-family.ts';
+import { claimStoreFamilies } from './claim-families.ts';
+import { createStoreOwnedRun } from './owned-run-create.ts';
+import { commitStoreWorkerResult } from './worker-result-commit.ts';
 import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } from './run-claims.ts';
 
 /** Per-store persistence adapter; the second argument is the normal fenced transaction. */
@@ -596,10 +597,6 @@ export class RunWriteRefusedError extends Error {
   }
 }
 
-/** How many times open (or an adoption) tries to take its claims while another connection holds
- *  the write lock, each waiting out the 50 ms busy timeout: recovery cannot start without them. */
-const ADOPT_CLAIM_ATTEMPTS = 10;
-
 /** The `run_claims` family of a run: a worker's parent, else the run itself (`parent_run_id ?? id`). */
 function familyKey(run: Pick<RunRecord, 'id' | 'delegation'>): string {
   return run.delegation?.role === 'worker' ? run.delegation.parentRunId : run.id;
@@ -642,17 +639,6 @@ function isDestroyProgress(before: RunRecord['delegation'], after: DelegationSta
   if (before?.role !== 'worker' || after.role !== 'worker' || !before.destroy || !after.destroy) return false;
   if (before.destroy.phase === 'complete' || after.destroy.phase === 'complete') return false;
   return isDeepStrictEqual({ ...before, destroy: undefined }, { ...after, destroy: undefined });
-}
-
-/**
- * Two collected worker results carry the same evidence: equal but for when they were observed and
- * which snapshot file holds them, and, with `ignoreCleanup`, the cleanup phase. A retried destroy
- * that observed nothing new then rewrites and fsyncs nothing (hearsay-tools/cezarion#879).
- */
-function sameWorkerResult(a: WorkerCollectedResult, b: WorkerCollectedResult, opts: { ignoreCleanup?: boolean }): boolean {
-  const comparable = (value: WorkerCollectedResult) => ({ ...value, observedAt: undefined, ...(opts.ignoreCleanup ? { cleanup: undefined } : {}),
-    diff: value.diff.state === 'available' ? { ...value.diff, snapshotId: undefined, path: undefined } : value.diff });
-  return isDeepStrictEqual(comparable(a), comparable(b));
 }
 
 /** NDJSON transcript text to events; a damaged line is skipped, never fatal. */
@@ -972,70 +958,15 @@ export class RunStore extends EventEmitter {
     }
   }
 
-  /**
-   * Make sure this store claims each of `families`, taking every one no live process holds, and
-   * return the ones it now holds. Liveness is judged here (`claimOwnerLive`), outside the write
-   * transaction; `takeClaims` then takes a claim only if it is still exactly what was judged.
-   *
-   * `allowLive` also takes a family that still has a live row although no live process owns it.
-   * Open and `adoptFamily` pass it, because recovery follows both, and so does a write moving a
-   * run this store holds into a new family (a worker quarantined to `invalid` becomes its own):
-   * an ordinary write must not quietly inherit a dead process's live run and leave it unrecovered.
-   * `wait` retries a busy database instead of leaving the claim to the next write: recovery
-   * cannot start without it.
-   */
+  /** Make sure this store claims each of `families`; `claimStoreFamilies` takes the free ones. */
   private claimFamilies(families: Iterable<string>, opts: { allowLive?: boolean; wait?: boolean } = {}): Set<string> {
-    const owned = new Set<string>();
-    const wanted: string[] = [];
-    for (const family of new Set(families)) {
-      if (this.claimed.has(family) || this.pendingClaims.has(family)) owned.add(family);
-      else wanted.push(family);
-    }
-    if (!this.db || !this.owner || wanted.length === 0) return owned;
-    const claims = this.db.getClaims(wanted);
-    const take: Array<{ family: string; expect: { session: string; generation: number } | null }> = [];
-    for (const family of wanted) {
-      const claim = claims.get(family);
-      if (claim && claimOwnerLive(claim)) continue;
-      if (!opts.allowLive && this.db.familyHasLive(family)) continue;
-      take.push({ family, expect: claim ? { session: claim.session, generation: claim.generation } : null });
-    }
-    if (take.length === 0) return owned;
-    let taken: Map<string, number>;
-    try {
-      taken = this.takeClaims(take, opts.wait ? ADOPT_CLAIM_ATTEMPTS : 1);
-    } catch (error) {
-      if (!(error instanceof RunDatabaseBusyError)) throw error;
-      // Recovery follows an adoption, so it must hold the claim first: those families stay
-      // unclaimed and orphaned (a control or the next restart adopts them). A write does not wait:
-      // its next transaction takes the claim (`fence`), or meets whoever took it meanwhile.
-      if (opts.wait) return owned;
-      for (const { family, expect } of take) {
-        this.pendingClaims.set(family, expect);
-        owned.add(family);
-      }
-      this.scheduleSave();
-      return owned;
-    }
-    for (const [family, generation] of taken) {
-      this.claimed.set(family, generation);
-      owned.add(family);
-    }
-    // A claim taken for a write that then changes nothing still leaves at the next sweep.
-    if (taken.size > 0) this.scheduleSave();
-    return owned;
-  }
-
-  /** `takeClaims`, retried while another connection holds the write lock (each try waits out the
-   *  busy timeout), then the busy error. */
-  private takeClaims(take: Parameters<RunDatabase['takeClaims']>[1], attempts: number): Map<string, number> {
-    for (let attempt = 1; ; attempt++) {
-      try {
-        return this.db!.takeClaims(this.owner!, take);
-      } catch (error) {
-        if (!(error instanceof RunDatabaseBusyError) || attempt >= attempts) throw error;
-      }
-    }
+    return claimStoreFamilies({
+      claimed: this.claimed,
+      pendingClaims: this.pendingClaims,
+      db: this.db,
+      owner: this.owner,
+      scheduleSave: () => this.scheduleSave(),
+    }, families, opts);
   }
 
   /** Release the claim of every family with nothing left in memory, once nothing is pending: a
@@ -2137,54 +2068,21 @@ export class RunStore extends EventEmitter {
     return this.readWorkerResultFile(parentId, workerId)?.diffSnapshot;
   }
 
-  /** Publish a pointer only after its redacted immutable snapshot reaches disk. Failed index writes retain the old evidence.
-   * A result whose evidence is already stored returns the stored one and writes nothing; `ignoreCleanup` is for a
-   * caller that only needs the payload durable, whatever cleanup phase the stored copy names. */
+  /** Publish a pointer only after its redacted immutable snapshot reaches disk. */
   commitWorkerResult(parentId: string, value: WorkerCollectedResult, diffSnapshot?: string, opts: { ignoreCleanup?: boolean } = {}): WorkerCollectedResult {
-    const result = workerCollectedResultSchema.parse(this.redact({ type: 'worker-result', seq: 0, ts: value.observedAt, result: value }).result);
-    const parent = this.peek(parentId);
-    const worker = this.peek(result.workerId);
-    if (parent?.delegation?.role !== 'root' || result.parentRunId !== parentId ||
-      !parent.delegation.receipts.some(receipt => receipt.workerId === result.workerId)) throw new Error('missing result ownership');
-    if (worker && (worker.delegation?.role !== 'worker' || worker.delegation.parentRunId !== parentId ||
-      worker.delegation.workspace.ownerRunId !== worker.id || (worker.delegation.executionRevision ?? 0) !== result.revision || worker.status !== result.status)) throw new Error('worker result revision changed');
-    const old = parent.delegation.results?.find(entry => entry.workerId === result.workerId);
-    const stored = old && this.readWorkerResultFile(parentId, result.workerId);
-    if (stored && sameWorkerResult(stored.result, result, opts) &&
-      stored.diffSnapshot === (diffSnapshot === undefined ? undefined : this.redactText(diffSnapshot))) return stored.result;
-    if ((!worker && !this.readWorkerResult(parentId, result.workerId)) || (old && (old.revision > result.revision || (old.revision === result.revision && old.observedAt > result.observedAt)))) throw new Error('worker result is obsolete');
-    const snapshotId = result.diff.state === 'available' ? result.diff.snapshotId : randomUUID();
-    if (result.diff.state === 'available') result.diff.path = this.workerResultSnapshotPath(parentId, result.workerId, snapshotId);
-    if (result.diff.state === 'available' && diffSnapshot === undefined) throw new Error('missing diff snapshot');
-    const file = workerResultFileSchema.parse({ result, ...(diffSnapshot === undefined ? {} : { diffSnapshot: this.redactText(diffSnapshot) }) });
-    const dir = this.workerResultsDir(parentId);
-    const path = join(dir, `${result.workerId}.${snapshotId}.json`);
-    if (existsSync(path)) throw new Error('worker result snapshot identity already exists');
-    const temp = `${path}.${randomUUID()}.tmp`;
-    try {
-      const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      try { writeFileSync(fd, JSON.stringify(file)); fsyncSync(fd); } finally { closeSync(fd); }
-      renameSync(temp, path);
-      const reference = { workerId: result.workerId, revision: result.revision, observedAt: result.observedAt, snapshotId,
-        lastExecutionOutcome: result.lastExecutionOutcome,
-        ...(old ? { previous: old.revision === result.revision ? old.previous : { revision: old.revision, observedAt: old.observedAt, lastExecutionOutcome: old.lastExecutionOutcome } } : {}),
-      };
-      this.commitDelegation([{ id: parentId, delegation: { ...parent.delegation,
-        results: [...(parent.delegation.results ?? []).filter(entry => entry.workerId !== result.workerId), reference],
-      } }]);
-    } catch (error) { rmSync(temp, { force: true }); if (old?.snapshotId !== snapshotId) rmSync(path, { force: true }); throw error; }
-    // Keep the latest payload only; bounded previous outcome metadata lives in the pointer.
-    for (const name of readdirSync(dir)) if (name.startsWith(`${result.workerId}.`) && name !== `${result.workerId}.${snapshotId}.json`) {
-      try { rmSync(join(dir, name), { force: true }); } catch { /* retry on next collection */ }
-    }
-    return result;
+    return commitStoreWorkerResult({
+      redactResult: (result) => this.redact({ type: 'worker-result', seq: 0, ts: result.observedAt, result }).result,
+      peek: (id) => this.peek(id),
+      readWorkerResultFile: (id, workerId) => this.readWorkerResultFile(id, workerId),
+      readWorkerResult: (id, workerId) => this.readWorkerResult(id, workerId),
+      redactText: (text) => this.redactText(text),
+      workerResultSnapshotPath: (id, workerId, snapshotId) => this.workerResultSnapshotPath(id, workerId, snapshotId),
+      workerResultsDir: (id) => this.workerResultsDir(id),
+      commitDelegation: (patches) => this.commitDelegation(patches),
+    }, parentId, value, diffSnapshot, opts);
   }
 
-  /**
-   * requestHash is supplied only by the trusted service: hash the ORIGINAL normalized request,
-   * before resolving refs. A retry keeps the original worker and pinned SHA even if HEAD moved.
-   * workspace.ownerRunId is the trusted service's preallocated worker UUID.
-   */
+  /** Create an owned worker run and its parent receipt; `createStoreOwnedRun` holds the checks. */
   createOwnedRun(
     input: Parameters<RunStore['createRun']>[0],
     parentId: string,
@@ -2193,59 +2091,15 @@ export class RunStore extends EventEmitter {
     requestHash: string,
     executionIdentity: WorkerExecutionIdentity = { kind: 'internal' },
   ): RunRecord {
-    const parent = this.peek(parentId);
-    const authority = delegationStateSchema.safeParse(parent?.delegation);
-    if (!parent || !authority.success || authority.data.role !== 'root' || authority.data.historyDeletion) {
-      throw new Error('invalid delegation parent');
-    }
-    // Validate retry identity independently of the newly proposed resource.
-    const identity = workerCreationReceiptSchema.pick({ requestId: true, requestHash: true })
-      .parse({ requestId, requestHash });
-    const receipt = authority.data.receipts.find(entry => entry.requestId === identity.requestId);
-    if (receipt) {
-      if (receipt.requestHash !== identity.requestHash) throw new Error('request ID payload conflict');
-      const existing = this.peek(receipt.workerId);
-      const metadata = delegationStateSchema.safeParse(existing?.delegation);
-      if (!existing || !metadata.success || metadata.data.role !== 'worker' ||
-        metadata.data.parentRunId !== parentId || metadata.data.workspace.ownerRunId !== existing.id ||
-        existing.id === parentId) throw new Error('invalid request receipt ownership');
-      return existing;
-    }
-    // #816: the same check the spawn policy makes, inside the receipt transaction, so no path
-    // writes a receipt past either limit.
-    const refusal = capacityError(workerCapacity(parent, id => this.peek(id)));
-    if (refusal) throw new Error(refusal);
-    const metadata = delegationStateSchema.parse(worker);
-    if (metadata.role !== 'worker' || metadata.parentRunId !== parentId ||
-      metadata.workspace.ownerRunId === parentId || input.worktree === false) {
-      throw new Error('invalid worker ownership');
-    }
-    const workspace = metadata.workspace;
-    if (this.hasRun(workspace.ownerRunId)) throw new Error('worker run ID collision');
-    for (const run of this.held.values()) {
-      const owned = run.delegation?.role === 'worker' ? run.delegation.workspace : undefined;
-      if ((owned && (owned.resourceId === workspace.resourceId || owned.path === workspace.path ||
-        owned.branch === workspace.branch)) || run.worktreePath === workspace.path || run.branch === workspace.branch) {
-        throw new Error('worker resource ownership collision');
-      }
-    }
-    // Runs not in memory answer through the branch and worktree columns. A worker's planned
-    // branch is its `branch` column; its path and resource id derive from its own run id, which
-    // the id check above already proved unused.
-    if ((this.db?.findResourceHolders({ branch: workspace.branch, worktreePath: workspace.path }) ?? [])
-      .some((id) => !this.held.has(id) && !this.deleted.has(id))) throw new Error('worker resource ownership collision');
-    const delegation = delegationStateSchema.parse({
-      ...authority.data,
-      receipts: [...authority.data.receipts, { ...identity, workerId: workspace.ownerRunId }],
-    });
-    const run = { ...this.buildRun(input, workspace.ownerRunId), delegation: metadata };
-    // This transaction precedes materialization. Every launch must rotate this
-    // generation to starting before touching the workspace or a session.
-    this.writeWorkerIdentity(run.id, workerExecutionIdentitySchema.parse(executionIdentity));
-    this.writeWorkerExecution(run.id, { generation: randomUUID(), phase: 'queued' }, true);
-    // No pruning here: deleting run history cannot be part of a proposed index transaction.
-    this.commitIndex(new Map([[parentId, { ...parent, delegation }], [run.id, run]]));
-    return run;
+    return createStoreOwnedRun({
+      peek: (id) => this.peek(id),
+      hasRun: (id) => this.hasRun(id),
+      held: this.held, deleted: this.deleted, db: this.db,
+      buildRun: (ownedInput, id) => this.buildRun(ownedInput, id),
+      writeWorkerIdentity: (id, identity) => this.writeWorkerIdentity(id, identity),
+      writeWorkerExecution: (id, proof, fresh) => this.writeWorkerExecution(id, proof, fresh),
+      commitIndex: (owned) => this.commitIndex(owned),
+    }, input, parentId, requestId, worker, requestHash, executionIdentity);
   }
 
   /**
@@ -2498,37 +2352,20 @@ export class RunStore extends EventEmitter {
 
   /** Use unnormalized persisted evidence: cold reads must not turn interrupted work into safety. */
   private archiveFamily(id: string, isActive: (id: string) => boolean): RunRecord[] | undefined {
-    const ids = [id, ...new Set([...(this.db?.listIdsByParent(id) ?? []), ...this.listWorkersOf(id).map(run => run.id)])];
-    if (ids.length > 1025) return undefined;
-    const family: RunRecord[] = [];
-    const block = (message: string, runId = id) => { this.setArchiveBlocker(id, { message, runId }); return undefined; };
-    for (const memberId of ids) {
-      const row = this.db?.get(memberId);
-      const raw: unknown = row ? JSON.parse(row.data) : this.held.get(memberId);
-      const decoded = decodeRunRow(JSON.stringify(raw));
-      if (!decoded) return block('Task history is unavailable. Open the task or archive it manually.', memberId);
-      // Do not let the runtime schema's per-entry salvage hide malformed PR authority.
-      if (raw && typeof raw === 'object' && 'pullRequests' in raw &&
-        (!Array.isArray(raw.pullRequests) || raw.pullRequests.some(entry => !runPullRequestSchema.safeParse(entry).success))) return block('PR associations are invalid. Check the task PRs or archive manually.', memberId);
-      const run = this.held.get(memberId) ?? decoded.run;
-      if (row && !this.held.has(memberId)) this.decodeCold(row); // records the synchronous write fence
-      if (this.deleted.has(memberId) || this.quarantined.has(memberId) || this.writeRefusal(memberId))
-        return block('Task history is owned elsewhere or cannot be changed. Retry after its owner stops.', memberId);
-      if (this.pins.has(memberId) || isActive(memberId) || isLiveRecord(run) || row?.live ||
-        !['review', 'done', 'failed', 'cancelled'].includes(run.status))
-        return block('Task work is still active. Wait for it to finish or archive manually.', memberId);
-      if (run.waits?.some(wait => wait.kind === 'human' && wait.phase === 'open') || run.hasPendingPermission)
-        return block('Task needs an answer or permission. Open it to respond, or archive manually.', memberId);
-      if (run.delegation?.role === 'invalid') return block('Worker ownership is invalid. Inspect the task or archive manually.', memberId);
-      const facts = this.facts.peek(memberId);
-      if (!facts || facts.pendingAsk !== undefined) return block('Task has an unanswered question or unread history. Open it to respond, or archive manually.', memberId);
-      if (run.delegation?.role === 'worker' && this.readWorkerExecution(memberId)?.phase !== 'complete')
-        return block('Worker execution has not settled. Open the worker or archive manually.', memberId);
-      // Process and scratch cleanup evidence protects deletion, not reversible filing.
-      family.push(run);
-    }
-    if (family[0]?.delegation?.role === 'worker' || family[0]?.archived) return undefined;
-    return family;
+    return archiveStoreFamily({
+      db: this.db,
+      held: this.held,
+      deleted: this.deleted,
+      quarantined: this.quarantined,
+      pins: this.pins,
+      listWorkersOf: (parentId) => this.listWorkersOf(parentId),
+      setArchiveBlocker: (runId, blocker) => this.setArchiveBlocker(runId, blocker),
+      decodeRunRow,
+      decodeCold: (row) => this.decodeCold(row),
+      writeRefusal: (memberId) => this.writeRefusal(memberId),
+      factsPeek: (memberId) => this.facts.peek(memberId),
+      readWorkerExecution: (memberId) => this.readWorkerExecution(memberId),
+    }, id, isActive);
   }
 
   /** Blockers are feedback, never archive authority or cleanup permission. */
