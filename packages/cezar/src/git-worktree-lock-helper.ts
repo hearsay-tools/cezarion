@@ -3,6 +3,23 @@ import { fileURLToPath } from 'node:url';
 
 type Claim = { pid: number; ticket: number; gitRunning: boolean };
 
+/** One IPC message the keeper accepts over its channel. */
+type KeeperMessage = { kind: string; id: number; cwd: string; args: string[]; timeout?: number; input?: string };
+type CommandResult = { ok: boolean; stdout: string; stderr: string };
+
+/** Run one queued Git command; without input git sees an empty stdin, exactly as before. */
+function runGitCommand(
+  execFile: typeof import('node:child_process').execFile, message: KeeperMessage,
+): Promise<CommandResult> {
+  return new Promise(resolve => {
+    const child = execFile('git', message.args, { cwd: message.cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: message.timeout }, (error, stdout, stderr) => {
+      resolve({ ok: !error, stdout: stdout ?? '', stderr: stderr || error?.message || '' });
+    });
+    child.stdin?.on('error', () => undefined);
+    child.stdin?.end(message.input ?? '');
+  });
+}
+
 export async function readMutationClaim(
   path: string, platform: NodeJS.Platform, probe: (pid: number) => void,
 ): Promise<Claim | undefined> {
@@ -45,6 +62,46 @@ export async function readMutationClaim(
   return value;
 }
 
+/**
+ * Lamport bakery: choose a ticket above every visible ticket.
+ * Atomic rename keeps readers from observing partial JSON.
+ */
+async function selectTicket(
+  directory: string, name: string, read: (entry: string) => Promise<Claim | undefined>,
+): Promise<number> {
+  let ticket = 1;
+  for (const entry of await fs.readdir(directory)) {
+    if (!entry.endsWith('.json') || entry === name) continue;
+    const claim = await read(entry);
+    if (claim) ticket = Math.max(ticket, claim.ticket + 1);
+  }
+  return ticket;
+}
+
+/** A peer holds the turn while it is still choosing or holds a smaller (ticket, name) pair. */
+function hasPriority(claim: Claim, ticket: number, entry: string, name: string): boolean {
+  return claim.ticket === 0 || claim.ticket < ticket || (claim.ticket === ticket && entry < name);
+}
+
+/** Wait for choosing peers and smaller (ticket, name) pairs, or give up. */
+async function waitForTurn(
+  directory: string, name: string, ticket: number,
+  options: { read: (entry: string) => Promise<Claim | undefined>; isStopping: () => boolean; deadline: number; wait: () => Promise<void> },
+): Promise<'ready' | 'timeout' | 'stopped'> {
+  for (;;) {
+    if (options.isStopping()) return 'stopped';
+    let blocked = false;
+    for (const entry of await fs.readdir(directory)) {
+      if (!entry.endsWith('.json') || entry === name) continue;
+      const claim = await options.read(entry);
+      if (claim && hasPriority(claim, ticket, entry, name)) { blocked = true; break; }
+    }
+    if (!blocked) return 'ready';
+    if (Date.now() >= options.deadline) return 'timeout';
+    await options.wait();
+  }
+}
+
 /** Short-lived IPC keeper; launched only by git-worktree-lock.ts. */
 async function keepWorktreeLock(): Promise<void> {
   const { join } = await import('node:path');
@@ -70,46 +127,21 @@ async function keepWorktreeLock(): Promise<void> {
   try {
     await fs.mkdir(directory, { recursive: true });
     // Lamport bakery: publish "choosing" atomically, then choose a ticket above
-    // every visible ticket. Wait for choosing peers and smaller (ticket, name)
-    // pairs. Atomic rename keeps readers from observing partial JSON.
+    // every visible ticket. Atomic rename keeps readers from observing partial JSON.
     await write(0);
-    let ticket = 1;
-    for (const entry of await fs.readdir(directory)) {
-      if (!entry.endsWith('.json') || entry === name) continue;
-      const claim = await read(entry);
-      if (claim) ticket = Math.max(ticket, claim.ticket + 1);
-    }
+    const ticket = await selectTicket(directory, name, read);
     await write(ticket);
     const waitMs = Number(process.argv[3] ?? 120_000);
     if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 120_000) throw new Error('invalid worktree mutation wait budget');
     const deadline = Date.now() + waitMs;
-    for (;;) {
-      if (stopping) return;
-      let blocked = false;
-      for (const entry of await fs.readdir(directory)) {
-        if (!entry.endsWith('.json') || entry === name) continue;
-        const claim = await read(entry);
-        if (claim && (claim.ticket === 0 || claim.ticket < ticket || (claim.ticket === ticket && entry < name))) { blocked = true; break; }
-      }
-      if (!blocked) break;
-      if (Date.now() >= deadline) {
-        send({ kind: 'error', code: 'lock_timeout', error: 'timed out waiting for worktree mutation lock' });
-        return; // finally withdraws ONLY this queued claim; no mutation was admitted
-      }
-      await wait();
-    }
-    process.on('message', (message: { kind: string; id: number; cwd: string; args: string[]; timeout?: number; input?: string }) => {
+    const turn = await waitForTurn(directory, name, ticket, { read, isStopping: () => stopping, deadline, wait });
+    if (turn === 'timeout') send({ kind: 'error', code: 'lock_timeout', error: 'timed out waiting for worktree mutation lock' });
+    if (turn !== 'ready') return; // finally withdraws ONLY this queued claim; no mutation was admitted
+    process.on('message', (message: KeeperMessage) => {
       if (stopping || message.kind !== 'git') return;
       commands = commands.then(async () => {
         await write(ticket, true);
-        const result = await new Promise<{ ok: boolean; stdout: string; stderr: string }>(resolve => {
-          const child = execFile('git', message.args, { cwd: message.cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: message.timeout }, (error, stdout, stderr) => {
-            resolve({ ok: !error, stdout: stdout ?? '', stderr: stderr || error?.message || '' });
-          });
-          // Without input git sees an empty stdin, exactly as before.
-          child.stdin?.on('error', () => undefined);
-          child.stdin?.end(message.input ?? '');
-        });
+        const result = await runGitCommand(execFile, message);
         await write(ticket);
         send({ kind: 'result', id: message.id, result });
       }).catch(error => {
