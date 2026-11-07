@@ -151,6 +151,61 @@ function openLeaseDb(root, { create = true } = {}) {
   } catch (error) { db.close(); throw error; }
 }
 
+/** The holders.pgid value for this lease: the Windows job name, the lease pid on POSIX, or null when ungrouped. */
+function leaseGroupColumn(group, pid) {
+  if (!group) return null;
+  return process.platform === 'win32' ? (typeof group === 'string' ? group : process.env.TEST_ENV_LEASE_JOB) : pid;
+}
+
+/** An inherited token must still name a live holder whose verified incarnation matches. */
+function verifyInheritedToken(holders, token) {
+  if (token && !holders.some(holder => holder.token === token && holder.start && identity(holder.pid).start === holder.start)) {
+    throw new Error('invalid inherited test environment lease: no verified live holder');
+  }
+}
+
+/** A fresh environment (no holders) or an inherited one whose every holder shares our token. */
+function leaseIsFree(holders, token) {
+  return holders.length === 0 || (token && holders.every(holder => holder.token === token));
+}
+
+/** Claim a free environment: resolve the token, insert our holder row, commit, and return the
+ * lease. Ownership publishes only after the holder row is durable.
+ */
+function claimLease(db, { id, token, pid, start, group }) {
+  token ??= randomUUID();
+  db.prepare('INSERT INTO holders (id, token, pid, start, pgid) VALUES (?, ?, ?, ?, ?)').run(id, token, pid, start, leaseGroupColumn(group, pid));
+  db.exec('COMMIT');
+  let released = false;
+  return {
+    token,
+    release() {
+      if (released) return;
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.prepare('DELETE FROM holders WHERE id = ?').run(id);
+        // Joined shells have their own rows. Reclaim them only after their
+        // incarnation and whole group have exited; live descendants stay protected.
+        try { liveHolders(db); } catch { /* Reclamation is best effort; always release our own row. */ }
+        db.exec('COMMIT');
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+      finally { db.close(); }
+      released = true;
+    },
+  };
+}
+
+function leaseTimeoutError(holders, snapshots) {
+  const { owners, guidance } = holderDescription(holders, snapshots);
+  return new Error(`timed out waiting for test environment held by ${owners}; the active environment was left unchanged${guidance}`);
+}
+
+/** The one-time wait log names holders with a fresh diagnostics snapshot. */
+function reportWait(holders, { deadline, onWait, snapshots }) {
+  const { owners, guidance } = describeTestEnvHolders(holders, { deadline: Math.min(deadline, performance.now() + 2000), snapshots });
+  onWait?.(`waiting for test environment held by ${owners}${guidance}`);
+}
+
 /** A token admits only descendants of a still-live, verified holder. No token means a new run.
  * Each participant gets its OWN row: killing the wrapper cannot unprotect a live Vitest child.
  */
@@ -169,44 +224,16 @@ export async function acquireTestEnvLease(root, { token, pid = process.pid, grou
       let holders;
       try {
         holders = liveHolders(db);
-        if (token && !holders.some(holder => holder.token === token && holder.start && identity(holder.pid).start === holder.start)) {
-          throw new Error('invalid inherited test environment lease: no verified live holder');
-        }
-        if (holders.length === 0 || (token && holders.every(holder => holder.token === token))) {
-          token ??= randomUUID();
-          db.prepare('INSERT INTO holders (id, token, pid, start, pgid) VALUES (?, ?, ?, ?, ?)').run(id, token, pid, own.start, group ? (process.platform === 'win32' ? (typeof group === 'string' ? group : process.env.TEST_ENV_LEASE_JOB) : pid) : null);
-          db.exec('COMMIT');
-          // Publish ownership only after its holder row is durable.
-          let released = false;
-          return {
-            token,
-            release() {
-              if (released) return;
-              db.exec('BEGIN IMMEDIATE');
-              try {
-                db.prepare('DELETE FROM holders WHERE id = ?').run(id);
-                // Joined shells have their own rows. Reclaim them only after their
-                // incarnation and whole group have exited; live descendants stay protected.
-                try { liveHolders(db); } catch { /* Reclamation is best effort; always release our own row. */ }
-                db.exec('COMMIT');
-              } catch (error) { db.exec('ROLLBACK'); throw error; }
-              finally { db.close(); }
-              released = true;
-            },
-          };
-        }
+        verifyInheritedToken(holders, token);
+        if (leaseIsFree(holders, token)) return claimLease(db, { id, token, pid, start: own.start, group });
         db.exec('COMMIT');
       } catch (error) {
         db.exec('ROLLBACK');
         throw error;
       }
-      if (performance.now() >= deadline) {
-        const { owners, guidance } = holderDescription(holders, snapshots);
-        throw new Error(`timed out waiting for test environment held by ${owners}; the active environment was left unchanged${guidance}`);
-      }
+      if (performance.now() >= deadline) throw leaseTimeoutError(holders, snapshots);
       if (!logged) {
-        const { owners, guidance } = describeTestEnvHolders(holders, { deadline: Math.min(deadline, performance.now() + 2000), snapshots });
-        onWait?.(`waiting for test environment held by ${owners}${guidance}`);
+        reportWait(holders, { deadline, onWait, snapshots });
         logged = true;
       }
       await delay(Math.min(100, Math.max(1, deadline - performance.now())));
