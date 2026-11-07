@@ -40,7 +40,7 @@ import { cn } from '@/lib/utils'
 import { WB_MAX_STEPS } from '@/lib/workflow-builder'
 
 /**
- * The workflow builder's presentational sections, split out of `workflows.tsx` (the #2863
+ * The workflow builder's presentational sections, split out of `workflows.tsx` (the hearsay-tools/cezarion#2863
  * complexity split; the file-length pin holds `workflows.tsx` to its extracted size). Each
  * section renders exactly what it rendered inline: same elements, classes, strings and
  * handlers, reached through props. The dnd-kit wiring, mutations and state stay in the
@@ -204,7 +204,7 @@ export function WbActionsRow({
   )
 }
 
-/** The auto chain creator's prompt panel (#414). */
+/** The auto chain creator's prompt panel (hearsay-tools/cezarion#414). */
 export function WbAutoPanel({
   text,
   onTextChange,
