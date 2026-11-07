@@ -232,7 +232,8 @@ describe('density-independent mobile action targets (#166)', () => {
           browser.setViewport(width, height)
           browser.goto(`${baseUrl}/p/${project}/new`)
           const textarea = '[data-slot="composer"] textarea'
-          browser.waitForFunction(`document.querySelector('${textarea}') !== null`)
+          // The composer stays disabled until the providers query answers; wait for it before the first click.
+          browser.waitForFunction(`document.querySelector('${textarea}')?.disabled === false`)
           appearance(density, theme)
           browser.waitForFunction(`document.querySelector('[data-slot="model-pill"]') !== null`)
           browser.click('[data-slot="mode-seg"] button:first-child')
@@ -368,7 +369,7 @@ describe('keyboard, draft and choice journeys across appearance changes (hearsay
       browser.setViewport(width, height)
       browser.goto(`${baseUrl}/p/${project}/new`)
       const textarea = '[data-slot="composer"] textarea'
-      browser.waitForFunction(`document.querySelector('${textarea}') !== null`)
+      browser.waitForFunction(`document.querySelector('${textarea}')?.disabled === false`)
       appearance(density, theme)
       browser.waitForFunction(`document.querySelector('[data-slot="model-pill"]') !== null`)
       clickInView('[data-slot="mode-seg"] button:first-child')
