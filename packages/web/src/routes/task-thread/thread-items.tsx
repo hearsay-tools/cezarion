@@ -662,15 +662,6 @@ function defaultOpen(item: UiToolItem): boolean {
   return item.toolKind === 'execute' && item.status === 'running' && item.output !== undefined
 }
 
-/**
- * One tool invocation as a shadcn Collapsible card (mockup `.tool-card`, issue #381).
- * Locked (no chevron, trigger disabled) until the item has any detail to show. `nested` is the
- * sub-agent's items (`parentItemId` → this card), rendered indented in the body, one level.
- *
- * `cacheKey` (thread only — turn-scoped, since item ids repeat across sessions) remembers the
- * user's explicit open/close in the per-run open-card cache, so revisiting a thread restores
- * the cards as left. Without a key or outside a ThreadCardCache, the state is plain local.
- */
 /** The card's non-state view bits: busy flag, title parts, expandable command and icon. */
 function toolCardHeader(item: UiToolItem) {
   const busy = item.status === 'running' || item.status === 'pending'
@@ -732,7 +723,7 @@ function ToolCardBody({
   busy: boolean
   nested: readonly ThreadEntry[]
   cacheKey?: string | undefined
-  renderNested?: (entries: readonly ThreadEntry[], scope: string) => ReactNode
+  renderNested?: ((entries: readonly ThreadEntry[], scope: string) => ReactNode) | undefined
 }) {
   return (
     <div className="border-t border-border bg-card-2">
@@ -757,6 +748,15 @@ function ToolCardBody({
   )
 }
 
+/**
+ * One tool invocation as a shadcn Collapsible card (mockup `.tool-card`, issue #381).
+ * Locked (no chevron, trigger disabled) until the item has any detail to show. `nested` is the
+ * sub-agent's items (`parentItemId` → this card), rendered indented in the body, one level.
+ *
+ * `cacheKey` (thread only — turn-scoped, since item ids repeat across sessions) remembers the
+ * user's explicit open/close in the per-run open-card cache, so revisiting a thread restores
+ * the cards as left. Without a key or outside a ThreadCardCache, the state is plain local.
+ */
 export function ToolCard({
   item,
   nested = [],
