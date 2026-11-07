@@ -77,6 +77,9 @@ directory is cached once per process with its device and inode identity; an
 external replacement or unreadable identity gets a fresh grant.
 New files inherit that ACL, so atomic replacement starts no ACL subprocess.
 Unix private modes stay unchanged.
+The sandbox factory and passwd-home guard share `nativePathPlatform`, derived
+from Node's native path separator and OS type. A mocked `process.platform` cannot
+send real filesystem probes through another platform's path formulas.
 
 P2a-2 (hearsay-tools/cezarion#2932) routes HomeStore through the shared
 `home/file-location.ts` map. The marker and cockpit leases stay in config.
