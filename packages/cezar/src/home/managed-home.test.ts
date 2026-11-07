@@ -24,7 +24,7 @@ it('links, lists and unlinks a managed checkout in the injected home after CEZ_H
   writeFileSync(join(checkout, 'package.json'), JSON.stringify({ name: '@wjarka/cezarion', version: '1.2.3' }));
   writeFileSync(join(checkout, 'dist', 'index.js'), '// fixture');
   const env = { CEZ_HOME: join(root, 'selected') };
-  const home = resolveHome({ purpose: 'cli', env });
+  const home = resolveHome({ purpose: 'cli', env }); // test-home-read: resolve CEZ_HOME inside the temporary fixture
   useTestHome(join(root, 'later') ? Home.sandbox(join(root, 'later')) : undefined);
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })));

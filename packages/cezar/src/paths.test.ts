@@ -1,6 +1,6 @@
 import { resolveHome } from './home/resolve.ts';
 const env: NodeJS.ProcessEnv = {};
-const testHome = () => resolveHome({ purpose: 'cli', env });
+const testHome = () => resolveHome({ purpose: 'cli', env }); // test-home-read: pure path resolution; result not written
 import { afterEach, describe, expect, it } from 'vitest';
 import { homedir } from 'node:os';
 import { join } from 'node:path';

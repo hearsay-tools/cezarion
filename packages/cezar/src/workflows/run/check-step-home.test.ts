@@ -8,7 +8,7 @@ vi.mock('../grouped-command.ts', () => ({ runGroupedCommand: vi.fn(async () => (
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); });
 
 it.each(['0', '1'])('check steps remove only the home locator with full-env=%s', async (full) => {
-  useTestHome(resolveHome({ purpose: 'cli', env: { CEZ_HOME: '/live/home' } }));
+  useTestHome(resolveHome({ purpose: 'cli', env: { CEZ_HOME: '/live/home' } })); // test-home-read: resolve an env fixture; command execution is mocked
   vi.stubEnv('cez_home', '/live/lower');
   vi.stubEnv('CEZ_AGENT_ENV_FULL', full);
   vi.stubEnv('CEZ_ENV_PASSTHROUGH', 'CEZ_HOME');

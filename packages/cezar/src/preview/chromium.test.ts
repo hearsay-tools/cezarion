@@ -1,7 +1,7 @@
 import { resolveHome } from '../home/resolve.ts';
 // Fake filesystem fixtures supply an OS home independently of this test process.
 const testHome = (env: NodeJS.ProcessEnv = process.env) => {
-  const home = resolveHome({ purpose: 'cli', env });
+  const home = resolveHome({ purpose: 'cli', env }); // test-home-read: pure resolution for read-only browser discovery
   return { ...home, cache: env.HOME ? join(env.HOME, '.cache', 'cez') : home.cache };
 };
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';

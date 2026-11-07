@@ -3,7 +3,7 @@ import type { Node } from '@babel/types';
 import { property, unwrapped, visit } from './home-boundary.ts';
 import { lineAt, type SourceRule } from './source-rule.ts';
 
-const SOURCES = new Set(['homedir', 'cezarHomeDir']);
+const SOURCES = new Set(['homedir', 'cezarHomeDir', 'resolveHome']);
 
 function sourceRef(node: Node | undefined | null, aliases: Set<string>): boolean {
   if (!node) return false;
@@ -20,14 +20,26 @@ function sourceRef(node: Node | undefined | null, aliases: Set<string>): boolean
   return SOURCES.has(key ?? '') || (['call', 'apply'].includes(key ?? '') && sourceRef(target.object, aliases));
 }
 
+function patternAliases(pattern: Node, aliases: Set<string>, source = false): void {
+  if (pattern.type === 'Identifier' && source) aliases.add(pattern.name);
+  if (pattern.type === 'AssignmentPattern') patternAliases(pattern.left, aliases, source);
+  if (pattern.type === 'RestElement') patternAliases(pattern.argument, aliases, source);
+  if (pattern.type === 'ArrayPattern') {
+    for (const element of pattern.elements) if (element) patternAliases(element, aliases, source);
+  }
+  if (pattern.type !== 'ObjectPattern') return;
+  for (const field of pattern.properties) {
+    if (field.type === 'RestElement') patternAliases(field.argument, aliases, source);
+    else patternAliases(field.value, aliases, source || SOURCES.has(property(field.key) ?? ''));
+  }
+}
+
 function sourceAliases(ast: Node): Set<string> {
   const aliases = new Set(SOURCES);
   visit(ast, node => {
     if (node.type === 'ImportSpecifier' && SOURCES.has(property(node.imported) ?? '')) aliases.add(node.local.name);
-    if (node.type !== 'VariableDeclarator' || node.id.type !== 'ObjectPattern') return;
-    for (const field of node.id.properties) {
-      if (field.type === 'ObjectProperty' && SOURCES.has(property(field.key) ?? '') && field.value.type === 'Identifier') aliases.add(field.value.name);
-    }
+    if (node.type === 'VariableDeclarator') patternAliases(node.id, aliases);
+    if (node.type === 'AssignmentExpression') patternAliases(node.left, aliases);
   });
   return aliases;
 }

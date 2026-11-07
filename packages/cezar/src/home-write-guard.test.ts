@@ -1,6 +1,6 @@
 import { resolveHome } from './home/resolve.ts';
 import { randomUUID } from 'node:crypto';
-const testHome = (env: NodeJS.ProcessEnv = process.env) => resolveHome({ purpose: 'cli', env });
+const testHome = (env: NodeJS.ProcessEnv = process.env) => resolveHome({ purpose: 'cli', env }); // test-home-read: resolve refusal inputs; fixture blocks unowned mutations
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tmpdir, userInfo } from 'node:os';
 import { join, resolve, sep } from 'node:path';

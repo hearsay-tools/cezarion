@@ -27,6 +27,7 @@ describe('test writes use explicit sandbox paths', () => {
   it.each([
     "writeFileSync(join(Home.sandbox(dir).root, 'config.json'), '{}')",
     "readFileSync(join(homedir(), 'config.json')); // test-home-read: inspect the selected home",
+    "const home = resolveHome({purpose: 'cli'}); // test-home-read: pure resolution, result not written",
     "const file = join(tmp, 'x'); writeFileSync(file, 'homedir()')",
     "// writeFileSync(homedir(), 'x')\nconst sample = `mkdirSync(cezarHomeDir())`",
   ])('allows explicit sandbox writes and annotated reads: %s', source => {
@@ -120,6 +121,19 @@ describe('test writes use explicit sandbox paths', () => {
   });
 
   it.each([
+    "const {homedir: root = fallback} = require('node:os'); writeFileSync(root(), '{}')",
+    "const {homedir = fallback} = require('node:os'); homedir()",
+    "const {default: {homedir: read}} = await import('node:os'); read()",
+    "const {default: {homedir: read = fallback} = fallback} = await import('node:os'); read()",
+    "const {tmpdir, ...rest} = require('node:os'); rest.homedir()",
+    "const {tmpdir, ...rest} = require('node:os'); const {homedir: read = fallback} = rest; read()",
+    "let read; ({homedir: read = fallback} = require('node:os')); read()",
+    "const {homedir: {call: read}} = require('node:os'); read(null)",
+    "const {homedir: [read = fallback]} = source; read()",
+    "const {default: {homedir: read}, ...rest} = source; read()",
+    "writeFileSync(resolveHome({purpose: 'cli', env: {CEZ_HOME: '/host/live'}}).workspaceConfig, '{}')",
+    "import {resolveHome as select} from '../home/resolve.ts'; select({purpose: 'cli'})",
+    "const {resolveHome: select = fallback} = require('../home/resolve.cjs'); select({purpose: 'cli'})",
     "import {homedir} from 'node:os'; homedir()",
     "import {homedir as read} from 'os'; read()",
     "import os from 'node:os'; os.homedir()",

@@ -33,8 +33,8 @@ function checkout(root: string, branch: string): string {
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'cez-discovery-home-')); roots.push(root);
-  const selected = resolveHome({ purpose: 'cli', env: { CEZ_HOME: join(root, 'selected') } });
-  const ambient = resolveHome({ purpose: 'cli', env: { CEZ_HOME: join(root, 'ambient') } });
+  const selected = resolveHome({ purpose: 'cli', env: { CEZ_HOME: join(root, 'selected') } }); // test-home-read: resolve the temporary fixture CEZ_HOME
+  const ambient = resolveHome({ purpose: 'cli', env: { CEZ_HOME: join(root, 'ambient') } }); // test-home-read: resolve the temporary fixture CEZ_HOME
   const selectedRegistry = checkout(join(root, 'selected-registry'), 'registry');
   const selectedLink = checkout(join(root, 'selected-link'), 'main');
   const ambientRegistry = checkout(join(root, 'ambient-registry'), 'registry');

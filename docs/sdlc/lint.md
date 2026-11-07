@@ -90,19 +90,21 @@ forbidden form, parser errors, stale entries and the CI growth ratchet.
 refuses CEZ_HOME selection on these surfaces. Oxlint scans package tests. The lint
 runner applies the same two scanners to tracked and unignored new test files outside
 `packages/`, including the two node:test projects. Neither rule has a test baseline.
-The scanner bans calls of `homedir()` and `cezarHomeDir()` at their source,
+The scanner bans calls of `homedir()`, `cezarHomeDir()` and `resolveHome()` at their source,
 including named/renamed imports, default/namespace members and require/destructured
-require forms. It does not need to follow values into assignments, iterators or
+require forms, including defaulted, nested and rest patterns. It does not need to follow values into assignments, iterators or
 filesystem writers. Two independent reviews found new binding forms that escaped
 the earlier flow analysis; the source ban removes that open-ended sink model.
-The other Cezar path helpers in `paths.ts` take an explicit `Home`; its agent-home
+`home/resolve.ts` exports only `resolveHome` as an environment-to-Home resolver.
+The Cezar path helpers in `paths.ts` take an explicit `Home`; its agent-home
 and tilde helpers remain separate APIs. This rule does not ban those APIs.
 
 A read-only call requires `// test-home-read: <reason>` on the call line. The
 reason must be nonempty. Only a real line comment grants an exception; strings,
 block comments and comments on other lines do not. Each existing exception was
-checked to compare a path, inspect a sandbox or probe a refusal guard without
-writing. The annotation is a review contract, not proof of read-only behavior.
+checked to compare a path, inspect a sandbox, probe a refusal guard, or resolve
+a temporary sandbox env. Resolver calls are pure. A sandbox env may feed writes
+inside that sandbox; a refusal probe must prove the write was blocked. The annotation is a review contract, not proof of read-only behavior.
 Strings and fixture text are data, not calls. Import-level source aliases are
 resolved; arbitrary value aliases, dynamic computed keys, cross-module flow and
 eval are outside this static scan. Use `Home.sandbox` or the selected sandbox HOME

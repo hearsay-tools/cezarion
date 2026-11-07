@@ -28,9 +28,12 @@ is stronger: host config, data, state, cache and runtime directories never reach
 test. Other test outcomes stay unchanged.
 
 The coordinator directed a source ban after two review rounds found new flow-analysis
-bypasses. Calls to homedir/cezarHomeDir now need a reasoned read-only annotation;
+bypasses. Calls to homedir/cezarHomeDir/resolveHome now need a reasoned read-only annotation;
 writers use an explicit sandbox. CEZ_HOME assignment checks stay unchanged. The
-seven existing test files with direct calls were audited as read-only and annotated.
+existing homedir calls were audited as read-only and annotated. Resolver calls
+were separately checked for pure comparisons, mocked writes, refusal probes or
+temporary sandbox envs. The guarded environment-to-Home source set is complete:
+resolveHome is the only such export in home/resolve.ts; paths.ts has no other one.
 
 ## Behavior cases
 
