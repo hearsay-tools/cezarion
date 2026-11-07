@@ -75,40 +75,53 @@ child.stdout.on('data', chunk => {
   while ((idx = outBuf.indexOf('\n')) >= 0) {
     const line = outBuf.slice(0, idx + 1);
     outBuf = outBuf.slice(idx + 1);
-    if (stdoutPaused) {
-      pausedChunks.push(line);
-      continue;
-    }
-    let msg;
-    try { msg = JSON.parse(line); } catch { process.stdout.write(line); continue; }
-    if (typeof msg.id === 'number' && steerIds.has(msg.id) && (msg.result !== undefined || msg.error !== undefined)) {
-      steerIds.delete(msg.id);
-      if (forwardedCompleted) {
-        process.stdout.write(line);
-        continue;
-      }
-      held.push(line);
-      continue;
-    }
-    if (held.length && isSteerEcho(msg)) {
-      if (echoInTurn) process.stdout.write(line);
-      continue;
-    }
-    if ((msg.method === 'turn/completed' || msg.method === 'turn/failed') && held.length) {
-      forwardedCompleted = true;
-      process.stdout.write(line + held.splice(0).join(''));
-      continue;
-    }
-    if (msg.method === 'turn/completed' || msg.method === 'turn/failed') forwardedCompleted = true;
-    if (msg.method === 'turn/started') forwardedCompleted = false;
-    process.stdout.write(line);
-    if (delayTurnStartedMs > 0 && typeof msg.id === 'number' && followUpStartIds.has(msg.id) && msg.result !== undefined) {
-      followUpStartIds.delete(msg.id);
-      stdoutPaused = true;
-      resumeTimer = setTimeout(resumeStdout, delayTurnStartedMs);
-    }
+    dispatchChildLine(line);
   }
 });
+
+// Returns true when the line was fully handled, so dispatchChildLine must not
+// write or fall through for it.
+function handleSteerResponse(line, msg) {
+  if (typeof msg.id !== 'number' || !steerIds.has(msg.id) || (msg.result === undefined && msg.error === undefined)) return false;
+  steerIds.delete(msg.id);
+  if (forwardedCompleted) process.stdout.write(line);
+  else held.push(line);
+  return true;
+}
+
+function handleCompletedBoundary(line, msg) {
+  if ((msg.method !== 'turn/completed' && msg.method !== 'turn/failed') || held.length === 0) return false;
+  forwardedCompleted = true;
+  process.stdout.write(line + held.splice(0).join(''));
+  return true;
+}
+
+function holdFollowUpStart(msg) {
+  if (delayTurnStartedMs > 0 && typeof msg.id === 'number' && followUpStartIds.has(msg.id) && msg.result !== undefined) {
+    followUpStartIds.delete(msg.id);
+    stdoutPaused = true;
+    resumeTimer = setTimeout(resumeStdout, delayTurnStartedMs);
+  }
+}
+
+function dispatchChildLine(line) {
+  if (stdoutPaused) {
+    pausedChunks.push(line);
+    return;
+  }
+  let msg;
+  try { msg = JSON.parse(line); } catch { process.stdout.write(line); return; }
+  if (handleSteerResponse(line, msg)) return;
+  if (held.length && isSteerEcho(msg)) {
+    if (echoInTurn) process.stdout.write(line);
+    return;
+  }
+  if (handleCompletedBoundary(line, msg)) return;
+  if (msg.method === 'turn/completed' || msg.method === 'turn/failed') forwardedCompleted = true;
+  if (msg.method === 'turn/started') forwardedCompleted = false;
+  process.stdout.write(line);
+  holdFollowUpStart(msg);
+}
 child.on('exit', (code, signal) => {
   if (resumeTimer) clearTimeout(resumeTimer);
   // A killed follow-up whose turn/started is still paused must not flush into a
