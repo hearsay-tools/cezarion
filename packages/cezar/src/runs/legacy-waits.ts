@@ -198,6 +198,7 @@ function settleLegacyAgentWait(row: Record<string, unknown>, found: AgentWaitFou
   const input = inputs.find((candidate) => candidate.id === (wait.wakeId ?? wait.id));
   const entry = workerWaitEntry(wait, now);
   // Cezar's completion gate wait is its own: no agent registered it (hearsay-tools/cezarion#1301).
+  // It keeps the deadline it always carried, with the 600 s default registration.
   if (entry && completion) Object.assign(entry, { source: 'cezar', via: 'completion', mode: 'all' });
   // The `message` stand-in becomes no entry, but its delivered message may be that crash too.
   if (!entry) { if (legacyWakeInterrupted(row, key, input)) resumeParked(row); return; }
@@ -249,18 +250,6 @@ function readLegacyHumanAsk(row: Record<string, unknown>, opened: Wait[]): void 
     registeredAt: typeof row.createdAt === 'string' && z.iso.datetime().safeParse(row.createdAt).success ? row.createdAt : new Date(0).toISOString(),
     phase: 'open', turnId: 'legacy',
   });
-}
-
-/** Append the upgraded entries, keeping an id the row already holds. True when the stored list is unreadable. */
-function appendUpgradedWaits(row: Record<string, unknown>, key: 'waits' | 'lastWaits', added: Wait[]): boolean {
-  if (!added.length) return false;
-  const stored = row[key];
-  const current = Array.isArray(stored) ? stored as Array<{ id?: unknown }> : [];
-  const unreadable = stored !== undefined && !Array.isArray(stored);
-  row[key] = key === 'waits'
-    ? [...current, ...added.filter((wait) => !current.some((entry) => entry?.id === wait.id))]
-    : [...added, ...current].slice(-LAST_WAITS_LIMIT);
-  return unreadable;
 }
 
 /** Drop the fields schema 4 reads, and the agent waits schema 6 and 7 read. */
@@ -322,9 +311,17 @@ export function upgradeLegacyWaits(row: Record<string, unknown>): void {
   readLegacyAgentWaits(row, lists, agentWaits);
   readLegacyMonitoring(row, lists.opened);
   readLegacyHumanAsk(row, lists.opened);
-  const openedUnreadable = appendUpgradedWaits(row, 'waits', lists.opened);
-  const settledUnreadable = appendUpgradedWaits(row, 'lastWaits', lists.settled);
-  const unreadable = previousUnreadable || currentUnreadable || openedUnreadable || settledUnreadable;
+  let unreadable = previousUnreadable || currentUnreadable;
+  if (lists.opened.length) {
+    const current = Array.isArray(row.waits) ? row.waits as Array<{ id?: unknown }> : [];
+    if (row.waits !== undefined && !Array.isArray(row.waits)) unreadable = true;
+    row.waits = [...current, ...lists.opened.filter((wait) => !current.some((entry) => entry?.id === wait.id))];
+  }
+  if (lists.settled.length) {
+    const current = Array.isArray(row.lastWaits) ? row.lastWaits : [];
+    if (row.lastWaits !== undefined && !Array.isArray(row.lastWaits)) unreadable = true;
+    row.lastWaits = [...lists.settled, ...current].slice(-LAST_WAITS_LIMIT);
+  }
   if (typeof row.lastCiWaitError === 'string' && row.lastWaitsError === undefined) row.lastWaitsError = row.lastCiWaitError;
   if (unreadable) row.lastWaitsError = UNREADABLE_WAIT;
   dropLegacyWaitFields(row, agentWaits);

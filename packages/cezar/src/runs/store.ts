@@ -157,8 +157,6 @@ export const runRecordSchema = contractRunRecordSchema.extend({
   handoffRecords: contractRunRecordSchema.shape.handoffRecords.catch(undefined),
 });
 
-/** Upgrade-on-read of older wait fields lives in `legacy-waits.ts`. Public names stay here. */
-
 /** Read legacy wait fields into the wait list and salvage per entry, identically for live stores
  *  and the read-only workspace index. */
 export function parseRunRecords(raw: unknown) {
