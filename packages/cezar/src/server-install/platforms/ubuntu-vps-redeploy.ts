@@ -2,10 +2,9 @@ import { type InstallContext } from '../types.ts';
 import { StepAborted, sudoStep } from '../steps.ts';
 
 /**
- * `ubuntuVps.redeploy` helpers: resolve the unit's scope, restart it, and prove
- * the restart actually happened. `readExecStart`, `serviceSnapshot` and
- * `failedRestart` moved here verbatim from `ubuntu-vps.ts` (their only caller
- * was `redeploy`) so the pinned file stays at its length.
+ * The `ubuntuVps.redeploy` helpers: resolve the systemd scope the recorded
+ * service runs in, restart it (user scope directly, system scope through
+ * `sudoStep`), and prove the restart actually happened.
  */
 
 /** Read the unit's live `ExecStart` (read-only query; no sudo needed even for a
@@ -60,7 +59,7 @@ export async function failedRestart(ctx: InstallContext, scope: 'user' | 'system
  *  beside its other OS-user unit paths) — the user unit is the install
  *  default, so defaulting to `system` would sudo-restart a unit that was
  *  never installed. */
-export async function resolveRedeployScope(ctx: InstallContext, unit: string, userUnitExists: boolean): Promise<'user' | 'system'> {
+export function resolveRedeployScope(ctx: InstallContext, userUnitExists: boolean): 'user' | 'system' {
   const svc = (ctx.state.steps['autostart']?.created?.artifacts ?? []).find((a) => a.type === 'service');
   return svc?.scope === 'user' || svc?.scope === 'system' ? svc.scope : userUnitExists ? 'user' : 'system';
 }

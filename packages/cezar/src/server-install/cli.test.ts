@@ -1,20 +1,69 @@
-import { mkdtempSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, afterAll, beforeAll, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { afterEach, afterAll, beforeEach, expect, it, vi } from 'vitest';
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 
-// `serverCommand` (packages/cezar/src/index.ts) otherwise only runs through the
-// CLI as a child process, which no coverage report can see. These cases drive
-// the real `main()` in-process — argv swap + `vi.resetModules()`, the pattern
-// of `src/home/runtime-cli.test.ts` — so the branches the complexity split
-// (hearsay-tools/cezarion#2852) extracted are executed and measured. They only
-// exercise existing behavior: dry runs, refusal paths and recorded state.
+// These cases run the real `cez server-install` / `server-deploy` /
+// `server-uninstall` dispatch in-process — argv swap + `vi.resetModules()`, the
+// pattern of `src/home/runtime-cli.test.ts` — covering the refusals
+// (missing/unknown platform, `--domain` off ubuntu-vps), the dry-run state
+// records for install/deploy/uninstall, the named-instance port pick, and the
+// second-instance prompt's answer and failure fallbacks. Every case builds its
+// own sandbox and needs no other case.
+
+// No case may run a real host command: the process-spawning seam
+// (`node:child_process`) is mocked at the module boundary. The login-shell
+// PATH probe answers with the current (setup-hidden) PATH; every probe and
+// runner spawn resolves as command-not-found, so tool detection, git repo
+// discovery and any accidental binary call stay inside the sandbox.
+vi.mock('node:child_process', async (importActual) => {
+  const actual = await importActual<typeof import('node:child_process')>();
+  const notFound = (program: string): Error =>
+    Object.assign(new Error(`spawn ${program} ENOENT`), { code: 127, errno: -2, path: program });
+  const fakeChild = (): EventEmitter => {
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter; stderr: EventEmitter; stdin: EventEmitter & { end: () => void };
+      pid: number; kill: () => boolean;
+    };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = new EventEmitter() as EventEmitter & { end: () => void };
+    child.stdin.end = () => {};
+    child.pid = 1;
+    child.kill = () => true;
+    queueMicrotask(() => {
+      child.emit('close', 127);
+    });
+    return child;
+  };
+  const fakeSpawn = (): EventEmitter => {
+    return fakeChild();
+  };
+  const fakeExecFile = (file: string, _args: string[], optsOrCb?: unknown, maybeCb?: unknown): EventEmitter => {
+    const done = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
+    queueMicrotask(() => {
+      (done as (err: Error, stdout: string, stderr: string) => void)(notFound(file), '', '');
+    });
+    return fakeChild();
+  };
+  const fakeExecFileSync = (file: string, args: string[]): string => {
+    if (file === 'bash' && args[0] === '-lc') return process.env.PATH ?? '';
+    throw notFound(file);
+  };
+  return {
+    ...actual,
+    spawn: fakeSpawn as unknown as typeof actual.spawn,
+    execFile: fakeExecFile as unknown as typeof actual.execFile,
+    execFileSync: fakeExecFileSync as unknown as typeof actual.execFileSync,
+  };
+});
 
 // A scripted prompt seam: while set, `createClackUi` returns a console-backed
-// UI whose `text` answers once like the operator; the engine's own UI calls in
-// the dry run that follows never prompt. Unset, `./ui.ts` is the real module.
+// UI whose `text` answers once like the operator; the engine's own dry-run UI
+// calls never prompt. Unset, `./ui.ts` is the real module.
 const scriptedPrompt = vi.hoisted(() => ({ value: undefined as undefined | (() => Promise<string>) }));
 
 function consoleUi(): Record<string, unknown> {
@@ -52,24 +101,29 @@ vi.mock('./ui.ts', async (importActual) => {
 let serverHome: string;
 let repoDir: string;
 
-beforeAll(() => {
+beforeEach(() => {
   serverHome = mkdtempSync(join(tmpdir(), 'cez-server-cli-home-'));
   repoDir = mkdtempSync(join(tmpdir(), 'cez-server-cli-repo-'));
-  // Isolated from the worker's shared sandbox home: the cases below chain
-  // through recorded state (install → deploy read-back → prompt → uninstall),
-  // so leftovers from another file in the same worker must not leak in. The
-  // selector writes the environment; the test never touches it directly.
+  // Each case gets a fresh sandbox home so recorded state cannot leak between
+  // cases (they run under --sequence.shuffle too). The selector writes the
+  // environment; the test never touches it directly.
   useTestHome(Home.sandbox(serverHome));
+});
+
+afterEach(() => {
+  useTestHome(undefined);
+  rmSync(serverHome, { recursive: true, force: true });
+  rmSync(repoDir, { recursive: true, force: true });
+  scriptedPrompt.value = undefined;
+  vi.resetModules();
 });
 
 afterAll(() => {
   useTestHome(undefined);
-  rmSync(serverHome, { recursive: true, force: true });
-  rmSync(repoDir, { recursive: true, force: true });
 });
 
 /** Run `cez <args>` through the real main(): swap argv, reset modules, import
- *  the entry (which runs main()), and restore argv/env/spies/exit code. */
+ *  the entry (which runs main()), and restore argv/env/PATH/spies/exit code. */
 async function runCli(args: string[]): Promise<{ logs: string[]; errors: string[]; exitCode: number | undefined }> {
   const logs: string[] = [];
   const errors: string[] = [];
@@ -77,6 +131,7 @@ async function runCli(args: string[]): Promise<{ logs: string[]; errors: string[
   const error = vi.spyOn(console, 'error').mockImplementation((m) => { errors.push(String(m)); });
   const warn = vi.spyOn(console, 'warn').mockImplementation((m) => { logs.push(String(m)); });
   const argv = process.argv;
+  const previousPath = process.env.PATH;
   const previousExitCode: number | undefined = typeof process.exitCode === 'number' ? process.exitCode : undefined;
   const previousDryRun = process.env.CEZ_DRY_RUN;
   let result: { logs: string[]; errors: string[]; exitCode: number | undefined };
@@ -101,6 +156,7 @@ async function runCli(args: string[]): Promise<{ logs: string[]; errors: string[
     };
   } finally {
     process.argv = argv;
+    process.env.PATH = previousPath;
     if (previousDryRun === undefined) delete process.env.CEZ_DRY_RUN;
     else process.env.CEZ_DRY_RUN = previousDryRun;
     process.exitCode = previousExitCode;
@@ -118,10 +174,12 @@ function serverState(instance = 'default'): Record<string, unknown> {
   return JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
 }
 
-afterEach(() => {
-  scriptedPrompt.value = undefined;
-  vi.resetModules();
-});
+/** A completed dry-run install of the default instance, for the cases whose
+ *  behavior builds on a recorded install. */
+async function dryRunInstallDefault(): Promise<void> {
+  const { exitCode } = await runCli(['server-install', '--platform', 'ubuntu-vps', '--yes', '--repo', repoDir]);
+  expect(exitCode).toBe(0);
+}
 
 it('refuses a server command with no --platform', async () => {
   const { errors, exitCode } = await runCli(['server-install', '--yes']);
@@ -158,6 +216,7 @@ it('dry-run installs ubuntu-vps and records the state', async () => {
 });
 
 it('dry-run deploys reading the platform from the record', async () => {
+  await dryRunInstallDefault();
   const { logs, exitCode } = await runCli(['server-deploy', '--yes', '--repo', repoDir]);
   expect(logs.join('\n')).toContain('cez server-deploy (ubuntu-vps) complete');
   expect(exitCode).toBe(0);
@@ -165,6 +224,7 @@ it('dry-run deploys reading the platform from the record', async () => {
 });
 
 it('offers a second instance on an installed host and records it under its slug', async () => {
+  await dryRunInstallDefault();
   const stdin = process.stdin as unknown as { isTTY?: boolean };
   const hadTty = stdin.isTTY;
   stdin.isTTY = true;
@@ -186,6 +246,7 @@ it('offers a second instance on an installed host and records it under its slug'
 });
 
 it('a failed second-instance prompt falls back to the default instance', async () => {
+  await dryRunInstallDefault();
   const stdin = process.stdin as unknown as { isTTY?: boolean };
   const hadTty = stdin.isTTY;
   stdin.isTTY = true;
@@ -215,7 +276,8 @@ it('an explicit --port wins over the auto-picked loopback port', async () => {
   expect(serverState('shop3-example-com')['primaryPort']).toBe(4599);
 });
 
-it('dry-run uninstalls and reverses the recorded state', async () => {
+it('dry-run uninstalls and reverses the recorded state, leaving the record file', async () => {
+  await dryRunInstallDefault();
   const { logs, exitCode } = await runCli([
     'server-uninstall', '--platform', 'ubuntu-vps', '--yes', '--repo', repoDir,
   ]);
@@ -224,8 +286,4 @@ it('dry-run uninstalls and reverses the recorded state', async () => {
   const state = serverState();
   expect(state['installed']).toBe(false);
   expect(state['steps']).toEqual({});
-});
-
-it('leaves no stray server state file behind the cases created', () => {
-  expect(existsSync(join(serverHome, 'server.json'))).toBe(true);
 });

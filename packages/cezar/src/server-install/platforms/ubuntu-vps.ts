@@ -715,10 +715,6 @@ async function resolveExecStart(ctx: InstallContext): Promise<string> {
   return serviceExecStart({ node, pkgRoot, entry, entryExists: existsSync(entry), npxPath, globalBin });
 }
 
-/** Read the unit's live `ExecStart`, snapshot the unit and report a failed
- *  restart moved verbatim to `./ubuntu-vps-redeploy.ts` (their only caller was
- *  `redeploy`; the move keeps this pinned file at its length). */
-
 const autostartStep: InstallStep = {
   id: 'autostart',
   // Required: after install the cockpit must actually be serving, so cezar runs
@@ -1023,7 +1019,7 @@ export const ubuntuVps: PlatformStrategy = {
     // Restart the systemd service so it picks up the new cezar (a fresh local
     // build the unit runs from, or a newly published cezarion via npx), then
     // re-run the same end-to-end verify install uses.
-    const scope = await resolveRedeployScope(ctx, UNIT_NAME,
+    const scope = resolveRedeployScope(ctx,
       // No recorded artifact (older record, or the step was check()-satisfied):
       // prefer the scope whose unit file actually exists — the user unit is the
       // install default, so defaulting to `system` would sudo-restart a unit

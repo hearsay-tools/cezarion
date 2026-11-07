@@ -737,8 +737,7 @@ function resolveServerPort(
   return port;
 }
 
-/** The engine options for one run. Field order and the mode spread stay as the
- *  original inline literal. */
+/** The engine options for one run. */
 function buildRunOptions(
   mode: ServerCommandMode,
   home: Home,
