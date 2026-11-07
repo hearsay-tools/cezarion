@@ -189,8 +189,13 @@ Each pending account or managed tree is rebuilt in a fresh staging directory.
 Deferred retries first check the target registry: an already rewritten
 configDir repairs the migration record without copying over live credentials.
 
-`isCezarMigrationJson` defines the strict JSON set. It covers cezar's registry,
-state, grants, connections, backups and update JSON. Opaque vendor account
+`isCezarMigrationJson` defines the strict JSON set. It covers cezar's live registry,
+state, grants, connections and update JSON. Historical backups and version
+snapshots are opaque bytes, even when their filenames end in `.json`.
+An exact legacy `ACCEPTED` journal record follows its copied registry bytes;
+other journal records do not migrate. A recopy drops acceptance if its hash
+no longer matches, so an unrelated later state cannot inherit it.
+Opaque vendor account
 trees and managed `versions/` are verified byte for byte, since their `.json`
 files can be JSONC. Copies, archives, records and journals use private files
 and split-layout Windows ACLs. Managed executables and launchers use owner-only
@@ -198,6 +203,8 @@ execute permission; the old launchers remain unchanged.
 The managed package link at `versions/<id>/node_modules/@wjarka/cezarion`
 keeps an external checkout only when its version manifest records that same
 checkout with `source: 'link'`. Other escaping links refuse migration.
+Staged tree copies compute link targets against the final destination;
+absolute links and Windows junctions never retain staging paths.
 The archive writes one gzip member per tar entry, followed by tar end blocks.
 This standard concatenated gzip stream bounds buffers by the largest file,
 while retaining legacy journal history and backups in the archive.

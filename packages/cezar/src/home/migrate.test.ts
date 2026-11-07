@@ -9,10 +9,53 @@ import { readInstallMarker } from './install-marker.ts';
 import { getHomeRecovery } from './recovery.ts';
 import { HomeStore } from './store.ts';
 import { holdCockpitLease } from './leases.ts';
+import { VersionLog } from './version-log.ts';
 import { migrationFixture, json, rawJson } from './migration.testkit.ts';
 import { cleanStoreRoots, storeRoot } from './store.testkit.ts';
 
 afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
+
+it('D5: historical backup snapshots migrate as opaque bytes even when their JSON suffix hides malformed data', () => {
+  const { legacy, target } = migrationFixture();
+  const bytes = Buffer.from('malformed historical outside write\0\xff', 'latin1');
+  const paths = ['backups/config.json/2026-11-07-badbytes.json', 'remote-settings/backups/4321.json/bad.json', 'server-instances/backups/one.json/bad.json'];
+  for (const path of paths) {
+    mkdirSync(join(legacy.root, path, '..'), { recursive: true });
+    writeFileSync(join(legacy.root, path), bytes);
+  }
+  migrateLegacyHome(legacy, target);
+  for (const path of ['config.json/2026-11-07-badbytes.json', 'remote-settings/4321.json/bad.json', 'server-instances/one.json/bad.json']) {
+    expect(readFileSync(join(target.backups, path))).toEqual(bytes);
+  }
+});
+
+it('B2: an accepted empty legacy registry keeps its exact acceptance and raises no target reset row', () => {
+  const { legacy, target } = migrationFixture();
+  Home.seed(legacy, `${legacy.workspaceConfig}.bak`, { projects: [{ id: 'kept', root: '/kept' }] });
+  const store = new HomeStore(legacy);
+  expect(store.recovery(legacy.workspaceConfig)?.reason).toBe('reset');
+  store.acceptRecovery(legacy.workspaceConfig);
+  const accepted = new VersionLog(legacy.root, 'config.json').record('ACCEPTED');
+  expect(getHomeRecovery(legacy)).toEqual({ files: [] });
+  migrateLegacyHome(legacy, target);
+  expect(new VersionLog(target.config, 'config.json').record('ACCEPTED')).toEqual(accepted);
+  expect(new VersionLog(target.config, 'config.json').record('RESET')).toBeUndefined();
+  expect(new VersionLog(target.config, 'config.json').record('OUTSIDE')).toBeUndefined();
+  expect(getHomeRecovery(target)).toEqual({ files: [] });
+});
+
+it('B2: a recopy clears target acceptance when the legacy acceptance no longer matches the copied bytes', () => {
+  const { legacy, target } = migrationFixture();
+  Home.seed(legacy, `${legacy.workspaceConfig}.bak`, { projects: [{ id: 'kept', root: '/kept' }] });
+  const store = new HomeStore(legacy);
+  store.recovery(legacy.workspaceConfig);
+  store.acceptRecovery(legacy.workspaceConfig);
+  migrateLegacyHome(legacy, target, { onStep(step, attempt) {
+    if (step === 'recheck' && attempt === 0) rawJson(legacy.workspaceConfig, { projects: [], oldWriter: true });
+  } });
+  expect(new VersionLog(target.config, 'config.json').record('ACCEPTED')).toBeUndefined();
+  expect(getHomeRecovery(target).files).toContainEqual(expect.objectContaining({ file: 'config.json', reason: 'reset' }));
+});
 
 it.each(['absent', 'empty'])('step 1: an %s legacy home creates only a fresh target marker', kind => {
   const root = storeRoot(), old = join(root, 'legacy');

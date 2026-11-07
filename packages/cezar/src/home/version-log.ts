@@ -3,6 +3,7 @@ import { linkSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { registryCount } from './registry-content.ts';
+import { assertHomePath } from './boundary.ts';
 import { atomicTmpPath, replacePrivate, syncDirectory, type PrivateFileOptions } from './private-files.ts';
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/).nullable();
@@ -138,6 +139,18 @@ export class VersionLog {
     if (record === undefined) return false;
     const accepted = acceptedSchema.parse(record);
     return accepted.hash === digest(bytes) || (accepted.empty === true && registryCount(this.relativePath, bytes) === 0);
+  }
+
+  /** Migration retains an operator's exact acceptance, never pending writes or recovery flags. */
+  copyAcceptanceFrom(source: VersionLog, bytes: Buffer | null): void {
+    assertHomePath(source.root, join(source.directory, 'ACCEPTED'));
+    const record = source.record('ACCEPTED');
+    const accepted = record === undefined ? undefined : acceptedSchema.parse(record);
+    if (accepted && accepted.hash === digest(bytes)) this.setRecord('ACCEPTED', accepted);
+    else {
+      rmSync(join(this.directory, 'ACCEPTED'), { force: true });
+      syncDirectory(this.directory);
+    }
   }
 
   /** Resolve without rewriting the operator's bytes or changing their mtime. */

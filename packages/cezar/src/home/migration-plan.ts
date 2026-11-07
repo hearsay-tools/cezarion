@@ -19,10 +19,11 @@ export interface MigrationPlan {
 const ignored = /^(?:install\.json(?:\.failed)?|MOVED\.json|\.locks|\.versions|\.migrating|tmp|dry-cache|dry-prefix)(?:\/|$)|(?:^|\/)[^/]*\.install\.lock$/;
 export const archiveExcludes = /^(?:versions|bin|dry-cache|dry-prefix|tmp|\.locks|\.migrating)(?:\/|$)/;
 
-/** Parse cezar-owned JSON only. Vendor configs and managed node_modules may be JSONC. */
+/** Parse live cezar-owned JSON only. Historical snapshots and vendor trees are opaque bytes. */
 export function isCezarMigrationJson(path: string): boolean {
-  return ['config.json', 'config.json.bak', 'agent-accounts.json', 'ui-state.json', 'server.json'].includes(path)
-    || /^(?:remote-settings|tracker-connections|server-instances|backups|application-updates)\/.+\.json(?:\.bak)?$/.test(path);
+  if (path.split('/').includes('backups')) return false;
+  return ['config.json', 'config.json.bak', 'agent-accounts.json', 'ui-state.json', 'server.json', 'migration.json'].includes(path)
+    || /^(?:remote-settings|tracker-connections|server-instances|application-updates)\/.+\.json(?:\.bak)?$/.test(path);
 }
 
 function destination(path: string): MigrationFile['target'] {

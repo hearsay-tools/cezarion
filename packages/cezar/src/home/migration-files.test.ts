@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanStoreRoots, storeRoot } from './store.testkit.ts';
-import { copyPrivateTree, migrationFiles, writeLegacyArchive } from './migration-files.ts';
+import { copyPrivateTree, migrationFiles, replacePrivateTree, writeLegacyArchive } from './migration-files.ts';
 
 vi.mock('node:zlib', async original => {
   const zlib = await original<typeof import('node:zlib')>();
@@ -65,6 +65,19 @@ it.skipIf(process.platform === 'win32')('copies managed versions privately and p
   expect(statSync(join(target, 'v1', 'entry')).mode & 0o777).toBe(0o700);
   expect(statSync(join(target, 'v1')).mode & 0o777).toBe(0o700);
   expect(readFileSync(join(source, 'current', 'entry'), 'utf8')).toBe('executable');
+});
+
+it.skipIf(process.platform === 'win32')('D4: staged relative and absolute internal links resolve against the final tree after rename', () => {
+  const source = storeRoot(), target = join(storeRoot(), 'versions');
+  mkdirSync(join(source, 'v1'));
+  writeFileSync(join(source, 'v1/entry'), 'final bytes');
+  symlinkSync('v1', join(source, 'current'));
+  symlinkSync(join(source, 'v1/entry'), join(source, 'absolute-entry'));
+  replacePrivateTree(source, target);
+  expect(readlinkSync(join(target, 'current'))).toBe('v1');
+  expect(readlinkSync(join(target, 'absolute-entry'))).toBe(join(target, 'v1/entry'));
+  expect(readFileSync(join(target, 'current/entry'), 'utf8')).toBe('final bytes');
+  expect(readFileSync(join(target, 'absolute-entry'), 'utf8')).toBe('final bytes');
 });
 
 it.skipIf(process.platform === 'win32')('refuses copy links that escape the source and target trees', () => {

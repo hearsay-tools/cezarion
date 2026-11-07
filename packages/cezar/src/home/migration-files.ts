@@ -37,8 +37,9 @@ export function migrationFiles(root: string, exclude: (path: string) => boolean 
 
 /** Preserve internal links, including versions/current; refuse links to outside data. */
 export function copyPrivateTree(source: string, target: string, executable = false,
-  allowExternalLink: (key: string, destination: string) => boolean = () => false): void {
+  allowExternalLink: (key: string, destination: string) => boolean = () => false, finalTarget = target): void {
   const canonical = realpathSync(source);
+  const finalRoot = resolve(finalTarget);
   privateDirectory(target, migrationPrivacy);
   for (const key of migrationFiles(source, () => false, true)) {
     const from = join(source, key), to = join(target, key);
@@ -51,13 +52,14 @@ export function copyPrivateTree(source: string, target: string, executable = fal
       const link = realpathSync(from);
       const external = !insideDirectory(canonical, link);
       if (external && !allowExternalLink(key, link)) throw new Error(`Migration link escapes source: ${from}`);
-      const destination = external ? link : join(target, relative(canonical, link));
+      const destination = external ? link : join(finalRoot, relative(canonical, link));
       privateDirectory(dirname(to), migrationPrivacy);
       // The destination name belongs to a disposable pending copy, never the source.
       rmSync(to, { force: true });
       const directory = lstatSync(link).isDirectory();
       const junction = directory && process.platform === 'win32';
-      symlinkSync(external || junction ? destination : relative(dirname(to), destination), to, junction ? 'junction' : directory ? 'dir' : 'file');
+      const absolute = external || junction || isAbsolute(readlinkSync(from));
+      symlinkSync(absolute ? destination : relative(dirname(join(finalRoot, key)), destination), to, junction ? 'junction' : directory ? 'dir' : 'file');
     } else {
       assertHomePath(target, to);
       const bytes = readFileSync(from);
@@ -74,7 +76,7 @@ export function replacePrivateTree(source: string, target: string, executable = 
   assertHomePath(dirname(target), target);
   const stage = atomicTmpPath(target);
   try {
-    copyPrivateTree(source, stage, executable, allowExternalLink);
+    copyPrivateTree(source, stage, executable, allowExternalLink, target);
     rmSync(target, { recursive: true, force: true });
     renameSync(stage, target);
     syncDirectory(dirname(target));

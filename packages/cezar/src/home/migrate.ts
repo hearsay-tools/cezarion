@@ -59,7 +59,11 @@ function copyFile(legacy: Home, target: Home, file: MigrationFile): void {
   assertHomePath(legacy.root, source);
   const bytes = readBytes(source);
   if (bytes !== null && isCezarMigrationJson(file.path)) JSON.parse(bytes.toString('utf8'));
-  if (homeFileSchema.safeParse(file.target.path).success) new VersionLog(root, file.target.path, migrationPrivacy).replace(path, bytes);
+  if (homeFileSchema.safeParse(file.target.path).success) {
+    const log = new VersionLog(root, file.target.path, migrationPrivacy);
+    log.replace(path, bytes);
+    log.copyAcceptanceFrom(new VersionLog(legacy.root, file.path), bytes);
+  }
   else if (bytes !== null) replacePrivate(path, bytes, migrationPrivacy);
   else rmSync(path, { force: true });
   if (digest(readBytes(path)) !== digest(bytes)) throw new Error(`Migration copy verification failed: ${file.path}`);
