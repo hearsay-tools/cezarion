@@ -34,15 +34,20 @@ export class HomeStore {
 
   /** Synchronous transactions never retain the filesystem lock over an event-loop yield. */
   transaction<T>(operation: () => T, writePaths: readonly string[] = []): T {
-    const entry = readInstallMarker(this.root) ? undefined : homeEntryAuthorization(this.root);
-    if (!entry) assertHomeWritable(this.root);
+    const marker = readInstallMarker(this.root);
+    const authorization = homeEntryAuthorization(this.root);
+    const entry = authorization && (!marker || !authorization.seeded) ? authorization : undefined;
+    if (marker || !entry) assertHomeWritable(this.root);
     const files = entry ? registryFiles(entry.home) : [];
-    const required = files.filter(path => path !== `${entry?.home.workspaceConfig}.bak`);
-    this.assertBoundary([...writePaths, ...required], true);
+    this.assertBoundary(writePaths, true);
+    // Seeding is auxiliary. Check every path before the first mutation, but skip unsafe ones.
+    const seedable = files.filter(path => {
+      try { this.assertBoundary([path]); return true; } catch { return false; }
+    });
     return withHomeLock(this.root, () => {
       if (entry) createInstallMarker(this.root, underTestRunner() ? 'test' : entry.kind);
       assertHomeWritable(this.root);
-      if (entry) seedHomeRegistry(this, entry.home, files);
+      if (entry) entry.seeded = seedHomeRegistry(this, seedable) && seedable.length === files.length;
       return operation();
     });
   }

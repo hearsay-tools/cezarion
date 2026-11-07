@@ -54,7 +54,10 @@ it. The passwd-home guard remains a separate check. Read-only homes stay readabl
 even when their auxiliary lock or version directory cannot be written.
 
 The first entry seeds each existing registry file's committed version without
-changing its bytes or mode. Each later write stores content by hash, writes `PENDING`,
+changing its bytes or mode. Marker publication and seeding hold one write lock.
+Each file seeds best effort; an unreadable file cannot stop other files or an
+unrelated primary save. Every entry and the first authorized transaction retry
+missing HEAD records even when the marker exists. Each later write stores content by hash, writes `PENDING`,
 replaces the live file, advances `HEAD`, then clears `PENDING`. A read finishes an
 interrupted commit or records an outside write and pins its original restore target.
 Outside-write enforcement stays **off** in P1b (hearsay-tools/cezarion#2811). Later

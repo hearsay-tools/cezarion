@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs';
 import type { Home } from './home.ts';
 import type { ServerType } from '@hono/node-server';
-import { assertHomeWritable, createInstallMarker, underTestRunner } from './install-marker.ts';
+import { underTestRunner } from './install-marker.ts';
 import { holdCockpitLease } from './leases.ts';
 import { HomeStore } from './store.ts';
-import { authorizeHomeEntry, registryFiles, seedHomeRegistry } from './entry-authorization.ts';
+import { authorizeHomeEntry, registryFiles } from './entry-authorization.ts';
 
 export type HomeEntry = 'serve' | 'init' | 'run' | 'projects' | 'backup' | 'remote-settings'
   | 'install' | 'update' | 'use' | 'link' | 'unlink' | 'server-install' | 'server-deploy' | 'server-uninstall';
@@ -38,13 +38,8 @@ function markerKind(entry: string, env: NodeJS.ProcessEnv) {
 
 /** Explicit authorization at operator entry points. Resolution itself stays free of IO. */
 export function prepareHome(home: Home, entry: HomeEntry, env: NodeJS.ProcessEnv = process.env): void {
-  const store = new HomeStore(home);
-  const backup = `${home.workspaceConfig}.bak`;
-  const files = registryFiles(home).filter(path => path !== backup);
-  store.assertBoundary(files, true);
-  createInstallMarker(home.root, markerKind(entry, env));
-  assertHomeWritable(home.root);
-  store.transaction(() => seedHomeRegistry(store, home, files));
+  authorizeHomeEntry(home, entry, markerKind(entry, env));
+  new HomeStore(home).transaction(() => {});
 }
 
 /** Prepare before server consumers read, then hold presence only for the listener's lifetime. */

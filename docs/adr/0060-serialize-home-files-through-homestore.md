@@ -73,6 +73,12 @@ marker, lock or journal. Backup listing remains read-only too.
 
 The first authorized HomeStore write preflights all seeding paths, takes write.lock,
 creates the marker, seeds HEAD and performs the write without releasing the lock.
+Entry preparation uses that same transaction, including marker publication. Each
+registry file seeds independently; unreadable files and unsafe auxiliary paths
+cannot stop other seeds, boot or an unrelated primary write. Existing HEAD records
+stay unchanged. Missing HEAD records are retried at every entry and at the first
+authorized transaction even when a marker already exists. Incomplete attempts
+remain eligible for retry in process memory; no additional persisted state is used.
 An unmarked library writer without that process-local authorization still refuses.
 Authorization is not inherited by child processes. Managed-layout writers remain
 outside HomeStore; after validation, their first mutation consumes the same entry
