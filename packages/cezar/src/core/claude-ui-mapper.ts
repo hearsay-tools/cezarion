@@ -183,30 +183,57 @@ function mapHookResponse(msg: Record<string, unknown>): UiEvent[] {
   // Claude reads a hook's stdout only on exit 0; on any other exit it ignores it
   // (exit 2 feeds stderr back instead), so stdout stays raw output, not entries.
   const parsed = exitCode === undefined || exitCode === 0 ? parseHookJson(stdout) : undefined;
+  const { entries, blockedByOutput } = hookOutputEntries(parsed, stdout, exitCode);
+  const status = hookStatus(msg.outcome, exitCode, blockedByOutput);
+  if (status !== 'completed') addHookEntry(entries, 'error', stderr);
+  const item = completeHookItem(msg, hookId, event, status, entries, stdout, stderr, exitCode);
+  return isVisibleHookItem(item) ? [{ type: 'item.completed', item }] : [];
+}
+
+function addHookEntry(entries: UiHookItem['entries'], kind: HookEntryKind, text: unknown): void {
+  if (typeof text === 'string' && text.trim() !== '') entries.push({ kind, text: text.trim() });
+}
+
+function hookOutputEntries(
+  parsed: Record<string, unknown> | undefined,
+  stdout: string,
+  exitCode: number | undefined,
+): { entries: UiHookItem['entries']; blockedByOutput: boolean } {
   const entries: UiHookItem['entries'] = [];
-  const add = (kind: HookEntryKind, text: unknown): void => {
-    if (typeof text === 'string' && text.trim() !== '') entries.push({ kind, text: text.trim() });
-  };
   let blockedByOutput = false;
   if (parsed) {
     const specific = isRecord(parsed.hookSpecificOutput) ? parsed.hookSpecificOutput : {};
-    add('context', specific.additionalContext);
-    add('warning', parsed.systemMessage);
-    if (parsed.decision === 'block') { blockedByOutput = true; add('stop', parsed.reason); }
+    addHookEntry(entries, 'context', specific.additionalContext);
+    addHookEntry(entries, 'warning', parsed.systemMessage);
+    if (parsed.decision === 'block') { blockedByOutput = true; addHookEntry(entries, 'stop', parsed.reason); }
     if (parsed.continue === false) blockedByOutput = true;
-    add('stop', parsed.stopReason);
-    if (specific.permissionDecision === 'deny') { blockedByOutput = true; add('stop', specific.permissionDecisionReason); }
-    if (specific.permissionDecision === 'ask') add('feedback', specific.permissionDecisionReason);
+    addHookEntry(entries, 'stop', parsed.stopReason);
+    if (specific.permissionDecision === 'deny') { blockedByOutput = true; addHookEntry(entries, 'stop', specific.permissionDecisionReason); }
+    if (specific.permissionDecision === 'ask') addHookEntry(entries, 'feedback', specific.permissionDecisionReason);
   } else if (exitCode === undefined || exitCode === 0) {
-    add('context', stdout);
+    addHookEntry(entries, 'context', stdout);
   }
-  let status: HookStatus = 'completed';
-  if (msg.outcome === 'cancelled') status = 'cancelled';
-  else if (exitCode === 2) status = 'blocked';
-  else if (msg.outcome === 'error' || (exitCode !== undefined && exitCode !== 0)) status = 'failed';
-  else if (blockedByOutput) status = 'blocked';
-  if (status !== 'completed') add('error', stderr);
+  return { entries, blockedByOutput };
+}
 
+function hookStatus(outcome: unknown, exitCode: number | undefined, blockedByOutput: boolean): HookStatus {
+  if (outcome === 'cancelled') return 'cancelled';
+  if (exitCode === 2) return 'blocked';
+  if (outcome === 'error' || (exitCode !== undefined && exitCode !== 0)) return 'failed';
+  if (blockedByOutput) return 'blocked';
+  return 'completed';
+}
+
+function completeHookItem(
+  msg: Record<string, unknown>,
+  hookId: string,
+  event: string,
+  status: HookStatus,
+  entries: UiHookItem['entries'],
+  stdout: string,
+  stderr: string,
+  exitCode: number | undefined,
+): UiHookItem {
   const item: UiHookItem = { kind: 'hook', id: `hook_${hookId}`, event, status, entries };
   const name = str(msg.hook_name);
   if (name !== undefined && name !== event) item.name = name;
@@ -216,7 +243,7 @@ function mapHookResponse(msg: Record<string, unknown>): UiEvent[] {
   const parentItemId = str(msg.parent_tool_use_id);
   if (parentItemId !== undefined) item.parentItemId = parentItemId;
   item.event = hookEventName(item.event);
-  return isVisibleHookItem(item) ? [{ type: 'item.completed', item }] : [];
+  return item;
 }
 
 /** A hook's stdout as a JSON object, or undefined when it is plain text (or JSON
@@ -323,65 +350,20 @@ function mapAssistant(msg: Record<string, unknown>, state: ClaudeUiMapperState):
   for (const raw of content) {
     if (!isRecord(raw)) continue;
     if (raw.type === 'text' && typeof raw.text === 'string') {
-      // Whole blocks per API round-trip — claude sends no deltas in this
-      // mode, so we never fake `item.delta`s: started + completed.
-      // Match the runner's parent-only result fallback guard (#149), while
-      // still rendering child blocks as nested v2 messages.
-      if (parentItemId === undefined) sawAssistantText = true;
-      const item: UiMessageItem = { kind: 'message', id: `item_${++itemSeq}`, role: 'assistant', text: raw.text };
-      if (parentItemId !== undefined) item.parentItemId = parentItemId;
-      events.push({ type: 'item.started', item }, { type: 'item.completed', item });
+      const mapped = mapAssistantTextBlock(raw.text, parentItemId, itemSeq);
+      itemSeq = mapped.itemSeq;
+      if (mapped.sawAssistantText) sawAssistantText = true;
+      events.push(...mapped.events);
     } else if (raw.type === 'thinking' && typeof raw.thinking === 'string' && raw.thinking.trim() !== '') {
-      // Blank `thinking` is skipped: it carries no information and would only
-      // mint a dead "Thinking —" row in the session view (#528).
-      const item: UiReasoningItem = { kind: 'reasoning', id: `item_${++itemSeq}`, text: raw.thinking };
-      if (parentItemId !== undefined) item.parentItemId = parentItemId;
-      events.push({ type: 'item.started', item }, { type: 'item.completed', item });
+      const mapped = mapAssistantThinkingBlock(raw.thinking, parentItemId, itemSeq);
+      itemSeq = mapped.itemSeq;
+      events.push(...mapped.events);
     } else if (raw.type === 'tool_use' && typeof raw.id === 'string' && typeof raw.name === 'string') {
-      const display = toolDisplay(raw.name, raw.input);
-      const item: UiToolItem = {
-        kind: 'tool',
-        id: raw.id,
-        name: raw.name,
-        toolKind: display.toolKind,
-        title: display.title,
-        // claude has no pending phase — a tool_use is already executing.
-        status: 'running',
-      };
-      if (raw.input !== undefined) item.input = raw.input;
-      const edit = editArtifacts(raw.name, raw.input);
-      if (edit) {
-        if (edit.diffs) item.diffs = edit.diffs;
-        item.locations = edit.locations;
-      }
-      if (parentItemId !== undefined) item.parentItemId = parentItemId;
-      events.push({ type: 'item.started', item });
-      if (raw.name === 'TodoWrite') {
-        const entries = planEntries(raw.input);
-        if (entries) events.push({ type: 'plan.updated', entries });
-      } else if (parentItemId === undefined) {
-        // Task tools are main-agent-only: a subagent's tool list has no
-        // TaskCreate/TaskUpdate/TaskList at all (verified against the live
-        // harness). Should that change, its id space is its own, so folding a
-        // subagent's ids into this map would corrupt the main plan — ignore
-        // them until the shared-or-separate question is answered on the wire.
-        const pending = pendingTaskCreate(raw.name, raw.input);
-        if (pending) {
-          // The id is minted by the harness and only revealed in the result, so
-          // the entry parks here until then (`applyTaskCreateResult`). Counting
-          // creates to guess it desyncs the moment a create is rejected or the
-          // session resumes with a task list already at 1..N.
-          pendingTaskCreates = new Map(pendingTaskCreates).set(raw.id, pending);
-        } else {
-          const folded = applyTaskUpdate(raw.name, raw.input, tasks);
-          if (folded) {
-            tasks = folded;
-            events.push({ type: 'plan.updated', entries: [...tasks.values()] });
-          }
-        }
-      }
-      openTools ??= new Map(state.openTools);
-      openTools.set(raw.id, item);
+      const mapped = mapAssistantToolUse(raw, parentItemId, state.openTools, openTools, tasks, pendingTaskCreates);
+      events.push(...mapped.events);
+      openTools = mapped.openTools;
+      tasks = mapped.tasks;
+      pendingTaskCreates = mapped.pendingTaskCreates;
     }
     // Unknown block types (redacted_thinking, server_tool_use, …): ignored.
   }
@@ -391,6 +373,119 @@ function mapAssistant(msg: Record<string, unknown>, state: ClaudeUiMapperState):
     events,
     state: { ...state, itemSeq, openTools: openTools ?? state.openTools, tasks, pendingTaskCreates, sawAssistantText },
   };
+}
+
+function mapAssistantTextBlock(
+  text: string,
+  parentItemId: string | undefined,
+  itemSeq: number,
+): { events: UiEvent[]; itemSeq: number; sawAssistantText: boolean } {
+  // Whole blocks per API round-trip — claude sends no deltas in this
+  // mode, so we never fake `item.delta`s: started + completed.
+  // Match the runner's parent-only result fallback guard (#149), while
+  // still rendering child blocks as nested v2 messages.
+  const sawAssistantText = parentItemId === undefined;
+  const item: UiMessageItem = { kind: 'message', id: `item_${++itemSeq}`, role: 'assistant', text };
+  if (parentItemId !== undefined) item.parentItemId = parentItemId;
+  return { events: [{ type: 'item.started', item }, { type: 'item.completed', item }], itemSeq, sawAssistantText };
+}
+
+function mapAssistantThinkingBlock(
+  thinking: string,
+  parentItemId: string | undefined,
+  itemSeq: number,
+): { events: UiEvent[]; itemSeq: number } {
+  // Blank `thinking` is skipped: it carries no information and would only
+  // mint a dead "Thinking —" row in the session view (#528).
+  const item: UiReasoningItem = { kind: 'reasoning', id: `item_${++itemSeq}`, text: thinking };
+  if (parentItemId !== undefined) item.parentItemId = parentItemId;
+  return { events: [{ type: 'item.started', item }, { type: 'item.completed', item }], itemSeq };
+}
+
+function mapAssistantToolUse(
+  raw: Record<string, unknown>,
+  parentItemId: string | undefined,
+  stateOpenTools: ClaudeUiMapperState['openTools'],
+  openTools: Map<string, UiToolItem> | null,
+  tasks: ClaudeUiMapperState['tasks'],
+  pendingTaskCreates: ClaudeUiMapperState['pendingTaskCreates'],
+): {
+  events: UiEvent[];
+  openTools: Map<string, UiToolItem>;
+  tasks: ClaudeUiMapperState['tasks'];
+  pendingTaskCreates: ClaudeUiMapperState['pendingTaskCreates'];
+} {
+  const id = raw.id as string;
+  const name = raw.name as string;
+  const events: UiEvent[] = [];
+  const item = startAssistantToolItem(id, name, raw.input, parentItemId);
+  events.push({ type: 'item.started', item });
+  ({ tasks, pendingTaskCreates } = applyAssistantToolPlan(name, id, raw.input, parentItemId, tasks, pendingTaskCreates, events));
+  openTools ??= new Map(stateOpenTools);
+  openTools.set(id, item);
+  return { events, openTools, tasks, pendingTaskCreates };
+}
+
+function startAssistantToolItem(
+  id: string,
+  name: string,
+  input: unknown,
+  parentItemId: string | undefined,
+): UiToolItem {
+  const display = toolDisplay(name, input);
+  const item: UiToolItem = {
+    kind: 'tool',
+    id,
+    name,
+    toolKind: display.toolKind,
+    title: display.title,
+    // claude has no pending phase — a tool_use is already executing.
+    status: 'running',
+  };
+  if (input !== undefined) item.input = input;
+  const edit = editArtifacts(name, input);
+  if (edit) {
+    if (edit.diffs) item.diffs = edit.diffs;
+    item.locations = edit.locations;
+  }
+  if (parentItemId !== undefined) item.parentItemId = parentItemId;
+  return item;
+}
+
+function applyAssistantToolPlan(
+  name: string,
+  id: string,
+  input: unknown,
+  parentItemId: string | undefined,
+  tasks: ClaudeUiMapperState['tasks'],
+  pendingTaskCreates: ClaudeUiMapperState['pendingTaskCreates'],
+  events: UiEvent[],
+): { tasks: ClaudeUiMapperState['tasks']; pendingTaskCreates: ClaudeUiMapperState['pendingTaskCreates'] } {
+  if (name === 'TodoWrite') {
+    const entries = planEntries(input);
+    if (entries) events.push({ type: 'plan.updated', entries });
+    return { tasks, pendingTaskCreates };
+  }
+  if (parentItemId !== undefined) return { tasks, pendingTaskCreates };
+  // Task tools are main-agent-only: a subagent's tool list has no
+  // TaskCreate/TaskUpdate/TaskList at all (verified against the live
+  // harness). Should that change, its id space is its own, so folding a
+  // subagent's ids into this map would corrupt the main plan — ignore
+  // them until the shared-or-separate question is answered on the wire.
+  const pending = pendingTaskCreate(name, input);
+  if (pending) {
+    // The id is minted by the harness and only revealed in the result, so
+    // the entry parks here until then (`applyTaskCreateResult`). Counting
+    // creates to guess it desyncs the moment a create is rejected or the
+    // session resumes with a task list already at 1..N.
+    return { tasks, pendingTaskCreates: new Map(pendingTaskCreates).set(id, pending) };
+  }
+  const folded = applyTaskUpdate(name, input, tasks);
+  if (folded) {
+    events.push({ type: 'plan.updated', entries: [...folded.values()] });
+    return { tasks: folded, pendingTaskCreates };
+  }
+  return { tasks, pendingTaskCreates };
 }
 
 /** claude `Edit`/`Write` inputs carry the diff inline (§7.1). */
@@ -666,54 +761,89 @@ function samePlan(a: ReadonlyMap<string, PlanEntry>, b: ReadonlyMap<string, Plan
 
 function mapResult(msg: Record<string, unknown>, state: ClaudeUiMapperState): ClaudeUiMapping {
   const events: UiEvent[] = [];
-  let itemSeq = state.itemSeq;
+  const denials = completePermissionDenials(msg, state);
+  events.push(...denials.events);
+  let itemSeq = denials.itemSeq;
+  const fallback = fallbackResultMessage(msg, state.sawAssistantText, itemSeq);
+  events.push(...fallback.events);
+  itemSeq = fallback.itemSeq;
   let turnSeq = state.turnSeq;
+  const turnId = state.currentTurnId ?? `turn_${++turnSeq}`;
+  events.push(...completeTurnEvents(msg, turnId));
+  return {
+    events,
+    state: {
+      ...state,
+      itemSeq,
+      turnSeq,
+      currentTurnId: null,
+      openTools: denials.openTools ?? state.openTools,
+      sawAssistantText: fallback.sawAssistantText,
+    },
+  };
+}
+
+function completePermissionDenials(
+  msg: Record<string, unknown>,
+  state: ClaudeUiMapperState,
+): { events: UiEvent[]; itemSeq: number; openTools: Map<string, UiToolItem> | null } {
+  const events: UiEvent[] = [];
+  let itemSeq = state.itemSeq;
   let openTools: Map<string, UiToolItem> | null = null;
-
-  if (Array.isArray(msg.permission_denials)) {
-    for (const raw of msg.permission_denials) {
-      if (!isRecord(raw) || typeof raw.tool_name !== 'string') continue;
-      const id = typeof raw.tool_use_id === 'string' ? raw.tool_use_id : `item_${++itemSeq}`;
-      const open = (openTools ?? state.openTools).get(id);
-      let item: UiToolItem;
-      if (open) {
-        item = { ...open, status: 'declined' };
-        openTools ??= new Map(state.openTools);
-        openTools.delete(id);
-      } else {
-        const display = toolDisplay(raw.tool_name, raw.tool_input);
-        item = {
-          kind: 'tool',
-          id,
-          name: raw.tool_name,
-          toolKind: display.toolKind,
-          title: display.title,
-          status: 'declined',
-        };
-        if (raw.tool_input !== undefined) item.input = raw.tool_input;
-      }
-      events.push({ type: 'item.completed', item });
+  if (!Array.isArray(msg.permission_denials)) return { events, itemSeq, openTools };
+  for (const raw of msg.permission_denials) {
+    if (!isRecord(raw) || typeof raw.tool_name !== 'string') continue;
+    const id = typeof raw.tool_use_id === 'string' ? raw.tool_use_id : `item_${++itemSeq}`;
+    const open = (openTools ?? state.openTools).get(id);
+    let item: UiToolItem;
+    if (open) {
+      item = { ...open, status: 'declined' };
+      openTools ??= new Map(state.openTools);
+      openTools.delete(id);
+    } else {
+      const display = toolDisplay(raw.tool_name, raw.tool_input);
+      item = {
+        kind: 'tool',
+        id,
+        name: raw.tool_name,
+        toolKind: display.toolKind,
+        title: display.title,
+        status: 'declined',
+      };
+      if (raw.tool_input !== undefined) item.input = raw.tool_input;
     }
+    events.push({ type: 'item.completed', item });
   }
+  return { events, itemSeq, openTools };
+}
 
+function fallbackResultMessage(
+  msg: Record<string, unknown>,
+  sawAssistantText: boolean,
+  itemSeq: number,
+): { events: UiEvent[]; itemSeq: number; sawAssistantText: boolean } {
   // The result fallback, mirroring claude-cli-runner.ts's `textChunks.length === 0`
   // branch: a session that streamed no parent assistant text block carries its whole
   // reply on `msg.result`. The runner emits a v1 `text` for it; without the v2
   // twin below, the cockpit's per-turn "v2 wins" dedup drops that line and the
   // turn renders tool cards with no prose at all.
-  let sawAssistantText = state.sawAssistantText;
-  if (!sawAssistantText && typeof msg.result === 'string' && msg.result !== '') {
-    sawAssistantText = true;
-    const item: UiMessageItem = {
-      kind: 'message',
-      id: `item_${++itemSeq}`,
-      role: 'assistant',
-      text: msg.result,
-    };
-    events.push({ type: 'item.started', item }, { type: 'item.completed', item });
+  if (sawAssistantText || typeof msg.result !== 'string' || msg.result === '') {
+    return { events: [], itemSeq, sawAssistantText };
   }
+  const item: UiMessageItem = {
+    kind: 'message',
+    id: `item_${++itemSeq}`,
+    role: 'assistant',
+    text: msg.result,
+  };
+  return {
+    events: [{ type: 'item.started', item }, { type: 'item.completed', item }],
+    itemSeq,
+    sawAssistantText: true,
+  };
+}
 
-  const turnId = state.currentTurnId ?? `turn_${++turnSeq}`;
+function completeTurnEvents(msg: Record<string, unknown>, turnId: string): UiEvent[] {
   const usage = rawTokenUsage(msg.usage);
   const costUsd =
     typeof msg.total_cost_usd === 'number' && Number.isFinite(msg.total_cost_usd)
@@ -722,24 +852,13 @@ function mapResult(msg: Record<string, unknown>, state: ClaudeUiMapperState): Cl
   const turnEvent: UiTurnCompletedEvent = { type: 'turn.completed', turnId, stopReason: resultStopReason(msg) };
   if (usage) turnEvent.usage = usage;
   if (costUsd !== undefined) turnEvent.costUsd = costUsd;
-  events.push(turnEvent);
+  const events: UiEvent[] = [turnEvent];
   if (usage) {
     const usageEvent: UiUsageUpdatedEvent = { type: 'usage.updated', usage };
     if (costUsd !== undefined) usageEvent.costUsd = costUsd;
     events.push(usageEvent);
   }
-
-  return {
-    events,
-    state: {
-      ...state,
-      itemSeq,
-      turnSeq,
-      currentTurnId: null,
-      openTools: openTools ?? state.openTools,
-      sawAssistantText,
-    },
-  };
+  return events;
 }
 
 /** §7.1: success→end_turn, error_max_turns→max_tokens,

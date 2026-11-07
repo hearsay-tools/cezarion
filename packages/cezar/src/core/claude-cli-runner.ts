@@ -880,76 +880,80 @@ interface RefusalRetry {
   attempts: number;
 }
 
-function handleClaudeMessage(
-  msg: ClaudeStreamMessage,
-  ctx: {
-    toolCalls: AgentToolCallRecord[];
-    textChunks: string[];
-    onEvent?: ((e: AgentEvent) => void) | undefined;
-  },
-): number {
-  if (msg.type === 'assistant' && msg.message?.content) {
-    for (const block of msg.message.content) {
-      const b = block as { type?: string; text?: string; id?: string; name?: string; input?: unknown };
-      if (b.type === 'text' && typeof b.text === 'string') {
-        // The mapper keeps child text nested on v2. Neither v1 marker parsing
-        // nor the result fallback buffer may consume it as parent prose (#149).
-        if (typeof msg.parent_tool_use_id === 'string' && msg.parent_tool_use_id !== '') continue;
-        ctx.textChunks.push(b.text);
-        ctx.onEvent?.({ type: 'text', text: b.text });
-      } else if (b.type === 'tool_use' && b.id && b.name) {
-        ctx.toolCalls.push({ id: b.id, name: b.name, input: b.input });
-        ctx.onEvent?.({ type: 'tool-call', id: b.id, tool: b.name, input: b.input });
-      }
-    }
-    // Assistant-frame usage belongs to the individual API calls inside this
-    // agentic turn. Claude's terminal result frame already aggregates those
-    // calls, so adding both sources inflates the run total (#716). Keep these
-    // frames presentation-only; the result branch below is authoritative,
-    // matching the v2 `usage.updated` mapping in AGENT_PROTOCOL.md.
-    return 0;
-  }
+type ClaudeMessageCtx = {
+  toolCalls: AgentToolCallRecord[];
+  textChunks: string[];
+  onEvent?: ((e: AgentEvent) => void) | undefined;
+};
 
-  if (msg.type === 'user' && msg.message?.content) {
-    for (const block of msg.message.content) {
-      const b = block as { type?: string; tool_use_id?: string; content?: unknown; is_error?: boolean };
-      if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
-        ctx.onEvent?.({
-          type: 'tool-result',
-          toolCallId: b.tool_use_id,
-          result: stringifyToolResultContent(b.content),
-          isError: b.is_error === true,
-        });
-        // Screenshots and other images inside the result get their own
-        // events — the text path above renders them as a placeholder.
-        for (const img of toolResultImageBlocks(b.content)) {
-          ctx.onEvent?.({ type: 'image', mediaType: img.media_type, data: img.data });
-        }
-      }
-    }
-    return 0;
-  }
-
-  if (msg.type === 'result') {
-    // Final message of a turn: `result` is the full assistant text; only fall
-    // back to it if we never saw streamed assistant text blocks.
-    if (typeof msg.result === 'string' && ctx.textChunks.length === 0) {
-      ctx.textChunks.push(msg.result);
-      ctx.onEvent?.({ type: 'text', text: msg.result });
-    }
-    if (msg.is_error) {
-      ctx.onEvent?.({
-        type: 'error',
-        message: typeof msg.result === 'string' && msg.result.trim() !== ''
-          ? msg.result
-          : `claude reported result error${msg.subtype ? ` (${msg.subtype})` : ''}`,
-      });
-    }
-    return costWeightedTokens(msg.usage);
-  }
-
+function handleClaudeMessage(msg: ClaudeStreamMessage, ctx: ClaudeMessageCtx): number {
+  if (msg.type === 'assistant' && msg.message?.content) return handleAssistantBlocks(msg, ctx);
+  if (msg.type === 'user' && msg.message?.content) return handleUserToolResults(msg, ctx);
+  if (msg.type === 'result') return handleResultMessage(msg, ctx);
   // system/init and anything else: nothing actionable.
   return 0;
+}
+
+function handleAssistantBlocks(msg: ClaudeStreamMessage, ctx: ClaudeMessageCtx): number {
+  // Iterate `msg.message.content` by that path so a non-iterable still throws
+  // `msg.message.content is not iterable` (claude-cli-runner.test.ts).
+  for (const block of msg.message!.content!) {
+    const b = block as { type?: string; text?: string; id?: string; name?: string; input?: unknown };
+    if (b.type === 'text' && typeof b.text === 'string') {
+      // The mapper keeps child text nested on v2. Neither v1 marker parsing
+      // nor the result fallback buffer may consume it as parent prose (#149).
+      if (typeof msg.parent_tool_use_id === 'string' && msg.parent_tool_use_id !== '') continue;
+      ctx.textChunks.push(b.text);
+      ctx.onEvent?.({ type: 'text', text: b.text });
+    } else if (b.type === 'tool_use' && b.id && b.name) {
+      ctx.toolCalls.push({ id: b.id, name: b.name, input: b.input });
+      ctx.onEvent?.({ type: 'tool-call', id: b.id, tool: b.name, input: b.input });
+    }
+  }
+  // Assistant-frame usage belongs to the individual API calls inside this
+  // agentic turn. Claude's terminal result frame already aggregates those
+  // calls, so adding both sources inflates the run total (#716). Keep these
+  // frames presentation-only; the result branch below is authoritative,
+  // matching the v2 `usage.updated` mapping in AGENT_PROTOCOL.md.
+  return 0;
+}
+
+function handleUserToolResults(msg: ClaudeStreamMessage, ctx: ClaudeMessageCtx): number {
+  for (const block of msg.message!.content!) {
+    const b = block as { type?: string; tool_use_id?: string; content?: unknown; is_error?: boolean };
+    if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
+      ctx.onEvent?.({
+        type: 'tool-result',
+        toolCallId: b.tool_use_id,
+        result: stringifyToolResultContent(b.content),
+        isError: b.is_error === true,
+      });
+      // Screenshots and other images inside the result get their own
+      // events — the text path above renders them as a placeholder.
+      for (const img of toolResultImageBlocks(b.content)) {
+        ctx.onEvent?.({ type: 'image', mediaType: img.media_type, data: img.data });
+      }
+    }
+  }
+  return 0;
+}
+
+function handleResultMessage(msg: ClaudeStreamMessage, ctx: ClaudeMessageCtx): number {
+  // Final message of a turn: `result` is the full assistant text; only fall
+  // back to it if we never saw streamed assistant text blocks.
+  if (typeof msg.result === 'string' && ctx.textChunks.length === 0) {
+    ctx.textChunks.push(msg.result);
+    ctx.onEvent?.({ type: 'text', text: msg.result });
+  }
+  if (msg.is_error) {
+    ctx.onEvent?.({
+      type: 'error',
+      message: typeof msg.result === 'string' && msg.result.trim() !== ''
+        ? msg.result
+        : `claude reported result error${msg.subtype ? ` (${msg.subtype})` : ''}`,
+    });
+  }
+  return costWeightedTokens(msg.usage);
 }
 
 // stringify/image helpers moved to claude-ui-mapper.ts (shared by v1 and v2).
