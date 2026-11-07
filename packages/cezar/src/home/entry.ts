@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Home } from './home.ts';
@@ -38,7 +39,7 @@ export function prepareOperatorHome(home: Home, command: string | undefined, env
 }
 
 function markerKind(entry: string, env: NodeJS.ProcessEnv) {
-  return underTestRunner() ? 'test' : (entry === 'serve' || entry === 'init') && env.CEZ_DRY_RUN === '1' ? 'dev' : 'live';
+  return underTestRunner() ? 'test' : (entry === 'serve' || entry === 'init') && productEnv('DRY_RUN', env) === '1' ? 'dev' : 'live';
 }
 
 /** Explicit authorization at operator entry points. Resolution itself stays free of IO. */

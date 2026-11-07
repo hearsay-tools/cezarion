@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { prepareHomeLifecycle } from '../home/entry.ts';
 import { reportsRoutes } from './reports-api.ts';
 import { writeMergedConfig } from './config-merge.ts';
@@ -53,7 +54,6 @@ import { ARCHIVED_RUNS_PAGE_DEFAULT } from '@open-mercato/cezar-contract/run-lim
 import { RUNS_SEARCH_PER_PROJECT_MAX, archivedRunsQuerySchema, runSummariesQuerySchema, runsSearchQuerySchema } from '@open-mercato/cezar-contract/runs';
 import { workspaceEventsQuerySchema, type RunsIndexResponse } from '@open-mercato/cezar-contract/workspace-events';
 import { automationListQuerySchema } from '@open-mercato/cezar-contract/automations';
-
 import { localTimeZone } from '@open-mercato/cezar-contract/zoned-time';
 import { DelegationService } from '../delegation/service.ts';
 import { workerCapacity } from '../delegation/capacity.ts';
@@ -779,7 +779,7 @@ export function createApp(deps: ServerDeps) {
 
   /** One `task.test` POST to `webhook`, or a dry run under `CEZ_DRY_RUN=1`. */
   const sendTestDelivery = async (projectId: string, webhook: StoredProjectWebhook): Promise<TestProjectWebhookResponse> => {
-    if (process.env.CEZ_DRY_RUN === '1') return { ok: true, dryRun: true };
+    if (productEnv('DRY_RUN') === '1') return { ok: true, dryRun: true };
     const payload = {
       event: 'task.test' as const,
       deliveryId: randomUUID(),
@@ -2593,14 +2593,14 @@ export function createApp(deps: ServerDeps) {
       autonomous: config.composerDefaults.autonomous ?? null,
       worktree: config.composerDefaults.worktree ?? null,
       inheritedAutonomous:
-        process.env.CEZ_AUTONOMOUS_DEFAULT === '0'
+        productEnv('AUTONOMOUS_DEFAULT') === '0'
           ? false
-          : process.env.CEZ_AUTONOMOUS_DEFAULT === '1'
+          : productEnv('AUTONOMOUS_DEFAULT') === '1'
             ? true
             : 'source-dependent',
       inheritedWorktree: effectiveComposerDefault(
         undefined,
-        process.env.CEZ_WORKTREE_DEFAULT,
+        productEnv('WORKTREE_DEFAULT'),
         true,
       ),
     },
