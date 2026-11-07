@@ -165,48 +165,59 @@ export function mapCodexNotification(frame: unknown, state: CodexUiMapperState):
   // Server requests are answered by CodexSession, not the notification mapper.
   if (frame.id !== undefined) return { events: [], state };
   const params = isRecord(frame.params) ? frame.params : {};
-  switch (frame.method) {
-    case 'error': {
-      const message = codexStreamError(params);
-      return { events: message ? [{ type: 'session.error', message, fatal: params.willRetry === false }] : [], state };
-    }
-    case 'warning': {
-      const message = str(params.message);
-      return { events: message ? [{ type: 'session.error', message, fatal: false }] : [], state };
-    }
-    case 'thread/started':
-      return codexSessionStarted(threadIdOf(params) ?? '', state);
-    case 'turn/started':
-      return mapTurnStarted(params, state);
-    case 'turn/completed':
-    case 'turn/failed':
-      return mapTurnEnd(params, state, codexTurnOutcome(frame.method, params));
-    case 'turn/plan/updated':
-      return mapTurnPlanUpdated(params, state);
-    case 'item/started':
-      return mapItemLifecycle(params, state, 'item.started');
-    case 'item/updated':
-      return mapItemLifecycle(params, state, 'item.updated');
-    case 'item/completed':
-      return mapItemLifecycle(params, state, 'item.completed');
-    case 'item/agentMessage/delta':
-      return mapDelta(params, state, 'text');
-    case 'item/reasoning/textDelta':
-      return mapDelta(params, state, 'reasoning', 'text');
-    case 'item/reasoning/summaryDelta':
-    case 'item/reasoning/summaryTextDelta':
-      return mapDelta(params, state, 'reasoning', 'summary');
-    case 'item/commandExecution/outputDelta':
-      return mapDelta(params, state, 'output');
-    case 'thread/tokenUsage/updated':
-      return mapTokenUsage(params, state);
-    // `hook/started` renders nothing: hooks are completion-only (#961).
-    case 'hook/completed':
-      return { events: mapHookCompleted(params, state), state };
-    default:
-      // thread/status/changed, thread/closed, … — nothing to render yet.
-      return { events: [], state };
+  const mapper = CODEX_NOTIFICATION_MAPPERS.get(frame.method);
+  if (mapper === undefined) {
+    // thread/status/changed, thread/closed, … — nothing to render yet.
+    return { events: [], state };
   }
+  return mapper(params, state);
+}
+
+type CodexNotificationMapper = (
+  params: Record<string, unknown>,
+  state: CodexUiMapperState,
+) => CodexUiMapping;
+
+/** Method → mapper for the notification arms of the §7.1 mapping. Method
+ *  strings are unique, so first-match semantics are the same as the switch
+ *  this table replaced. */
+const CODEX_NOTIFICATION_MAPPERS: ReadonlyMap<string, CodexNotificationMapper> = new Map([
+  ['error', mapErrorNotification],
+  ['warning', mapWarningNotification],
+  ['thread/started', mapThreadStartedNotification],
+  ['turn/started', mapTurnStarted],
+  ['turn/completed', (params, state) => mapTurnEnd(params, state, codexTurnOutcome('turn/completed', params))],
+  ['turn/failed', (params, state) => mapTurnEnd(params, state, codexTurnOutcome('turn/failed', params))],
+  ['turn/plan/updated', mapTurnPlanUpdated],
+  ['item/started', (params, state) => mapItemLifecycle(params, state, 'item.started')],
+  ['item/updated', (params, state) => mapItemLifecycle(params, state, 'item.updated')],
+  ['item/completed', (params, state) => mapItemLifecycle(params, state, 'item.completed')],
+  ['item/agentMessage/delta', (params, state) => mapDelta(params, state, 'text')],
+  ['item/reasoning/textDelta', (params, state) => mapDelta(params, state, 'reasoning', 'text')],
+  ['item/reasoning/summaryDelta', (params, state) => mapDelta(params, state, 'reasoning', 'summary')],
+  ['item/reasoning/summaryTextDelta', (params, state) => mapDelta(params, state, 'reasoning', 'summary')],
+  ['item/commandExecution/outputDelta', (params, state) => mapDelta(params, state, 'output')],
+  ['thread/tokenUsage/updated', mapTokenUsage],
+  ['hook/completed', mapHookNotification],
+]);
+
+function mapErrorNotification(params: Record<string, unknown>, state: CodexUiMapperState): CodexUiMapping {
+  const message = codexStreamError(params);
+  return { events: message ? [{ type: 'session.error', message, fatal: params.willRetry === false }] : [], state };
+}
+
+function mapWarningNotification(params: Record<string, unknown>, state: CodexUiMapperState): CodexUiMapping {
+  const message = str(params.message);
+  return { events: message ? [{ type: 'session.error', message, fatal: false }] : [], state };
+}
+
+function mapThreadStartedNotification(params: Record<string, unknown>, state: CodexUiMapperState): CodexUiMapping {
+  return codexSessionStarted(threadIdOf(params) ?? '', state);
+}
+
+function mapHookNotification(params: Record<string, unknown>, state: CodexUiMapperState): CodexUiMapping {
+  // `hook/started` renders nothing: hooks are completion-only (#961).
+  return { events: mapHookCompleted(params, state), state };
 }
 
 // ---- turn lifecycle ---------------------------------------------------------
@@ -577,6 +588,14 @@ function mapHookCompleted(params: Record<string, unknown>, state: CodexUiMapperS
   const eventName = str(run?.eventName);
   const status = typeof run?.status === 'string' ? HOOK_STATUS[run.status] : undefined;
   if (!run || id === undefined || eventName === undefined || status === undefined) return [];
+  const entries = hookEntries(run, status);
+  const item = hookItem(run, id, eventName, status, entries, params, state);
+  return isVisibleHookItem(item) ? [{ type: 'item.completed', item }] : [];
+}
+
+/** The agent-visible entry list: the run's own entries, then `statusMessage`
+ *  joined as a warning/error unless an entry already says it. */
+function hookEntries(run: Record<string, unknown>, status: HookStatus): UiHookItem['entries'] {
   const entries: UiHookItem['entries'] = [];
   for (const raw of Array.isArray(run.entries) ? run.entries : []) {
     if (!isRecord(raw) || typeof raw.text !== 'string' || raw.text.trim() === '') continue;
@@ -587,6 +606,20 @@ function mapHookCompleted(params: Record<string, unknown>, state: CodexUiMapperS
   if (message && !entries.some((entry) => entry.text.trim() === message)) {
     entries.push({ kind: status === 'completed' ? 'warning' : 'error', text: message });
   }
+  return entries;
+}
+
+/** Assemble the hook item with its optional source, duration and subagent
+ *  nesting. */
+function hookItem(
+  run: Record<string, unknown>,
+  id: string,
+  eventName: string,
+  status: HookStatus,
+  entries: UiHookItem['entries'],
+  params: Record<string, unknown>,
+  state: CodexUiMapperState,
+): UiHookItem {
   const item: UiHookItem = { kind: 'hook', id: `hook_${id}`, event: hookEventName(eventName), status, entries };
   const source = str(run.sourcePath);
   if (source !== undefined) item.source = source;
@@ -594,7 +627,7 @@ function mapHookCompleted(params: Record<string, unknown>, state: CodexUiMapperS
   if (durationMs !== undefined) item.durationMs = durationMs;
   const parentItemId = collabParentItemId(params, state);
   if (parentItemId !== undefined) item.parentItemId = parentItemId;
-  return isVisibleHookItem(item) ? [{ type: 'item.completed', item }] : [];
+  return item;
 }
 
 function collabParentItemId(params: Record<string, unknown>, state: CodexUiMapperState): string | undefined {
