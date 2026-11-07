@@ -662,6 +662,92 @@ function defaultOpen(item: UiToolItem): boolean {
   return item.toolKind === 'execute' && item.status === 'running' && item.output !== undefined
 }
 
+/** The card's non-state view bits: busy flag, title parts, expandable command and icon. */
+function toolCardHeader(item: UiToolItem) {
+  const busy = item.status === 'running' || item.status === 'pending'
+  const title = splitToolTitle(item.title)
+  // OpenCode sends the command itself as an execute title, without a "Ran" prefix.
+  const { verb, detail } = item.toolKind === 'execute' && title.detail === undefined
+    ? { verb: 'Ran', detail: item.title }
+    : title
+  const expandedCommand = item.toolKind === 'execute' ? (fullExecCommand(item.input) ?? detail) : detail
+  const Icon = TOOL_ICONS[item.toolKind] ?? WrenchIcon
+  return { busy, verb, detail, expandedCommand, Icon }
+}
+
+/** Anything a card can expand to show: command, output, error, diffs or nested sub-agent items. */
+function toolHasContent(item: UiToolItem, nestedCount: number): boolean {
+  return (
+    (item.output !== undefined && item.output !== '') ||
+    (item.error !== undefined && item.error !== '') ||
+    (item.diffs !== undefined && item.diffs.length > 0) ||
+    nestedCount > 0
+  )
+}
+
+/** The trigger's right side: spinner while busy, then the failed/declined label and the exit pill. */
+function ToolCardBadges({ item, busy }: { item: UiToolItem; busy: boolean }) {
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-2 pl-2">
+      {busy ? (
+        <LoaderCircleIcon role="status" aria-label="Running" className="size-3.5 animate-spin text-soft-foreground" />
+      ) : null}
+      {item.status === 'failed' ? <span className="text-xs text-muted-foreground">failed</span> : null}
+      {item.status === 'declined' ? <span className="text-xs text-soft-foreground">declined</span> : null}
+      {item.toolKind === 'execute' && typeof item.exitCode === 'number' ? (
+        <span
+          data-slot="tool-exit"
+          className={cn(
+            'rounded-full px-2 py-px font-mono text-[11px] font-semibold',
+            item.exitCode === 0 ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger',
+          )}
+        >
+          {item.exitCode}
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
+/** The expanded body: command, error, diffs, output and nested sub-agent items, in that order. */
+function ToolCardBody({
+  item,
+  command,
+  busy,
+  nested,
+  cacheKey,
+  renderNested,
+}: {
+  item: UiToolItem
+  command: string | undefined
+  busy: boolean
+  nested: readonly ThreadEntry[]
+  cacheKey?: string | undefined
+  renderNested?: ((entries: readonly ThreadEntry[], scope: string) => ReactNode) | undefined
+}) {
+  return (
+    <div className="border-t border-border bg-card-2">
+      {command !== undefined ? (
+        <pre data-slot="tool-command" className="px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{command}</pre>
+      ) : null}
+      {item.error !== undefined && item.error !== '' ? (
+        <div data-slot="tool-error" className="px-4 py-3 font-mono text-xs leading-[1.7] whitespace-pre-wrap text-danger">
+          {item.error}
+        </div>
+      ) : null}
+      {item.diffs !== undefined && item.diffs.length > 0 ? <InlineDiffPreview diffs={item.diffs} /> : null}
+      {item.output !== undefined && item.output !== '' ? (
+        <ToolOutput text={item.output} streaming={busy} />
+      ) : null}
+      {nested.length > 0 ? (
+        <div data-slot="tool-nested" className="flex flex-col gap-2 border-l-2 border-border py-2.5 pr-3 pl-3 ml-4 my-2">
+          {renderNested?.(nested, cacheKey ?? item.id)}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 /**
  * One tool invocation as a shadcn Collapsible card (mockup `.tool-card`, issue #381).
  * Locked (no chevron, trigger disabled) until the item has any detail to show. `nested` is the
@@ -690,23 +776,11 @@ export function ToolCard({
     if (cacheKey !== undefined) cache?.set(cacheKey, open)
     setUserOpenState(open)
   }
-  const busy = item.status === 'running' || item.status === 'pending'
-  const title = splitToolTitle(item.title)
-  // OpenCode sends the command itself as an execute title, without a "Ran" prefix.
-  const { verb, detail } = item.toolKind === 'execute' && title.detail === undefined
-    ? { verb: 'Ran', detail: item.title }
-    : title
-  const expandedCommand = item.toolKind === 'execute' ? (fullExecCommand(item.input) ?? detail) : detail
-  const hasContent =
-    (item.output !== undefined && item.output !== '') ||
-    (item.error !== undefined && item.error !== '') ||
-    (item.diffs !== undefined && item.diffs.length > 0) ||
-    nested.length > 0
+  const { busy, verb, detail, expandedCommand, Icon } = toolCardHeader(item)
+  const hasContent = toolHasContent(item, nested.length)
   const hasDetail = expandedCommand !== undefined || hasContent
   // Commands are expandable even when silent, without auto-opening a running empty card.
   const open = hasDetail && (userOpen ?? (hasContent && defaultOpen(item)))
-
-  const Icon = TOOL_ICONS[item.toolKind] ?? WrenchIcon
   return (
     <Collapsible
       data-slot="tool-card"
@@ -745,45 +819,10 @@ export function ToolCard({
         {detail !== undefined ? (
           <code title={detail} className="block min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{detail}</code>
         ) : null}
-        <span className="ml-auto flex shrink-0 items-center gap-2 pl-2">
-          {busy ? (
-            <LoaderCircleIcon role="status" aria-label="Running" className="size-3.5 animate-spin text-soft-foreground" />
-          ) : null}
-          {item.status === 'failed' ? <span className="text-xs text-muted-foreground">failed</span> : null}
-          {item.status === 'declined' ? <span className="text-xs text-soft-foreground">declined</span> : null}
-          {item.toolKind === 'execute' && typeof item.exitCode === 'number' ? (
-            <span
-              data-slot="tool-exit"
-              className={cn(
-                'rounded-full px-2 py-px font-mono text-[11px] font-semibold',
-                item.exitCode === 0 ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger',
-              )}
-            >
-              {item.exitCode}
-            </span>
-          ) : null}
-        </span>
+        <ToolCardBadges item={item} busy={busy} />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="border-t border-border bg-card-2">
-          {expandedCommand !== undefined ? (
-            <pre data-slot="tool-command" className="px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{expandedCommand}</pre>
-          ) : null}
-          {item.error !== undefined && item.error !== '' ? (
-            <div data-slot="tool-error" className="px-4 py-3 font-mono text-xs leading-[1.7] whitespace-pre-wrap text-danger">
-              {item.error}
-            </div>
-          ) : null}
-          {item.diffs !== undefined && item.diffs.length > 0 ? <InlineDiffPreview diffs={item.diffs} /> : null}
-          {item.output !== undefined && item.output !== '' ? (
-            <ToolOutput text={item.output} streaming={busy} />
-          ) : null}
-          {nested.length > 0 ? (
-            <div data-slot="tool-nested" className="flex flex-col gap-2 border-l-2 border-border py-2.5 pr-3 pl-3 ml-4 my-2">
-              {renderNested?.(nested, cacheKey ?? item.id)}
-            </div>
-          ) : null}
-        </div>
+        <ToolCardBody item={item} command={expandedCommand} busy={busy} nested={nested} cacheKey={cacheKey} renderNested={renderNested} />
       </CollapsibleContent>
     </Collapsible>
   )
