@@ -77,6 +77,7 @@ import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.
 import { ColdReadCache, storedRow, type StoredRow } from './cold-reads.ts';
 import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
 import { RunStoreOpenError, toRunStoreOpenError } from './store-open-error.ts';
+import { archiveStoreFamily } from './archive-family.ts';
 import { claimStoreFamilies } from './claim-families.ts';
 import { createStoreOwnedRun } from './owned-run-create.ts';
 import { commitStoreWorkerResult } from './worker-result-commit.ts';
@@ -2351,37 +2352,20 @@ export class RunStore extends EventEmitter {
 
   /** Use unnormalized persisted evidence: cold reads must not turn interrupted work into safety. */
   private archiveFamily(id: string, isActive: (id: string) => boolean): RunRecord[] | undefined {
-    const ids = [id, ...new Set([...(this.db?.listIdsByParent(id) ?? []), ...this.listWorkersOf(id).map(run => run.id)])];
-    if (ids.length > 1025) return undefined;
-    const family: RunRecord[] = [];
-    const block = (message: string, runId = id) => { this.setArchiveBlocker(id, { message, runId }); return undefined; };
-    for (const memberId of ids) {
-      const row = this.db?.get(memberId);
-      const raw: unknown = row ? JSON.parse(row.data) : this.held.get(memberId);
-      const decoded = decodeRunRow(JSON.stringify(raw));
-      if (!decoded) return block('Task history is unavailable. Open the task or archive it manually.', memberId);
-      // Do not let the runtime schema's per-entry salvage hide malformed PR authority.
-      if (raw && typeof raw === 'object' && 'pullRequests' in raw &&
-        (!Array.isArray(raw.pullRequests) || raw.pullRequests.some(entry => !runPullRequestSchema.safeParse(entry).success))) return block('PR associations are invalid. Check the task PRs or archive manually.', memberId);
-      const run = this.held.get(memberId) ?? decoded.run;
-      if (row && !this.held.has(memberId)) this.decodeCold(row); // records the synchronous write fence
-      if (this.deleted.has(memberId) || this.quarantined.has(memberId) || this.writeRefusal(memberId))
-        return block('Task history is owned elsewhere or cannot be changed. Retry after its owner stops.', memberId);
-      if (this.pins.has(memberId) || isActive(memberId) || isLiveRecord(run) || row?.live ||
-        !['review', 'done', 'failed', 'cancelled'].includes(run.status))
-        return block('Task work is still active. Wait for it to finish or archive manually.', memberId);
-      if (run.waits?.some(wait => wait.kind === 'human' && wait.phase === 'open') || run.hasPendingPermission)
-        return block('Task needs an answer or permission. Open it to respond, or archive manually.', memberId);
-      if (run.delegation?.role === 'invalid') return block('Worker ownership is invalid. Inspect the task or archive manually.', memberId);
-      const facts = this.facts.peek(memberId);
-      if (!facts || facts.pendingAsk !== undefined) return block('Task has an unanswered question or unread history. Open it to respond, or archive manually.', memberId);
-      if (run.delegation?.role === 'worker' && this.readWorkerExecution(memberId)?.phase !== 'complete')
-        return block('Worker execution has not settled. Open the worker or archive manually.', memberId);
-      // Process and scratch cleanup evidence protects deletion, not reversible filing.
-      family.push(run);
-    }
-    if (family[0]?.delegation?.role === 'worker' || family[0]?.archived) return undefined;
-    return family;
+    return archiveStoreFamily({
+      db: this.db,
+      held: this.held,
+      deleted: this.deleted,
+      quarantined: this.quarantined,
+      pins: this.pins,
+      listWorkersOf: (parentId) => this.listWorkersOf(parentId),
+      setArchiveBlocker: (runId, blocker) => this.setArchiveBlocker(runId, blocker),
+      decodeRunRow,
+      decodeCold: (row) => this.decodeCold(row),
+      writeRefusal: (memberId) => this.writeRefusal(memberId),
+      factsPeek: (memberId) => this.facts.peek(memberId),
+      readWorkerExecution: (memberId) => this.readWorkerExecution(memberId),
+    }, id, isActive);
   }
 
   /** Blockers are feedback, never archive authority or cleanup permission. */
