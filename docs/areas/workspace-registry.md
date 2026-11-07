@@ -184,6 +184,30 @@ with a warning. `rollbackLegacyMigration(target)` renames a
 pending marker to `install.json.failed`; the next explicit migration overwrites
 the recorded pending destinations. Rollback never rewrites legacy registry data.
 
+With the switch on, boot keeps serving the legacy home after a server group
+rollback. The signal is an `installed` record without `dryRun` in the legacy
+`server.json` or `server-instances/`, plus target `install.json.failed` without
+a committed marker. Boot warns once to run `hsq server-migrate`. The selected
+legacy Home passes through CLI boot and the server lifecycle, including leases;
+the second preparation never tries to migrate that legacy Home into itself.
+The lifecycle refuses startup if preparation selects a different Home from the
+one the caller supplied. Its error names both roots. `startServer` runs this
+check before constructing home consumers, so an embedded caller must pass the
+Home returned by `prepareOperatorHome`, as CLI boot does.
+
+| Boot state | Selected home and action |
+| --- | --- |
+| Completed server, failed marker, no committed marker | Legacy home; no target writes; warn to retry `hsq server-migrate` |
+| Finished staged retry, including a prior failed marker | Pending target, read-only, for the group's health checks |
+| Committed target, including a prior failed marker | Target; normal boot |
+| Desktop, incomplete install or dry-run server, failed marker | Existing boot migration to the target |
+| Switch off | Existing legacy behavior |
+
+An explicit `hsq migrate` or successful `hsq server-migrate` recopies the current
+legacy data and commits the target, which clears the boot skip. The failed marker
+stays as diagnostic evidence. `migrate --dry-run` and legacy recovery actions do
+not commit a target or clear the skip. No new state marker or setting is used.
+
 `cez server-migrate` (`server-install/group-migrate.ts`, registered only with
 the switch on) is that caller. It holds every instance's install lock in the
 records home, sorted, for the whole run. Before the first platform move it

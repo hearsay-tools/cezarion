@@ -26,7 +26,9 @@ export function operatorHomeEntry(argv: readonly string[]): string | undefined {
 export function prepareOperatorHome(home: Home, command: string | undefined, env = process.env, migration?: MigrationBootOptions): Home {
   command ??= 'serve';
   if (!entries.includes(command)) return home;
-  if (prepareMigrationHome(home, env, migration)) return home;
+  const boot = prepareMigrationHome(home, env, migration);
+  if (boot.kind === 'staged') return home;
+  if (boot.kind === 'legacy') home = boot.home;
   authorizeHomeEntry(home, command, markerKind(command, env));
   try {
     if (['serve', 'init', 'run', 'backup'].includes(command) || registryFiles(home).some(path => existsSync(path))) {
@@ -60,16 +62,19 @@ export function serverInstanceForPort(home: Home, port: number): string {
   return 'default';
 }
 
-/** Prepare before server consumers read, then hold presence only for the listener's lifetime. */
+/** Refuse a changed Home before server consumers read; hold presence for the listener's lifetime. */
 export function prepareHomeLifecycle(home: Home, instance?: string, { rebrand = REBRAND_SWITCH } = {}): (server: ServerType) => void {
-  prepareOperatorHome(home, 'serve');
+  const preparedHome = prepareOperatorHome(home, 'serve', process.env, { enabled: rebrand });
+  if (preparedHome !== home) {
+    throw new Error(`[hsq] refusing to serve home ${home.root}: preparation selected ${preparedHome.root}. Prepare the home before starting the server.`);
+  }
   return server => {
     const listening = () => {
       const address = server.address();
       if (!address || typeof address !== 'object') return;
       try {
-        const name = instance ?? (rebrand ? serverInstanceForPort(home, address.port) : 'default');
-        const release = holdCockpitLease(home, address.port, name);
+        const name = instance ?? (rebrand ? serverInstanceForPort(preparedHome, address.port) : 'default');
+        const release = holdCockpitLease(preparedHome, address.port, name);
         server.once('close', () => { try { release(); } catch { /* Presence is advisory. */ } });
       } catch { /* A read-only home must not stop the cockpit. */ }
     };

@@ -26,3 +26,11 @@ to stdout and exits 0. Invalid arguments or recovery failures print an error to
 stderr and exit 1. Help exits 0. The action rejects `--dry-run` and does not
 start migration; the operator runs `hsq migrate` again. The entire `migrate`
 command and its help entry remain absent while `REBRAND_SWITCH` is disabled.
+
+With `REBRAND_SWITCH` enabled, a rolled-back server migration keeps boot on the
+legacy home while the target has `install.json.failed` and no committed marker.
+Boot prints one warning naming `hsq server-migrate`. A successful explicit
+`hsq migrate` or `hsq server-migrate` commits the target and clears this skip.
+The existing server records identify completed non-dry-run installs. Desktop
+boot, staged read-only health checks, saved formats and switch-off behavior stay
+unchanged.

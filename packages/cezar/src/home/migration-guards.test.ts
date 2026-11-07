@@ -73,7 +73,7 @@ it('with the default switch off, boot leaves legacy unchanged, migrates nothing,
   const { legacy, target, env } = migrationFixture();
   expect(REBRAND_SWITCH).toBe(false);
   const bytes = readFileSync(legacy.workspaceConfig);
-  expect(prepareMigrationHome(target, env, { legacy })).toBe(false);
+  expect(prepareMigrationHome(target, env, { legacy })).toEqual({ kind: 'ready' });
   prepareOperatorHome(legacy, 'serve', env);
   expect(readFileSync(legacy.workspaceConfig)).toEqual(bytes);
   expect(readMigrationRecord(target)).toBeUndefined();
