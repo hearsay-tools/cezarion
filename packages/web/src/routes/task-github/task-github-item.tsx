@@ -149,9 +149,9 @@ function ItemUnavailable({
   retryButton: ReactNode
 }) {
   const KindIcon = kind === 'pr' ? GitPullRequestIcon : CircleDotIcon
-  const url = taskReferences(run, repoBase).find(
-    (reference) => (reference.kind === 'PR') === (kind === 'pr') && reference.number === number,
-  )?.url
+  const url = taskReferences(run, repoBase).find((reference) => {
+    return (reference.kind === 'PR') === (kind === 'pr') && reference.number === number
+  })?.url
   return (
     <CenteredState
       icon={<KindIcon size={16} />}
