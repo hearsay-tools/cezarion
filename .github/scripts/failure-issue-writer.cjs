@@ -30,10 +30,8 @@ async function createFailureWriter({github,owner,repo,log=()=>{},maxIssues=Infin
     return comments.get(number);
   }
 
-  async function reportStep({run,job,step,causes,labels=['area-ci'],bodyFor=defaultBodyFor}) {
-    const runUrl=`https://github.com/${owner}/${repo}/actions/runs/${run.id}/attempts/${run.run_attempt}`;
-    const prefix=`<!-- cez-failure-occurrence:v1:${run.id}:${run.run_attempt}:${job.id}:${step.number}:`;
-    const failureIssues=issues.filter(issue=>/<!-- cez-failure-signature:v1:[a-f0-9]{64} -->/.test(issue.body||''));
+  // Signatures this run/job/step already recorded, with the issue that holds each.
+  async function recordedSignatures(failureIssues,prefix) {
     const recorded=new Map();
     for(const issue of failureIssues) {
       const evidence=[issue.body,...(await commentsFor(issue)).map(entry=>entry.body||'')].join('\n');
@@ -42,40 +40,69 @@ async function createFailureWriter({github,owner,repo,log=()=>{},maxIssues=Infin
         if(key) recorded.set(key,issue);
       }
     }
-    const fallback=causesForStep({run,job,step,log:''})[0];
-    let effectiveCauses=causes;
+    return recorded;
+  }
+
+  // Replaces recorded empty-log causes with merged evidence, or with the
+  // previously recorded causes when this step's own log matches them.
+  function effectiveCausesFor(causes,fallback,recorded) {
     if(fallback && recorded.has(fallback.signature)) {
-      effectiveCauses=[{...fallback,excerpt:causes.map(cause=>cause.excerpt).join('\n').slice(0,4000)}];
-    } else if(fallback && causes[0]?.signature===fallback.signature && recorded.size) {
-      effectiveCauses=[...recorded].map(([signature,issue])=>({...fallback,signature,title:sanitize(issue.title)}));
+      return [{...fallback,excerpt:causes.map(cause=>cause.excerpt).join('\n').slice(0,4000)}];
     }
+    if(fallback && causes[0]?.signature===fallback.signature && recorded.size) {
+      return [...recorded].map(([signature,issue])=>({...fallback,signature,title:sanitize(issue.title)}));
+    }
+    return causes;
+  }
+
+  // An issue that already carries this occurrence marker, and whether a
+  // comment (not just the body) recorded it.
+  async function findExistingTarget(matches,occurrence) {
+    let target,alreadyReported=false;
+    for(const issue of matches) {
+      const entries=await commentsFor(issue);
+      if(entries.some(comment=>comment.body?.includes(occurrence))) {target=issue;alreadyReported=true;break;}
+      if((issue.body||'').includes(occurrence)) target=issue;
+    }
+    return {target,alreadyReported};
+  }
+
+  async function createTargetIssue({cause,matches,failureIssues,runUrl,signature,occurrence,labels,bodyFor}) {
+    if(createdIssues>=maxIssues) throw new FailureWriterLimitError('issue-limit');
+    const previous=matches.find(issue=>issue.state==='closed');
+    const subject=cause.title.match(/([a-z0-9_.-]+\.(?:test|spec)\.[cm]?[jt]sx?)/i)?.[1]||cause.stage;
+    const body=bodyFor({cause,runUrl,signature,occurrence,previous:previous?`https://github.com/${owner}/${repo}/issues/${previous.number}`:undefined});
+    const {data:created}=await github.request('POST /repos/{owner}/{repo}/issues',{...base,title:`[Task]: Investigate ${subject} ${cause.kind==='timeout'?'timeout':'failure'}`,labels,body});
+    createdIssues++;issues.push(created);failureIssues.push(created);comments.set(created.number,[]);
+    return created;
+  }
+
+  // Deduplicates, reports and logs one cause of one step. Returns its single result.
+  async function reportCause({cause,failureIssues,run,job,step,runUrl,labels,bodyFor}) {
+    const signature=marker('signature',cause.signature);
+    const occurrence=marker('occurrence',`${run.id}:${run.run_attempt}:${job.id}:${step.number}:${cause.signature}`);
+    const matches=failureIssues.filter(issue=>(issue.body||'').includes(signature)).sort((a,b)=>b.number-a.number);
+    const {target:found,alreadyReported}=await findExistingTarget(matches,occurrence);
+    if(alreadyReported) return {issue:found,cause,reported:false};
+    if(createdOccurrences>=maxOccurrences) throw new FailureWriterLimitError('occurrence-limit');
+    let target=found||matches.find(issue=>issue.state==='open');
+    if(!target) target=await createTargetIssue({cause,matches,failureIssues,runUrl,signature,occurrence,labels,bodyFor});
+    const comment=commentFor({cause,run,job,step,runUrl,jobUrl:`https://github.com/${owner}/${repo}/actions/runs/${run.id}/job/${job.id}`,occurrence});
+    await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/comments',{...base,issue_number:target.number,body:comment});
+    createdOccurrences++;(await commentsFor(target)).push({body:comment});
+    log(`Reported run ${run.id} attempt ${run.run_attempt}, job ${job.id}, step ${step.number} in issue #${target.number}.`);
+    return {issue:target,cause,reported:true};
+  }
+
+  async function reportStep({run,job,step,causes,labels=['area-ci'],bodyFor=defaultBodyFor}) {
+    const runUrl=`https://github.com/${owner}/${repo}/actions/runs/${run.id}/attempts/${run.run_attempt}`;
+    const prefix=`<!-- cez-failure-occurrence:v1:${run.id}:${run.run_attempt}:${job.id}:${step.number}:`;
+    const failureIssues=issues.filter(issue=>/<!-- cez-failure-signature:v1:[a-f0-9]{64} -->/.test(issue.body||''));
+    const recorded=await recordedSignatures(failureIssues,prefix);
+    const effectiveCauses=effectiveCausesFor(causes,causesForStep({run,job,step,log:''})[0],recorded);
     const results=[];
     for(const cause of effectiveCauses) {
-      const signature=marker('signature',cause.signature);
-      const occurrence=marker('occurrence',`${run.id}:${run.run_attempt}:${job.id}:${step.number}:${cause.signature}`);
-      const matches=failureIssues.filter(issue=>(issue.body||'').includes(signature)).sort((a,b)=>b.number-a.number);
-      let target,alreadyReported=false;
-      for(const issue of matches) {
-        const entries=await commentsFor(issue);
-        if(entries.some(comment=>comment.body?.includes(occurrence))) {target=issue;alreadyReported=true;break;}
-        if((issue.body||'').includes(occurrence)) target=issue;
-      }
-      if(alreadyReported) {results.push({issue:target,cause,reported:false});continue;}
-      if(createdOccurrences>=maxOccurrences) throw new FailureWriterLimitError('occurrence-limit');
-      target ||= matches.find(issue=>issue.state==='open');
-      if(!target) {
-        if(createdIssues>=maxIssues) throw new FailureWriterLimitError('issue-limit');
-        const previous=matches.find(issue=>issue.state==='closed');
-        const subject=cause.title.match(/([a-z0-9_.-]+\.(?:test|spec)\.[cm]?[jt]sx?)/i)?.[1]||cause.stage;
-        const body=bodyFor({cause,runUrl,signature,occurrence,previous:previous?`https://github.com/${owner}/${repo}/issues/${previous.number}`:undefined});
-        const {data:created}=await github.request('POST /repos/{owner}/{repo}/issues',{...base,title:`[Task]: Investigate ${subject} ${cause.kind==='timeout'?'timeout':'failure'}`,labels,body});
-        createdIssues++;target=created;issues.push(created);failureIssues.push(created);comments.set(created.number,[]);
-      }
-      const comment=commentFor({cause,run,job,step,runUrl,jobUrl:`https://github.com/${owner}/${repo}/actions/runs/${run.id}/job/${job.id}`,occurrence});
-      await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/comments',{...base,issue_number:target.number,body:comment});
-      createdOccurrences++;(await commentsFor(target)).push({body:comment});
-      results.push({issue:target,cause,reported:true});
-      log(`Reported run ${run.id} attempt ${run.run_attempt}, job ${job.id}, step ${step.number} in issue #${target.number}.`);
+      results.push(await reportCause({cause,failureIssues,run,job,step,runUrl,labels,bodyFor}));
     }
     return results;
   }
