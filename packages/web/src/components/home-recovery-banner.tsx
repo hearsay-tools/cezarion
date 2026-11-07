@@ -36,7 +36,9 @@ function HomeRecoveryRow({ file, editable }: { file: HomeRecoveryFile; editable:
           onClick={() => run('import')}>Import changes from the old home</Button>
           : <Button type="button" data-action="restore" disabled={busy || !file.canRestore} onClick={() => run('restore')}>Restore</Button>}
         <Button type="button" variant="outline" data-action="accept" disabled={busy} onClick={() => run('accept')}>{legacy ? 'Ignore' : 'Accept as found'}</Button>
-      </div> : editable === false && <p className="basis-full">{legacy ? 'Only the host operator can import or ignore this file.' : 'Only the host operator can restore or accept this file.'}
+      </div> : editable === false && <p className="basis-full">{legacy
+        ? (file.canImport ? 'Only the host operator can import or ignore this file.' : 'Only the host operator can ignore this file.')
+        : 'Only the host operator can restore or accept this file.'}
         {file.file.startsWith('remote-settings/') && (legacy
           ? <> {file.canImport && <><code>cez backup import {file.file}</code> or </>}<code>cez backup ignore {file.file}</code></>
           : <> <code>cez backup restore {file.file}</code></>)}

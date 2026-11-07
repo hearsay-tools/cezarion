@@ -49,6 +49,7 @@ export function readLegacySource(record: MigrationRecord, entry: MigrationFile):
 export function legacyWatchDirectories(home: Home, enabled: boolean): string[] {
   try {
     const record = legacyMigration(home, enabled);
-    return record ? [...new Set([record.legacyRoot, ...legacyEntries(record).map(entry => dirname(join(record.legacyRoot, entry.path)))])] : [];
+    return record ? [...new Set([record.legacyRoot, join(record.legacyRoot, 'remote-settings'),
+      join(record.legacyRoot, 'server-instances'), ...legacyEntries(record).map(entry => dirname(join(record.legacyRoot, entry.path)))])] : [];
   } catch { return []; }
 }

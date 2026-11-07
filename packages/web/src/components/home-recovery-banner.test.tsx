@@ -149,7 +149,7 @@ it.each([true, false])('gives host CLI actions for legacy grants with canImport=
   state([{ ...file('remote-settings/4321.json', 'legacy-change'), reason: 'legacy-change', canImport }])
   render(<HomeRecoveryBanner />)
   expect(screen.queryByRole('button')).toBeNull()
-  expect(screen.getByText('Only the host operator can import or ignore this file.', { exact: false })).toBeTruthy()
+  expect(screen.getByText(canImport ? 'Only the host operator can import or ignore this file.' : 'Only the host operator can ignore this file.', { exact: false })).toBeTruthy()
   expect(screen.getByText('cez backup ignore remote-settings/4321.json')).toBeTruthy()
   expect(screen.queryByText('cez backup import remote-settings/4321.json') !== null).toBe(canImport)
   expect(screen.queryByText('cez backup restore remote-settings/4321.json')).toBeNull()

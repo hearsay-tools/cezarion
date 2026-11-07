@@ -155,6 +155,43 @@ it('creates no legacy watcher with the shipped switch off', async () => {
   expect(watch.mock.calls.some(([path]) => String(path).startsWith(legacy.root))).toBe(false);
 });
 
+async function filesystemSignal(signal: Promise<void>): Promise<void> {
+  let guard: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([signal, new Promise<never>((_, reject) => {
+      // bound: actual filesystem delivery after a completed write, not a product delay.
+      guard = setTimeout(() => reject(new Error('No legacy family change signal')), 5000);
+    })]);
+  } finally { if (guard) clearTimeout(guard); }
+}
+
+it.each(['remote-settings', 'server-instances'])('watches an empty legacy %s directory before its first file', async family => {
+  const { legacy, home } = fixture(true);
+  const directory = join(legacy.root, family);
+  rmSync(directory, { recursive: true, force: true });
+  const watch = vi.mocked(fs.watch);
+  watch.mockClear();
+  let ready!: () => void, rebound!: () => void, changed!: () => void;
+  const initial = new Promise<void>(resolve => { ready = resolve; });
+  const watching = new Promise<void>(resolve => { rebound = resolve; });
+  const observed = new Promise<void>(resolve => { changed = resolve; });
+  const file = `${family}/late.json`;
+  const release = subscribeHomeRecovery(home, () => {
+    ready();
+    if (watch.mock.calls.some(([path]) => String(path) === directory)) rebound();
+    if (row(home, file)) changed();
+  }, true);
+  try {
+    await filesystemSignal(initial);
+    mkdirSync(directory);
+    expect(legacyWatchDirectories(home, true)).toContain(directory);
+    await filesystemSignal(watching); // The root event has rebound to the empty family.
+    writeFileSync(join(directory, 'late.json'), '{}');
+    await filesystemSignal(observed);
+    expect(row(home, file)).toMatchObject({ reason: 'legacy-change', canImport: true });
+  } finally { release(); }
+});
+
 it('refuses Import before replacement when a required backup fails, but lets Ignore proceed', () => {
   const { legacy, home } = fixture();
   writeFileSync(legacy.workspaceConfig, JSON.stringify({ ...base, late: true }));
