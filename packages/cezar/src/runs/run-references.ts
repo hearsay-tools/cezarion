@@ -5,12 +5,20 @@
  * the record write rules (`record-write-rules.ts`) both apply them.
  */
 import { isDeepStrictEqual } from 'node:util';
+import { runPullRequestSchema } from '@open-mercato/cezar-contract/runs';
+import type { RunEvent, RunPullRequest } from '@open-mercato/cezar-contract';
 import { mergePullRequests } from './pull-requests.ts';
 import { extractTaskRefs, isRepoScopedRef, MAX_REF } from './task-refs.ts';
 import type { RepoHandle, RunRecord } from './store.ts';
 
 export const PR_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/;
 export const ISSUE_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+/;
+
+// The transcript auto-link is convenience only (the cockpit's own `gh pr create` path sets the
+// URL authoritatively). Adopt a PR URL ONLY when the agent actually CREATED one — a task that
+// reviews or merely references an existing PR must not get mislabeled with its number (#fake-pr).
+const CREATED_PR_RE =
+  /\b(?:gh\s+pr\s+create|pull\s*request\s+created|created\s+(?:a\s+)?(?:draft\s+)?(?:pr|pull\s*request)|opened\s+(?:a\s+)?(?:draft\s+)?pull\s*request)\b/i;
 
 /** Referenced-tier working-set cap (spec 2026-07-16-pr-autodiscovery): past
  *  this many distinct PRs the conversation is a survey, not a subject. */
@@ -223,4 +231,194 @@ export function trackReferencedIssues(
     }
   }
   return candidatesChanged || run.referencedIssueUrl !== prev || numberChanged;
+}
+
+/**
+ * Every scannable string of one persisted event: the v1 top-level fields plus
+ * the protocol-v2 `item.*` content (nested — the reason v2 streams were
+ * invisible to the janitor, #407). Reasoning items are skipped: thinking text
+ * speculates about PRs the task never touches.
+ */
+function eventTextFragments(event: Record<string, unknown>): string[] {
+  const fragments: string[] = [];
+  for (const key of ['text', 'result', 'message'] as const) {
+    const value = event[key];
+    if (typeof value === 'string') fragments.push(value);
+  }
+  const item = event.item;
+  if (item && typeof item === 'object' && (item as Record<string, unknown>).kind !== 'reasoning') {
+    const it = item as Record<string, unknown>;
+    for (const key of ['text', 'title', 'output'] as const) {
+      const value = it[key];
+      if (typeof value === 'string') fragments.push(value);
+    }
+    if (typeof it.input === 'string') {
+      fragments.push(it.input);
+    } else if (it.input !== undefined) {
+      try {
+        fragments.push(JSON.stringify(it.input));
+      } catch {
+        // circular input — skip it
+      }
+    }
+  }
+  return fragments;
+}
+
+/**
+ * Creation claims come from agent prose or cezar-rendered tool titles, never arbitrary tool
+ * output/input. The claimed URL may still come from the event’s command result.
+ */
+function eventCreationClaimFragments(event: Record<string, unknown>): string[] {
+  const fragments: string[] = [];
+  const nested = event.item;
+  if (event.parentItemId !== undefined || (nested && typeof nested === 'object' &&
+    (nested as Record<string, unknown>).parentItemId !== undefined)) return fragments;
+  // A `tool-result` event's `result` IS raw command output; on every other event the top-level
+  // text is the agent's own.
+  if (event.type !== 'tool-result') {
+    for (const key of ['text', 'result', 'message'] as const) {
+      const value = event[key];
+      if (typeof value === 'string') fragments.push(value);
+    }
+  }
+  const item = event.item;
+  if (item && typeof item === 'object') {
+    const it = item as Record<string, unknown>;
+    if (it.kind === 'message' && it.role === 'assistant' && typeof it.text === 'string') {
+      fragments.push(it.text);
+    }
+    if (it.kind === 'tool' && typeof it.title === 'string') fragments.push(it.title);
+  }
+  return fragments;
+}
+
+/** Agent-authored event text, matching the trust boundary used by task markers.
+ * Tool titles, inputs, and outputs remain visible to the referenced-URL tier,
+ * but must never promote an issue into the shared `issueNumber` field (#538). */
+function eventAgentTextFragments(event: Record<string, unknown>): string[] {
+  const fragments: string[] = [];
+  for (const key of ['text', 'result'] as const) {
+    const value = event[key];
+    if (typeof value === 'string') fragments.push(value);
+  }
+  const item = event.item;
+  if (item && typeof item === 'object') {
+    const it = item as Record<string, unknown>;
+    if (it.kind === 'message' && it.role === 'assistant' && typeof it.text === 'string') {
+      fragments.push(it.text);
+    }
+  }
+  return fragments;
+}
+
+/**
+ * The PR URL a creation phrase *introduces*, or undefined. The created URL is
+ * the first one at or after the `CREATED_PR_RE` phrase — a PR the same event
+ * merely referenced *earlier* (e.g. the issue's own linked `…/pull/1`) must not
+ * be mistaken for the one just created (#495). Falls back to the last URL
+ * *before* the phrase for `gh` orderings that print the URL first. Selection
+ * only — the caller decides whether creation phrasing is present.
+ */
+function createdPrUrl(haystack: string): string | undefined {
+  const phrase = CREATED_PR_RE.exec(haystack);
+  if (!phrase) return undefined;
+  const after = PR_URL_RE.exec(haystack.slice(phrase.index));
+  if (after) return after[0];
+  let before: string | undefined;
+  for (const m of haystack.slice(0, phrase.index).matchAll(new RegExp(PR_URL_RE.source, 'g'))) {
+    before = m[0];
+  }
+  return before;
+}
+
+/** Associate one URL per claim; command outputs remain separate from authored claims. */
+function createdPrUrls(claim: string, haystack: string, toolOutput?: string): string[] {
+  const phrases = [...claim.matchAll(new RegExp(CREATED_PR_RE.source, 'gi'))];
+  if (!phrases.length) return [];
+  const urls = phrases.flatMap((phrase, index) => {
+    const preceding = claim.slice(index ? phrases[index - 1]!.index! + phrases[index - 1]![0].length : 0, phrase.index);
+    const before = [...preceding.matchAll(new RegExp(PR_URL_RE.source, 'g'))].at(-1);
+    // URL-first reports put only punctuation/whitespace between the URL and its claim.
+    // An earlier URL followed by unrelated prose is still context, not a created resource.
+    if (before && /^[\s:—–-]*(?:draft\s+)?$/i.test(preceding.slice(before.index! + before[0].length))) return [before[0]];
+    const after = PR_URL_RE.exec(claim.slice(phrase.index, phrases[index + 1]?.index))?.[0];
+    return after ? [after] : [];
+  });
+  if (!urls.length && toolOutput !== undefined) {
+    // gh prints one URL per successful command. Never promote more output links than commands.
+    const outputs = [...toolOutput.matchAll(new RegExp(PR_URL_RE.source, 'g'))];
+    urls.push(...outputs.slice(0, phrases.length).map(match => match[0]));
+  }
+  if (!urls.length && phrases.length === 1) {
+    const url = createdPrUrl(`${claim} ${haystack}`);
+    if (url) urls.push(url);
+  }
+  return [...new Set(urls)];
+}
+
+/**
+ * The janitor trick: agents print the PR URL after `gh pr create` — the
+ * first one spotted in the transcript becomes the run's PR link. Scans v1
+ * fields AND nested v2 `item.*` content (#407). A URL without the created
+ * phrasing still feeds the referenced tier (the PR the task is about) —
+ * and the phrasing itself is only believed from a source that can speak
+ * FOR this run (`eventCreationClaimFragments`), never from quoted output.
+ *
+ * Extracted from `RunStore.appendEvent` so the append-and-publish body and
+ * reference discovery are two named steps. Call it only after the event is
+ * persisted, indexed and published: discovery reads the event text and may
+ * still update and touch the run. `accumulatePullRequests` is the store's
+ * staging callback (`stagePullRequests` with the store's repo handle);
+ * `touch` is the store's dirty/save/fan-out signal.
+ */
+export function scanEventReferences(
+  run: RunRecord,
+  event: RunEvent,
+  repoHandle: RepoHandle | null | undefined,
+  accumulatePullRequests: (run: RunRecord, entries: readonly RunPullRequest[]) => boolean,
+  touch: (run: RunRecord) => void,
+): void {
+  const haystack = eventTextFragments(event).join(' ');
+  const agentHaystack = eventAgentTextFragments(event).join(' ');
+  // The creation CLAIM is read from a narrower source than the URL is
+  // (`eventCreationClaimFragments`), which is why the two are searched
+  // together rather than the haystack alone: the phrase must land in the
+  // trusted prefix, and the link may come from anywhere after it.
+  const claim = eventCreationClaimFragments(event).join(' ');
+  if (haystack.length > 0) {
+    let changed = false;
+    // One associated URL per trusted creation claim; replayed v1/v2 reports merge by identity.
+    const item = event.item as Record<string, unknown> | undefined;
+    const toolOutput = item?.kind === 'tool' && typeof item.output === 'string' ? item.output : undefined;
+    const created = createdPrUrls(claim, haystack, toolOutput);
+    for (const url of created) {
+      const number = refUrlNumber(url);
+      const parsed = runPullRequestSchema.safeParse({ number, url, source: 'created' });
+      if (!parsed.success) continue;
+      changed = accumulatePullRequests(run, [parsed.data]) || changed;
+      if (!run.pullRequestUrl) { run.pullRequestUrl = url; changed = true; }
+    }
+    if (created.length > 0) {
+      const resolved = resolveReferencedRef(
+        run.referencedPrCandidates ?? [], run.task, referencedPrDeclaration(run), repoHandle,
+      );
+      if (resolved !== run.referencedPullRequestUrl) {
+        run.referencedPullRequestUrl = resolved;
+        changed = true;
+      }
+    } else if (!run.pullRequestUrl && PR_URL_RE.test(haystack) && trackReferencedPrs(run, haystack, repoHandle)) {
+      changed = true;
+    }
+    // Issue links feed their own referenced tier regardless of PR state —
+    // a task that created a PR can still be ABOUT an issue
+    // (spec 2026-07-21-report-ref-discovery).
+    if (
+      ISSUE_URL_RE.test(haystack) &&
+      trackReferencedIssues(run, haystack, repoHandle, agentHaystack)
+    ) {
+      changed = true;
+    }
+    if (changed) touch(run);
+  }
 }
