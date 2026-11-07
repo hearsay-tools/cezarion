@@ -212,7 +212,6 @@ it.each([
   ['project', 1440, 900, 'preview'], ['project', 360, 640, 'preview'],
   ['global', 1440, 900, 'preview'], ['global', 360, 640, 'preview'],
   ['global', 1440, 900, 'storage'],
-  // A Finished group below the threshold renders flat above the virtual Working group.
   ['project', 1440, 900, 'flat fold'], ['project', 360, 640, 'flat fold'], ['project', 360, 640, 'flat storage'],
 ] as const)('anchors %s at %s x %s after an earlier %s collapses', async (scope, width, height, kind) => {
   const change = kind.replace('flat ', '') as 'fold' | 'preview' | 'storage'
@@ -220,10 +219,12 @@ it.each([
   try {
     await large.control({ update: large.runs.slice(0, scope === 'global' ? 1 : kind.startsWith('flat') ? 80 : 120).map(run => ({ ...run, patch: { status: RUN_STATUS.done } })) })
     browser.setViewport(width, height)
-    browser.goto(`${large.origin}${scope === 'project' ? '/p/boot/' : '/tasks'}?tasks=virtual`)
+    // The flat cases keep the default tiers: 80 Finished rows render flat, 230 Working rows virtual.
+    browser.goto(`${large.origin}${scope === 'project' ? '/p/boot/' : '/tasks'}${kind.startsWith('flat') ? '' : '?tasks=virtual'}`)
     const route = `[data-route="${scope === 'project' ? 'tasks' : 'global-tasks'}"]`
     const finished = `${route} [data-bucket="Finished"]`
     browser.waitForFunction(`document.querySelector('${finished} [data-run-id]') !== null && window.__cezIdle`)
+    if (kind.startsWith('flat')) browser.waitForFunction(`document.querySelector('${finished} [data-slot="task-list-items"]').dataset.virtualized === 'false' && document.querySelector('${route} [data-bucket="Working"] [data-slot="task-list-items"]').dataset.virtualized === 'true'`)
     const preview = `${finished} [data-run-id] button[data-task-control="resources"]`
     if (change === 'preview') {
       // Pin this control so the same expanded row remains mounted above the viewport.
