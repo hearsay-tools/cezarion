@@ -26,6 +26,29 @@ const realHome = join(userInfo().homedir, '.cezar');
 afterEach(() => { vi.unstubAllEnvs(); vi.mocked(existsSync).mockRestore(); vi.clearAllMocks(); });
 
 describe('home write guard with HOME pinned to a sandbox', () => {
+  it.each(['VITEST', 'NODE_TEST_CONTEXT', 'JEST_WORKER_ID', 'STRYKER_MUTATOR'])('blocks a real-home sandbox before any filesystem mutation under %s', async (runner) => {
+    vi.resetModules();
+    const { Home } = await import('./home/home.ts');
+    for (const key of Object.keys(process.env)) {
+      if (['VITEST', 'NODE_TEST_CONTEXT', 'JEST_WORKER_ID'].includes(key) || key.startsWith('STRYKER_')) vi.stubEnv(key, undefined);
+    }
+    vi.stubEnv(runner, '1');
+    vi.stubEnv('HOME', '/tmp/cez-guard-sandbox');
+    expect(() => Home.sandbox(realHome)).toThrow('refusing to write');
+    for (const mutation of [mkdirSync, writeFileSync]) expect(mutation).not.toHaveBeenCalled();
+  });
+
+  it('allows sandbox creation outside test runners', async () => {
+    vi.resetModules();
+    const { Home } = await import('./home/home.ts');
+    for (const key of Object.keys(process.env)) {
+      if (['VITEST', 'NODE_TEST_CONTEXT', 'JEST_WORKER_ID'].includes(key) || key.startsWith('STRYKER_')) vi.stubEnv(key, undefined);
+    }
+    expect(Home.sandbox(realHome).root).toBe(realHome);
+    expect(mkdirSync).toHaveBeenCalledWith(realHome, { recursive: true, mode: 0o700 });
+    expect(writeFileSync).toHaveBeenCalledWith(join(realHome, 'install.json'), expect.any(String), { flag: 'wx', mode: 0o600 });
+  });
+
   it.each(['atomic JSON', 'agent accounts', 'remote settings', 'server state'])('blocks %s before any filesystem mutation', async (writer) => {
     vi.stubEnv('HOME', '/tmp/cez-guard-sandbox');
     useTestHome(testHome({ CEZ_HOME: realHome }));

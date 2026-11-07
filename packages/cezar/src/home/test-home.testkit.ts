@@ -1,5 +1,3 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { Home } from './home.ts';
 
 let pinHome: ((home: Home | undefined) => void) | undefined;
@@ -17,5 +15,7 @@ export function useTestHome(home: Home | undefined): void {
 
 /** Widely used test constructors share the selected sandbox rather than resolving a product Home. */
 export function testHome(env: NodeJS.ProcessEnv = process.env): Home {
-  return Home.sandbox(env.CEZ_HOME || process.env.CEZ_HOME || join(homedir(), '.cezar'));
+  const root = env.CEZ_HOME || process.env.CEZ_HOME;
+  if (!root) throw new Error('Test Home requires a sandbox CEZ_HOME; run with the shared test setup.');
+  return Home.sandbox(root);
 }

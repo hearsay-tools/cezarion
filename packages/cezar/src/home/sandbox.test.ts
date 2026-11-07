@@ -1,8 +1,25 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative } from 'node:path';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { Home } from './home.ts';
+import { testHome, useTestHome } from './test-home.testkit.ts';
+
+it('requires a configured test sandbox before creating any default home', () => {
+  const selected = testHome();
+  const root = mkdtempSync(join(tmpdir(), 'cez-home-unconfigured-'));
+  try {
+    vi.stubEnv('HOME', root);
+    vi.stubEnv('USERPROFILE', root);
+    useTestHome(undefined);
+    expect(() => testHome({})).toThrow('Test Home requires a sandbox CEZ_HOME');
+    expect(existsSync(join(root, '.cezar'))).toBe(false);
+  } finally {
+    useTestHome(selected);
+    vi.unstubAllEnvs();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 it('creates a test marker and contains all paths, including caches, in its directory', () => {
   const root = mkdtempSync(join(tmpdir(), 'cez-home-sandbox-'));

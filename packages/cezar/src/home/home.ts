@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 
 /** Resolved cockpit paths. Legacy cache paths deliberately have a different root. */
 export interface Home {
@@ -55,6 +56,7 @@ export function homePaths(root: string, cache: string, override: string | undefi
 /** Test homes contain every cockpit path, including caches, below the supplied directory. */
 export const Home = Object.freeze({
   sandbox(dir: string): Home {
+    assertCezarHomeWriteIsSandboxed(dir);
     const home = homePaths(dir, join(dir, '.cache', 'cez'), dir);
     const marker = join(dir, 'install.json');
     mkdirSync(dir, { recursive: true, mode: 0o700 });

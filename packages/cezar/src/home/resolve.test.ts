@@ -11,6 +11,8 @@ import { cezCacheDir, resolveChromium } from '../preview/chromium.ts';
 import { resolveHome } from './resolve.ts';
 import { REBRAND_SWITCH } from './switch.ts';
 
+// Shared setup now loads the write guard before this file installs its OS-home mock.
+vi.hoisted(() => vi.resetModules());
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => '/home/operator' }));
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 

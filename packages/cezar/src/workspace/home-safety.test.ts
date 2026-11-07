@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertCezarHomeWriteIsSandboxed, workspaceConfigPath } from '../paths.ts';
-import { atomicWriteJsonSync, loadWorkspaceConfig, mergeWriteWorkspaceConfig } from './config.ts';
+import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from './config.ts';
 
 vi.mock('node:os', async (importOriginal) => {
   const os = await importOriginal<typeof import('node:os')>();
@@ -86,7 +86,10 @@ describe('cezar home write safety', () => {
     expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((p) => p.id)).toEqual(['shop']);
   });
 
-  it('refuses a write into the real cezar home while running under vitest', () => {
+  it('refuses a write into the real cezar home while running under vitest', async () => {
+    // Reload the writer so its guard observes this file's OS-account mock after shared setup.
+    vi.resetModules();
+    const { atomicWriteJsonSync } = await import('./config.ts');
     // Model the account home without ever writing the host account's files.
     vi.mocked(userInfo).mockReturnValue({ ...userInfo(), homedir: fakeUserHome });
     process.env.HOME = fakeUserHome;
@@ -98,7 +101,9 @@ describe('cezar home write safety', () => {
     expect(existsSync(join(fakeUserHome, '.cezar'))).toBe(false);
   });
 
-  it('leaves an existing real-home registry byte-for-byte intact when a leaked write is refused', () => {
+  it('leaves an existing real-home registry byte-for-byte intact when a leaked write is refused', async () => {
+    vi.resetModules();
+    const { atomicWriteJsonSync } = await import('./config.ts');
     // Model the account home without ever writing the host account's files.
     vi.mocked(userInfo).mockReturnValue({ ...userInfo(), homedir: fakeUserHome });
     process.env.HOME = fakeUserHome;
