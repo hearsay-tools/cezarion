@@ -108,28 +108,39 @@ function isToolStart(value: Record<string, unknown>): boolean {
   return Boolean(string(value.toolCallId) && string(value.toolName));
 }
 
+/** First `get_state` response names the session; later ones are ignored. */
+function mapPiSessionStart(data: Record<string, unknown>, state: PiUiMapperState): PiUiMapping | undefined {
+  const sessionId = string(data.sessionId);
+  if (!sessionId || state.sessionStarted) return undefined;
+  const model = isRecord(data.model) ? string(data.model.id) : undefined;
+  return {
+    events: [{ type: 'session.started', sessionId, backend: 'pi', ...(model ? { model } : {}) }],
+    state: { ...state, sessionStarted: true, sessionId },
+  };
+}
+
+/** Map a `response` frame: session discovery from `get_state`, or a failed command. */
+function mapPiResponse(value: Record<string, unknown>, state: PiUiMapperState): PiUiMapping {
+  if (value.command === 'get_state' && value.success === true && isRecord(value.data)) {
+    const started = mapPiSessionStart(value.data, state);
+    if (started) return started;
+  }
+  if (value.success === false) {
+    return {
+      events: [{ type: 'session.error', message: rpcError(value), fatal: false }],
+      state,
+    };
+  }
+  return { events: [], state };
+}
+
+function piExtensionErrorMessage(value: Record<string, unknown>): string {
+  return string(value.error) ?? string(value.message) ?? 'pi extension error';
+}
+
 export function mapPiRpcMessage(value: unknown, state: PiUiMapperState): PiUiMapping {
   if (!isRecord(value) || typeof value.type !== 'string') return { events: [], state };
-
-  if (value.type === 'response') {
-    if (value.command === 'get_state' && value.success === true && isRecord(value.data)) {
-      const sessionId = string(value.data.sessionId);
-      if (sessionId && !state.sessionStarted) {
-        const model = isRecord(value.data.model) ? string(value.data.model.id) : undefined;
-        return {
-          events: [{ type: 'session.started', sessionId, backend: 'pi', ...(model ? { model } : {}) }],
-          state: { ...state, sessionStarted: true, sessionId },
-        };
-      }
-    }
-    if (value.success === false) {
-      return {
-        events: [{ type: 'session.error', message: rpcError(value), fatal: false }],
-        state,
-      };
-    }
-    return { events: [], state };
-  }
+  if (value.type === 'response') return mapPiResponse(value, state);
 
   switch (value.type) {
     case 'message_update':
@@ -150,54 +161,79 @@ export function mapPiRpcMessage(value: unknown, state: PiUiMapperState): PiUiMap
       return mapActivity(value, state, mapToolEnd);
     case 'agent_settled':
       return completeTurn(state.stopReason, state);
-    case 'extension_error': {
-      const message = string(value.error) ?? string(value.message) ?? 'pi extension error';
-      return { events: [{ type: 'session.error', message, fatal: false }], state };
-    }
+    case 'extension_error':
+      return { events: [{ type: 'session.error', message: piExtensionErrorMessage(value), fatal: false }], state };
     default:
       return { events: [], state };
   }
 }
 
-function mapMessageUpdate(value: Record<string, unknown>, state: PiUiMapperState): PiUiMapping {
-  const update = isRecord(value.assistantMessageEvent) ? value.assistantMessageEvent : undefined;
-  const updateType = update ? string(update.type) : undefined;
-  const contentIndex = update ? number(update.contentIndex) ?? 0 : 0;
-  if (!update || !updateType || !state.turnId) return { events: [], state };
+/** The `assistantMessageEvent` payload of a `message_update`, with its type and content index. */
+interface PiAssistantEventFrame {
+  readonly update: Record<string, unknown>;
+  readonly type: string;
+  readonly contentIndex: number;
+}
 
-  if (updateType === 'done') {
+function piAssistantEvent(value: Record<string, unknown>): PiAssistantEventFrame | undefined {
+  const update = isRecord(value.assistantMessageEvent) ? value.assistantMessageEvent : undefined;
+  const type = update ? string(update.type) : undefined;
+  if (!update || !type) return undefined;
+  return { update, type, contentIndex: number(update.contentIndex) ?? 0 };
+}
+
+/** Terminal `done`/`error` updates set the stop reason; `error` also latches a provider failure. */
+function mapMessageTerminal(
+  type: string,
+  update: Record<string, unknown>,
+  state: PiUiMapperState,
+): PiUiMapping | undefined {
+  if (type === 'done') {
     return {
       events: [],
       state: { ...state, stopReason: mapPiMessageStopReason(string(update.reason)) },
     };
   }
-  if (updateType === 'error') {
-    const reason: StopReason = string(update.reason) === 'aborted' ? 'cancelled' : 'error';
-    const error = isRecord(update.error) ? string(update.error.errorMessage) : undefined;
-    return {
-      events: [],
-      state: { ...state, stopReason: reason, latchedProviderError: error ?? `pi model ${reason}` },
-    };
-  }
+  if (type !== 'error') return undefined;
+  const reason: StopReason = string(update.reason) === 'aborted' ? 'cancelled' : 'error';
+  const error = isRecord(update.error) ? string(update.error.errorMessage) : undefined;
+  return {
+    events: [],
+    state: { ...state, stopReason: reason, latchedProviderError: error ?? `pi model ${reason}` },
+  };
+}
 
-  const field =
-    updateType.startsWith('thinking_') ? ('reasoning' as const) : updateType.startsWith('text_') ? ('text' as const) : null;
+function piDeltaField(type: string): 'reasoning' | 'text' | null {
+  if (type.startsWith('thinking_')) return 'reasoning';
+  if (type.startsWith('text_')) return 'text';
+  return null;
+}
+
+function piMessageItem(field: 'text' | 'reasoning', id: string, text: string): UiMessageItem | UiReasoningItem {
+  return field === 'text'
+    ? { kind: 'message', id, role: 'assistant', text }
+    : { kind: 'reasoning', id, text };
+}
+
+/** Map a streaming `thinking_*`/`text_*` update onto started/delta/completed item events. */
+function mapMessageDelta(
+  frame: PiAssistantEventFrame,
+  turnId: string,
+  state: PiUiMapperState,
+): PiUiMapping {
+  const field = piDeltaField(frame.type);
   if (!field) return { events: [], state };
+  const itemId = `${turnId}_${field}_${frame.contentIndex}_${state.textBlock}`;
+  const delta = string(frame.update.delta);
+  const ending = frame.type.endsWith('_end');
+  if (!state.startedItems.has(itemId) && delta === undefined && !ending) return { events: [], state };
 
-  const itemId = `${state.turnId}_${field}_${contentIndex}_${state.textBlock}`;
   const events: UiEvent[] = [];
   let startedItems = state.startedItems;
   let textByItem = state.textByItem;
   let endedItems = state.endedItems;
-  const makeItem = (text: string): UiMessageItem | UiReasoningItem =>
-    field === 'text'
-      ? { kind: 'message', id: itemId, role: 'assistant', text }
-      : { kind: 'reasoning', id: itemId, text };
-
-  const delta = string(update.delta);
   if (!startedItems.has(itemId)) {
-    if (delta === undefined && !updateType.endsWith('_end')) return { events: [], state };
-    events.push({ type: 'item.started', item: makeItem('') });
+    events.push({ type: 'item.started', item: piMessageItem(field, itemId, '') });
     startedItems = new Set(startedItems).add(itemId);
   }
 
@@ -208,12 +244,20 @@ function mapMessageUpdate(value: Record<string, unknown>, state: PiUiMapperState
     textByItem = next;
   }
 
-  if (updateType.endsWith('_end')) {
-    const text = string(update.content) ?? textByItem.get(itemId) ?? '';
-    events.push({ type: 'item.completed', item: makeItem(text) });
+  if (ending) {
+    const text = string(frame.update.content) ?? textByItem.get(itemId) ?? '';
+    events.push({ type: 'item.completed', item: piMessageItem(field, itemId, text) });
     endedItems = new Set(endedItems).add(itemId);
   }
   return { events, state: { ...state, startedItems, textByItem, endedItems } };
+}
+
+function mapMessageUpdate(value: Record<string, unknown>, state: PiUiMapperState): PiUiMapping {
+  const frame = piAssistantEvent(value);
+  if (!frame || !state.turnId) return { events: [], state };
+  const terminal = mapMessageTerminal(frame.type, frame.update, state);
+  if (terminal) return terminal;
+  return mapMessageDelta(frame, state.turnId, state);
 }
 
 function closeOpenPiText(state: PiUiMapperState): PiUiMapping {

@@ -187,6 +187,49 @@ export function parsePiModels(stdout: string): ModelOption[] {
   return models;
 }
 
+/** One parsed RPC response line: which half of the probe pair answered, for which model. */
+interface PiEffortRecord {
+  readonly index: number;
+  readonly kind: 'set' | 'levels';
+  readonly record: Record<string, unknown>;
+}
+
+/**
+ * Parse one RPC response line into a `set`/`levels` record for a known model index, or
+ * `undefined` for anything else on the wire: malformed JSON, non-responses, foreign ids,
+ * out-of-range indexes.
+ */
+function parsePiEffortRecord(line: string, modelCount: number): PiEffortRecord | undefined {
+  let record: unknown;
+  try {
+    record = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(record) || record.type !== 'response' || record.success !== true) return undefined;
+  const id = typeof record.id === 'string' ? record.id : '';
+  const match = /^(set|levels):(\d+)$/.exec(id);
+  if (!match) return undefined;
+  const index = Number(match[2]);
+  if (!Number.isInteger(index) || index < 0 || index >= modelCount) return undefined;
+  return { index, kind: match[1] as PiEffortRecord['kind'], record };
+}
+
+/**
+ * Parse the `levels` payload of a `get_available_thinking_levels` response, keeping
+ * schema-valid levels in wire order without duplicates; `undefined` when the payload is
+ * malformed or every level is invalid.
+ */
+function parsePiLevelCandidates(record: Record<string, unknown>): EffortLevel[] | undefined {
+  if (!isRecord(record.data) || !Array.isArray(record.data.levels)) return undefined;
+  const levels: EffortLevel[] = [];
+  for (const value of record.data.levels) {
+    const parsed = effortLevelSchema.safeParse(value);
+    if (parsed.success && !levels.includes(parsed.data)) levels.push(parsed.data);
+  }
+  return levels.length > 0 ? levels : undefined;
+}
+
 /** Parse model-indexed Pi RPC responses without letting a failed model switch reuse prior state. */
 export function parsePiEffortLevels(
   stdout: string,
@@ -197,31 +240,16 @@ export function parsePiEffortLevels(
 
   for (const line of stdout.split('\n')) {
     if (!line.trim()) continue;
-    let record: unknown;
-    try {
-      record = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (!isRecord(record) || record.type !== 'response' || record.success !== true) continue;
-    const id = typeof record.id === 'string' ? record.id : '';
-    const match = /^(set|levels):(\d+)$/.exec(id);
-    if (!match) continue;
-    const index = Number(match[2]);
-    if (!Number.isInteger(index) || index < 0 || index >= modelCount) continue;
+    const parsed = parsePiEffortRecord(line, modelCount);
+    if (!parsed) continue;
 
-    if (match[1] === 'set' && record.command === 'set_model') {
-      successfulSets.add(index);
+    if (parsed.kind === 'set' && parsed.record.command === 'set_model') {
+      successfulSets.add(parsed.index);
       continue;
     }
-    if (match[1] !== 'levels' || record.command !== 'get_available_thinking_levels') continue;
-    if (!isRecord(record.data) || !Array.isArray(record.data.levels)) continue;
-    const levels: EffortLevel[] = [];
-    for (const value of record.data.levels) {
-      const parsed = effortLevelSchema.safeParse(value);
-      if (parsed.success && !levels.includes(parsed.data)) levels.push(parsed.data);
-    }
-    if (levels.length > 0) candidates.set(index, levels);
+    if (parsed.kind !== 'levels' || parsed.record.command !== 'get_available_thinking_levels') continue;
+    const levels = parsePiLevelCandidates(parsed.record);
+    if (levels) candidates.set(parsed.index, levels);
   }
 
   const result = new Map<number, EffortLevel[]>();
