@@ -1,4 +1,5 @@
 import { defined } from './defined.ts';
+import { editWriteKey } from './edit-write-key.ts';
 /**
  * Cursor Agent CLI `stream-json` → protocol v2 mapper (+ v1 helpers).
  * Adapted from open-mercato/cezar PR #807's fresh-turn print mapper. This
@@ -351,44 +352,69 @@ function cursorToolKeyToName(key: string): string {
   }
 }
 
-function editArtifacts(
-  name: string,
-  input: unknown,
-): { diffs?: FileDiff[]; locations: ToolLocation[] } | undefined {
-  const key = name.toLowerCase();
-  if (key !== 'edit' && key !== 'write') return undefined;
-  if (!isRecord(input)) return undefined;
-  const path =
+function editInputPath(input: Record<string, unknown>): string {
+  return (
     (typeof input.path === 'string' && input.path) ||
     (typeof input.file_path === 'string' && input.file_path) ||
     (typeof input.filePath === 'string' && input.filePath) ||
-    '';
-  if (!path) return undefined;
-  const locations: ToolLocation[] = [{ path }];
-  if (key === 'edit') {
-    const oldText =
-      typeof input.old_string === 'string'
-        ? input.old_string
-        : typeof input.oldString === 'string'
-          ? input.oldString
-          : null;
-    const newText =
-      typeof input.new_string === 'string'
-        ? input.new_string
-        : typeof input.newString === 'string'
-          ? input.newString
-          : typeof input.fileText === 'string'
-            ? input.fileText
-            : undefined;
-    if (oldText !== null || newText !== undefined) {
-      return { diffs: [defined({ path, oldText, newText })], locations };
-    }
-    return { locations };
+    ''
+  );
+}
+
+function editOldText(input: Record<string, unknown>): string | null {
+  return typeof input.old_string === 'string'
+    ? input.old_string
+    : typeof input.oldString === 'string'
+      ? input.oldString
+      : null;
+}
+
+function editNewText(input: Record<string, unknown>): string | undefined {
+  return typeof input.new_string === 'string'
+    ? input.new_string
+    : typeof input.newString === 'string'
+      ? input.newString
+      : typeof input.fileText === 'string'
+        ? input.fileText
+        : undefined;
+}
+
+function editArtifact(
+  path: string,
+  input: Record<string, unknown>,
+  locations: ToolLocation[],
+): { diffs?: FileDiff[]; locations: ToolLocation[] } {
+  const oldText = editOldText(input);
+  const newText = editNewText(input);
+  if (oldText !== null || newText !== undefined) {
+    return { diffs: [defined({ path, oldText, newText })], locations };
   }
+  return { locations };
+}
+
+function writeArtifact(
+  path: string,
+  input: Record<string, unknown>,
+  locations: ToolLocation[],
+): { diffs?: FileDiff[]; locations: ToolLocation[] } {
   const diff: FileDiff = { path, oldText: null };
   if (typeof input.fileText === 'string') diff.newText = input.fileText;
   else if (typeof input.content === 'string') diff.newText = input.content;
   return { diffs: [diff], locations };
+}
+
+function editArtifacts(
+  name: string,
+  input: unknown,
+): { diffs?: FileDiff[]; locations: ToolLocation[] } | undefined {
+  const key = editWriteKey(name);
+  if (!key) return undefined;
+  if (!isRecord(input)) return undefined;
+  const path = editInputPath(input);
+  if (!path) return undefined;
+  const locations: ToolLocation[] = [{ path }];
+  if (key === 'edit') return editArtifact(path, input, locations);
+  return writeArtifact(path, input, locations);
 }
 
 function completedEditDiffs(parsed: ParsedTool): { diffs: FileDiff[]; locations: ToolLocation[] } | undefined {
@@ -532,6 +558,63 @@ function assistantText(message: unknown): string {
   return parts.join('');
 }
 
+function mapCursorPrintAssistant(raw: Record<string, unknown>): AgentEvent[] {
+  if ('model_call_id' in raw) return [];
+  const text = assistantText(raw.message);
+  return text ? [{ type: 'text', text }] : [];
+}
+
+function mapCursorPrintToolCall(raw: Record<string, unknown>): AgentEvent[] {
+  const callId = typeof raw.call_id === 'string' ? raw.call_id : `cursor-${Date.now()}`;
+  if (raw.subtype === 'started') {
+    return [
+      {
+        type: 'tool-call',
+        id: callId,
+        tool: toolNameFromCall(raw.tool_call),
+        input: toolInputFromCall(raw.tool_call),
+      },
+    ];
+  }
+  if (raw.subtype === 'completed') {
+    const parsed = parseCursorToolCall(raw.tool_call);
+    return [
+      {
+        type: 'tool-result',
+        toolCallId: callId,
+        result: JSON.stringify(parsed.result ?? {}),
+        isError: toolFailed(parsed),
+      },
+    ];
+  }
+  return [];
+}
+
+function mapCursorPrintResult(raw: Record<string, unknown>): AgentEvent[] {
+  // `session` and `done` are owned by the runner (init emits session once; the runner's
+  // own post-loop logic emits exactly one terminal `done`) — emitting them here too
+  // produced duplicate events in the append-only run log.
+  const events: AgentEvent[] = [];
+  // Cursor's documented terminal `result` shape is
+  // {type, subtype, is_error, duration_ms, duration_api_ms, result, session_id, request_id}
+  // — no `usage`/`total_cost_usd` field today. Kept defensive per the docs' own "field
+  // additions may occur… backward-compatible" note; harmless no-op against real output.
+  const usage = tokenUsage(raw);
+  if (usage) events.push({ type: 'token-usage', tokensUsed: usage.total });
+  if (typeof raw.total_cost_usd === 'number' && raw.total_cost_usd > 0) {
+    events.push({ type: 'cost', usd: raw.total_cost_usd });
+  }
+  if (raw.is_error === true) {
+    const msg =
+      typeof raw.result === 'string' && raw.result
+        ? raw.result
+        : 'Cursor agent reported an error';
+    events.push({ type: 'error', message: msg });
+  }
+  events.push({ type: 'turn-end' });
+  return events;
+}
+
 /**
  * Convert one Cursor stream-json object into zero or more v1 AgentEvents.
  * With default (non-partial) stream-json, every assistant event is used.
@@ -544,64 +627,9 @@ export function mapCursorPrintStreamEvent(raw: unknown): AgentEvent[] {
     if (type === 'system' && raw.subtype === 'init' && typeof raw.session_id === 'string') {
       return [{ type: 'session', sessionId: raw.session_id }];
     }
-
-    if (type === 'assistant') {
-      if ('model_call_id' in raw) return [];
-      const text = assistantText(raw.message);
-      return text ? [{ type: 'text', text }] : [];
-    }
-
-    if (type === 'tool_call') {
-      const callId = typeof raw.call_id === 'string' ? raw.call_id : `cursor-${Date.now()}`;
-      if (raw.subtype === 'started') {
-        return [
-          {
-            type: 'tool-call',
-            id: callId,
-            tool: toolNameFromCall(raw.tool_call),
-            input: toolInputFromCall(raw.tool_call),
-          },
-        ];
-      }
-      if (raw.subtype === 'completed') {
-        const parsed = parseCursorToolCall(raw.tool_call);
-        return [
-          {
-            type: 'tool-result',
-            toolCallId: callId,
-            result: JSON.stringify(parsed.result ?? {}),
-            isError: toolFailed(parsed),
-          },
-        ];
-      }
-      return [];
-    }
-
-    if (type === 'result') {
-      // `session` and `done` are owned by the runner (init emits session once; the runner's
-      // own post-loop logic emits exactly one terminal `done`) — emitting them here too
-      // produced duplicate events in the append-only run log.
-      const events: AgentEvent[] = [];
-      // Cursor's documented terminal `result` shape is
-      // {type, subtype, is_error, duration_ms, duration_api_ms, result, session_id, request_id}
-      // — no `usage`/`total_cost_usd` field today. Kept defensive per the docs' own "field
-      // additions may occur… backward-compatible" note; harmless no-op against real output.
-      const usage = tokenUsage(raw);
-      if (usage) events.push({ type: 'token-usage', tokensUsed: usage.total });
-      if (typeof raw.total_cost_usd === 'number' && raw.total_cost_usd > 0) {
-        events.push({ type: 'cost', usd: raw.total_cost_usd });
-      }
-      if (raw.is_error === true) {
-        const msg =
-          typeof raw.result === 'string' && raw.result
-            ? raw.result
-            : 'Cursor agent reported an error';
-        events.push({ type: 'error', message: msg });
-      }
-      events.push({ type: 'turn-end' });
-      return events;
-    }
-
+    if (type === 'assistant') return mapCursorPrintAssistant(raw);
+    if (type === 'tool_call') return mapCursorPrintToolCall(raw);
+    if (type === 'result') return mapCursorPrintResult(raw);
     return [];
   } catch {
     return [];
