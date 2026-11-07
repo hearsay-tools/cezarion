@@ -19,14 +19,22 @@ export function runnersUnderTest(): RunnerFactory {
   return current;
 }
 
-/** A factory that builds one runner and refuses every other backend, so a per-runner test loads
- *  and starts only its own adapter. */
-export function onlyRunner(id: RunnerId, make: (options: { sessionTransport?: SessionTransport }) => AgentRunner): RunnerFactory {
+type RunnerMaker = (options: { sessionTransport?: SessionTransport }) => AgentRunner;
+
+/** A factory that builds the named runners and refuses every other backend, so a per-runner test
+ *  loads and starts only the adapters it names. */
+export function onlyRunners(makers: Partial<Record<RunnerId, RunnerMaker>>): RunnerFactory {
   return (backend, options = {}) => {
     const requested = backend === undefined || backend === 'claude-cli' ? 'claude' : backend;
-    if (requested !== id) throw new Error(`This test drives only the ${id} runner; it was asked for ${String(backend)}.`);
+    const make = makers[requested];
+    if (!make) throw new Error(`This test drives only the ${Object.keys(makers).join(' and ')} runner; it was asked for ${String(backend)}.`);
     return make(options);
   };
+}
+
+/** `onlyRunners` for one runner. */
+export function onlyRunner(id: RunnerId, make: RunnerMaker): RunnerFactory {
+  return onlyRunners({ [id]: make });
 }
 
 /** For a run module test that starts no runner: building one fails the test at once. */

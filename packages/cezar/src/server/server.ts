@@ -2673,7 +2673,7 @@ export function createApp(deps: ServerDeps) {
     // Global GUI state (`~/.cezar/ui-state.json`) — same parse/key-cap/shallow-
     // merge semantics as the per-repo /api/v1/ui-state route below (the shared half
     // is `uiStateBodySchema`), but backed by the workspace file.
-    .get('/workspace/ui-state', async (c) => c.json(await readWorkspaceUiState(deps.home.workspaceUiState)))
+    .get('/workspace/ui-state', async (c) => c.json(await readWorkspaceUiState(deps.home.workspaceUiState, deps.home)))
 
     // The tighter body cap rides on `use` rather than inline on the route: `bodyLimit` is typed
     // as a bare MiddlewareHandler, and passing one to `.put()` collapses the route's schema, so

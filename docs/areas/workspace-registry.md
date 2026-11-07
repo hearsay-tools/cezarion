@@ -107,7 +107,18 @@ In split layout, registry, accounts and remote settings use config. UI state,
 server files and locks, backups and application updates use state. Managed
 versions and bin use data. Skills and dry caches use cache. Runtime has no file
 consumer yet. Legacy paths and managed launcher fixtures remain unchanged.
-HomeStore routing across kinds is a separate P2a-2 slice.
+`home/file-location.ts` exports the single `homeFileKind(key)` map and
+`homeFileLocation(home, key)` for unchanged HomeFile keys. Config, its `.bak`,
+accounts and remote grants use config. UI state, server state, named instances
+and install locks use state. HomeStore uses the owning root for `write.lock`
+and `.versions/<key>/`; readers of state paths pass their Home explicitly.
+The marker check always reads `<config>/install.json`; presence leases stay in
+`<config>/.locks/cockpits/`. Backups of both kinds use `<state>/backups/<key>/`.
+Recovery scans live families and journals in both roots, including deleted files,
+and watches both roots and their journal families only while subscribed.
+Entry seeding holds the config lock through marker publication and seeds each
+file under its owning lock. Transactions that need both roots take config first.
+Legacy roots coincide, so their paths and existing recovery formats stay intact.
 
 `HSQ_HOME` selects one-root subdirectories and wins over `CEZ_HOME`; an explicit
 legacy-default `CEZ_HOME` counts as unset in split layout. Both names belong to

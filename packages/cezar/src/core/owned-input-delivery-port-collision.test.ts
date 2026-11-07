@@ -2,7 +2,8 @@ import { createServer } from 'node:net';
 
 import { expect, it, vi } from 'vitest';
 
-import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { waitFor } from './harness-parity.testkit.ts';
+import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 
 
 it('opencode fixture reaches waiting when the requested runner port is occupied', async () => {

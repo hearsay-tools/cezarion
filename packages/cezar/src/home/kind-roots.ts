@@ -1,4 +1,8 @@
-import { posix, win32 } from 'node:path';
+import { type } from 'node:os';
+import { posix, sep, win32 } from 'node:path';
+
+/** Real filesystem operations must ignore process.platform mocks. Keep macOS defaults native too. */
+export const nativePathPlatform: NodeJS.Platform = sep === '\\' ? 'win32' : type() === 'Darwin' ? 'darwin' : 'linux';
 
 export type HomeLayout = 'legacy' | 'split';
 export type HomeKind = 'config' | 'state' | 'data' | 'cache' | 'runtime';

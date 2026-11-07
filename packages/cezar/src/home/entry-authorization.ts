@@ -1,8 +1,9 @@
 import { existsSync, readdirSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Home } from './home.ts';
 import type { InstallMarker } from './install-marker.ts';
 import type { HomeStore } from './store.ts';
+import { homePathLocation } from './file-location.ts';
 
 interface EntryAuthorization { home: Home; entry: string; kind: InstallMarker['kind']; seeded: boolean }
 const entries = new Map<string, EntryAuthorization>();
@@ -26,10 +27,11 @@ export function registryFiles(home: Home): string[] {
 }
 
 /** Caller holds write.lock. Recovery snapshots remain auxiliary during first-write seeding. */
-export function seedHomeRegistry(store: HomeStore, files: readonly string[]): boolean {
+export function seedHomeRegistry(store: HomeStore, files: readonly string[], home: Home): boolean {
   let complete = true;
   for (const path of files) {
-    const head = join(store.root, '.versions', relative(store.root, path), 'HEAD');
+    const { root, file } = homePathLocation(home, path);
+    const head = join(root, '.versions', file, 'HEAD');
     if (existsSync(head)) continue;
     try { store.read(path); } catch { /* Absence is normal; failed reads leave HEAD absent. */ }
     if (!existsSync(head)) complete = false;

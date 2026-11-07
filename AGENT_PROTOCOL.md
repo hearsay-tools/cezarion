@@ -1376,12 +1376,15 @@ a guard that every runner has its file (hearsay-tools/cezarion#1288). Below,
 
 A per-runner file chooses its runner with `useRunners(onlyRunner(<id>, ...))` from
 `core/runners-under-test.testkit.ts`, and its testkits build managers through
-`workflows/fixture-manager.testkit.ts`, `workflows/worker-wait-core.testkit.ts` and
-`core/harness-parity-core.testkit.ts`, which import no adapter. Their older names
-(`fixture-cleanup`, `worker-wait`, `harness-parity`) re-export them with every adapter chosen. `core/runner-closure.test.ts` fails when a `harness-<runner>-*` or
-`waits-<runner>-*` file reaches another runner's adapter or `runner-factory.ts`. The one
-exception: the wait kit runs its workers on the Claude wire, so a `waits-<runner>-*` file
-also loads the Claude adapter (hearsay-tools/cezarion#2939, hearsay-tools/cezarion#2959).
+`workflows/fixture-manager.testkit.ts`, `workflows/worker-wait-core.testkit.ts`,
+`core/harness-parity-core.testkit.ts` and `core/workflow-parity-core.testkit.ts`, which import
+no adapter. Their plain names (`fixture-cleanup`, `worker-wait`, `harness-parity`,
+`workflow-parity`) re-export them with every adapter chosen. `core/runner-closure.test.ts` fails when a `harness-<runner>-*` or
+`waits-<runner>-*` file reaches another runner's adapter or `runner-factory.ts`. Two
+exceptions: the wait kit runs its workers on the Claude wire, so a `waits-<runner>-*` file
+also loads the Claude adapter (hearsay-tools/cezarion#2959); and R14 runs a mixed-runner chain,
+so a `harness-<runner>-owned-workflows` file also loads the next runner in `RUNNER_IDS`
+(hearsay-tools/cezarion#2939).
 
 **P1** (hearsay-tools/cezarion#1049, hearsay-tools/cezarion#1266) routes an
 approval from each native mock that carries one through `RunManager`, the

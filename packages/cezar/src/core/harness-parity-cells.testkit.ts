@@ -78,41 +78,8 @@ import { cleanupCheckpoint, seedSettledFamily } from '../workflows/delegation-re
 import { supportsProfiles } from './agent-profiles.ts';
 import { allowedToolsForStep, plannedWorkflow, skillTaskSteps, type WorkflowDef } from '../workflows/types.ts';
 import { workerWorkflowHash, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
-import {
-  withOwnedInputRun,
-  withoutTaskScenario,
-  withSkillParentRun,
-  promptFor,
-  driveRun,
-  driveUnavailableProvider,
-  driveSeam,
-  lastIndexWhere,
-  textEvents,
-  exemptionFor,
-  HARNESS_ADAPTERS,
-  SHUTDOWN_CRITERIA,
-  MODEL_REFUSAL_CRITERIA,
-  PERMISSION_CRITERIA,
-  WORKFLOW_TIMEOUT_CRITERIA,
-  NO_PROGRESS_CRITERIA,
-  AUTONOMOUS_CRITERIA,
-  FINAL_MESSAGE_CRITERIA,
-  WORKER_PROGRESS_WAIT_CRITERIA,
-  WORKFLOW_ASK_CRITERIA,
-  STEP_COMPLETION_CRITERIA,
-  FOLLOWUP_CRITERIA,
-  ANSWER_DELIVERY_CRITERIA,
-  SKILL_RESUME_CRITERIA,
-  SKILL_PROVISION_CRITERIA,
-  WORKTREE_SETUP_CRITERIA,
-  PARITY_EXEMPTIONS,
-  PINNED_SESSION_ID,
-  seedOpencodeMockSession,
-  type RunObservation,
-  type ScenarioName,
-  type SeamObservation,
-  waitFor,
-} from './harness-parity-core.testkit.ts';
+import { promptFor, driveSeam, lastIndexWhere, textEvents, exemptionFor, HARNESS_ADAPTERS, SHUTDOWN_CRITERIA, MODEL_REFUSAL_CRITERIA, PERMISSION_CRITERIA, WORKFLOW_TIMEOUT_CRITERIA, NO_PROGRESS_CRITERIA, AUTONOMOUS_CRITERIA, FINAL_MESSAGE_CRITERIA, WORKER_PROGRESS_WAIT_CRITERIA, WORKFLOW_ASK_CRITERIA, STEP_COMPLETION_CRITERIA, FOLLOWUP_CRITERIA, ANSWER_DELIVERY_CRITERIA, SKILL_RESUME_CRITERIA, SKILL_PROVISION_CRITERIA, WORKTREE_SETUP_CRITERIA, PARITY_EXEMPTIONS, PINNED_SESSION_ID, seedOpencodeMockSession, type ScenarioName, type SeamObservation, waitFor } from './harness-parity-core.testkit.ts';
+import { withOwnedInputRun, withoutTaskScenario, withSkillParentRun, driveRun, driveUnavailableProvider, type RunObservation } from './workflow-parity-core.testkit.ts';
 import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns, seedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { createFixtureManager, drainFixtureManagers, fixtureWork } from '../workflows/fixture-manager.testkit.ts';
@@ -2236,7 +2203,8 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         const countedRunners = /\b(?:[2-9]\d*|1\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:(?:real|offline|native|supported|existing|unrelated|passing|per-runner|wire)\s+)*(?:runners?|backends?|mocks?|mock selectors|test files)\b/gi;
         for (const path of ['AGENT_PROTOCOL.md', '.ai/specs/2026-09-04-harness-parity-matrix.md',
           'packages/cezar/src/core/harness-parity.test.ts', 'packages/cezar/src/core/harness-parity-cells.testkit.ts',
-          'packages/cezar/src/core/harness-parity.testkit.ts', 'packages/cezar/src/core/harness-parity-core.testkit.ts']) {
+          'packages/cezar/src/core/harness-parity.testkit.ts', 'packages/cezar/src/core/harness-parity-core.testkit.ts',
+          'packages/cezar/src/core/workflow-parity.testkit.ts', 'packages/cezar/src/core/workflow-parity-core.testkit.ts']) {
           const source = readFileSync(new URL(`../../../../${path}`, import.meta.url), 'utf8');
           expect(source.match(countedRunners) ?? [], path).toEqual([]);
         }

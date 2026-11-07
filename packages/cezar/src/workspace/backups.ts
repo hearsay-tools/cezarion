@@ -1,10 +1,11 @@
 import type { Home } from '../home/home.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { linkSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, relative, sep } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 import { assertHomePaths } from '../home/boundary.ts';
 import { homeFileSchema } from '@open-mercato/cezar-contract/home-recovery';
+import { homeFileLocation, homePathLocation } from '../home/file-location.ts';
 
 export const BACKUP_FILES = ['config.json', 'config.json.bak', 'agent-accounts.json', 'ui-state.json', 'server.json', 'server.install.lock'] as const;
 export type BackupFile = string;
@@ -41,9 +42,11 @@ function entries(home: string | Home, file: BackupFile, directory = join(backupR
 /** Discover backup keys even after the live file was removed. Never recurse into snapshots. */
 function backupFiles(home: string | Home): BackupFile[] {
   const files: BackupFile[] = [...BACKUP_FILES];
-  const root = typeof home === 'string' ? home : home.root;
   for (const family of ['remote-settings', 'server-instances']) {
-    for (const dir of [join(backupRoot(home), family), join(root, family, 'backups')]) {
+    const familyRoot = typeof home === 'string' ? home : homeFileLocation(home, `${family}/config.json`).root;
+    const directories = [join(backupRoot(home), family)];
+    if (typeof home === 'string' || home.layout === 'legacy') directories.push(join(familyRoot, family, 'backups'));
+    for (const dir of directories) {
       try {
         for (const name of readdirSync(dir)) {
           const key = `${family}/${name}`;
@@ -61,7 +64,7 @@ function listedEntries(home: string | Home, file: BackupFile): BackupEntry[] {
   const found = entries(home, file);
   const root = typeof home === 'string' ? home : home.root;
   // P0/P1b used the basename under a named instance's own directory.
-  if (file.includes('/') && ['config.json', 'agent-accounts.json'].includes(basename(file))) {
+  if ((typeof home === 'string' || home.layout === 'legacy') && file.includes('/') && ['config.json', 'agent-accounts.json'].includes(basename(file))) {
     found.push(...entries(home, file, join(root, dirname(file), 'backups', basename(file))));
   }
   found.sort((a, b) => b.time.localeCompare(a.time) || b.path.localeCompare(a.path));
@@ -102,8 +105,8 @@ const warned = new Set<string>();
 export function backupBeforeWrite(path: string, next: unknown, options: { home?: Home | string; unavailable?: unknown } = {}): void {
   // The optional fallback preserves the exported P0 helper for root-file callers.
   const home = options.home ?? dirname(path);
-  const root = typeof home === 'string' ? home : home.root;
-  const file = relative(root, path).split(sep).join('/');
+  const root = typeof home === 'string' ? home : home.state;
+  const file = homePathLocation(home, path).file;
   if (!isBackupFile(file)) throw new Error(`Unsupported backup file: ${file}`);
   let raw: Buffer;
   try { raw = readFileSync(path); } catch (error) {

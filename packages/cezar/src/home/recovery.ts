@@ -1,11 +1,12 @@
 import { readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { homeFileSchema, type HomeFile, type HomeRecovery, type HomeRecoveryFile } from '@open-mercato/cezar-contract/home-recovery';
 import type { Home } from './home.ts';
 import { registryFiles } from './entry-authorization.ts';
 import { HomeStore } from './store.ts';
 import { digest, readBytes } from './version-log.ts';
 import { restorePinnedRecovery } from '../workspace/backup-cli.ts';
+import { homeFileLocation, homePathLocation } from './file-location.ts';
 export { subscribeHomeRecovery } from './recovery-watch.ts';
 
 interface CachedFile { fingerprint: string; state: HomeRecoveryFile | undefined; pinnedPath?: string | undefined }
@@ -23,29 +24,33 @@ function stamp(path: string): string {
 }
 
 export function recoveryFiles(home: Home): HomeFile[] {
-  const files = new Set(registryFiles(home).map(path => relative(home.root, path).replaceAll('\\', '/')));
+  const files = new Set(registryFiles(home).map(path => homePathLocation(home, path).file));
   files.add('server.install.lock');
   // Include journals of deleted files: absence is itself an outside write.
-  for (const dir of ['.versions', 'remote-settings', 'server-instances', '.versions/remote-settings', '.versions/server-instances']) {
-    try {
-      for (const name of readdirSync(join(home.root, dir))) {
-        const family = dir.replace(/^\.versions\/?/, '');
-        files.add(family ? `${family}/${name}` : name);
-      }
-    } catch { /* Missing or unreadable auxiliary families never prevent boot. */ }
+  for (const root of new Set([home.config, home.state])) {
+    for (const dir of ['.versions', 'remote-settings', 'server-instances', '.versions/remote-settings', '.versions/server-instances']) {
+      try {
+        for (const name of readdirSync(join(root, dir))) {
+          const family = dir.replace(/^\.versions\/?/, '');
+          const file = family ? `${family}/${name}` : name;
+          if (homeFileSchema.safeParse(file).success && homeFileLocation(home, file).root === root) files.add(file);
+        }
+      } catch { /* Missing or unreadable auxiliary families never prevent boot. */ }
+    }
   }
   return [...files].filter((file): file is HomeFile => homeFileSchema.safeParse(file).success).sort();
 }
 
 /** Content fingerprints avoid reacquiring every HomeStore lock on repeated cockpit requests. */
 export function getHomeRecovery(home: Home): HomeRecovery {
-  let cache = caches.get(home.root);
-  if (!cache) { cache = new Map(); caches.set(home.root, cache); }
+  const key = JSON.stringify([home.config, home.state]);
+  let cache = caches.get(key);
+  if (!cache) { cache = new Map(); caches.set(key, cache); }
   const store = new HomeStore(home);
   const files: HomeRecoveryFile[] = [];
   for (const file of recoveryFiles(home)) {
-    const path = join(home.root, file);
-    const journal = join(home.root, '.versions', file);
+    const { path, root } = homeFileLocation(home, file);
+    const journal = join(root, '.versions', file);
     const fingerprint = [path, journal, ...['HEAD', 'OUTSIDE', 'RESET', 'ACCEPTED'].map(name => join(journal, name)),
       ...(file === 'config.json' ? [`${path}.bak`, join(home.backups, file)] : []),
       ...(cache.get(file)?.pinnedPath ? [cache.get(file)!.pinnedPath!] : [])].map(stamp).join('|');
@@ -71,5 +76,5 @@ export async function restoreHomeRecovery(home: Home, file: HomeFile, detectedAt
 
 export function acceptHomeRecovery(home: Home, file: HomeFile, detectedAt?: string): void {
   homeFileSchema.parse(file);
-  new HomeStore(home).acceptRecovery(join(home.root, file), detectedAt);
+  new HomeStore(home).acceptRecovery(homeFileLocation(home, file).path, detectedAt);
 }

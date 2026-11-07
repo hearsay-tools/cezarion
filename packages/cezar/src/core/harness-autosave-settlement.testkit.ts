@@ -11,7 +11,8 @@ import { RunStore } from '../runs/store.ts';
 import { IDLE_TIMEOUT_MS, RunManager } from '../workflows/run.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
-import { HARNESS_ADAPTERS, withOwnedInputRun, withoutTaskScenario, waitFor } from './harness-parity.testkit.ts';
+import { HARNESS_ADAPTERS, waitFor } from './harness-parity.testkit.ts';
+import { withOwnedInputRun, withoutTaskScenario } from './workflow-parity.testkit.ts';
 import { readPid, requirePid } from '../pid-file.testkit.ts';
 
 // bound: native mock turns and real saves use the same 30 s per-step guard as R24/R25

@@ -1,16 +1,18 @@
 import { existsSync, watch, type FSWatcher } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Home } from './home.ts';
 import { onHomeChange } from './changes.ts';
 import { getHomeRecovery, recoveryFiles } from './recovery.ts';
+import { homeFileLocation } from './file-location.ts';
 
 /** A subscription owns its watchers; no timer or watcher survives the last listener. */
 export function subscribeHomeRecovery(home: Home, listener: () => void): () => void {
   let closed = false;
   let scheduled = false;
   const watchers = new Map<string, FSWatcher>();
-  const directories = [home.root, home.remoteSettings, home.serverInstances, join(home.root, '.versions'),
-    join(home.root, '.versions', 'remote-settings'), join(home.root, '.versions', 'server-instances')];
+  const directories = [home.config, home.state, home.remoteSettings, home.serverInstances,
+    join(home.config, '.versions'), join(home.state, '.versions'),
+    join(home.config, '.versions', 'remote-settings'), join(home.state, '.versions', 'server-instances')];
   const schedule = () => {
     if (closed || scheduled) return;
     scheduled = true;
@@ -23,7 +25,14 @@ export function subscribeHomeRecovery(home: Home, listener: () => void): () => v
     });
   };
   const bind = () => {
-    for (const directory of [...directories, ...recoveryFiles(home).map(file => join(home.root, '.versions', file))]) {
+    const journals = recoveryFiles(home).map(file => join(homeFileLocation(home, file).root, '.versions', file));
+    // Split state may not exist yet. Watch its nearest parent until the root appears.
+    const roots = [home.config, home.state].map(existingParent);
+    const wanted = new Set([...directories, ...journals, ...roots]);
+    for (const [directory, watcher] of watchers) {
+      if (!wanted.has(directory)) { watcher.close(); watchers.delete(directory); }
+    }
+    for (const directory of wanted) {
       if (watchers.has(directory)) continue;
       try {
         const watcher = watch(directory, { persistent: false }, () => {
@@ -45,4 +54,9 @@ export function subscribeHomeRecovery(home: Home, listener: () => void): () => v
     for (const watcher of watchers.values()) watcher.close();
     watchers.clear();
   };
+}
+
+function existingParent(path: string): string {
+  while (!existsSync(path) && dirname(path) !== path) path = dirname(path);
+  return path;
 }
