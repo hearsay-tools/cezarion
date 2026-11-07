@@ -65,3 +65,13 @@ among them, so one value imported through a root loads them all, and an edit to 
 then reruns tests that never use it (hearsay-tools/cezarion#1237). Types still come from the
 roots, as `import type`. The lint rule `cez/contract-root-import` refuses every other root
 import and names the subpath for each value.
+
+## Home recovery
+
+The workspace-only `/api/v1/home/recovery` GET returns the `home-recovery` contract.
+POST `/home/recovery/restore` and `/home/recovery/accept` accept `{file, detectedAt}` using the
+same HomeStore allowlist as the CLI, never a free filesystem path. Their successful
+response is the fresh snapshot; a recovery failure returns `{error}` with 409.
+They use the normal origin guard and require `localHandoff`; hosted sessions receive 403. Remote-settings grant files are host-CLI-only and receive 403 even locally. GET uses the same read boundary as workspace config. No file content is returned.
+
+Recovery actions apply only to the incident named by `detectedAt`. A newer incident returns 409; an already resolved incident returns the current snapshot without writing. Explicit CLI backup restore can still select retained backups when no incident is open.

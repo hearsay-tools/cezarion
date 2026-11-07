@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Home } from './home.ts';
 import { HomeStore } from './store.ts';
@@ -39,9 +39,9 @@ it('refuses a journal record symlink before taking the write lock', () => {
   expect(JSON.parse(readFileSync(home.workspaceConfig, 'utf8'))).toEqual({ saved: true });
 });
 
-it.each(['backups', 'backups/config.json', 'backups/agent-accounts.json', 'server-instances/backups/config.json'])('skips escaped %s before the first lock mutation and keeps saves working', name => {
+it.each(['backups', 'backups/config.json', 'backups/agent-accounts.json', 'backups/server-instances/config.json'])('skips escaped %s before the first lock mutation and keeps saves working', name => {
   const home = Home.sandbox(storeRoot());
-  const target = name.startsWith('server-instances') ? home.serverState('config')
+  const target = name.includes('server-instances') ? home.serverState('config')
     : name.endsWith('agent-accounts.json') ? home.agentAccounts : home.workspaceConfig;
   Home.seed(home, target, { saved: true });
   const victim = storeRoot();
@@ -61,7 +61,7 @@ it.each(['backups', 'backups/config.json', 'backups/agent-accounts.json', 'serve
   const store = new HomeStore(home);
   store.writeJson(target, { changed: 1 });
   store.writeJson(target, { changed: 2 });
-  const backupPath = join(dirname(target), 'backups', target.endsWith('agent-accounts.json') ? 'agent-accounts.json' : 'config.json');
+  const backupPath = join(home.backups, relative(home.root, target));
   const check = preflight.mock.calls.findIndex(([, paths]) => paths.includes(backupPath));
   expect(check).toBeGreaterThanOrEqual(0);
   expect(preflight.mock.invocationCallOrder[check]).toBeLessThan(directory.mock.invocationCallOrder[0]!);

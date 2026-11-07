@@ -12,7 +12,22 @@
 
 **Agent accounts** (spec `2026-07-29-agent-profiles`) live in this directory too, but in their OWN file — `~/.cezar/agent-accounts.json`, never a key in `config.json`, so a cezar that has never heard of accounts cannot drop them; `src/workspace/agent-accounts.ts` owns the store, `src/core/agent-profiles.ts` the vendor knowledge and `src/workspace/agent-profiles.ts` the resolution.
 
-Changed writes to `config.json` and `agent-accounts.json` first copy the previous content to `backups/<file>/<UTC>-<sha8>.json` under the same home. Private snapshots keep the last 20 plus one per day for 30 days. Backup failures warn once per file and do not block writes. HomeStore preflights the backup directory chain before the write lock. If a backup directory is unavailable, dangling or resolves outside the canonical home, it skips backup creation and pruning while the primary save proceeds. This also skips backups linked to another disk; that backup layout remains a known limit. `cez backup list [<file>]` lists them; `cez backup restore <file> [--at <time>]` restores the newest snapshot at or before that UTC time through the normal writer, which backs up the replaced file. Restore covers JSON only, not account config directories. The separate `config.json.bak` recovery behavior remains unchanged. Its path and version journal are auxiliary too: failed preflight or publication skips the snapshot with one warning; the primary save still succeeds.
+Every changed HomeStore file is backed up before replacement or removal under
+`Home.backups/<home-relative file>/<UTC>-<sha8>.json`, including remote grants,
+server instances and raw install locks. Private snapshots keep the last 20 plus
+one per day for 30 days. Backup failures warn once per file and never block the
+primary write. HomeStore checks the backup directory chain before the write lock;
+unavailable, dangling or escaping paths disable both backup creation and pruning.
+`cez backup list [<file>]` discovers every supported file, including backups whose
+live file is gone. Legacy root-file snapshots and nested named-instance snapshots
+remain readable. `config.json.bak` is listed as the newest config backup; the
+loader still restores it only when the primary is missing, blank or corrupt.
+`cez backup restore <file> [--at <time>]` uses the same recovery writer as the
+cockpit. The default restores a pinned recovery target when one exists; an explicit
+UTC time selects a retained snapshot. Restoring config/accounts keeps tolerant
+schema parsing. Other home files, including locks, restore their exact bytes.
+Account config directories are not restored. The `.bak` snapshot and its journal
+stay auxiliary: a failure warns and leaves the primary save committed.
 
 ### Explicit home paths
 
@@ -60,8 +75,22 @@ unrelated primary save. Every entry and the first authorized transaction retry
 missing HEAD records even when the marker exists. Each later write stores content by hash, writes `PENDING`,
 replaces the live file, advances `HEAD`, then clears `PENDING`. A read finishes an
 interrupted commit or records an outside write and pins its original restore target.
-Outside-write enforcement stays **off** in P1b (hearsay-tools/cezarion#2811). Later
-writes still work and cannot change the pinned target. P1c
-(hearsay-tools/cezarion#2812) owns blocking, the banner, and restore/accept routes.
-See [ADR 0060](../adr/0060-serialize-home-files-through-homestore.md) for the caller
-audit, write ordering and remaining limits.
+Outside-write enforcement is **on** in P1c (hearsay-tools/cezarion#2812). All
+HomeStore mutations, including exclusive lock creation, refuse a flagged file until
+an explicit restore or acceptance. The pinned target cannot absorb later writes.
+Emptying nonempty projects or accounts records a durable reset flag with the prior
+version. Recovery demand also detects an empty registry whose newest backup has
+projects. Acceptance records the current hash, so an accepted empty registry does
+not raise the same banner again.
+
+`GET /api/v1/home/recovery` exposes file names, reasons, times and restore availability;
+it never exposes file contents. Metadata and content fingerprints avoid repeated
+HomeStore transactions for unchanged files, including on coarse-timestamp filesystems.
+The trusted-only `home:recovery` topic uses
+filesystem watches only while subscribed, including journal directories so another
+cockpit's acceptance clears the banner. Restore and accept POST routes use the
+normal origin guard, `localHandoff`, and the contract's HomeStore file allowlist.
+Remote grant files remain host-CLI-only. Remote banner rows are read-only. Actions
+carry the incident time; resolved retries do nothing, while a different incident
+returns a conflict. See ADR 0060 for
+write ordering and the remaining version-retention and staging-file limits.

@@ -82,9 +82,10 @@ export function readSharedProjects(): RegistryProject[] {
  */
 export function writeSharedProjects(projects: RegistryProject[]): void {
   const config = readSharedConfig()
-  // mode 0600 to match what the app writes (src/workspace/config.ts) — it only applies when the
-  // file is created, which is the one case where the default would be wrong.
-  Home.seed(Home.sandbox(sharedHome), sharedFile('config.json'), { ...config, projects })
+  // Fixture replacement is explicit: use the restore writer to keep bytes and journal aligned
+  // and resolve any incident from the previous fixture, including a deliberately empty registry.
+  new HomeStore(Home.sandbox(sharedHome)).restoreFile(sharedFile('config.json'),
+    Buffer.from(`${JSON.stringify({ ...config, projects }, null, 2)}\n`))
 }
 
 /**
@@ -101,7 +102,7 @@ export function snapshotSharedHome(...names: string[]): () => void {
   })
   return () => {
     for (const { path, content } of before) {
-      Home.seedBytes(Home.sandbox(sharedHome), path, content === null ? null : Buffer.from(content))
+      new HomeStore(Home.sandbox(sharedHome)).restoreFile(path, content === null ? null : Buffer.from(content))
     }
   }
 }

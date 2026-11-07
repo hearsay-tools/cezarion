@@ -1,6 +1,6 @@
 import type { Home } from '../home/home.ts';
 import { existsSync, readdirSync } from 'node:fs';
-import { HomeStore, readHomeFile } from '../home/store.ts';
+import { HomeOutsideWriteError, HomeStore, readHomeFile } from '../home/store.ts';
 import { assertHomeWritable } from '../home/install-marker.ts';
 import { basename } from 'node:path';
 import {
@@ -91,7 +91,8 @@ export function deleteServerState(instance: string, home: Home): void {
   assertHomeWritable(home.root);
   try {
     new HomeStore(home).replace(serverStatePath(instance, home), null);
-  } catch {
+  } catch (error) {
+    if (error instanceof HomeOutsideWriteError) console.warn(`[cez] ${error.message}; instance state was kept`);
     // non-fatal — an empty record left behind is harmless
   }
 }
@@ -146,7 +147,10 @@ function lockRelease(store: HomeStore, path: string): () => void {
     released = true;
     try {
       store.transaction(() => { if (readLockPid(path) === process.pid) store.replace(path, null); }, [path]);
-    } catch { /* Release has always been best-effort. */ }
+    } catch (error) {
+      if (error instanceof HomeOutsideWriteError) console.warn(`[cez] ${error.message}; install lock was kept`);
+      // Release has always been best-effort.
+    }
   };
 }
 

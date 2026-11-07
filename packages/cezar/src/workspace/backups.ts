@@ -1,20 +1,26 @@
 import type { Home } from '../home/home.ts';
 import { createHash, randomUUID } from 'node:crypto';
-import { linkSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { linkSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
+import { assertHomePaths } from '../home/boundary.ts';
+import { homeFileSchema } from '@open-mercato/cezar-contract/home-recovery';
 
-export const BACKUP_FILES = ['config.json', 'agent-accounts.json'] as const;
-export type BackupFile = typeof BACKUP_FILES[number];
+export const BACKUP_FILES = ['config.json', 'config.json.bak', 'agent-accounts.json', 'ui-state.json', 'server.json', 'server.install.lock'] as const;
+export type BackupFile = string;
 export interface BackupEntry { file: BackupFile; time: string; path: string; }
 
 export function isBackupFile(value: string): value is BackupFile {
-  return BACKUP_FILES.some((file) => file === value);
+  return homeFileSchema.safeParse(value).success;
+}
+
+function backupRoot(home: string | Home): string {
+  return typeof home === 'string' ? join(home, 'backups') : home.backups;
 }
 
 /** Names are sortable UTC times, with colons replaced for Windows. */
-function entries(home: string | Home, file: BackupFile): BackupEntry[] {
-  const dir = join(typeof home === 'string' ? join(home, 'backups') : home.backups, file);
+function entries(home: string | Home, file: BackupFile, directory = join(backupRoot(home), file)): BackupEntry[] {
+  const dir = directory;
   let names: string[];
   try { names = readdirSync(dir); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
@@ -32,11 +38,53 @@ function entries(home: string | Home, file: BackupFile): BackupEntry[] {
   }).sort((a, b) => b.time.localeCompare(a.time) || b.path.localeCompare(a.path));
 }
 
-export function listBackups(file: BackupFile | undefined, home: string | Home): BackupEntry[] {
-  return (file ? [file] : BACKUP_FILES).flatMap((name) => entries(home, name));
+/** Discover backup keys even after the live file was removed. Never recurse into snapshots. */
+function backupFiles(home: string | Home): BackupFile[] {
+  const files: BackupFile[] = [...BACKUP_FILES];
+  const root = typeof home === 'string' ? home : home.root;
+  for (const family of ['remote-settings', 'server-instances']) {
+    for (const dir of [join(backupRoot(home), family), join(root, family, 'backups')]) {
+      try {
+        for (const name of readdirSync(dir)) {
+          const key = `${family}/${name}`;
+          if (isBackupFile(key) && !files.includes(key)) files.push(key);
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+  }
+  return files;
 }
 
-function prune(home: string, file: BackupFile, now: Date): void {
+function listedEntries(home: string | Home, file: BackupFile): BackupEntry[] {
+  const found = entries(home, file);
+  const root = typeof home === 'string' ? home : home.root;
+  // P0/P1b used the basename under a named instance's own directory.
+  if (file.includes('/') && ['config.json', 'agent-accounts.json'].includes(basename(file))) {
+    found.push(...entries(home, file, join(root, dirname(file), 'backups', basename(file))));
+  }
+  found.sort((a, b) => b.time.localeCompare(a.time) || b.path.localeCompare(a.path));
+  if (file === 'config.json') {
+    const path = join(root, 'config.json.bak');
+    try {
+      const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        // .bak is the newest recovery entry, including on coarse filesystem clocks.
+        const time = new Date(Math.max(statSync(path).mtimeMs, found[0] ? Date.parse(found[0].time) + 1 : 0)).toISOString();
+        found.unshift({ file, path, time });
+      }
+    } catch { /* The loader also ignores an unreadable or corrupt recovery snapshot. */ }
+  }
+  return found;
+}
+
+export function listBackups(file: BackupFile | undefined, home: string | Home): BackupEntry[] {
+  if (file !== undefined && !isBackupFile(file)) throw new Error(`Unsupported backup file: ${file}`);
+  return (file ? [file] : backupFiles(home)).flatMap((name) => listedEntries(home, name));
+}
+
+function prune(home: string | Home, file: BackupFile, now: Date): void {
   const days = new Set<string>();
   const cutoff = now.getTime() - 30 * 86_400_000;
   for (const [index, entry] of entries(home, file).entries()) {
@@ -50,9 +98,12 @@ function prune(home: string, file: BackupFile, now: Date): void {
 }
 
 const warned = new Set<string>();
-/** Best effort, before replacement. Only the two registry writers call this; ui-state does not. */
-export function backupBeforeWrite(path: string, next: unknown, options: { unavailable?: unknown } = {}): void {
-  const file = basename(path);
+/** Best effort before replacement or removal; raw lock bytes stay byte-for-byte restorable. */
+export function backupBeforeWrite(path: string, next: unknown, options: { home?: Home | string; unavailable?: unknown } = {}): void {
+  // The optional fallback preserves the exported P0 helper for root-file callers.
+  const home = options.home ?? dirname(path);
+  const root = typeof home === 'string' ? home : home.root;
+  const file = relative(root, path).split(sep).join('/');
   if (!isBackupFile(file)) throw new Error(`Unsupported backup file: ${file}`);
   let raw: Buffer;
   try { raw = readFileSync(path); } catch (error) {
@@ -60,17 +111,18 @@ export function backupBeforeWrite(path: string, next: unknown, options: { unavai
     warn(path, error);
     return;
   }
-  if (raw.equals(Buffer.from(`${JSON.stringify(next, null, 2)}\n`))) return;
+  const bytes = next === null || Buffer.isBuffer(next) ? next : Buffer.from(`${JSON.stringify(next, null, 2)}\n`);
+  if (bytes !== null && raw.equals(bytes)) return;
   if (options.unavailable !== undefined) { warn(path, options.unavailable); return; }
   try {
-    const home = dirname(path);
-    const root = join(home, 'backups');
-    const dir = join(root, file);
+    const backups = backupRoot(home);
+    const dir = join(backups, file);
+    assertHomePaths(root, [dir]);
     const now = new Date();
     const latest = entries(home, file)[0];
     const timestamp = new Date(Math.max(now.getTime(), latest ? Date.parse(latest.time) + 1 : 0));
     const sha = createHash('sha256').update(raw).digest('hex').slice(0, 8);
-    for (const directory of [root, dir]) {
+    for (const directory of [backups, dir]) {
       assertCezarHomeWriteIsSandboxed(directory);
       mkdirSync(directory, { recursive: true, mode: 0o700 });
     }

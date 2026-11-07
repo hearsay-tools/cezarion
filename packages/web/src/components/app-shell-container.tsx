@@ -9,6 +9,7 @@ import { useApplicationUpdate } from '@/components/use-application-update'
 import { CommandPalette } from '@/components/command-palette'
 import { ListViewProvider } from '@/components/list-view'
 import { ProviderBannerContainer } from '@/components/provider-banner-container'
+import { HomeRecoveryBanner } from '@/components/home-recovery-banner'
 import { SidebarProjectHeader } from '@/components/sidebar-project-header'
 import { ProjectRail, ProjectRailPlaceholder } from '@/components/project-rail'
 import { useProjectSwitch } from '@/components/use-project-switch'
@@ -224,7 +225,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         forgeAvailable={forgeAvailable}
         // Hidden unless health reports the opt-in automations capability (#801).
         automationsAvailable={automationsAvailable}
-        banner={<ProviderBannerContainer />}
+        banner={<><HomeRecoveryBanner /><ProviderBannerContainer /></>}
         sidebarList={viewSidebar}
         taskQuickList={<TaskQuickListContainer projectId={sidebarProjectId} boot={sidebarBoot} />}
         sidebarProjectId={sidebarProjectId}

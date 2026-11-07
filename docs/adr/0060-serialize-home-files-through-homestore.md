@@ -173,3 +173,52 @@ Accounts merge/import and UI-state transactions have one primary file; account
 import does not rewrite its source config. Remote grant removal may name several
 primary grants. Install-lock release removes its own primary lock best effort.
 No other HomeStore transaction writes an application-state companion file.
+
+## P1c recovery extension
+
+hearsay-tools/cezarion#2812 enables the existing enforcement switch. The P1b case
+"later HomeStore write after OUTSIDE" now refuses before any backup or replacement.
+Exclusive lock publication uses the same check. Restore and acceptance are explicit
+resolution operations under the same lock. Restore preserves the previous pinned
+bytes; acceptance makes the found bytes HEAD without changing their mtime.
+
+The owner approved automatic recovery of registry deletions on 2026-11-07.
+The existing registry loader can recover missing `config.json` from its nonempty
+`.bak`. It carries the exact recovered bytes into the merge writer. If the primary
+is still absent and those bytes match the pinned restore hash, the merge writer
+commits the recovered base plus its mutation and clears the incident. It never
+uses outside content as a base. A different backup, a save without that recovered
+base, or any outside change that leaves primary bytes still refuses. Other
+HomeStore families have no equivalent loader recovery and keep refusing deletions.
+
+A per-file `RESET` record pins the last nonempty project/account collection when a
+HomeStore write empties it. Recovery demand also checks the newest registry backup
+for an empty registry. `ACCEPTED` records the resolved content hash before flags
+are cleared, so an accepted empty registry does not immediately raise another flag.
+Both records are private HomeStore journal state. Rotating backups cover every
+HomeStore file through the existing workspace backup module. They remain auxiliary.
+The CLI and HTTP recovery actions share the same restore implementation.
+
+| Recovery case | Result |
+| --- | --- |
+| Normal session or upgrade with no outside change | No banner |
+| Nonempty projects/accounts become empty | RESET pins the prior version |
+| Empty registry, newest backup holds projects | RESET pins that backup |
+| Outside write followed by a merge or exclusive write | Refuse; keep found bytes and pinned HEAD |
+| Deleted config.json, merge starts from .bak equal to pinned HEAD | Commit recovered registry plus mutation; clear flag |
+| Restore reset/outside flag | Back up found bytes, restore pinned bytes, clear flags |
+| Accept found bytes | Store as HEAD, record acceptance, clear flags |
+| Another cockpit resolves a flag | Demand-bound journal watch refreshes the snapshot |
+| Backup or .bak publication fails | Warn; primary save remains committed |
+
+Retained content and crash staging still have the P1b limits above. Pruning them
+requires a separate policy that preserves pinned versions and active writers.
+
+P1c recovery actions carry the incident's `detectedAt`. The HomeStore lock checks
+that it still identifies the current flag before restoring or accepting. A stale
+incident conflicts; a retry after resolution leaves primary bytes unchanged.
+Only explicit CLI backup restore falls back to rotating backups without a flag.
+The HTTP routes require `localHandoff`; remote-settings grants are excluded even
+locally because only the host CLI may write grants. Hosted readers see the same
+incident rows with the host-operator instruction and no action buttons. Finite
+reconciliation uses the existing live coordinator when topic delivery is absent.
