@@ -34,7 +34,7 @@ xcrun simctl install "$SIMULATOR_ID" "$legacy_products/Debug-iphonesimulator/Cez
 xcrun simctl install "$SIMULATOR_ID" "$rebrand_products/Debug-iphonesimulator/Cezarion.app"
 
 check() {
-    local products=$1 app_id=$2 method=$3 run_file
+    local products=$1 app_id=$2 method=$3 run_file label=${4:-$3}
     # xctestrun retains each compiled host's path and bundle ID. Add test-only inputs
     # to that host's environment, without changing the app or the shared scheme.
     run_file=$(python3 - "$products" "$app_id" <<'PY'
@@ -85,14 +85,16 @@ with destination.open('wb') as output:
 print(destination)
 PY
 )
-    rm -rf "$reports/side-by-side-$method.xcresult"
+    rm -rf "$reports/side-by-side-$label.xcresult"
     xcodebuild -xctestrun "$run_file" -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
         -parallel-testing-enabled NO -only-testing:"CezarionTests/SideBySideIsolationTests/$method" \
-        -resultBundlePath "$reports/side-by-side-$method.xcresult" test-without-building \
-        2>&1 | tee "$saved/$method.log"
+        -resultBundlePath "$reports/side-by-side-$label.xcresult" test-without-building \
+        2>&1 | tee "$saved/$label.log"
     # A skipped test cannot prove isolation. Require the selected test to execute.
-    grep -E "[Tt]est [Cc]ase.*$method.*passed" "$saved/$method.log"
+    grep -E "[Tt]est [Cc]ase.*$method.*passed" "$saved/$label.log"
 }
 check "$legacy_products" "$legacy_id" testSeedLegacySession
+# Prove the seed survives a fresh old-app process before touching the new app.
+check "$legacy_products" "$legacy_id" testLegacySessionRemainsUnchanged legacy-control
 check "$rebrand_products" "$rebrand_id" testNewAppNeedsConnectionAndSignIn
 check "$legacy_products" "$legacy_id" testLegacySessionRemainsUnchanged

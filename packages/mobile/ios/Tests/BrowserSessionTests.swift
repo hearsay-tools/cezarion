@@ -47,7 +47,11 @@ final class SideBySideIsolationTests: XCTestCase {
             .domain: "isolation.example.test", .path: "/", .name: cookieName,
             .value: "legacy-session", .secure: "TRUE", .expires: Date().addingTimeInterval(86400)
         ]))
-        let store = WKWebsiteDataStore.default().httpCookieStore
+        // Match an actual sign-in, which uses an initialized WebView.
+        let webView = await loadedBrowser()
+        let dataStore = webView.configuration.websiteDataStore
+        XCTAssertTrue(dataStore.isPersistent)
+        let store = dataStore.httpCookieStore
         await store.setCookie(cookie)
         // setCookie completes when WebKit accepts the cookie, before its disk write.
         // This SPI exists only in the test bundle; no private API ships in the app.
@@ -62,7 +66,13 @@ final class SideBySideIsolationTests: XCTestCase {
         }
         let cookies = await store.allCookies()
         XCTAssertTrue(cookies.contains { $0.name == cookieName && $0.value == "legacy-session" })
+        let records = await withCheckedContinuation { continuation in
+            dataStore.fetchDataRecords(ofTypes: [WKWebsiteDataTypeCookies]) { continuation.resume(returning: $0) }
+        }
+        print("Cookie seed: persistent=\(dataStore.isPersistent), sessionOnly=\(cookie.isSessionOnly), records=\(records.map { $0.displayName })")
+        XCTAssertFalse(cookie.isSessionOnly)
         try assertConnectionFields(endpoint: "https://isolation.example.test", auth: "https://login.isolation.example.test")
+        withExtendedLifetime(webView) {}
     }
 
     @MainActor func testNewAppNeedsConnectionAndSignIn() async throws {
@@ -70,16 +80,31 @@ final class SideBySideIsolationTests: XCTestCase {
         // Inspect before any connection/reset action could hide an accidental import.
         XCTAssertNil(UserDefaults.standard.data(forKey: "connection"))
         try assertConnectionFields(endpoint: "", auth: "")
-        let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
+        let webView = await loadedBrowser()
+        let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
         XCTAssertFalse(cookies.contains { $0.name == cookieName }, "The new WebView must not inherit the old sign-in")
+        withExtendedLifetime(webView) {}
     }
 
     @MainActor func testLegacySessionRemainsUnchanged() async throws {
         try requireSideBySideRun()
         XCTAssertEqual(UserDefaults.standard.data(forKey: "connection"), try connectionData())
         try assertConnectionFields(endpoint: "https://isolation.example.test", auth: "https://login.isolation.example.test")
-        let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
+        let webView = await loadedBrowser()
+        let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
         XCTAssertTrue(cookies.contains { $0.name == cookieName && $0.value == "legacy-session" })
+        withExtendedLifetime(webView) {}
+    }
+
+    @MainActor private func loadedBrowser() async -> WKWebView {
+        let webView = WKWebView(frame: .zero)
+        let navigation = CookieSeedNavigation(loaded: expectation(description: "Cookie fixture WebView loaded"))
+        webView.navigationDelegate = navigation
+        webView.loadHTMLString("<html><body>Cookie fixture</body></html>", baseURL: URL(string: "https://isolation.example.test"))
+        // bound: local HTML must finish loading before the browser store is inspected.
+        await fulfillment(of: [navigation.loaded], timeout: 15)
+        withExtendedLifetime(navigation) {}
+        return webView
     }
 
     @MainActor private func assertConnectionFields(endpoint: String, auth: String) throws {
@@ -95,4 +120,11 @@ final class SideBySideIsolationTests: XCTestCase {
     @MainActor private func descendants(_ view: UIView) -> [UIView] {
         view.subviews.flatMap { [$0] + descendants($0) }
     }
+}
+
+/// Retained until each fixture WebView finishes loading its local page.
+@MainActor private final class CookieSeedNavigation: NSObject, WKNavigationDelegate {
+    let loaded: XCTestExpectation
+    init(loaded: XCTestExpectation) { self.loaded = loaded }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loaded.fulfill() }
 }

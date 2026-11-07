@@ -102,10 +102,11 @@ printf "Test Case 'fixture.testMethod' passed\\n"
             runner.chmod(0o755)
             env = {**os.environ, 'PATH': directory + os.pathsep + os.environ['PATH'], 'SIMULATOR_ID': 'fixture'}
             script = 'set -euo pipefail\nreports=$1\nsaved=$1\n' + IOS_CHECK
-            script += '\ncheck "$1" fixture.app testMethod\ncheck "$1" fixture.app testMethod\n'
+            script += '\ncheck "$1" fixture.app testMethod\ncheck "$1" fixture.app testMethod\ncheck "$1" fixture.app testMethod legacy-control\n'
             result = subprocess.run(['bash', '-c', script, 'fixture', directory], env=env, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue((root / 'side-by-side-testMethod.xcresult').is_dir())
+            self.assertTrue((root / 'side-by-side-legacy-control.xcresult').is_dir())
             self.assertEqual((unrelated / 'keep').read_text(), 'unrelated report')
 
 
