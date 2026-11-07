@@ -246,6 +246,8 @@ function ItemBody({
   const checksQuery = useGithubChecks(hasPr ? [number] : [], hasPr)
   const checksMap = checksQuery.data?.available ? checksQuery.data.checks : undefined
   const label = `${KIND_LABEL[kind]} #${number}`
+  // One Retry for both failures: a request that never landed, and gh answering `available: false`
+  // (auth, transport, no remote) — a 200 the client would otherwise keep for its whole staleTime.
   const retryButton = <ItemRetryButton retry={retry} kind={kind} number={number} />
 
   if (item.isPending) return <TaskGithubItemLoading kind={kind} number={number} heading="h2" />
