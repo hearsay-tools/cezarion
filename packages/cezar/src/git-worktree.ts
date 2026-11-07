@@ -129,10 +129,9 @@ export async function createWorktree(
   return withWorktreeMutation(repoRoot, git => createWorktreeLocked(repoRoot, runId, baseBranch, options, git));
 }
 
-async function createWorktreeLocked(
-  repoRoot: string, runId: string, baseBranch: string,
-  options: { freshOnly?: boolean }, git: WorktreeGit,
-): Promise<WorktreeInfo> {
+async function resolveWorktreeBase(
+  repoRoot: string, baseBranch: string, git: WorktreeGit,
+): Promise<string> {
   let base = baseBranch;
   if (!base || base === 'HEAD') {
     // Detached HEAD — pin the base to the current commit so the record and
@@ -144,31 +143,94 @@ async function createWorktreeLocked(
   // Dash-guard (#431): `base` is spliced in as a positional git operand; an
   // option-like value would be argument injection.
   if (!isSafeGitRef(base)) throw new Error(`refusing option-like base ref: ${base}`);
+  return base;
+}
+
+async function createFreshOwnedWorktree(
+  repoRoot: string, base: string, branch: string, absolutePath: string, branchRef: string, git: WorktreeGit,
+): Promise<WorktreeInfo> {
+  // Owned workers cannot inherit the legacy adoption/prune behavior. Even a stale
+  // registration or an empty directory is a collision, not proof of ownership.
+  const listed = await git(repoRoot, ['worktree', 'list', '--porcelain', '-z'], 30_000);
+  if (!listed.ok) throw new Error('cannot verify existing worktree registrations');
+  const paths = listed.stdout.split('\0').filter((entry) => entry.startsWith('worktree '));
+  if (paths.some((entry) => canonicalPath(entry.slice(9)) === canonicalPath(absolutePath))) {
+    throw new Error('owned worktree registration already exists');
+  }
+  const pathExists = await lstat(absolutePath).then(() => true, (err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT') return false;
+    throw err;
+  });
+  const branchExists = await git(repoRoot, ['show-ref', '--verify', '--quiet', branchRef], 30_000);
+  if (pathExists || branchExists.ok) throw new Error('owned worktree path or branch already exists');
+  await mkdir(dirname(absolutePath), { recursive: true });
+  // Reserve the previously absent path exclusively; Git accepts our empty directory.
+  await mkdir(absolutePath);
+  const created = await git(repoRoot, ['worktree', 'add', '--no-track', '-b', branch, absolutePath, base], 30_000);
+  if (!created.ok) throw new Error(`git worktree add failed: ${created.stderr.trim()}`);
+  return worktreeInfo(absolutePath, branch, base);
+}
+
+function registeredWorktreeInfo(
+  atPath: RegisteredWorktree, branchRef: string, branch: string, base: string,
+): WorktreeInfo {
+  if (atPath.branch !== branchRef) {
+    throw new Error(
+      `managed worktree path is registered to ${atPath.branch ?? 'a detached HEAD'}, expected ${branchRef}`,
+    );
+  }
+  return worktreeInfo(atPath.path, branch, base);
+}
+
+async function repairExistingWorktreePath(
+  repoRoot: string, absolutePath: string, canonicalTarget: string,
+  branchRef: string, branch: string, base: string, git: WorktreeGit,
+): Promise<{ info: WorktreeInfo } | { registered: RegisteredWorktree[] }> {
+  await git(repoRoot, ['worktree', 'repair', absolutePath]);
+  const registered = await registeredWorktrees(repoRoot);
+  const atPath = registered.find((item) => canonicalPath(item.path) === canonicalTarget);
+  if (atPath) {
+    return { info: registeredWorktreeInfo(atPath, branchRef, branch, base) };
+  }
+  const entries = await readdir(absolutePath).catch(() => ['unreadable']);
+  if (entries.length > 0) {
+    throw new Error(`managed worktree path already exists and could not be repaired: ${absolutePath}`);
+  }
+  return { registered };
+}
+
+async function attachExistingTaskBranch(
+  repoRoot: string, runId: string, absolutePath: string, registered: RegisteredWorktree[],
+  branchRef: string, branch: string, base: string, git: WorktreeGit,
+): Promise<WorktreeInfo> {
+  // The task branch may still be checked out after its directory was moved.
+  // Reuse only a path whose basename is the full run id; a same-prefix UUID
+  // collision must fail rather than point two tasks at one worktree.
+  const byBranch = registered.find((item) => item.branch === branchRef);
+  if (byBranch) {
+    if (basename(byBranch.path) !== runId) {
+      throw new Error(`task branch ${branch} is already checked out at ${byBranch.path}`);
+    }
+    return worktreeInfo(byBranch.path, branch, base);
+  }
+  const attach = await git(repoRoot, ['worktree', 'add', absolutePath, branch]);
+  if (!attach.ok) {
+    throw new Error(`git worktree reattach failed: ${attach.stderr.trim() || attach.stdout.trim()}`);
+  }
+  return worktreeInfo(absolutePath, branch, base);
+}
+
+async function createWorktreeLocked(
+  repoRoot: string, runId: string, baseBranch: string,
+  options: { freshOnly?: boolean }, git: WorktreeGit,
+): Promise<WorktreeInfo> {
+  const base = await resolveWorktreeBase(repoRoot, baseBranch, git);
   const branch = branchFor(runId);
   const absolutePath = join(canonicalPath(repoRoot), WORKTREES_DIR, runId);
   const branchRef = `refs/heads/${branch}`;
 
   if (options.freshOnly) {
-    // Owned workers cannot inherit the legacy adoption/prune behavior. Even a stale
-    // registration or an empty directory is a collision, not proof of ownership.
-    const listed = await git(repoRoot, ['worktree', 'list', '--porcelain', '-z'], 30_000);
-    if (!listed.ok) throw new Error('cannot verify existing worktree registrations');
-    const paths = listed.stdout.split('\0').filter((entry) => entry.startsWith('worktree '));
-    if (paths.some((entry) => canonicalPath(entry.slice(9)) === canonicalPath(absolutePath))) {
-      throw new Error('owned worktree registration already exists');
-    }
-    const pathExists = await lstat(absolutePath).then(() => true, (err: NodeJS.ErrnoException) => {
-      if (err.code === 'ENOENT') return false;
-      throw err;
-    });
-    const branchExists = await git(repoRoot, ['show-ref', '--verify', '--quiet', branchRef], 30_000);
-    if (pathExists || branchExists.ok) throw new Error('owned worktree path or branch already exists');
-    await mkdir(dirname(absolutePath), { recursive: true });
-    // Reserve the previously absent path exclusively; Git accepts our empty directory.
-    await mkdir(absolutePath);
-    const created = await git(repoRoot, ['worktree', 'add', '--no-track', '-b', branch, absolutePath, base], 30_000);
-    if (!created.ok) throw new Error(`git worktree add failed: ${created.stderr.trim()}`);
-    return worktreeInfo(absolutePath, branch, base);
+    return createFreshOwnedWorktree(repoRoot, base, branch, absolutePath, branchRef, git);
   }
 
   const protection = await ownedCleanupProtection(repoRoot);
@@ -176,54 +238,29 @@ async function createWorktreeLocked(
   // A missing directory can leave stale administrative metadata behind.
   // Prune first so the checks below describe the filesystem as it exists now.
   if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
-  function registeredInfo(atPath: RegisteredWorktree): WorktreeInfo {
-    if (atPath.branch !== branchRef) {
-      throw new Error(
-        `managed worktree path is registered to ${atPath.branch ?? 'a detached HEAD'}, expected ${branchRef}`,
-      );
-    }
-    return worktreeInfo(atPath.path, branch, base);
-  }
   const canonicalTarget = canonicalPath(absolutePath);
   let registered = await registeredWorktrees(repoRoot);
-  let atPath = registered.find((item) => canonicalPath(item.path) === canonicalTarget);
+  const atPath = registered.find((item) => canonicalPath(item.path) === canonicalTarget);
   if (atPath) {
-    return registeredInfo(atPath);
+    return registeredWorktreeInfo(atPath, branchRef, branch, base);
   }
 
   // If the directory survived but its administrative entry did not, let Git
   // repair it. This is non-destructive; an unrepairable non-empty directory is
   // preserved and reported instead of being recursively removed.
   if (existsSync(absolutePath)) {
-    await git(repoRoot, ['worktree', 'repair', absolutePath]);
-    registered = await registeredWorktrees(repoRoot);
-    atPath = registered.find((item) => canonicalPath(item.path) === canonicalTarget);
-    if (atPath) {
-      return registeredInfo(atPath);
-    }
-    const entries = await readdir(absolutePath).catch(() => ['unreadable']);
-    if (entries.length > 0) {
-      throw new Error(`managed worktree path already exists and could not be repaired: ${absolutePath}`);
-    }
+    const repaired = await repairExistingWorktreePath(
+      repoRoot, absolutePath, canonicalTarget, branchRef, branch, base, git,
+    );
+    if ('info' in repaired) return repaired.info;
+    registered = repaired.registered;
   }
 
   const branchExists = await git(repoRoot, ['show-ref', '--verify', '--quiet', branchRef]);
   if (branchExists.ok) {
-    // The task branch may still be checked out after its directory was moved.
-    // Reuse only a path whose basename is the full run id; a same-prefix UUID
-    // collision must fail rather than point two tasks at one worktree.
-    const byBranch = registered.find((item) => item.branch === branchRef);
-    if (byBranch) {
-      if (basename(byBranch.path) !== runId) {
-        throw new Error(`task branch ${branch} is already checked out at ${byBranch.path}`);
-      }
-      return worktreeInfo(byBranch.path, branch, base);
-    }
-    const attach = await git(repoRoot, ['worktree', 'add', absolutePath, branch]);
-    if (!attach.ok) {
-      throw new Error(`git worktree reattach failed: ${attach.stderr.trim() || attach.stdout.trim()}`);
-    }
-    return worktreeInfo(absolutePath, branch, base);
+    return attachExistingTaskBranch(
+      repoRoot, runId, absolutePath, registered, branchRef, branch, base, git,
+    );
   }
 
   const create = await git(repoRoot, ['worktree', 'add', '--no-track', '-b', branch, absolutePath, base]);
@@ -253,9 +290,47 @@ export function worktreeSizeBytes(path: string): Promise<number | null> {
   });
 }
 
-/** Remove a task worktree and optionally its branch. Best effort — never throws.
- *  Owned worker paths are refused unless `reclaimOwnedDirectory` is set and no
- *  branch is passed (retention #575: directory only, receipts and branch kept). */
+type OwnedCleanupSets = { paths: Set<string>; branches: Set<string> };
+
+async function collectOwnedReceipts(receipts: string, sets: OwnedCleanupSets): Promise<boolean> {
+  const entries = await readdir(receipts).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return []; throw error;
+  });
+  for (const entry of entries) {
+    if (!entry.endsWith('.json')) continue;
+    const path = join(receipts, entry); const info = await lstat(path);
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 16_384) return true;
+    const receipt: unknown = JSON.parse(await readFile(path, 'utf8'));
+    if (!receipt || typeof receipt !== 'object' || !('workspace' in receipt)) return true;
+    const parsed = workerWorkspaceSchema.safeParse(receipt.workspace);
+    if (!parsed.success) return true;
+    const workspace = parsed.data;
+    if (workspace.branch !== branchFor(workspace.ownerRunId) ||
+        !workspace.path.endsWith(join(WORKTREES_DIR, workspace.ownerRunId)) ||
+        entry.replace(/(?:\.cleanup)?\.json$/, '') !== workspace.resourceId) return true;
+    sets.paths.add(workspace.path); sets.branches.add(workspace.branch);
+  }
+  return false;
+}
+
+/** A provisioning crash can leave the administrative marker before its receipt. */
+async function collectOwnedAdminMarkers(root: string, sets: OwnedCleanupSets): Promise<void> {
+  const admins = await readdir(join(root, 'worktrees')).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return []; throw error;
+  });
+  for (const admin of admins) {
+    const dir = join(root, 'worktrees', admin);
+    const marker = await lstat(join(dir, 'cezar-owned-resource')).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined; throw error;
+    });
+    if (marker) {
+      sets.paths.add(dirname((await readFile(join(dir, 'gitdir'), 'utf8')).trim()));
+      const head = (await readFile(join(dir, 'HEAD'), 'utf8')).trim();
+      if (head.startsWith('ref: refs/heads/')) sets.branches.add(head.slice('ref: refs/heads/'.length));
+    }
+  }
+}
+
 /** Ownership receipts survive a missing run index and a replaced directory.
  * Unreadable/malformed evidence disables generic deletion instead of granting it. */
 export async function ownedCleanupProtection(repoRoot: string): Promise<{ paths: Set<string>; branches: Set<string>; uncertain: boolean }> {
@@ -269,42 +344,15 @@ export async function ownedCleanupProtection(repoRoot: string): Promise<{ paths:
       if (error.code === 'ENOENT') return undefined; throw error;
     });
     if (directory && (!directory.isDirectory() || directory.isSymbolicLink())) return { paths, branches, uncertain: true };
-    const entries = await readdir(receipts).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return []; throw error;
-    });
-    for (const entry of entries) {
-      if (!entry.endsWith('.json')) continue;
-      const path = join(receipts, entry); const info = await lstat(path);
-      if (!info.isFile() || info.isSymbolicLink() || info.size > 16_384) return { paths, branches, uncertain: true };
-      const receipt: unknown = JSON.parse(await readFile(path, 'utf8'));
-      if (!receipt || typeof receipt !== 'object' || !('workspace' in receipt)) return { paths, branches, uncertain: true };
-      const parsed = workerWorkspaceSchema.safeParse(receipt.workspace);
-      if (!parsed.success) return { paths, branches, uncertain: true };
-      const workspace = parsed.data;
-      if (workspace.branch !== branchFor(workspace.ownerRunId) ||
-          !workspace.path.endsWith(join(WORKTREES_DIR, workspace.ownerRunId)) ||
-          entry.replace(/(?:\.cleanup)?\.json$/, '') !== workspace.resourceId) return { paths, branches, uncertain: true };
-      paths.add(workspace.path); branches.add(workspace.branch);
-    }
-    // A provisioning crash can leave the administrative marker before its receipt.
-    const admins = await readdir(join(root, 'worktrees')).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return []; throw error;
-    });
-    for (const admin of admins) {
-      const dir = join(root, 'worktrees', admin);
-      const marker = await lstat(join(dir, 'cezar-owned-resource')).catch((error: NodeJS.ErrnoException) => {
-        if (error.code === 'ENOENT') return undefined; throw error;
-      });
-      if (marker) {
-        paths.add(dirname((await readFile(join(dir, 'gitdir'), 'utf8')).trim()));
-        const head = (await readFile(join(dir, 'HEAD'), 'utf8')).trim();
-        if (head.startsWith('ref: refs/heads/')) branches.add(head.slice('ref: refs/heads/'.length));
-      }
-    }
+    if (await collectOwnedReceipts(receipts, { paths, branches })) return { paths, branches, uncertain: true };
+    await collectOwnedAdminMarkers(root, { paths, branches });
     return { paths, branches, uncertain: false };
   } catch { return { paths, branches, uncertain: true }; }
 }
 
+/** Remove a task worktree and optionally its branch. Best effort — never throws.
+ *  Owned worker paths are refused unless `reclaimOwnedDirectory` is set and no
+ *  branch is passed (retention #575: directory only, receipts and branch kept). */
 export type RemoveWorktreeOptions = {
   reclaimOwnedDirectory?: boolean;
   onlyClean?: boolean;
@@ -324,17 +372,61 @@ export async function removeWorktree(
   await withWorktreeMutation(repoRoot, git => removeWorktreeLocked(repoRoot, worktreePath, branch, opts, git)).catch(() => undefined);
 }
 
+type OwnedCleanupProtection = { paths: Set<string>; branches: Set<string>; uncertain: boolean };
+
+async function runBeforeWorktreeRemove(
+  opts: RemoveWorktreeOptions | undefined,
+  protection: OwnedCleanupProtection,
+  worktreePath: string,
+): Promise<void> {
+  await opts?.beforeRemove?.().catch(() => undefined);
+  opts?.assertCurrent?.();
+  if (protection.paths.has(worktreePath) && inspectGeneration({ paths: [worktreePath] }).liveness !== 'gone') {
+    throw new Error('Owned worktree may still be held by a process');
+  }
+}
+
+async function removeCleanWorktree(
+  repoRoot: string, worktreePath: string, protection: OwnedCleanupProtection,
+  git: WorktreeGit, beforeRemove: () => Promise<void>,
+): Promise<void> {
+  const head = await git(worktreePath, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
+  const sha = head.stdout.trim();
+  if (!head.ok || !sha) return;
+  const kept = await git(repoRoot, ['for-each-ref', '--contains', sha, '--count=1', '--format=%(refname)', 'refs/heads', 'refs/remotes']);
+  if (!kept.ok || kept.stdout.trim() === '') return;
+  // The refusal git would give a dirty tree, read first so a declined removal costs nothing
+  // (`beforeRemove` stops the run's preview). git still has the last word at removal time.
+  const status = await git(worktreePath, ['status', '--porcelain']);
+  if (!status.ok || status.stdout.trim() !== '') return;
+  await beforeRemove();
+  const removed = await git(repoRoot, ['worktree', 'remove', worktreePath]);
+  if (!removed.ok) return;
+  if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
+}
+
+async function forceRemoveWorktree(
+  repoRoot: string, worktreePath: string, branch: string | undefined,
+  reclaimOwnedDirectory: boolean, protection: OwnedCleanupProtection,
+  git: WorktreeGit, beforeRemove: () => Promise<void>,
+): Promise<void> {
+  await beforeRemove();
+  await git(repoRoot, ['worktree', 'remove', '--force', worktreePath]);
+  // Owned-path reclaim must not `rm` a receipt path that is no longer a git
+  // worktree — the directory may have been replaced with unrelated files.
+  // For owned resources Git already removed the exact checkout. Never recursively delete a
+  // path recreated after that operation (possibly by another execution/controller).
+  if (reclaimOwnedDirectory && protection.paths.has(worktreePath)) return;
+  await rm(worktreePath, { recursive: true, force: true }).catch(() => undefined);
+  if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
+  if (branch) await git(repoRoot, ['branch', '-D', branch]);
+}
+
 async function removeWorktreeLocked(
   repoRoot: string, worktreePath: string, branch: string | undefined,
   opts: RemoveWorktreeOptions | undefined, git: WorktreeGit,
 ): Promise<void> {
-  const beforeRemove = async () => {
-    await opts?.beforeRemove?.().catch(() => undefined);
-    opts?.assertCurrent?.();
-    if (protection.paths.has(worktreePath) && inspectGeneration({ paths: [worktreePath] }).liveness !== 'gone') {
-      throw new Error('Owned worktree may still be held by a process');
-    }
-  };
+  const beforeRemove = async () => runBeforeWorktreeRemove(opts, protection, worktreePath);
   const protection = await ownedCleanupProtection(repoRoot);
   // Directory-only retention (#575) may reclaim a finished owned-worker checkout
   // while keeping its branch and receipts. Unowned deletion still refuses owned
@@ -357,32 +449,8 @@ async function removeWorktreeLocked(
   // removal is git's own unforced one — git refuses a dirty tree at the moment it removes, which a
   // status read beforehand cannot promise against an editor saving in between. Any refusal keeps
   // the directory: no forced fallback, no `rm`. Ignored files (build output) never block it.
-  if (opts?.onlyClean) {
-    const head = await git(worktreePath, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
-    const sha = head.stdout.trim();
-    if (!head.ok || !sha) return;
-    const kept = await git(repoRoot, ['for-each-ref', '--contains', sha, '--count=1', '--format=%(refname)', 'refs/heads', 'refs/remotes']);
-    if (!kept.ok || kept.stdout.trim() === '') return;
-    // The refusal git would give a dirty tree, read first so a declined removal costs nothing
-    // (`beforeRemove` stops the run's preview). git still has the last word at removal time.
-    const status = await git(worktreePath, ['status', '--porcelain']);
-    if (!status.ok || status.stdout.trim() !== '') return;
-    await beforeRemove();
-    const removed = await git(repoRoot, ['worktree', 'remove', worktreePath]);
-    if (!removed.ok) return;
-    if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
-    return;
-  }
-  await beforeRemove();
-  await git(repoRoot, ['worktree', 'remove', '--force', worktreePath]);
-  // Owned-path reclaim must not `rm` a receipt path that is no longer a git
-  // worktree — the directory may have been replaced with unrelated files.
-  // For owned resources Git already removed the exact checkout. Never recursively delete a
-  // path recreated after that operation (possibly by another execution/controller).
-  if (reclaimOwnedDirectory && protection.paths.has(worktreePath)) return;
-  await rm(worktreePath, { recursive: true, force: true }).catch(() => undefined);
-  if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
-  if (branch) await git(repoRoot, ['branch', '-D', branch]);
+  if (opts?.onlyClean) return removeCleanWorktree(repoRoot, worktreePath, protection, git, beforeRemove);
+  return forceRemoveWorktree(repoRoot, worktreePath, branch, reclaimOwnedDirectory, protection, git, beforeRemove);
 }
 
 /**
@@ -458,6 +526,158 @@ function hasConflictMarkers(text: string): boolean {
 /** Serialize all autosave entry points, including periodic/final flush overlap. */
 const autosaves = new Map<string, Promise<AutosaveResult>>();
 
+type AutosaveGitFn = (cwd: string, args: string[]) => ReturnType<typeof autosaveGit>;
+
+/** HEAD's symbolic ref, `null` on a detached HEAD, `undefined` when the read failed. */
+async function readAutosaveHead(dir: string, git: AutosaveGitFn): Promise<string | null | undefined> {
+  // Exit 1 under -q is a detached HEAD; anything else is a failed read.
+  const ref = await git(dir, ['symbolic-ref', '-q', 'HEAD']);
+  if (!ref.ok && ref.code !== 1) return undefined;
+  return ref.ok ? ref.stdout.trim() : null;
+}
+
+function autosaveBranchName(head: string | null): string | null {
+  return head?.startsWith('refs/heads/') ? head.slice('refs/heads/'.length) : head;
+}
+
+function reportAutosave(onOutcome: AutosaveCommitOptions['onOutcome'], outcome: AutosaveOutcome): void {
+  try { onOutcome?.(outcome); } catch { /* Reporting must not change what the save did. */ }
+}
+
+// HEAD is not the task branch: the work stays uncommitted, reported with the paths status saw.
+function skipAutosave(head: string | null, status: string, onOutcome: AutosaveCommitOptions['onOutcome']): 'skipped' {
+  reportAutosave(onOutcome, { result: 'skipped', branch: autosaveBranchName(head), changedPaths: status.split('\n').filter(Boolean).length });
+  return 'skipped';
+}
+
+/** A resolved merge, cherry-pick or revert the agent has not concluded: `git commit`
+ * would conclude it under `cezar autosave`. The agent concludes it with its own
+ * message; the next flush picks the work up (hearsay-tools/cezarion#1004). Asked of
+ * Git, not looked up as files: only MERGE_HEAD is always a file. CHERRY_PICK_HEAD and
+ * REVERT_HEAD are root refs in the ref backend, which a reftable repository keeps in
+ * its reftable stack, so a file check would miss them there. */
+async function pendingAutosaveOperation(dir: string, reason: AutosaveReason, git: AutosaveGitFn): Promise<'refused' | 'failed' | null> {
+  for (const pending of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
+    const found = await git(dir, ['rev-parse', '--verify', '-q', pending]);
+    if (found.ok) {
+      console.warn(`[cezar] skipping ${reason} autosave in ${dir}: ${pending} is set, the operation is not concluded`);
+      return 'refused';
+    }
+    if (found.code !== 1) return 'failed';
+  }
+  return null;
+}
+
+/** Commit as the CURRENT git user, so the branch's commits (and any PR opened from it) are
+ * attributed to the real author and pass CLA / attribution checks. The old hardcoded
+ * `cezar <cezar@local>` identity made every autosave look like a non-GitHub user. Fall back to
+ * that identity ONLY when the machine has no git identity configured — otherwise `git commit`
+ * would fail and the autosave (the run's recovery point) would be lost. */
+async function autosaveIdentityArgs(dir: string, git: AutosaveGitFn): Promise<string[] | 'failed'> {
+  const name = await git(dir, ['config', 'user.name']);
+  if (!name.ok && name.code !== 1) return 'failed';
+  const email = await git(dir, ['config', 'user.email']);
+  if (!email.ok && email.code !== 1) return 'failed';
+  return (name.ok && name.stdout.trim() && email.ok && email.stdout.trim())
+    ? [] : ['-c', 'user.name=cezar', '-c', 'user.email=cezar@local'];
+}
+
+async function commitAutosaveOnHead(
+  dir: string, identityArgs: string[], message: string, branch: string | null,
+  onOutcome: AutosaveCommitOptions['onOutcome'], git: AutosaveGitFn,
+): Promise<AutosaveResult> {
+  const commit = await git(dir, [...identityArgs, 'commit', '--no-verify', '-m', message]);
+  if (!commit.ok) return 'failed';
+  if (onOutcome) {
+    // The commit already landed: a failed read loses the sha, never the report.
+    const sha = await git(dir, ['rev-parse', '--short', 'HEAD']);
+    reportAutosave(onOutcome, { result: 'committed', sha: (sha.ok && sha.stdout.trim()) || null, branch });
+  }
+  return 'committed';
+}
+
+/** The task branch is written by compare-and-swap, never through HEAD: the agent can
+ * check another branch out after the `symbolic-ref` check in `readAutosaveHead`, and `git commit`
+ * resolves HEAD again at its own start, so the save landed on the agent's branch
+ * (review on hearsay-tools/cezarion#1111). `update-ref <ref> <new> <old>` moves the
+ * branch only while it still points at the tip read here (an unborn one: while it
+ * still does not exist); a moved branch fails the save and the next flush retries.
+ * Unlike the porcelain this runs no prepare-commit-msg or post-commit hook
+ * (`--no-verify` already skipped pre-commit and commit-msg), and the reflog entry
+ * reads `cezar autosave (<reason>)` without the `commit: ` prefix. commit-tree
+ * stopped reading commit.gpgSign in Git 2.9 (its release notes tell scripts to read
+ * it and pass -S), so it is read here: a user who signs every commit still does. */
+async function writeAutosaveCommit(
+  dir: string, taskBranch: string, identityArgs: string[], message: string, git: AutosaveGitFn,
+): Promise<{ sha: string; parent: string } | 'failed' | 'nothing-to-do'> {
+  const ref = `refs/heads/${taskBranch}`;
+  const tip = await git(dir, ['rev-parse', '--verify', '-q', ref]);
+  if (!tip.ok && tip.code !== 1) return 'failed';
+  const parent = tip.ok ? tip.stdout.trim() : '';
+  const written = await git(dir, ['write-tree']);
+  const tree = written.stdout.trim();
+  if (!written.ok || !tree) return 'failed';
+  if (parent) {
+    // Dirty when status looked, identical once staged: nothing to save.
+    const parentTree = await git(dir, ['rev-parse', '--verify', '-q', `${parent}^{tree}`]);
+    if (!parentTree.ok) return 'failed';
+    if (parentTree.stdout.trim() === tree) return 'nothing-to-do';
+  }
+  const sign = await git(dir, ['config', '--type=bool', 'commit.gpgsign']);
+  if (!sign.ok && sign.code !== 1) return 'failed';
+  const created = await git(dir, [
+    ...identityArgs,
+    'commit-tree',
+    ...(sign.ok && sign.stdout.trim() === 'true' ? ['-S'] : []),
+    tree,
+    ...(parent ? ['-p', parent] : []),
+    '-m',
+    message,
+  ]);
+  const sha = created.stdout.trim();
+  if (!created.ok || !sha) return 'failed';
+  return { sha, parent };
+}
+
+async function publishAutosaveCommit(
+  dir: string, taskBranch: string, sha: string, parent: string, message: string, status: string,
+  onOutcome: AutosaveCommitOptions['onOutcome'], reason: AutosaveReason, git: AutosaveGitFn,
+): Promise<AutosaveResult> {
+  const ref = `refs/heads/${taskBranch}`;
+  // The save is not atomic against the agent's own Git commands. It guarantees that no
+  // ref other than refs/heads/<taskBranch> moves, and that no merge, cherry-pick or
+  // revert Git has recorded as pending (its MERGE_HEAD, CHERRY_PICK_HEAD or REVERT_HEAD
+  // written) by this recheck is committed: the check before `add -A` cannot see one that
+  // starts after it, and the save would record that operation's content without its
+  // ancestry (review round 4 on hearsay-tools/cezarion#1004). An operation that starts
+  // after `write-tree` cannot be in this tree; one recorded before it is still pending
+  // here, unless the agent also concluded it, which moved the branch and fails the
+  // compare-and-swap, or aborted it within those few commands, whose content the save
+  // then still records. A Git command still running during the save is not excluded:
+  // `git merge` publishes the merged index before it writes MERGE_HEAD, so a save in
+  // between records that content single-parent, as `git add -A && git commit` always
+  // did (review round 5 reproduced the same result on main). The save also commits only
+  // when HEAD names the task branch at both of its reads, before `add -A` and here after
+  // `write-tree`, so a checkout between them skips it (review round 2 on
+  // hearsay-tools/cezarion#1111). A checkout away and back again between the reads is not
+  // excluded, nor is one still running, which writes the new index and working tree
+  // before it moves HEAD, so a save in between commits the other branch's files onto the
+  // task branch, as `git add -A && git commit` on main does. A refusal or a skip here
+  // leaves what `add -A` staged in the index, as every failure after it does.
+  const moved = await readAutosaveHead(dir, git);
+  if (moved === undefined) return 'failed';
+  if (moved !== ref) return skipAutosave(moved, status, onOutcome);
+  const late = await pendingAutosaveOperation(dir, reason, git);
+  if (late) return late;
+  if (!(await git(dir, ['update-ref', '-m', message, ref, sha, parent])).ok) return 'failed';
+  if (onOutcome) {
+    // The commit already landed: a failed read loses the sha, never the report.
+    const short = await git(dir, ['rev-parse', '--short', sha]);
+    reportAutosave(onOutcome, { result: 'committed', sha: (short.ok && short.stdout.trim()) || null, branch: taskBranch });
+  }
+  return 'committed';
+}
+
 /**
  * Stage and commit everything in the worktree as a "cezar autosave" commit
  * (janitor pattern) — the agent's progress is recoverable from the `cez/<id8>`
@@ -487,35 +707,19 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
   finally { if (autosaves.get(key) === task) autosaves.delete(key); }
 
   async function save(): Promise<AutosaveResult> {
-    const git = (cwd: string, args: string[]) => autosaveGit(cwd, args, options);
+    const git: AutosaveGitFn = (cwd, args) => autosaveGit(cwd, args, options);
     const status = await git(dir, ['status', '--porcelain']);
     if (!status.ok) return 'failed';
     if (!status.stdout.trim()) return 'nothing-to-do';
     const { taskBranch, onOutcome } = options;
-    const report = (outcome: AutosaveOutcome) => {
-      try { onOutcome?.(outcome); } catch { /* Reporting must not change what the save did. */ }
-    };
-    // HEAD's symbolic ref, `null` on a detached HEAD, `undefined` when the read failed.
-    const readHead = async (): Promise<string | null | undefined> => {
-      // Exit 1 under -q is a detached HEAD; anything else is a failed read.
-      const ref = await git(dir, ['symbolic-ref', '-q', 'HEAD']);
-      if (!ref.ok && ref.code !== 1) return undefined;
-      return ref.ok ? ref.stdout.trim() : null;
-    };
-    const branchName = (head: string | null) => head?.startsWith('refs/heads/') ? head.slice('refs/heads/'.length) : head;
-    // HEAD is not the task branch: the work stays uncommitted, reported with the paths status saw.
-    const skip = (head: string | null): 'skipped' => {
-      report({ result: 'skipped', branch: branchName(head), changedPaths: status.stdout.split('\n').filter(Boolean).length });
-      return 'skipped';
-    };
     let head: string | null = null;
     if (taskBranch !== undefined || onOutcome) {
-      const read = await readHead();
+      const read = await readAutosaveHead(dir, git);
       if (read === undefined) return 'failed';
       head = read;
     }
-    const branch = branchName(head);
-    if (taskBranch !== undefined && head !== `refs/heads/${taskBranch}`) return skip(head);
+    const branch = autosaveBranchName(head);
+    if (taskBranch !== undefined && head !== `refs/heads/${taskBranch}`) return skipAutosave(head, status.stdout, onOutcome);
     const unresolved = await unresolvedConflicts(dir, status.stdout);
     if (unresolved) {
       // Losing one recovery point beats poisoning the branch with a commit that
@@ -525,127 +729,21 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
       console.warn(`[cezar] skipping ${reason} autosave in ${dir}: ${unresolved}`);
       return 'refused';
     }
-    // A resolved merge, cherry-pick or revert the agent has not concluded: `git commit`
-    // would conclude it under `cezar autosave`. The agent concludes it with its own
-    // message; the next flush picks the work up (hearsay-tools/cezarion#1004). Asked of
-    // Git, not looked up as files: only MERGE_HEAD is always a file. CHERRY_PICK_HEAD and
-    // REVERT_HEAD are root refs in the ref backend, which a reftable repository keeps in
-    // its reftable stack, so a file check would miss them there.
-    const pendingOperation = async (): Promise<'refused' | 'failed' | null> => {
-      for (const pending of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
-        const found = await git(dir, ['rev-parse', '--verify', '-q', pending]);
-        if (found.ok) {
-          console.warn(`[cezar] skipping ${reason} autosave in ${dir}: ${pending} is set, the operation is not concluded`);
-          return 'refused';
-        }
-        if (found.code !== 1) return 'failed';
-      }
-      return null;
-    };
     if (taskBranch !== undefined) {
       // Checked before staging too, so a pending operation's index stays as the agent left it.
-      const pending = await pendingOperation();
+      const pending = await pendingAutosaveOperation(dir, reason, git);
       if (pending) return pending;
     }
     if (!(await git(dir, ['add', '-A'])).ok) return 'failed';
-    // Commit as the CURRENT git user, so the branch's commits (and any PR opened from it) are
-    // attributed to the real author and pass CLA / attribution checks. The old hardcoded
-    // `cezar <cezar@local>` identity made every autosave look like a non-GitHub user. Fall back to
-    // that identity ONLY when the machine has no git identity configured — otherwise `git commit`
-    // would fail and the autosave (the run's recovery point) would be lost.
-    const name = await git(dir, ['config', 'user.name']);
-    if (!name.ok && name.code !== 1) return 'failed';
-    const email = await git(dir, ['config', 'user.email']);
-    if (!email.ok && email.code !== 1) return 'failed';
-    const identityArgs = (name.ok && name.stdout.trim() && email.ok && email.stdout.trim())
-      ? []
-      : ['-c', 'user.name=cezar', '-c', 'user.email=cezar@local'];
+    const identityArgs = await autosaveIdentityArgs(dir, git);
+    if (identityArgs === 'failed') return 'failed';
     const message = `cezar autosave (${reason})`;
     if (taskBranch === undefined) {
-      const commit = await git(dir, [
-        ...identityArgs,
-        'commit',
-        '--no-verify',
-        '-m',
-        message,
-      ]);
-      if (!commit.ok) return 'failed';
-      if (onOutcome) {
-        // The commit already landed: a failed read loses the sha, never the report.
-        const sha = await git(dir, ['rev-parse', '--short', 'HEAD']);
-        report({ result: 'committed', sha: (sha.ok && sha.stdout.trim()) || null, branch });
-      }
-      return 'committed';
+      return commitAutosaveOnHead(dir, identityArgs, message, branch, onOutcome, git);
     }
-    // The task branch is written by compare-and-swap, never through HEAD: the agent can
-    // check another branch out after the `symbolic-ref` check above, and `git commit`
-    // resolves HEAD again at its own start, so the save landed on the agent's branch
-    // (review on hearsay-tools/cezarion#1111). `update-ref <ref> <new> <old>` moves the
-    // branch only while it still points at the tip read here (an unborn one: while it
-    // still does not exist); a moved branch fails the save and the next flush retries.
-    // Unlike the porcelain this runs no prepare-commit-msg or post-commit hook
-    // (`--no-verify` already skipped pre-commit and commit-msg), and the reflog entry
-    // reads `cezar autosave (<reason>)` without the `commit: ` prefix. commit-tree
-    // stopped reading commit.gpgSign in Git 2.9 (its release notes tell scripts to read
-    // it and pass -S), so it is read here: a user who signs every commit still does.
-    const ref = `refs/heads/${taskBranch}`;
-    const tip = await git(dir, ['rev-parse', '--verify', '-q', ref]);
-    if (!tip.ok && tip.code !== 1) return 'failed';
-    const parent = tip.ok ? tip.stdout.trim() : '';
-    const written = await git(dir, ['write-tree']);
-    const tree = written.stdout.trim();
-    if (!written.ok || !tree) return 'failed';
-    if (parent) {
-      // Dirty when status looked, identical once staged: nothing to save.
-      const parentTree = await git(dir, ['rev-parse', '--verify', '-q', `${parent}^{tree}`]);
-      if (!parentTree.ok) return 'failed';
-      if (parentTree.stdout.trim() === tree) return 'nothing-to-do';
-    }
-    const sign = await git(dir, ['config', '--type=bool', 'commit.gpgsign']);
-    if (!sign.ok && sign.code !== 1) return 'failed';
-    const created = await git(dir, [
-      ...identityArgs,
-      'commit-tree',
-      ...(sign.ok && sign.stdout.trim() === 'true' ? ['-S'] : []),
-      tree,
-      ...(parent ? ['-p', parent] : []),
-      '-m',
-      message,
-    ]);
-    const sha = created.stdout.trim();
-    if (!created.ok || !sha) return 'failed';
-    // The save is not atomic against the agent's own Git commands. It guarantees that no
-    // ref other than refs/heads/<taskBranch> moves, and that no merge, cherry-pick or
-    // revert Git has recorded as pending (its MERGE_HEAD, CHERRY_PICK_HEAD or REVERT_HEAD
-    // written) by this recheck is committed: the check before `add -A` cannot see one that
-    // starts after it, and the save would record that operation's content without its
-    // ancestry (review round 4 on hearsay-tools/cezarion#1004). An operation that starts
-    // after `write-tree` cannot be in this tree; one recorded before it is still pending
-    // here, unless the agent also concluded it, which moved the branch and fails the
-    // compare-and-swap, or aborted it within those few commands, whose content the save
-    // then still records. A Git command still running during the save is not excluded:
-    // `git merge` publishes the merged index before it writes MERGE_HEAD, so a save in
-    // between records that content single-parent, as `git add -A && git commit` always
-    // did (review round 5 reproduced the same result on main). The save also commits only
-    // when HEAD names the task branch at both of its reads, before `add -A` and here after
-    // `write-tree`, so a checkout between them skips it (review round 2 on
-    // hearsay-tools/cezarion#1111). A checkout away and back again between the reads is not
-    // excluded, nor is one still running, which writes the new index and working tree
-    // before it moves HEAD, so a save in between commits the other branch's files onto the
-    // task branch, as `git add -A && git commit` on main does. A refusal or a skip here
-    // leaves what `add -A` staged in the index, as every failure after it does.
-    const moved = await readHead();
-    if (moved === undefined) return 'failed';
-    if (moved !== ref) return skip(moved);
-    const late = await pendingOperation();
-    if (late) return late;
-    if (!(await git(dir, ['update-ref', '-m', message, ref, sha, parent])).ok) return 'failed';
-    if (onOutcome) {
-      // The commit already landed: a failed read loses the sha, never the report.
-      const short = await git(dir, ['rev-parse', '--short', sha]);
-      report({ result: 'committed', sha: (short.ok && short.stdout.trim()) || null, branch: taskBranch });
-    }
-    return 'committed';
+    const written = await writeAutosaveCommit(dir, taskBranch, identityArgs, message, git);
+    if (written === 'failed' || written === 'nothing-to-do') return written;
+    return publishAutosaveCommit(dir, taskBranch, written.sha, written.parent, message, status.stdout, onOutcome, reason, git);
   }
 }
 
