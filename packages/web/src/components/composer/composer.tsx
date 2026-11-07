@@ -628,9 +628,19 @@ export function Composer(props: ComposerProps) {
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (menuOpen && moveMenu(event)) return
-    if (!isSubmitShortcut(submitEvent(event))) return
-    event.preventDefault()
-    submitDraft()
+    const shouldSend = isSubmitShortcut({
+      key: event.key,
+      shiftKey: event.shiftKey,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+      altKey: event.altKey,
+      repeat: event.repeat,
+      isComposing: event.nativeEvent.isComposing,
+    })
+    if (shouldSend) {
+      event.preventDefault()
+      submitDraft()
+    }
   }
 
   const moveMenu = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
@@ -788,9 +798,6 @@ export function Composer(props: ComposerProps) {
         onKeyDown={onKeyDown}
         onSelect={syncTrigger}
         onPaste={(event) => {
-          // `kind: 'file'` rather than an `image/` type test (#950): the clipboard carries a pasted
-          // `.md` as a file item too, and `screenFiles` is what decides whether cezar takes it. The
-          // text half of the clipboard is start alone so an ordinary ⌘V still types.
           const files = composerPasteFiles(event.clipboardData?.items)
           if (files.length === 0) return
           event.preventDefault()
@@ -816,16 +823,4 @@ export function Composer(props: ComposerProps) {
       />
     </ComposerFrame>
   )
-}
-
-function submitEvent(event: KeyboardEvent<HTMLTextAreaElement>) {
-  return {
-    key: event.key,
-    shiftKey: event.shiftKey,
-    metaKey: event.metaKey,
-    ctrlKey: event.ctrlKey,
-    altKey: event.altKey,
-    repeat: event.repeat,
-    isComposing: event.nativeEvent.isComposing,
-  }
 }
