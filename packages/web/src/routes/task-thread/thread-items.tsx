@@ -694,6 +694,69 @@ function toolHasContent(item: UiToolItem, nestedCount: number): boolean {
   )
 }
 
+/** The trigger's right side: spinner while busy, then the failed/declined label and the exit pill. */
+function ToolCardBadges({ item, busy }: { item: UiToolItem; busy: boolean }) {
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-2 pl-2">
+      {busy ? (
+        <LoaderCircleIcon role="status" aria-label="Running" className="size-3.5 animate-spin text-soft-foreground" />
+      ) : null}
+      {item.status === 'failed' ? <span className="text-xs text-muted-foreground">failed</span> : null}
+      {item.status === 'declined' ? <span className="text-xs text-soft-foreground">declined</span> : null}
+      {item.toolKind === 'execute' && typeof item.exitCode === 'number' ? (
+        <span
+          data-slot="tool-exit"
+          className={cn(
+            'rounded-full px-2 py-px font-mono text-[11px] font-semibold',
+            item.exitCode === 0 ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger',
+          )}
+        >
+          {item.exitCode}
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
+/** The expanded body: command, error, diffs, output and nested sub-agent items, in that order. */
+function ToolCardBody({
+  item,
+  command,
+  busy,
+  nested,
+  cacheKey,
+  renderNested,
+}: {
+  item: UiToolItem
+  command: string | undefined
+  busy: boolean
+  nested: readonly ThreadEntry[]
+  cacheKey?: string | undefined
+  renderNested?: (entries: readonly ThreadEntry[], scope: string) => ReactNode
+}) {
+  return (
+    <div className="border-t border-border bg-card-2">
+      {command !== undefined ? (
+        <pre data-slot="tool-command" className="px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{command}</pre>
+      ) : null}
+      {item.error !== undefined && item.error !== '' ? (
+        <div data-slot="tool-error" className="px-4 py-3 font-mono text-xs leading-[1.7] whitespace-pre-wrap text-danger">
+          {item.error}
+        </div>
+      ) : null}
+      {item.diffs !== undefined && item.diffs.length > 0 ? <InlineDiffPreview diffs={item.diffs} /> : null}
+      {item.output !== undefined && item.output !== '' ? (
+        <ToolOutput text={item.output} streaming={busy} />
+      ) : null}
+      {nested.length > 0 ? (
+        <div data-slot="tool-nested" className="flex flex-col gap-2 border-l-2 border-border py-2.5 pr-3 pl-3 ml-4 my-2">
+          {renderNested?.(nested, cacheKey ?? item.id)}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export function ToolCard({
   item,
   nested = [],
@@ -756,45 +819,10 @@ export function ToolCard({
         {detail !== undefined ? (
           <code title={detail} className="block min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{detail}</code>
         ) : null}
-        <span className="ml-auto flex shrink-0 items-center gap-2 pl-2">
-          {busy ? (
-            <LoaderCircleIcon role="status" aria-label="Running" className="size-3.5 animate-spin text-soft-foreground" />
-          ) : null}
-          {item.status === 'failed' ? <span className="text-xs text-muted-foreground">failed</span> : null}
-          {item.status === 'declined' ? <span className="text-xs text-soft-foreground">declined</span> : null}
-          {item.toolKind === 'execute' && typeof item.exitCode === 'number' ? (
-            <span
-              data-slot="tool-exit"
-              className={cn(
-                'rounded-full px-2 py-px font-mono text-[11px] font-semibold',
-                item.exitCode === 0 ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger',
-              )}
-            >
-              {item.exitCode}
-            </span>
-          ) : null}
-        </span>
+        <ToolCardBadges item={item} busy={busy} />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="border-t border-border bg-card-2">
-          {expandedCommand !== undefined ? (
-            <pre data-slot="tool-command" className="px-3 py-2 font-mono text-xs whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{expandedCommand}</pre>
-          ) : null}
-          {item.error !== undefined && item.error !== '' ? (
-            <div data-slot="tool-error" className="px-4 py-3 font-mono text-xs leading-[1.7] whitespace-pre-wrap text-danger">
-              {item.error}
-            </div>
-          ) : null}
-          {item.diffs !== undefined && item.diffs.length > 0 ? <InlineDiffPreview diffs={item.diffs} /> : null}
-          {item.output !== undefined && item.output !== '' ? (
-            <ToolOutput text={item.output} streaming={busy} />
-          ) : null}
-          {nested.length > 0 ? (
-            <div data-slot="tool-nested" className="flex flex-col gap-2 border-l-2 border-border py-2.5 pr-3 pl-3 ml-4 my-2">
-              {renderNested?.(nested, cacheKey ?? item.id)}
-            </div>
-          ) : null}
-        </div>
+        <ToolCardBody item={item} command={expandedCommand} busy={busy} nested={nested} cacheKey={cacheKey} renderNested={renderNested} />
       </CollapsibleContent>
     </Collapsible>
   )
