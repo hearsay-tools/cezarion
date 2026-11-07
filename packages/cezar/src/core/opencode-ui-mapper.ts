@@ -40,96 +40,19 @@ import type {
   FileDiff,
   PlanEntry,
   PlanStatus,
-  TokenUsage,
   ToolLocation,
   ToolStatus,
   UiEvent,
   UiMessageItem,
   UiReasoningItem,
   UiToolItem,
-  UiUsageUpdatedEvent,
 } from './ui-events.ts';
 import { toolDisplay } from '@open-mercato/cezar-contract/tool-display';
+import { EMPTY_MESSAGE_USAGE, addUsage, emitUsage, maxCost, tokensToUsage, usageForMessages } from './opencode-usage.ts';
+import type { MessageUsage } from './opencode-usage.ts';
+import type { OpencodeUiMapperState, OpencodeUiMapping, SubtaskScope } from './opencode-ui-mapper-state.ts';
 
-/** Per-message telemetry: `message.updated` snapshots (cumulative per
- *  message) and summed `step-finish` increments are tracked separately —
- *  they describe the same accumulation, so the larger total wins and
- *  nothing is double-counted. */
-interface MessageUsage {
-  readonly info: TokenUsage | null;
-  readonly infoCost: number | null;
-  readonly steps: TokenUsage | null;
-  readonly stepsCost: number | null;
-}
-
-interface SubtaskScope {
-  readonly id: string;
-  /** The wire tool name the item was started under (`subtask` for subtask
-   *  parts, `task` for the task tool) — completion keeps the same name. */
-  readonly name: string;
-  readonly title: string;
-  readonly input?: unknown;
-  /** The child session the wire named for this scope, when it did: opencode's
-   *  task tool publishes `metadata.sessionId` on its running snapshot right
-   *  after creating the child. Known → bound directly, never through FIFO. */
-  readonly childSession?: string;
-  /** The scope this one was opened inside (a task issued from a child
-   *  session) — completion keeps the same nesting. */
-  readonly parentItemId?: string;
-}
-
-export interface OpencodeUiMapperState {
-  /** The main session id (from POST /session) — the SSE bus is server-wide,
-   *  so this is what separates our events from a subtask's child session. */
-  readonly sessionId: string | null;
-  /** True once `opencodeSessionStarted` emitted `session.started`. */
-  readonly sessionStarted: boolean;
-  readonly turnSeq: number;
-  readonly currentTurnId: string | null;
-  /** Message ids observed during the active turn. Their latest snapshots are
-   * summed once when the matching `session.idle` closes the turn. */
-  readonly currentTurnMessageIds: ReadonlySet<string>;
-  /** A `session.error` arrived since the turn started → `session.idle`
-   *  closes the turn with stopReason 'error' (§7.1). */
-  readonly turnErrored: boolean;
-  /** messageID → role. Parts carry no role; only assistant parts surface
-   *  (the user's own prompt streams as parts over the same feed). */
-  readonly msgRoles: ReadonlyMap<string, string>;
-  /** Text/reasoning part id → chars already emitted as deltas. */
-  readonly cursors: ReadonlyMap<string, number>;
-  /** Part ids whose `item.started` was emitted. */
-  readonly startedItems: ReadonlySet<string>;
-  /** Text/reasoning/patch part ids whose `item.completed` was emitted. */
-  readonly endedItems: ReadonlySet<string>;
-  /** Tool part id → last emitted status/title (flip + live-title detection).
-   *  `live` says the title came off the wire rather than being derived from
-   *  the input, so only a live title is worth carrying over. */
-  readonly tools: ReadonlyMap<string, { status: ToolStatus; title: string; live: boolean }>;
-  /** Serialized last plan — todowrite snapshots are idempotent, so identical
-   *  replacements emit no duplicate `plan.updated`. */
-  readonly lastPlanJson: string | null;
-  /** Child session id → subtask scope. Foreign parts are attributed only to
-   *  their own child session; that session's idle completes the scope. */
-  readonly subtasks: ReadonlyMap<string, SubtaskScope>;
-  /** Subtask parts and task tool calls do not carry the child session id.
-   *  Pending scopes bind to child sessions first-in-first-out: the oldest
-   *  pending subtask takes the next child session heard from (#5). */
-  readonly unboundSubtasks: readonly SubtaskScope[];
-  /** Child sessions whose scope is over (the child went idle, its task tool
-   *  settled, or the main turn ended around it). A late event from one must
-   *  never claim a pending scope through the FIFO queue — not in this turn and
-   *  not in a later one, so the set lives as long as the mapper state does
-   *  (one id per child session ever seen; small by construction). */
-  readonly closedSessions: ReadonlySet<string>;
-  readonly usageByMessage: ReadonlyMap<string, MessageUsage>;
-  /** Last emitted session totals — usage.updated fires only on change. */
-  readonly lastUsage: { total: number; cost: number | null } | null;
-}
-
-export interface OpencodeUiMapping {
-  events: UiEvent[];
-  state: OpencodeUiMapperState;
-}
+export type { OpencodeUiMapperState, OpencodeUiMapping } from './opencode-ui-mapper-state.ts';
 
 export function createOpencodeUiState(): OpencodeUiMapperState {
   return {
@@ -900,93 +823,6 @@ function completedSubtask(subtask: SubtaskScope): UiToolItem {
   if (subtask.input !== undefined) item.input = subtask.input;
   if (subtask.parentItemId !== undefined) item.parentItemId = subtask.parentItemId;
   return item;
-}
-
-// ---- telemetry ----------------------------------------------------------------
-
-const EMPTY_MESSAGE_USAGE: MessageUsage = { info: null, infoCost: null, steps: null, stepsCost: null };
-
-/** `{input, output, reasoning, cache:{read,write}}` → raw TokenUsage
- *  (opencode reports no total — the sum of the parts is the total). */
-function tokensToUsage(tokens: unknown): TokenUsage | undefined {
-  if (!isRecord(tokens)) return undefined;
-  const input = num(tokens.input) ?? 0;
-  const output = num(tokens.output) ?? 0;
-  const reasoning = num(tokens.reasoning);
-  const cache = isRecord(tokens.cache) ? tokens.cache : undefined;
-  const cacheRead = cache ? num(cache.read) : undefined;
-  const cacheWrite = cache ? num(cache.write) : undefined;
-  const usage: TokenUsage = {
-    input,
-    output,
-    total: input + output + (reasoning ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0),
-  };
-  if (cacheRead !== undefined) usage.cacheRead = cacheRead;
-  if (cacheWrite !== undefined) usage.cacheWrite = cacheWrite;
-  if (reasoning !== undefined) usage.reasoning = reasoning;
-  return usage;
-}
-
-function addUsage(a: TokenUsage | null, b: TokenUsage): TokenUsage {
-  if (a === null) return b;
-  const sum: TokenUsage = { input: a.input + b.input, output: a.output + b.output, total: a.total + b.total };
-  const cacheRead = optSum(a.cacheRead, b.cacheRead);
-  if (cacheRead !== undefined) sum.cacheRead = cacheRead;
-  const cacheWrite = optSum(a.cacheWrite, b.cacheWrite);
-  if (cacheWrite !== undefined) sum.cacheWrite = cacheWrite;
-  const reasoning = optSum(a.reasoning, b.reasoning);
-  if (reasoning !== undefined) sum.reasoning = reasoning;
-  return sum;
-}
-
-function optSum(a: number | undefined, b: number | undefined): number | undefined {
-  if (a === undefined && b === undefined) return undefined;
-  return (a ?? 0) + (b ?? 0);
-}
-
-function maxCost(a: number | null, b: number | undefined): number | null {
-  if (b === undefined) return a;
-  return a === null ? b : Math.max(a, b);
-}
-
-/** Session totals = per-message effective usage summed across messages;
- *  emitted only when the snapshot actually changed and is non-zero. */
-function emitUsage(state: OpencodeUiMapperState): OpencodeUiMapping {
-  let usage: TokenUsage = { input: 0, output: 0, total: 0 };
-  let cost: number | null = null;
-  for (const mu of state.usageByMessage.values()) {
-    const effective = mu.info !== null && (mu.steps === null || mu.info.total >= mu.steps.total) ? mu.info : mu.steps;
-    if (effective !== null) usage = addUsage(usage, effective);
-    const effCost = maxCost(mu.infoCost, mu.stepsCost ?? undefined);
-    if (effCost !== null) cost = (cost ?? 0) + effCost;
-  }
-  if (usage.total === 0 && (cost === null || cost === 0)) return { events: [], state };
-  if (state.lastUsage !== null && state.lastUsage.total === usage.total && state.lastUsage.cost === cost) {
-    return { events: [], state };
-  }
-  const event: UiUsageUpdatedEvent = { type: 'usage.updated', usage };
-  if (cost !== null) event.costUsd = cost;
-  return { events: [event], state: { ...state, lastUsage: { total: usage.total, cost } } };
-}
-
-function usageForMessages(
-  messageIds: ReadonlySet<string>,
-  usageByMessage: ReadonlyMap<string, MessageUsage>,
-): { usage: TokenUsage | null; cost: number | null } {
-  let usage: TokenUsage | null = null;
-  let cost: number | null = null;
-  for (const id of messageIds) {
-    const message = usageByMessage.get(id);
-    if (message === undefined) continue;
-    const effective =
-      message.info !== null && (message.steps === null || message.info.total >= message.steps.total)
-        ? message.info
-        : message.steps;
-    if (effective !== null && (effective.input > 0 || effective.output > 0)) usage = addUsage(usage, effective);
-    const effectiveCost = maxCost(message.infoCost, message.stepsCost ?? undefined);
-    if (effectiveCost !== null && effectiveCost > 0) cost = (cost ?? 0) + effectiveCost;
-  }
-  return { usage, cost };
 }
 
 // ---- tiny guards ---------------------------------------------------------------
