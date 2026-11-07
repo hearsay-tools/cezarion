@@ -358,6 +358,27 @@ function createdPrUrls(claim: string, haystack: string, toolOutput?: string): st
 }
 
 /**
+ * One associated URL per trusted creation claim; replayed v1/v2 reports merge by identity.
+ * Stages each parsed URL through the store's staging callback and gives the first one the
+ * run's `pullRequestUrl`. Reports whether anything changed.
+ */
+function claimCreatedPullRequests(
+  run: RunRecord,
+  created: readonly string[],
+  accumulatePullRequests: (run: RunRecord, entries: readonly RunPullRequest[]) => boolean,
+): boolean {
+  let changed = false;
+  for (const url of created) {
+    const number = refUrlNumber(url);
+    const parsed = runPullRequestSchema.safeParse({ number, url, source: 'created' });
+    if (!parsed.success) continue;
+    changed = accumulatePullRequests(run, [parsed.data]) || changed;
+    if (!run.pullRequestUrl) { run.pullRequestUrl = url; changed = true; }
+  }
+  return changed;
+}
+
+/**
  * The janitor trick: agents print the PR URL after `gh pr create` — the
  * first one spotted in the transcript becomes the run's PR link. Scans v1
  * fields AND nested v2 `item.*` content (#407). A URL without the created
@@ -387,18 +408,10 @@ export function scanEventReferences(
   // trusted prefix, and the link may come from anywhere after it.
   const claim = eventCreationClaimFragments(event).join(' ');
   if (haystack.length > 0) {
-    let changed = false;
-    // One associated URL per trusted creation claim; replayed v1/v2 reports merge by identity.
     const item = event.item as Record<string, unknown> | undefined;
     const toolOutput = item?.kind === 'tool' && typeof item.output === 'string' ? item.output : undefined;
     const created = createdPrUrls(claim, haystack, toolOutput);
-    for (const url of created) {
-      const number = refUrlNumber(url);
-      const parsed = runPullRequestSchema.safeParse({ number, url, source: 'created' });
-      if (!parsed.success) continue;
-      changed = accumulatePullRequests(run, [parsed.data]) || changed;
-      if (!run.pullRequestUrl) { run.pullRequestUrl = url; changed = true; }
-    }
+    let changed = claimCreatedPullRequests(run, created, accumulatePullRequests);
     if (created.length > 0) {
       const resolved = resolveReferencedRef(
         run.referencedPrCandidates ?? [], run.task, referencedPrDeclaration(run), repoHandle,
