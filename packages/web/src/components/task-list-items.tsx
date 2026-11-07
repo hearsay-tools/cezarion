@@ -5,7 +5,8 @@ import { useTaskEditingRunId } from '@/lib/task-title-editor'
 import { TaskListFocusContext, useTaskListFocus, useTaskListFocusState } from '@/lib/use-task-list-focus'
 import { taskListKeepMounted, virtualizeTaskList } from '@/lib/task-list-render'
 
-const logicalLists = new WeakMap<HTMLElement, { keys: readonly string[]; handle: React.RefObject<VirtualizerHandle | null>; margin: number }>()
+/** Virtual lists by their element, so the page anchor can locate a run that is not mounted. */
+const logicalLists = new WeakMap<HTMLElement, { keys: readonly string[]; handle: React.RefObject<VirtualizerHandle | null> }>()
 
 /** One item includes its expanded preview. The page remains the sole vertical scroll owner. */
 export function TaskListItems<T>({ items, itemKey, children, itemSize }: {
@@ -28,7 +29,7 @@ export function TaskListItems<T>({ items, itemKey, children, itemSize }: {
   useLayoutEffect(() => {
     pageFocus?.registerList?.(listId.current, keys)
     const element = root.current
-    if (element) logicalLists.set(element, { keys, handle, margin: geometry.margin })
+    if (element) logicalLists.set(element, { keys, handle })
     return () => {
       pageFocus?.registerList?.(listId.current, null)
       if (element) logicalLists.delete(element)
@@ -91,7 +92,6 @@ function VirtualTaskItems<T>({ items, keys, handle, scroll, margin, focused, edi
   margin: number; focused: string | null; editing: string | null
   children: (item: T, index: number) => ReactElement
 }) {
-  const previous = useRef(keys)
   const [measured, setMeasured] = useState(false)
   useLayoutEffect(() => {
     const owner = scroll.current
@@ -105,146 +105,60 @@ function VirtualTaskItems<T>({ items, keys, handle, scroll, margin, focused, edi
     observer.observe(owner)
     return () => observer.disconnect()
   }, [scroll])
-  // Virtua's shift path preserves the visible anchor for prepends, including size corrections.
-  const added = keys.length - previous.current.length
-  const shift = added > 0 && previous.current.every((key, index) => keys[index + added] === key)
-  useLayoutEffect(() => { previous.current = keys })
-  return <TaskListScrollAnchor revision={keys} keys={keys} scroll={scroll} handle={handle} shifting={shift}><Virtualizer ref={handle} {...(itemSize === undefined ? {} : { itemSize })} scrollRef={scroll} startMargin={margin} shift={shift}
+  return <Virtualizer ref={handle} {...(itemSize === undefined ? {} : { itemSize })} scrollRef={scroll} startMargin={margin}
     keepMounted={[...new Set([...(!measured && items.length ? [0] : []), ...taskListKeepMounted(keys, focused), ...taskListKeepMounted(keys, editing)])]} data={items}>
     {(item, index) => <div key={keys[index]} data-task-item={keys[index]} data-first={index === 0} data-last={index === items.length - 1}>{children(item, index)}</div>}
-  </Virtualizer></TaskListScrollAnchor>
+  </Virtualizer>
 }
 
-/** Capture before React mutates the item positions; keep the first visible run at its offset. */
-export class TaskListScrollAnchor extends Component<{
-  revision: unknown; visibilityRevision?: string; keys?: readonly string[]; scroll?: React.RefObject<HTMLElement | null>; shifting?: boolean; handle?: React.RefObject<VirtualizerHandle | null>; children: ReactNode
-}, object, { key: string; top: number; offset: number } | null> {
+type Snapshot = { key: string | null; top: number; scrollTop: number }
+
+/**
+ * Keeps the first visible run in place across a content commit (ADR 0034). Three parts share the work:
+ * native `overflow-anchor` keeps the visible list in place when content above it changes, virtua keeps its own
+ * rows in place when a row above its viewport resizes, and this boundary covers what both leave after a commit:
+ * a count change above the anchor inside the anchor's own virtual list, and virtua's stored offset, which misses
+ * a native adjustment until the next scroll event. It writes at most once per commit and never later, so user
+ * input and other programmatic scrolls always win. It never uses virtua's scroll scheduler: that scheduler
+ * re-applies its target on later size events and would undo virtua's own compensation.
+ */
+export class TaskListScrollAnchor extends Component<{ revision: unknown; visibilityRevision?: string; children: ReactNode }, object, Snapshot | null> {
   private root = { current: null as HTMLDivElement | null }
-  private anchor: { key: string; top: number; offset: number } | null = null
-  private pendingAnchor = false
-  private pendingRestores = 0
-  private pendingSince = 0
-  private lastRetryOffset: number | undefined
-  private finishUpdate: (() => void) | undefined
-  private stopObserving: (() => void) | undefined
-  override componentDidMount() {
-    // Only the page boundary owns cross-group corrections. Inner anchors handle item changes.
-    if (this.props.keys) return
-    const root = this.root.current
-    const owner = root?.closest<HTMLElement>('[data-slot="main"]')
-    if (!root || !owner) return
-    let capturedScrollTop = owner.scrollTop
-    const capture = () => { this.anchor = this.capture(); capturedScrollTop = owner.scrollTop }
-    let frame = 0
-    const settle = () => {
-      cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => {
-        if (this.pendingAnchor && this.anchor && !this.anchorSettled(owner, this.anchor) && owner.scrollTop !== this.lastRetryOffset) {
-          this.lastRetryOffset = owner.scrollTop
-          if (this.restore(this.anchor)) { settle(); return }
-        }
-        this.pendingAnchor = false
-        capture()
-      }) })
-    }
-    this.finishUpdate = settle
-    const observer = new ResizeObserver(() => {
-      if (this.pendingAnchor || owner.scrollTop === capturedScrollTop) this.restore(this.anchor)
-      if (!this.pendingAnchor) capture()
-      settle()
-    })
-    const observed = new Set<Element>()
-    const observe = () => {
-      for (const node of observed) if (!node.isConnected) { observer.unobserve(node); observed.delete(node) }
-      for (const list of root.querySelectorAll('[data-slot="task-list-items"]')) {
-        for (let node: Element | null = list; node && node !== root; node = node.parentElement) {
-          if (!observed.has(node)) { observed.add(node); observer.observe(node) }
-        }
-      }
-    }
-    const mutations = new MutationObserver(observe)
-    mutations.observe(root, { childList: true, subtree: true })
-    observe()
-    capture()
-    const scrolled = () => { if (this.pendingAnchor) { this.restore(this.anchor); settle() } else capture() }
-    const intent = () => { this.pendingAnchor = false; cancelAnimationFrame(frame) }
-    owner.addEventListener('scroll', scrolled, { passive: true })
-    for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown']) owner.addEventListener(event, intent, { passive: true })
-    this.stopObserving = () => {
-      observer.disconnect(); mutations.disconnect(); cancelAnimationFrame(frame)
-      owner.removeEventListener('scroll', scrolled)
-      for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown']) owner.removeEventListener(event, intent)
-    }
-  }
-  override componentWillUnmount() { this.stopObserving?.() }
-  private capture(keys = this.props.keys) {
-    const owner = this.props.scroll?.current ?? this.root.current?.closest<HTMLElement>('[data-slot="main"]')
-    if (!owner) return null
-    const viewport = owner.getBoundingClientRect()
-    const first = [...(this.root.current?.querySelectorAll<HTMLElement>('[data-task-item]') ?? [])]
-      .find((element) => { const rect = element.getBoundingClientRect(); return rect.bottom > viewport.top && rect.top < viewport.bottom })
-    if (!first) return null
-    const key = first.dataset.taskItem!
-    return { key, top: first.getBoundingClientRect().top, offset: this.props.handle?.current?.getItemOffset(keys?.indexOf(key) ?? -1) ?? 0 }
-  }
-  override getSnapshotBeforeUpdate(previous: Readonly<typeof this.props>) {
-    if (this.props.shifting) return null
+  private owner() { return this.root.current?.closest<HTMLElement>('[data-slot="main"]') ?? null }
+  override getSnapshotBeforeUpdate(previous: Readonly<typeof this.props>): Snapshot | null {
     if (previous.revision === this.props.revision && previous.visibilityRevision === this.props.visibilityRevision) return null
-    const snapshot = this.capture(previous.keys)
-    if (!this.props.keys) {
-      this.anchor = snapshot; this.pendingAnchor = true
-      this.pendingRestores = 0; this.pendingSince = performance.now(); this.lastRetryOffset = undefined
+    const owner = this.owner()
+    if (!owner || !this.root.current) return null
+    // Reads only, before React mutates the DOM: one layout for the whole snapshot.
+    const viewport = owner.getBoundingClientRect()
+    for (const element of this.root.current.querySelectorAll<HTMLElement>('[data-task-item]')) {
+      const rect = element.getBoundingClientRect()
+      if (rect.bottom > viewport.top && rect.top < viewport.bottom) return { key: element.dataset.taskItem!, top: rect.top, scrollTop: owner.scrollTop }
     }
-    return snapshot
+    return { key: null, top: 0, scrollTop: owner.scrollTop }
   }
-  override componentDidUpdate(_previous: Readonly<typeof this.props>, _state: object, snapshot: { key: string; top: number; offset: number } | null) {
-    const owner = this.root.current?.closest<HTMLElement>('[data-slot="main"]')
-    if (!this.props.keys && snapshot && owner && this.anchorSettled(owner, snapshot)) this.pendingAnchor = false
-    this.restore(snapshot)
-    if (!this.props.keys && this.pendingAnchor) this.finishUpdate?.()
+  override componentDidUpdate(_previous: Readonly<typeof this.props>, _state: object, snapshot: Snapshot | null) {
+    const owner = this.owner()
+    if (!snapshot || !owner) return
+    // A filtered-out anchor keeps scrollTop; the browser clamps it to the new height.
+    const top = snapshot.key === null ? null : this.currentTop(snapshot.key)
+    if (top !== null && Math.abs(top - snapshot.top) > 0.5) owner.scrollTop += top - snapshot.top
+    // Tell virtua about any offset change in this commit before its next resize compensation reads its stored offset.
+    // After the commit, so virtua's synchronous re-render does not run inside a React lifecycle.
+    queueMicrotask(() => { if (owner.isConnected && owner.scrollTop !== snapshot.scrollTop) owner.dispatchEvent(new Event('scroll')) })
   }
-  private restore(snapshot: { key: string; top: number; offset: number } | null) {
-    // Async virtualizer corrections may need a retry, but an unreachable target must release.
-    if (this.pendingAnchor && (this.pendingRestores++ >= 10 || performance.now() - this.pendingSince >= 1000)) {
-      this.pendingAnchor = false
-      return false
+  /** The run's current top: its row, or the position virtua will render it at. */
+  private currentTop(key: string) {
+    for (const element of this.root.current?.querySelectorAll<HTMLElement>('[data-task-item]') ?? []) {
+      if (element.dataset.taskItem === key) return element.getBoundingClientRect().top
     }
-    return this.restorePosition(snapshot)
-  }
-  private restorePosition(snapshot: { key: string; top: number; offset: number } | null) {
-    if (!snapshot) return false
-    const owner = this.props.scroll?.current ?? this.root.current?.closest<HTMLElement>('[data-slot="main"]')
-    const next = [...(this.root.current?.querySelectorAll<HTMLElement>('[data-task-item]') ?? [])].find((element) => element.dataset.taskItem === snapshot.key)
-    if (!this.props.keys && this.pendingAnchor && owner && (!next || Math.abs(next.getBoundingClientRect().top - snapshot.top) > 1) && this.restoreLogical(owner, snapshot)) return true
-    if (owner && next) { owner.scrollTop += next.getBoundingClientRect().top - snapshot.top; return true }
-    else {
-      const index = this.props.keys?.indexOf(snapshot.key) ?? -1
-      const handle = this.props.handle?.current
-      if (index >= 0 && handle) { handle.scrollBy(handle.getItemOffset(index) - snapshot.offset); return true }
-    }
-    return false
-  }
-  private anchorSettled(owner: HTMLElement, snapshot: { key: string; top: number }) {
-    const next = [...(this.root.current?.querySelectorAll<HTMLElement>('[data-task-item]') ?? [])].find(element => element.dataset.taskItem === snapshot.key)
-    if (!next || Math.abs(next.getBoundingClientRect().top - snapshot.top) > 1) return false
-    const element = next.closest<HTMLElement>('[data-slot="task-list-items"]')
-    const list = element && logicalLists.get(element)
-    const handle = list?.handle.current
-    if (!element || !handle || !list) return true
-    const margin = element.getBoundingClientRect().top - owner.getBoundingClientRect().top + owner.scrollTop
-    return Math.abs(handle.scrollOffset - owner.scrollTop) <= 1 && Math.abs(list.margin - margin) <= 1
-  }
-  private restoreLogical(owner: HTMLElement, snapshot: { key: string; top: number }) {
-    // A fold can clamp scrolling and unmount the anchor before its new range renders.
     for (const element of this.root.current?.querySelectorAll<HTMLElement>('[data-slot="task-list-items"]') ?? []) {
       const list = logicalLists.get(element)
-      const index = list?.keys.indexOf(snapshot.key) ?? -1
+      const index = list?.keys.indexOf(key) ?? -1
       const handle = list?.handle.current
-      if (index < 0 || !handle) continue
-      handle.scrollTo(owner.scrollTop + element.getBoundingClientRect().top + handle.getItemOffset(index) - snapshot.top)
-      return true
+      if (index >= 0 && handle) return element.getBoundingClientRect().top + handle.getItemOffset(index)
     }
-    return false
+    return null
   }
   override render() { return <div ref={this.root} style={{ display: 'contents' }}>{this.props.children}</div> }
 }

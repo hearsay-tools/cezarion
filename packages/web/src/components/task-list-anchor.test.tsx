@@ -5,16 +5,16 @@ import { Component, type ReactNode } from 'react'
 import { TaskListItems, TaskListScrollAnchor, TaskListFocusBoundary } from './task-list-items'
 
 // Keep all items mounted to isolate the before-mutation anchor from virtua's own sizing.
-const virtualState = vi.hoisted(() => ({ hidden: null as string | null }))
+const virtualState = vi.hoisted(() => ({ hidden: null as string | null, scheduled: [] as string[] }))
 vi.mock('virtua', async () => {
   const React = await import('react')
   return { Virtualizer: React.forwardRef(function Virtualizer({ data, children }: { data: string[]; children: (item: string, index: number) => ReactNode }, ref) {
     const root = React.useRef<HTMLDivElement>(null)
-    React.useImperativeHandle(ref, () => ({ getItemOffset: (index: number) => index * 60, scrollBy() {}, scrollTo(offset: number) { root.current!.closest<HTMLElement>('[data-slot="main"]')!.scrollTop = offset } }))
+    React.useImperativeHandle(ref, () => ({ getItemOffset: (index: number) => index * 60, scrollBy() { virtualState.scheduled.push('scrollBy') }, scrollTo(offset: number) { virtualState.scheduled.push('scrollTo'); root.current!.closest<HTMLElement>('[data-slot="main"]')!.scrollTop = offset } }))
     return <div ref={root}>{data.flatMap((item, index) => item === virtualState.hidden ? [] : [children(item, index)])}</div>
   }) }
 })
-afterEach(() => { virtualState.hidden = null; cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { virtualState.hidden = null; virtualState.scheduled = []; cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 it('keeps the first visible run in place after an insertion in the middle above it', () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
@@ -25,7 +25,7 @@ it('keeps the first visible run in place after an insertion in the middle above 
     return { top, bottom: top + (index >= 0 ? 60 : 300), height: index >= 0 ? 60 : 300, width: 1000, x: 0, y: top, left: 0, right: 1000, toJSON() {} }
   })
   const items = Array.from({ length: 120 }, (_, index) => `run-${index}`)
-  const list = (data: string[]) => <MemoryRouter><div data-slot="main"><TaskListItems items={data} itemKey={(item) => item}>{(item) => <button>{item}</button>}</TaskListItems></div></MemoryRouter>
+  const list = (data: string[]) => <MemoryRouter><div data-slot="main"><TaskListFocusBoundary layout="same" revision={data}><TaskListItems items={data} itemKey={(item) => item}>{(item) => <button>{item}</button>}</TaskListItems></TaskListFocusBoundary></div></MemoryRouter>
   const view = render(list(items))
   const owner = document.querySelector<HTMLElement>('[data-slot="main"]')!
   owner.scrollTop = 300
@@ -52,31 +52,6 @@ it('anchors a later group when an earlier group grows and the visible group keys
   owner.scrollTop = 300
   view.rerender(list([...first.slice(0, 2), 'inserted', ...first.slice(2)]))
   expect(owner.scrollTop).toBe(360)
-  expect(document.querySelector<HTMLElement>('[data-task-item="visible"]')!.getBoundingClientRect().top).toBe(0)
-})
-
-it.each([114, -114, -300])('keeps the anchor through a delayed earlier-group height correction of %s px without another route render', (delta) => {
-  const callbacks: (() => void)[] = []
-  vi.stubGlobal('ResizeObserver', class {
-    constructor(callback: () => void) { callbacks.push(callback) }
-    observe() {} unobserve() {} disconnect() {}
-  })
-  let earlierHeight = 300
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-    const owner = this.closest<HTMLElement>('[data-slot="main"]')
-    const top = this.dataset.taskItem ? earlierHeight - (owner?.scrollTop ?? 0) : 0
-    return { top, bottom: top + 60, height: 60, width: 1000 } as DOMRect
-  })
-  render(<div data-slot="main"><TaskListScrollAnchor revision="same">
-    <section data-slot="task-list-items">Earlier group</section>
-    <section data-slot="task-list-items"><div data-task-item="visible">Visible run</div></section>
-  </TaskListScrollAnchor></div>)
-  const owner = document.querySelector<HTMLElement>('[data-slot="main"]')!
-  owner.scrollTop = 300
-  owner.dispatchEvent(new Event('scroll'))
-  earlierHeight += delta
-  callbacks.forEach(callback => callback())
-  expect(owner.scrollTop).toBe(300 + delta)
   expect(document.querySelector<HTMLElement>('[data-task-item="visible"]')!.getBoundingClientRect().top).toBe(0)
 })
 
@@ -164,6 +139,8 @@ it('restores the same logical virtual key when browser clamping unmounts its DOM
   view.rerender(list(true))
   expect(document.querySelector('[data-task-item="anchor"]')).toBeNull()
   expect(owner.scrollTop).toBe(400)
+  // Virtua's scheduler re-applies a target on later size events; the anchor writes scrollTop itself.
+  expect(virtualState.scheduled).toEqual([])
 })
 
 it.each((['flat', 'virtual'] as const).flatMap(rendering =>
@@ -208,10 +185,10 @@ it.each((['flat', 'virtual'] as const).flatMap(rendering =>
   expect(owner.scrollTop).toBeGreaterThanOrEqual(edge === 'top' ? 0 : 899)
   expect(owner.scrollTop).toBeLessThanOrEqual(edge === 'top' ? 1 : 900)
   expect(frames.size).toBe(0)
-  expect(writes.mock.calls.length).toBeLessThanOrEqual(12)
+  expect(writes.mock.calls.length).toBeLessThanOrEqual(1)
 })
 
-it('releases and captures after a preview below the visible row collapses at the bottom', () => {
+it('accepts the clamp after a preview below the visible row collapses at the bottom', () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   const frames = new Map<number, FrameRequestCallback>()
   let frameId = 0
@@ -222,7 +199,6 @@ it('releases and captures after a preview below the visible row collapses at the
     const top = this.dataset.taskItem ? 2400 - (owner?.scrollTop ?? 0) : 0
     return { top, bottom: top + (this.dataset.taskItem ? 60 : 300), height: 300, width: 1000 } as DOMRect
   })
-  const capture = vi.spyOn(TaskListScrollAnchor.prototype as unknown as { capture: () => unknown }, 'capture')
   class Rows extends Component<{ expanded: boolean }> {
     override componentDidUpdate() {
       const owner = document.querySelector<HTMLElement>('[data-slot="main"]')!
@@ -245,7 +221,6 @@ it('releases and captures after a preview below the visible row collapses at the
   })
   owner.dispatchEvent(new Event('scroll'))
   view.rerender(list(false))
-  capture.mockClear()
   for (let tick = 0; tick < 40 && frames.size; tick++) {
     const batch = [...frames.values()]
     frames.clear()
@@ -253,5 +228,100 @@ it('releases and captures after a preview below the visible row collapses at the
   }
   expect(owner.scrollTop).toBe(2200)
   expect(frames.size).toBe(0)
-  expect(capture).toHaveReturnedWith(expect.objectContaining({ key: 'anchor', top: 200 }))
+})
+
+it('keeps a programmatic jump after a layout restore was clamped at zero', () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  vi.stubGlobal('requestAnimationFrame', () => 1)
+  vi.stubGlobal('cancelAnimationFrame', () => {})
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const owner = this.closest<HTMLElement>('[data-slot="main"]')
+    const height = Number(owner?.querySelector<HTMLElement>('[data-height]')?.dataset.height ?? 0)
+    const top = this.dataset.taskItem ? height - (owner?.scrollTop ?? 0) : 0
+    return { top, bottom: top + (this.dataset.taskItem ? 60 : 600), height: 600, width: 1000 } as DOMRect
+  })
+  const tree = (compact: boolean) => <div data-slot="main"><TaskListFocusBoundary layout={String(compact)} revision="same">
+    <section data-slot="task-list-items" data-height={compact ? 508 : 540}><div data-task-item="anchor">Task card</div></section>
+  </TaskListFocusBoundary></div>
+  const view = render(tree(false))
+  const owner = document.querySelector<HTMLElement>('[data-slot="main"]')!
+  let offset = 0
+  Object.defineProperty(owner, 'scrollTop', { configurable: true, get: () => offset, set: (value: number) => { offset = Math.max(0, value) } })
+  view.rerender(tree(true))
+  // scrollIntoView can run before the next frame; the impossible old anchor must be released.
+  owner.scrollTop = 266
+  owner.dispatchEvent(new Event('scroll'))
+  expect(owner.scrollTop).toBe(266)
+})
+
+it.each(['flat', 'virtual'] as const)('keeps a programmatic scroll during pending %s restoration', (rendering) => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  vi.stubGlobal('requestAnimationFrame', () => 1)
+  vi.stubGlobal('cancelAnimationFrame', () => {})
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const owner = this.closest<HTMLElement>('[data-slot="main"]')
+    const height = Number(owner?.querySelector<HTMLElement>('[data-height]')?.dataset.height ?? 0)
+    const top = this.dataset.taskItem || this.dataset.slot === 'task-list-items' ? height - (owner?.scrollTop ?? 0) : 0
+    return { top, bottom: top + 300, height: 300, width: 1000 } as DOMRect
+  })
+  const tree = (changed: boolean) => <MemoryRouter initialEntries={['/?tasks=virtual']}><div data-slot="main"><TaskListFocusBoundary layout="same" revision="same" visibilityRevision={String(changed)}>
+    <span data-height={changed ? 2500 : 3000} />
+    {rendering === 'virtual' ? <TaskListItems items={['anchor']} itemKey={key => key}>{key => <button>{key}</button>}</TaskListItems>
+      : <section data-slot="task-list-items"><div data-task-item="anchor">Anchor</div></section>}
+  </TaskListFocusBoundary></div></MemoryRouter>
+  const view = render(tree(false))
+  const owner = document.querySelector<HTMLElement>('[data-slot="main"]')!
+  owner.scrollTop = 3000
+  owner.dispatchEvent(new Event('scroll'))
+  view.rerender(tree(true))
+  // Model scrollIntoView/focus/hash restoration before the pending animation frames finish.
+  owner.scrollTop = 500
+  owner.dispatchEvent(new Event('scroll'))
+  expect(owner.scrollTop).toBe(500)
+})
+
+it('adds no scroll, input, resize or frame work while the list rests', () => {
+  const resize = vi.fn()
+  vi.stubGlobal('ResizeObserver', class { constructor() { resize() } observe() {} unobserve() {} disconnect() {} })
+  const frame = vi.fn(() => 1)
+  vi.stubGlobal('requestAnimationFrame', frame)
+  const listen = vi.spyOn(HTMLElement.prototype, 'addEventListener')
+  const tree = (revision: string) => <div data-slot="main"><TaskListScrollAnchor revision={revision}>
+    <section data-slot="task-list-items"><div data-task-item="anchor">Anchor</div></section>
+  </TaskListScrollAnchor></div>
+  const view = render(tree('first'))
+  view.rerender(tree('second'))
+  const owner = document.querySelector<HTMLElement>('[data-slot="main"]')!
+  owner.scrollTop = 500
+  owner.dispatchEvent(new Event('scroll'))
+  // React's root listeners sit on the render container; the scroll owner gets none from the anchor.
+  expect(listen.mock.contexts.filter(target => target === owner)).toEqual([])
+  expect(resize).not.toHaveBeenCalled()
+  expect(frame).not.toHaveBeenCalled()
+  expect(owner.scrollTop).toBe(500)
+})
+
+it('tells the virtualizer about an offset change made during a content commit', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const owner = this.closest<HTMLElement>('[data-slot="main"]')
+    const height = Number(owner?.querySelector<HTMLElement>('[data-height]')?.dataset.height ?? 0)
+    const top = this.dataset.taskItem ? height - (owner?.scrollTop ?? 0) : 0
+    return { top, bottom: top + 60, height: 60, width: 1000 } as DOMRect
+  })
+  class Native extends Component<{ grown: boolean }> {
+    // Models the browser's native scroll anchoring during the commit's layout.
+    override componentDidUpdate() { document.querySelector<HTMLElement>('[data-slot="main"]')!.scrollTop += 115 }
+    override render() { return <><span data-height={this.props.grown ? 415 : 300} /><section data-slot="task-list-items"><div data-task-item="anchor">Anchor</div></section></> }
+  }
+  const tree = (grown: boolean) => <div data-slot="main"><TaskListScrollAnchor revision={grown}><Native grown={grown} /></TaskListScrollAnchor></div>
+  const view = render(tree(false))
+  const owner = document.querySelector<HTMLElement>('[data-slot="main"]')!
+  owner.scrollTop = 300
+  const seen: number[] = []
+  owner.addEventListener('scroll', () => seen.push(owner.scrollTop))
+  view.rerender(tree(true))
+  expect(owner.scrollTop).toBe(415)
+  await Promise.resolve()
+  expect(seen).toEqual([415])
 })

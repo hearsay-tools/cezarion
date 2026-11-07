@@ -528,7 +528,8 @@ remain unchanged.
 
 ### Cross-group anchor and focus follow-up
 
-At source `806418730`, the page boundary retains the pre-update visible row through
+The anchor mechanism in this section and the next was replaced; see
+[Anchor redesign](#anchor-redesign). At source `806418730`, the page boundary retains the pre-update visible row through
 later ResizeObserver and start-margin corrections. It releases that anchor after
 two quiet frames; wheel, touch, pointer and keyboard input take precedence.
 The browser regression reproduced a 114 px global desktop shift and a 217 px
@@ -612,7 +613,8 @@ limitation, separate from the retained anchor during content updates.
 
 ### Later layout-change correction
 
-A later QA check found that folding Finished above a virtual Working group could
+This describes the anchor up to `29876e170`; [Anchor redesign](#anchor-redesign)
+replaced it. A later QA check found that folding Finished above a virtual Working group could
 shrink the page below its old scroll offset. The browser clamped scrolling and
 unmounted the saved anchor before the page could restore it. The correction
 captures before local fold/preview changes, then restores the same logical key
@@ -648,3 +650,64 @@ retains the groups identity; changes to data, placeholder/error/loading state,
 pagination availability or callbacks still invalidate it. This identity test
 failed before the correction and passes after it. This follow-up postdates the
 recorded performance studies and makes no new timing claim.
+
+### Anchor redesign
+
+The retained-anchor mechanism above accumulated special cases: a pending state,
+retry frames, a ResizeObserver, a MutationObserver, scroll and input listeners,
+and a set of remembered offsets to tell its own writes from others. It passed
+31 of 32 browser checks; the remaining failure was an earlier preview collapse
+on the global page at 1440×900. It was replaced after instrumented traces of the
+three parties that move the page's scroll offset: the browser's native
+`overflow-anchor`, virtua's own resize compensation, and the page anchor. Each
+trace records every `scrollTop` write with its caller, every scroll event, a
+ResizeObserver callback and the saved row's top on each frame, for 2 s after the
+change, on an isolated fixture. [Trace summary](task-list-rendering/s3b/anchor-trace.json).
+
+| Change above the first visible row | No JS anchor | No JS anchor, native anchoring off | Redesigned anchor |
+| --- | --- | --- | --- |
+| Fold Finished (project and global, both widths) | drift ≤ 0.5 px, 0 JS writes | row lost | drift ≤ 0.5 px, 0 writes |
+| Fold from another tab (storage event) | drift 0.5 px | row lost | drift 0.5 px |
+| Preview collapse (project and global, both widths) | drift 0 px, 1 virtua write | drift 0 px | drift 0 px |
+| Project status move into Finished | drift ≤ 0.2 px | drift 0 px | drift ≤ 0.2 px |
+| Global status move into Finished | **+114 px** desktop, **+217 px** phone | same | drift 0.5 px |
+
+Drift is the saved row's top after minus before; each cell has two or three
+traces per scope and width.
+
+Two causes explain every failure:
+
+1. **Virtua's scroll scheduler re-applies stale targets.** The reproduced global
+   preview failure (1 of 3 traces at `3962653cb`): the collapse commit moves no
+   row, because virtual items keep their cached offsets. Virtua then measures the
+   −276 px shrink and writes 84220 → 83944, which is correct. The old anchor had
+   called `handle.scrollTo`/`scrollBy`, and the scheduler wrote the stale target
+   84220 again on the next two size events, 12 and 15 ms later. The row was lost.
+2. **Virtua's stored offset misses native adjustments.** In the global status
+   move, native anchoring moves 219774 → 219889 (+115) in the commit's layout.
+   Before the next scroll event reaches virtua, it measures the new Finished row
+   (−0.5 px) and writes its stored offset plus that delta, 219773.5. This undoes
+   the native adjustment.
+
+The page anchor now does two things, once per content commit and never later.
+It corrects any residual movement of the first visible row with one direct
+`scrollTop` write. This covers inserts, moves and removals above the row inside
+its own virtual list, which move neither the list nor native anchoring's anchor
+node. Then, if the commit changed the offset, it dispatches one `scroll` event
+after the commit, so every virtualizer stores the current offset before its next
+compensation. It has no pending state, retries, observers, frame callbacks or
+listeners, and it never calls virtua's scheduler. Native anchoring keeps folds,
+previews, status moves and other changes in earlier groups; virtua keeps its own
+rows when a row above its viewport resizes. Virtua's `shift` mode and the
+per-list anchors are removed: the page anchor's residual covers prepends too.
+
+With the redesigned anchor, global status moves drift −0.5 px at both widths,
+and the global desktop preview collapse kept its row in 3 of 3 traces. User input and
+programmatic scrolls (scrollIntoView, focus, hash restore) after the commit
+always win, because nothing writes later. An unreachable target is one clamped
+write. A filtered-out anchor keeps scrollTop, which the browser clamps to the new
+height. The commit snapshot is read before React mutates the DOM: one layout.
+
+The measured scroll path changed: the old anchor captured the first visible row
+on every scroll event, and the new one does no scroll work. The final head check
+above measured the old path. This section makes no new timing claim.
