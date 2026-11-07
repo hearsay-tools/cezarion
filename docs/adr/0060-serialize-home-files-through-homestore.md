@@ -17,7 +17,8 @@ HomeStore for config and account JSON. Extending rotating backups to every file 
 
 A synchronous read or read-modify-write holds `<root>/.locks/write.lock/`.
 Atomic Lamport bakery claims have unique names and record pid, process start identity
-and ordering ticket. Recovery removes only dead process claims. A canonical root
+and ordering ticket. Recovery removes dead claims and expires unconfirmed claims
+as described below. A canonical root
 identifies nested transactions in one process. No lock spans an event-loop yield.
 The current process start token is read lazily once, including an unavailable
 result. Prepared peer-free reads never invoke macOS ps; only an existing peer
@@ -120,11 +121,12 @@ a follow-up after P1b; this slice does not add it.
 An undefined recorded token or unreadable current token makes a live PID count as
 the holder. To recover from a crashed holder followed by PID reuse, an unconfirmed
 claim expires after its mtime is more than 30 seconds old, three times the 10-second
-wait. A confirmed matching token never expires. This trades exclusion during a
-write stalled for over 30 seconds for recovery on Windows and unreadable-token
-systems. Such a stalled writer already makes each waiter time out. A foreign PID
-collision can still block a waiter until recovery; cross-namespace homes remain
-unsupported.
+wait. A confirmed matching token never expires. This trades exclusion for recovery
+on Windows and unreadable-token systems. An unconfirmed claim expires more than
+30 seconds after publication, whether its holder is waiting, stalled or still
+working. A later waiter can then take the lock, so a long-running write can lose
+updates. Cross-namespace identity and advisory lease collisions are tracked by
+hearsay-tools/cezarion#2906. Cross-namespace homes remain unsupported.
 
 Canonical passwd-home checks cover existing symlinks and unresolved descendants.
 Marker checks read the selected directory, so lexical aliases of the same home see
