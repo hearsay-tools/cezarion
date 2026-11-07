@@ -272,6 +272,25 @@ describe('shared live ownership', () => {
     owner.dispose()
   })
 
+  it('starts the workspace lane from the snapshot taken before a capacity reset releases the document', async () => {
+    const owner = createLiveOwner(deps)
+    const port = new Port()
+    const deliver = port.postMessage.bind(port)
+    port.postMessage = (value: unknown) => {
+      if ((value as { type?: string }).type === 'reset') throw new Error('detached')
+      deliver(value)
+    }
+    owner.attach(port)
+    const extraRuns = Array.from({ length: 32 }, (_, i) => ({
+      id: `run-${i}`,
+      demand: { kind: 'run' as const, projectId: 'boot', runId: `r${i}`, afterSeq: 0 },
+    }))
+    port.sync('a', [workspace, run(), ...extraRuns])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(streams.some(stream => stream.kind === 'workspace')).toBe(true)
+    owner.dispose()
+  })
+
   it('keeps the replacement read deadline when an invalidation aborts its predecessor', async () => {
     const signals: AbortSignal[] = []
     deps.read = (_path, signal) => {

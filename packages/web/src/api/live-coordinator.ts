@@ -37,6 +37,20 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   })
 }
 
+/** Root-relative local URLs use the shared owner; anything else stays on document HTTP. */
+function usesFiniteTransport(session: LiveSession, workerFailed: boolean): boolean {
+  const apiUrl = new URL(session.apiBase || '/', location.href)
+  return !session.local || apiUrl.origin !== location.origin || apiUrl.pathname !== '/' || workerFailed || typeof SharedWorker !== 'function'
+}
+
+function liveWorkerUrl(): URL {
+  return import.meta.env.DEV ? new URL('./live-worker.ts', import.meta.url) : new URL('/live-worker.js', location.href)
+}
+
+function signalReady(entries: readonly Subscription[]): void {
+  for (const entry of entries) entry.handlers.ready?.()
+}
+
 /** Documents own their cursors. The worker owns only local wire work for visible demand. */
 export function createLiveCoordinator() {
   const subscriptions = new Map<string, Subscription>()
@@ -130,19 +144,17 @@ export function createLiveCoordinator() {
   const start = (workspaceReconciled = false) => {
     if (disposed || restoration || !session || !subscriptions.size || !pageIsActive()) return
     active = true
-    const apiUrl = new URL(session.apiBase || '/', location.href)
     // The shared owner serves root-relative URLs. Other origins or service prefixes
     // use document-authenticated finite requests, which preserve the configured base.
-    if (!session.local || apiUrl.origin !== location.origin || apiUrl.pathname !== '/' || workerFailed || typeof SharedWorker !== 'function') {
+    if (usesFiniteTransport(session, workerFailed)) {
       setTransport('finite')
-      for (const entry of available()) entry.handlers.ready?.()
+      signalReady(available())
       fallback.start(workspaceReconciled)
       return
     }
-    if (worker) { setTransport('topics'); for (const entry of available()) entry.handlers.ready?.(); sync(); return }
+    if (worker) { setTransport('topics'); signalReady(available()); sync(); return }
     try {
-      const url = import.meta.env.DEV ? new URL('./live-worker.ts', import.meta.url) : new URL('/live-worker.js', location.href)
-      const created = new SharedWorker(url, { type: 'module', name: LIVE_WORKER_NAME })
+      const created = new SharedWorker(liveWorkerUrl(), { type: 'module', name: LIVE_WORKER_NAME })
       worker = created; lastAlive = Date.now()
       setTransport('topics')
       created.addEventListener('error', () => { if (worker === created) failWorker() })
@@ -173,7 +185,7 @@ export function createLiveCoordinator() {
         entry.frame(message.frame)
       }
       created.port.start()
-      for (const entry of available()) entry.handlers.ready?.()
+      signalReady(available())
       sync()
       renewal = setInterval(() => {
         if (Date.now() - lastAlive >= LEASE_MS) { failWorker(); return }

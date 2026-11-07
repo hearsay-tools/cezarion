@@ -85,6 +85,38 @@ describe('finite HTTP recovery', () => {
     expect(entry.value).not.toHaveBeenCalled()
   })
 
+  it('still fetches run batches on a restart after a later batch throws once hasMore was seen', async () => {
+    vi.useFakeTimers()
+    const entries = Array.from({ length: 33 }, (_, i) => ({
+      id: String(i),
+      demand: { kind: 'run' as const, projectId: 'boot', runId: String(i), afterSeq: 0 },
+      frame: vi.fn(), value: vi.fn(), reset: vi.fn(async () => {}),
+    }))
+    let n = 0
+    const fetcher = vi.fn(async () => {
+      n += 1
+      if (n === 1) {
+        return new Response(JSON.stringify({
+          generation: 'g',
+          results: [{ type: 'batch', projectId: 'boot', runId: '0', afterSeq: 1, cursor: 'c', hasMore: true, events: [] }],
+        }))
+      }
+      if (n === 2) return new Response('nope', { status: 500 })
+      return new Response(JSON.stringify({
+        generation: 'g',
+        results: [{ type: 'batch', projectId: 'boot', runId: '0', afterSeq: 2, cursor: 'c', hasMore: false, events: [] }],
+      }))
+    })
+    const recovery = createLiveFallback(() => entries, async () => {}, fetcher)
+    recovery.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    recovery.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetcher.mock.calls.length).toBeGreaterThan(2)
+    recovery.stop()
+  })
+
   it('hands a failed read to its consumers with the status and the answer, then backs off', async () => {
     vi.useFakeTimers()
     const entry: FallbackEntry = { ...run(), demand: { kind: 'read', path: '/api/v1/workspace/activity?project=shop', intervalMs: 5_000 } }
