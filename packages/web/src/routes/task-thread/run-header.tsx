@@ -2,7 +2,7 @@ import './run-header.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AppWindowIcon, FileTextIcon, MailIcon, PencilIcon, PinOffIcon } from 'lucide-react'
 import { CircleDotIcon, CopyIcon, EllipsisIcon, GitPullRequestIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from '@/lib/project-router'
 
 import { deleteRun } from '@/api/client'
@@ -163,6 +163,146 @@ function PreviewToggle({ servers }: { servers: ApiRun['previewServers'] & object
   )
 }
 
+/** The word above the title naming the session kind (worker / parent / task). */
+function sessionKindLabel(delegation: ApiRun['delegation']): string {
+  return delegation?.role === 'worker' ? 'Worker session' : delegation?.role === 'root' ? 'Parent session' : 'Task session'
+}
+
+/** A worker session links back to the parent run that spawned it — full-width under the title,
+ *  compact inside the phone top bar (hearsay-tools/cezarion#621). */
+function WorkerParentLink({ run, compact = false }: { run: ApiRun; compact?: boolean }) {
+  return run.delegation?.role === 'worker'
+    ? compact
+      ? <CompactParentTaskLink id={run.delegation.parentRunId} />
+      : <ParentTaskLink id={run.delegation.parentRunId} />
+    : null
+}
+
+/** #281: Archive out of the kebab row. The Session tab's composer carries it — within a
+ *  thumb's reach, which this header is not on a phone, where it scrolls away by
+ *  design. The three git tabs have no composer, so the header carries it there, and
+ *  exactly one surface offers it on any given screen. Stop takes the composer's slot on a
+ *  failed run holding wait results (hearsay-tools/cezarion#1233), so the header carries
+ *  Archive on the Session tab too. */
+function headerArchiveButton(run: ApiRun, flags: ReturnType<typeof runActionFlags>, tab: RunTab) {
+  return !run.archiveBlocker && flags.archive && (tab !== 'session' || !archiveInComposer(run))
+    ? <ArchiveButton run={run} />
+    : null
+}
+
+/** The auto-archive provenance line: shown only when the run is archived right now by the
+ *  PR-merge automation and the stamp still matches this archive event. */
+function AutoArchiveNote({ run }: { run: ApiRun }) {
+  return run.archived && run.autoArchive?.reason === 'pull-requests-merged' && run.autoArchive.archivedAt === run.archivedAt
+    ? <p data-slot="auto-archive-reason" className="text-[13px] text-muted-foreground">Archived automatically after all associated PRs merged.</p>
+    : null
+}
+
+/** Pushed phone screen: the controls the dropped title row used to carry, in a row of their
+ *  own (hearsay-tools/cezarion#621) — rendered only when one of them applies, so an empty row never sits between
+ *  the top bar and the tabs. */
+function MobileActionsRow({ shown, run, archiveButton, previewToggle }: {
+  shown: boolean
+  run: ApiRun
+  archiveButton: ReactNode
+  previewToggle: ReactNode
+}) {
+  const handoffVisible = useHandoffActionVisible(run)
+  return shown && (archiveButton || previewToggle || handoffVisible) ? (
+    <div data-slot="run-mobile-actions" className="flex flex-wrap items-center gap-2 pt-2">
+      {archiveButton}
+      {previewToggle}
+      <HandoffAction run={run} />
+    </div>
+  ) : null
+}
+
+/** The Session | Changes | Commits | Files tab row plus the linked item tabs
+ *  (hearsay-tools/cezarion#692): the inline
+ *  tabs and the "+N" overflow menu, with the phone-only scroll-into-view for the active tab,
+ *  which can sit past the right edge of the sideways-scrolling row. */
+function RunTabs({ run, tab, activeItem, inlineItemTabs, overflowItemTabs, phoneBar, isDesktop }: {
+  run: ApiRun
+  tab: RunTab
+  activeItem: TaskItemTab | null
+  inlineItemTabs: TaskItemTab[]
+  overflowItemTabs: TaskItemTab[]
+  phoneBar: boolean
+  isDesktop: boolean
+}) {
+  // Below md the tab row scrolls sideways rather than wrapping, so a tab can sit past the right
+  // edge. The one the reader is on is brought into view — it may have been in the "+N" menu.
+  const tabRowRef = useRef<HTMLDivElement>(null)
+  // Keyed by the inline tab set too, not just the active item: a URL-only reference becomes a tab
+  // only once `repoBase` resolves, so the active link can appear after mount (review g3 #2).
+  const activeItemKey = activeItem ? `${activeItem.kind}#${activeItem.number}` : null
+  const inlineItemSignature = inlineItemTabs.map((item) => `${item.kind}#${item.number}`).join(',')
+  useEffect(() => {
+    if (!activeItemKey || isDesktop) return
+    tabRowRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  }, [activeItemKey, inlineItemSignature, isDesktop])
+  return (
+    <div
+      ref={tabRowRef}
+      data-slot="run-tabs"
+      data-phone-bar={phoneBar || undefined}
+      className="mt-3 flex flex-wrap items-end gap-1 border-b border-border md:mt-5 max-md:flex-nowrap max-md:overflow-x-auto max-md:border-b-0 max-md:shadow-[inset_0_-1px_0_var(--border)] max-md:gap-0 max-md:[&>*]:mb-0 max-md:[&>*]:shrink-0 max-md:[&>a]:min-h-11 max-md:[&>a]:px-3.5 max-md:[&>a]:text-[13.5px]"
+    >
+      {/* Below md (hearsay-tools/cezarion#621): 13.5px labels and quiet counts, tabs spread across the row. The 44px
+          floor stays — the touch-target sweep measures these links — so the design's 40px is the
+          visual weight of the row, not a smaller hit area. The count is phone-only (desktop tabs are unchanged). Counts come only from data the record
+          already carries: the changed-file tally. A commit count is not on the record, and one
+          more query for a badge is not worth it, so Commits shows none. */}
+      {/* Below md the row scrolls sideways instead of wrapping (hearsay-tools/cezarion#692): item tabs can push it past
+          the viewport, and a wrapped second row of tabs reads as a second tab bar. The divider
+          moves into an inset shadow there, because a scroll container clips the tabs' `-mb-px`
+          overlap — the underline then sits ON the divider exactly as it does on desktop. */}
+      <TabLink to={`/tasks/${run.id}`} active={tab === 'session'} replace={phoneBar}>
+        Session
+      </TabLink>
+      <TabLink to={`/tasks/${run.id}/changes`} active={tab === 'changes'} replace={phoneBar} count={run.diffStat && run.diffStat.files > 0 ? run.diffStat.files : undefined}>
+        Changes
+      </TabLink>
+      <TabLink to={`/tasks/${run.id}/commits`} active={tab === 'commits'} replace={phoneBar}>
+        Commits
+      </TabLink>
+      <TabLink to={`/tasks/${run.id}/files`} active={tab === 'files'} replace={phoneBar}>
+        Files
+      </TabLink>
+      {inlineItemTabs.map((item) => (
+        <TabLink
+          key={`${item.kind}-${item.number}`}
+          to={itemTabPath(run.id, item)}
+          active={activeItem !== null && sameItemTab(item, activeItem)}
+          replace={phoneBar}
+        >
+          <ItemTabLabel tab={item} />
+        </TabLink>
+      ))}
+      {overflowItemTabs.length > 0 ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            data-slot="run-tabs-more"
+            aria-label={`${overflowItemTabs.length} more linked items`}
+            className="-mb-px flex h-8 items-center rounded-t-md border-b-2 border-transparent px-3 text-[13px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-link-foreground max-md:min-h-11 max-md:px-3.5 max-md:text-[13.5px]"
+          >
+            +{overflowItemTabs.length}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {overflowItemTabs.map((item) => (
+              <DropdownMenuItem key={`${item.kind}-${item.number}`} asChild>
+                <Link to={itemTabPath(run.id, item)} replace={phoneBar}>
+                  <ItemTabLabel tab={item} />
+                </Link>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+    </div>
+  )
+}
+
 export function RunHeader({
   run,
   tab = 'session',
@@ -208,18 +348,8 @@ export function RunHeader({
   const itemTabs = useMemo(() => taskItemTabs(run, repoBase), [run, repoBase])
   const activeItem = typeof tab === 'object' ? tab : null
   const { inline: inlineItemTabs, overflow: overflowItemTabs } = visibleItemTabs(itemTabs, activeItem)
-  // Below md the tab row scrolls sideways rather than wrapping, so a tab can sit past the right
-  // edge. The one the reader is on is brought into view — it may have been in the "+N" menu.
-  const tabRowRef = useRef<HTMLDivElement>(null)
-  // Keyed by the inline tab set too, not just the active item: a URL-only reference becomes a tab
-  // only once `repoBase` resolves, so the active link can appear after mount (review g3 #2).
-  const activeItemKey = activeItem ? `${activeItem.kind}#${activeItem.number}` : null
-  const inlineItemSignature = inlineItemTabs.map((item) => `${item.kind}#${item.number}`).join(',')
-  useEffect(() => {
-    if (!activeItemKey || isDesktop) return
-    tabRowRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
-  }, [activeItemKey, inlineItemSignature, isDesktop])
-  const previewToggle = run.worktreePath && health.data?.capabilities?.preview === true
+  const previewCapable = health.data?.capabilities?.preview === true
+  const previewToggle = run.worktreePath && previewCapable
     ? <PreviewToggle servers={run.previewServers ?? []} />
     : null
   const actionsKebab = (
@@ -231,14 +361,7 @@ export function RunHeader({
     />
   )
 
-  // #281: Archive out of the kebab. The Session tab's composer carries it — within a
-  // thumb's reach, which this header is not on a phone, where it scrolls away by
-  // design. The three git tabs have no composer, so the header carries it there, and
-  // exactly one surface offers it on any given screen. Stop takes the composer's slot on a
-  // failed run holding wait results (hearsay-tools/cezarion#1233), so the header carries
-  // Archive on the Session tab too.
-  const archiveButton = !run.archiveBlocker && flags.archive && (tab !== 'session' || !archiveInComposer(run)) ? <ArchiveButton run={run} /> : null
-  const handoffVisible = useHandoffActionVisible(run)
+  const archiveButton = headerArchiveButton(run, flags, tab)
 
   return (
     <ReferenceStatusProvider projectId={referenceProjectId} repoBase={repoBase} requests={referenceRequests}>
@@ -252,23 +375,23 @@ export function RunHeader({
         tab === 'session' && 'md:sticky md:top-0',
       )}
     >
-      {run.archived && run.autoArchive?.reason === 'pull-requests-merged' && run.autoArchive.archivedAt === run.archivedAt ? <p data-slot="auto-archive-reason" className="text-[13px] text-muted-foreground">Archived automatically after all associated PRs merged.</p> : null}
+      <AutoArchiveNote run={run} />
       <CompletionStatus run={run} />
       <div className="w-full">
-        {run.delegation?.role === 'worker' ? <ParentTaskLink id={run.delegation.parentRunId} /> : null}
+        <WorkerParentLink run={run} />
         {/* Pushed phone screen (#621): the shell's top bar carries back, the title and the run
             actions. hearsay-tools/cezarion#1333 took the state line out of it: the run's status
             lives in Session activity, the one card both viewports read. */}
         {barSlot ? (
           <MobileRunBarPortal slot={barSlot}>
             <MobileRunTitle run={run} />
-            {run.delegation?.role === 'worker' ? <CompactParentTaskLink id={run.delegation.parentRunId} /> : null}
+            <WorkerParentLink run={run} compact />
             {actionsKebab}
           </MobileRunBarPortal>
         ) : (
           <div data-slot="run-title-row" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
             <p data-slot="session-kind" className="text-[12px] font-semibold tracking-[0.14em] text-muted-foreground uppercase md:hidden">
-              {run.delegation?.role === 'worker' ? 'Worker session' : run.delegation?.role === 'root' ? 'Parent session' : 'Task session'}
+              {sessionKindLabel(run.delegation)}
             </p>
             <EditableTitle run={run} />
             {/* Desktop only: below md the header shows no status at all (#1333). */}
@@ -284,75 +407,22 @@ export function RunHeader({
           </div>
         )}
 
-        {/* Pushed phone screen: the controls the dropped title row used to carry, in a row of
-            their own — rendered only when one of them applies, so an empty row never sits
-            between the top bar and the tabs. */}
-        {barSlot && (archiveButton || previewToggle || handoffVisible) ? (
-          <div data-slot="run-mobile-actions" className="flex flex-wrap items-center gap-2 pt-2">
-            {archiveButton}
-            {previewToggle}
-            <HandoffAction run={run} />
-          </div>
-        ) : null}
+        <MobileActionsRow
+          shown={barSlot !== null}
+          run={run}
+          archiveButton={archiveButton}
+          previewToggle={previewToggle}
+        />
 
-        {/* Below md (#621): 13.5px labels and quiet counts, tabs spread across the row. The 44px
-            floor stays — the touch-target sweep measures these links — so the design's 40px is the
-            visual weight of the row, not a smaller hit area. The count is phone-only (desktop tabs are unchanged). Counts come only from data the record
-            already carries: the changed-file tally. A commit count is not on the record, and one
-            more query for a badge is not worth it, so Commits shows none. */}
-        {/* Below md the row scrolls sideways instead of wrapping (#692): item tabs can push it past
-            the viewport, and a wrapped second row of tabs reads as a second tab bar. The divider
-            moves into an inset shadow there, because a scroll container clips the tabs' `-mb-px`
-            overlap — the underline then sits ON the divider exactly as it does on desktop. */}
-        <div
-          ref={tabRowRef}
-          data-slot="run-tabs"
-          data-phone-bar={phoneBar || undefined}
-          className="mt-3 flex flex-wrap items-end gap-1 border-b border-border md:mt-5 max-md:flex-nowrap max-md:overflow-x-auto max-md:border-b-0 max-md:shadow-[inset_0_-1px_0_var(--border)] max-md:gap-0 max-md:[&>*]:mb-0 max-md:[&>*]:shrink-0 max-md:[&>a]:min-h-11 max-md:[&>a]:px-3.5 max-md:[&>a]:text-[13.5px]"
-        >
-          <TabLink to={`/tasks/${run.id}`} active={tab === 'session'} replace={phoneBar}>
-            Session
-          </TabLink>
-          <TabLink to={`/tasks/${run.id}/changes`} active={tab === 'changes'} replace={phoneBar} count={run.diffStat && run.diffStat.files > 0 ? run.diffStat.files : undefined}>
-            Changes
-          </TabLink>
-          <TabLink to={`/tasks/${run.id}/commits`} active={tab === 'commits'} replace={phoneBar}>
-            Commits
-          </TabLink>
-          <TabLink to={`/tasks/${run.id}/files`} active={tab === 'files'} replace={phoneBar}>
-            Files
-          </TabLink>
-          {inlineItemTabs.map((item) => (
-            <TabLink
-              key={`${item.kind}-${item.number}`}
-              to={itemTabPath(run.id, item)}
-              active={activeItem !== null && sameItemTab(item, activeItem)}
-              replace={phoneBar}
-            >
-              <ItemTabLabel tab={item} />
-            </TabLink>
-          ))}
-          {overflowItemTabs.length > 0 ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                data-slot="run-tabs-more"
-                aria-label={`${overflowItemTabs.length} more linked items`}
-                className="-mb-px flex h-8 items-center rounded-t-md border-b-2 border-transparent px-3 text-[13px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-link-foreground max-md:min-h-11 max-md:px-3.5 max-md:text-[13.5px]"
-              >
-                +{overflowItemTabs.length}
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {overflowItemTabs.map((item) => (
-                  <DropdownMenuItem key={`${item.kind}-${item.number}`} asChild>
-                    <Link to={itemTabPath(run.id, item)} replace={phoneBar}>
-                      <ItemTabLabel tab={item} />
-                    </Link>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : null}
-        </div>
+        <RunTabs
+          run={run}
+          tab={tab}
+          activeItem={activeItem}
+          inlineItemTabs={inlineItemTabs}
+          overflowItemTabs={overflowItemTabs}
+          phoneBar={phoneBar}
+          isDesktop={isDesktop}
+        />
 
         {notesOpen ? <NotesPanel runId={run.id} onClose={() => setNotesOpen(false)} /> : null}
         {openChooser ? <OpenInMenuForRun run={run} canResume={runActionFlags(run).terminal} onResume={() => actions.terminal.mutate()} onClose={() => setOpenChooser(false)} /> : null}
