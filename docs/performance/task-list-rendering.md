@@ -693,9 +693,10 @@ The page anchor now does two things, once per content commit and never later.
 It corrects any residual movement of the first visible row with one direct
 `scrollTop` write. This covers inserts, moves and removals above the row inside
 its own virtual list, which move neither the list nor native anchoring's anchor
-node. Then, if the commit changed the offset, it dispatches one `scroll` event
-after the commit, so every virtualizer stores the current offset before its next
-compensation. It has no pending state, retries, observers, frame callbacks or
+node. After the commit, in one synchronous render before paint, it gives
+every virtual list its new start margin and, if the commit changed the offset,
+dispatches one `scroll` event, so every virtualizer stores the current offset
+before its next compensation. It has no pending state, retries, observers, frame callbacks or
 listeners, and it never calls virtua's scheduler. Native anchoring keeps folds,
 previews, status moves and other changes in earlier groups; virtua keeps its own
 rows when a row above its viewport resizes. Virtua's `shift` mode and the
@@ -711,3 +712,39 @@ height. The commit snapshot is read before React mutates the DOM: one layout.
 The measured scroll path changed: the old anchor captured the first visible row
 on every scroll event, and the new one does no scroll work. The final head check
 above measured the old path. This section makes no new timing claim.
+
+#### Start-margin follow-up
+
+QA at `0b304aa96` found three defects that the final-position checks missed:
+one animation frame with no task row in the viewport on every project fold and
+unfold, a 3.0 px drift after a phone project fold over a flat Finished group
+(direct and from another tab), and a one-frame jump on a global phone status
+move. Traces of the first two confirm one cause. After a fold, a virtual list's
+start margin was refreshed only by its ResizeObserver, a later render. The sync
+`scroll` event gave virtua the new offset with the old margin, so it rendered
+the wrong range for one frame. Rows first measured in that range were not
+compensated, because virtua took them to be in view.
+
+The anchor now refreshes every virtual list's start margin in the same
+synchronous render as the sync event, after the commit and before paint.
+
+| Fold above a virtual Working group | Before (`0b304aa96`) | After |
+| --- | --- | --- |
+| Project 360×640, flat Finished, direct fold (3 offsets) | 1 empty frame each; drift +2.41/+2.41/+3.20 px | 0 empty frames; max frame deviation 0.01 px; drift 0.02 px |
+| Project 360×640, flat Finished, other-tab fold (3 offsets) | 1 empty frame each; drift +2.41/+2.41/+3.20 px | 0 empty frames; 0.01 px; 0.02 px |
+| Project 1440×900, flat Finished, direct fold (2 offsets) | 1 empty frame each; drift 0 px | 0 empty frames; 0 px |
+
+The global phone status move held its row within 0.5 px on every frame in 14
+traces on both builds (fixtures 310×3 and 1000×2 projects, seven offsets). There
+native anchoring adds the moved card's estimate and virtua adds the rest in the
+same frame, before paint. One trace near the page end drifts 7.5 px because the
+target clamps at the bottom, which the unreachable-target rule allows. The
+reported one-frame jump did not reproduce. The global summary hint now follows
+the layout at mount: 115 px for desktop rows and 218 px for phone cards
+(measured 114.5 and 217.5 px), instead of 115 px for both.
+
+The browser checks for status moves and earlier folds, previews and other-tab
+folds now sample every frame after the change. Each frame must show rows in the
+viewport and the saved row mounted within 2 px. Three cases add a flat Finished
+group. On the anchor code of `0b304aa96` four of these checks fail: empty
+frames, an unmounted row, and +2.4 px. [Trace summary](task-list-rendering/s3b/anchor-trace.json).

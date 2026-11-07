@@ -15,6 +15,22 @@ beforeAll(async () => {
 })
 afterAll(async () => { browser?.close(); await fixture?.stop() })
 
+// Samples every frame from now until stopped: the saved row's top and how many rows cover the viewport.
+const startFrames = (id: string) => `(() => {const owner=document.querySelector('[data-slot="main"]'),frames=window.__anchorFrames=[];window.__stopFrames=false;
+  const step=()=>{const view=owner.getBoundingClientRect(),row=document.querySelector('[data-run-id="${id}"]');
+    frames.push({top:row?row.getBoundingClientRect().top:null,rows:[...document.querySelectorAll('[data-task-item]')].filter(e=>{const r=e.getBoundingClientRect();return r.bottom>view.top&&r.top<view.bottom}).length});
+    if(!window.__stopFrames&&frames.length<600)requestAnimationFrame(step)};requestAnimationFrame(step)})()`
+// A one-frame jump or an empty viewport is visible even when the final position is right.
+function expectEveryFrame(browser: AgentBrowser, top: number) {
+  const frames = browser.evaluate('(() => {window.__stopFrames=true;return window.__anchorFrames})()') as { top: number | null; rows: number }[]
+  expect(frames.length).toBeGreaterThan(0)
+  for (const frame of frames) {
+    expect(frame.rows).toBeGreaterThan(0)
+    expect(frame.top).not.toBeNull()
+    expect(Math.abs(frame.top! - top)).toBeLessThanOrEqual(2)
+  }
+}
+
 it('bounds rows, preserves focused controls and expansion, and follows pathname scroll rules', () => {
   const count = browser.waitForValue(`document.querySelectorAll('[data-slot="task-summary-row"]').length`) as number
   expect(count).toBeGreaterThan(0)
@@ -181,10 +197,12 @@ it.each([['project', 1440, 900], ['project', 360, 640], ['global', 1440, 900], [
     browser.evaluate(`(() => {const owner=document.querySelector('[data-slot="main"]'),group=document.querySelector('${route} [data-bucket="Working"]');owner.scrollTop+=group.getBoundingClientRect().top-owner.getBoundingClientRect().top+${scope === 'global' ? 90445 : 6500}})()`)
     const sample = `(() => {const owner=document.querySelector('[data-slot="main"]'),edge=owner.getBoundingClientRect().top;const rows=[...document.querySelectorAll('${route} [data-run-id]')].filter(e=>e.getBoundingClientRect().bottom>edge&&e.getBoundingClientRect().top<edge+owner.clientHeight);return rows.length>1?{id:rows[0].dataset.runId,top:rows[0].getBoundingClientRect().top,move:rows[rows.length-1].dataset.runId,project:rows[rows.length-1].dataset.project}:null})()`
     const before = waitForSettledSample(browser, sample) as { id: string; top: number; move: string; project?: string }
+    browser.evaluate(startFrames(before.id))
     await large.control({ update: [{ projectId: before.project ?? 'boot', runId: before.move, patch: { status: RUN_STATUS.done } }] })
     browser.waitForFunction(`document.querySelector('${route} [data-bucket="Finished"] [data-slot="status-group-toggle"]')?.getAttribute('aria-label')?.startsWith('Finished ${finished + 1}') && window.__cezIdle`)
     const after = waitForSettledSample(browser, `(() => {const row=document.querySelector('${route} [data-run-id="${before.id}"]');return row?row.getBoundingClientRect().top:null})()`) as number
     expect(Math.abs(after - before.top)).toBeLessThanOrEqual(2)
+    expectEveryFrame(browser, before.top)
   } finally { await large.stop() }
 })
 
@@ -194,10 +212,13 @@ it.each([
   ['project', 1440, 900, 'preview'], ['project', 360, 640, 'preview'],
   ['global', 1440, 900, 'preview'], ['global', 360, 640, 'preview'],
   ['global', 1440, 900, 'storage'],
-] as const)('anchors %s at %s x %s after an earlier %s collapses', async (scope, width, height, change) => {
+  // A Finished group below the threshold renders flat above the virtual Working group.
+  ['project', 1440, 900, 'flat fold'], ['project', 360, 640, 'flat fold'], ['project', 360, 640, 'flat storage'],
+] as const)('anchors %s at %s x %s after an earlier %s collapses', async (scope, width, height, kind) => {
+  const change = kind.replace('flat ', '') as 'fold' | 'preview' | 'storage'
   const large = await createTabFixture(process.cwd(), { taskList: scope, taskListSizes: { active: 310, archived: 0, projects: scope === 'global' ? 3 : 1 } })
   try {
-    await large.control({ update: large.runs.slice(0, scope === 'global' ? 1 : 120).map(run => ({ ...run, patch: { status: RUN_STATUS.done } })) })
+    await large.control({ update: large.runs.slice(0, scope === 'global' ? 1 : kind.startsWith('flat') ? 80 : 120).map(run => ({ ...run, patch: { status: RUN_STATUS.done } })) })
     browser.setViewport(width, height)
     browser.goto(`${large.origin}${scope === 'project' ? '/p/boot/' : '/tasks'}?tasks=virtual`)
     const route = `[data-route="${scope === 'project' ? 'tasks' : 'global-tasks'}"]`
@@ -212,8 +233,9 @@ it.each([
     browser.evaluate(`(() => {const owner=document.querySelector('[data-slot="main"]'),group=document.querySelector('${route} [data-bucket="Working"]');owner.scrollTop+=group.getBoundingClientRect().top-owner.getBoundingClientRect().top+${scope === 'global' ? 12000 : 15000}})()`)
     const sample = `(() => {const owner=document.querySelector('[data-slot="main"]'),edge=owner.getBoundingClientRect().top;const row=[...document.querySelectorAll('${route} [data-bucket="Working"] [data-run-id]')].find(e=>e.getBoundingClientRect().bottom>edge&&e.getBoundingClientRect().top<edge+owner.clientHeight);return row?{id:row.dataset.runId,top:row.getBoundingClientRect().top}:null})()`
     const before = waitForSettledSample(browser, sample) as { id: string; top: number }
+    browser.evaluate(startFrames(before.id))
     if (change !== 'preview') {
-      if (change === 'storage') browser.evaluate(`localStorage.setItem('cez-task-list-folds',JSON.stringify({[JSON.stringify(['global','active','Finished'])]:true}));window.dispatchEvent(new StorageEvent('storage',{key:'cez-task-list-folds'}))`)
+      if (change === 'storage') browser.evaluate(`localStorage.setItem('cez-task-list-folds',JSON.stringify({[JSON.stringify([${JSON.stringify(scope === 'global' ? 'global' : 'project:boot')},'active','Finished'])]:true}));window.dispatchEvent(new StorageEvent('storage',{key:'cez-task-list-folds'}))`)
       else browser.evaluate(`document.querySelector('${finished} [data-slot="status-group-toggle"]').click()`)
       browser.waitForFunction(`document.querySelector('${finished} [data-slot="status-group-toggle"]').getAttribute('aria-expanded') === 'false'`)
     } else {
@@ -222,6 +244,7 @@ it.each([
     }
     const after = waitForSettledSample(browser, `(() => {const row=document.querySelector('${route} [data-run-id="${before.id}"]');return row?row.getBoundingClientRect().top:null})()`) as number
     expect(Math.abs(after - before.top)).toBeLessThanOrEqual(2)
+    expectEveryFrame(browser, before.top)
   } finally { await large.stop() }
 })
 

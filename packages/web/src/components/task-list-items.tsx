@@ -1,4 +1,5 @@
 import { Component, useContext, useLayoutEffect, useRef, useState, type ReactNode, type ReactElement, type ComponentProps } from 'react'
+import { flushSync } from 'react-dom'
 import { useSearchParams } from 'react-router'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import { useTaskEditingRunId } from '@/lib/task-title-editor'
@@ -6,7 +7,7 @@ import { TaskListFocusContext, useTaskListFocus, useTaskListFocusState } from '@
 import { taskListKeepMounted, virtualizeTaskList } from '@/lib/task-list-render'
 
 /** Virtual lists by their element, so the page anchor can locate a run that is not mounted. */
-const logicalLists = new WeakMap<HTMLElement, { keys: readonly string[]; handle: React.RefObject<VirtualizerHandle | null> }>()
+const logicalLists = new WeakMap<HTMLElement, { keys: readonly string[]; handle: React.RefObject<VirtualizerHandle | null>; measure: () => void }>()
 
 /** One item includes its expanded preview. The page remains the sole vertical scroll owner. */
 export function TaskListItems<T>({ items, itemKey, children, itemSize }: {
@@ -26,10 +27,11 @@ export function TaskListItems<T>({ items, itemKey, children, itemSize }: {
   const eligible = virtualizeTaskList(items.length, params.get('tasks'))
   const virtual = geometry.available === true && eligible
   const listId = useRef(Symbol('task-list'))
+  const measureMargin = useRef(() => {})
   useLayoutEffect(() => {
     pageFocus?.registerList?.(listId.current, keys)
     const element = root.current
-    if (element) logicalLists.set(element, { keys, handle })
+    if (element) logicalLists.set(element, { keys, handle, measure: () => measureMargin.current() })
     return () => {
       pageFocus?.registerList?.(listId.current, null)
       if (element) logicalLists.delete(element)
@@ -54,6 +56,7 @@ export function TaskListItems<T>({ items, itemKey, children, itemSize }: {
       setGeometry((previous) => previous.available === true && previous.margin === margin ? previous : { available: true, margin })
     }
     measure()
+    measureMargin.current = measure
     const observer = new ResizeObserver(measure)
     // Earlier groups can resize without changing this group's own size.
     for (let node: Element | null = element; node && node !== owner; node = node.parentElement) {
@@ -143,9 +146,16 @@ export class TaskListScrollAnchor extends Component<{ revision: unknown; visibil
     // A filtered-out anchor keeps scrollTop; the browser clamps it to the new height.
     const top = snapshot.key === null ? null : this.currentTop(snapshot.key)
     if (top !== null && Math.abs(top - snapshot.top) > 0.5) owner.scrollTop += top - snapshot.top
-    // Tell virtua about any offset change in this commit before its next resize compensation reads its stored offset.
-    // After the commit, so virtua's synchronous re-render does not run inside a React lifecycle.
-    queueMicrotask(() => { if (owner.isConnected && owner.scrollTop !== snapshot.scrollTop) owner.dispatchEvent(new Event('scroll')) })
+    // Before paint, give every virtualizer this commit's start margin and offset in one render: a stale margin with a
+    // new offset renders the wrong range for a frame. After the commit, so virtua's re-render is outside a lifecycle.
+    queueMicrotask(() => {
+      if (!owner.isConnected) return
+      flushSync(() => {
+        for (const element of this.root.current?.querySelectorAll<HTMLElement>('[data-slot="task-list-items"]') ?? []) logicalLists.get(element)?.measure()
+        // Virtua's next resize compensation adds to its stored offset, which misses this commit's native adjustment.
+        if (owner.scrollTop !== snapshot.scrollTop) owner.dispatchEvent(new Event('scroll'))
+      })
+    })
   }
   /** The run's current top: its row, or the position virtua will render it at. */
   private currentTop(key: string) {

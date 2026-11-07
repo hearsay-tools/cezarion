@@ -108,3 +108,20 @@ it('keeps a native adjustment when virtua later compensates an earlier row resiz
   expect(owner.scrollTop).toBe(7914)
   expect(Math.abs(anchor.getBoundingClientRect().top - top)).toBeLessThanOrEqual(1)
 })
+
+it('keeps the anchor mounted when an earlier fold moves the list before its margin observer runs', async () => {
+  setupGeometry({ events: false })
+  const view = render(<Lists first={initial} />)
+  await act(async () => { resize() })
+  await act(async () => { resize() })
+  const owner = await scrollTo(9000)
+  const visible = () => [...document.querySelectorAll<HTMLElement>('[data-group="second"] [data-task-item]')].find(element => element.getBoundingClientRect().top >= 0 && element.getBoundingClientRect().top < 300)
+  await waitFor(() => expect(visible()).toBeDefined())
+  const key = visible()!.dataset.taskItem!, top = visible()!.getBoundingClientRect().top
+  // Native anchoring follows a 1000 px fold above; no ResizeObserver delivery reaches the list yet.
+  await act(async () => { view.rerender(<Lists first={[...initial]} shift={-1000} />) })
+  expect(owner.scrollTop).toBe(8000)
+  const anchor = [...document.querySelectorAll<HTMLElement>('[data-task-item]')].find(element => element.dataset.taskItem === key)
+  expect(anchor).toBeDefined()
+  expect(Math.abs(anchor!.getBoundingClientRect().top - top)).toBeLessThanOrEqual(1)
+})

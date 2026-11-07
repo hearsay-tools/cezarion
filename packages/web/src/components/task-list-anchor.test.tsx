@@ -1,20 +1,21 @@
-import { cleanup, render } from '@testing-library/react'
+import { act, cleanup, render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Component, type ReactNode } from 'react'
 import { TaskListItems, TaskListScrollAnchor, TaskListFocusBoundary } from './task-list-items'
 
 // Keep all items mounted to isolate the before-mutation anchor from virtua's own sizing.
-const virtualState = vi.hoisted(() => ({ hidden: null as string | null, scheduled: [] as string[] }))
+const virtualState = vi.hoisted(() => ({ hidden: null as string | null, scheduled: [] as string[], margins: [] as number[] }))
 vi.mock('virtua', async () => {
   const React = await import('react')
-  return { Virtualizer: React.forwardRef(function Virtualizer({ data, children }: { data: string[]; children: (item: string, index: number) => ReactNode }, ref) {
+  return { Virtualizer: React.forwardRef(function Virtualizer({ data, children, startMargin = 0 }: { data: string[]; startMargin?: number; children: (item: string, index: number) => ReactNode }, ref) {
+    virtualState.margins.push(startMargin)
     const root = React.useRef<HTMLDivElement>(null)
     React.useImperativeHandle(ref, () => ({ getItemOffset: (index: number) => index * 60, scrollBy() { virtualState.scheduled.push('scrollBy') }, scrollTo(offset: number) { virtualState.scheduled.push('scrollTo'); root.current!.closest<HTMLElement>('[data-slot="main"]')!.scrollTop = offset } }))
     return <div ref={root}>{data.flatMap((item, index) => item === virtualState.hidden ? [] : [children(item, index)])}</div>
   }) }
 })
-afterEach(() => { virtualState.hidden = null; virtualState.scheduled = []; cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { virtualState.hidden = null; virtualState.scheduled = []; virtualState.margins = []; cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 it('keeps the first visible run in place after an insertion in the middle above it', () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
@@ -324,4 +325,23 @@ it('tells the virtualizer about an offset change made during a content commit', 
   expect(owner.scrollTop).toBe(415)
   await Promise.resolve()
   expect(seen).toEqual([415])
+})
+
+it('gives each virtual list its new start margin before paint after a content commit', async () => {
+  // No ResizeObserver delivery: only the commit path can refresh the margin.
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const owner = this.closest<HTMLElement>('[data-slot="main"]')
+    const height = Number(owner?.querySelector<HTMLElement>('[data-height]')?.dataset.height ?? 0)
+    const top = this === owner ? 0 : this.dataset.slot === 'task-list-items' || this.dataset.taskItem ? height - (owner?.scrollTop ?? 0) : 0
+    return { top, bottom: top + 60, height: 60, width: 1000 } as DOMRect
+  })
+  const tree = (height: number) => <MemoryRouter initialEntries={['/?tasks=virtual']}><div data-slot="main"><TaskListFocusBoundary layout="same" revision="same" visibilityRevision={String(height)}>
+    <span data-height={height} /><TaskListItems items={['anchor']} itemKey={key => key}>{key => <button>{key}</button>}</TaskListItems>
+  </TaskListFocusBoundary></div></MemoryRouter>
+  const view = render(tree(2000))
+  expect(virtualState.margins.at(-1)).toBe(2000)
+  view.rerender(tree(500))
+  await act(async () => {})
+  expect(virtualState.margins.at(-1)).toBe(500)
 })
