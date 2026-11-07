@@ -1,5 +1,6 @@
 import type { Home } from './home.ts';
 import { homeFileSchema } from '@open-mercato/cezar-contract/home-recovery';
+import { registryCount } from './registry-content.ts';
 import { homeChanged } from './changes.ts';
 import { flagResetFromBackup, flagResetOnWrite } from './reset-detection.ts';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
@@ -112,8 +113,12 @@ export class HomeStore {
       const previous = readBytes(path);
       this.checkOutside(path, log, previous);
       backupBeforeWrite(path, bytes, { home: this.home, unavailable });
+      const keepAcceptance = registryCount(log.relativePath, previous) === 0 && log.accepted(previous);
+      log.reset(); // Finish any reset whose primary committed before a crash.
       flagResetOnWrite(log, previous, bytes);
       log.replace(path, bytes);
+      log.reset(); // The durable reset now survives later ordinary writes.
+      if (keepAcceptance) log.clearRecovery(bytes);
       homeChanged(this.root);
     });
   }
@@ -135,12 +140,11 @@ export class HomeStore {
   }
 
   createExclusive(path: string, bytes: Buffer): void {
-    const unavailable = this.assertBoundary([path], true).get(path);
+    this.assertBoundary([path], true);
     this.transaction(() => {
       const log = this.journal(path);
       this.checkOutside(path, log, readBytes(path));
       // Exclusive publication can only replace absence, which needs no snapshot.
-      backupBeforeWrite(path, bytes, { home: this.home, unavailable });
       log.createExclusive(path, bytes);
       homeChanged(this.root);
     });
@@ -152,7 +156,7 @@ export class HomeStore {
   }
 
   /** Bounded flag reads; outside inspection still owns the normal per-file lock. */
-  recovery(path: string): { reason: 'outside-write' | 'reset'; detectedAt: string; canRestore: boolean } | undefined {
+  recovery(path: string): { reason: 'outside-write' | 'reset'; detectedAt: string; canRestore: boolean; restoreHash: string | null } | undefined {
     if (!this.canJournal()) return;
     this.assertBoundary([path]);
     return this.transaction(() => {
@@ -161,19 +165,21 @@ export class HomeStore {
       const outside = log.inspect(bytes);
       if (!outside) flagResetFromBackup(log, bytes);
       const flag = outside ?? log.reset();
-      return flag ? { reason: outside ? 'outside-write' as const : 'reset' as const, detectedAt: flag.detectedAt, canRestore: true } : undefined;
+      let canRestore = true;
+      if (flag) try { log.recoveryBytes(flag); } catch { canRestore = false; }
+      return flag ? { reason: outside ? 'outside-write' as const : 'reset' as const, detectedAt: flag.detectedAt, canRestore, restoreHash: flag.restoreHash } : undefined;
     });
   }
 
   /** Explicit restore is the sole replacement that can bypass an unresolved outside write. */
-  restoreFile(path: string, bytes: Buffer | null): void {
+  restoreFile(path: string, bytes: Buffer | null, keepReset = false): void {
     const unavailable = this.assertBoundary([path], true).get(path);
     this.transaction(() => {
       const log = this.journal(path);
       log.inspect(readBytes(path));
       backupBeforeWrite(path, bytes, { home: this.home, unavailable });
       log.replace(path, bytes);
-      log.clearRecovery(bytes);
+      log.clearRecovery(bytes, keepReset);
       homeChanged(this.root);
     });
   }
@@ -182,9 +188,12 @@ export class HomeStore {
     this.assertBoundary([path], true);
     return this.transaction(() => {
       const log = this.journal(path);
-      const flag = log.inspect(readBytes(path)) ?? log.reset();
+      const outside = log.inspect(readBytes(path));
+      const reset = log.reset();
+      const flag = outside ?? reset;
       if (!flag) return;
-      this.restoreFile(path, log.recoveryBytes(flag));
+      // Restoring an outside write must not accept a separate, unresolved registry reset.
+      this.restoreFile(path, log.recoveryBytes(flag), Boolean(outside && reset));
       return flag.detectedAt;
     });
   }

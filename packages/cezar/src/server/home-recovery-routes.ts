@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { homeRecoveryActionSchema } from '@open-mercato/cezar-contract/home-recovery';
 import type { Home } from '../home/home.ts';
 import { acceptHomeRecovery, getHomeRecovery, restoreHomeRecovery, subscribeHomeRecovery } from '../home/recovery.ts';
@@ -29,20 +29,17 @@ export function createHomeRecoveryRoutes({ home, socketHub }: { home: Home; sock
   socketHub?.registerTopic(HOME_RECOVERY_TOPIC, createHomeRecoveryPublisher(home), { loopbackReadable: false });
   return new Hono()
     .get('/home/recovery', (c) => c.json(getHomeRecovery(home), 200))
-    .post('/home/recovery/restore', jsonZodValidator(homeRecoveryActionSchema), async (c) => {
-      try {
-        await restoreHomeRecovery(home, c.req.valid('json').file);
-        return c.json(getHomeRecovery(home), 200);
-      } catch (error) {
-        return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
-      }
-    })
-    .post('/home/recovery/accept', jsonZodValidator(homeRecoveryActionSchema), (c) => {
-      try {
-        acceptHomeRecovery(home, c.req.valid('json').file);
-        return c.json(getHomeRecovery(home), 200);
-      } catch (error) {
-        return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
-      }
-    });
+    .post('/home/recovery/restore', jsonZodValidator(homeRecoveryActionSchema), (c) =>
+      respondRecovery(c, home, () => restoreHomeRecovery(home, c.req.valid('json').file)))
+    .post('/home/recovery/accept', jsonZodValidator(homeRecoveryActionSchema), (c) =>
+      respondRecovery(c, home, () => acceptHomeRecovery(home, c.req.valid('json').file)));
+}
+
+async function respondRecovery(c: Context, home: Home, action: () => void | Promise<void>) {
+  try {
+    await action();
+    return c.json(getHomeRecovery(home), 200);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
+  }
 }

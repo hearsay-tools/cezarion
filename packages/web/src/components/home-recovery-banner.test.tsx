@@ -1,0 +1,91 @@
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { HomeRecoveryFile } from '@open-mercato/cezar-api-client/contract/home-recovery'
+import { useHomeRecovery } from '@/api/home-recovery'
+import { HomeRecoveryBanner } from './home-recovery-banner'
+
+const actions = vi.hoisted(() => ({
+  restore: { mutate: vi.fn(), reset: vi.fn(), isPending: false, error: null as Error | null },
+  accept: { mutate: vi.fn(), reset: vi.fn(), isPending: false, error: null as Error | null },
+}))
+vi.mock('@/api/home-recovery', () => ({
+  useHomeRecovery: vi.fn(), useRestoreHomeRecovery: () => actions.restore, useAcceptHomeRecovery: () => actions.accept,
+}))
+
+function state(files: HomeRecoveryFile[], status: 'ready' | 'pending' | 'error' = 'ready') {
+  vi.mocked(useHomeRecovery).mockReturnValue({ data: { files }, isSuccess: status === 'ready',
+    isError: status === 'error' } as ReturnType<typeof useHomeRecovery>)
+}
+function file(name: string, reason: HomeRecoveryFile['reason'] = 'reset', canRestore = true): HomeRecoveryFile {
+  return { file: name, reason, detectedAt: '2026-11-07T09:00:00.000Z', canRestore }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  for (const action of Object.values(actions)) { action.isPending = false; action.error = null }
+  state([])
+})
+afterEach(cleanup)
+
+it('shows no banner in a normal session and exposes the successful empty state', () => {
+  const { container } = render(<HomeRecoveryBanner />)
+  expect(container.querySelector('[data-slot="home-recovery-state"]')?.getAttribute('data-state')).toBe('ready')
+  expect(screen.queryByRole('status')).toBeNull()
+  expect(screen.queryByRole('button')).toBeNull()
+  expect(container.textContent).toBe('')
+})
+
+it('shows each reset with its approved copy and both recovery actions', () => {
+  state([file('config.json'), file('agent-accounts.json')])
+  render(<HomeRecoveryBanner />)
+  const projects = screen.getByText('The project registry was reset. Restore the previous projects?').closest('[role="status"]')!
+  const accounts = screen.getByText('The account list was reset. Restore the previous accounts?').closest('[role="status"]')!
+  expect(screen.getAllByRole('status')).toHaveLength(2)
+  expect(projects.getAttribute('aria-live')).toBe('polite')
+  fireEvent.click(within(projects as HTMLElement).getByRole('button', { name: 'Restore' }))
+  expect(actions.restore.mutate).toHaveBeenCalledWith('config.json')
+  fireEvent.click(within(accounts as HTMLElement).getByRole('button', { name: 'Accept as found' }))
+  expect(actions.accept.mutate).toHaveBeenCalledWith('agent-accounts.json')
+  expect(actions.restore.reset).toHaveBeenCalledTimes(2)
+  expect(actions.accept.reset).toHaveBeenCalledTimes(2)
+})
+
+it('names the outside-written file and leaves accept available when no restore target is readable', () => {
+  state([file('remote-settings/4321.json', 'outside-write', false)])
+  render(<HomeRecoveryBanner />)
+  expect(screen.getByText('remote-settings/4321.json changed outside Cezar. Restore the previous version or accept the file as found.')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Restore' }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('button', { name: 'Accept as found' }).hasAttribute('disabled')).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Accept as found' }))
+  expect(actions.accept.mutate).toHaveBeenCalledWith('remote-settings/4321.json')
+})
+
+it.each(['restore', 'accept'] as const)('disables both buttons while %s is in flight', action => {
+  state([file('config.json')])
+  actions[action].isPending = true
+  render(<HomeRecoveryBanner />)
+  expect(screen.getByRole('status').getAttribute('aria-busy')).toBe('true')
+  for (const button of screen.getAllByRole('button')) {
+    expect(button.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(button)
+  }
+  expect(actions.restore.mutate).not.toHaveBeenCalled()
+  expect(actions.accept.mutate).not.toHaveBeenCalled()
+})
+
+it.each(['restore', 'accept'] as const)('keeps a failed %s action error beside the available retry', action => {
+  state([file('config.json')])
+  actions[action].error = new Error('Saved version cannot be read')
+  render(<HomeRecoveryBanner />)
+  expect(screen.getByRole('alert').textContent).toBe('Saved version cannot be read')
+  expect(screen.getByRole('button', { name: 'Restore' }).hasAttribute('disabled')).toBe(false)
+  expect(screen.getByRole('button', { name: 'Accept as found' }).hasAttribute('disabled')).toBe(false)
+})
+
+it.each(['pending', 'error'] as const)('does not invent a banner while the initial read is %s', status => {
+  state([], status)
+  const { container } = render(<HomeRecoveryBanner />)
+  expect(container.querySelector('[data-slot="home-recovery-state"]')?.getAttribute('data-state')).toBe(status)
+  expect(screen.queryByRole('status')).toBeNull()
+  expect(container.textContent).toBe('')
+})

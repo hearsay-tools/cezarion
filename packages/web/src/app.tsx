@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { BrowserRouter } from 'react-router'
 
 import { GlobalEventsProvider } from './api/global-events'
+import { HomeRecoveryController } from './components/home-recovery-controller'
 import { createQueryClient } from './api/query-client'
 import { attachQueryIdle } from './lib/cez-idle'
 import { AppErrorBoundary } from './components/app-error-boundary'
@@ -40,6 +41,7 @@ export function App() {
     <AppErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <GlobalEventsProvider>
+          <HomeRecoveryController />
           {/* Beside the stream on purpose: it watches the run-list cache the stream patches
               (and reconciliation refetches), turning attention transitions into browser
               notifications when the tab is hidden (R6 1.7). Renders nothing. */}

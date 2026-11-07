@@ -68,6 +68,11 @@ it('uses the Home backup root for nested files and reads the old named-instance 
   renameSync(join(home.backups, file), legacy);
   expect(listBackups(file, home)[0]?.path.startsWith(legacy)).toBe(true);
   expect(listBackups(undefined, home).some(item => item.file === file)).toBe(true);
+  const before = listBackups(file, home).map(entry => ({ path: entry.path, bytes: readFileSync(entry.path) }));
+  store.writeJson(path, { third: true });
+  for (const entry of before) expect(readFileSync(entry.path)).toEqual(entry.bytes);
+  expect(listBackups(file, home).filter(entry => entry.path.startsWith(legacy)).map(entry => entry.path)).toEqual(before.map(entry => entry.path));
+  expect(listBackups(file, home)[0]?.path.startsWith(join(home.backups, file))).toBe(true);
 });
 
 it('lists config.json.bak first and uses it for an unflagged restore', async () => {

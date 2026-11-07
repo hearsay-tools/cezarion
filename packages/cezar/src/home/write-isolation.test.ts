@@ -4,8 +4,9 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSyn
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
-import { loadAgentAccounts, mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
+import { mergeWriteWorkspaceConfig, workspaceConfigSchema } from '../workspace/config.ts';
+import { loadAgentAccounts, mergeWriteAgentAccounts, storeSchema } from '../workspace/agent-accounts.ts';
+import { listBackups } from '../workspace/backups.ts';
 import { restoreBackup } from '../workspace/backup-cli.ts';
 import { runMigrations } from '../workspace/migrations.ts';
 import { SelfUpdateService } from '../self-update/service.ts';
@@ -26,17 +27,22 @@ it.each(['config.json', 'agent-accounts.json'] as const)('restores %s only in th
   const { selected, ambient } = homes();
   const selectedPath = join(selected.root, file);
   const ambientPath = join(ambient.root, file);
-  const snapshot = file === 'config.json' ? { extra: 'snapshot' } : { accounts: [], selections: {}, extra: 'snapshot' };
+  const snapshot = file === 'config.json' ? workspaceConfigSchema.parse({ extra: 'snapshot' })
+    : storeSchema.parse({ accounts: [], selections: {}, extra: 'snapshot' });
   Home.seed(Home.sandbox(selected.root), selectedPath, snapshot);
   Home.seed(Home.sandbox(ambient.root), ambientPath, { ...snapshot, extra: 'ambient' });
+  const snapshotBytes = readFileSync(selectedPath);
   const before = readFileSync(ambientPath, 'utf8');
   const ambientFiles = readdirSync(ambient.root);
   useTestHome(ambient.root ? Home.sandbox(ambient.root) : undefined);
   if (file === 'config.json') await mergeWriteWorkspaceConfig(value => { value.extra = 'replaced'; }, selected);
   else await mergeWriteAgentAccounts(value => { value.extra = 'replaced'; }, selected);
 
-  await restoreBackup(file, undefined, selected);
+  // Select the older rotation explicitly: .bak is now the newest default config entry.
+  const rotation = listBackups(file, selected).find(entry => entry.path !== `${selectedPath}.bak`)!;
+  await restoreBackup(file, rotation.time, selected);
 
+  expect(readFileSync(selectedPath)).toEqual(snapshotBytes);
   expect(JSON.parse(readFileSync(selectedPath, 'utf8')).extra).toBe('snapshot');
   expect(readFileSync(ambientPath, 'utf8')).toBe(before);
   expect(readdirSync(ambient.root)).toEqual(ambientFiles);

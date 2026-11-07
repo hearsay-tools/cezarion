@@ -2,11 +2,14 @@ import { createHash } from 'node:crypto';
 import { linkSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
+import { registryCount } from './registry-content.ts';
 import { atomicTmpPath, replacePrivate, syncDirectory } from './private-files.ts';
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/).nullable();
 const versionSchema = z.object({ hash: hashSchema });
+const acceptedSchema = versionSchema.extend({ empty: z.boolean().optional() });
 const outsideSchema = z.object({ restoreHash: hashSchema, observedHash: hashSchema, detectedAt: z.iso.datetime() });
+const resetSchema = outsideSchema.extend({ pending: z.boolean().optional() });
 export type OutsideWrite = z.infer<typeof outsideSchema>;
 type Hash = z.infer<typeof hashSchema>;
 export const OUTSIDE_WRITE_ENFORCEMENT = true;
@@ -111,17 +114,26 @@ export class VersionLog {
 
   reset(): OutsideWrite | undefined {
     const record = this.record('RESET');
-    return record === undefined ? undefined : outsideSchema.parse(record);
+    if (record === undefined) return;
+    const reset = resetSchema.parse(record);
+    // A crash before replacement must not turn an unchanged registry into a reset.
+    if (reset.pending) {
+      if (versionSchema.parse(this.record('HEAD')).hash !== reset.observedHash) return;
+      this.setRecord('RESET', { ...reset, pending: false });
+    }
+    return reset;
   }
 
-  flagReset(previous: Buffer, observed: Buffer | null): void {
+  flagReset(previous: Buffer, observed: Buffer | null, pending = false): void {
     if (this.reset()) return;
-    this.setRecord('RESET', { restoreHash: this.store(previous), observedHash: digest(observed), detectedAt: new Date().toISOString() });
+    this.setRecord('RESET', { restoreHash: this.store(previous), observedHash: digest(observed), detectedAt: new Date().toISOString(), pending });
   }
 
   accepted(bytes: Buffer | null): boolean {
     const record = this.record('ACCEPTED');
-    return record !== undefined && versionSchema.parse(record).hash === digest(bytes);
+    if (record === undefined) return false;
+    const accepted = acceptedSchema.parse(record);
+    return accepted.hash === digest(bytes) || (accepted.empty === true && registryCount(this.relativePath, bytes) === 0);
   }
 
   /** Resolve without rewriting the operator's bytes or changing their mtime. */
@@ -132,10 +144,10 @@ export class VersionLog {
     this.clearRecovery(bytes);
   }
 
-  clearRecovery(bytes: Buffer | null): void {
+  clearRecovery(bytes: Buffer | null, keepReset = false): void {
     // Record acceptance before clearing flags: an empty accepted registry must not re-alert.
-    this.setRecord('ACCEPTED', { hash: digest(bytes) });
-    for (const name of ['OUTSIDE', 'RESET']) rmSync(join(this.directory, name), { force: true });
+    if (!keepReset) this.setRecord('ACCEPTED', { hash: digest(bytes), empty: registryCount(this.relativePath, bytes) === 0 });
+    for (const name of keepReset ? ['OUTSIDE'] : ['OUTSIDE', 'RESET']) rmSync(join(this.directory, name), { force: true });
     syncDirectory(this.directory);
   }
 

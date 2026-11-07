@@ -7,7 +7,7 @@ import { HomeStore } from './store.ts';
 import { restoreBackup } from '../workspace/backup-cli.ts';
 export { subscribeHomeRecovery } from './recovery-watch.ts';
 
-interface CachedFile { fingerprint: string; state: HomeRecoveryFile | undefined }
+interface CachedFile { fingerprint: string; state: HomeRecoveryFile | undefined; pinnedPath?: string | undefined }
 const caches = new Map<string, Map<HomeFile, CachedFile>>();
 
 function stamp(path: string): string {
@@ -39,13 +39,15 @@ export function getHomeRecovery(home: Home): HomeRecovery {
   for (const file of recoveryFiles(home)) {
     const path = join(home.root, file);
     const journal = join(home.root, '.versions', file);
-    const fingerprint = [path, ...['HEAD', 'OUTSIDE', 'RESET', 'ACCEPTED'].map(name => join(journal, name)),
-      ...(file === 'config.json' ? [`${path}.bak`, join(home.backups, file)] : [])].map(stamp).join('|');
+    const fingerprint = [path, journal, ...['HEAD', 'OUTSIDE', 'RESET', 'ACCEPTED'].map(name => join(journal, name)),
+      ...(file === 'config.json' ? [`${path}.bak`, join(home.backups, file)] : []),
+      ...(cache.get(file)?.pinnedPath ? [cache.get(file)!.pinnedPath!] : [])].map(stamp).join('|');
     let entry = cache.get(file);
     if (!entry || entry.fingerprint !== fingerprint) {
       try {
-        const state = store.recovery(path);
-        entry = { fingerprint, state: state ? { file, ...state } : undefined };
+        const recovery = store.recovery(path);
+        const state = recovery ? { file, reason: recovery.reason, detectedAt: recovery.detectedAt, canRestore: recovery.canRestore } : undefined;
+        entry = { fingerprint, state, pinnedPath: recovery?.restoreHash ? join(journal, recovery.restoreHash) : undefined };
         cache.set(file, entry);
       } catch { /* Read-only or corrupt auxiliary state leaves the cockpit available. Retry next demand. */ }
     }
