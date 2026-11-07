@@ -49,6 +49,103 @@ function Section({ title, failure, section, children }: { title: string; failure
   )
 }
 
+/** The trigger picker for a new automation; an existing one keeps its kind and says which it is. */
+function TriggerFields({ draft, patch, forge, automation }: {
+  draft: AutomationDraft
+  patch: (next: Partial<AutomationDraft>) => void
+  forge: { available: boolean; reason?: string | undefined }
+  automation?: AutomationDefinition | undefined
+}) {
+  return (
+    <>
+      {automation ? (
+        <p className="text-sm"><span className="text-muted-foreground">Trigger · </span>{KIND_LABEL[draft.kind]}</p>
+      ) : (
+        <div className="grid justify-items-start gap-2">
+          <SegmentedControl<AutomationKind>
+            slot="automation-kind"
+            label="Trigger"
+            size="touch"
+            value={draft.kind}
+            onChange={(kind) => patch({ kind })}
+            options={[
+              { value: 'schedule', label: KIND_LABEL.schedule },
+              { value: 'github', label: KIND_LABEL.github, disabled: !forge.available, ...(forge.available ? {} : { title: forge.reason ?? 'GitHub is unavailable' }) },
+            ]}
+          />
+          {forge.available ? null : <p className="text-xs break-words text-muted-foreground">{`GitHub unavailable · ${forge.reason ?? 'no GitHub access'}`}</p>}
+        </div>
+      )}
+    </>
+  )
+}
+
+/** The schedule the trigger fires on, or the GitHub events and filters it polls. */
+function KindFields({ draft, patch, forge, timeZone, automation }: {
+  draft: AutomationDraft
+  patch: (next: Partial<AutomationDraft>) => void
+  forge: { available: boolean; reason?: string | undefined }
+  timeZone: string
+  automation?: AutomationDefinition | undefined
+}) {
+  return draft.kind === 'schedule'
+    ? <ScheduleFields value={draft.schedule} stored={automation?.schedule} onChange={(schedule) => patch({ schedule })} timeZone={timeZone} />
+    : <GithubFields draft={draft} onChange={patch} {...(forge.available ? {} : { disabledReason: forge.reason ?? 'no GitHub access' })} />
+}
+
+/** The task a run launches: the prompt with its placeholders, engine pills and access controls. */
+function TaskFields({ draft, patch, saving, automation }: {
+  draft: AutomationDraft
+  patch: (next: Partial<AutomationDraft>) => void
+  saving: boolean
+  automation?: AutomationDefinition | undefined
+}) {
+  return (
+    <>
+      <div className="grid gap-2">
+        <Label htmlFor="automation-prompt">Prompt</Label>
+        <Textarea id="automation-prompt" value={draft.prompt} onChange={(event) => patch({ prompt: event.target.value })} rows={4} required />
+        <p className="text-xs break-words text-muted-foreground">
+          {draft.kind === 'schedule'
+            ? <>Available: {'{{date}}'} {'{{time}}'} {'{{project}}'} {'{{automation}}'}. A run-context block is appended automatically.</>
+            : <>Available: {'{{github.number}}'} {'{{github.title}}'} {'{{github.url}}'} {'{{github.labels}}'}. GitHub content is appended as untrusted context.</>}
+        </p>
+      </div>
+      <EnginePills draft={draft} patch={patch} />
+      <label className="flex min-h-11 items-center gap-3 text-sm">
+        <Switch aria-label="Autonomous" checked={draft.autonomous} onCheckedChange={(autonomous) => patch({ autonomous })} />
+        <span>Autonomous <span className="text-muted-foreground">· runs without waiting for answers</span></span>
+      </label>
+      <p className="text-xs break-words text-muted-foreground">Each run is an ordinary task in its own worktree, queued behind the parallel cap.</p>
+      <CompletionControls archiveWhenDone={draft.archiveWhenDone} autoMergePr={draft.autoMergePr} onChange={patch} disabled={saving} />
+      <TaskAccessControls allowWorkers={draft.allowWorkers} allowMessaging={draft.allowMessaging} onChange={patch} disabled={saving} />
+      {automation ? <p className="text-xs text-muted-foreground">These settings apply to future tasks. Existing tasks keep their settings.</p> : null}
+    </>
+  )
+}
+
+/** The enable switch, with the sentence that says what switching it on means for this kind. */
+function EnableFields({ draft, patch, automation }: {
+  draft: AutomationDraft
+  patch: (next: Partial<AutomationDraft>) => void
+  automation?: AutomationDefinition | undefined
+}) {
+  const isSchedule = draft.kind === 'schedule'
+  return (
+    <>
+      <label className="flex min-h-11 items-center gap-3 text-sm">
+        <Switch aria-label={automation ? 'Enabled' : 'Enable after saving'} checked={draft.enabled} onCheckedChange={(enabled) => patch({ enabled })} />
+        <span>{automation ? 'Enabled' : 'Enable after saving'}</span>
+      </label>
+      <p className="text-xs break-words text-muted-foreground">
+        {isSchedule && draft.schedule.type === 'once'
+          ? 'It runs once at the time set above, then moves to Archived with its task.'
+          : isSchedule ? 'The first run is the next occurrence shown beside the schedule.' : historySentence(draft.filters.includeExisting)}
+      </p>
+    </>
+  )
+}
+
 export function AutomationEditor({ automation, forge, timeZone, onSaved, onReload }: {
   automation?: AutomationDefinition
   forge: { available: boolean; reason?: string | undefined }
@@ -141,60 +238,16 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
           </Section>
 
           <Section title="When" section="when" failure={failure}>
-            {automation ? (
-              <p className="text-sm"><span className="text-muted-foreground">Trigger · </span>{KIND_LABEL[draft.kind]}</p>
-            ) : (
-              <div className="grid justify-items-start gap-2">
-                <SegmentedControl<AutomationKind>
-                  slot="automation-kind"
-                  label="Trigger"
-                  size="touch"
-                  value={draft.kind}
-                  onChange={(kind) => patch({ kind })}
-                  options={[
-                    { value: 'schedule', label: KIND_LABEL.schedule },
-                    { value: 'github', label: KIND_LABEL.github, disabled: !forge.available, ...(forge.available ? {} : { title: forge.reason ?? 'GitHub is unavailable' }) },
-                  ]}
-                />
-                {forge.available ? null : <p className="text-xs break-words text-muted-foreground">{`GitHub unavailable · ${forge.reason ?? 'no GitHub access'}`}</p>}
-              </div>
-            )}
-            {isSchedule
-              ? <ScheduleFields value={draft.schedule} stored={automation?.schedule} onChange={(schedule) => patch({ schedule })} timeZone={timeZone} />
-              : <GithubFields draft={draft} onChange={patch} {...(forge.available ? {} : { disabledReason: forge.reason ?? 'no GitHub access' })} />}
+            <TriggerFields draft={draft} patch={patch} forge={forge} automation={automation} />
+            <KindFields draft={draft} patch={patch} forge={forge} timeZone={timeZone} automation={automation} />
           </Section>
 
           <Section title="What to run" section="run" failure={failure}>
-            <div className="grid gap-2">
-              <Label htmlFor="automation-prompt">Prompt</Label>
-              <Textarea id="automation-prompt" value={draft.prompt} onChange={(event) => patch({ prompt: event.target.value })} rows={4} required />
-              <p className="text-xs break-words text-muted-foreground">
-                {isSchedule
-                  ? <>Available: {'{{date}}'} {'{{time}}'} {'{{project}}'} {'{{automation}}'}. A run-context block is appended automatically.</>
-                  : <>Available: {'{{github.number}}'} {'{{github.title}}'} {'{{github.url}}'} {'{{github.labels}}'}. GitHub content is appended as untrusted context.</>}
-              </p>
-            </div>
-            <EnginePills draft={draft} patch={patch} />
-            <label className="flex min-h-11 items-center gap-3 text-sm">
-              <Switch aria-label="Autonomous" checked={draft.autonomous} onCheckedChange={(autonomous) => patch({ autonomous })} />
-              <span>Autonomous <span className="text-muted-foreground">· runs without waiting for answers</span></span>
-            </label>
-            <p className="text-xs break-words text-muted-foreground">Each run is an ordinary task in its own worktree, queued behind the parallel cap.</p>
-            <CompletionControls archiveWhenDone={draft.archiveWhenDone} autoMergePr={draft.autoMergePr} onChange={patch} disabled={saving} />
-            <TaskAccessControls allowWorkers={draft.allowWorkers} allowMessaging={draft.allowMessaging} onChange={patch} disabled={saving} />
-            {automation ? <p className="text-xs text-muted-foreground">These settings apply to future tasks. Existing tasks keep their settings.</p> : null}
+            <TaskFields draft={draft} patch={patch} saving={saving} automation={automation} />
           </Section>
 
           <Section title="Enable" section="enable" failure={failure}>
-            <label className="flex min-h-11 items-center gap-3 text-sm">
-              <Switch aria-label={automation ? 'Enabled' : 'Enable after saving'} checked={draft.enabled} onCheckedChange={(enabled) => patch({ enabled })} />
-              <span>{automation ? 'Enabled' : 'Enable after saving'}</span>
-            </label>
-            <p className="text-xs break-words text-muted-foreground">
-              {draft.kind === 'schedule' && draft.schedule.type === 'once'
-                ? 'It runs once at the time set above, then moves to Archived with its task.'
-                : isSchedule ? 'The first run is the next occurrence shown beside the schedule.' : historySentence(draft.filters.includeExisting)}
-            </p>
+            <EnableFields draft={draft} patch={patch} automation={automation} />
           </Section>
 
           {failure?.section === 'form' ? (
