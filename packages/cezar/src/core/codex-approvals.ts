@@ -102,41 +102,59 @@ export function codexApproval(method: string, rpcId: number | string, raw: unkno
   const parsed = schema.safeParse(raw);
   if (!parsed.success) return undefined;
   const params = parsed.data;
-  const requestId = randomUUID();
-  const { options, responses, add } = offer();
-  if (method === 'item/permissions/requestApproval') {
-    add('Allow requested permissions for this turn', 'allow_once', { permissions: params.permissions, scope: 'turn' });
-    add('Allow requested permissions for this session', 'allow_always', { permissions: params.permissions, scope: 'session' });
-    add('Decline requested permissions', 'reject_once', { permissions: {}, scope: 'turn' });
-  } else {
-    const decisions = (params.availableDecisions ?? ['accept', 'acceptForSession', 'decline', 'cancel']) as z.infer<typeof commandDecision>[];
-    for (const decision of decisions) {
-      if (decision === 'accept') add('Allow once', 'allow_once', { decision });
-      else if (decision === 'acceptForSession') add(method === 'item/fileChange/requestApproval'
-        ? 'Allow future changes to these files for this session' : 'Allow matching commands for this session', 'allow_always', { decision });
-      else if (decision === 'decline') add('Decline and continue', 'reject_once', { decision });
-      else if (decision === 'cancel') add('Cancel turn', 'reject_once', { decision });
-      else if ('acceptWithExecpolicyAmendment' in decision) {
-        add(`Allow and persist command rule: ${JSON.stringify(decision.acceptWithExecpolicyAmendment.execpolicy_amendment)}`, 'allow_always', { decision });
-      } else {
-        const rule = decision.applyNetworkPolicyAmendment.network_policy_amendment;
-        add(`Persist network rule: ${rule.action} ${rule.host}`, rule.action === 'allow' ? 'allow_always' : 'reject_always', { decision });
-      }
-    }
-  }
+  const { options, responses } = approvalOptions(method, params);
   const { threadId: _threadId, turnId: _turnId, itemId: _itemId, approvalId: _approvalId, startedAtMs: _startedAtMs, availableDecisions: _availableDecisions, ...details } = params;
   const scopedDecisions = Array.isArray(_availableDecisions) ? _availableDecisions.filter(decision => typeof decision === 'object') : [];
   return {
     rpcId, turnId: params.turnId, responses,
-    event: { type: 'permission.requested', requestId, itemId: params.itemId,
-      title: method === 'item/permissions/requestApproval' ? 'Codex requests additional permissions'
-        : method === 'item/fileChange/requestApproval' ? 'Codex requests file changes'
-          : params.networkApprovalContext ? 'Codex requests network access'
-            : params.kind === 'writeStdin' ? 'Codex requests terminal input' : 'Codex requests command execution',
+    event: { type: 'permission.requested', requestId: randomUUID(), itemId: params.itemId,
+      title: approvalTitle(method, params),
       // Retain action context, including exact proposed rules and permission
       // paths. Never abbreviate an amendment into an ambiguous "always allow".
       details: JSON.stringify({ ...details, ...(scopedDecisions.length ? { availableDecisions: scopedDecisions } : {}) }, null, 2), options },
   };
+}
+
+type ApprovalParams = z.infer<typeof commandParams> | z.infer<typeof fileParams> | z.infer<typeof permissionsParams>;
+
+function approvalOptions(method: string, params: ApprovalParams): { options: PermissionOption[]; responses: Map<string, Record<string, unknown>> } {
+  const { options, responses, add } = offer();
+  if (method === 'item/permissions/requestApproval') addPermissionOptions(add, params);
+  else addDecisionOptions(add, method, params);
+  return { options, responses };
+}
+
+function addPermissionOptions(add: ReturnType<typeof offer>['add'], params: ApprovalParams): void {
+  add('Allow requested permissions for this turn', 'allow_once', { permissions: params.permissions, scope: 'turn' });
+  add('Allow requested permissions for this session', 'allow_always', { permissions: params.permissions, scope: 'session' });
+  add('Decline requested permissions', 'reject_once', { permissions: {}, scope: 'turn' });
+}
+
+function addDecisionOptions(add: ReturnType<typeof offer>['add'], method: string, params: ApprovalParams): void {
+  const decisions = (params.availableDecisions ?? ['accept', 'acceptForSession', 'decline', 'cancel']) as z.infer<typeof commandDecision>[];
+  for (const decision of decisions) addDecisionOption(add, method, decision);
+}
+
+function addDecisionOption(add: ReturnType<typeof offer>['add'], method: string, decision: z.infer<typeof commandDecision>): void {
+  if (decision === 'accept') add('Allow once', 'allow_once', { decision });
+  else if (decision === 'acceptForSession') add(method === 'item/fileChange/requestApproval'
+    ? 'Allow future changes to these files for this session' : 'Allow matching commands for this session', 'allow_always', { decision });
+  else if (decision === 'decline') add('Decline and continue', 'reject_once', { decision });
+  else if (decision === 'cancel') add('Cancel turn', 'reject_once', { decision });
+  else if ('acceptWithExecpolicyAmendment' in decision) {
+    add(`Allow and persist command rule: ${JSON.stringify(decision.acceptWithExecpolicyAmendment.execpolicy_amendment)}`, 'allow_always', { decision });
+  } else {
+    const rule = decision.applyNetworkPolicyAmendment.network_policy_amendment;
+    add(`Persist network rule: ${rule.action} ${rule.host}`, rule.action === 'allow' ? 'allow_always' : 'reject_always', { decision });
+  }
+}
+
+function approvalTitle(method: string, params: ApprovalParams): string {
+  if (method === 'item/permissions/requestApproval') return 'Codex requests additional permissions';
+  if (method === 'item/fileChange/requestApproval') return 'Codex requests file changes';
+  if (params.networkApprovalContext) return 'Codex requests network access';
+  if (params.kind === 'writeStdin') return 'Codex requests terminal input';
+  return 'Codex requests command execution';
 }
 
 function mcpToolApproval(rpcId: number | string, raw: unknown, cezarServer: string | undefined): CodexApproval | undefined {
