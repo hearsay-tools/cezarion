@@ -157,14 +157,14 @@ export function shquote(s: string): string {
 }
 
 /** Decide how one privileged command runs: `--yes` picks by passwordless sudo,
- *  a remembered answer is reused (issue #6), otherwise the operator chooses. */
+ *  a remembered answer is reused, otherwise the operator chooses. */
 async function chooseSudoMode(ctx: InstallContext, passwordless: boolean): Promise<'sudo' | 'delegate'> {
   const { ui } = ctx;
   if (ctx.assumeYes) {
     return passwordless ? 'sudo' : 'delegate';
   }
   if (ctx.prefs.sudoMode) {
-    // Remembered from an earlier answer — don't ask again this run (issue #6).
+    // Remembered from an earlier answer — don't ask again this run.
     return ctx.prefs.sudoMode;
   }
   // Default to "I'll run it myself as root" — the safe, no-surprise choice
