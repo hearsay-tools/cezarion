@@ -1,5 +1,5 @@
 import { isReferenceStatus } from '@/lib/reference-status'
-import type { ReferenceStatus } from '@open-mercato/cezar-api-client'
+import type { GithubRefStatusData, ReferenceStatus } from '@open-mercato/cezar-api-client'
 
 /** One chip's identity: which project's forge to ask, and about what. */
 export interface ReferenceStatusRequest {
@@ -170,5 +170,120 @@ export function __clearRememberedStatusesForTests(): void {
   } catch {
     // Nothing to clear.
   }
+}
+
+export const refStatusKey = (ref: ReferenceStatusRequest) => `${ref.projectId}\u0000${ref.kind}#${ref.number}`
+
+type ReferenceStatusGroup = { projectId: string; prs: number[]; issues: number[] }
+type ReferenceStatusResult = {
+  data: GithubRefStatusData | undefined
+  isError: boolean
+  error: unknown
+}
+
+function withRemembered(
+  remembered: ReferenceStatus | undefined,
+  conflicting: true | undefined,
+): Pick<ReferenceStatusEntry, 'status' | 'conflicting'> {
+  return {
+    ...(remembered ? { status: remembered } : {}),
+    ...(conflicting ? { conflicting: true } : {}),
+  }
+}
+
+function askedRefs(group: ReferenceStatusGroup): ReferenceStatusRequest[] {
+  return [
+    ...group.prs.map((number) => ({ projectId: group.projectId, kind: 'PR' as const, number })),
+    ...group.issues.map((number) => ({ projectId: group.projectId, kind: 'Issue' as const, number })),
+  ]
+}
+
+function recordAvailableStatus(
+  map: Map<string, ReferenceStatusEntry>,
+  key: string,
+  ref: ReferenceStatusRequest,
+  data: Extract<GithubRefStatusData, { available: true }>,
+  remembered: ReferenceStatus | undefined,
+  knownConflict: true | undefined,
+): void {
+  // Either bucket. A repository numbers its issues and pull requests from one sequence, so
+  // #774 is exactly one of the two — and which one the cockpit GUESSED (`taskReferences`
+  // infers it from whichever field carried the number) can be wrong. The server files the
+  // answer under what the number really is; a chip labelled PR that turns out to name an
+  // issue still gets that issue's status, which beats reporting "not found".
+  const status = data.prs[ref.number] ?? data.issues[ref.number]
+  if (!status) {
+    map.set(key, { state: 'unknown', ...(remembered ? { status: remembered } : {}) })
+    return
+  }
+  // A server from before the field omits `conflicts` entirely, and that absence is not
+  // an answer: leave the memory alone rather than clearing it to "merges cleanly".
+  const conflicting = data.conflicts ? data.conflicts.includes(ref.number) : undefined
+  // Written during render on purpose: this is a cache, not state — the write is
+  // idempotent, derived solely from the response, and re-running it (StrictMode's
+  // double invoke) lands on the same value.
+  rememberStatus(key, status)
+  if (conflicting !== undefined) rememberConflict(key, conflicting)
+  map.set(key, {
+    state: 'ready',
+    status,
+    ...((conflicting ?? knownConflict) ? { conflicting: true } : {}),
+  })
+}
+
+function recordAskedReference(
+  map: Map<string, ReferenceStatusEntry>,
+  ref: ReferenceStatusRequest,
+  result: ReferenceStatusResult,
+): void {
+  const key = refStatusKey(ref)
+  // Whatever this request says, the last thing we learned about this reference stands until
+  // a NEWER answer replaces it.
+  const remembered = rememberedStatuses.get(key)
+  // Same rule as the status, one axis over: the last thing we were told stands until a
+  // newer answer replaces it, and `undefined` stays available to mean "never told".
+  const knownConflict = rememberedConflicts.has(key) ? true : undefined
+  const data = result.data
+  if (data?.available) {
+    recordAvailableStatus(map, key, ref, data, remembered, knownConflict)
+    return
+  }
+  if (data) {
+    map.set(key, {
+      state: 'unavailable',
+      reason: data.reason,
+      ...withRemembered(remembered, knownConflict),
+    })
+    return
+  }
+  if (result.isError) {
+    // A transport failure, as opposed to the server's own "I could not reach gh" payload.
+    map.set(key, {
+      state: 'unavailable',
+      reason: result.error instanceof Error ? result.error.message : undefined,
+      ...withRemembered(remembered, knownConflict),
+    })
+    return
+  }
+  map.set(key, {
+    state: 'loading',
+    ...withRemembered(remembered, knownConflict),
+  })
+}
+
+/** Fold each project's batch into one lookup map, walking the numbers we asked about. */
+export function collectReferenceStatusEntries(
+  groups: readonly ReferenceStatusGroup[],
+  results: readonly ReferenceStatusResult[],
+): Map<string, ReferenceStatusEntry> {
+  const map = new Map<string, ReferenceStatusEntry>()
+  results.forEach((result, index) => {
+    const group = groups[index]
+    if (!group) return
+    // Walk the numbers we ASKED about, not the ones that came back: a number the forge does not
+    // have is absent from the answer, and that absence is exactly what `unknown` has to report.
+    for (const ref of askedRefs(group)) recordAskedReference(map, ref, result)
+  })
+  return map
 }
 

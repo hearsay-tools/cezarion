@@ -7,10 +7,11 @@ import { mergeRunsIndexRead, RUNS_INDEX_BACKSTOP_MS, RUNS_INDEX_QUERY_KEY, runsI
 export { RUNS_INDEX_BACKSTOP_MS } from './runs-index-sync'
 import { configureLiveSession, resetLiveSession } from './live-coordinator'
 import {
+  collectReferenceStatusEntries,
   rememberedConflicts,
   rememberedStatuses,
-  rememberConflict,
   rememberStatus,
+  refStatusKey,
   type ReferenceStatusEntry,
   type ReferenceStatusLookup,
   type ReferenceStatusRequest,
@@ -1984,8 +1985,6 @@ export function refStatusRecheckAfter(data: GithubRefStatusData | undefined): nu
   return data.recheckAfterMs
 }
 
-const refStatusKey = (ref: ReferenceStatusRequest) => `${ref.projectId}\u0000${ref.kind}#${ref.number}`
-
 /**
  * Status for every PR/issue chip a surface is painting, in as few requests as there are projects
  * on screen.
@@ -2069,74 +2068,7 @@ export function useReferenceStatuses(
   }, [enabled, readsSignature, referenceClient])
 
   const byRef = useMemo(() => {
-    const map = new Map<string, ReferenceStatusEntry>()
-    results.forEach((result, index) => {
-      const group = groups[index]
-      if (!group) return
-      // Walk the numbers we ASKED about, not the ones that came back: a number the forge does not
-      // have is absent from the answer, and that absence is exactly what `unknown` has to report.
-      const asked: ReferenceStatusRequest[] = [
-        ...group.prs.map((number) => ({ projectId: group.projectId, kind: 'PR' as const, number })),
-        ...group.issues.map((number) => ({ projectId: group.projectId, kind: 'Issue' as const, number })),
-      ]
-      const data = result.data
-      for (const ref of asked) {
-        const key = refStatusKey(ref)
-        // Whatever this request says, the last thing we learned about this reference stands until
-        // a NEWER answer replaces it.
-        const remembered = rememberedStatuses.get(key)
-        // Same rule as the status, one axis over: the last thing we were told stands until a
-        // newer answer replaces it, and `undefined` stays available to mean "never told".
-        const rememberedConflict = rememberedConflicts.has(key) ? true : undefined
-        if (data?.available) {
-          // Either bucket. A repository numbers its issues and pull requests from one sequence, so
-          // #774 is exactly one of the two — and which one the cockpit GUESSED (`taskReferences`
-          // infers it from whichever field carried the number) can be wrong. The server files the
-          // answer under what the number really is; a chip labelled PR that turns out to name an
-          // issue still gets that issue's status, which beats reporting "not found".
-          const status = data.prs[ref.number] ?? data.issues[ref.number]
-          if (status) {
-            // A server from before the field omits `conflicts` entirely, and that absence is not
-            // an answer: leave the memory alone rather than clearing it to "merges cleanly".
-            const conflicting = data.conflicts ? data.conflicts.includes(ref.number) : undefined
-            // Written during render on purpose: this is a cache, not state — the write is
-            // idempotent, derived solely from the response, and re-running it (StrictMode's
-            // double invoke) lands on the same value.
-            rememberStatus(key, status)
-            if (conflicting !== undefined) rememberConflict(key, conflicting)
-            map.set(key, {
-              state: 'ready',
-              status,
-              ...((conflicting ?? rememberedConflict) ? { conflicting: true } : {}),
-            })
-          } else {
-            map.set(key, { state: 'unknown', ...(remembered ? { status: remembered } : {}) })
-          }
-        } else if (data) {
-          map.set(key, {
-            state: 'unavailable',
-            reason: data.reason,
-            ...(remembered ? { status: remembered } : {}),
-            ...(rememberedConflict ? { conflicting: true } : {}),
-          })
-        } else if (result.isError) {
-          // A transport failure, as opposed to the server's own "I could not reach gh" payload.
-          map.set(key, {
-            state: 'unavailable',
-            reason: result.error instanceof Error ? result.error.message : undefined,
-            ...(remembered ? { status: remembered } : {}),
-            ...(rememberedConflict ? { conflicting: true } : {}),
-          })
-        } else {
-          map.set(key, {
-            state: 'loading',
-            ...(remembered ? { status: remembered } : {}),
-            ...(rememberedConflict ? { conflicting: true } : {}),
-          })
-        }
-      }
-    })
-    return map
+    return collectReferenceStatusEntries(groups, results)
     // `results` is a fresh array identity every render; its DATA is what the map is built from.
   }, [groups, results.map((result) => `${result.dataUpdatedAt}:${result.status}`).join(',')])
 
