@@ -62,6 +62,8 @@
       "sgconfig.yml",
       ".ai/ast-grep/**",
       "packages/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",
+      "**/*.test.{ts,tsx,mjs,cjs}",
+      "**/*.testkit.ts",
       "packages/*/src/**/*.json",
       "packages/web/src/styles/index.css",
       "packages/web/{src,e2e}/**/*.css"
@@ -196,7 +198,8 @@
       "packages/cezar/test/**/*.ts"
     ],
     "packages/cezar/src/test-task-env.test.ts": [
-      "scripts/test-git-env.mjs"
+      "scripts/test-git-env.mjs",
+      "scripts/test-home-setup.mjs"
     ],
     "packages/cezar/test/unit/cursor-hang-stdin.test.ts": [
       "packages/cezar/scripts/mock-cursor-hang-stdin.mjs"

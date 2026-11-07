@@ -1,4 +1,4 @@
-import { ensureTestInstallMarker } from '../../scripts/test-install-marker.mjs'
+import { configureTestHome } from '../../scripts/test-home-setup.mjs'
 import { configureTestHomeSelector } from './src/home/test-home-selector.testkit.ts'
 import { checkWorkspaceResolution } from '../../scripts/check-workspace-resolution.mjs'
 
@@ -11,14 +11,6 @@ import { strictRunExits, throwRunExitViolations } from './src/runs/run-exits.ts'
 import { installOutboundGuard, throwOutboundRefusals } from './src/test-outbound-guard.testkit.ts'
 
 import { createTestSandbox, hideHostCommands, linkSharedOmpNatives, removeTestSandboxes } from '../../scripts/test-sandbox.mjs'
-
-// Test files start from shipped defaults, not the parent cockpit's flags or
-// task context (hearsay-tools/cezarion#1517). Scrub once before sandbox pins:
-// beforeAll and test bodies may then supply their own CEZ_* values. Keep the
-// narrower per-test cleanup below so existing file-level fixtures still work.
-for (const key of Object.keys(process.env)) {
-  if (key.toUpperCase().startsWith('CEZ_')) delete process.env[key]
-}
 
 // Cezar task worktrees pin TMPDIR under the repo (`.ai/cezar/tmp/<runId>`). That
 // makes `os.tmpdir()` land inside a git worktree, so suites that mkdtemp a
@@ -61,15 +53,19 @@ process.env.PATH = hideHostCommands(HOST_RUNNER_COMMANDS, join(sandboxTemp, 'pat
 // works, because this hook runs after the test, not during it. The write guard in
 // `assertCezarHomeWriteIsSandboxed` catches whatever still slips through.
 // Both homes live inside `sandboxTemp`, so its exit, signal and dead-owner cleanup removes them too.
-const sandboxHome = mkdtempSync(join(sandboxTemp, 'cez-vitest-home-'))
+const sandboxUserHome = mkdtempSync(join(sandboxTemp, 'cez-vitest-user-home-'))
+const sandboxHome = mkdtempSync(join(sandboxUserHome, 'cez-vitest-home-'))
+// A test that starts the real omp would unpack its 373 MB native addon into this
+// home. Select the shared cache before the XDG sandbox pins below.
+// Every sandbox home reads it from one shared cache instead
+// (hearsay-tools/cezarion#1911); without that cache omp unpacks here, as before.
+linkSharedOmpNatives(sandboxUserHome)
 
-configureTestHomeSelector(home => {
-  if (home === undefined) delete process.env.CEZ_HOME
-  else process.env.CEZ_HOME = home.root
-})
-const pinSandboxHome = (): void => {
-  if (!process.env.CEZ_HOME) { ensureTestInstallMarker(sandboxHome); process.env.CEZ_HOME = sandboxHome }
-}
+
+const testHome = configureTestHome({ userHome: sandboxUserHome, cezarHome: sandboxHome })
+
+configureTestHomeSelector(home => testHome.select(home?.root))
+const pinSandboxHome = testHome.pinHome
 
 // Nor may a test resolve the developer's own agent folders (hearsay-tools/cezarion#1361).
 // `agentHomePaths()` and the default agent account read `HOME` and each agent's own
@@ -78,29 +74,8 @@ const pinSandboxHome = (): void => {
 // variables that move an agent home are cleared, and both are restored around every test.
 // A test that needs a populated home sets its own in its `beforeEach` (see the omp block
 // in `src/server/agent-profiles-api.test.ts`): this hook runs before theirs.
-const sandboxUserHome = mkdtempSync(join(sandboxTemp, 'cez-vitest-user-home-'))
-// A test that starts the real omp would unpack its 373 MB native addon into this
-// home. Every sandbox home reads it from one shared cache instead
-// (hearsay-tools/cezarion#1911); without that cache omp unpacks here, as before.
-linkSharedOmpNatives(sandboxUserHome)
 
-const AGENT_HOME_KEYS = [
-  'CLAUDE_CONFIG_DIR', // Claude Code's home.
-  'CODEX_HOME', // Codex's home.
-  'PI_CODING_AGENT_DIR', // Pi's agent folder, and omp's when no profile is selected.
-  'PI_CONFIG_DIR', // omp's root folder under HOME.
-  'OMP_PROFILE', // Selects an omp profile, which moves the default omp account.
-  'PI_PROFILE', // omp reads it when OMP_PROFILE is unset.
-  'XDG_CONFIG_HOME', // OpenCode's config, and Cursor's on Linux.
-  'XDG_DATA_HOME', // OpenCode's credentials.
-  'CURSOR_CONFIG_DIR', // Cursor's config.
-] as const
-
-const pinSandboxUserHome = (): void => {
-  process.env.HOME = sandboxUserHome
-  process.env.USERPROFILE = sandboxUserHome // `os.homedir()` reads this one on Windows.
-  for (const key of AGENT_HOME_KEYS) delete process.env[key]
-}
+const pinSandboxUserHome = testHome.pinUserHome
 
 // Cezar tasks inherit host wrappers, deployment mode and feature flags. Suites
 // assume default executables, local mode and opt-in features off — clear the

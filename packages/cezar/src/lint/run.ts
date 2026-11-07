@@ -1,4 +1,5 @@
 import { staleHomeReaders } from './home-boundary.ts';
+import { externalTestHomeProblems } from './test-home-repository.ts';
 import { guardianCssProblems } from './design-guardian-css.ts';
 import { serverWaitProblems, unitWaitProblems } from './wait-discipline-runner.ts';
 import { execFile } from 'node:child_process';
@@ -216,7 +217,7 @@ export function waitProblems(): string[] {
 }
 
 export function repositoryProblems(): string[] {
-  return [...staleEntries(), ...fileLengthProblems(), ...guardianCssProblems()];
+  return [...staleEntries(), ...fileLengthProblems(), ...guardianCssProblems(), ...externalTestHomeProblems()];
 }
 
 async function lintProblems(withOxlint: boolean): Promise<string[]> {

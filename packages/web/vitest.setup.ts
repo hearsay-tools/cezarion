@@ -10,6 +10,7 @@ import { afterAll, afterEach, beforeEach } from 'vitest'
 import { highlighterSettledForTests } from '@/lib/highlighter'
 
 import { createTestSandbox, removeTestSandboxes } from '../../scripts/test-sandbox.mjs'
+import { configureTestHome } from '../../scripts/test-home-setup.mjs'
 
 // Web unit tests also create Git fixtures. Keep those Git calls independent of
 // the developer's global and system config, just like the server suite. The
@@ -17,6 +18,9 @@ import { createTestSandbox, removeTestSandboxes } from '../../scripts/test-sandb
 // before `afterAll`; a signal removes it before the worker ends
 // (hearsay-tools/cezarion#1395).
 const gitSandbox = createTestSandbox('cez-web-test-git-')
+const testHome = configureTestHome({ userHome: join(gitSandbox, 'home') })
+beforeEach(() => { testHome.pinHome(); testHome.pinUserHome() })
+afterEach(() => { testHome.pinHome(); testHome.pinUserHome() })
 const gitConfig = join(gitSandbox, 'gitconfig')
 // No automatic maintenance (hearsay-tools/cezarion#1279): Git 2.54+ repacks in a
 // detached process after a commit or fetch, and that repack deletes loose objects

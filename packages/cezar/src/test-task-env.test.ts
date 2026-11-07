@@ -34,7 +34,7 @@ describe('test runs never inherit a task session (hearsay-tools/cezarion#953)', 
 // runner. vitest.setup.ts points HOME at a sandbox and clears every variable that moves an agent home.
 const AGENT_HOME_KEYS = [
   'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'PI_CODING_AGENT_DIR', 'PI_CONFIG_DIR', 'OMP_PROFILE', 'PI_PROFILE',
-  'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'CURSOR_CONFIG_DIR',
+  'CURSOR_CONFIG_DIR',
 ];
 
 describe('test runs never read the host home (hearsay-tools/cezarion#1361)', () => {
@@ -58,6 +58,14 @@ describe('test runs never read the host home (hearsay-tools/cezarion#1361)', () 
 
   it('vitest.setup.ts clears the host variables that move an agent home', () => {
     expect(agentHomeEnv()).toEqual(unset);
+  });
+
+  it('pins every XDG home below the sandbox and removes the host runtime dir', () => {
+    for (const [key, suffix] of Object.entries({ XDG_CONFIG_HOME: '.config', XDG_DATA_HOME: '.local/share',
+      XDG_STATE_HOME: '.local/state', XDG_CACHE_HOME: '.cache' })) {
+      expect(process.env[key]).toBe(join(process.env.HOME!, suffix));
+    }
+    expect(process.env.XDG_RUNTIME_DIR).toBeUndefined();
   });
 
   it('links the sandbox home to one omp natives cache outside every sandbox (hearsay-tools/cezarion#1911)', () => {
