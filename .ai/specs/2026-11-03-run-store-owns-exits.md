@@ -172,7 +172,7 @@ S5 keeps every row as it is (owner, 2026-11-03). S7 normalizes them (§ Table B 
 | `store.ts:restoreLoadedUsageLimitHold` | waiting, `finishedAt` cleared | schema-7 row: failed with `autoResumeAt` | hold | `failed.legacy-hold` |
 | `store.ts:failLoadedInterruptedRun` | failed, fixed error, steps failed | store opened without `keepLive`, engine-owned row | fail-interrupted | `live.read-only` |
 | `store.ts:settleOrphanedRun` | cancelled | untouched queued run whose process is gone | cancel | `queued.orphaned` |
-| `store.ts:setLiveStatus` | running→waiting, waiting→running | legacy wait rows (`upgradeLegacyWaits`) | park, resume | `running.legacy`, `plain.legacy` |
+| `legacy-waits.ts:setLiveStatus` | running→waiting, waiting→running | legacy wait rows (`upgradeLegacyWaits`) | park, resume | `running.legacy`, `plain.legacy` |
 | `server.ts` `POST /runs/:id/pr` | done, `finishedAt ??= now`, `pullRequestUrl` | publish succeeded; **no status check in the route** | draft-pr | `review.draft-pr`, `settled.draft-pr` |
 
 Two rows have no status check today: `settleLoadedStop` and the Draft PR route. S4 must show the

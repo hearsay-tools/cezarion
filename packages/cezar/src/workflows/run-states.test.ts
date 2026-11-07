@@ -69,7 +69,7 @@ describe('run states and their exits (hearsay-tools/cezarion#1804)', () => {
   });
 
   it('names only functions that exist', () => {
-    const files = { run: runSources().map(blanked).join('\n'), store: blanked('runs/store.ts'), server: blanked('server/server.ts'), exits: blanked('runs/run-exits.ts'), rules: blanked('runs/record-write-rules.ts') };
+    const files = { run: runSources().map(blanked).join('\n'), store: [blanked('runs/store.ts'), blanked('runs/legacy-waits.ts')].join('\n'), server: blanked('server/server.ts'), exits: blanked('runs/run-exits.ts'), rules: blanked('runs/record-write-rules.ts') };
     const missing = [...new Set(RUN_TRIGGERS.flatMap((row) => row.via))].filter((name) => {
       const [file, fn] = name.includes(':') ? name.split(':') as ['store' | 'server' | 'exits' | 'rules', string] : ['run' as const, name];
       const defined = file === 'server'

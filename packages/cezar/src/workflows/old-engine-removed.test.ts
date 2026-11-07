@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
  * `delegation.wait`, its `delegation.completion` record and the `activity: 'monitoring'` park.
  * Cezar's completion wait is a `worker` entry in the wait list, so no source names the old engine's
  * pieces, writes the old fields or reads them. Old rows still parse: the contract keeps the fields
- * optional, and store schema 7 reads them into the list on open (`upgradeLegacyWaits`, store.ts),
+ * optional, and store schema 7 reads them into the list on open (`upgradeLegacyWaits`, legacy-waits.ts),
  * which with the schema history in run-database.ts and the cold index's re-derivation of an old
  * stored summary (run-index.ts) are the only places allowed to name them.
  */
@@ -19,8 +19,8 @@ interface Region { file: string; from: RegExp; to: RegExp }
 
 /** The schema 4 upgrade reads the old monitoring park into a timer: its doc comment and its body. */
 const MONITORING_UPGRADE: readonly Region[] = [
-  { file: 'packages/cezar/src/runs/store.ts', from: /^ \* Upgrade-on-read \(store schema 4/, to: /^ \*\/$/ },
-  { file: 'packages/cezar/src/runs/store.ts', from: /^export function upgradeLegacyWaits\(/, to: /^}$/ },
+  { file: 'packages/cezar/src/runs/legacy-waits.ts', from: /^ \* Upgrade-on-read \(store schema 4/, to: /^ \*\/$/ },
+  { file: 'packages/cezar/src/runs/legacy-waits.ts', from: /^export function upgradeLegacyWaits\(/, to: /^}$/ },
 ];
 
 const FORBIDDEN: Array<{ name: string; pattern: RegExp; exempt?: readonly string[]; exemptRegions?: readonly Region[] }> = [
@@ -35,7 +35,7 @@ const FORBIDDEN: Array<{ name: string; pattern: RegExp; exempt?: readonly string
   { name: 'completion: { write', pattern: /(?<!(?:let|const|var) )\bcompletion: \{/ },
   { name: 'a delegation.wait/lastWait/completion read', pattern: /\bdelegation\??\.(?:wait|lastWait|completion)\b/,
     // The upgrade, the schema history, and the cold index re-deriving a summary an older build stored.
-    exempt: ['packages/cezar/src/runs/store.ts', 'packages/cezar/src/runs/run-database.ts', 'packages/cezar/src/runs/run-index.ts'] },
+    exempt: ['packages/cezar/src/runs/legacy-waits.ts', 'packages/cezar/src/runs/run-database.ts', 'packages/cezar/src/runs/run-index.ts'] },
 ];
 
 function sources(dir: string): string[] {

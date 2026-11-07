@@ -147,7 +147,7 @@ const MIGRATIONS: readonly string[] = [
   -- Schema 4 changes no table: it changes the record JSON in data (spec 2026-10-17-unified-waits,
   -- hearsay-tools/cezarion#1233). Records carry a wait list (waits, lastWaits) and are no longer
   -- written with ciWait, lastCiWait, lastCiWaitError, monitoringWakeAt, monitoringWakeCapReached
-  -- or activity 'monitoring'; this build reads those into the list (upgradeLegacyWaits, store.ts).
+  -- or activity 'monitoring'; this build reads those into the list (upgradeLegacyWaits, legacy-waits.ts).
   -- An older cezar reading a row without ciWait would recover a parked run as a plain waiting
   -- one, and settle an owned worker as successful. The version bump makes it refuse the store as
   -- unsupported-schema instead; the recovery is to run this version again.
@@ -171,7 +171,7 @@ const MIGRATIONS: readonly string[] = [
   -- Schema 6 changes no table either: records may carry worker waits (kind 'worker') in waits and
   -- lastWaits, and a record is no longer written with an agent-registered delegation.wait or
   -- delegation.lastWait (hearsay-tools/cezarion#1235, phase 3a); this build reads those into the
-  -- list (upgradeLegacyWaits, store.ts). Only the completion gate's wait, the one
+  -- list (upgradeLegacyWaits, legacy-waits.ts). Only the completion gate's wait, the one
   -- delegation.completion.waitId names, stays in delegation.wait until phase 3b. A schema-5 build
   -- would drop each worker entry as unreadable and recover the run without the wait it parked on,
   -- so the bump makes it refuse the store as unsupported-schema instead; the recovery is to run
@@ -184,7 +184,7 @@ const MIGRATIONS: readonly string[] = [
   -- Schema 7 changes no table: a record no longer carries delegation.wait, delegation.lastWait or
   -- delegation.completion (hearsay-tools/cezarion#1301, phase 3b). Cezar's completion gate wait is a
   -- worker entry in waits (source 'cezar', via 'completion'), and this build reads a stored one up
-  -- (upgradeLegacyWaits, store.ts). A schema-6 build would read an upgraded completion entry without
+  -- (upgradeLegacyWaits, legacy-waits.ts). A schema-6 build would read an upgraded completion entry without
   -- its deadline as unreadable and recover the run without the wait it parked on, so the bump makes
   -- it refuse the store as unsupported-schema instead; the recovery is to run this version again.
   --
