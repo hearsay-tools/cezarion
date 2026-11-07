@@ -9,6 +9,7 @@ import { WorkspaceSemaphore } from '../../workspace/semaphore.ts';
 import { createActiveRun } from '../active-run.ts';
 import { RunSkills } from './run-skills.ts';
 import { TrackedWork } from './tracked-work.ts';
+import { noRunners } from '../../core/runners-under-test.testkit.ts';
 
 vi.mock('../../skills.ts', async (original) => ({
   ...await original<typeof import('../../skills.ts')>(), discoverSkills: vi.fn(),
@@ -20,7 +21,7 @@ let owner: RunSkills;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'cez-skill-owner-'));
   store = RunStore.open(root);
-  owner = new RunSkills({ home: testHome(), store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore({ home: testHome() }),
+  owner = new RunSkills({ createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore({ home: testHome() }),
     work: new TrackedWork(), disposed: () => false }, {
     builtinSkills: () => [], workerExecutionStopped: unused, isCurrentState: unused, flushAgentInputs: unused,
   });

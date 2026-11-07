@@ -21,6 +21,7 @@ import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.te
 import { createActiveRun } from './active-run.ts';
 import { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 vi.mock('../skills.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../skills.ts')>();
@@ -90,7 +91,7 @@ describe('loading a run\'s skill registry', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-1806-loader-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    runSkills = new RunSkills({ home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+    runSkills = new RunSkills({ createRunner: noRunners, home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
       semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false }, {
       builtinSkills: () => [], workerExecutionStopped: unused, isCurrentState: unused, flushAgentInputs: unused,
     });

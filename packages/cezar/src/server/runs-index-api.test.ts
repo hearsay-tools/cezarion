@@ -32,6 +32,7 @@ import { clearProjectProbeCache, listProjects, registerProject } from '../worksp
 import { ProjectContexts } from './project-context.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp, type ServerDeps } from './server.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 /**
  * `GET /api/v1/workspace/runs-index` — the ⌘K palette's cross-project task finder.
@@ -151,7 +152,7 @@ describe('workspace runs index API', () => {
     await registerProject(repoRoot, undefined, testHome());
     const other = await registerProject(otherRoot, undefined, testHome());
     seedColdProject(otherRoot, [storedRun({ id: 'cold-1', title: 'Cold task' })]);
-    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
 
     const body = await getIndex({ contexts });
 
@@ -176,7 +177,7 @@ describe('workspace runs index API', () => {
     const original = readPersistedText(join(otherRoot, '.ai/cezar'));
     let finish!: (handle: { owner: string; name: string }) => void;
     resolveRepoHandle.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
-    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     const app = makeApp({ contexts });
     const request = async () => runsIndexResponseSchema.parse(
       await (await apiRequest(app, '/api/v1/workspace/runs-index')).json(),
@@ -408,7 +409,7 @@ describe('workspace runs index API', () => {
     mkdirSync(join(otherRoot, '.ai/cezar/runs'));
     writeFileSync(join(otherRoot, '.ai/cezar/runs/cold-question.ndjson'), JSON.stringify({ ...question, seq: 1, ts: new Date().toISOString() }) + '\n');
     const before = readPersistedText(join(otherRoot, '.ai/cezar'));
-    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     const app = makeApp({ contexts });
     try {
       const body = runsIndexResponseSchema.parse(await (await apiRequest(app, '/api/v1/workspace/runs-index')).json());
@@ -681,7 +682,7 @@ describe('workspace runs index API', () => {
       await registerProject(repoRoot, undefined, testHome());
       const other = await registerProject(otherRoot, undefined, testHome());
       seedColdProject(otherRoot, [storedRun({ id: 'cold-1', title: 'Cold needle' })]);
-      const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+      const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
       expect(ids((await search('?q=needle', { contexts })).body)).toEqual(['cold-1']);
       expect(contexts.peek(other.id)).toBeUndefined();
       expect(contexts.ids()).toEqual([]);

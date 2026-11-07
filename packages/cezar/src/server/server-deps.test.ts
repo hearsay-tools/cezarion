@@ -23,6 +23,7 @@ import {
   watchProviderRuntimeAuth,
 } from './server-deps.ts';
 import { createApp, type WorkspaceEventBus } from './server.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 const response = (statuses: Partial<Record<ProviderId, 'connected' | 'disconnected'>>): ProviderStatusResponse => ({
   providers: PROVIDER_IDS.map((provider) => ({ provider, status: statuses[provider] ?? 'connected' })),
@@ -230,7 +231,7 @@ describe('context listeners', () => {
 
     it('runs the provider watch, then the webhook attach, then the project-ready event for a built context', () => {
       const events: string[] = [];
-      const contexts = new ProjectContexts({ home: testHome(), listProjects: async () => [] });
+      const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => [] });
       const listeners: ((ctx: ProjectContext) => void)[] = [];
       const register = contexts.onContextBuilt.bind(contexts);
       vi.spyOn(contexts, 'onContextBuilt').mockImplementation((listener) => {

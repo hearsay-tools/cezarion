@@ -18,6 +18,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { connectedProviderAuth } from './provider-auth.testkit.ts';
 import { createApp, projectRouteManifest } from './server.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 /**
  * Run controls when two cezar processes share a project (#779, plan step 3). The other process is
@@ -43,7 +44,7 @@ describe('controls on a run another cezar process owns', () => {
     runId = owner.createRun({ title: 'theirs', workflow: 'quick-task', task: 'theirs', steps: [] }).id;
     owner.flush();
     store = RunStore.open(dataDir, { keepLive: true });
-    manager = new RunManager(store, repoRoot, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
+    manager = new RunManager(store, repoRoot, { createRunner, home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
     app = createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test', providerAuth: connectedProviderAuth() });
   });
 

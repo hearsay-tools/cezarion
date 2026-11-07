@@ -1,5 +1,10 @@
 import { describeWaitParity } from './waits-parity-cells.testkit.ts';
 import { subagentGuard } from './waits-subagents-parity-cells.testkit.ts';
+import { ClaudeCliRunner } from '../core/claude-cli-runner.ts';
+import { onlyRunner, useRunners } from '../core/runners-under-test.testkit.ts';
+
+// The single-runner cells drive the Claude wire.
+useRunners(onlyRunner('claude', () => new ClaudeCliRunner()));
 
 // The wait list's criteria guard and single-runner cells; each runner's RUNNER_IDS cells run from
 // the semantic part and residual family files in `WAIT_PARITY_FILES` / `WAIT_PARITY_FAMILIES` (hearsay-tools/cezarion#1301).

@@ -11,6 +11,7 @@ import { clearProjectProbeCache, listProjects, registerProject } from '../worksp
 import { ProjectContexts } from './project-context.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp } from './server.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 /**
  * The versioned surface is the ONLY surface (spec 2026-07-23-independent-server-web-packages).
@@ -42,7 +43,7 @@ describe('the versioned API surface', () => {
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     clearProjectProbeCache();
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-    contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     await registerProject(repoRoot, undefined, testHome());
     app = createApp({ home: testHome(),
       repoRoot,

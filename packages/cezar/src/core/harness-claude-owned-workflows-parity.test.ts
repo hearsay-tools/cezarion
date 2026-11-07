@@ -1,3 +1,9 @@
 import { describeHarnessParity } from './harness-parity-cells.testkit.ts';
+import { ClaudeCliRunner } from './claude-cli-runner.ts';
+import { CodexAppServerRunner } from './codex-app-server-runner.ts';
+import { onlyRunners, useRunners } from './runners-under-test.testkit.ts';
+
+// R14 runs a mixed-runner chain: its second step is the next runner in RUNNER_IDS.
+useRunners(onlyRunners({ claude: () => new ClaudeCliRunner(), codex: () => new CodexAppServerRunner() }));
 
 describeHarnessParity({ runner: 'claude', part: 'owned-workflows' });

@@ -11,6 +11,8 @@ import type { ServerDeps } from './server.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContext, type ProjectContextDeps } from './project-context.ts';
 
 type ContextServices = Pick<ServerDeps, 'contexts' | 'semaphore' | 'previewHost' | 'forgeFactory' | 'toolActivity' | 'home'> & {
+  /** Every project's manager builds runners the way the boot manager does. */
+  manager: Pick<ServerDeps['manager'], 'createRunner'>;
   delegation?: Pick<NonNullable<ServerDeps['delegation']>, 'attachProject'> & {
     service: Pick<NonNullable<ServerDeps['delegation']>['service'], 'armDestroyRetries'>;
   };
@@ -27,6 +29,7 @@ export function createWorkspaceProjectContexts(
   // Both entry points supply the visible registry (hearsay-tools/cezarion#2320).
   return deps.contexts ?? new ProjectContexts({
     home: deps.home,
+    createRunner: deps.manager.createRunner,
     forgeFactory: deps.forgeFactory,
     ...options,
     semaphore: deps.semaphore,

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { readNdjson } from './ndjson.ts';
-import { resolveClaudeExecutable } from './claude-cli-runner.ts';
+import { resolveClaudeExecutable } from './claude-executable.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
 
 export interface ClaudeModelDiscoveryOptions {

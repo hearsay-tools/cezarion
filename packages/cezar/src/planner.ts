@@ -2,7 +2,7 @@ import type { Home } from './home/home.ts';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { createRunner } from './core/runner-factory.ts';
+import type { RunnerFactory } from './core/agent-runner.ts';
 import { loadConfig } from './config.ts';
 import { discoverSkills, type Skill } from './skills.ts';
 import { resolveProfileEnvForRoot } from './workspace/agent-profiles.ts';
@@ -53,7 +53,7 @@ export interface PlanResult {
   fallback: boolean;
 }
 
-export async function planChain(repoRoot: string, task: string, builtin: readonly Skill[] = [], home: Home): Promise<PlanResult> {
+export async function planChain(repoRoot: string, task: string, builtin: readonly Skill[] = [], home: Home, createRunner: RunnerFactory): Promise<PlanResult> {
   const [skills, config, verifyCommands] = await Promise.all([
     discoverSkills(repoRoot, { builtin }, home),
     loadConfig(repoRoot, home),

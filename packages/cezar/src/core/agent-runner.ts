@@ -381,6 +381,11 @@ export function inputDeliveryOf(runner: Pick<AgentRunner, 'inputDelivery'>): Inp
  */
 export type SystemPromptOnResume = 'resent' | 'in-thread';
 
+/** Builds the runner for a backend id. The engine depends on this type only; the entry points
+ *  pass `createRunner` from `runner-factory.ts`, which knows every adapter, and a test passes a
+ *  factory for the one runner it drives (hearsay-tools/cezarion#2939). */
+export type RunnerFactory = (backend: AgentBackend | RunnerId | undefined, options?: { sessionTransport?: SessionTransport }) => AgentRunner;
+
 export interface AgentRunner {
   readonly backend: AgentBackend;
   /** Which `AgentRunSpec` fields this runner honors, and how — see `AgentRunSpecSupport`. */

@@ -9,6 +9,7 @@ import { makeTimerWait } from '@open-mercato/cezar-contract/test-factories.testk
 import { describe, expect, it } from 'vitest';
 import { currentUsage } from '../core/process-usage.ts';
 import { bookkeeping, executions, manager, parent, register, reopenRuntime, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker, work } from './worker-wait.testkit.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -52,7 +53,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('disposed turn bookkeeping leaves durable fields unchanged before applying title markers', async () => {
     const run = store.createRun({ title: 'disposed root', task: 'task', workflow: 'quick-task', steps: [] });
     const disposed = () => true;
-    const context = { home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), semaphore, work, disposed };
+    const context = { createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), semaphore, work, disposed };
     const host = unused<ConstructorParameters<typeof TurnBookkeeper>[1]>('TurnBookkeeperHost', { isDisposedDelegatedRun: disposed });
     const bookkeeper = new TurnBookkeeper(context, host);
     const snapshot = structuredClone(store.getRun(run.id));

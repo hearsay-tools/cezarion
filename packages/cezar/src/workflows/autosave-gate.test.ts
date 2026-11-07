@@ -14,6 +14,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { autosaveCommit, createWorktree } from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
 import { AUTOSAVE_INTERVAL_MS, periodicAutosaveEnabled } from './run.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -42,7 +43,7 @@ describe('periodic autosave gate (#471)', () => {
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new WorktreeAutosave({ home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+    manager = new WorktreeAutosave({ createRunner: noRunners, home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
       work, semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false,
     }, unused<ConstructorParameters<typeof WorktreeAutosave>[1]>('WorktreeAutosave.host', {
       saveWorktree: (id, state, reason) => manager.saveWorktree(id, state, reason),

@@ -6,10 +6,9 @@ import { delegationStateSchema } from '@open-mercato/cezar-contract/delegation';
 import { readAgentModelProvider } from '../../agent-config/models.ts';
 import { loadConfig, readDisabledSkillsReposSync, type CezConfig } from '../../config.ts';
 import { buildChildEnv } from '../../core/agent-env.ts';
-import type { ContentBlock, RunnerId } from '../../core/agent-runner.ts';
+import type { AgentRunner, ContentBlock, RunnerFactory, RunnerId } from '../../core/agent-runner.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../../core/agent-model-policy.ts';
 import { ModelIdentityError, formatModelIdentity, normalizeModelForBackend } from '../../core/model-identity.ts';
-import type { createRunner } from '../../core/runner-factory.ts';
 import { parseDelegationEffort } from '../../delegation/effort.ts';
 import { boundWorkerAccountEnv, captureWorkerAccount, continuationDefStep, ownedWorkflow, workerIdentity, workerStepIdentity, WorkerIdentityError, type WorkerAccountBinding, type WorkerStepIdentity } from '../../delegation/execution-identity.ts';
 import { DelegationPolicyError } from '../../delegation/policy.ts';
@@ -126,8 +125,8 @@ function continuationRunner(
   backend: RunnerId,
   sessionId: string | undefined,
   owningStep: RunRecord['steps'][number] | undefined,
-  factory: typeof createRunner,
-): { runner: ReturnType<typeof createRunner>; skipSkillOnResume: boolean } {
+  factory: RunnerFactory,
+): { runner: AgentRunner; skipSkillOnResume: boolean } {
   const sessionTransport = sessionId !== undefined && backend === 'cursor'
     ? owningStep?.sessionTransport ?? 'cursor-acp'
     : undefined;

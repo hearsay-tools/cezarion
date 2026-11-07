@@ -3,9 +3,8 @@ import { atStepOpen } from './launch-read-resolver.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import type { AgentEvent, AgentSession, ContentBlock, RunnerId } from '../../core/agent-runner.ts';
+import type { AgentEvent, AgentRunner, AgentSession, ContentBlock, RunnerId } from '../../core/agent-runner.ts';
 import { inputDeliveryOf } from '../../core/agent-runner.ts';
-import { createRunner } from '../../core/runner-factory.ts';
 import { startManagedSession } from '../../core/managed-session.ts';
 import type { WorkerStepIdentity } from '../../delegation/execution-identity.ts';
 import type { RunRecord } from '../../runs/store.ts';
@@ -109,7 +108,7 @@ export class StepSession {
       effort: model.effectiveEffort,
       agentProfile: stepProfile.profileId, accountBinding: stepProfile.accountBinding, systemPrompt: extraSystemPrompt,
       ...toolGrantLists(toolGrant) });
-    const runner = createRunner(stepBackend);
+    const runner = this.context.createRunner(stepBackend);
     state.liveSession.recordSessionError(undefined);
     state.liveSession.selectStep(step.id);
     transitionTurnBoundary(state, { kind: 'session-open', phase: 'reset-step', session: state.liveSession.session });
@@ -207,7 +206,7 @@ export class StepSession {
   private startStepSession(
     runId: string,
     state: ActiveRun,
-    runner: ReturnType<typeof createRunner>,
+    runner: AgentRunner,
     launch: StepSessionLaunch,
     onEvent: (event: AgentEvent) => void,
     turn: SessionTurn,

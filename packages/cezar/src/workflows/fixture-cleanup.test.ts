@@ -25,6 +25,7 @@ import * as retention from '../runs/retention.ts';
 import * as workflows from './load.ts';
 import * as fixtureCleanup from './fixture-cleanup.testkit.ts';
 import { createFixtureManager, removeFixtureRepo, fixtureWorkSettled, unused, fixtureWork, managerDisposed } from './fixture-cleanup.testkit.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 const roots: string[] = [];
 async function cleanupFixtureRoots() {
@@ -231,7 +232,7 @@ it('records disposal and shares owned work across restart', () => {
 
 /** These are module contracts: no public manager call invokes just one owned wrapper. */
 function moduleContext(root: string, store: RunStore, manager: RunManager, work: TrackedWork): RunModuleContext {
-  return { home: testHome(), repoRoot: root, dataDir: join(root, '.ai/cezar'), store, semaphore: new WorkspaceSemaphore({ home: testHome() }), work, disposed: () => managerDisposed(manager) };
+  return { createRunner: noRunners, home: testHome(), repoRoot: root, dataDir: join(root, '.ai/cezar'), store, semaphore: new WorkspaceSemaphore({ home: testHome() }), work, disposed: () => managerDisposed(manager) };
 }
 
 function settlementModule(context: RunModuleContext): RunSettlement {

@@ -24,6 +24,7 @@ const forgeFactory = (root: string) => ({
   mergedPullRequests: (identities: ArchivePullRequestIdentity[], signal: AbortSignal) => lookupMergedPullRequests(root, identities, signal),
 });
 import { startServer } from './server.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
 const HANG_GUARD_MS = 15_000;
@@ -46,7 +47,7 @@ it.each([{ single: false, repository: 'r' }, { single: true, repository: 'r' }, 
   const id = randomUUID(), dataDir = join(cold, '.ai/cezar');
   seedRuns(dataDir, [{ id, title: 't', task: 't', workflow: 'quick-task', steps: [], tokensUsed: 0, status: RUN_STATUS.done, archived: false, createdAt: '2026-01-01T00:00:00Z', pullRequests: [{ number: 42, source: 'declared' }] }]);
   const recover = vi.spyOn(RunManager.prototype, 'recover');
-  const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+  const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
   const store = RunStore.open(join(boot, '.ai/cezar'), { keepLive: true });
   // The real post-listen hook starts the coordinator; drive an additional tick to avoid
   // waiting a minute for the project cursor to move beyond the empty boot project.

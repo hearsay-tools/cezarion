@@ -16,6 +16,7 @@ import { RunManager } from '../workflows/run.ts';
 import type { BranchForge } from './repo-branches.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 const exec = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -65,7 +66,7 @@ describe('the repo branches API', () => {
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     forgeCalls = 0;
     // A real manager: a delete claims the owning runs through it, the claim Continue is refused by.
-    manager = new RunManager(store, repoRoot, { home: testHome() });
+    manager = new RunManager(store, repoRoot, { createRunner, home: testHome() });
     app = createApp({ home: testHome(),
       repoRoot,
       store,

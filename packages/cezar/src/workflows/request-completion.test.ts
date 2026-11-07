@@ -16,6 +16,7 @@ import { manager, parent, restart, root, store, until, useWorkerWaitFixture } fr
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { toolCall } from './waits-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 function unused<T extends object>(name: string, values: Partial<T> = {}): T {
   return new Proxy(values, { get(target, key) {
@@ -36,7 +37,7 @@ function obligation(senderRunId: string, recipientRunId: string, kind: 'request'
     createdAt: new Date().toISOString(), deadline: new Date(Date.now() + 600_000).toISOString(), state: 'accepted' as const, requestHash: 'a'.repeat(64) };
 }
 function completionRefusalFor(id: string) {
-  const context: RunModuleContext = { home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
+  const context: RunModuleContext = { createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
     work: new TrackedWork(), semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false };
   const host = unused<CompletionGateHost>('completionHost', { active: new Map(),
     unansweredQuestions: () => [], parentCompletionBlockers: () => [] });

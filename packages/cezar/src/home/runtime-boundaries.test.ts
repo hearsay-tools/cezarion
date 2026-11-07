@@ -7,6 +7,7 @@ import { ProjectContexts, type ProjectContextDeps } from '../server/project-cont
 import * as config from '../config.ts';
 import type { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 vi.mock('../server/project-context.ts', async original => ({ ...await original<typeof import('../server/project-context.ts')>(),
   ProjectContexts: vi.fn(function (this: { deps: ProjectContextDeps }, deps: ProjectContextDeps) { this.deps = deps; }),
@@ -37,6 +38,6 @@ it('passes the selected Home to branch-classification config loading', async () 
 
 it('passes the selected Home to lazy project contexts', () => {
   const { selected } = runtimeHomes();
-  createWorkspaceProjectContexts({ home: selected }, { attach: vi.fn() }, { listProjects: async () => [] });
+  createWorkspaceProjectContexts({ home: selected, manager: { createRunner: noRunners } }, { attach: vi.fn() }, { listProjects: async () => [] });
   expect(ProjectContexts).toHaveBeenCalledWith(expect.objectContaining({ home: selected }));
 });

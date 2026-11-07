@@ -11,6 +11,7 @@ import * as runners from '../core/runner-factory.ts';
 import { createActiveRun } from './active-run.ts';
 import { WaitRegistry } from './run/wait-registry.ts';
 import type { RunModuleContext } from './run/types.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 const pr = 'https://github.com/acme/repo/pull/12';
 const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
@@ -64,7 +65,7 @@ function registrationFixture() {
     active: () => current, workerExecutionStopped: () => false, executionBlockedByRootFinish: () => false,
     ciSupervisor: () => unused<ReturnType<ConstructorParameters<typeof WaitRegistry>[1]['ciSupervisor']>>({ resolve }),
   });
-  const context: RunModuleContext = { home: testHome(), store, repoRoot: root, dataDir: root,
+  const context: RunModuleContext = { createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: root,
     work: unused(), semaphore: unused(), disposed: () => false };
   const registry = new WaitRegistry(context, host, 10);
   return { run, state, registry, resolve, remove: () => { current = undefined; }, replace: () => { current = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false }); } };

@@ -1,7 +1,7 @@
 import type { Home } from '../home/home.ts';
 import { z } from 'zod';
 import { loadConfig } from '../config.ts';
-import { createRunner } from '../core/runner-factory.ts';
+import type { RunnerFactory } from '../core/agent-runner.ts';
 import { parseStructured } from '../planner.ts';
 import { resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
 import { extractTaskRefs, refineTaskRefs, titleRefNumber, type TaskRefs } from './task-refs.ts';
@@ -151,7 +151,7 @@ export function postValidateTitle(title: string, refNumber?: number): string {
  * the heuristic title. `namerModel` is a Claude alias, so it is passed only
  * when the namer runs on Claude (the `plannerModel` precedent).
  */
-export async function generateRunName(repoRoot: string, ctx: NamerContext, home: Home): Promise<NameResult | null> {
+export async function generateRunName(repoRoot: string, ctx: NamerContext, home: Home, createRunner: RunnerFactory): Promise<NameResult | null> {
   try {
     const config = await loadConfig(repoRoot, home);
     const runner = createRunner(config.defaultRunner);

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixture } from '../delegation/service.testkit.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 function unused<T extends object>(name: string, values: Partial<T> = {}): T {
   return new Proxy(values, { get(target, key) {
@@ -23,7 +24,7 @@ describe('unanswered worker question completion guidance', () => {
   it.each([1, 100])('teaches usable message commands for %i questions without a live session', count => {
     const questions = Array.from({ length: count }, () => ({ workerId: randomUUID(), messageId: randomUUID() }));
     const asked = vi.fn(() => questions);
-    const context: RunModuleContext = { home: testHome(), store: f.store, repoRoot: f.root, dataDir: join(f.root, '.ai/cezar'),
+    const context: RunModuleContext = { createRunner: noRunners, home: testHome(), store: f.store, repoRoot: f.root, dataDir: join(f.root, '.ai/cezar'),
       work: new TrackedWork(), semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false };
     const host = unused<CompletionGateHost>('completionHost', { active: new Map(),
       unansweredQuestions: asked, parentCompletionBlockers: () => [] });

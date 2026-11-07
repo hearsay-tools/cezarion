@@ -21,6 +21,7 @@ import { apiRequest } from './loopback-request.testkit.ts';
 import { ProjectContexts } from './project-context.ts';
 import { createApp } from './server.ts';
 import type { WorkspaceProjects } from './workspace-projects.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 const TOOL_STATUS = activityToolSchema.shape.status.enum;
 
@@ -60,7 +61,7 @@ describe('workspace activity API', () => {
     const boot = await registerProject(repoRoot, undefined, testHome());
     const other = await registerProject(otherRoot, undefined, testHome());
     const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
-    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
 
     const res = await get('/api/v1/workspace/activity', contexts);
 
@@ -128,7 +129,7 @@ describe('workspace activity API', () => {
   it('keeps an unregistered boot project when the registry reads fine', async () => {
     const other = await registerProject(otherRoot, undefined, testHome());
     const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
-    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
 
     const body = activitySnapshotSchema.parse(await (await get('/api/v1/workspace/activity', contexts)).json());
 
