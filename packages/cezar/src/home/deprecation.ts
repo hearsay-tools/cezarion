@@ -5,7 +5,7 @@ import { REBRAND_SWITCH } from './switch.ts';
 export function warnLegacyHome(env: NodeJS.ProcessEnv, {
   layout = REBRAND_SWITCH ? 'split' : 'legacy', warn = console.warn,
 }: { layout?: HomeLayout; warn?: (message: string) => void } = {}): void {
-  if (layout === 'split' && env.CEZ_HOME !== undefined) {
+  if (layout === 'split' && env.CEZ_HOME) {
     warn('[hsq] CEZ_HOME is deprecated. Rename it to HSQ_HOME.');
   }
 }

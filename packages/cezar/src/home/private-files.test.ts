@@ -1,11 +1,15 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { privateDirectory, protectPrivatePath, replacePrivate } from './private-files.ts';
 
 vi.mock('node:child_process', () => ({ execFileSync: vi.fn() }));
+vi.mock('node:fs', async original => {
+  const fs = await original<typeof import('node:fs')>();
+  return { ...fs, renameSync: vi.fn(fs.renameSync) };
+});
 afterEach(() => { vi.resetAllMocks(); });
 
 it.each([false, true])('replaces the Windows ACL with one current-user grant (directory=%s)', directory => {
@@ -29,7 +33,7 @@ it('keeps legacy Windows and POSIX behavior free of ACL commands', () => {
   expect(execFileSync).not.toHaveBeenCalled();
 });
 
-it('protects new and existing directories and staging files before publication', () => {
+it('protects each directory once and lets all staging files inherit the private ACL', () => {
   const root = mkdtempSync(join(tmpdir(), 'cez-private-acl-'));
   try {
     const dir = join(root, 'nested');
@@ -38,19 +42,42 @@ it('protects new and existing directories and staging files before publication',
     privateDirectory(dir, options);
     expect(execFileSync).toHaveBeenCalledTimes(1);
     replacePrivate(path, 'secret', options);
-    expect(execFileSync).toHaveBeenCalledTimes(3);
-    expect(readFileSync(path, 'utf8')).toBe('secret');
+    replacePrivate(path, 'updated secret', options);
+    privateDirectory(dir + '/.', options);
+    expect(execFileSync).toHaveBeenCalledTimes(1);
+    expect(readFileSync(path, 'utf8')).toBe('updated secret');
     expect(readdirSync(dir)).toEqual(['secret.json']);
-    expect(vi.mocked(execFileSync).mock.calls[2]?.[1]?.[3]).toContain('.tmp');
+    expect(vi.mocked(execFileSync).mock.calls[0]?.[1]?.[3]).not.toContain('.tmp');
+    rmSync(dir, { recursive: true });
+    privateDirectory(dir, options);
+    expect(execFileSync).toHaveBeenCalledTimes(2);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-it('refuses publication and removes the stage when a Windows ACL fails', () => {
+it('refuses publication when a Windows directory ACL fails, then retries the grant', () => {
   const root = mkdtempSync(join(tmpdir(), 'cez-private-acl-fail-'));
   try {
     const path = join(root, 'secret.json');
-    vi.mocked(execFileSync).mockImplementationOnce(() => Buffer.alloc(0)).mockImplementationOnce(() => { throw new Error('ACL refused'); });
+    vi.mocked(execFileSync).mockImplementationOnce(() => { throw new Error('ACL refused'); });
     expect(() => replacePrivate(path, 'secret', { platform: 'win32', layout: 'split' })).toThrow('ACL refused');
+    expect(existsSync(path)).toBe(false);
+    expect(readdirSync(root)).toEqual([]);
+    replacePrivate(path, 'retry', { platform: 'win32', layout: 'split' });
+    expect(execFileSync).toHaveBeenCalledTimes(2);
+    expect(readFileSync(path, 'utf8')).toBe('retry');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+it('removes its staging file when publication fails after directory protection', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cez-private-stage-fail-'));
+  try {
+    const path = join(root, 'secret.json');
+    vi.mocked(renameSync).mockImplementationOnce(stage => {
+      expect(existsSync(stage)).toBe(true);
+      throw new Error('Publication refused');
+    });
+    expect(() => replacePrivate(path, 'secret', { platform: 'win32', layout: 'split' })).toThrow('Publication refused');
+    expect(execFileSync).toHaveBeenCalledTimes(1);
     expect(existsSync(path)).toBe(false);
     expect(readdirSync(root)).toEqual([]);
   } finally { rmSync(root, { recursive: true, force: true }); }

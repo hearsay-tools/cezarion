@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { REBRAND_SWITCH } from './switch.ts';
 import type { HomeLayout } from './kind-roots.ts';
 import { randomBytes } from 'node:crypto';
-import { closeSync, fsyncSync, mkdirSync, openSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, fsyncSync, mkdirSync, openSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 
 export interface PrivateFileOptions {
@@ -29,17 +29,30 @@ Set-Acl -LiteralPath ${literal} -AclObject $acl;`;
   execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, stdio: 'pipe' });
 }
 
+const protectedDirectories = new Set<string>();
+
+/** Cache only successful grants; a directory recreated by this call needs a fresh grant. */
+function protectDirectoryOnce(path: string, options: PrivateFileOptions, created: boolean): void {
+  const platform = options.platform ?? process.platform;
+  const layout = options.layout ?? (REBRAND_SWITCH ? 'split' : 'legacy');
+  if (platform !== 'win32' || layout !== 'split') return;
+  const canonical = realpathSync(path).toLowerCase();
+  if (!created && protectedDirectories.has(canonical)) return;
+  protectPrivatePath(path, true, options);
+  protectedDirectories.add(canonical);
+}
+
 export function privateDirectory(path: string, options: PrivateFileOptions = {}): void {
   const created = mkdirSync(path, { recursive: true, mode: 0o700 });
-  if (!created) { protectPrivatePath(path, true, options); return; }
+  if (!created) { protectDirectoryOnce(path, options, false); return; }
   syncDirectory(dirname(created));
   let directory = created;
   for (const part of relative(created, path).split(/[\\/]/).filter(Boolean)) {
-    protectPrivatePath(directory, true, options);
+    protectDirectoryOnce(directory, options, true);
     syncDirectory(directory);
     directory = join(directory, part);
   }
-  protectPrivatePath(directory, true, options);
+  protectDirectoryOnce(directory, options, true);
   syncDirectory(directory);
 }
 
@@ -60,7 +73,7 @@ export function replacePrivate(path: string, bytes: string | Buffer, options: Pr
   const stage = atomicTmpPath(path);
   try {
     const fd = openSync(stage, 'wx', 0o600);
-    try { protectPrivatePath(stage, false, options); writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
+    try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
     renameSync(stage, path);
     syncDirectory(dirname(path));
   } finally { rmSync(stage, { force: true }); }

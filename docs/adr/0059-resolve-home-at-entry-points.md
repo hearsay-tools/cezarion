@@ -61,7 +61,8 @@ literal path table keeps the same enumerable shape.
 Split defaults follow the platform table in the spec. Relative Linux XDG values
 are ignored. macOS uses `/tmp/hearsay-squawk` when TMPDIR is absent. Nonempty
 `HSQ_HOME` selects one-root subdirectories, then nonempty custom `CEZ_HOME` does;
-`CEZ_HOME` equal to the literal legacy default counts as unset. CLI boot warns
+`CEZ_HOME` equal to the normalized legacy default counts as unset (Windows
+compares paths without case). CLI boot warns
 once about a set `CEZ_HOME` when split layout is enabled. Split managed launchers
 use the resolved data root; legacy launcher text stays byte for byte.
 
@@ -70,8 +71,11 @@ Legacy sandboxes retain their old shape. Split sandboxes use `config/`, `state/`
 `data/`, `cache/`, `run/`, with a test marker under config. The script-only setup
 scrubs both prefixes and pins both locators, APPDATA and LOCALAPPDATA as well as
 XDG values. The passwd-home write guard rejects native split default roots too.
-Windows private writers replace the DACL with one current-user full-control
-rule under the split gate; Unix private modes stay unchanged.
+Windows private directories replace the DACL with one inheritable current-user
+full-control rule under the split gate. A successful grant on an existing canonical
+directory is cached once per process; a recreated directory gets a fresh grant.
+New files inherit that ACL, so atomic replacement starts no ACL subprocess.
+Unix private modes stay unchanged.
 
 HomeStore routing across kind roots belongs to P2a-2. P2a-1 only defines paths;
 passing an explicit split Home to current HomeStore is not yet supported.

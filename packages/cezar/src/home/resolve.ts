@@ -24,7 +24,11 @@ export function resolveHome({ env = process.env, layout = REBRAND_SWITCH ? 'spli
     return kindHomePaths({ config: root, state: root, data: root, runtime: root,
       cache: join(userHome, '.cache', 'cez') }, layout, platform, locating.CEZ_HOME || undefined);
   }
-  const override = locating.HSQ_HOME || (locating.CEZ_HOME !== legacyDefault ? locating.CEZ_HOME : undefined) || undefined;
+  const { resolve } = platform === 'win32' ? win32 : posix;
+  const normalize = (path: string) => platform === 'win32' ? resolve(path).toLowerCase() : resolve(path);
+  const legacyOverride = locating.CEZ_HOME && normalize(locating.CEZ_HOME) !== normalize(legacyDefault)
+    ? locating.CEZ_HOME : undefined;
+  const override = locating.HSQ_HOME || legacyOverride || undefined;
   const layoutEnv = Object.fromEntries(HOME_LAYOUT_ENV.map(name => [name, env[name]]));
   const roots = override ? oneRootKinds(override, platform) : platformKindRoots(userHome, layoutEnv, platform);
   return kindHomePaths(roots, layout, platform, override);

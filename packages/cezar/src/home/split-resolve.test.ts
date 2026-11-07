@@ -45,9 +45,15 @@ const cases: { name: string; env: NodeJS.ProcessEnv; expected: HomeRoots; platfo
   { name: 'empty HSQ_HOME falls through to CEZ_HOME', env: { HSQ_HOME: '', CEZ_HOME: '/custom' }, expected: custom },
   { name: 'empty home locators fall through to platform defaults', env: { HSQ_HOME: '', CEZ_HOME: '' }, expected: linux },
   { name: 'CEZ_HOME legacy default counts as unset', env: { CEZ_HOME: '/home/operator/.cezar' }, expected: linux },
+  { name: 'CEZ_HOME trailing slash counts as the legacy default', env: { CEZ_HOME: '/home/operator/.cezar/' }, expected: linux },
+  { name: 'CEZ_HOME dotted path counts as the legacy default', env: { CEZ_HOME: '/home/operator/./.cezar' }, expected: linux },
+  { name: 'HSQ_HOME legacy spelling remains an explicit one-root override', env: { HSQ_HOME: '/home/operator/.cezar/' },
+    expected: { config: '/home/operator/.cezar/config', state: '/home/operator/.cezar/state', data: '/home/operator/.cezar/data', cache: '/home/operator/.cezar/cache', runtime: '/home/operator/.cezar/run' } },
   { name: 'HSQ_HOME wins even at the legacy default', env: { HSQ_HOME: '/custom', CEZ_HOME: '/home/operator/.cezar' }, expected: custom },
   { name: 'Windows one-root precedence uses win32 paths', platform: 'win32', env: { HSQ_HOME: 'E:\\home', CEZ_HOME: 'D:\\ignored' },
     expected: { config: 'E:\\home\\config', state: 'E:\\home\\state', data: 'E:\\home\\data', cache: 'E:\\home\\cache', runtime: 'E:\\home\\run' } },
+  { name: 'Windows legacy default trailing separator and case count as unset', platform: 'win32', env: { CEZ_HOME: 'c:/users/OPERATOR/.CEZAR/' }, expected: windows },
+  { name: 'Windows legacy default dotted path counts as unset', platform: 'win32', env: { CEZ_HOME: 'C:/Users/operator/./.cezar' }, expected: windows },
   { name: 'Windows legacy default counts as unset', platform: 'win32', env: { CEZ_HOME: 'C:\\Users\\operator\\.cezar' }, expected: windows },
 ];
 

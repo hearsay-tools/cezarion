@@ -13,3 +13,9 @@ it('keeps the disabled switch and absent legacy env silent', () => {
   warnLegacyHome({ HSQ_HOME: '/preferred' }, { layout: 'split', warn });
   expect(warn).not.toHaveBeenCalled();
 });
+
+it.each([undefined, ''])('does not warn for an unset legacy locator (%s)', CEZ_HOME => {
+  const warn = vi.fn();
+  warnLegacyHome({ CEZ_HOME }, { layout: 'split', warn });
+  expect(warn).not.toHaveBeenCalled();
+});
