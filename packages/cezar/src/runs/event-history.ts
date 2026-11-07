@@ -582,6 +582,8 @@ async function pageFromSource(
     ? forwardPageEventSlice(scannedEvents, selected)
     : pageEventSlice(scannedEvents, selected);
   const asOfSeq = highWaterRead.fileHighWater;
+  const oldest = selected[0];
+  const newest = selected.at(-1);
   onRead?.({
     fileSize: highWaterRead.fileSize,
     bytesRead: (reverse?.bytesRead ?? forward?.bytesRead ?? 0) + highWaterRead.bytesRead,
@@ -590,7 +592,7 @@ async function pageFromSource(
   return {
     events,
     itemCount: selected.length,
-    ...historyPageCursors(hasOlder, hasNewer, selected[0], selected.at(-1), highWaterRead.fileSize, asOfSeq),
+    ...historyPageCursors(hasOlder, hasNewer, oldest, newest, highWaterRead.fileSize, asOfSeq),
     asOfSeq,
     hasOlder,
   };
