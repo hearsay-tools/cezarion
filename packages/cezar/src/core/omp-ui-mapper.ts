@@ -30,7 +30,7 @@ import { contentText, isRecord, number, ompRpcError as rpcError, string } from '
 import { accountUsage, ompFlushProviderError, ompMessageUsage, ompProviderErrorMessage } from './omp-provider-events.ts';
 
 // Provider-failure surfacing and usage accounting moved verbatim to `omp-provider-events.ts`
-// when the #2836 split crossed the 1,000-line limit; the names stay importable from here.
+// when the hearsay-tools/cezarion#2836 split crossed the 1,000-line limit; the names stay importable from here.
 export { ompFlushProviderError, ompMessageUsage, ompProviderErrorMessage } from './omp-provider-events.ts';
 
 /** One stream of text/reasoning blocks: the parent turn's, or one sub-agent's. */
