@@ -3,7 +3,7 @@ import { useRef, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
 
 import { useHealth, useProjectRuns, useProjects } from '@/api/queries'
-import type { HealthResponse } from '@open-mercato/cezar-api-client'
+import type { HealthResponse, ProjectListEntry, ProjectsResponse, RunSummary } from '@open-mercato/cezar-api-client'
 import { AppShell, type RepoChip } from '@/components/app-shell'
 import { useApplicationUpdate } from '@/components/use-application-update'
 import { CommandPalette } from '@/components/command-palette'
@@ -21,7 +21,7 @@ import { GithubSidebar } from '@/routes/github/github-sidebar'
 import { SettingsSidebar } from '@/routes/settings/settings-sidebar'
 import { useActiveProjectId, stripProjectPrefix } from '@/lib/project-router'
 import { listCounts, runTitle } from '@/lib/task-groups'
-import { pageTitleContext } from '@/routes'
+import { pageTitleContext, type PageTitleContext } from '@/routes'
 
 /**
  * Derive the sidebar's repo chip from `/api/health`.
@@ -40,6 +40,103 @@ export function repoChipOf(health: HealthResponse | undefined): RepoChip | null 
   const name = repo.root.replace(/[\\/]+$/, '').split(/[\\/]/).pop()
   if (!name) return null
   return { name, branch: repo.branch }
+}
+
+/** Boot project, sidebar scope and the URL's registry row — the identity the rest of the shell
+ *  reads, including the `default` alias when neither the URL nor health/registry has named a
+ *  project yet. */
+function shellProjectScope(
+  projectId: string | null,
+  registry: ProjectsResponse | undefined,
+  health: HealthResponse | undefined,
+) {
+  const bootProjectId = registry?.bootProject ?? health?.bootProject ?? null
+  const sidebarProjectId = projectId ?? bootProjectId ?? 'default'
+  const sidebarBoot = sidebarProjectId === bootProjectId
+  const isBootProject = projectId !== null && projectId === bootProjectId
+  const activeProject = registry?.projects.find((project) => project.id === projectId)
+  return { bootProjectId, sidebarProjectId, sidebarBoot, isBootProject, activeProject }
+}
+
+/** Global settings intentionally has no selected project. Everywhere else the URL id selects
+ *  the authoritative registry entry; health may name only the CONFIRMED boot project while
+ *  the registry is unavailable, never a non-boot project whose root health does not describe. */
+function shellTitleParts(
+  pathname: string,
+  activeProject: ProjectListEntry | undefined,
+  isBootProject: boolean,
+  health: HealthResponse | undefined,
+  titleContext: PageTitleContext,
+  titleRuns: RunSummary[] | undefined,
+) {
+  const globalSettings = pathname === '/tools' || pathname === '/settings/global' || pathname.startsWith('/settings/global/')
+  const projectName = globalSettings
+    ? null
+    : (activeProject?.name ??
+      (isBootProject ? (repoChipOf(health)?.name ?? null) : null))
+  const titleRun = titleContext.taskId
+    ? titleRuns?.find((run) => run.id === titleContext.taskId)
+    : undefined
+  const pageLabel = titleRun ? runTitle(titleRun) : titleContext.pageLabel
+  return { globalSettings, projectName, titleRun, pageLabel }
+}
+
+function shellForgeAvailable(
+  activeProject: ProjectListEntry | undefined,
+  health: HealthResponse | undefined,
+): boolean {
+  return activeProject ? activeProject.forge === 'github' : health?.forge?.available === true
+}
+
+/** Views that have their own sidebar list; everything else keeps the task list. */
+function shellViewSidebar(
+  flatPathname: string,
+  forgeAvailable: boolean,
+  sidebarProjectId: string,
+  sidebarBoot: boolean,
+  registry: ProjectsResponse | undefined,
+  health: HealthResponse | undefined,
+): ReactNode {
+  return /^\/settings(?:\/|$)/.test(flatPathname) ? (
+    <SettingsSidebar
+      projectId={sidebarProjectId}
+      projectName={registry?.projects.find((project) => project.id === sidebarProjectId)?.name ?? (sidebarBoot ? repoChipOf(health)?.name ?? null : null)}
+      capabilities={health?.capabilities}
+    />
+  ) : /^\/github(?:\/|$)/.test(flatPathname) && forgeAvailable ? (
+    // Explicit scope, not `queryScope()`: this subtree sits above the ProjectScopeProvider.
+    <GithubSidebar scope={projectAddress({ projectId: sidebarProjectId, boot: sidebarBoot }).cacheScope} />
+  ) : /^\/git(?:\/|$)/.test(flatPathname) ? (
+    <GitSidebar scope={projectAddress({ projectId: sidebarProjectId, boot: sidebarBoot }).cacheScope} />
+  ) : undefined
+}
+
+function shellRepoChip(
+  pathname: string,
+  globalSettings: boolean,
+  activeProject: ProjectListEntry | undefined,
+  bootProjectId: string | null,
+  health: HealthResponse | undefined,
+): RepoChip | null {
+  return pathname === '/tools' ? repoChipOf(health) : globalSettings ? null : activeProject ? { name: activeProject.name, branch: activeProject.id === bootProjectId ? health?.repo?.branch ?? '' : '' } : repoChipOf(health)
+}
+
+function shellBreadcrumb(
+  pathname: string,
+  projectName: string | null,
+  titleRun: RunSummary | undefined,
+  pageLabel: string | null,
+) {
+  return { project: pathname === '/tools' ? 'Workspace' : projectName, page: titleRun ? `Tasks / ${pageLabel}` : pageLabel ?? 'Cezarion', branch: titleRun?.worktreePath ? 'Isolated worktree' : undefined }
+}
+
+function shellProjectRail(
+  workspace: ReturnType<typeof useWorkspaceSignals>,
+  projectSwitch: ReturnType<typeof useProjectSwitch>,
+  projectsPending: boolean,
+  version: string | null,
+) {
+  return workspace ? <ProjectRail {...workspace} projectTarget={projectSwitch.target} onSwitchProject={(id) => void projectSwitch.go(id)} version={version} /> : projectsPending ? <ProjectRailPlaceholder /> : null
 }
 
 /**
@@ -71,12 +168,9 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
   const workspace = useWorkspaceSignals()
   const projectSwitch = useProjectSwitch()
   const titleContext = pageTitleContext(pathname)
-  const bootProjectId = registry?.bootProject ?? health.data?.bootProject ?? null
-  const sidebarProjectId = projectId ?? bootProjectId ?? 'default'
-  const sidebarBoot = sidebarProjectId === bootProjectId
+  const { bootProjectId, sidebarProjectId, sidebarBoot, isBootProject, activeProject } =
+    shellProjectScope(projectId, registry, health.data)
   const runs = useProjectRuns(sidebarProjectId, true, sidebarBoot)
-  const isBootProject = projectId !== null && projectId === bootProjectId
-  const activeProject = registry?.projects.find((project) => project.id === projectId)
   const titleRuns = useProjectRuns(
     projectId ?? '',
     // Wait for the registry to identify the project before choosing the boot/non-boot cache
@@ -86,45 +180,37 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
     registry?.bootProject === projectId,
   ).data
 
-  // Global settings intentionally has no selected project. Everywhere else the URL id selects
-  // the authoritative registry entry; health may name only the CONFIRMED boot project while
-  // the registry is unavailable, never a non-boot project whose root health does not describe.
-  const globalSettings = pathname === '/tools' || pathname === '/settings/global' || pathname.startsWith('/settings/global/')
-  const projectName = globalSettings
-    ? null
-    : (activeProject?.name ??
-      (isBootProject ? (repoChipOf(health.data)?.name ?? null) : null))
-  const titleRun = titleContext.taskId
-    ? titleRuns?.find((run) => run.id === titleContext.taskId)
-    : undefined
-  const pageLabel = titleRun ? runTitle(titleRun) : titleContext.pageLabel
+  const { globalSettings, projectName, titleRun, pageLabel } = shellTitleParts(
+    pathname,
+    activeProject,
+    isBootProject,
+    health.data,
+    titleContext,
+    titleRuns,
+  )
 
   useDocumentTitle({ projectName, pageLabel })
 
-  const forgeAvailable = activeProject ? activeProject.forge === 'github' : health.data?.forge?.available === true
+  const forgeAvailable = shellForgeAvailable(activeProject, health.data)
   const flatPathname = stripProjectPrefix(pathname)
-  // Views that have their own sidebar list; everything else keeps the task list.
-  const viewSidebar = /^\/settings(?:\/|$)/.test(flatPathname) ? (
-    <SettingsSidebar
-      projectId={sidebarProjectId}
-      projectName={registry?.projects.find((project) => project.id === sidebarProjectId)?.name ?? (sidebarBoot ? repoChipOf(health.data)?.name ?? null : null)}
-      capabilities={health.data?.capabilities}
-    />
-  ) : /^\/github(?:\/|$)/.test(flatPathname) && forgeAvailable ? (
-    // Explicit scope, not `queryScope()`: this subtree sits above the ProjectScopeProvider.
-    <GithubSidebar scope={projectAddress({ projectId: sidebarProjectId, boot: sidebarBoot }).cacheScope} />
-  ) : /^\/git(?:\/|$)/.test(flatPathname) ? (
-    <GitSidebar scope={projectAddress({ projectId: sidebarProjectId, boot: sidebarBoot }).cacheScope} />
-  ) : undefined
+  const viewSidebar = shellViewSidebar(
+    flatPathname,
+    forgeAvailable,
+    sidebarProjectId,
+    sidebarBoot,
+    registry,
+    health.data,
+  )
+  const version = shellHealth?.version ?? null
 
   return (
     // The sidebar's Active/Automations filter. The Tasks table owns a separate copy and is not a
     // consumer.
     <ListViewProvider>
       <AppShell
-        repo={pathname === '/tools' ? repoChipOf(health.data) : globalSettings ? null : activeProject ? { name: activeProject.name, branch: activeProject.id === bootProjectId ? health.data?.repo?.branch ?? '' : '' } : repoChipOf(health.data)}
-        breadcrumb={{ project: pathname === '/tools' ? 'Workspace' : projectName, page: titleRun ? `Tasks / ${pageLabel}` : pageLabel ?? 'Cezarion', branch: titleRun?.worktreePath ? 'Isolated worktree' : undefined }}
-        version={shellHealth?.version ?? null}
+        repo={shellRepoChip(pathname, globalSettings, activeProject, bootProjectId, health.data)}
+        breadcrumb={shellBreadcrumb(pathname, projectName, titleRun, pageLabel)}
+        version={version}
         latestVersion={shellHealth?.latestVersion ?? null}
         applicationUpdate={shellHealth?.applicationUpdate}
         onApplyUpdate={applicationUpdate.apply}
@@ -147,7 +233,7 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         needsYou={listCounts(runs.data ?? []).waiting > 0}
         toolsMenu={<ToolsMenu health={health.data} />}
         toolsStatus={health.data ? { blocked: toolsBlocker(health.data) !== null, note: forgeNote(health.data) } : null}
-        projectRail={workspace ? <ProjectRail {...workspace} projectTarget={projectSwitch.target} onSwitchProject={(id) => void projectSwitch.go(id)} version={shellHealth?.version ?? null} /> : projectsQuery.isPending ? <ProjectRailPlaceholder /> : null}
+        projectRail={shellProjectRail(workspace, projectSwitch, projectsQuery.isPending, version)}
       >
         {children}
       </AppShell>
