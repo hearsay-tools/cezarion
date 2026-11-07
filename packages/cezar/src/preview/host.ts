@@ -258,6 +258,32 @@ export class PreviewHost implements PreviewHostLike {
     return true;
   }
 
+  /** Whether the stop was overtaken by the run's release or an aborted request. */
+  private stopAborted(entry: RunEntry | undefined, signal?: AbortSignal): boolean {
+    return !!signal?.aborted || !!entry?.released;
+  }
+
+  /** Reuse only the approval attached to this exact owned process, including after a crash. */
+  private approvalHolds(entry: RunEntry, port: number, approval: PreviewServer | undefined): boolean {
+    const current = this.registration(entry, port);
+    return !!approval && entry.approvals.get(port) === approval && !!current
+      && current.command === approval.command && current.cwd === approval.cwd && current.path === approval.path;
+  }
+
+  /** Starts the stopped server again over its still-valid approval: the port can change hands in between, so every guard is re-checked. */
+  private async restartAfterStop(runId: string, entry: RunEntry, port: number, dev: DevServerLike,
+    approval: PreviewServer | undefined, signal?: AbortSignal): Promise<PreviewStopResult> {
+    // Another process can take the port after stop/crash. Never adopt it or spawn over it.
+    const answering = await this.deps.probe(port);
+    if (this.stopAborted(entry, signal)) return previewStopResult('unavailable');
+    if (!this.approvalHolds(entry, port, approval)) return previewStopResult('approval_required');
+    if (entry.servers.get(port) !== dev) return previewStopResult('unavailable');
+    if (this.portOwner(port)) return previewStopResult('port_held');
+    if (answering) return previewStopResult('port_in_use');
+    await this.run(runId, port);
+    return previewStopResult('restarted');
+  }
+
   /** Reuse only the approval attached to this exact owned process, including after a crash. */
   async stopPreview(runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult> {
     const { port, restart } = request;
@@ -265,32 +291,18 @@ export class PreviewHost implements PreviewHostLike {
     if (owner && owner.runId !== runId) return previewStopResult('port_held');
     const entry = this.entries.get(runId);
     const server = entry && this.registration(entry, port);
-    if (signal?.aborted || entry?.released) return previewStopResult('unavailable');
+    if (this.stopAborted(entry, signal)) return previewStopResult('unavailable');
     if (!entry) return previewStopResult('approval_required');
     if (!server) return previewStopResult('not_registered');
     const dev = entry.servers.get(port);
     if (dev === 'adopted') return previewStopResult('adopted');
     const approval = entry.approvals.get(port);
-    const approved = () => {
-      const current = this.registration(entry, port);
-      return !!approval && entry.approvals.get(port) === approval && !!current
-        && current.command === approval.command && current.cwd === approval.cwd && current.path === approval.path;
-    };
     if (!owned(dev)) return previewStopResult('approval_required');
     await this.stopServer(dev, 'user');
-    if (signal?.aborted || entry.released) return previewStopResult('unavailable');
+    if (this.stopAborted(entry, signal)) return previewStopResult('unavailable');
     if (!restart) return previewStopResult('stopped');
-    if (!approved()) return previewStopResult('approval_required');
-    // Another process can take the port after stop/crash. Never adopt it or spawn over it.
-    const answering = await this.deps.probe(port);
-    if (signal?.aborted || entry.released) return previewStopResult('unavailable');
-    if (!approved()) return previewStopResult('approval_required');
-    if (entry.servers.get(port) !== dev) return previewStopResult('unavailable');
-    const holder = this.portOwner(port);
-    if (holder) return previewStopResult('port_held');
-    if (answering) return previewStopResult('port_in_use');
-    await this.run(runId, port);
-    return previewStopResult('restarted');
+    if (!this.approvalHolds(entry, port, approval)) return previewStopResult('approval_required');
+    return this.restartAfterStop(runId, entry, port, dev, approval, signal);
   }
 
   private stopServer(dev: DevServerLike, reason: 'user' | 'idle' | 'release'): Promise<void> {
