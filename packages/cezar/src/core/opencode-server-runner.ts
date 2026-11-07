@@ -77,6 +77,8 @@ interface PendingOpencodePermission {
   answer?: { optionId: string; reply: OpencodeReply } | undefined;
 }
 
+type PromptOrigin = 'opening' | 'human' | 'agent';
+
 const SERVER_START_TIMEOUT_MS = 30_000;
 
 /**
@@ -330,90 +332,85 @@ class OpencodeSession implements AgentSession {
       await this.bootstrap();
     })();
 
-    this.result = (async (): Promise<AgentRunResult> => {
-      try {
-        await this.ready;
-        // Live for the whole session; the SSE loop runs until end()/interrupt.
-        await this.serve.exited;
-      } catch (err) {
-        if (!this.timedOut && !this.openingPromptFailed) {
-          const message = err instanceof Error ? err.message : String(err);
-          this.exitFailure = `opencode: ${message}`;
-        }
-      } finally {
-        if (deadline) clearTimeout(deadline);
-        if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
-        this.sse.abort();
-        this.serverOpen = false;
-        this.clearLostWakeTimer();
-        this.agentRequest?.abort();
-        this.expirePermissions('session ended');
-        this.terminate();
-      }
+    this.result = this.finishSession(deadline, limitMs);
+  }
 
-      const serve = this.serve;
-      await serve.exited;
-      await serve.outputDrained;
-      if (serve.spawnFailed) {
-        this.emit({ type: 'error', message: serve.spawnFailed.message });
-        throw serve.spawnFailed;
+  /** Wait out the child, then map its exit onto the v1 result. */
+  private async finishSession(deadline: NodeJS.Timeout | undefined, limitMs: number): Promise<AgentRunResult> {
+    try {
+      await this.ready;
+      // Live for the whole session; the SSE loop runs until end()/interrupt.
+      await this.serve.exited;
+    } catch (err) {
+      if (!this.timedOut && !this.openingPromptFailed) {
+        this.exitFailure = `opencode: ${err instanceof Error ? err.message : String(err)}`;
       }
-
-      // SSE closure can precede the process exit event. Choose one authoritative
-      // error after settlement, before the synthetic turn-end, retaining the code.
-      const code = serve.child.exitCode;
-      const signal = serve.child.signalCode;
-      const crashed = (signal !== null && !serve.signalled)
-        || (code !== null && code !== 0 && !(serve.signalled && isSignalTerminationExit(code)));
-      if (!this.timedOut && (crashed || this.exitFailure)) {
-        const stderr = serve.stderrChunks.join('');
-        const detail = summarizeRunnerStderr(stderr);
-        if (this.retrySpawnError) {
-          if (stderr.trim()) this.emit({ type: 'note', message: `opencode serve stderr:\n${stderr}` });
-          this.emit({
-            type: 'error',
-            message: `opencode serve exited before listening (${describeEarlyExit(serve)}) and its retry could not start: ${this.retrySpawnError.message}`,
-          });
-        } else if (this.failedStart) {
-          // #872: the retry failed too — one error naming both attempts.
-          const attempts = [this.failedStart, serve];
-          const notes = attempts.map((attempt, i) => {
-            const text = attempt.stderrChunks.join('');
-            return text.trim() ? `opencode serve stderr (attempt ${i + 1}):\n${text}` : '';
-          }).filter(Boolean);
-          if (notes.length) this.emit({ type: 'note', message: notes.join('\n') });
-          const described = attempts.map((attempt, i) => `attempt ${i + 1}: ${describeEarlyExit(attempt)}`);
-          this.emit({ type: 'error', message: `opencode serve exited before listening on both attempts — ${described.join('; ')}` });
-        } else {
-          if (stderr.trim()) this.emit({ type: 'note', message: `opencode serve stderr:\n${stderr}` });
-          const message = crashed
-            ? `opencode serve exited with ${describeExit(serve)}${detail ? ` — ${detail}` : ''}`
-            : this.exitFailure!;
-          this.emit({ type: 'error', message });
-        }
-      }
-
-      // Timeout/interrupt can cut the SSE feed before its `session.idle` —
-      // close the turn (idempotent) so consumers still see the v1 boundary,
-      // and recover prose buffered mid-part.
-      this.finishTurn();
-      this.textCoalescer.flush();
-      // Chunks are whole blocks now (one per finished part), so newline-join
-      // like the other runners, not the old delta concatenation.
-      const text = this.textChunks.join('\n').trim();
-      const base: AgentRunResult = {
-        text,
-        toolCalls: this.toolCalls,
-        tokensUsed: this.tokensUsed,
-        sessionId: this.sessionId ?? spec.sessionId,
-      };
-      if (this.timedOut) {
-        const mins = Math.round((limitMs / 60_000) * 10) / 10;
-        this.emit({ type: 'error', message: `opencode timed out after ${mins}m and was killed` });
-      }
-      this.emit({ type: 'done' });
-      return base;
-    })();
+    } finally {
+      if (deadline) clearTimeout(deadline);
+      if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
+      this.sse.abort();
+      this.serverOpen = false;
+      this.clearLostWakeTimer();
+      this.agentRequest?.abort();
+      this.expirePermissions('session ended');
+      this.terminate();
+    }
+    const serve = this.serve;
+    await serve.exited;
+    await serve.outputDrained;
+    if (serve.spawnFailed) {
+      this.emit({ type: 'error', message: serve.spawnFailed.message });
+      throw serve.spawnFailed;
+    }
+    this.reportServeFailure(serve);
+    return this.resultFromCleanExit(limitMs);
+  }
+  private reportServeFailure(serve: ServeProcess): void {
+    // SSE closure can precede the process exit event. Choose one authoritative
+    // error after settlement, before the synthetic turn-end, retaining the code.
+    const code = serve.child.exitCode;
+    const signal = serve.child.signalCode;
+    const crashed = (signal !== null && !serve.signalled)
+      || (code !== null && code !== 0 && !(serve.signalled && isSignalTerminationExit(code)));
+    if (this.timedOut || (!crashed && !this.exitFailure)) return;
+    const stderr = serve.stderrChunks.join('');
+    const detail = summarizeRunnerStderr(stderr);
+    if (this.retrySpawnError) {
+      if (stderr.trim()) this.emit({ type: 'note', message: `opencode serve stderr:\n${stderr}` });
+      this.emit({ type: 'error', message: `opencode serve exited before listening (${describeEarlyExit(serve)}) and its retry could not start: ${this.retrySpawnError.message}` });
+    } else if (this.failedStart) {
+      // #872: the retry failed too — one error naming both attempts.
+      const attempts = [this.failedStart, serve];
+      const notes = attempts.map((attempt, i) => {
+        const text = attempt.stderrChunks.join('');
+        return text.trim() ? `opencode serve stderr (attempt ${i + 1}):\n${text}` : '';
+      }).filter(Boolean);
+      if (notes.length) this.emit({ type: 'note', message: notes.join('\n') });
+      const described = attempts.map((attempt, i) => `attempt ${i + 1}: ${describeEarlyExit(attempt)}`);
+      this.emit({ type: 'error', message: `opencode serve exited before listening on both attempts — ${described.join('; ')}` });
+    } else {
+      if (stderr.trim()) this.emit({ type: 'note', message: `opencode serve stderr:\n${stderr}` });
+      this.emit({ type: 'error', message: crashed ? `opencode serve exited with ${describeExit(serve)}${detail ? ` — ${detail}` : ''}` : this.exitFailure! });
+    }
+  }
+  private resultFromCleanExit(limitMs: number): AgentRunResult {
+    // Timeout/interrupt can cut the SSE feed before its `session.idle` —
+    // close the turn (idempotent) so consumers still see the v1 boundary,
+    // and recover prose buffered mid-part.
+    this.finishTurn();
+    this.textCoalescer.flush();
+    // Chunks are whole blocks now (one per finished part), so newline-join
+    // like the other runners, not the old delta concatenation.
+    const base: AgentRunResult = {
+      text: this.textChunks.join('\n').trim(), toolCalls: this.toolCalls,
+      tokensUsed: this.tokensUsed, sessionId: this.sessionId ?? this.spec.sessionId,
+    };
+    if (this.timedOut) {
+      const mins = Math.round((limitMs / 60_000) * 10) / 10;
+      this.emit({ type: 'error', message: `opencode timed out after ${mins}m and was killed` });
+    }
+    this.emit({ type: 'done' });
+    return base;
   }
 
   get open(): boolean {
@@ -791,7 +788,7 @@ class OpencodeSession implements AgentSession {
     });
   }
 
-  private async prompt(text: string, origin: 'opening' | 'human' | 'agent' = 'human', signal?: AbortSignal): Promise<void> {
+  private async prompt(text: string, origin: PromptOrigin = 'human', signal?: AbortSignal): Promise<void> {
     // One turn at a time. `prompt_async` acknowledges before the turn runs,
     // so `ready` no longer serializes prompts the way the long-poll did — a
     // follow-up posted mid-turn would share the turnActive/turnEnded pair
@@ -821,36 +818,39 @@ class OpencodeSession implements AgentSession {
     try {
       await this.http('POST', `/session/${this.sessionId}/prompt_async`, body, signal);
     } catch (err) {
-      // No turn started server-side, so no `session.idle` will ever close it —
-      // surface the failure and end the turn here instead of parking the run.
-      const message = err instanceof Error ? err.message : String(err);
-      if (origin === 'agent' && this.providerErrorPending) {
-        // Latch the initiating provider failure before rejection reaches the
-        // manager's ACK handler (including grace expiry and explicit abort).
-        this.providerErrorPending.reported = true;
-        if (this.serverOpen) this.emit({ type: 'error', message: this.providerErrorPending.message });
-      } else if (origin === 'agent') {
-        // Fatal BEFORE the synthetic boundary: the rejected submission stays
-        // queued and must not drain more input or settle DONE.
-        if (this.serverOpen) {
-          this.emit({ type: 'error', message: `opencode: agent input failed: ${message}` });
-          this.interrupt();
-        }
-      } else if (origin === 'opening') {
-        this.emit({ type: 'note', message: `opencode: prompt failed: ${message}` });
-        // A dropped ACK can be the first sign of a process crash. Retain HTTP
-        // rejection details, but let settlement choose one error before turn-end.
-        this.openingPromptFailed = true;
-        this.exitFailure = `opencode: ${message}`;
-        this.interrupt();
-      } else {
-        this.emit({ type: 'note', message: `opencode: prompt failed: ${message}` });
-      }
-      if (!this.providerErrorPending && origin !== 'opening') this.finishTurn();
-      // Bootstrap still rejects; its result path reports the latched opening
-      // failure. Human follow-ups keep their nonfatal note and turn boundary.
+      this.reportPromptFailure(origin, err);
       throw err;
     }
+  }
+  private reportPromptFailure(origin: PromptOrigin, err: unknown): void {
+    // No turn started server-side, so no `session.idle` will ever close it —
+    // surface the failure and end the turn here instead of parking the run.
+    const message = err instanceof Error ? err.message : String(err);
+    if (origin === 'agent' && this.providerErrorPending) {
+      // Latch the initiating provider failure before rejection reaches the
+      // manager's ACK handler (including grace expiry and explicit abort).
+      this.providerErrorPending.reported = true;
+      if (this.serverOpen) this.emit({ type: 'error', message: this.providerErrorPending.message });
+    } else if (origin === 'agent') {
+      // Fatal BEFORE the synthetic boundary: the rejected submission stays
+      // queued and must not drain more input or settle DONE.
+      if (this.serverOpen) {
+        this.emit({ type: 'error', message: `opencode: agent input failed: ${message}` });
+        this.interrupt();
+      }
+    } else if (origin === 'opening') {
+      this.emit({ type: 'note', message: `opencode: prompt failed: ${message}` });
+      // A dropped ACK can be the first sign of a process crash. Retain HTTP
+      // rejection details, but let settlement choose one error before turn-end.
+      this.openingPromptFailed = true;
+      this.exitFailure = `opencode: ${message}`;
+      this.interrupt();
+    } else {
+      this.emit({ type: 'note', message: `opencode: prompt failed: ${message}` });
+    }
+    if (!this.providerErrorPending && origin !== 'opening') this.finishTurn();
+    // Bootstrap still rejects; its result path reports the latched opening
+    // failure. Human follow-ups keep their nonfatal note and turn boundary.
   }
 
   private promptBody(text: string): Record<string, unknown> {
@@ -1086,35 +1086,13 @@ class OpencodeSession implements AgentSession {
     const type = evt.type ?? '';
     const props = evt.properties ?? {};
     if (type === 'message.updated' || type === 'message.created' || type === 'message.completed') {
-      const info = (props.info as Record<string, unknown>) ?? props;
-      const mid = stringField(info, 'id');
-      const role = stringField(info, 'role');
-      if (mid && role) this.msgRole.set(mid, role);
-      // The model answers a steered user message: it has read it (#505).
-      const parent = role === 'assistant' ? stringField(info, 'parentID') : undefined;
-      const submission = parent ? this.userMessageSubmission.get(parent) : undefined;
-      if (parent && submission) {
-        this.userMessageSubmission.delete(parent);
-        // After an idle, the server started a new run for steered input: a new turn.
-        if (!this.turnActive && this.serverOpen) { this.openTurn(); this.emitUi(opencodeTurnStarted); }
-        const ids = this.submissions.consume(submission);
-        if (ids.length) this.opts.onAgentInputConsumed?.(ids);
-      }
-      this.absorbUsage(info);
+      this.handleMessageEvent(props);
     } else if (type === 'message.part.updated' || type === 'message.part.created') {
       this.handlePart((props.part as Record<string, unknown>) ?? props);
     } else if (type === 'permission.asked') {
       this.handlePermissionAsked(props);
     } else if (type === 'permission.replied') {
-      // OpenCode settled the request, in any phase: our own reply, another client's, or its own.
-      const nativeId = stringField(props, 'requestID');
-      const pending = nativeId === undefined ? undefined : this.pendingPermissions.get(nativeId);
-      // OpenCode publishes this before it answers the reply route, so a human reply in flight
-      // that it echoes is that human's answer.
-      if (pending) {
-        const answered = pending.phase === 'answering' && pending.answer?.reply === stringField(props, 'reply');
-        this.settlePermission(pending, answered ? { optionId: pending.answer!.optionId } : { reason: 'resolved by OpenCode' });
-      }
+      this.handlePermissionReplied(props);
     } else if (type === 'session.idle') {
       // THE turn-end signal. The SSE bus is server-wide, so a child session's
       // (sub-agent's) idle must not close the main turn; an idle with no
@@ -1122,42 +1100,53 @@ class OpencodeSession implements AgentSession {
       const sid = stringField(props, 'sessionID');
       if (sid === undefined || sid === this.sessionId) this.finishTurn();
     } else if (type === 'session.error') {
-      const warning = opencodeSkillWarning(props);
-      if (warning) {
-        this.emit({ type: 'note', message: warning });
-        return;
-      }
-      // The wire's failure signal, now that the prompt POST returns
-      // before the turn runs: forward it to v1, whose `error` events are what
-      // run.ts records failed steps from — dropped, the terminal idle would
-      // file a provider/auth failure as a successful step. The idle that
-      // follows still closes the turn.
-      const sid = stringField(props, 'sessionID');
-      if (sid === undefined || sid === this.sessionId) {
-        this.turnErrored = true;
-        this.emit({ type: 'error', message: this.sessionErrorMessage(props.error) });
-      }
+      this.handleSessionError(props);
     }
   }
-
-  private handlePart(part: Record<string, unknown>): void {
-    // The SSE bus carries every session on the server — drop parts that
-    // belong to another one (a sub-agent's stream is surfaced by v2 only).
-    const partSession = stringField(part, 'sessionID');
-    if (partSession !== undefined && this.sessionId !== undefined && partSession !== this.sessionId)
-      return;
-    // Only surface parts of assistant messages — the user's own message streams
-    // over the same feed. Role is known early (the message.updated event
-    // precedes its parts); an unknown role means "not assistant yet" → skip.
-    const messageID = stringField(part, 'messageID');
-    if (messageID && this.msgRole.get(messageID) !== 'assistant') {
-      // A user message carrying submitted agent text: remember which submission it is.
-      if (this.msgRole.get(messageID) === 'user' && stringField(part, 'type') === 'text' && !this.userMessageSubmission.has(messageID)) {
-        const submission = this.submissions.findByText(stringField(part, 'text') ?? '');
-        if (submission && ![...this.userMessageSubmission.values()].includes(submission)) this.userMessageSubmission.set(messageID, submission);
-      }
-      return;
+  private handleMessageEvent(props: Record<string, unknown>): void {
+    const info = (props.info as Record<string, unknown>) ?? props;
+    const mid = stringField(info, 'id');
+    const role = stringField(info, 'role');
+    if (mid && role) this.msgRole.set(mid, role);
+    // The model answers a steered user message: it has read it (#505).
+    const parent = role === 'assistant' ? stringField(info, 'parentID') : undefined;
+    const submission = parent ? this.userMessageSubmission.get(parent) : undefined;
+    if (parent && submission) {
+      this.userMessageSubmission.delete(parent);
+      // After an idle, the server started a new run for steered input: a new turn.
+      if (!this.turnActive && this.serverOpen) { this.openTurn(); this.emitUi(opencodeTurnStarted); }
+      const ids = this.submissions.consume(submission);
+      if (ids.length) this.opts.onAgentInputConsumed?.(ids);
     }
+    this.absorbUsage(info);
+  }
+  private handlePermissionReplied(props: Record<string, unknown>): void {
+    // OpenCode settled the request, in any phase: our own reply, another client's, or its own.
+    const nativeId = stringField(props, 'requestID');
+    const pending = nativeId === undefined ? undefined : this.pendingPermissions.get(nativeId);
+    // OpenCode publishes this before it answers the reply route, so a human reply in flight
+    // that it echoes is that human's answer.
+    if (!pending) return;
+    const answered = pending.phase === 'answering' && pending.answer?.reply === stringField(props, 'reply');
+    this.settlePermission(pending, answered ? { optionId: pending.answer!.optionId } : { reason: 'resolved by OpenCode' });
+  }
+  private handleSessionError(props: Record<string, unknown>): void {
+    const warning = opencodeSkillWarning(props);
+    if (warning) { this.emit({ type: 'note', message: warning }); return; }
+    // The wire's failure signal, now that the prompt POST returns
+    // before the turn runs: forward it to v1, whose `error` events are what
+    // run.ts records failed steps from — dropped, the terminal idle would
+    // file a provider/auth failure as a successful step. The idle that
+    // follows still closes the turn.
+    const sid = stringField(props, 'sessionID');
+    if (sid === undefined || sid === this.sessionId) {
+      this.turnErrored = true;
+      this.emit({ type: 'error', message: this.sessionErrorMessage(props.error) });
+    }
+  }
+  private handlePart(part: Record<string, unknown>): void {
+    if (!this.partBelongsToUs(part)) return;
+    const messageID = stringField(part, 'messageID');
     const kind = stringField(part, 'type');
     const id = stringField(part, 'id') ?? messageID ?? '';
     if (kind === 'text') {
@@ -1174,45 +1163,54 @@ class OpencodeSession implements AgentSession {
         this.textCoalescer.complete(id, full);
       }
     } else if (kind === 'tool') {
-      const state = (part.state as Record<string, unknown> | undefined) ?? {};
-      const status = stringField(state, 'status');
-      const name = stringField(part, 'tool') ?? stringField(part, 'name') ?? 'tool';
-      const questionPartId =
-        stringField(part, 'id') ?? stringField(part, 'callID') ?? messageID;
-      const questionInput = state.input ?? state;
-      const questionReady =
-        name === 'question' && (toCezarQuestions(questionInput) !== null || status !== 'pending');
-      if (
-        questionReady &&
-        this.turnActive &&
-        this.pendingQuestion === undefined &&
-        this.questionCapture === undefined &&
-        this.questionReply === undefined &&
-        (questionPartId === undefined || !this.handledQuestionParts.has(questionPartId))
-      ) {
-        if (questionPartId) this.handledQuestionParts.add(questionPartId);
-        const capture = this.captureQuestion(questionInput);
-        this.questionCapture = capture;
-        const clearCapture = () => {
-          if (this.questionCapture === capture) this.questionCapture = undefined;
-        };
-        void capture.then(clearCapture, clearCapture);
-      }
-      const callId = id || `${name}-${this.toolsSeen.size}`;
-      if (!this.toolsSeen.has(callId)) {
-        this.toolsSeen.add(callId);
-        this.toolCalls.push({ id: callId, name, input: state.input ?? state });
-        this.emit({ type: 'tool-call', id: callId, tool: name, input: state.input ?? state });
-      }
-      if (status === 'completed' || status === 'error') {
-        this.emit({
-          type: 'tool-result',
-          toolCallId: callId,
-          result: safeStringify(state.output ?? state.result ?? state),
-          isError: status === 'error',
-        });
-      }
+      this.handleToolPart(part, id, messageID);
     }
+  }
+  private partBelongsToUs(part: Record<string, unknown>): boolean {
+    // The SSE bus carries every session on the server — drop parts that
+    // belong to another one (a sub-agent's stream is surfaced by v2 only).
+    const partSession = stringField(part, 'sessionID');
+    if (partSession !== undefined && this.sessionId !== undefined && partSession !== this.sessionId)
+      return false;
+    // Only surface parts of assistant messages — the user's own message streams
+    // over the same feed. Role is known early (the message.updated event
+    // precedes its parts); an unknown role means "not assistant yet" → skip.
+    const messageID = stringField(part, 'messageID');
+    if (messageID && this.msgRole.get(messageID) !== 'assistant') {
+      // A user message carrying submitted agent text: remember which submission it is.
+      if (this.msgRole.get(messageID) === 'user' && stringField(part, 'type') === 'text' && !this.userMessageSubmission.has(messageID)) {
+        const submission = this.submissions.findByText(stringField(part, 'text') ?? '');
+        if (submission && ![...this.userMessageSubmission.values()].includes(submission)) this.userMessageSubmission.set(messageID, submission);
+      }
+      return false;
+    }
+    return true;
+  }
+  private handleToolPart(part: Record<string, unknown>, id: string, messageID: string | undefined): void {
+    const state = (part.state as Record<string, unknown> | undefined) ?? {};
+    const status = stringField(state, 'status');
+    const name = stringField(part, 'tool') ?? stringField(part, 'name') ?? 'tool';
+    this.maybeCaptureQuestion(part, state, status, name, messageID);
+    const callId = id || `${name}-${this.toolsSeen.size}`;
+    if (!this.toolsSeen.has(callId)) {
+      this.toolsSeen.add(callId);
+      this.toolCalls.push({ id: callId, name, input: state.input ?? state });
+      this.emit({ type: 'tool-call', id: callId, tool: name, input: state.input ?? state });
+    }
+    if (status === 'completed' || status === 'error') {
+      this.emit({ type: 'tool-result', toolCallId: callId, result: safeStringify(state.output ?? state.result ?? state), isError: status === 'error' });
+    }
+  }
+  private maybeCaptureQuestion(part: Record<string, unknown>, state: Record<string, unknown>, status: string | undefined, name: string, messageID: string | undefined): void {
+    const questionPartId = stringField(part, 'id') ?? stringField(part, 'callID') ?? messageID;
+    const questionInput = state.input ?? state;
+    const questionReady = name === 'question' && (toCezarQuestions(questionInput) !== null || status !== 'pending');
+    if (!questionReady || !this.turnActive || this.pendingQuestion !== undefined || this.questionCapture !== undefined || this.questionReply !== undefined || (questionPartId !== undefined && this.handledQuestionParts.has(questionPartId))) return;
+    if (questionPartId) this.handledQuestionParts.add(questionPartId);
+    const capture = this.captureQuestion(questionInput);
+    this.questionCapture = capture;
+    const clearCapture = () => { if (this.questionCapture === capture) this.questionCapture = undefined; };
+    void capture.then(clearCapture, clearCapture);
   }
 
   /** Pull cumulative tokens/cost out of an assistant message info object. */
