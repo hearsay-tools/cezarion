@@ -105,6 +105,7 @@ describe('macosx-ngrok review fixes (PR #423)', () => {
 
   function ctxFor(runner: Runner, over: Record<string, unknown> = {}) {
     return {
+      launchAgentsDir: () => join(home, 'Library', 'LaunchAgents'),
       state: { schema: 1, installed: false, primaryPort: 4321, steps: {} },
       ui: {
         ...createAutoUi(),
@@ -152,20 +153,11 @@ describe('macosx-ngrok review fixes (PR #423)', () => {
       },
       interactive: async () => 0,
     };
-    // point HOME-based plist path into the temp dir via a fake homedir? plistPath()
-    // uses the real homedir — instead assert through the file the step wrote.
-    const oldHome = process.env.HOME;
-    process.env.HOME = home; // node's os.homedir() honors $HOME on posix
-    try {
-      await ngrokStepOf().run(ctxFor(runner));
-      const p = join(home, 'Library', 'LaunchAgents', 'ai.cezar.ngrok.plist');
-      const mode = statSync(p).mode & 0o777;
-      expect(mode).toBe(0o600);
-      expect(readFileSync(p, 'utf8')).toContain('ops:longenough'); // creds live here → hence 0600
-    } finally {
-      if (oldHome === undefined) delete process.env.HOME;
-      else process.env.HOME = oldHome;
-    }
+    await ngrokStepOf().run(ctxFor(runner));
+    const p = join(home, 'Library', 'LaunchAgents', 'ai.cezar.ngrok.plist');
+    const mode = statSync(p).mode & 0o777;
+    expect(mode).toBe(0o600);
+    expect(readFileSync(p, 'utf8')).toContain('ops:longenough'); // creds live here → hence 0600
   });
 
   it('a failed launchctl bootstrap fails the step instead of recording done', async () => {
@@ -177,14 +169,7 @@ describe('macosx-ngrok review fixes (PR #423)', () => {
       },
       interactive: async (_p, args) => (args[0] === 'bootstrap' ? 5 : 0),
     };
-    const oldHome = process.env.HOME;
-    process.env.HOME = home;
-    try {
-      await expect(ngrokStepOf().run(ctxFor(runner))).rejects.toThrow(/launchctl could not load/);
-    } finally {
-      if (oldHome === undefined) delete process.env.HOME;
-      else process.env.HOME = oldHome;
-    }
+    await expect(ngrokStepOf().run(ctxFor(runner))).rejects.toThrow(/launchctl could not load/);
   });
 
   it('undo removes the agent from static label/path even with created:null', async () => {
@@ -196,15 +181,8 @@ describe('macosx-ngrok review fixes (PR #423)', () => {
       },
       interactive: async () => 0,
     };
-    const oldHome = process.env.HOME;
-    process.env.HOME = home;
-    try {
-      await ngrokStepOf().undo(ctxFor(runner), null);
-      expect(commands.some((c) => c[0] === 'bootout' && (c[1] ?? '').includes('ai.cezar.ngrok'))).toBe(true);
-    } finally {
-      if (oldHome === undefined) delete process.env.HOME;
-      else process.env.HOME = oldHome;
-    }
+    await ngrokStepOf().undo(ctxFor(runner), null);
+    expect(commands.some((c) => c[0] === 'bootout' && (c[1] ?? '').includes('ai.cezar.ngrok'))).toBe(true);
   });
 
   it('rejects a scheme-carrying domain (bare hostname only)', async () => {
@@ -229,14 +207,7 @@ describe('macosx-ngrok review fixes (PR #423)', () => {
         },
       },
     });
-    const oldHome = process.env.HOME;
-    process.env.HOME = home;
-    try {
-      await ngrokStepOf().run(ctx);
-    } finally {
-      if (oldHome === undefined) delete process.env.HOME;
-      else process.env.HOME = oldHome;
-    }
+    await ngrokStepOf().run(ctx);
     expect(domainValidate).toBeDefined();
     expect(domainValidate?.('https://cezar.ngrok.app')).toBeDefined();
     expect(domainValidate?.('cezar.ngrok.app')).toBeUndefined();
@@ -247,20 +218,16 @@ describe('macosx-ngrok review fixes (PR #423)', () => {
 describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
   let home: string;
   let cache: string;
-  const originalHome = process.env.HOME;
   const originalCache = process.env.npm_config_cache;
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'cez-mac-npx-home-'));
     cache = mkdtempSync(join(tmpdir(), 'cez-mac-npx-cache-'));
-    process.env.HOME = home;
     process.env.npm_config_cache = cache;
     mkdirSync(join(home, 'Library', 'LaunchAgents'), { recursive: true });
   });
 
   afterEach(() => {
-    if (originalHome === undefined) delete process.env.HOME;
-    else process.env.HOME = originalHome;
     if (originalCache === undefined) delete process.env.npm_config_cache;
     else process.env.npm_config_cache = originalCache;
     rmSync(home, { recursive: true, force: true });
@@ -297,6 +264,7 @@ describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
       interactive,
     };
     return { home: testHome(),
+      launchAgentsDir: () => join(home, 'Library', 'LaunchAgents'),
       state: { schema: 1, installed: true, primaryPort: 4321, steps: {} },
       ui: createAutoUi() as Ui,
       instance: 'default',
