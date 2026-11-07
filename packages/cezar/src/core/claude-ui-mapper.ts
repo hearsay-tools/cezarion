@@ -43,6 +43,7 @@ import type {
   UiUsageUpdatedEvent,
 } from './ui-events.ts';
 import { hookEventName, isVisibleHookItem } from './hook-items.ts';
+import { editWriteKey } from './edit-write-key.ts';
 import { toolDisplay } from '@open-mercato/cezar-contract/tool-display';
 
 export interface ClaudeUiMapperState {
@@ -398,8 +399,8 @@ function editArtifacts(
   name: string,
   input: unknown,
 ): { diffs?: FileDiff[]; locations: ToolLocation[] } | undefined {
-  const key = name.toLowerCase();
-  if (key !== 'edit' && key !== 'write') return undefined;
+  const key = editWriteKey(name);
+  if (!key) return undefined;
   if (!isRecord(input) || typeof input.file_path !== 'string' || input.file_path === '') return undefined;
   const path = input.file_path;
   const locations: ToolLocation[] = [{ path }];

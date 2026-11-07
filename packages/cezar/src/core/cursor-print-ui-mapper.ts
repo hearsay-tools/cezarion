@@ -1,4 +1,5 @@
 import { defined } from './defined.ts';
+import { editWriteKey } from './edit-write-key.ts';
 /**
  * Cursor Agent CLI `stream-json` → protocol v2 mapper (+ v1 helpers).
  * Adapted from open-mercato/cezar PR #807's fresh-turn print mapper. This
@@ -406,8 +407,8 @@ function editArtifacts(
   name: string,
   input: unknown,
 ): { diffs?: FileDiff[]; locations: ToolLocation[] } | undefined {
-  const key = name.toLowerCase();
-  if (key !== 'edit' && key !== 'write') return undefined;
+  const key = editWriteKey(name);
+  if (!key) return undefined;
   if (!isRecord(input)) return undefined;
   const path = editInputPath(input);
   if (!path) return undefined;
