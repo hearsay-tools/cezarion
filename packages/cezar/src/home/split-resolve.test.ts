@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HOME_LOCATING_ENV } from '../core/agent-env.ts';
 import { posixLauncher, windowsLauncher } from '../self-update/launcher.ts';
 import { Home } from './home.ts';
+import * as installMarker from './install-marker.ts';
 import { HOME_LAYOUT_ENV, type HomeRoots } from './kind-roots.ts';
 import { resolveHome } from './resolve.ts'; // test-home-read: pure resolver tables; writes use Home.sandbox only
 
@@ -123,6 +124,9 @@ describe('split Home resolution', () => {
 
 it('keeps sandbox filesystem paths native when process.platform is mocked', () => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-native-sandbox-'));
+  const marker = installMarker.createInstallMarker(dir, 'test');
+  // Keep marker writes on the native platform; this assertion checks path construction only.
+  const createMarker = vi.spyOn(installMarker, 'createInstallMarker').mockReturnValue(marker);
   const platform = process.platform;
   Object.defineProperty(process, 'platform', { value: platform === 'win32' ? 'linux' : 'win32', configurable: true });
   try {
@@ -130,10 +134,10 @@ it('keeps sandbox filesystem paths native when process.platform is mocked', () =
     const split = Home.sandbox(join(dir, 'split'), { layout: 'split' });
     expect(legacy.workspaceConfig).toBe(join(dir, 'legacy', 'config.json'));
     expect(split.workspaceConfig).toBe(join(dir, 'split', 'config', 'config.json'));
-    expect(JSON.parse(readFileSync(join(dir, 'legacy', 'install.json'), 'utf8')).kind).toBe('test');
-    expect(JSON.parse(readFileSync(join(dir, 'split', 'config', 'install.json'), 'utf8')).kind).toBe('test');
+    expect(createMarker.mock.calls).toEqual([[join(dir, 'legacy'), 'test'], [join(dir, 'split', 'config'), 'test']]);
   } finally {
     Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    createMarker.mockRestore();
     rmSync(dir, { recursive: true, force: true });
   }
 });
