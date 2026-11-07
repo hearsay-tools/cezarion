@@ -49,6 +49,17 @@ final class SideBySideIsolationTests: XCTestCase {
         ]))
         let store = WKWebsiteDataStore.default().httpCookieStore
         await store.setCookie(cookie)
+        // setCookie completes when WebKit accepts the cookie, before its disk write.
+        // This SPI exists only in the test bundle; no private API ships in the app.
+        let flush = NSSelectorFromString("_flushCookiesToDiskWithCompletionHandler:")
+        guard store.responds(to: flush) else {
+            XCTFail("The simulator WebKit must provide a cookie persistence callback")
+            return
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let completion: @convention(block) () -> Void = { continuation.resume() }
+            _ = store.perform(flush, with: completion)
+        }
         let cookies = await store.allCookies()
         XCTAssertTrue(cookies.contains { $0.name == cookieName && $0.value == "legacy-session" })
         try assertConnectionFields(endpoint: "https://isolation.example.test", auth: "https://login.isolation.example.test")

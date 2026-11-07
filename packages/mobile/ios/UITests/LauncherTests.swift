@@ -136,8 +136,10 @@ final class FinalOldAppTests: XCTestCase {
         XCTAssertFalse(app.buttons["connect"].exists)
         XCTAssertEqual(app.webViews.count, 0)
         app.buttons["openStore"].tap()
-        // bound: UIKit must hand the release URL to an external app.
-        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10))
+        // bound: UIKit must open the supplied HTTPS URL in the receiving browser.
+        // The source app can already be suspended by the time XCTest observes it.
+        let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+        XCTAssertTrue(safari.wait(for: .runningForeground, timeout: 10))
     }
 }
 #endif

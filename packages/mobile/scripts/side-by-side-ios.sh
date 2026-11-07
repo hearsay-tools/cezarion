@@ -85,6 +85,7 @@ with destination.open('wb') as output:
 print(destination)
 PY
 )
+    rm -rf "$reports/side-by-side-$method.xcresult"
     xcodebuild -xctestrun "$run_file" -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
         -parallel-testing-enabled NO -only-testing:"CezarionTests/SideBySideIsolationTests/$method" \
         -resultBundlePath "$reports/side-by-side-$method.xcresult" test-without-building \

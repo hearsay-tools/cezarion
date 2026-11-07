@@ -97,7 +97,9 @@ checks its empty connection fields and absent cookie, then relaunches the old ap
 and checks that its connection and cookie remain unchanged. It inspects the new
 app before any connection or reset action can clear an accidental copy. Each
 stage runs in a separate process and must report an executed pass; skips fail the
-check. The scripts are `scripts/side-by-side-android.sh` and
+check. The iOS seed awaits WebKit's cookie disk-flush callback after setting the
+persistent cookie. That private WebKit selector is confined to the test bundle;
+it is absent from the shipped app, and a simulator without it fails the test. The scripts are `scripts/side-by-side-android.sh` and
 `scripts/side-by-side-ios.sh`. Their reports join the existing CI test artifacts.
 The iOS patcher supports xctestrun format 1 (schemes without a test plan) and format 2
 (test configurations), selected by the file's metadata. Unsupported versions or

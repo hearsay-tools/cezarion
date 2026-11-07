@@ -9,6 +9,7 @@ import unittest
 
 SCRIPTS = Path(__file__).resolve().parent
 IOS_PROGRAM = (SCRIPTS / 'side-by-side-ios.sh').read_text().split("<<'PY'\n", 1)[1].split('\nPY\n', 1)[0]
+IOS_CHECK = 'check() {' + (SCRIPTS / 'side-by-side-ios.sh').read_text().split('check() {', 1)[1].split('\n}\ncheck', 1)[0] + '\n}'
 ANDROID_CHECK = 'check() {' + (SCRIPTS / 'side-by-side-android.sh').read_text().split('check() {', 1)[1].split('\n}', 1)[0] + '\n}'
 
 
@@ -76,6 +77,36 @@ class XctestrunFixtures(unittest.TestCase):
                 self.assertEqual(result.stdout, '')
                 self.assertFalse((Path(directory) / 'side-by-side.xctestrun').exists())
                 self.assertEqual(source.read_bytes(), original)
+
+
+class IosResultFixtures(unittest.TestCase):
+    def test_repeated_check_removes_only_its_previous_result_bundle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'Cezarion.xctestrun').write_bytes(plistlib.dumps({
+                '__xctestrun_metadata__': {'FormatVersion': 1},
+                'CezarionTests': target('CezarionTests'),
+            }))
+            unrelated = root / 'other.xcresult'
+            unrelated.mkdir()
+            (unrelated / 'keep').write_text('unrelated report')
+            runner = root / 'xcodebuild'
+            runner.write_text("""#!/usr/bin/env bash
+set -eu
+while [ "$1" != -resultBundlePath ]; do shift; done
+shift
+test ! -e "$1"
+mkdir "$1"
+printf "Test Case 'fixture.testMethod' passed\\n"
+""")
+            runner.chmod(0o755)
+            env = {**os.environ, 'PATH': directory + os.pathsep + os.environ['PATH'], 'SIMULATOR_ID': 'fixture'}
+            script = 'set -euo pipefail\nreports=$1\nsaved=$1\n' + IOS_CHECK
+            script += '\ncheck "$1" fixture.app testMethod\ncheck "$1" fixture.app testMethod\n'
+            result = subprocess.run(['bash', '-c', script, 'fixture', directory], env=env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / 'side-by-side-testMethod.xcresult').is_dir())
+            self.assertEqual((unrelated / 'keep').read_text(), 'unrelated report')
 
 
 class AndroidResultFixtures(unittest.TestCase):
