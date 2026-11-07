@@ -60,15 +60,22 @@ final class SideBySideIsolationTests: XCTestCase {
             XCTFail("The simulator WebKit must provide a cookie persistence callback")
             return
         }
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let completion: @convention(block) () -> Void = { continuation.resume() }
-            _ = store.perform(flush, with: completion)
-        }
+        let flushed = expectation(description: "Cookie flushed to disk")
+        let completion: @convention(block) () -> Void = { flushed.fulfill() }
+        _ = store.perform(flush, with: completion)
+        // bound: WebKit must finish its disk write before the seed process exits.
+        await fulfillment(of: [flushed], timeout: 15)
         let cookies = await store.allCookies()
         XCTAssertTrue(cookies.contains { $0.name == cookieName && $0.value == "legacy-session" })
-        let records = await withCheckedContinuation { continuation in
-            dataStore.fetchDataRecords(ofTypes: [WKWebsiteDataTypeCookies]) { continuation.resume(returning: $0) }
+        let fetched = expectation(description: "Cookie data records fetched")
+        var fetchedRecords: [WKWebsiteDataRecord]?
+        dataStore.fetchDataRecords(ofTypes: [WKWebsiteDataTypeCookies]) {
+            fetchedRecords = $0
+            fetched.fulfill()
         }
+        // bound: WebKit must report the persisted cookie metadata for diagnostics.
+        await fulfillment(of: [fetched], timeout: 15)
+        let records = try XCTUnwrap(fetchedRecords)
         print("Cookie seed: persistent=\(dataStore.isPersistent), sessionOnly=\(cookie.isSessionOnly), records=\(records.map { $0.displayName })")
         XCTAssertFalse(cookie.isSessionOnly)
         try assertConnectionFields(endpoint: "https://isolation.example.test", auth: "https://login.isolation.example.test")
