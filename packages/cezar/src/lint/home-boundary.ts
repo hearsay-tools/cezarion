@@ -10,7 +10,7 @@ export interface HomeSite { kind: 'cezarHomeDir' | 'resolveHome' | 'homedir' | '
 const ENTRY_POINTS = new Set(['packages/cezar/src/index.ts', 'packages/cezar/src/subcommands.ts']);
 const SHARED_SETUP = 'packages/cezar/vitest.setup.ts';
 const HOME_DIR = 'packages/cezar/src/home/';
-const TEST_FILE = /\.(?:test|testkit)\.[cm]?[jt]sx?$/;
+export const TEST_FILE = /\.(?:test|testkit)\.[cm]?[jt]sx?$/;
 
 export function readHomeReaders(path = join(repoRoot, homeReadersFile)): HomeReader[] {
   return (JSON.parse(readFileSync(path, 'utf8')) as { entries: HomeReader[] }).entries;
@@ -125,7 +125,7 @@ function selectsHome(node: Node): boolean {
 
 /** Parse failures propagate to lint. Strings and comments cannot hide or create sites. */
 export function homeSites(source: string, file = 'file.ts'): HomeSite[] {
-  const ast = parse(source, { sourceType: 'module', plugins: ['typescript', ...(file.endsWith('.tsx') ? ['jsx' as const] : [])] });
+  const ast = parse(source, { sourceType: 'module', plugins: ['typescript', ...(/\.[cm]?[jt]sx$/.test(file) ? ['jsx' as const] : [])] });
   const aliases = new Set(['homedir']);
   visit(ast, node => {
     if (node.type === 'ImportSpecifier' && name(node.imported) === 'homedir') aliases.add(node.local.name);

@@ -8,8 +8,9 @@ stay unchanged. P1c owns backups, outside-write enforcement and banners.
 ## Decisions
 
 The coordinator approved test-source scope and operational-tool exclusions on
-2026-11-07. The new rule covers `*.test.ts`, `*.test.tsx`, `*.testkit.ts`,
-`*.test.mjs` and `*.test.cjs` across the repository. `docs/sdlc/lint.md` records
+2026-11-07. Both home rules share `TEST_FILE`, the regular expression
+`\.(?:test|testkit)\.[cm]?[jt]sx?$`, across the repository. CodeRabbit found the original
+five-suffix scope mismatch; the coordinator approved this stricter superset. `docs/sdlc/lint.md` records
 each excluded tool and its reason. Benchmarks, transcript measurement and mutation
 tools keep their explicit environments and legacy cache paths. Runtime skill
 discovery, browser launch discovery, Squeal discovery and the registry refusal
@@ -36,7 +37,7 @@ were separately checked for pure comparisons, mocked writes, refusal probes or
 temporary sandbox envs. The guarded environment-to-Home source set is complete:
 resolveHome is the only such export in home/resolve.ts; paths.ts has no other one.
 
-The coordinator removed alias tracking after round4 found new binding bypasses
+The coordinator removed alias tracking after round 4 found new binding bypasses
 and a false positive. The rule now checks only guarded syntax. Type-only syntax
 and data-property definitions stay outside it. Import lines have their own reasons.
 

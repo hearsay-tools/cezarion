@@ -85,9 +85,11 @@ forbidden form, parser errors, stale entries and the CI growth ratchet.
 
 ### Test home boundary
 
-`cez/test-home-write` covers `*.test.ts`, `*.test.tsx`, `*.testkit.ts`,
-`*.test.mjs` and `*.test.cjs` across the repository. `cez/home-boundary` also
-refuses CEZ_HOME selection on these surfaces. Oxlint scans package tests. The lint
+`cez/test-home-write` and `cez/home-boundary` share `TEST_FILE`, the regular
+expression `\.(?:test|testkit)\.[cm]?[jt]sx?$`, across the repository. Both cover
+`.test` and `.testkit` files with `.js`, `.jsx`, `.ts`, `.tsx` extensions and
+their `m`/`c` variants, including JSX source in these files. The shared pattern keeps ambient-home syntax and CEZ_HOME selection
+checks on the same test surfaces. Oxlint scans package tests. The lint
 runner applies the same two scanners to tracked and unignored new test files outside
 `packages/`, including the two node:test projects. Neither rule has a test baseline.
 The guarded names are `homedir`, legacy `cezarHomeDir` and `resolveHome`.

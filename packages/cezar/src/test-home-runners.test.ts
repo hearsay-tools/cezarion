@@ -66,5 +66,6 @@ it('every node:test and browser entry loads the shared bootstrap', () => {
   expect(read('packages/web/e2e/vitest.config.ts')).toContain("setupFiles: ['../../../scripts/test-browser-home-env.mjs'");
   for (const entry of ['scripts/test-home-env.mjs', 'scripts/test-browser-home-env.mjs',
     'packages/cezar/vitest.setup.ts', 'packages/web/vitest.setup.ts']) expect(read(entry)).toContain('configureTestHome');
-  expect(JSON.parse(read('squeal.config.json')).inputs['packages/cezar/src/test-task-env.test.ts']).toContain('scripts/test-git-env.mjs');
+  expect(JSON.parse(read('squeal.config.json')).inputs['packages/cezar/src/test-task-env.test.ts']).toEqual(
+    expect.arrayContaining(['scripts/test-git-env.mjs', 'scripts/test-home-setup.mjs']));
 });

@@ -1,5 +1,6 @@
 import { parse } from '@babel/parser';
 import type { Node } from '@babel/types';
+import { TEST_FILE } from './home-boundary.ts';
 import { lineAt, type SourceRule } from './source-rule.ts';
 
 const SOURCES = new Set(['homedir', 'cezarHomeDir', 'resolveHome']);
@@ -58,7 +59,7 @@ function sites(node: Node, parent: Node | undefined): Node[] {
 
 /** Ban guarded syntax instead of attempting open-ended binding or value flow. */
 export function unsafeHomeWrites(source: string, file = 'file.test.ts'): number[] {
-  const ast = parse(source, { sourceType: 'unambiguous', plugins: ['typescript', 'decorators', ...(file.endsWith('.tsx') ? ['jsx' as const] : [])] });
+  const ast = parse(source, { sourceType: 'unambiguous', plugins: ['typescript', 'decorators', ...(/\.[cm]?[jt]sx$/.test(file) ? ['jsx' as const] : [])] });
   const allowedLines = new Set((ast.comments ?? []).filter(comment => comment.type === 'CommentLine'
     && /^\s*test-home-read:\s*\S/.test(comment.value)).map(comment => comment.loc?.start.line));
   const offsets = new Set<number>();
@@ -75,7 +76,7 @@ export function unsafeHomeWrites(source: string, file = 'file.test.ts'): number[
 export const testHomeWrite: SourceRule = {
   name: 'test-home-write',
   description: 'Test home syntax requires a reasoned exception (hearsay-tools/cezarion#2813).',
-  applies: file => /\.(?:test\.tsx?|testkit\.ts|test\.[mc]js)$/.test(file),
+  applies: file => TEST_FILE.test(file),
   check: (file, source) => unsafeHomeWrites(source, file).map(offset => ({
     line: lineAt(source, offset),
     message: 'Ambient home syntax in a test; use Home.sandbox or add // test-home-read: <reason> on this line (hearsay-tools/cezarion#2813).',

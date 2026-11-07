@@ -34,7 +34,8 @@ describe('test writes use explicit sandbox paths', () => {
     expect(unsafeHomeWrites(source)).toEqual([]);
   });
 
-  it.each(['a.test.ts', 'a.test.tsx', 'a.testkit.ts', 'a.test.mjs', 'a.test.cjs'])('covers %s repository-wide', file => {
+  it.each(['test', 'testkit'].flatMap(kind => ['js', 'jsx', 'ts', 'tsx', 'mjs', 'mjsx', 'mts', 'mtsx', 'cjs', 'cjsx', 'cts', 'ctsx']
+    .map(extension => `a.${kind}.${extension}`)))('covers %s repository-wide', file => {
     expect(testHomeWrite.applies(`scripts/${file}`)).toBe(true);
     expect(testHomeWrite.check(`scripts/${file}`, "writeFileSync(join(cezarHomeDir(), 'config.json'), '{}')")).toHaveLength(1);
   });
@@ -53,6 +54,19 @@ describe('test writes use explicit sandbox paths', () => {
       writeFileSync(join(root, '.github/scripts/mutants-file.cjs'), 'mkdirSync(homedir())');
       const problems = externalTestHomeProblems(root, ['.github/scripts/unsafe.test.cjs', '.github/scripts/mutants-file.cjs', 'deleted.test.mjs']);
       expect(problems).toEqual([expect.stringContaining('cez/home-boundary'), expect.stringContaining('cez/test-home-write')]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['jsx', 'tsx', 'mjsx', 'mtsx', 'cjsx', 'ctsx'])('runs both repository rules on JSX in .testkit.%s', extension => {
+    const root = mkdtempSync(join(tmpdir(), 'cez-jsx-home-rule-'));
+    const file = `unsafe.testkit.${extension}`;
+    try {
+      writeFileSync(join(root, file), "const view = <div>{homedir()}</div>; process.env.CEZ_HOME = '/host';");
+      expect(externalTestHomeProblems(root, [file])).toEqual([
+        expect.stringContaining('cez/home-boundary'), expect.stringContaining('cez/test-home-write'),
+      ]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
