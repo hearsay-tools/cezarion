@@ -64,7 +64,7 @@ export type RunExitSpec = {
 };
 
 /** A record that may still carry `activity`, a legacy key the load-time upgrade reads
- *  (`LEGACY_WAIT_KEYS`, store.ts); a root Finish and a released park clear it. */
+ *  (`LEGACY_WAIT_KEYS`, legacy-waits.ts); a root Finish and a released park clear it. */
 type WithLegacyActivity = RunRecord & { activity?: undefined };
 
 /** A root that holds a pending Finish intent. */

@@ -43,4 +43,4 @@ rule:
         inside:
           stopBy: end
           kind: function_declaration
-          has: { field: name, regex: '^(ciWaitEntry|workerWaitEntry|upgradeLegacyWaits)$' }
+          has: { field: name, regex: '^(ciWaitEntry|workerWaitEntry|upgradeLegacyWaits|settleLegacyAgentWait)$' }
