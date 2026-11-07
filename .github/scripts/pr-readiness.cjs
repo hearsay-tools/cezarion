@@ -94,23 +94,35 @@ fragment item on ProjectV2Item {
   fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
 }`;
 
-// Every card the PR or its closing issues have, on any board with a Status
-// field that names the target option. Done cards never move back.
-function boardMoves(data, status) {
-  const pull = data?.repository?.pullRequest;
-  const items = [
+function projectItems(pull) {
+  return [
     ...(pull?.projectItems?.nodes || []),
     ...(pull?.closingIssuesReferences?.nodes || []).flatMap((issue) => issue?.projectItems?.nodes || []),
   ];
+}
+
+function statusOption(field, status) {
+  return field?.options?.find((candidate) => candidate?.name?.toLowerCase() === status.toLowerCase());
+}
+
+// One card's move, or null when the card must stay where it is.
+function cardMove(item, status) {
+  const option = statusOption(item?.project?.field, status);
+  const current = item?.fieldValueByName?.name?.toLowerCase() || null;
+  if (!item?.id || !option || current === DONE_STATUS || current === status.toLowerCase()) return null;
+  return { projectId: item.project.id, itemId: item.id, fieldId: item.project.field.id, optionId: option.id };
+}
+
+// Every card the PR or its closing issues have, on any board with a Status
+// field that names the target option. Done cards never move back.
+function boardMoves(data, status) {
   const moves = [];
   const seen = new Set();
-  for (const item of items) {
-    const field = item?.project?.field;
-    const option = field?.options?.find((candidate) => candidate?.name?.toLowerCase() === status.toLowerCase());
-    const current = item?.fieldValueByName?.name?.toLowerCase() || null;
-    if (!item?.id || seen.has(item.id) || !option || current === DONE_STATUS || current === status.toLowerCase()) continue;
-    seen.add(item.id);
-    moves.push({ projectId: item.project.id, itemId: item.id, fieldId: field.id, optionId: option.id });
+  for (const item of projectItems(data?.repository?.pullRequest)) {
+    const move = cardMove(item, status);
+    if (!move || seen.has(move.itemId)) continue;
+    seen.add(move.itemId);
+    moves.push(move);
   }
   return moves;
 }

@@ -105,6 +105,33 @@ function queueRun(run, fullName, workflowId, sha) {
     && run.head_sha === sha && run.event === 'merge_group'
     && typeof run.head_branch === 'string' && run.head_branch.startsWith('gh-readonly-queue/main/');
 }
+
+// The race re-check: the run just verified, and the same run as the newest
+// merge-group run for the sha, must still read back completed and successful.
+function sameCompletedRun(final, authoritative, run, fullName, workflowId, sha) {
+  return queueRun(final, fullName, workflowId, sha) && final.id === run.id && final.run_attempt === run.run_attempt
+    && final.status === 'completed' && final.conclusion === 'success'
+    && queueRun(authoritative, fullName, workflowId, sha) && authoritative?.id === run.id
+    && authoritative.run_attempt === run.run_attempt
+    && authoritative.status === 'completed' && authoritative.conclusion === 'success';
+}
+
+// One poll iteration: list and read the queue run for sha, then wait while it
+// is pending. Returns the completed run, a fallback reason, or nothing after
+// a pending wait (the caller polls again).
+async function pollQueueRun({ read, fullName, workflowId, sha, poll, deadline, now, sleep }) {
+  const listed = newest(await readCiRuns(read, workflowId, sha, 'merge_group'));
+  if (!queueRun(listed, fullName, workflowId, sha)) return { reason: 'no-exact-queue-run' };
+  const run = await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: listed.id });
+  if (!queueRun(run, fullName, workflowId, sha) || run.id !== listed.id) return { reason: 'source-changed' };
+  if (run.status !== 'completed') {
+    if (poll === 6 || now() >= deadline) return { reason: 'source-pending' };
+    await sleep(Math.min(10000, deadline - now()));
+    return {};
+  }
+  return { run };
+}
+
 async function queueCiProof({ github, owner, repo, eventName, ref, sha, now = Date.now, sleep = delay, surfaceOf }) {
   const fallback = reason => ({ verified: false, reason });
   if (eventName !== 'push' || ref !== 'refs/heads/main' || !validSha(sha)) return fallback('not-main-push');
@@ -115,25 +142,17 @@ async function queueCiProof({ github, owner, repo, eventName, ref, sha, now = Da
     if (!positive(workflow?.id) || workflow.path !== CI_PATH || workflow.state !== 'active') return fallback('workflow-unavailable');
     const fullName = `${owner}/${repo}`;
     for (let poll = 0; poll < 7; poll++) {
-      const listed = newest(await readCiRuns(read, workflow.id, sha, 'merge_group'));
-      if (!queueRun(listed, fullName, workflow.id, sha)) return fallback('no-exact-queue-run');
-      const run = await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: listed.id });
-      if (!queueRun(run, fullName, workflow.id, sha) || run.id !== listed.id) return fallback('source-changed');
-      if (run.status !== 'completed') {
-        if (poll === 6 || now() >= deadline) return fallback('source-pending');
-        await sleep(Math.min(10000, deadline - now()));
-        continue;
-      }
+      const step = await pollQueueRun({ read, fullName, workflowId: workflow.id, sha, poll, deadline, now, sleep });
+      if (step.reason) return fallback(step.reason);
+      if (!step.run) continue;
+      const run = step.run;
       if (run.conclusion !== 'success') return fallback('source-not-successful');
       const jobs = await readCiJobs(read, run.id);
       const suites = await completeGate(jobs, run, surfaceOf);
       if (!suites) return fallback('incomplete-gate');
       const final = await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: run.id });
       const authoritative = newest(await readCiRuns(read, workflow.id, sha, 'merge_group'));
-      if (!queueRun(final, fullName, workflow.id, sha) || final.id !== run.id || final.run_attempt !== run.run_attempt
-        || final.status !== 'completed' || final.conclusion !== 'success'
-        || !queueRun(authoritative, fullName, workflow.id, sha) || authoritative?.id !== run.id || authoritative.run_attempt !== run.run_attempt
-        || authoritative.status !== 'completed' || authoritative.conclusion !== 'success') return fallback('source-changed');
+      if (!sameCompletedRun(final, authoritative, run, fullName, workflow.id, sha)) return fallback('source-changed');
       return { verified: true, runId: run.id, attempt: run.run_attempt, sha, suites,
         url: `https://github.com/${fullName}/actions/runs/${run.id}/attempts/${run.run_attempt}` };
     }
