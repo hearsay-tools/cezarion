@@ -124,6 +124,28 @@ function TaskFields({ draft, patch, saving, automation }: {
   )
 }
 
+/** The enable switch, with the sentence that says what switching it on means for this kind. */
+function EnableFields({ draft, patch, automation }: {
+  draft: AutomationDraft
+  patch: (next: Partial<AutomationDraft>) => void
+  automation?: AutomationDefinition | undefined
+}) {
+  const isSchedule = draft.kind === 'schedule'
+  return (
+    <>
+      <label className="flex min-h-11 items-center gap-3 text-sm">
+        <Switch aria-label={automation ? 'Enabled' : 'Enable after saving'} checked={draft.enabled} onCheckedChange={(enabled) => patch({ enabled })} />
+        <span>{automation ? 'Enabled' : 'Enable after saving'}</span>
+      </label>
+      <p className="text-xs break-words text-muted-foreground">
+        {isSchedule && draft.schedule.type === 'once'
+          ? 'It runs once at the time set above, then moves to Archived with its task.'
+          : isSchedule ? 'The first run is the next occurrence shown beside the schedule.' : historySentence(draft.filters.includeExisting)}
+      </p>
+    </>
+  )
+}
+
 export function AutomationEditor({ automation, forge, timeZone, onSaved, onReload }: {
   automation?: AutomationDefinition
   forge: { available: boolean; reason?: string | undefined }
@@ -225,15 +247,7 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
           </Section>
 
           <Section title="Enable" section="enable" failure={failure}>
-            <label className="flex min-h-11 items-center gap-3 text-sm">
-              <Switch aria-label={automation ? 'Enabled' : 'Enable after saving'} checked={draft.enabled} onCheckedChange={(enabled) => patch({ enabled })} />
-              <span>{automation ? 'Enabled' : 'Enable after saving'}</span>
-            </label>
-            <p className="text-xs break-words text-muted-foreground">
-              {draft.kind === 'schedule' && draft.schedule.type === 'once'
-                ? 'It runs once at the time set above, then moves to Archived with its task.'
-                : isSchedule ? 'The first run is the next occurrence shown beside the schedule.' : historySentence(draft.filters.includeExisting)}
-            </p>
+            <EnableFields draft={draft} patch={patch} automation={automation} />
           </Section>
 
           {failure?.section === 'form' ? (
