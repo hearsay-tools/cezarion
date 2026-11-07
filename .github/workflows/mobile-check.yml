@@ -72,7 +72,9 @@ jobs:
           arch: x86_64
           target: google_apis
           working-directory: packages/mobile/android
-          script: ./gradlew --no-daemon ${{ matrix.args }} connectedDebugAndroidTest
+          script: |
+            ./gradlew --no-daemon ${{ matrix.args }} connectedDebugAndroidTest
+            if [ '${{ matrix.mode }}' = legacy ]; then bash ../scripts/side-by-side-android.sh; fi
       - name: Personal-install APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -138,6 +140,10 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleDisplayName' "$products/Cezarion.app/Info.plist")" = "$display_name"
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$products/Cezarion.app/PlugIns/CezarionTests.xctest/Info.plist")" = "$prefix.CezarionTests"
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$products/CezarionUITests-Runner.app/PlugIns/CezarionUITests.xctest/Info.plist")" = "$prefix.CezarionUITests"
+      - name: Verify old and new apps side by side on the same simulator
+        if: matrix.mode == 'legacy'
+        timeout-minutes: 10
+        run: bash packages/mobile/scripts/side-by-side-ios.sh
       - name: Regenerate Xcode project and compile unsigned device archive
         run: |
           brew install xcodegen

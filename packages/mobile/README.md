@@ -90,8 +90,25 @@ On an Android device and an iPhone, check the following before store submission:
    and a higher version. Confirm only the move screen appears and the button opens
    the exact supplied store page. Confirm the new app still works.
 
-This manual check has not been run on this Linux development host. CI covers each
-build mode separately, the move screen, button URL dispatch and preservation of a
-seeded old connection. It does not prove real store installation, signing, side-by-side
-device behavior or a real remote sign-in. The optional remote sign-in test still
-needs its existing endpoint inputs.
+CI also runs an automated side-by-side check in each platform's existing legacy
+job. It installs both IDs on that job's emulator/simulator, seeds a saved connection
+and persistent browser sign-in cookie in the old app, launches the new app and
+checks its empty connection fields and absent cookie, then relaunches the old app
+and checks that its connection and cookie remain unchanged. It inspects the new
+app before any connection or reset action can clear an accidental copy. Each
+stage runs in a separate process and must report an executed pass; skips fail the
+check. The scripts are `scripts/side-by-side-android.sh` and
+`scripts/side-by-side-ios.sh`. Their reports join the existing CI test artifacts.
+
+The check reuses each legacy job's native test device and build outputs. It builds
+the second ID without an extra emulator/simulator job. The Android script restores
+the legacy APK outputs for the existing download artifact; the iOS script restores
+the selected build metadata before the ordinary archive step.
+
+Native checks have not run on this Linux development host. The CI check uses a
+synthetic persistent session cookie. It proves separation of app connection settings
+and browser session state, without a live sign-in service. It does not prove real
+store installation, signing, physical-device transfer behavior, every browser
+storage type or a real remote sign-in. The manual check above remains required
+before store submission. The optional remote sign-in test still needs its existing
+endpoint inputs.
