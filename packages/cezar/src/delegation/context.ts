@@ -85,6 +85,9 @@ async function attachmentBytes(dataDir: string, parentId: string, id: string, li
 }
 
 const refuse = (message: string) => new DelegationPolicyError('invalid_input', message);
+const attachmentDetail = (error: unknown) => error instanceof Error ? error.message : String(error);
+const attachmentNotIgnored = (path: string) => refuse(`--attach path is not ignored by the worker baseline: ${path}; commit it and spawn from that commit instead of attaching it`);
+type PlacedAttachment = { source: string; dir: string; path: string; dev: number; ino: number };
 /**
  * Read a regular parent-worktree file without symlink components. Revalidate the open
  * descriptor’s identity and containment before accepting bytes; path checks alone are
@@ -230,6 +233,90 @@ export async function verifyWorkerContext(options: {
   }
 }
 
+/** Existing components first: `check-ignore` dies outright on a path beyond a symlink. */
+async function walkAttachDir(root: string, components: string[], sourcePath: string, create: boolean): Promise<string | undefined> {
+  let dir = root;
+  for (const component of components) {
+    dir = join(dir, component);
+    const entry = await lstat(dir).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+      return undefined;
+    });
+    if (!entry && !create) return;
+    if (!entry) await mkdir(dir).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
+    const current = entry ?? await lstat(dir);
+    if (current.isSymbolicLink() || !current.isDirectory()) {
+      throw refuse(`--attach path has a component that is not a directory in the worker worktree: ${sourcePath}`);
+    }
+  }
+  return dir;
+}
+
+/** Copy one parent-file snapshot; skip when the destination already exists. */
+async function placeParentFileAttachment(options: {
+  dataDir: string; workspace: WorkerWorkspace; root: string; input: WorkerInput; index: number; sourcePath: string; created: PlacedAttachment[];
+}): Promise<void> {
+  const { dataDir, workspace, root, input, index, sourcePath, created } = options;
+  const components = sourcePath.split('/');
+  const name = components.pop()!;
+  await walkAttachDir(root, components, sourcePath, false);
+  if (!await ignoredByGit(root, sourcePath)) throw attachmentNotIgnored(sourcePath);
+  const bytes = await (async () => readBoundedContextFile(await parentFileSnapshotPath(dataDir, workspace, index), input.bytes))()
+    .catch((error: unknown) => { throw refuse(`--attach snapshot is missing or changed: ${sourcePath} (${attachmentDetail(error)})`); });
+  if (bytes.length !== input.bytes || hash(bytes) !== input.sha256) throw refuse(`--attach snapshot is missing or changed: ${sourcePath}`);
+  const dir = (await walkAttachDir(root, components, sourcePath, true))!;
+  const destination = join(dir, name);
+  let file;
+  try {
+    file = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return;
+    throw error;
+  }
+  try {
+    const opened = await file.stat();
+    const entry = await lstat(destination).catch(() => undefined);
+    // A directory swapped for a symlink since the walk: the file is elsewhere, and unlinking
+    // through the redirected path could remove someone else's. Leave it, write nothing.
+    if (await realpath(dir).catch(() => undefined) !== dir || entry?.dev !== opened.dev || entry.ino !== opened.ino) {
+      throw refuse(`--attach path leaves the worker worktree: ${sourcePath}`);
+    }
+    created.push({ source: sourcePath, dir, path: destination, dev: opened.dev, ino: opened.ino });
+    await file.writeFile(bytes);
+  } finally { await file.close(); }
+}
+
+/** A placed file can change the rules for another (a nested `.gitignore` re-including it). */
+async function recheckAttachedIgnoreRules(root: string, attached: string[]): Promise<void> {
+  if (!attached.length) return;
+  const check = git('git', ['check-ignore', '-z', '--stdin'], { cwd: root, maxBuffer: 1024 * 1024, timeout: 30_000 });
+  // A git that exits early fails the promise below; its EPIPE on stdin must not crash the process.
+  check.child.stdin?.on('error', () => {}).end(attached.map(path => `${path}\0`).join(''));
+  const result = await check
+    .then(({ stdout }) => stdout, (error: { code?: unknown; message?: string }) => {
+      if (error.code === 1) return '';
+      throw refuse(`--attach paths could not be checked against the worker baseline: ${attached[0]} (${attachmentDetail(error)})`);
+    });
+  const ignored = new Set(result.split('\0'));
+  const offending = attached.find(path => !ignored.has(path));
+  if (offending !== undefined) throw attachmentNotIgnored(offending);
+}
+
+/** Only files this call created, still the same inode in the same canonical directory. */
+async function discardPlacedAttachments(created: PlacedAttachment[], error: unknown): Promise<never> {
+  const leftovers: string[] = [];
+  for (const copy of created.reverse()) {
+    try {
+      const entry = await lstat(copy.path).catch(() => undefined);
+      if (entry?.dev === copy.dev && entry.ino === copy.ino && await realpath(copy.dir).catch(() => undefined) === copy.dir) {
+        await rm(copy.path, { force: true });
+      }
+    } catch (failure) { leftovers.push(`${copy.source} (${attachmentDetail(failure)})`); }
+  }
+  if (!leftovers.length) throw error;
+  throw refuse(`${attachmentDetail(error)}; could not remove the attached copies made before the failure: ${leftovers.join(', ')}`);
+}
+
 /**
  * Copy verified parent-file snapshots before first launch only. Never overwrite existing worker
  * content or restore deleted files on Continue. Require baseline ignore rules and recheck the
@@ -238,93 +325,23 @@ export async function verifyWorkerContext(options: {
 export async function placeWorkerAttachments(options: { dataDir: string; workspace: WorkerWorkspace; context?: WorkerInputRecipe | undefined }): Promise<void> {
   const { dataDir, workspace, context } = options;
   const root = await realpath(workspace.path);
-  const notIgnored = (path: string) => refuse(`--attach path is not ignored by the worker baseline: ${path}; commit it and spawn from that commit instead of attaching it`);
-  const detail = (error: unknown) => error instanceof Error ? error.message : String(error);
   const attached: string[] = [];
-  const created: Array<{ source: string; dir: string; path: string; dev: number; ino: number }> = [];
+  const created: PlacedAttachment[] = [];
   try {
     for (const [index, input] of (context?.inputs ?? []).entries()) {
       const { source } = input;
       if (source.kind !== 'parent-file') continue;
       attached.push(source.path);
       try {
-        const components = source.path.split('/');
-        const name = components.pop()!;
-        // Existing components first: `check-ignore` dies outright on a path beyond a symlink.
-        const walk = async (create: boolean) => {
-          let dir = root;
-          for (const component of components) {
-            dir = join(dir, component);
-            const entry = await lstat(dir).catch((error: NodeJS.ErrnoException) => {
-              if (error.code !== 'ENOENT') throw error;
-              return undefined;
-            });
-            if (!entry && !create) return;
-            if (!entry) await mkdir(dir).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
-            const current = entry ?? await lstat(dir);
-            if (current.isSymbolicLink() || !current.isDirectory()) {
-              throw refuse(`--attach path has a component that is not a directory in the worker worktree: ${source.path}`);
-            }
-          }
-          return dir;
-        };
-        await walk(false);
-        if (!await ignoredByGit(root, source.path)) throw notIgnored(source.path);
-        const bytes = await (async () => readBoundedContextFile(await parentFileSnapshotPath(dataDir, workspace, index), input.bytes))()
-          .catch((error: unknown) => { throw refuse(`--attach snapshot is missing or changed: ${source.path} (${detail(error)})`); });
-        if (bytes.length !== input.bytes || hash(bytes) !== input.sha256) throw refuse(`--attach snapshot is missing or changed: ${source.path}`);
-        const dir = (await walk(true))!;
-        const destination = join(dir, name);
-        let file;
-        try {
-          file = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue;
-          throw error;
-        }
-        try {
-          const opened = await file.stat();
-          const entry = await lstat(destination).catch(() => undefined);
-          // A directory swapped for a symlink since the walk: the file is elsewhere, and unlinking
-          // through the redirected path could remove someone else's. Leave it, write nothing.
-          if (await realpath(dir).catch(() => undefined) !== dir || entry?.dev !== opened.dev || entry.ino !== opened.ino) {
-            throw refuse(`--attach path leaves the worker worktree: ${source.path}`);
-          }
-          created.push({ source: source.path, dir, path: destination, dev: opened.dev, ino: opened.ino });
-          await file.writeFile(bytes);
-        } finally { await file.close(); }
+        await placeParentFileAttachment({ dataDir, workspace, root, input, index, sourcePath: source.path, created });
       } catch (error) {
-        throw error instanceof DelegationPolicyError ? error : refuse(`--attach path could not be placed in the worker worktree: ${source.path} (${detail(error)})`);
+        throw error instanceof DelegationPolicyError ? error : refuse(`--attach path could not be placed in the worker worktree: ${source.path} (${attachmentDetail(error)})`);
       }
     }
-    // A placed file can change the rules for another (a nested `.gitignore` re-including it).
-    if (attached.length) {
-      const check = git('git', ['check-ignore', '-z', '--stdin'], { cwd: root, maxBuffer: 1024 * 1024, timeout: 30_000 });
-      // A git that exits early fails the promise below; its EPIPE on stdin must not crash the process.
-      check.child.stdin?.on('error', () => {}).end(attached.map(path => `${path}\0`).join(''));
-      const result = await check
-        .then(({ stdout }) => stdout, (error: { code?: unknown; message?: string }) => {
-          if (error.code === 1) return '';
-          throw refuse(`--attach paths could not be checked against the worker baseline: ${attached[0]} (${detail(error)})`);
-        });
-      const ignored = new Set(result.split('\0'));
-      const offending = attached.find(path => !ignored.has(path));
-      if (offending !== undefined) throw notIgnored(offending);
-    }
+    await recheckAttachedIgnoreRules(root, attached);
   } catch (error) {
-    // Only files this call created, still the same inode in the same canonical directory. Each
-    // removal is attempted on its own; one that fails is reported, never allowed to hide the cause.
-    const leftovers: string[] = [];
-    for (const copy of created.reverse()) {
-      try {
-        const entry = await lstat(copy.path).catch(() => undefined);
-        if (entry?.dev === copy.dev && entry.ino === copy.ino && await realpath(copy.dir).catch(() => undefined) === copy.dir) {
-          await rm(copy.path, { force: true });
-        }
-      } catch (failure) { leftovers.push(`${copy.source} (${detail(failure)})`); }
-    }
-    if (!leftovers.length) throw error;
-    throw refuse(`${detail(error)}; could not remove the attached copies made before the failure: ${leftovers.join(', ')}`);
+    // Each removal is attempted on its own; one that fails is reported, never allowed to hide the cause.
+    await discardPlacedAttachments(created, error);
   }
 }
 
