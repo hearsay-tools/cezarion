@@ -71,6 +71,26 @@ export function scanSource(file: string, source: string): Site[] {
   const at = (rule: Rule, index: number): Site => ({ rule, file, line: index + 1, site: lines[index]?.trim() ?? '' })
 
   // Rule 1 — a one-shot read within two lines after an action, with no wait between them.
+  for (const j of oneShotReadIndices(lines)) sites.push(at('one-shot-read', j))
+  // Rules 2 and 3 — what a wait's argument contains.
+  for (const site of waitPredicateSites(source)) sites.push(at(site.rule, site.line))
+  // Rule 4 — a sleep.
+  for (const site of sleepSites(source, file, lines)) sites.push(at(site.rule, site.line))
+  // Rule 7 — a keyboard step, or a read of where focus is, after an Escape nobody waited out.
+  for (const site of focusAfterBareEscapeSites(source, lines)) sites.push(at(site.rule, site.line))
+  // Rules 5 and 6 — what a spec does to the page it is measuring. Both only look inside in-page
+  // code, so a node-side `rows[0]` on an array `evaluate` RETURNED is untouched: reading a result
+  // by index is not addressing a row by index.
+  for (const call of callSpans(source, inPage)) {
+    for (const site of productDomSites(call, source)) sites.push(at(site.rule, site.line))
+  }
+
+  return sites.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule))
+}
+
+/** Rule 1 — indices of a one-shot read within two lines after an action, with no wait between
+ *  them, sorted. */
+function oneShotReadIndices(lines: string[]): number[] {
   const flaggedReads = new Set<number>()
   lines.forEach((line, i) => {
     if (!action.test(line)) return
@@ -80,22 +100,29 @@ export function scanSource(file: string, source: string): Site[] {
       if (read.test(candidate)) flaggedReads.add(j)
     }
   })
-  for (const j of [...flaggedReads].sort((a, b) => a - b)) sites.push(at('one-shot-read', j))
+  return [...flaggedReads].sort((a, b) => a - b)
+}
 
-  // Rules 2 and 3 — what a wait's argument contains.
+/** Rules 2 and 3 — what a wait's argument contains. */
+function waitPredicateSites(source: string): { rule: Rule; line: number }[] {
+  const found: { rule: Rule; line: number }[] = []
   for (const call of callSpans(source, /\b(waitForFunction|waitForValue|waitForStable|waitForSettledSample)\(/g)) {
     const line = lineOf(source, call.start)
     const hasClock = /(?:performance|Date)\.now\s*\(|\bnew\s+Date\s*\(\s*\)\s*\.\s*getTime\s*\(/.test(call.text)
     const hasState = /document\.|querySelector|activeElement|__cezIdle|__geometry|dataset\./.test(call.text)
-    if (hasClock && !hasState) sites.push(at('clock-only-wait', line))
-    if (call.text.includes(':hover')) sites.push(at('hover-in-wait', line))
-    if (call.name === 'waitForFunction' && call.text.includes('scrollIntoView')) sites.push(at('mutating-predicate', line))
+    if (hasClock && !hasState) found.push({ rule: 'clock-only-wait', line })
+    if (call.text.includes(':hover')) found.push({ rule: 'hover-in-wait', line })
+    if (call.name === 'waitForFunction' && call.text.includes('scrollIntoView')) found.push({ rule: 'mutating-predicate', line })
   }
+  return found
+}
 
-  // Rule 4 — a sleep. No exemption: a spec that must poll the server calls `e2e/poll.ts`,
-  // which is excluded from this scan and is the only place a spec-side poll sleeps (#416).
-  // The name-based exemption this replaces trusted any looping `waitFor…`/`poll…` function,
-  // so a helper could sleep for any reason at all under a good name.
+/** Rule 4 — a sleep. No exemption: a spec that must poll the server calls `e2e/poll.ts`,
+ *  which is excluded from this scan and is the only place a spec-side poll sleeps (#416).
+ *  The name-based exemption this replaces trusted any looping `waitFor…`/`poll…` function,
+ *  so a helper could sleep for any reason at all under a good name. */
+function sleepSites(source: string, file: string, lines: string[]): { rule: Rule; line: number }[] {
+  const found: { rule: Rule; line: number }[] = []
   for (const call of callSpans(source, new RegExp(sleep.source, 'g'))) {
     const i = lineOf(source, call.start)
     if (lines[i]?.trim().startsWith('//')) continue
@@ -108,21 +135,25 @@ export function scanSource(file: string, source: string): Site[] {
     // Packaged fixtures model shutdown and condition backoff on their own event loop.
     // Named, reviewed mechanisms only; a new bare delay still fails the guard.
     const fixturePolicy = file.startsWith('packages/cezar/test/e2e/') && /^\/\/ e2e-wait: (condition-poll|shutdown-grace|process-deadline) — .+/.test(policy)
-    if (!deadline && !fixturePolicy) sites.push(at('sleep', i))
+    if (!deadline && !fixturePolicy) found.push({ rule: 'sleep', line: i })
   }
+  return found
+}
 
-  // Rule 7 — a keyboard step, or a read of where focus is, after an Escape nobody waited out.
-  // A Radix overlay closed with Escape hands focus back to its trigger one task AFTER its
-  // content unmounts, so a wait for the content to be gone settles inside that gap and the
-  // next Tab starts from wherever the refocus put it (#410). `dismissWithEscape` waits for the
-  // returned focus; a plain `press('Escape')` does not, so anything that depends on focus
-  // before something else moves it deterministically is flagged. The window ends at the next
-  // pointer action or navigation (a click sets focus itself), at a wait that names
-  // `activeElement` (that IS the settled wait), or after a few lines — a dismissal in one helper
-  // and a Tab in another test is beyond a line scan, which is what the helper is for.
-  // Waits are matched as spans, not lines: a predicate usually sits on the line after
-  // `waitForFunction(`, and a wait's own mention of `activeElement` is the settled wait, never
-  // a one-shot read of it.
+/** Rule 7 — a keyboard step, or a read of where focus is, after an Escape nobody waited out.
+ *  A Radix overlay closed with Escape hands focus back to its trigger one task AFTER its
+ *  content unmounts, so a wait for the content to be gone settles inside that gap and the
+ *  next Tab starts from wherever the refocus put it (#410). `dismissWithEscape` waits for the
+ *  returned focus; a plain `press('Escape')` does not, so anything that depends on focus
+ *  before something else moves it deterministically is flagged. The window ends at the next
+ *  pointer action or navigation (a click sets focus itself), at a wait that names
+ *  `activeElement` (that IS the settled wait), or after a few lines — a dismissal in one helper
+ *  and a Tab in another test is beyond a line scan, which is what the helper is for.
+ *  Waits are matched as spans, not lines: a predicate usually sits on the line after
+ *  `waitForFunction(`, and a wait's own mention of `activeElement` is the settled wait, never
+ *  a one-shot read of it. */
+function focusAfterBareEscapeSites(source: string, lines: string[]): { rule: Rule; line: number }[] {
+  const found: { rule: Rule; line: number }[] = []
   const waitLines = new Map<number, 'settles' | 'other'>()
   for (const call of callSpans(source, /\b(waitForFunction|waitForValue|waitForStable|waitForSettledSample)\(/g)) {
     const kind = focusState.test(call.text) ? 'settles' : 'other'
@@ -137,20 +168,12 @@ export function scanSource(file: string, source: string): Site[] {
       const candidate = lines[j] ?? ''
       if (settlesFocus.test(candidate)) break
       if (focusDependent.test(candidate)) {
-        sites.push(at('focus-after-bare-escape', j))
+        found.push({ rule: 'focus-after-bare-escape', line: j })
         break
       }
     }
   })
-
-  // Rules 5 and 6 — what a spec does to the page it is measuring. Both only look inside in-page
-  // code, so a node-side `rows[0]` on an array `evaluate` RETURNED is untouched: reading a result
-  // by index is not addressing a row by index.
-  for (const call of callSpans(source, inPage)) {
-    for (const site of productDomSites(call, source)) sites.push(at(site.rule, site.line))
-  }
-
-  return sites.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule))
+  return found
 }
 
 /** The calls whose argument is code that runs IN the page. */
@@ -187,33 +210,12 @@ const receiverHead = /([A-Za-z_$][\w$]*)(?:\s*\??\.\s*[\w$]+|\s*\[[^\]]*\]|\s*\(
  * A variable bound to `document.createElement` or `.cloneNode` is the spec's own and is masked,
  * whatever it is called, and so is `document.documentElement`, which is where theme, density,
  * width and accent legitimately live.
- *
- * The positional rule only applies to a spec that also addresses rows by `data-run-id`: mixing the
- * two is the inconsistency worth catching, because the file has already said which row it means.
  */
 function productDomSites(call: CallSpan, source: string): { rule: Rule; line: number }[] {
   const found: { rule: Rule; line: number }[] = []
   const owned = new Set<string>()
   for (const match of call.text.matchAll(specOwned)) owned.add(match[1] as string)
-  const rooted = new Set<string>()
-  // Two passes, so `const cell = row.querySelector(…)` then `const link = cell.firstChild` both
-  // land. A third would buy nothing the specs actually write.
-  for (let pass = 0; pass < 2; pass += 1) {
-    for (const line of call.text.split('\n')) {
-      const bound = boundNames.exec(line)
-      if (!bound) continue
-      const names = (bound[1] as string).replace(/[[\]{}.]/g, ' ').split(/[,\s]+/).filter(Boolean)
-      const rhs = line.slice((bound.index ?? 0) + bound[0].length)
-      const head = receiverHead.exec(rhs.trim())?.[1]
-      // Rooted when the right-hand side reaches into the page: through `querySelector`, through
-      // a name already known to be rooted at its head, or — for `[...chip.childNodes].find(…)` —
-      // anywhere inside it. Looser than the head test on purpose: a binding that MENTIONS a
-      // rendered node is one, and the cost of being wrong is one fixture record.
-      const fromRooted = [...rooted].some((name) => new RegExp(`\\b${name}\\b`).test(rhs))
-      if (!(rhs.includes('querySelector') || (head !== undefined && rooted.has(head)) || fromRooted)) continue
-      for (const name of names) if (!owned.has(name)) rooted.add(name)
-    }
-  }
+  const rooted = rootedNames(call.text, owned)
 
   const isRendered = (before: string): boolean => {
     const trimmed = before.trimEnd()
@@ -230,15 +232,52 @@ function productDomSites(call: CallSpan, source: string): { rule: Rule; line: nu
     }
   }
 
-  if (source.includes('data-run-id')) {
-    for (const match of call.text.matchAll(positional)) {
-      const name = /^[\w$]+/.exec(match[0])?.[0]
-      if (match[0].includes('querySelectorAll') || (name !== undefined && rooted.has(name) && !owned.has(name))) {
-        found.push({ rule: 'positional-row-index', line: lineOf(source, call.textStart + match.index) })
-      }
+  for (const site of positionalRowSites(call, source, rooted, owned)) found.push(site)
+
+  return found
+}
+
+/** The names a call's in-page code binds to a rendered node. Two passes, so
+ *  `const cell = row.querySelector(…)` then `const link = cell.firstChild` both land. A third
+ *  would buy nothing the specs actually write. */
+function rootedNames(text: string, owned: Set<string>): Set<string> {
+  const rooted = new Set<string>()
+  for (let pass = 0; pass < 2; pass += 1) {
+    for (const line of text.split('\n')) {
+      for (const name of rootBoundNames(line, rooted, owned)) rooted.add(name)
     }
   }
+  return rooted
+}
 
+/** The names one binding line roots, when its right-hand side reaches into the page: through
+ *  `querySelector`, through a name already known to be rooted at its head, or — for
+ *  `[...chip.childNodes].find(…)` — anywhere inside it. Looser than the head test on purpose:
+ *  a binding that MENTIONS a rendered node is one, and the cost of being wrong is one fixture
+ *  record. */
+function rootBoundNames(line: string, rooted: Set<string>, owned: Set<string>): string[] {
+  const bound = boundNames.exec(line)
+  if (!bound) return []
+  const names = (bound[1] as string).replace(/[[\]{}.]/g, ' ').split(/[,\s]+/).filter(Boolean)
+  const rhs = line.slice((bound.index ?? 0) + bound[0].length)
+  const head = receiverHead.exec(rhs.trim())?.[1]
+  const fromRooted = [...rooted].some((name) => new RegExp(`\\b${name}\\b`).test(rhs))
+  if (!(rhs.includes('querySelector') || (head !== undefined && rooted.has(head)) || fromRooted)) return []
+  return names.filter((name) => !owned.has(name))
+}
+
+/** A positional read of a live node list, when the file also addresses rows by `data-run-id`:
+ *  mixing the two is the inconsistency worth catching, because the file has already said which
+ *  row it means. */
+function positionalRowSites(call: CallSpan, source: string, rooted: Set<string>, owned: Set<string>): { rule: Rule; line: number }[] {
+  const found: { rule: Rule; line: number }[] = []
+  if (!source.includes('data-run-id')) return found
+  for (const match of call.text.matchAll(positional)) {
+    const name = /^[\w$]+/.exec(match[0])?.[0]
+    if (match[0].includes('querySelectorAll') || (name !== undefined && rooted.has(name) && !owned.has(name))) {
+      found.push({ rule: 'positional-row-index', line: lineOf(source, call.textStart + match.index) })
+    }
+  }
   return found
 }
 
@@ -271,44 +310,85 @@ function matchingParen(source: string, open: number): number {
   // A stack of what encloses the cursor: a string quote, a template, or a `${` inside one.
   const context: string[] = []
   for (let i = open; i < source.length; i += 1) {
-    const ch = source[i] ?? ''
     const top = context.at(-1)
     if (top === "'" || top === '"') {
-      if (ch === '\\') i += 1
-      else if (ch === top) context.pop()
+      i = advanceInString(source, i, top, context)
       continue
     }
     if (top === '`') {
-      if (ch === '\\') i += 1
-      else if (ch === '`') context.pop()
-      else if (ch === '$' && source[i + 1] === '{') {
-        context.push('${')
-        i += 1
-      }
+      i = advanceInTemplate(source, i, context)
       continue
     }
     // Code: either the top level or a `${…}` slot.
-    if (ch === '/' && source[i + 1] === '/') {
-      i = source.indexOf('\n', i)
-      if (i === -1) return source.length
+    const comment = commentEnd(source, i)
+    if (comment !== -1) {
+      i = comment
       continue
     }
-    if (ch === '/' && source[i + 1] === '*') {
-      const end = source.indexOf('*/', i + 2)
-      if (end === -1) return source.length
-      i = end + 1
-      continue
-    }
-    if (ch === "'" || ch === '"' || ch === '`') context.push(ch)
-    else if (ch === '{' && top === '${') context.push('{')
-    else if (ch === '}' && (top === '${' || top === '{')) context.pop()
-    else if (ch === '(') depth += 1
-    else if (ch === ')') {
-      depth -= 1
-      if (depth === 0) return i
-    }
+    const ch = source[i] ?? ''
+    const next = stepCode(ch, top, context, depth)
+    if (ch === ')' && next === 0) return i
+    depth = next
   }
   return source.length
+}
+
+/** The index a quoted string hands back: an escape skips its target character, the closing
+ *  quote leaves the string. */
+function advanceInString(source: string, i: number, quote: "'" | '"', context: string[]): number {
+  const ch = source[i] ?? ''
+  if (ch === '\\') return i + 1
+  if (ch === quote) context.pop()
+  return i
+}
+
+/** The index a template literal hands back: an escape skips its target, the closing backtick
+ *  leaves the template, and a `${` opens a code slot on the context stack. */
+function advanceInTemplate(source: string, i: number, context: string[]): number {
+  const ch = source[i] ?? ''
+  if (ch === '\\') return i + 1
+  if (ch === '`') context.pop()
+  else if (ch === '$' && source[i + 1] === '{') {
+    context.push('${')
+    return i + 1
+  }
+  return i
+}
+
+/** The index a comment at `i` hands back: past a line comment's end, past a block comment's
+ *  closer — or -1 when the character starts no comment. An unterminated comment runs to the
+ *  source end. */
+function commentEnd(source: string, i: number): number {
+  if (source[i] === '/' && source[i + 1] === '/') {
+    const end = source.indexOf('\n', i)
+    return end === -1 ? source.length : end
+  }
+  if (source[i] === '/' && source[i + 1] === '*') {
+    const end = source.indexOf('*/', i + 2)
+    return end === -1 ? source.length : end + 1
+  }
+  return -1
+}
+
+/** What one code character does to the paren scan: a quote or template opens on the context
+ *  stack, a `{` opens a brace frame inside a `${…}` slot, a `}` closes one, and `(` / `)` step
+ *  the depth. Returns the depth after the character. */
+function stepCode(ch: string, top: string | undefined, context: string[], depth: number): number {
+  if (ch === "'" || ch === '"' || ch === '`') {
+    context.push(ch)
+    return depth
+  }
+  if (ch === '{' && top === '${') {
+    context.push('{')
+    return depth
+  }
+  if (ch === '}' && (top === '${' || top === '{')) {
+    context.pop()
+    return depth
+  }
+  if (ch === '(') return depth + 1
+  if (ch === ')') return depth - 1
+  return depth
 }
 
 function lineOf(source: string, offset: number): number {
