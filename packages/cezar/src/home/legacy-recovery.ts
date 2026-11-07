@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { statSync } from 'node:fs';
 import { z } from 'zod';
 import type { HomeRecoveryFile } from '@open-mercato/cezar-contract/home-recovery';
 import { homeFileSchema } from '@open-mercato/cezar-contract/home-recovery';
@@ -7,7 +8,7 @@ import { HomeStore } from './store.ts';
 import { homeFileKind, homeFileLocation } from './file-location.ts';
 import { assertHomePath } from './boundary.ts';
 import { homeChanged } from './changes.ts';
-import { VersionLog, readBytes } from './version-log.ts';
+import { VersionLog, readBytes, type OutsideWrite } from './version-log.ts';
 import { replacePrivate } from './private-files.ts';
 import { migrationPrivacy } from './migration-files.ts';
 import { writeMigrationRecord, type MigrationRecord } from './migration-record.ts';
@@ -16,6 +17,7 @@ import { mergeLegacyJson } from './legacy-merge.ts';
 import { preserveAccountRelocations } from './legacy-account-paths.ts';
 
 const incidentSchema = z.object({ restoreHash: z.string().nullable(), observedHash: z.string().nullable(), detectedAt: z.iso.datetime() });
+const baseChecks = new Map<string, { stamp: string; available: boolean }>();
 
 function journal(home: Home, file: string): VersionLog {
   const { root } = homeFileLocation(home, file);
@@ -40,6 +42,29 @@ function importable(source: LegacySource): boolean {
     && entry.target?.path === entry.path && entry.target.kind === homeFileKind(entry.path);
 }
 
+/** Retained versions are immutable; metadata changes invalidate their hash/JSON check. */
+function baseAvailable(log: VersionLog, flag: OutsideWrite): boolean {
+  // A recorded absence is the valid empty base for a file created after migration.
+  if (flag.restoreHash === null) return true;
+  try {
+    const stat = statSync(join(log.directory, flag.restoreHash), { bigint: true });
+    const stamp = `${flag.restoreHash}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    const cached = baseChecks.get(log.directory);
+    if (cached?.stamp === stamp) return cached.available;
+    const bytes = log.recoveryBytes(flag); // Read failures are transient: the outer catch retries next poll.
+    let available = false;
+    try {
+      const base: unknown = bytes === null ? null : JSON.parse(bytes.toString('utf8'));
+      available = base !== null && typeof base === 'object' && !Array.isArray(base);
+    } catch { /* Invalid JSON stays Ignore-only without another read per poll. */ }
+    baseChecks.set(log.directory, { stamp, available });
+    return available;
+  } catch {
+    baseChecks.delete(log.directory);
+    return false;
+  }
+}
+
 export function getLegacyRecovery(home: Home, enabled: boolean): HomeRecoveryFile[] {
   const files: HomeRecoveryFile[] = [];
   try {
@@ -50,8 +75,12 @@ export function getLegacyRecovery(home: Home, enabled: boolean): HomeRecoveryFil
       try {
         const source = readLegacySource(record, entry);
         if (source.hash === entry.hash) continue;
-        const flag = store.transaction(() => incident(journal(home, entry.path), source), [homeFileLocation(home, entry.path).path]);
-        files.push({ file: entry.path, reason: 'legacy-change', detectedAt: flag.detectedAt, canRestore: false, canImport: importable(source) });
+        const state = store.transaction(() => {
+          const log = journal(home, entry.path);
+          const flag = incident(log, source);
+          return { detectedAt: flag.detectedAt, canImport: importable(source) && baseAvailable(log, flag) };
+        }, [homeFileLocation(home, entry.path).path]);
+        files.push({ file: entry.path, reason: 'legacy-change', canRestore: false, ...state });
       } catch { /* One unreadable legacy file or auxiliary journal must not hide other rows. */ }
     }
   } catch { /* A missing or unreadable migration record leaves the cockpit available. */ }
