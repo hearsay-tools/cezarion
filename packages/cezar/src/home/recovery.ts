@@ -7,6 +7,8 @@ import { HomeStore } from './store.ts';
 import { digest, readBytes } from './version-log.ts';
 import { restorePinnedRecovery } from '../workspace/backup-cli.ts';
 import { homeFileLocation, homePathLocation } from './file-location.ts';
+import { getLegacyRecovery, resolveLegacyRecovery } from './legacy-recovery.ts';
+import { REBRAND_SWITCH } from './switch.ts';
 export { subscribeHomeRecovery } from './recovery-watch.ts';
 
 interface CachedFile { fingerprint: string; state: HomeRecoveryFile | undefined; pinnedPath?: string | undefined }
@@ -42,7 +44,7 @@ export function recoveryFiles(home: Home): HomeFile[] {
 }
 
 /** Content fingerprints avoid reacquiring every HomeStore lock on repeated cockpit requests. */
-export function getHomeRecovery(home: Home): HomeRecovery {
+export function getHomeRecovery(home: Home, legacyCanary = REBRAND_SWITCH): HomeRecovery {
   const key = JSON.stringify([home.config, home.state]);
   let cache = caches.get(key);
   if (!cache) { cache = new Map(); caches.set(key, cache); }
@@ -65,6 +67,8 @@ export function getHomeRecovery(home: Home): HomeRecovery {
     }
     if (entry?.state) files.push(entry.state);
   }
+  // A live-file incident takes precedence. Offer the legacy row once that incident resolves.
+  files.push(...getLegacyRecovery(home, legacyCanary).filter(legacy => !files.some(file => file.file === legacy.file)));
   return { files };
 }
 
@@ -74,7 +78,14 @@ export async function restoreHomeRecovery(home: Home, file: HomeFile, detectedAt
   restorePinnedRecovery(file, home, detectedAt);
 }
 
-export function acceptHomeRecovery(home: Home, file: HomeFile, detectedAt?: string): void {
+export function acceptHomeRecovery(home: Home, file: HomeFile, detectedAt?: string, legacyCanary = REBRAND_SWITCH): void {
   homeFileSchema.parse(file);
-  new HomeStore(home).acceptRecovery(homeFileLocation(home, file).path, detectedAt);
+  const store = new HomeStore(home);
+  const path = homeFileLocation(home, file).path;
+  if (legacyCanary && !store.recovery(path)) resolveLegacyRecovery(home, file, detectedAt, 'ignore', legacyCanary);
+  else store.acceptRecovery(path, detectedAt);
+}
+
+export function importHomeRecovery(home: Home, file: HomeFile, detectedAt?: string, legacyCanary = REBRAND_SWITCH): void {
+  resolveLegacyRecovery(home, file, detectedAt, 'import', legacyCanary);
 }

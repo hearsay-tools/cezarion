@@ -75,3 +75,11 @@ response is the fresh snapshot; a recovery failure returns `{error}` with 409.
 They use the normal origin guard and require `localHandoff`; hosted sessions receive 403. Remote-settings grant files are host-CLI-only and receive 403 even locally. GET uses the same read boundary as workspace config. No file content is returned.
 
 Recovery actions apply only to the incident named by `detectedAt`. A newer incident returns 409; an already resolved incident returns the current snapshot without writing. Explicit CLI backup restore can still select retained backups when no incident is open.
+
+Behind `REBRAND_SWITCH`, a committed migrated home also reports `legacy-change` rows
+with `canImport`. POST `/home/recovery/import` takes the same `{file, detectedAt}` and
+uses the same local-only and host-CLI grant guards. Import performs a three-way merge
+through HomeStore and requires its backup to succeed. `/accept` means Ignore for a
+legacy row: it keeps the live file and records the observed legacy hash and next merge
+base. Deleted legacy files are Ignore-only. The explicit `legacyCanary` server option
+exists for fixtures; its default is the release switch, with no CLI or env setting.

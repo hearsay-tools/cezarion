@@ -1,0 +1,80 @@
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, expect, it, vi } from 'vitest';
+import { Home } from '../home/home.ts';
+import { HomeStore } from '../home/store.ts';
+import { migrateLegacyHome } from '../home/migrate.ts';
+import { getHomeRecovery } from '../home/recovery.ts';
+import { readMigrationRecord } from '../home/migration-record.ts';
+import { digest } from '../home/version-log.ts';
+import { cleanStoreRoots, storeRoot } from '../home/store.testkit.ts';
+import { listBackups } from './backups.ts';
+import { runBackupCommand } from './backup-cli.ts';
+
+afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
+
+function fixture() {
+  const legacy = Home.sandbox(storeRoot());
+  const home = Home.sandbox(storeRoot(), { layout: 'split' });
+  const file = 'remote-settings/4321.json';
+  const source = join(legacy.root, file);
+  const target = join(home.config, file);
+  new HomeStore(legacy).writeJson(source, { enabled: false, liveOnly: 'base' });
+  migrateLegacyHome(legacy, home);
+  new HomeStore(home).writeJson(target, { enabled: false, liveOnly: 'live' });
+  writeFileSync(source, JSON.stringify({ enabled: true, liveOnly: 'base' }));
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  return { legacy, home, file, source, target };
+}
+
+it.each(['import', 'ignore'])('resolves a legacy grant through host CLI %s', async action => {
+  const { home, file, source, target } = fixture();
+  const previous = readFileSync(target);
+  expect(getHomeRecovery(home, true).files).toContainEqual(expect.objectContaining({ file, reason: 'legacy-change' }));
+  expect(await runBackupCommand([action, file], {}, home, true)).toBe(0);
+  expect(getHomeRecovery(home, true).files).toEqual([]);
+  expect(JSON.parse(readFileSync(target, 'utf8'))).toEqual({ enabled: action === 'import', liveOnly: 'live' });
+  const hash = digest(readFileSync(source));
+  expect(readMigrationRecord(home)!.files.find(entry => entry.path === file)?.hash).toBe(hash);
+  expect(readFileSync(join(home.config, '.versions', file, hash!))).toEqual(readFileSync(source));
+  if (action === 'import') expect(listBackups(file, home).some(backup => readFileSync(backup.path).equals(previous))).toBe(true);
+});
+
+it.each(['import', 'ignore'])('refuses host CLI %s by default while the switch is off', async action => {
+  const { home, file, target } = fixture();
+  const before = readFileSync(target);
+  const record = readMigrationRecord(home);
+  expect(await runBackupCommand([action, file], {}, home)).toBe(1);
+  expect(console.error).toHaveBeenCalledWith('Legacy home import and ignore are not enabled.');
+  expect(readFileSync(target)).toEqual(before);
+  expect(readMigrationRecord(home)).toEqual(record);
+});
+
+it('allows host CLI Ignore for a deleted grant and refuses Import', async () => {
+  const { home, file, source, target } = fixture();
+  const before = readFileSync(target);
+  rmSync(source);
+  expect(await runBackupCommand(['import', file], {}, home, true)).toBe(1);
+  expect(console.error).toHaveBeenCalledWith(expect.stringContaining('cannot be imported'));
+  expect(await runBackupCommand(['ignore', file], {}, home, true)).toBe(0);
+  expect(getHomeRecovery(home, true).files).toEqual([]);
+  expect(readFileSync(target)).toEqual(before);
+});
+
+it('shows legacy command usage only when the canary is enabled', async () => {
+  const { home } = fixture();
+  expect(await runBackupCommand(['--help'], {}, home)).toBe(0);
+  expect(console.log).toHaveBeenLastCalledWith(expect.not.stringContaining('backup import'));
+  expect(await runBackupCommand(['--help'], {}, home, true)).toBe(0);
+  expect(console.log).toHaveBeenLastCalledWith(expect.stringContaining('cez backup import <file>'));
+  expect(console.log).toHaveBeenLastCalledWith(expect.stringContaining('cez backup ignore <file>'));
+});
+
+it.each([['import'], ['ignore', 'remote-settings/4321.json', '--at', '2026-11-07T00:00:00Z'],
+  ['import', '../outside.json'], ['ignore', 'remote-settings/4321.json', 'extra']])('rejects invalid legacy CLI arguments %j', async (...argv) => {
+  const { home, target } = fixture();
+  const before = readFileSync(target);
+  expect(await runBackupCommand(argv, {}, home, true)).toBe(1);
+  expect(readFileSync(target)).toEqual(before);
+});

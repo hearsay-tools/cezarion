@@ -73,3 +73,27 @@ it('accepts an outside file as found and permits the next HomeStore write', asyn
   await fixture.control({ kind: 'write-ui-state', value: 'after-accept' })
   expect(fixture.readState().uiState.recoveryFixture).toBe('after-accept')
 })
+
+it('imports a late legacy change from the global banner without a reload', async () => {
+  const before = fixture.legacyHash()
+  await fixture.control({ kind: 'legacy-ui-state', value: 'late-import' })
+  const text = browser.waitForValue<string>(`document.querySelector(${JSON.stringify(row('ui-state.json'))})?.textContent`,
+    value => typeof value === 'string' && value.includes('ui-state.json changed in the old home.'))
+  expect(text).toContain('Old-home changes win')
+  browser.click(`${row('ui-state.json')} button[data-action="import"]`)
+  const count = browser.waitForValue<number>(`document.querySelectorAll(${JSON.stringify(row('ui-state.json'))}).length`, value => value === 0)
+  expect(count).toBe(0)
+  expect(fixture.readState().uiState.recoveryFixture).toBe('late-import')
+  expect(fixture.legacyHash()).not.toBe(before)
+})
+
+it('ignores a late legacy change and records its hash while keeping the live file', async () => {
+  const before = fixture.legacyHash()
+  await fixture.control({ kind: 'legacy-ui-state', value: 'late-ignore' })
+  browser.waitForFunction(`document.querySelector(${JSON.stringify(row('ui-state.json'))})?.textContent.includes('changed in the old home.')`)
+  browser.click(`${row('ui-state.json')} button[data-action="accept"]`)
+  const count = browser.waitForValue<number>(`document.querySelectorAll(${JSON.stringify(row('ui-state.json'))}).length`, value => value === 0)
+  expect(count).toBe(0)
+  expect(fixture.readState().uiState.recoveryFixture).toBe('original')
+  expect(fixture.legacyHash()).not.toBe(before)
+})

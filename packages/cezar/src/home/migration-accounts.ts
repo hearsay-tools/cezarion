@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
@@ -13,6 +13,7 @@ import { digest, readBytes, VersionLog } from './version-log.ts';
 import { assertHomePath } from './boundary.ts';
 import { readMigrationRecord, writeMigrationRecord, type MigrationRecord } from './migration-record.ts';
 import { withHomeLock } from './write-lock.ts';
+import { migrationAccountSource } from './migration-account-source.ts';
 
 export interface MigrationAccount { id: string; configDir: string; source: string; target: string; provider: string }
 
@@ -24,12 +25,8 @@ export function migrationAccountInventory(legacy: Home, target: Home): { account
   const parsed = parseAgentAccountEntries(readAgentAccountSource(legacy, readUtf8).rows);
   const accounts: MigrationAccount[] = [];
   for (const account of parsed.accounts) {
-    let source: string;
-    try { source = realpathSync(expandTilde(account.configDir)); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-      throw error;
-    }
-    if (!insideDirectory(realpathSync(legacy.root), source)) continue;
+    const source = migrationAccountSource(legacy.root, account.configDir);
+    if (source === undefined) continue;
     if (insideDirectory(source, target.config) || insideDirectory(source, target.data)) {
       throw new Error(`Account ${account.id} contains the migration target: ${source}`);
     }
