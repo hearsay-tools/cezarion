@@ -4,7 +4,7 @@ import { parse } from '@babel/parser';
 import type { Node } from '@babel/types';
 import { property, unwrapped, visit } from './home-boundary.ts';
 import { lineAt, repoRoot, type SourceRule } from './source-rule.ts';
-import { productEnvHelpers, scannedEnvFile } from './undocumented-env-name.ts';
+import { productEnvCalls, scannedEnvFile } from './undocumented-env-name.ts';
 
 export const productEnvBaselineFile = 'packages/cezar/src/lint/product-env-read.baseline.json';
 const ACCESSOR = 'packages/cezar/src/core/product-env.ts';
@@ -19,28 +19,78 @@ export function readProductEnvBaseline(path = join(repoRoot, productEnvBaselineF
 const productName = (name: string | undefined): boolean => /^(CEZ|HSQ)_[A-Z0-9_]+$/.test(name ?? '');
 const member = (node: Node): boolean => node.type === 'MemberExpression' || node.type === 'OptionalMemberExpression';
 
-function envReference(node: Node | null | undefined, aliases: Set<string>): boolean {
-  if (!node) return false;
-  const target = unwrapped(node);
-  if (target.type === 'Identifier') return aliases.has(target.name) || /env$/i.test(target.name);
-  return member(target) && property(target) === 'env';
+type EnvReference = 'global' | 'process' | 'env';
+type EnvBindings = Map<string, EnvReference>;
+
+function childReference(owner: EnvReference | undefined, key: string | undefined): EnvReference | undefined {
+  if (owner === 'global' && key === 'process') return 'process';
+  // As with member reads, an env property is conservatively treated as an env source.
+  if (key === 'env') return 'env';
+  return undefined;
 }
 
-/** Track simple aliases and typed env parameters. Dynamic env indexing remains an inventoried read. */
-function envBindings(ast: Node): Set<string> {
-  const aliases = new Set<string>();
+function reference(node: Node | null | undefined, aliases: EnvBindings): EnvReference | undefined {
+  if (!node) return undefined;
+  const target = unwrapped(node);
+  if (target.type === 'Identifier') {
+    if (aliases.has(target.name)) return aliases.get(target.name);
+    if (target.name === 'process') return 'process';
+    if (target.name === 'globalThis') return 'global';
+    if (/env$/i.test(target.name)) return 'env';
+  }
+  if (target.type === 'MemberExpression' || target.type === 'OptionalMemberExpression') {
+    return childReference(reference(target.object, aliases), property(target));
+  }
+  return undefined;
+}
+
+function typedReference(node: Node): EnvReference | undefined {
+  if (!('typeAnnotation' in node) || node.typeAnnotation?.type !== 'TSTypeAnnotation') return undefined;
+  const type = node.typeAnnotation.typeAnnotation;
+  if (type.type === 'TSTypeQuery') return reference(type.exprName, new Map());
+  if (type.type !== 'TSTypeReference' || type.typeName.type !== 'TSQualifiedName') return undefined;
+  if (type.typeName.right.name === 'ProcessEnv') return 'env';
+  return type.typeName.right.name === 'Process' ? 'process' : undefined;
+}
+
+/** Walk the pattern with its source, including defaults and copies made by rest bindings. */
+function patternReads(pattern: Node, owner: EnvReference | undefined, aliases: EnvBindings, bind = false): EnvRead[] {
+  if (pattern.type === 'AssignmentPattern') return patternReads(pattern.left, owner ?? reference(pattern.right, aliases), aliases, bind);
+  if (pattern.type === 'Identifier') {
+    if (bind && owner) aliases.set(pattern.name, owner);
+    return [];
+  }
+  if (pattern.type !== 'ObjectPattern') return [];
+  return pattern.properties.flatMap(field => {
+    if (field.type === 'RestElement') {
+      const reads: EnvRead[] = owner === 'env' ? [{ form: 'computed', name: '*', offset: field.start ?? 0 }] : [];
+      return [...reads, ...patternReads(field.argument, owner, aliases, bind)];
+    }
+    const name = field.computed && field.key.type === 'Identifier' ? undefined : property(field.key);
+    const reads: EnvRead[] = (owner === 'env' && productName(name)) || (owner !== undefined && name === undefined)
+      ? [{ form: name === undefined ? 'computed' : 'destructure', name: name ?? '*', offset: field.start ?? 0 }] : [];
+    return [...reads, ...patternReads(field.value, childReference(owner, name), aliases, bind)];
+  });
+}
+
+function bindingReads(node: Node, aliases: EnvBindings, bind = false): EnvRead[] {
+  if (node.type === 'VariableDeclarator') return patternReads(node.id, reference(node.init, aliases), aliases, bind);
+  if (node.type === 'AssignmentExpression') return patternReads(node.left, reference(node.right, aliases), aliases, bind);
+  if (node.type === 'ForOfStatement' || node.type === 'ForInStatement') return patternReads(node.left, undefined, aliases, bind);
+  if (!('params' in node) || !Array.isArray(node.params)) return [];
+  return node.params.flatMap(param => {
+    const pattern = param.type === 'AssignmentPattern' ? param.left : param;
+    return patternReads(param, typedReference(pattern), aliases, bind);
+  });
+}
+
+/** Track env, process and global aliases, including aliases nested in destructuring. */
+function envBindings(ast: Node): EnvBindings {
+  const aliases: EnvBindings = new Map();
   visit(ast, node => {
-    if (node.type === 'Identifier' && node.typeAnnotation?.type === 'TSTypeAnnotation') {
-      const type = node.typeAnnotation.typeAnnotation;
-      if (type.type === 'TSTypeReference' && type.typeName.type === 'TSQualifiedName' && type.typeName.right.name === 'ProcessEnv') aliases.add(node.name);
-    }
-    if (node.type !== 'VariableDeclarator') return;
-    if (node.id.type === 'Identifier' && envReference(node.init, aliases)) aliases.add(node.id.name);
-    if (node.id.type === 'ObjectPattern' && node.init?.type === 'Identifier' && node.init.name === 'process') {
-      for (const field of node.id.properties) {
-        if (field.type === 'ObjectProperty' && property(field.key) === 'env' && field.value.type === 'Identifier') aliases.add(field.value.name);
-      }
-    }
+    const typed = typedReference(node);
+    if (node.type === 'Identifier' && typed) aliases.set(node.name, typed);
+    bindingReads(node, aliases, true);
   });
   return aliases;
 }
@@ -69,33 +119,11 @@ function writeTargets(ast: Node): Set<Node> {
   return targets;
 }
 
-function destructuredReads(pattern: Node, source: Node | null | undefined, aliases: Set<string>): EnvRead[] {
-  if (pattern.type !== 'ObjectPattern' || !envReference(source, aliases)) return [];
-  return pattern.properties.flatMap(field => {
-    if (field.type !== 'ObjectProperty') return [];
-    const name = property(field.key);
-    return productName(name) ? [{ form: 'destructure' as const, name: name!, offset: field.start ?? 0 }] : [];
-  });
-}
-
-function memberRead(node: Node, aliases: Set<string>, writes: Set<Node>): EnvRead[] {
+function memberRead(node: Node, aliases: EnvBindings, writes: Set<Node>): EnvRead[] {
   if ((node.type !== 'MemberExpression' && node.type !== 'OptionalMemberExpression') || writes.has(node)) return [];
   const name = property(node);
-  if (!productName(name) && !(node.computed && name === undefined && envReference(node.object, aliases))) return [];
+  if (!productName(name) && !(node.computed && name === undefined && reference(node.object, aliases) === 'env')) return [];
   return [{ form: node.computed ? name === undefined ? 'computed' : 'bracket' : 'dot', name: name ?? '*', offset: node.start ?? 0 }];
-}
-
-function parameterReads(node: Node, aliases: Set<string>): EnvRead[] {
-  if (!('params' in node) || !Array.isArray(node.params)) return [];
-  return node.params.flatMap(param => {
-    const pattern = param.type === 'AssignmentPattern' ? param.left : param;
-    if (pattern.type !== 'ObjectPattern') return [];
-    if (param.type === 'AssignmentPattern' && envReference(param.right, aliases)) return destructuredReads(pattern, param.right, aliases);
-    if (pattern.typeAnnotation?.type !== 'TSTypeAnnotation') return [];
-    const type = pattern.typeAnnotation.typeAnnotation;
-    return type.type === 'TSTypeReference' && type.typeName.type === 'TSQualifiedName' && type.typeName.right.name === 'ProcessEnv'
-      ? destructuredReads(pattern, { type: 'Identifier', name: 'env' }, aliases) : [];
-  });
 }
 
 /** AST scanning avoids strings/comments, supports env arguments, brackets, aliases and destructuring. */
@@ -103,17 +131,14 @@ export function productEnvReads(source: string, file = 'file.ts'): EnvRead[] {
   const ast = parse(source, { sourceType: 'unambiguous', plugins: ['typescript', ...(/\.[cm]?[jt]sx$/.test(file) ? ['jsx' as const] : [])] });
   const aliases = envBindings(ast);
   const writes = writeTargets(ast);
-  const helpers = productEnvHelpers(source);
   const reads: EnvRead[] = [];
   visit(ast, node => {
     reads.push(...memberRead(node, aliases, writes));
-    if (node.type === 'VariableDeclarator') reads.push(...destructuredReads(node.id, node.init, aliases));
-    if (node.type === 'AssignmentExpression') reads.push(...destructuredReads(node.left, node.right, aliases));
-    reads.push(...parameterReads(node, aliases));
-    if ((node.type === 'CallExpression' || node.type === 'OptionalCallExpression') && helpers.has(property(node.callee) ?? '') && node.arguments[0]?.type !== 'StringLiteral') {
-      reads.push({ form: 'helper-dynamic', name: '*', offset: node.start ?? 0 });
-    }
+    reads.push(...bindingReads(node, aliases));
   });
+  for (const call of productEnvCalls(ast)) {
+    if (call.suffix === undefined) reads.push({ form: 'helper-dynamic', name: '*', offset: call.offset });
+  }
   return reads.sort((a, b) => a.offset - b.offset);
 }
 

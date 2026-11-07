@@ -60,3 +60,59 @@ it('rejects stale, duplicate and invalid allowances', () => {
     expect(staleProductEnvReads(root)).toHaveLength(3);
   } finally { rmSync(root, {recursive: true, force: true}); }
 });
+
+it('scans nested env patterns from process and globalThis with renames, defaults and rest', () => {
+  const source = `const {env: {CEZ_NESTED}} = process;
+    const {env: {HSQ_RENAMED: local = 'x'} = {}} = globalThis.process;
+    ({process: {env: {['CEZ_ASSIGNED']: value} = {}}} = globalThis);
+    function f({env: {HSQ_PARAMETER} = {}} = process) {}
+    const {env: selected = {}} = globalThis.process; const {CEZ_ALIAS} = selected;
+    const {env: {CEZ_PICKED, ...remaining}} = process; const {HSQ_REST} = remaining;
+    const {...processCopy} = process; const {env: {CEZ_PROCESS_REST}} = processCopy;
+    const {process: renamedProcess = process} = globalThis;
+    const {env: {HSQ_PROCESS_ALIAS}} = renamedProcess;`;
+  expect(productEnvReads(source).map(({form, name}) => [form, name])).toEqual([
+    ['destructure', 'CEZ_NESTED'], ['destructure', 'HSQ_RENAMED'],
+    ['destructure', 'CEZ_ASSIGNED'], ['destructure', 'HSQ_PARAMETER'],
+    ['destructure', 'CEZ_ALIAS'], ['destructure', 'CEZ_PICKED'], ['computed', '*'],
+    ['destructure', 'HSQ_REST'], ['destructure', 'CEZ_PROCESS_REST'],
+    ['destructure', 'HSQ_PROCESS_ALIAS'],
+  ]);
+  expect(scanProductEnvReads('packages/cezar/src/new-reader.ts', source, [])).toHaveLength(10);
+});
+
+it('scans computed nested pattern keys and default env sources without flagging ordinary patterns', () => {
+  const source = `const {env: {[key]: selected, [\`HSQ_STATIC\`]: renamed}} = process;
+    const {other: {CEZ_DEFAULT} = process.env} = input;
+    const {env: {...rest}} = globalThis.process; const {CEZ_REST} = rest;
+    const {config: {CEZ_FIXTURE}} = fixture; const {ordinary} = process.env;`;
+  expect(productEnvReads(source).map(({form, name}) => [form, name])).toEqual([
+    ['computed', '*'], ['destructure', 'HSQ_STATIC'], ['destructure', 'CEZ_DEFAULT'],
+    ['computed', '*'], ['destructure', 'CEZ_REST'],
+  ]);
+});
+
+it('accepts commented and static template helper suffixes but rejects all dynamic suffixes', () => {
+  const source = `import {productEnv /* import comment */ as setting} from './product-env.ts';
+    setting(/* reason */ \`NEW_FLAG\`); productEnv?.(/* reason */ 'OTHER_FLAG');
+    productEnv(\`FLAG_\${name}\`); setting(suffix); productEnv(); productEnv(...suffixes);`;
+  expect(productEnvReads(source).map(read => read.form)).toEqual(Array(4).fill('helper-dynamic'));
+});
+
+
+it('tracks nested typed parameters and env bindings with an unknown outer source', () => {
+  const source = `function typed({env: {CEZ_TYPED}}: NodeJS.Process) {}
+    function queried({env: {HSQ_QUERIED}}: typeof process) {}
+    function untyped({env: {CEZ_UNTYPED}}) {}
+    const {env: settings} = input; const {HSQ_SELECTED} = settings;
+    const {process: {env: {CEZ_GLOBAL}}} = globalThis;
+    const {[unknown]: candidate} = process;
+    for (const {env: {HSQ_LOOP}} of inputs) {}
+    for ({env: {CEZ_LOOP_ASSIGN}} of inputs) {}`;
+  expect(productEnvReads(source).map(({form, name}) => [form, name])).toEqual([
+    ['destructure', 'CEZ_TYPED'], ['destructure', 'HSQ_QUERIED'],
+    ['destructure', 'CEZ_UNTYPED'], ['destructure', 'HSQ_SELECTED'],
+    ['destructure', 'CEZ_GLOBAL'], ['computed', '*'], ['destructure', 'HSQ_LOOP'],
+    ['destructure', 'CEZ_LOOP_ASSIGN'],
+  ]);
+});

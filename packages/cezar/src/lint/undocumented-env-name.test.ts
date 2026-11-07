@@ -25,3 +25,20 @@ it('keeps imported helper aliases and destructured env names documented', () => 
     setting('NEW_FLAG'); setting?.('OPTIONAL'); const {CEZ_READ, HSQ_OTHER: other} = env;`))
     .toEqual(['CEZ_NEW_FLAG', 'CEZ_OPTIONAL', 'CEZ_READ', 'HSQ_NEW_FLAG', 'HSQ_OPTIONAL', 'HSQ_OTHER']);
 });
+
+it('checks literal helper suffixes across comments, whitespace, templates and import aliases', () => {
+  const source = `import {productEnv /* alias comment */ as setting} from './product-env.ts';
+    productEnv(/* reason */ "NEW_FLAG");
+    productEnv /* callee comment */ (\`TEMPLATE_FLAG\`);
+    setting?.( // argument comment
+      'ALIASED_FLAG');
+    const example = "productEnv('STRING')"; // productEnv('COMMENT')`;
+  expect(undocumented(source, new Set())).toEqual([
+    'CEZ_ALIASED_FLAG', 'CEZ_NEW_FLAG', 'CEZ_TEMPLATE_FLAG',
+    'HSQ_ALIASED_FLAG', 'HSQ_NEW_FLAG', 'HSQ_TEMPLATE_FLAG',
+  ]);
+  expect(undocumented(source, new Set([
+    'CEZ_ALIASED_FLAG', 'CEZ_NEW_FLAG', 'CEZ_TEMPLATE_FLAG',
+    'HSQ_ALIASED_FLAG', 'HSQ_NEW_FLAG', 'HSQ_TEMPLATE_FLAG',
+  ]))).toEqual([]);
+});
