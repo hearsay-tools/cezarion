@@ -21,7 +21,6 @@ import {
   agentInputSchema,
   inboxClaimSchema,
   delegationStateSchema,
-  workerCreationReceiptSchema,
   workerResultFileSchema,
   workerDestroyRetrySchema,
 } from '@open-mercato/cezar-contract/delegation';
@@ -49,7 +48,6 @@ import { LiveItemSnapshots } from './live-item-snapshots.ts';
 import { emptyFacts, stampOf, TranscriptFactsIndex, type TranscriptFacts } from './transcript-facts.ts';
 import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
-import { capacityError, workerCapacity } from '../delegation/capacity.ts';
 import { inspectGeneration, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
@@ -80,6 +78,7 @@ import { ColdReadCache, storedRow, type StoredRow } from './cold-reads.ts';
 import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
 import { RunStoreOpenError, toRunStoreOpenError } from './store-open-error.ts';
 import { claimStoreFamilies } from './claim-families.ts';
+import { createStoreOwnedRun } from './owned-run-create.ts';
 import { commitStoreWorkerResult } from './worker-result-commit.ts';
 import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } from './run-claims.ts';
 
@@ -2082,11 +2081,7 @@ export class RunStore extends EventEmitter {
     }, parentId, value, diffSnapshot, opts);
   }
 
-  /**
-   * requestHash is supplied only by the trusted service: hash the ORIGINAL normalized request,
-   * before resolving refs. A retry keeps the original worker and pinned SHA even if HEAD moved.
-   * workspace.ownerRunId is the trusted service's preallocated worker UUID.
-   */
+  /** Create an owned worker run and its parent receipt; `createStoreOwnedRun` holds the checks. */
   createOwnedRun(
     input: Parameters<RunStore['createRun']>[0],
     parentId: string,
@@ -2095,59 +2090,15 @@ export class RunStore extends EventEmitter {
     requestHash: string,
     executionIdentity: WorkerExecutionIdentity = { kind: 'internal' },
   ): RunRecord {
-    const parent = this.peek(parentId);
-    const authority = delegationStateSchema.safeParse(parent?.delegation);
-    if (!parent || !authority.success || authority.data.role !== 'root' || authority.data.historyDeletion) {
-      throw new Error('invalid delegation parent');
-    }
-    // Validate retry identity independently of the newly proposed resource.
-    const identity = workerCreationReceiptSchema.pick({ requestId: true, requestHash: true })
-      .parse({ requestId, requestHash });
-    const receipt = authority.data.receipts.find(entry => entry.requestId === identity.requestId);
-    if (receipt) {
-      if (receipt.requestHash !== identity.requestHash) throw new Error('request ID payload conflict');
-      const existing = this.peek(receipt.workerId);
-      const metadata = delegationStateSchema.safeParse(existing?.delegation);
-      if (!existing || !metadata.success || metadata.data.role !== 'worker' ||
-        metadata.data.parentRunId !== parentId || metadata.data.workspace.ownerRunId !== existing.id ||
-        existing.id === parentId) throw new Error('invalid request receipt ownership');
-      return existing;
-    }
-    // #816: the same check the spawn policy makes, inside the receipt transaction, so no path
-    // writes a receipt past either limit.
-    const refusal = capacityError(workerCapacity(parent, id => this.peek(id)));
-    if (refusal) throw new Error(refusal);
-    const metadata = delegationStateSchema.parse(worker);
-    if (metadata.role !== 'worker' || metadata.parentRunId !== parentId ||
-      metadata.workspace.ownerRunId === parentId || input.worktree === false) {
-      throw new Error('invalid worker ownership');
-    }
-    const workspace = metadata.workspace;
-    if (this.hasRun(workspace.ownerRunId)) throw new Error('worker run ID collision');
-    for (const run of this.held.values()) {
-      const owned = run.delegation?.role === 'worker' ? run.delegation.workspace : undefined;
-      if ((owned && (owned.resourceId === workspace.resourceId || owned.path === workspace.path ||
-        owned.branch === workspace.branch)) || run.worktreePath === workspace.path || run.branch === workspace.branch) {
-        throw new Error('worker resource ownership collision');
-      }
-    }
-    // Runs not in memory answer through the branch and worktree columns. A worker's planned
-    // branch is its `branch` column; its path and resource id derive from its own run id, which
-    // the id check above already proved unused.
-    if ((this.db?.findResourceHolders({ branch: workspace.branch, worktreePath: workspace.path }) ?? [])
-      .some((id) => !this.held.has(id) && !this.deleted.has(id))) throw new Error('worker resource ownership collision');
-    const delegation = delegationStateSchema.parse({
-      ...authority.data,
-      receipts: [...authority.data.receipts, { ...identity, workerId: workspace.ownerRunId }],
-    });
-    const run = { ...this.buildRun(input, workspace.ownerRunId), delegation: metadata };
-    // This transaction precedes materialization. Every launch must rotate this
-    // generation to starting before touching the workspace or a session.
-    this.writeWorkerIdentity(run.id, workerExecutionIdentitySchema.parse(executionIdentity));
-    this.writeWorkerExecution(run.id, { generation: randomUUID(), phase: 'queued' }, true);
-    // No pruning here: deleting run history cannot be part of a proposed index transaction.
-    this.commitIndex(new Map([[parentId, { ...parent, delegation }], [run.id, run]]));
-    return run;
+    return createStoreOwnedRun({
+      peek: (id) => this.peek(id),
+      hasRun: (id) => this.hasRun(id),
+      held: this.held, deleted: this.deleted, db: this.db,
+      buildRun: (ownedInput, id) => this.buildRun(ownedInput, id),
+      writeWorkerIdentity: (id, identity) => this.writeWorkerIdentity(id, identity),
+      writeWorkerExecution: (id, proof, fresh) => this.writeWorkerExecution(id, proof, fresh),
+      commitIndex: (owned) => this.commitIndex(owned),
+    }, input, parentId, requestId, worker, requestHash, executionIdentity);
   }
 
   /**
