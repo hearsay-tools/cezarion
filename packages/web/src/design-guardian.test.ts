@@ -134,7 +134,7 @@ describe('design guardian', () => {
     const button = readFileSync(path.join(APP_ROOT, 'src/components/ui/button.tsx'), 'utf8')
     const input = readFileSync(path.join(APP_ROOT, 'src/components/ui/input.tsx'), 'utf8')
     const select = readFileSync(path.join(APP_ROOT, 'src/components/ui/select.tsx'), 'utf8')
-    const composer = readFileSync(path.join(APP_ROOT, 'src/components/composer/composer.tsx'), 'utf8')
+    const composer = readFileSync(path.join(APP_ROOT, 'src/components/composer/composer-view.tsx'), 'utf8')
     expect(button).toContain('default: "h-11')
     expect(input).toContain('h-11 w-full')
     expect(select).toContain('data-[size=default]:h-11')
