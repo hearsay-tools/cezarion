@@ -102,12 +102,14 @@ export function codexApproval(method: string, rpcId: number | string, raw: unkno
   const parsed = schema.safeParse(raw);
   if (!parsed.success) return undefined;
   const params = parsed.data;
+  // The request id comes before the option ids, so a deterministic UUID mock keeps its order.
+  const requestId = randomUUID();
   const { options, responses } = approvalOptions(method, params);
   const { threadId: _threadId, turnId: _turnId, itemId: _itemId, approvalId: _approvalId, startedAtMs: _startedAtMs, availableDecisions: _availableDecisions, ...details } = params;
   const scopedDecisions = Array.isArray(_availableDecisions) ? _availableDecisions.filter(decision => typeof decision === 'object') : [];
   return {
     rpcId, turnId: params.turnId, responses,
-    event: { type: 'permission.requested', requestId: randomUUID(), itemId: params.itemId,
+    event: { type: 'permission.requested', requestId, itemId: params.itemId,
       title: approvalTitle(method, params),
       // Retain action context, including exact proposed rules and permission
       // paths. Never abbreviate an amendment into an ambiguous "always allow".
