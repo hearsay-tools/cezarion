@@ -1,5 +1,5 @@
 import type { Home } from '../home/home.ts';
-import { HomeStore, readHomeFile } from '../home/store.ts';
+import { HomeOutsideWriteError, HomeStore, readHomeFile } from '../home/store.ts';
 import { realpathSync } from 'node:fs';
 import { posix, resolve, win32 } from 'node:path';
 import { z } from 'zod';
@@ -230,7 +230,8 @@ function importLegacyAccounts(home: Home): AgentAccountStore {
       }
       return readLegacyAccounts(home, true);
     }, [home.agentAccounts]);
-  } catch {
+  } catch (error) {
+    if (error instanceof HomeOutsideWriteError) console.warn(`[cez] ${error.message}; imported accounts are available in memory only`);
     // A missing marker or read-only home still permits the historical in-memory import.
     return readLegacyAccounts(home, false);
   }
@@ -264,7 +265,8 @@ function readLegacyAccounts(home: Home, persist: boolean): AgentAccountStore {
   try {
     const path = home.agentAccounts;
     new HomeStore(home).writeJson(path, imported.data);
-  } catch {
+  } catch (error) {
+    if (error instanceof HomeOutsideWriteError) console.warn(`[cez] ${error.message}; imported accounts are available in memory only`);
     // read-only home: the import stays in memory for this process, which is still correct
   }
   return imported.data;

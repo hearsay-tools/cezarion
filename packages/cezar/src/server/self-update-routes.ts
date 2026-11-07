@@ -62,7 +62,11 @@ export function createSelfUpdateRoutes(
 
     .put('/workspace/self-update/channel', jsonZodValidator(selfUpdateChannelRequestSchema, { message: 'body must be { channel: "stable" | "nightly" | "development" }' }), async (c) => {
       const { channel } = c.req.valid('json');
-      await selfUpdate.setChannel(channel);
+      try {
+        await selfUpdate.setChannel(channel);
+      } catch (error) {
+        return c.json({ error: error instanceof Error ? error.message : String(error) }, 500);
+      }
       return c.json(await managedUpdateStatus());
     })
 

@@ -1,6 +1,9 @@
 import type { Home } from './home.ts';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { backupBeforeWrite, isBackupFile } from '../workspace/backups.ts';
+import { homeFileSchema } from '@open-mercato/cezar-contract/home-recovery';
+import { homeChanged } from './changes.ts';
+import { flagResetFromBackup, flagResetOnWrite } from './reset-detection.ts';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { backupBeforeWrite } from '../workspace/backups.ts';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 import { assertHomeWritable, createInstallMarker, readInstallMarker, underTestRunner } from './install-marker.ts';
 import { OUTSIDE_WRITE_ENFORCEMENT, readBytes, VersionLog, type OutsideWrite } from './version-log.ts';
@@ -19,16 +22,11 @@ export function homeFileRoot(path: string): string {
 /** Registry files only. No ambient paths, no user settings, no layout selection. */
 export class HomeStore {
   readonly root: string;
-  constructor(home: Home | string) { this.root = typeof home === 'string' ? home : home.root; }
+  constructor(private readonly home: Home | string) { this.root = typeof home === 'string' ? home : home.root; }
 
   private journal(path: string): VersionLog {
     const rel = relative(resolve(this.root), resolve(path));
-    if (!rel || isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) throw new Error(`Path outside HomeStore: ${path}`);
-    const parts = rel.split(sep);
-    const allowed = /^(?:config\.json(?:\.bak)?|agent-accounts\.json|ui-state\.json|server\.json|server\.install\.lock)$/;
-    if (!(parts.length === 1 && allowed.test(rel)) && !(parts.length === 2
-      && ['remote-settings', 'server-instances'].includes(parts[0]!)
-      && /^[a-zA-Z0-9-]+\.(?:json|install\.lock)$/.test(parts[1]!))) throw new Error(`Not a HomeStore file: ${path}`);
+    if (!homeFileSchema.safeParse(rel.split(sep).join('/')).success) throw new Error(`Not a HomeStore file: ${path}`);
     return new VersionLog(this.root, rel);
   }
 
@@ -62,9 +60,8 @@ export class HomeStore {
     }
     assertHomePaths(this.root, targets);
     if (backups) for (const path of paths) {
-      if (!isBackupFile(basename(path))) continue;
-      // Named instances keep their historical basename-based backup location too.
-      try { assertHomePaths(this.root, [join(dirname(path), 'backups', basename(path))]); }
+      const file = this.journal(path).relativePath;
+      try { assertHomePaths(this.root, [join(typeof this.home === 'string' ? join(this.root, 'backups') : this.home.backups, file)]); }
       catch (error) { unavailable.set(path, error); }
     }
     return unavailable;
@@ -105,23 +102,28 @@ export class HomeStore {
   }
 
   writeJson(path: string, value: unknown): void {
-    const unavailable = this.assertBoundary([path], true).get(path);
-    this.transaction(() => {
-      assertCezarHomeWriteIsSandboxed(path);
-      if (isBackupFile(basename(path))) backupBeforeWrite(path, value, { unavailable });
-      this.replace(path, Buffer.from(`${JSON.stringify(value, null, 2)}\n`));
-    });
+    this.replace(path, Buffer.from(`${JSON.stringify(value, null, 2)}\n`));
   }
 
   replace(path: string, bytes: Buffer | null): void {
-    this.assertBoundary([path]);
+    const unavailable = this.assertBoundary([path], true).get(path);
     this.transaction(() => {
-      assertCezarHomeWriteIsSandboxed(path);
       const log = this.journal(path);
-      const outside = log.inspect(readBytes(path));
-      if (outside && OUTSIDE_WRITE_ENFORCEMENT) throw new Error(`Outside write to ${path}; restore or accept it first`);
+      const previous = readBytes(path);
+      this.checkOutside(path, log, previous);
+      backupBeforeWrite(path, bytes, { home: this.home, unavailable });
+      flagResetOnWrite(log, previous, bytes);
       log.replace(path, bytes);
+      homeChanged(this.root);
     });
+  }
+
+  private checkOutside(path: string, log: VersionLog, previous: Buffer | null): void {
+    const outside = log.inspect(previous);
+    if (outside && OUTSIDE_WRITE_ENFORCEMENT) {
+      homeChanged(this.root);
+      throw new HomeOutsideWriteError(path);
+    }
   }
 
   outsideWrite(path: string): OutsideWrite | undefined {
@@ -133,18 +135,70 @@ export class HomeStore {
   }
 
   createExclusive(path: string, bytes: Buffer): void {
-    this.assertBoundary([path]);
+    const unavailable = this.assertBoundary([path], true).get(path);
     this.transaction(() => {
       const log = this.journal(path);
-      log.inspect(readBytes(path));
+      this.checkOutside(path, log, readBytes(path));
+      // Exclusive publication can only replace absence, which needs no snapshot.
+      backupBeforeWrite(path, bytes, { home: this.home, unavailable });
       log.createExclusive(path, bytes);
+      homeChanged(this.root);
     });
   }
 
   restoreOutsideWrite(path: string): void {
     this.assertBoundary([path]);
-    this.transaction(() => this.journal(path).restore(path));
+    this.restoreRecovery(path);
   }
+
+  /** Bounded flag reads; outside inspection still owns the normal per-file lock. */
+  recovery(path: string): { reason: 'outside-write' | 'reset'; detectedAt: string; canRestore: boolean } | undefined {
+    if (!this.canJournal()) return;
+    this.assertBoundary([path]);
+    return this.transaction(() => {
+      const log = this.journal(path);
+      const bytes = readBytes(path);
+      const outside = log.inspect(bytes);
+      if (!outside) flagResetFromBackup(log, bytes);
+      const flag = outside ?? log.reset();
+      return flag ? { reason: outside ? 'outside-write' as const : 'reset' as const, detectedAt: flag.detectedAt, canRestore: true } : undefined;
+    });
+  }
+
+  /** Explicit restore is the sole replacement that can bypass an unresolved outside write. */
+  restoreFile(path: string, bytes: Buffer | null): void {
+    const unavailable = this.assertBoundary([path], true).get(path);
+    this.transaction(() => {
+      const log = this.journal(path);
+      log.inspect(readBytes(path));
+      backupBeforeWrite(path, bytes, { home: this.home, unavailable });
+      log.replace(path, bytes);
+      log.clearRecovery(bytes);
+      homeChanged(this.root);
+    });
+  }
+
+  restoreRecovery(path: string): string | undefined {
+    this.assertBoundary([path], true);
+    return this.transaction(() => {
+      const log = this.journal(path);
+      const flag = log.inspect(readBytes(path)) ?? log.reset();
+      if (!flag) return;
+      this.restoreFile(path, log.recoveryBytes(flag));
+      return flag.detectedAt;
+    });
+  }
+
+  acceptOutsideWrite(path: string): void {
+    this.assertBoundary([path]);
+    this.transaction(() => {
+      const log = this.journal(path);
+      log.inspect(readBytes(path));
+      log.accept(path);
+      homeChanged(this.root);
+    });
+  }
+
 }
 
 export function readHomeFile(path: string): string {
@@ -154,4 +208,9 @@ export function readHomeFile(path: string): string {
 /** Managed-layout files stay outside HomeStore, but their entry's first write still marks it. */
 export function prepareAuthorizedHomeWrite(home: Home): void {
   if (homeEntryAuthorization(home.root)) new HomeStore(home).transaction(() => {});
+}
+
+/** Callers preserve their existing write-failure surface; best-effort writers can warn by type. */
+export class HomeOutsideWriteError extends Error {
+  constructor(path: string) { super(`Outside write to ${path}; restore or accept it first`); this.name = 'HomeOutsideWriteError'; }
 }

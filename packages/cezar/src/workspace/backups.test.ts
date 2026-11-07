@@ -10,9 +10,12 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { mergeWriteWorkspaceConfig, loadWorkspaceConfig, atomicWriteJsonSync } from './config.ts';
 import { mergeWriteAgentAccounts, loadAgentAccounts } from './agent-accounts.ts';
-import { backupBeforeWrite, listBackups } from './backups.ts';
+import { listBackups as allBackups } from './backups.ts';
 import { runBackupCommand } from './backup-cli.ts';
 
+
+// Rotation retains P0's guarantees. The separate .bak is now also listed for restore.
+const listBackups: typeof allBackups = (file, home) => allBackups(file, home).filter(entry => entry.path !== join(typeof home === 'string' ? home : home.root, 'config.json.bak'));
 
 let home: string;
 const originalHome = process.env.CEZ_HOME;
@@ -53,7 +56,6 @@ it('prunes in the write: last 20 plus the newest per day within 30 days', () => 
   for (let day = 0; day < 40; day++) {
     for (let hour = 0; hour < 3; hour++) {
       vi.setSystemTime(new Date(Date.UTC(2026, 0, day + 1, hour)));
-      backupBeforeWrite(path, { day, hour });
       Home.seedBytes(testHome(), path, Buffer.from(`${JSON.stringify({ day, hour }, null, 2)}\n`));
     }
   }
@@ -89,7 +91,7 @@ it('keeps config.json.bak recovery and restores an older registry without losing
   Home.seedBytes(Home.sandbox(home), join(home, 'config.json'), Buffer.from(JSON.stringify({ projects: [], future: 'old' })));
   await mergeWriteWorkspaceConfig((config) => { config.future = 'new'; }, testHome());
   vi.spyOn(console, 'log').mockImplementation(() => {});
-  expect(await runBackupCommand(['restore', 'config.json'], process.env, testHome())).toBe(0);
+  expect(await runBackupCommand(['restore', 'config.json', '--at', listBackups('config.json', testHome())[0]!.time], process.env, testHome())).toBe(0);
   expect((await loadWorkspaceConfig(testHome().workspaceConfig)).future).toBe('old');
   expect(JSON.parse(readFileSync(join(home, 'config.json.bak'), 'utf8')).future).toBe('old');
 });
@@ -100,18 +102,19 @@ it('creates a missing backup directory and warns once for an unusable one withou
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
   await mergeWriteWorkspaceConfig((value) => { value.extra = 1; }, testHome());
   await mergeWriteWorkspaceConfig((value) => { value.extra = 2; }, testHome());
-  expect(warning).toHaveBeenCalledTimes(1);
+  // The primary and its .bak each warn once; neither auxiliary failure blocks the save.
+  expect(warning).toHaveBeenCalledTimes(2);
   expect((await loadWorkspaceConfig(testHome().workspaceConfig)).extra).toBe(2);
   rmSync(join(home, 'backups'));
   await mergeWriteWorkspaceConfig((value) => { value.extra = 3; }, testHome());
   expect(listBackups('config.json', testHome())).toHaveLength(1);
 });
 
-it('does not back up ui-state or account config directories', () => {
+it('backs up ui-state and leaves account config directories outside backup scope', () => {
   mkdirSync(join(home, 'claude-work'));
   atomicWriteJsonSync(join(home, 'ui-state.json'), { tab: 1 });
   atomicWriteJsonSync(join(home, 'ui-state.json'), { tab: 2 });
-  expect(listBackups(undefined, testHome())).toEqual([]);
+  expect(listBackups(undefined, testHome()).map(entry => entry.file)).toEqual(['ui-state.json']);
 });
 
 it.each([['restore', '../config.json'], ['restore', 'config.json', '--at', 'invalid'], ['restore', 'config.json'], ['list', 'config.json', '--at', '2026-01-01']])('rejects invalid or unavailable backups: %j', async (...args) => {
@@ -154,7 +157,7 @@ it.each(['config.json', 'agent-accounts.json'] as const)('warns when restoring %
   await write((value) => { value.future = 'new'; }, testHome());
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'log').mockImplementation(() => {});
-  expect(await runBackupCommand(['restore', file], process.env, testHome())).toBe(0);
+  expect(await runBackupCommand(['restore', file, '--at', listBackups(file, testHome())[0]!.time], process.env, testHome())).toBe(0);
   expect(warning).toHaveBeenCalledWith(`[cez] restore dropped 1 invalid ${key} entries from the snapshot`);
   expect(JSON.parse(readFileSync(join(home, file), 'utf8')).future).toBe('preserved');
 });
@@ -198,6 +201,7 @@ it('publishes only completed staging bytes and retries an exclusive publication 
   const link = fs.linkSync;
   let attempts = 0;
   vi.spyOn(fs, 'linkSync').mockImplementation((stage, target) => {
+    if (dirname(String(target)) !== join(home, 'backups', 'config.json')) { link(stage, target); return; }
     expect(readFileSync(stage)).toEqual(previous);
     expect(listBackups('config.json', testHome())).toEqual([]);
     if (attempts++ === 0) throw Object.assign(new Error('collision'), { code: 'EEXIST' });

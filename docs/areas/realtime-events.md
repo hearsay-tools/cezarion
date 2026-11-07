@@ -38,3 +38,9 @@ frames require a list reconciliation. The finite twin is
 15 s of watch demand. Both transports compare all three counters. A shelf fences
 in-flight content/search reads and replays concurrent metadata patches onto
 unfiltered responses. Unrelated workspace events do not invalidate report shelves.
+
+**Home recovery.** The trusted-only `home:recovery` topic carries the same snapshot
+as `GET /api/v1/home/recovery`. One root subscription serves the banner. The server
+holds filesystem watches only while there is demand, including per-file journals
+so an acceptance from another cockpit is visible without a primary-file write.
+Unchanged snapshots produce no frame. There is no recovery polling timer.

@@ -9,7 +9,7 @@ const versionSchema = z.object({ hash: hashSchema });
 const outsideSchema = z.object({ restoreHash: hashSchema, observedHash: hashSchema, detectedAt: z.iso.datetime() });
 export type OutsideWrite = z.infer<typeof outsideSchema>;
 type Hash = z.infer<typeof hashSchema>;
-export const OUTSIDE_WRITE_ENFORCEMENT = false;
+export const OUTSIDE_WRITE_ENFORCEMENT = true;
 
 export function readBytes(path: string): Buffer | null {
   try { return readFileSync(path); } catch (error) {
@@ -18,7 +18,7 @@ export function readBytes(path: string): Buffer | null {
   }
 }
 
-function digest(bytes: Buffer | null): Hash {
+export function digest(bytes: Buffer | null): Hash {
   return bytes === null ? null : createHash('sha256').update(bytes).digest('hex');
 }
 
@@ -29,12 +29,12 @@ export class VersionLog {
     this.directory = join(root, '.versions', relativePath);
   }
 
-  private record(name: string): unknown | undefined {
+  record(name: string): unknown | undefined {
     const bytes = readBytes(join(this.directory, name));
     return bytes === null ? undefined : JSON.parse(bytes.toString('utf8'));
   }
 
-  private setRecord(name: string, record: unknown): void {
+  setRecord(name: string, record: unknown): void {
     replacePrivate(join(this.directory, name), `${JSON.stringify(record)}\n`);
   }
 
@@ -109,13 +109,47 @@ export class VersionLog {
     } finally { rmSync(stage, { force: true }); }
   }
 
+  reset(): OutsideWrite | undefined {
+    const record = this.record('RESET');
+    return record === undefined ? undefined : outsideSchema.parse(record);
+  }
+
+  flagReset(previous: Buffer, observed: Buffer | null): void {
+    if (this.reset()) return;
+    this.setRecord('RESET', { restoreHash: this.store(previous), observedHash: digest(observed), detectedAt: new Date().toISOString() });
+  }
+
+  accepted(bytes: Buffer | null): boolean {
+    const record = this.record('ACCEPTED');
+    return record !== undefined && versionSchema.parse(record).hash === digest(bytes);
+  }
+
+  /** Resolve without rewriting the operator's bytes or changing their mtime. */
+  accept(path: string): void {
+    const bytes = readBytes(path);
+    this.setRecord('HEAD', { hash: this.store(bytes) });
+    this.clearPending();
+    this.clearRecovery(bytes);
+  }
+
+  clearRecovery(bytes: Buffer | null): void {
+    // Record acceptance before clearing flags: an empty accepted registry must not re-alert.
+    this.setRecord('ACCEPTED', { hash: digest(bytes) });
+    for (const name of ['OUTSIDE', 'RESET']) rmSync(join(this.directory, name), { force: true });
+    syncDirectory(this.directory);
+  }
+
+  recoveryBytes(flag: OutsideWrite): Buffer | null {
+    const bytes = flag.restoreHash === null ? null : readBytes(join(this.directory, flag.restoreHash));
+    if (digest(bytes) !== flag.restoreHash) throw new Error(`Missing or corrupt pinned HomeStore version: ${this.relativePath}`);
+    return bytes;
+  }
+
   restore(path: string): void {
     const outside = this.outside();
     if (!outside) return;
-    const bytes = outside.restoreHash === null ? null : readBytes(join(this.directory, outside.restoreHash));
-    if (digest(bytes) !== outside.restoreHash) throw new Error(`Missing or corrupt pinned HomeStore version: ${path}`);
+    const bytes = this.recoveryBytes(outside);
     this.replace(path, bytes);
-    rmSync(join(this.directory, 'OUTSIDE'), { force: true });
-    syncDirectory(this.directory);
+    this.clearRecovery(bytes);
   }
 }

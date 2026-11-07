@@ -42,7 +42,7 @@ import { runIdParamSchema as permissionRunIdParamSchema } from '@open-mercato/ce
 import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { CheckoutProgressCache } from './checkout-progress.ts';
 import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract/projects';
-import { createLiveRoutes } from './live-routes.ts';
+import { createWorkspaceLiveRoutes } from './workspace-live-routes.ts';
 import { createActivityRoutes, type ActivityServerDeps } from './activity-routes.ts';
 import { createWorkspaceProjects, createWorkspaceProjectContexts, createTaskWebhooks, type WorkspaceProjects } from './workspace-projects.ts';
 import { subscribeRunFeed } from './run-event-feed.ts';
@@ -5103,10 +5103,10 @@ export function createApp(deps: ServerDeps) {
 
   // Workspace-level families answer for the whole workspace, so they are single-mount: never a
   // project-scoped spelling, which would be a second surface to protect with no consumer.
-  const liveRoutes = createLiveRoutes({ serverGeneration, resolveBootProject,
+  const liveRoutes = createWorkspaceLiveRoutes({ serverGeneration, resolveBootProject,
     projectFailure: workspaceProjects.projectFailure,
     resolveProject: (id) => workspaceProjects.resolveLiveProject(id),
-  });
+  }, deps);
   const workspaceV1 = new Hono()
     .route('/', liveRoutes)
     .route('/', healthRoutes)

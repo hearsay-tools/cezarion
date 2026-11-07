@@ -25,7 +25,7 @@ it('seeds an existing install without changing any live bytes or mode', () => {
   expect(JSON.parse(readFileSync(join(dir, '.versions/config.json/HEAD'), 'utf8'))).toEqual({ hash });
 });
 
-it('pins HEAD on an outside write and restores it after later writes with enforcement off', () => {
+it('pins HEAD on an outside write and refuses later writes until restoration', () => {
   const dir = storeRoot();
   storeChild(dir, 'prepare', 'run');
   storeChild(dir, 'write', '{"original":true}');
@@ -35,7 +35,8 @@ it('pins HEAD on an outside write and restores it after later writes with enforc
   storeChild(dir, 'read');
   const flag = JSON.parse(storeChild(dir, 'outside'));
   expect(flag.restoreHash).toBe(createHash('sha256').update(original).digest('hex'));
-  storeChild(dir, 'write', '{"later":true}');
+  expect(() => storeChild(dir, 'write', '{"later":true}')).toThrow(/Outside write/);
+  expect(readFileSync(path, 'utf8')).toBe('{"outside":true}');
   expect(JSON.parse(storeChild(dir, 'outside')).restoreHash).toBe(flag.restoreHash);
   storeChild(dir, 'restore');
   expect(readFileSync(path)).toEqual(original);
