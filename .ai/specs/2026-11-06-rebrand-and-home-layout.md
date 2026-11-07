@@ -224,9 +224,10 @@ success. When the install owns its nginx site, `/etc/cezar/htpasswd[-<slug>]` is
 `/etc/hearsay-squawk/` (the old file stays). The new site is the old site file copied as is (TLS listeners,
 certificates, redirects and operator edits kept) with only its name and the
 `auth_basic_user_file` path changed, so a credential rotated in the new file takes effect and
-the old file no longer authenticates. The health check for each instance goes through its
-public URL (HTTPS when the site has TLS), not only the loopback port, before the group
-commits. An `--external-proxy`
+the old file no longer authenticates. For an install that owns its site, the health check goes through
+its public URL (HTTPS when the site has TLS), not only the loopback port, before the group
+commits. An `--external-proxy` install keeps the installer's existing check at its bind
+address, since its public route belongs to the operator. An `--external-proxy`
 install has neither; the migration leaves the operator's proxy untouched and moves only the
 unit. Units and sites of an install made before the switch keep working with
 `server-uninstall` and `server-deploy`, which act on the recorded names.
