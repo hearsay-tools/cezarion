@@ -102,7 +102,7 @@ function prune(home: string | Home, file: BackupFile, now: Date): void {
 
 const warned = new Set<string>();
 /** Best effort before replacement or removal; raw lock bytes stay byte-for-byte restorable. */
-export function backupBeforeWrite(path: string, next: unknown, options: { home?: Home | string; unavailable?: unknown } = {}): void {
+export function backupBeforeWrite(path: string, next: unknown, options: { home?: Home | string; unavailable?: unknown; required?: boolean | undefined } = {}): void {
   // The optional fallback preserves the exported P0 helper for root-file callers.
   const home = options.home ?? dirname(path);
   const root = typeof home === 'string' ? home : home.state;
@@ -111,12 +111,12 @@ export function backupBeforeWrite(path: string, next: unknown, options: { home?:
   let raw: Buffer;
   try { raw = readFileSync(path); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-    warn(path, error);
+    backupUnavailable(path, error, options.required);
     return;
   }
   const bytes = next === null || Buffer.isBuffer(next) ? next : Buffer.from(`${JSON.stringify(next, null, 2)}\n`);
   if (bytes !== null && raw.equals(bytes)) return;
-  if (options.unavailable !== undefined) { warn(path, options.unavailable); return; }
+  if (options.unavailable !== undefined) { backupUnavailable(path, options.unavailable, options.required); return; }
   try {
     const backups = backupRoot(home);
     const dir = join(backups, file);
@@ -131,7 +131,12 @@ export function backupBeforeWrite(path: string, next: unknown, options: { home?:
     }
     writeSnapshot(dir, timestamp, sha, raw);
     prune(home, file, now);
-  } catch (error) { warn(path, error); }
+  } catch (error) { backupUnavailable(path, error, options.required); }
+}
+
+function backupUnavailable(path: string, error: unknown, required = false): void {
+  if (required) throw new Error(`Import refused: backup of ${path} is unavailable. Ignore this change or repair backups before importing.`, { cause: error });
+  warn(path, error);
 }
 
 /** Keep serialized writes ordered even with a coarse or adjusted clock. */

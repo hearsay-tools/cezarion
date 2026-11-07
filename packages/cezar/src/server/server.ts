@@ -314,8 +314,9 @@ import {
   isSafeAssetFilename,
   resolveGetRequest,
 } from './static-ui.ts';
-
 export interface ServerDeps extends SelfUpdateServerDeps, ActivityServerDeps {
+  /** Explicit fixture seam; production defaults to the disabled rebrand release switch. */
+  legacyCanary?: boolean | undefined;
   /** Per-repository forge injection for embedded servers and tests. */
   forgeFactory?: ForgeFactory;
   /** CLI lifetime ownership, shared with secondary project contexts. */
@@ -421,7 +422,6 @@ export interface ServerDeps extends SelfUpdateServerDeps, ActivityServerDeps {
   automationsChanged?: () => void;
   archiveOnMergeChanged?: () => void;
 }
-
 // ---- project-scoped routing (multi-project spec, step 2.2) -----------------
 
 /** Hono env for the mirrored project-route table: the scope resolver puts the

@@ -248,6 +248,17 @@ async function withInstallContext(opts: RunOptions, run: (ctx: InstallContext) =
   }
 }
 
+/** Group variant for `server-migrate`: every instance lock, taken in sorted order, held to the end. */
+export async function withInstallLocks<T>(instances: readonly string[], home: Home, run: () => Promise<T>): Promise<T> {
+  const releases: Array<() => void> = [];
+  try {
+    for (const instance of [...instances].sort()) releases.push(acquireLock(instance, home));
+    return await run();
+  } finally {
+    for (const release of releases.reverse()) release();
+  }
+}
+
 export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): Promise<RunResult> {
   return withInstallContext(opts, async ctx => {
     const { state } = ctx;

@@ -22,3 +22,16 @@ Operator commands (`projects`, nested `run`, `remote-settings`, `backup`,
 `install`, `update`, `versions`, `use`, `link`, `unlink`) retain their home access.
 Inside a task they now resolve the default home because the cockpit's
 `CEZ_HOME` override is absent. Their command behavior is otherwise unchanged.
+
+## Legacy home recovery (staged)
+
+Behind `REBRAND_SWITCH`, the host operator can use `cez backup import <file>` or
+`cez backup ignore <file>` for a legacy-change row. Both use the same recovery
+writer as the cockpit. Import applies legacy deltas after a required backup;
+Ignore keeps the live file. Both record the current legacy hash and next merge
+base. Deleted legacy files allow Ignore only. `cez backup --help` lists these
+actions only when the switch is enabled; both refuse while it is disabled.
+
+Remote-settings grants remain host-CLI-only, even for a local cockpit. Their
+legacy banner rows show these commands. Existing `backup list` and `backup
+restore` behavior is unchanged.
