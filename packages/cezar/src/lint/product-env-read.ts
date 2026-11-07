@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from '@babel/parser';
-import type { Node } from '@babel/types';
+import type { Node, TSTypeAliasDeclaration, TSTypeReference } from '@babel/types';
 import { property, unwrapped, visit } from './home-boundary.ts';
 import { lineAt, repoRoot, type SourceRule } from './source-rule.ts';
 import { productEnvCalls, scannedEnvFile } from './undocumented-env-name.ts';
@@ -21,6 +21,8 @@ const member = (node: Node): boolean => node.type === 'MemberExpression' || node
 
 type EnvReference = 'global' | 'process' | 'env';
 type EnvBindings = Map<string, EnvReference>;
+type TypeAliases = Map<string, TSTypeAliasDeclaration>;
+const OBJECT_UTILITIES = new Set(['Partial', 'Readonly', 'Required', 'Pick', 'Omit', 'NonNullable']);
 
 function childReference(owner: EnvReference | undefined, key: string | undefined): EnvReference | undefined {
   if (owner === 'global' && key === 'process') return 'process';
@@ -38,19 +40,54 @@ function reference(node: Node | null | undefined, aliases: EnvBindings): EnvRefe
     if (target.name === 'globalThis') return 'global';
     if (/env$/i.test(target.name)) return 'env';
   }
+  if (target.type === 'TSQualifiedName') return childReference(reference(target.left, aliases), target.right.name);
   if (target.type === 'MemberExpression' || target.type === 'OptionalMemberExpression') {
     return childReference(reference(target.object, aliases), property(target));
   }
   return undefined;
 }
 
-function typedReference(node: Node): EnvReference | undefined {
-  if (!('typeAnnotation' in node) || node.typeAnnotation?.type !== 'TSTypeAnnotation') return undefined;
-  const type = node.typeAnnotation.typeAnnotation;
+/** Resolve only object-preserving type forms, without requiring the TypeScript checker. */
+function typeReference(type: Node | null | undefined, aliases: TypeAliases, parameters = new Map<string, EnvReference | undefined>(), seen = new Set<Node>()): EnvReference | undefined {
+  if (!type || seen.has(type)) return undefined;
+  const next = new Set(seen).add(type);
+  if (type.type === 'TSTypeReference') return namedTypeReference(type, aliases, parameters, next);
   if (type.type === 'TSTypeQuery') return reference(type.exprName, new Map());
-  if (type.type !== 'TSTypeReference' || type.typeName.type !== 'TSQualifiedName') return undefined;
-  if (type.typeName.right.name === 'ProcessEnv') return 'env';
-  return type.typeName.right.name === 'Process' ? 'process' : undefined;
+  if (type.type === 'TSParenthesizedType') return typeReference(type.typeAnnotation, aliases, parameters, next);
+  if (type.type === 'TSUnionType' || type.type === 'TSIntersectionType') {
+    const refs = type.types.map(part => typeReference(part, aliases, parameters, next));
+    return refs.find(ref => ref === 'env') ?? refs.find(ref => ref !== undefined);
+  }
+  if (type.type === 'TSIndexedAccessType') {
+    const owner = typeReference(type.objectType, aliases, parameters, next);
+    const key = type.indexType.type === 'TSLiteralType' ? property(type.indexType.literal) : undefined;
+    return owner === undefined ? undefined : childReference(owner, key);
+  }
+  // Arrays, tuples, keyof and scalar types do not describe an env object.
+  return undefined;
+}
+
+function namedTypeReference(type: TSTypeReference, aliases: TypeAliases, parameters: Map<string, EnvReference | undefined>, seen: Set<Node>): EnvReference | undefined {
+  const name = property(type.typeName.type === 'TSQualifiedName' ? type.typeName.right : type.typeName)!;
+  if (parameters.has(name)) return parameters.get(name);
+  if (name === 'ProcessEnv') return 'env';
+  if (name === 'Process') return 'process';
+  if (OBJECT_UTILITIES.has(name)) return typeReference(type.typeArguments?.params[0], aliases, parameters, seen);
+  const alias = aliases.get(name);
+  if (!alias) return undefined;
+  const substitutions = new Map(parameters);
+  for (const [index, parameter] of (alias.typeParameters?.params ?? []).entries()) {
+    const argument = type.typeArguments?.params[index];
+    substitutions.set(parameter.name.name, argument
+      ? typeReference(argument, aliases, parameters, seen)
+      : typeReference(parameter.default, aliases, substitutions, seen));
+  }
+  return typeReference(alias.typeAnnotation, aliases, substitutions, seen);
+}
+
+function typedReference(node: Node, aliases: TypeAliases): EnvReference | undefined {
+  if (!('typeAnnotation' in node) || node.typeAnnotation?.type !== 'TSTypeAnnotation') return undefined;
+  return typeReference(node.typeAnnotation.typeAnnotation, aliases);
 }
 
 /** Walk the pattern with its source, including defaults and copies made by rest bindings. */
@@ -73,24 +110,24 @@ function patternReads(pattern: Node, owner: EnvReference | undefined, aliases: E
   });
 }
 
-function bindingReads(node: Node, aliases: EnvBindings, bind = false): EnvRead[] {
-  if (node.type === 'VariableDeclarator') return patternReads(node.id, reference(node.init, aliases), aliases, bind);
+function bindingReads(node: Node, aliases: EnvBindings, types: TypeAliases, bind = false): EnvRead[] {
+  if (node.type === 'VariableDeclarator') return patternReads(node.id, typedReference(node.id, types) ?? reference(node.init, aliases), aliases, bind);
   if (node.type === 'AssignmentExpression') return patternReads(node.left, reference(node.right, aliases), aliases, bind);
   if (node.type === 'ForOfStatement' || node.type === 'ForInStatement') return patternReads(node.left, undefined, aliases, bind);
   if (!('params' in node) || !Array.isArray(node.params)) return [];
   return node.params.flatMap(param => {
     const pattern = param.type === 'AssignmentPattern' ? param.left : param;
-    return patternReads(param, typedReference(pattern), aliases, bind);
+    return patternReads(param, typedReference(pattern, types), aliases, bind);
   });
 }
 
 /** Track env, process and global aliases, including aliases nested in destructuring. */
-function envBindings(ast: Node): EnvBindings {
+function envBindings(ast: Node, types: TypeAliases): EnvBindings {
   const aliases: EnvBindings = new Map();
   visit(ast, node => {
-    const typed = typedReference(node);
+    const typed = typedReference(node, types);
     if (node.type === 'Identifier' && typed) aliases.set(node.name, typed);
-    bindingReads(node, aliases, true);
+    bindingReads(node, aliases, types, true);
   });
   return aliases;
 }
@@ -129,12 +166,16 @@ function memberRead(node: Node, aliases: EnvBindings, writes: Set<Node>): EnvRea
 /** AST scanning avoids strings/comments, supports env arguments, brackets, aliases and destructuring. */
 export function productEnvReads(source: string, file = 'file.ts'): EnvRead[] {
   const ast = parse(source, { sourceType: 'unambiguous', plugins: ['typescript', ...(/\.[cm]?[jt]sx$/.test(file) ? ['jsx' as const] : [])] });
-  const aliases = envBindings(ast);
+  const types: TypeAliases = new Map();
+  visit(ast, node => {
+    if (node.type === 'TSTypeAliasDeclaration') types.set(node.id.name, node);
+  });
+  const aliases = envBindings(ast, types);
   const writes = writeTargets(ast);
   const reads: EnvRead[] = [];
   visit(ast, node => {
     reads.push(...memberRead(node, aliases, writes));
-    reads.push(...bindingReads(node, aliases));
+    reads.push(...bindingReads(node, aliases, types));
   });
   for (const call of productEnvCalls(ast)) {
     if (call.suffix === undefined) reads.push({ form: 'helper-dynamic', name: '*', offset: call.offset });

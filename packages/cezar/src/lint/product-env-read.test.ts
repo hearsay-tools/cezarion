@@ -116,3 +116,56 @@ it('tracks nested typed parameters and env bindings with an unknown outer source
     ['destructure', 'CEZ_LOOP_ASSIGN'],
   ]);
 });
+
+
+it.each([
+  'ProcessEnv', 'NodeJS.ProcessEnv', 'Runtime.NodeJS.ProcessEnv',
+  'typeof process.env', 'typeof globalThis.process.env',
+  "typeof process['env']", "typeof globalThis.process['env']",
+  'Partial<NodeJS.ProcessEnv>', 'Readonly<ProcessEnv>', 'Required<ProcessEnv>',
+  "Pick<ProcessEnv, 'CEZ_DRY_RUN'>", 'Partial<Readonly<Required<ProcessEnv>>>',
+  'ProcessEnv | undefined', 'undefined | (ProcessEnv & {extra: string})',
+  '(ProcessEnv)', 'Omit<ProcessEnv, "PATH">', 'NonNullable<ProcessEnv | undefined>',
+])('classifies env object annotations consistently: %s', annotation => {
+  const source = `function destructured({CEZ_DRY_RUN}: ${annotation}) {}
+    function named(settings: ${annotation}) { return settings[key]; }
+    const selected: ${annotation} = supplied; const {HSQ_FLAG} = selected;
+    const {CEZ_DECLARED}: ${annotation} = supplied;`;
+  expect(productEnvReads(source).map(({form, name}) => [form, name])).toEqual([
+    ['destructure', 'CEZ_DRY_RUN'], ['computed', '*'],
+    ['destructure', 'HSQ_FLAG'], ['destructure', 'CEZ_DECLARED'],
+  ]);
+});
+
+it('resolves local aliases, generic substitutions, defaults, forward references and recursive unions', () => {
+  const source = `type Wrapped<T> = Readonly<Partial<T>>;
+    type Env = Later; type Later = Wrapped<typeof globalThis.process.env>;
+    type Chained<T> = Wrapped<T>; type Defaulted<T = NodeJS.ProcessEnv> = Required<T>;
+    type Recursive = Recursive | ProcessEnv;
+    function f({CEZ_ALIAS}: Env) {}
+    function g({HSQ_GENERIC}: Chained<ProcessEnv>) {}
+    function h({CEZ_DEFAULTED}: Defaulted) {}
+    function r({HSQ_RECURSIVE}: Recursive) {}
+    const settings: Env = supplied; const {CEZ_VARIABLE} = settings;
+    const {HSQ_DECLARED}: Wrapped<Env> = supplied;`;
+  expect(productEnvReads(source).map(read => read.name)).toEqual([
+    'CEZ_ALIAS', 'HSQ_GENERIC', 'CEZ_DEFAULTED', 'HSQ_RECURSIVE', 'CEZ_VARIABLE', 'HSQ_DECLARED',
+  ]);
+});
+
+it('does not classify arrays, tuples, keys, scalar indexed types or unrelated aliases as env objects', () => {
+  const source = `type Cycle = Cycle; type List<T> = T[];
+    type EnvList = ReadonlyArray<ProcessEnv>; type Ordinary = {other: string};
+    function a({CEZ_ARRAY}: ProcessEnv[]) {}
+    function b({CEZ_GENERIC_ARRAY}: Array<ProcessEnv>) {}
+    function c({CEZ_READONLY_ARRAY}: EnvList) {}
+    function d({CEZ_WRAPPED_ARRAY}: Partial<List<ProcessEnv>>) {}
+    function e({CEZ_UNION_ARRAY}: ProcessEnv[] | undefined) {}
+    function f({CEZ_TUPLE}: [ProcessEnv]) {}
+    function g({CEZ_KEYS}: keyof ProcessEnv) {}
+    function h({CEZ_SCALAR}: (typeof process.env)['PATH']) {}
+    function i({CEZ_CYCLE}: Cycle) {}
+    function j({CEZ_ORDINARY}: Ordinary) {}
+    function named(collection: Array<ProcessEnv>) { return collection[key]; }`;
+  expect(productEnvReads(source)).toEqual([]);
+});
