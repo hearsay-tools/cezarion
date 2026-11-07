@@ -25,6 +25,39 @@ function failed(core, error) {
   core.setFailed(reason);
 }
 
+function releaseMetadata(version, published, alias) {
+  return [
+    '## Published packages', '', '| Package | Version |', '|---|---|',
+    ...published.map((name) => `| \`${name}\` | \`${version}\` |`),
+    '', '### Install', '', '```bash', `npx ${alias}@${version}`, '```',
+  ].join('\n');
+}
+
+function resolveReleaseBody({ release, metadata, tag, context, version }) {
+  // Old releases predate generated notes. Reuse exact legacy metadata, never
+  // overwrite it. New releases always include a verifiable changelog.
+  let body = metadata;
+  if (!release || release.body !== metadata) {
+    const prefix = `${metadata}\n\n`;
+    if (release && !release.body?.startsWith(prefix)) {
+      throw new Error(`Conflicting GitHub Release ${tag}. Existing metadata was not changed.`);
+    }
+    body = prefix + releaseChangelog({
+      git, url: repoUrl(context), sha: context.sha, version,
+      ...(release ? { previous: release.body.slice(prefix.length) } : {}),
+    });
+  }
+  return body;
+}
+
+function expectVerifiableRelease(release, tag, body, context) {
+  // target_commitish can name a moving branch; the resolved tag is the source
+  // of truth. Never edit a release with different publication metadata.
+  if (release.tag_name !== tag || release.name !== tag || release.body !== body || release.draft || release.prerelease) {
+    throw new Error(`Conflicting GitHub Release ${tag}. Inspect ${repoUrl(context)}/releases/tag/${tag}; existing metadata was not changed.`);
+  }
+}
+
 function collectBumpTree() {
   command('pnpm', ['install', '--lockfile-only', '--ignore-scripts', '--no-frozen-lockfile']);
   // Use Git pathspecs, not a shell. Stage all stamped workspaces and the alias.
@@ -145,11 +178,7 @@ async function githubRelease({ github, context, core }) {
     const alias = process.env.ALIAS_NAME;
     const published = (process.env.PUBLISHED_NAMES ?? '').split(',').filter(Boolean);
     if (!alias || !published.length) throw new Error('Missing published package names.');
-    const metadata = [
-      '## Published packages', '', '| Package | Version |', '|---|---|',
-      ...published.map((name) => `| \`${name}\` | \`${version}\` |`),
-      '', '### Install', '', '```bash', `npx ${alias}@${version}`, '```',
-    ].join('\n');
+    const metadata = releaseMetadata(version, published, alias);
     const verifyTag = async () => {
       const ref = await readOptional(() => github.rest.git.getRef({ ...context.repo, ref: `tags/${tag}` }));
       if (!ref) return false;
@@ -166,19 +195,7 @@ async function githubRelease({ github, context, core }) {
     };
     const tagged = await verifyTag();
     let release = await readOptional(() => github.rest.repos.getReleaseByTag({ ...context.repo, tag }));
-    // Old releases predate generated notes. Reuse exact legacy metadata, never
-    // overwrite it. New releases always include a verifiable changelog.
-    let body = metadata;
-    if (!release || release.body !== metadata) {
-      const prefix = `${metadata}\n\n`;
-      if (release && !release.body?.startsWith(prefix)) {
-        throw new Error(`Conflicting GitHub Release ${tag}. Existing metadata was not changed.`);
-      }
-      body = prefix + releaseChangelog({
-        git, url: repoUrl(context), sha: context.sha, version,
-        ...(release ? { previous: release.body.slice(prefix.length) } : {}),
-      });
-    }
+    const body = resolveReleaseBody({ release, metadata, tag, context, version });
     let status = 'reused';
     if (!release) {
       release = (await github.rest.repos.createRelease({
@@ -189,11 +206,7 @@ async function githubRelease({ github, context, core }) {
     } else if (!tagged) {
       throw new Error(`Existing release ${tag} has no verifiable tag. Inspect ${repoUrl(context)}/releases/tag/${tag} before retrying.`);
     }
-    // target_commitish can name a moving branch; the resolved tag is the source
-    // of truth. Never edit a release with different publication metadata.
-    if (release.tag_name !== tag || release.name !== tag || release.body !== body || release.draft || release.prerelease) {
-      throw new Error(`Conflicting GitHub Release ${tag}. Inspect ${repoUrl(context)}/releases/tag/${tag}; existing metadata was not changed.`);
-    }
+    expectVerifiableRelease(release, tag, body, context);
     if (!await verifyTag()) throw new Error(`GitHub Release ${tag} exists but its tag could not be verified.`);
     core.setOutput('status', status);
     core.setOutput('url', release.html_url);
