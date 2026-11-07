@@ -34,12 +34,204 @@ const repoMergePolicySchema = z.object({
   squash_merge_commit_title: z.string().nullish(),
 });
 
-function mergeCheckState(check: z.infer<typeof mergeCheckSchema>): ForgePrCheck['state'] {
+type MergeCheck = z.infer<typeof mergeCheckSchema>;
+type MergePr = z.infer<typeof mergePrSchema>;
+type MergePolicy = z.infer<typeof repoMergePolicySchema>;
+type MergeEligibility = {
+  eligibility: ForgePrMergeState['eligibility'];
+  blockers: ForgePrMergeState['blockers'];
+};
+type MergeEligibilityInput = {
+  state: ForgePrMergeState['state'];
+  isDraft: boolean;
+  mergeable: ForgePrMergeState['mergeable'];
+  mergeStateStatus: string | null | undefined;
+  checks: ForgePrCheck[];
+  reviewDecision: ForgePrMergeState['reviewDecision'];
+  requirements: GithubMergeRequirements;
+  methods: ForgeMergeMethod[];
+};
+
+function mergeCheckState(check: MergeCheck): ForgePrCheck['state'] {
   const value = (check.conclusion || check.state || check.status || '').toUpperCase();
   if (['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(value)) return 'passing';
   if (['FAILURE', 'ERROR', 'TIMED_OUT', 'ACTION_REQUIRED', 'CANCELLED'].includes(value)) return 'failing';
   if (['PENDING', 'IN_PROGRESS', 'QUEUED', 'EXPECTED', 'WAITING', 'REQUESTED'].includes(value)) return 'pending';
   return 'unknown';
+}
+
+function mergePrLifecycleState(pr: MergePr): ForgePrMergeState['state'] {
+  return pr.state.toUpperCase() === 'MERGED' ? 'merged' : pr.state.toUpperCase() === 'CLOSED' ? 'closed' : 'open';
+}
+
+function mergePrMergeable(pr: MergePr): ForgePrMergeState['mergeable'] {
+  return pr.mergeable?.toUpperCase() === 'MERGEABLE'
+    ? 'mergeable'
+    : pr.mergeable?.toUpperCase() === 'CONFLICTING'
+      ? 'conflicting'
+      : 'unknown';
+}
+
+function mergePrReviewDecision(
+  pr: MergePr,
+  requirements: GithubMergeRequirements,
+): ForgePrMergeState['reviewDecision'] {
+  return pr.reviewDecision?.toUpperCase() === 'APPROVED'
+    ? 'approved'
+    : pr.reviewDecision?.toUpperCase() === 'CHANGES_REQUESTED'
+      ? 'changes-requested'
+      : pr.reviewDecision?.toUpperCase() === 'REVIEW_REQUIRED'
+        ? 'review-required'
+        : !pr.reviewDecision?.trim() && requirements.readable && requirements.requiredApprovingReviews === 0
+          ? 'not-required'
+          : 'unknown';
+}
+
+function mergePrCheckRow(check: MergeCheck, requirements: GithubMergeRequirements): ForgePrCheck {
+  const name = check.name ?? check.context ?? 'Check';
+  const url = check.detailsUrl ?? check.targetUrl;
+  return {
+    name,
+    state: mergeCheckState(check),
+    required: requirements.readable ? requirements.requiredChecks.includes(name) : null,
+    ...(url?.startsWith('https://') || url?.startsWith('http://') ? { url } : {}),
+  };
+}
+
+function mergePrChecks(pr: MergePr, requirements: GithubMergeRequirements): ForgePrCheck[] {
+  const checks: ForgePrCheck[] = (pr.statusCheckRollup ?? []).map((check) => mergePrCheckRow(check, requirements));
+  if (requirements.readable) {
+    for (const name of requirements.requiredChecks) {
+      if (!checks.some((check) => check.name === name)) checks.push({ name, state: 'pending', required: true });
+    }
+  }
+  return checks;
+}
+
+function mergeMethodAllowed(requirements: GithubMergeRequirements, method: ForgeMergeMethod): boolean {
+  return requirements.allowedMergeMethods?.includes(method) ?? true;
+}
+
+function mergePrMethods(
+  policy: MergePolicy,
+  requirements: GithubMergeRequirements,
+): { methods: ForgeMergeMethod[]; defaultMethod: ForgePrMergeState['defaultMethod'] } {
+  const methods: ForgeMergeMethod[] = [];
+  if (policy.allow_squash_merge && mergeMethodAllowed(requirements, 'squash')) methods.push('squash');
+  if (policy.allow_merge_commit && mergeMethodAllowed(requirements, 'merge')) methods.push('merge');
+  if (policy.allow_rebase_merge && mergeMethodAllowed(requirements, 'rebase')) methods.push('rebase');
+  const defaultMethod =
+    policy.squash_merge_commit_title && methods.includes('squash')
+      ? 'squash'
+      : policy.merge_commit_title && methods.includes('merge')
+        ? 'merge'
+        : methods[0] ?? null;
+  return { methods, defaultMethod };
+}
+
+function mergePrTerminalBlocker(input: MergeEligibilityInput): MergeEligibility | null {
+  if (input.state === 'open') return null;
+  return {
+    eligibility: 'terminal',
+    blockers: [{
+      code: 'terminal',
+      message: input.state === 'merged' ? 'This pull request is merged.' : 'This pull request is closed.',
+    }],
+  };
+}
+
+function mergePrDraftBlocker(input: MergeEligibilityInput): MergeEligibility | null {
+  if (!input.isDraft) return null;
+  return {
+    eligibility: 'blocked',
+    blockers: [{ code: 'draft', message: 'Mark the pull request ready for review before merging.' }],
+  };
+}
+
+function mergePrConflictsBlocker(input: MergeEligibilityInput): MergeEligibility | null {
+  if (input.mergeable !== 'conflicting') return null;
+  return {
+    eligibility: 'blocked',
+    blockers: [{ code: 'conflicts', message: 'Conflicts must be resolved before merging.' }],
+  };
+}
+
+function mergePrChecksFailingBlocker(input: MergeEligibilityInput): MergeEligibility | null {
+  if (!input.checks.some((check) => check.state === 'failing')) return null;
+  return {
+    eligibility: 'blocked',
+    blockers: [{ code: 'checks-failing', message: 'One or more checks are failing.' }],
+  };
+}
+
+function mergePrReviewsBlocker(input: MergeEligibilityInput): MergeEligibility | null {
+  if (input.reviewDecision !== 'changes-requested' && input.reviewDecision !== 'review-required') return null;
+  return {
+    eligibility: 'blocked',
+    blockers: [{
+      code: 'reviews',
+      message: input.reviewDecision === 'changes-requested' ? 'Changes were requested.' : 'A required review is missing.',
+    }],
+  };
+}
+
+function mergePrReviewThreadsBlocker(input: MergeEligibilityInput): MergeEligibility | null {
+  if ((input.requirements.unresolvedThreads ?? 0) <= 0) return null;
+  return {
+    eligibility: 'blocked',
+    blockers: [{ code: 'review-threads', message: 'Required review threads must be resolved before merging.' }],
+  };
+}
+
+function mergePrRulesUnknownBlocker(input: MergeEligibilityInput): MergeEligibility | null {
+  if (
+    input.reviewDecision !== 'unknown' && input.requirements.readable &&
+    !(input.requirements.requiresThreadResolution && input.requirements.unresolvedThreads == null) &&
+    !input.checks.some((check) => check.required === true && check.state === 'unknown')
+  ) return null;
+  return {
+    eligibility: 'unknown',
+    blockers: [{
+      code: 'rules-unknown',
+      message: 'GitHub could not confirm review and branch-protection requirements.',
+    }],
+  };
+}
+
+function mergePrPendingBlocker(input: MergeEligibilityInput): MergeEligibility | null {
+  if (!input.checks.some((check) => check.state === 'pending') && input.mergeStateStatus?.toUpperCase() !== 'UNSTABLE') {
+    return null;
+  }
+  return {
+    eligibility: 'pending',
+    blockers: [{ code: 'pending', message: 'Checks or GitHub mergeability are still pending.' }],
+  };
+}
+
+function mergePrUnknownBlocker(input: MergeEligibilityInput): MergeEligibility | null {
+  // GitHub's aggregate still enforces other rules and required check provider identities.
+  if (
+    input.mergeable === 'mergeable' &&
+    ['CLEAN', 'HAS_HOOKS'].includes(input.mergeStateStatus?.toUpperCase() ?? '') &&
+    input.methods.length > 0
+  ) return null;
+  return {
+    eligibility: 'unknown',
+    blockers: [{ code: 'unknown', message: 'GitHub could not confirm every merge requirement.' }],
+  };
+}
+
+function mergePrEligibility(input: MergeEligibilityInput): MergeEligibility {
+  return mergePrTerminalBlocker(input)
+    ?? mergePrDraftBlocker(input)
+    ?? mergePrConflictsBlocker(input)
+    ?? mergePrChecksFailingBlocker(input)
+    ?? mergePrReviewsBlocker(input)
+    ?? mergePrReviewThreadsBlocker(input)
+    ?? mergePrRulesUnknownBlocker(input)
+    ?? mergePrPendingBlocker(input)
+    ?? mergePrUnknownBlocker(input)
+    ?? { eligibility: 'ready', blockers: [] };
 }
 
 export function normalizeMergeState(
@@ -52,92 +244,21 @@ export function normalizeMergeState(
 ): ForgePrMergeState {
   const pr = mergePrSchema.parse(raw);
   const policy = repoMergePolicySchema.parse(policyRaw);
-  const state: ForgePrMergeState['state'] =
-    pr.state.toUpperCase() === 'MERGED' ? 'merged' : pr.state.toUpperCase() === 'CLOSED' ? 'closed' : 'open';
-  const mergeable: ForgePrMergeState['mergeable'] =
-    pr.mergeable?.toUpperCase() === 'MERGEABLE'
-      ? 'mergeable'
-      : pr.mergeable?.toUpperCase() === 'CONFLICTING'
-        ? 'conflicting'
-        : 'unknown';
-  const reviewDecision: ForgePrMergeState['reviewDecision'] =
-    pr.reviewDecision?.toUpperCase() === 'APPROVED'
-      ? 'approved'
-      : pr.reviewDecision?.toUpperCase() === 'CHANGES_REQUESTED'
-        ? 'changes-requested'
-        : pr.reviewDecision?.toUpperCase() === 'REVIEW_REQUIRED'
-          ? 'review-required'
-          : !pr.reviewDecision?.trim() && requirements.readable && requirements.requiredApprovingReviews === 0
-            ? 'not-required'
-            : 'unknown';
-  const checks: ForgePrCheck[] = (pr.statusCheckRollup ?? []).map((check) => {
-    const name = check.name ?? check.context ?? 'Check';
-    const url = check.detailsUrl ?? check.targetUrl;
-    return {
-      name,
-      state: mergeCheckState(check),
-      required: requirements.readable ? requirements.requiredChecks.includes(name) : null,
-      ...(url?.startsWith('https://') || url?.startsWith('http://') ? { url } : {}),
-    };
+  const state = mergePrLifecycleState(pr);
+  const mergeable = mergePrMergeable(pr);
+  const reviewDecision = mergePrReviewDecision(pr, requirements);
+  const checks = mergePrChecks(pr, requirements);
+  const { methods, defaultMethod } = mergePrMethods(policy, requirements);
+  const { eligibility, blockers } = mergePrEligibility({
+    state,
+    isDraft: pr.isDraft,
+    mergeable,
+    mergeStateStatus: pr.mergeStateStatus,
+    checks,
+    reviewDecision,
+    requirements,
+    methods,
   });
-  if (requirements.readable) {
-    for (const name of requirements.requiredChecks) {
-      if (!checks.some((check) => check.name === name)) checks.push({ name, state: 'pending', required: true });
-    }
-  }
-  const methods: ForgeMergeMethod[] = [];
-  const methodAllowed = (method: ForgeMergeMethod) => requirements.allowedMergeMethods?.includes(method) ?? true;
-  if (policy.allow_squash_merge && methodAllowed('squash')) methods.push('squash');
-  if (policy.allow_merge_commit && methodAllowed('merge')) methods.push('merge');
-  if (policy.allow_rebase_merge && methodAllowed('rebase')) methods.push('rebase');
-  const defaultMethod =
-    policy.squash_merge_commit_title && methods.includes('squash')
-      ? 'squash'
-      : policy.merge_commit_title && methods.includes('merge')
-        ? 'merge'
-        : methods[0] ?? null;
-  const blockers: ForgePrMergeState['blockers'] = [];
-  let eligibility: ForgePrMergeState['eligibility'] = 'ready';
-  if (state !== 'open') {
-    eligibility = 'terminal';
-    blockers.push({ code: 'terminal', message: state === 'merged' ? 'This pull request is merged.' : 'This pull request is closed.' });
-  } else if (pr.isDraft) {
-    eligibility = 'blocked';
-    blockers.push({ code: 'draft', message: 'Mark the pull request ready for review before merging.' });
-  } else if (mergeable === 'conflicting') {
-    eligibility = 'blocked';
-    blockers.push({ code: 'conflicts', message: 'Conflicts must be resolved before merging.' });
-  } else if (checks.some((check) => check.state === 'failing')) {
-    eligibility = 'blocked';
-    blockers.push({ code: 'checks-failing', message: 'One or more checks are failing.' });
-  } else if (reviewDecision === 'changes-requested' || reviewDecision === 'review-required') {
-    eligibility = 'blocked';
-    blockers.push({ code: 'reviews', message: reviewDecision === 'changes-requested' ? 'Changes were requested.' : 'A required review is missing.' });
-  } else if ((requirements.unresolvedThreads ?? 0) > 0) {
-    eligibility = 'blocked';
-    blockers.push({ code: 'review-threads', message: 'Required review threads must be resolved before merging.' });
-  } else if (
-    reviewDecision === 'unknown' || !requirements.readable ||
-    (requirements.requiresThreadResolution && requirements.unresolvedThreads == null) ||
-    checks.some((check) => check.required === true && check.state === 'unknown')
-  ) {
-    eligibility = 'unknown';
-    blockers.push({
-      code: 'rules-unknown',
-      message: 'GitHub could not confirm review and branch-protection requirements.',
-    });
-  } else if (checks.some((check) => check.state === 'pending') || pr.mergeStateStatus?.toUpperCase() === 'UNSTABLE') {
-    eligibility = 'pending';
-    blockers.push({ code: 'pending', message: 'Checks or GitHub mergeability are still pending.' });
-  // GitHub's aggregate still enforces other rules and required check provider identities.
-  } else if (
-    mergeable !== 'mergeable' ||
-    !['CLEAN', 'HAS_HOOKS'].includes(pr.mergeStateStatus?.toUpperCase() ?? '') ||
-    methods.length === 0
-  ) {
-    eligibility = 'unknown';
-    blockers.push({ code: 'unknown', message: 'GitHub could not confirm every merge requirement.' });
-  }
   const canMerge = eligibility === 'ready';
   const canOverride =
     !canMerge &&
