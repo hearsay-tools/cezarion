@@ -111,3 +111,10 @@ it('re-grants after an identity lookup fails and never caches the unknown identi
     expect(execFileSync).toHaveBeenCalledTimes(3);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+it.each(['\u2018', '\u2019', '\u201A', '\u201B'])('keeps a typographic apostrophe %s inside the PowerShell path literal', quote => {
+  const path = `C:\\Users\\O${quote}Brien\\private`;
+  protectPrivatePath(path, true, { platform: 'win32', layout: 'split' });
+  expect(execFileSync).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(execFileSync).mock.calls[0]?.[1]?.[3]).toContain(`Set-Acl -LiteralPath 'C:\\Users\\O${quote}${quote}Brien\\private' -AclObject $acl;`);
+});

@@ -17,7 +17,8 @@ export function protectPrivatePath(path: string, directory: boolean, {
   if (platform !== 'win32' || layout !== 'split') return;
   const security = directory ? 'DirectorySecurity' : 'FileSecurity';
   const inheritance = directory ? 'ContainerInherit, ObjectInherit' : 'None';
-  const literal = "'" + path.replaceAll("'", "''") + "'";
+  // PowerShell also treats typographic apostrophes as quote delimiters.
+  const literal = "'" + path.replace(/['\u2018-\u201B]/g, quote => quote + quote) + "'";
   // A fresh descriptor has no old explicit grants. Disable inheritance and grant one SID.
   const script = `$ErrorActionPreference = 'Stop';
 $acl = New-Object System.Security.AccessControl.${security};
