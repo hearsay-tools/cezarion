@@ -2,6 +2,7 @@ import { registeredWaitRecord, registeredReceiptRecord } from './wait-registrati
 import { reportsIndex, type ReportsIndex } from '../artifacts/reports-index.ts';
 import { stageCommit, stageLoaded, stageDurableUpdate, stageDebouncedUpdate, stageConversation, stageArchiveFields, stagePullRequests, stageStepUpdate, redactPatch, redactText, clearPin, type RecordPatch } from './record-write-rules.ts';
 import { workerDeletionProof } from './worker-deletion-proof.ts';
+import { workerResourceAbsentHolders, workerResourceAuthorized, workerResourceLiveHolders, workerResourcePathsGone } from './worker-resource-holders.ts';
 import { listPeerTaskSummaries, parseStoredSummary, type PeerTaskPageOptions } from './run-summary-page.ts';
 export { parseStoredSummary } from './run-summary-page.ts';
 import { defined } from '../core/defined.ts';
@@ -50,7 +51,7 @@ import { emptyFacts, stampOf, TranscriptFactsIndex, type TranscriptFacts } from 
 import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
-import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { inspectGeneration, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { archivePullRequests, pullRequestKey } from './pull-requests.ts';
@@ -3169,22 +3170,15 @@ export class RunStore extends EventEmitter {
     if (autosaveCleanupBlocker(this.dataDir, id)) return [];
     const run = this.peek(id);
     const proof = this.readWorkerExecution(id);
-    if (run?.delegation?.role !== 'worker' || run.delegation.workspace.ownerRunId !== id ||
-      run.delegation.workspace.resourceId !== resourceId || proof?.generation !== generation ||
-      (proof.phase !== 'complete' && !(opts.admittingQueued && proof.phase === 'queued'))) return [];
+    if (!workerResourceAuthorized(run, proof, id, generation, resourceId, opts.admittingQueued)) return [];
     const record = this.readWorkerProcesses(id, generation);
     if (record === 'unknown' || !agentTmpDirOwnershipProven(this.dataDir, id)) return [];
     const paths = [run.delegation.workspace.path, ...agentTmpDirLocations(this.dataDir, id)];
     // Nothing can be deleted/reused at an absent path. This lets explicit history deletion
     // retire completed cleanup despite ambient denial, while recorded survivors/unknown evidence
     // still block. Only ENOENT proves absence; existsSync would also hide access errors.
-    const absent = paths.every(path => {
-      try { lstatSync(path); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT'; }
-    });
-    if (absent) return record === 'absent' ||
-      ((!recordedProcessLive(record.controller) || isCurrentProcess(record.controller)) && !record.processes.some(recordedProcessLive)) ? 'safe' : [];
-    const probe = inspectGeneration({ ...(record === 'absent' ? {} : { record }), paths, cwds: opts.cwds });
-    return probe.liveness === 'gone' ? 'safe' : probe.controller !== undefined ? [probe.controller] : probe.pids;
+    if (workerResourcePathsGone(paths)) return workerResourceAbsentHolders(record);
+    return workerResourceLiveHolders(inspectGeneration({ ...(record === 'absent' ? {} : { record }), paths, cwds: opts.cwds }));
   }
 
   /** Upgrade a legacy completed checkpoint while terminal task ownership is still known.
