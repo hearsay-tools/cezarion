@@ -212,11 +212,7 @@ function isToolStart(value: Record<string, unknown>): boolean {
   return Boolean(string(value.toolCallId) && string(value.toolName));
 }
 
-export function mapOmpRpcMessage(value: unknown, state: OmpUiMapperState): OmpUiMapping {
-  if (!isRecord(value) || typeof value.type !== 'string') return { events: [], state };
-
-  if (value.type === 'response') return mapResponse(value, state);
-
+function mapOmpMessageActivity(value: Record<string, unknown>, state: OmpUiMapperState): OmpUiMapping {
   switch (value.type) {
     case 'message_update':
       return isMessageUpdateActivity(value)
@@ -226,8 +222,39 @@ export function mapOmpRpcMessage(value: unknown, state: OmpUiMapperState): OmpUi
       return isAssistantMessageEnd(value)
         ? mapActivity(value, state, mapMessageEnd)
         : mapMessageEnd(value, state);
-    case 'tool_execution_start':
+    default: // 'tool_execution_start'
       return isToolStart(value) ? mapActivity(value, state, mapToolStart) : mapToolStart(value, state);
+  }
+}
+
+function mapOmpSubagentMessage(value: Record<string, unknown>, state: OmpUiMapperState): OmpUiMapping {
+  if (!isRecord(value.payload)) return { events: [], state };
+  return value.type === 'subagent_lifecycle'
+    ? mapSubagentLifecycle(value.payload, state)
+    : mapSubagentEvent(value.payload, state);
+}
+
+function mapOmpExtensionError(value: Record<string, unknown>, state: OmpUiMapperState): OmpUiMapping {
+  const message = string(value.error) ?? string(value.message) ?? 'omp extension error';
+  return { events: [{ type: 'session.error', message, fatal: false }], state };
+}
+
+function mapOmpNotice(value: Record<string, unknown>, state: OmpUiMapperState): OmpUiMapping {
+  if (value.level !== 'error') return { events: [], state };
+  const message = string(value.message) ?? 'omp error notice';
+  return { events: [{ type: 'session.error', message, fatal: false }], state };
+}
+
+export function mapOmpRpcMessage(value: unknown, state: OmpUiMapperState): OmpUiMapping {
+  if (!isRecord(value) || typeof value.type !== 'string') return { events: [], state };
+
+  if (value.type === 'response') return mapResponse(value, state);
+
+  switch (value.type) {
+    case 'message_update':
+    case 'message_end':
+    case 'tool_execution_start':
+      return mapOmpMessageActivity(value, state);
     case 'tool_execution_update':
       return mapActivity(value, state, mapToolUpdate);
     case 'tool_execution_end':
@@ -237,18 +264,12 @@ export function mapOmpRpcMessage(value: unknown, state: OmpUiMapperState): OmpUi
     case 'prompt_result':
       return mapPromptResult(value, state);
     case 'subagent_lifecycle':
-      return isRecord(value.payload) ? mapSubagentLifecycle(value.payload, state) : { events: [], state };
     case 'subagent_event':
-      return isRecord(value.payload) ? mapSubagentEvent(value.payload, state) : { events: [], state };
-    case 'extension_error': {
-      const message = string(value.error) ?? string(value.message) ?? 'omp extension error';
-      return { events: [{ type: 'session.error', message, fatal: false }], state };
-    }
-    case 'notice': {
-      if (value.level !== 'error') return { events: [], state };
-      const message = string(value.message) ?? 'omp error notice';
-      return { events: [{ type: 'session.error', message, fatal: false }], state };
-    }
+      return mapOmpSubagentMessage(value, state);
+    case 'extension_error':
+      return mapOmpExtensionError(value, state);
+    case 'notice':
+      return mapOmpNotice(value, state);
     // `agent_end` (any `yielded`), `ready`, `queue_update`, `auto_*`, `cache_warming_*`, and the
     // unsolicited startup frames `extension_ui_request`, `advisor_cost_changed`,
     // `available_commands_update` (recorded from the real v18.4.11 binary) carry nothing here.
@@ -568,6 +589,50 @@ function mapToolEnd(value: Record<string, unknown>, state: OmpUiMapperState): Om
   return toolEnded(value, parentScope(state), state, true);
 }
 
+function endedToolItem(
+  previous: UiToolItem,
+  result: Record<string, unknown>,
+  isError: boolean,
+  agent: [string, OmpSubagentEntry] | undefined,
+): UiToolItem {
+  const output = contentText(result.content);
+  const status = isError ? 'failed' : agent ? agent[1].status : 'completed';
+  const item: UiToolItem = {
+    ...previous,
+    status,
+    ...(isError ? { error: output ?? 'omp tool failed' } : output !== undefined ? { output } : {}),
+  };
+  applyEndedDiffs(item, previous, result, isError);
+  return item;
+}
+
+function applyEndedDiffs(
+  item: UiToolItem,
+  previous: UiToolItem,
+  result: Record<string, unknown>,
+  isError: boolean,
+): void {
+  const diffs = isError ? undefined : ompToolDiffs(previous.name, previous.input, result);
+  if (!diffs) return;
+  item.diffs = diffs;
+  // Hashline edits carry the path only in `{input}` text; the result names it.
+  if (previous.name.toLowerCase() === 'edit' && !argsPath(previous.input)) {
+    item.title = diffs.length === 1 ? `Edit ${diffs[0]!.path}` : `Edit ${diffs.length} files`;
+  }
+}
+
+function appendEndedPlan(
+  events: UiEvent[],
+  previous: UiToolItem,
+  result: Record<string, unknown>,
+  isError: boolean,
+  publishPlan: boolean,
+): void {
+  // A sub-agent's todo list is its own; it never replaces the session's plan dock.
+  const plan = publishPlan && !isError ? ompToolPlan(previous.name, result) : undefined;
+  if (plan) events.push({ type: 'plan.updated', entries: plan });
+}
+
 function toolEnded(
   value: Record<string, unknown>,
   scope: ItemScope,
@@ -579,33 +644,17 @@ function toolEnded(
   const previous = id ? state.tools.get(id) : undefined;
   if (!id || !previous) return { events: [], state };
   const result = isRecord(value.result) ? value.result : {};
-  const output = contentText(result.content);
   const isError = value.isError === true || result.isError === true;
   // A single-form `task` row is its sub-agent's: in RPC OMP runs `task` asynchronously by
   // default, so the result can arrive while the agent still runs, and an aborted agent's result
   // can still read as success. Its lifecycle status wins over a successful result.
   const agent = scope.toolPrefix === '' ? singleFormSubagent(state, id) : undefined;
   if (agent) state = withSubagent(state, agent[0], { ...agent[1], ended: true });
-  const status = isError ? 'failed' : agent ? agent[1].status : 'completed';
-  const item: UiToolItem = {
-    ...previous,
-    status,
-    ...(isError ? { error: output ?? 'omp tool failed' } : output !== undefined ? { output } : {}),
-  };
-  const diffs = isError ? undefined : ompToolDiffs(previous.name, previous.input, result);
-  if (diffs) {
-    item.diffs = diffs;
-    // Hashline edits carry the path only in `{input}` text; the result names it.
-    if (previous.name.toLowerCase() === 'edit' && !argsPath(previous.input)) {
-      item.title = diffs.length === 1 ? `Edit ${diffs[0]!.path}` : `Edit ${diffs.length} files`;
-    }
-  }
+  const item = endedToolItem(previous, result, isError, agent);
   const tools = new Map(state.tools);
   tools.set(id, item);
-  const events: UiEvent[] = [{ type: status === 'running' ? 'item.updated' : 'item.completed', item }];
-  // A sub-agent's todo list is its own; it never replaces the session's plan dock.
-  const plan = publishPlan && !isError ? ompToolPlan(previous.name, result) : undefined;
-  if (plan) events.push({ type: 'plan.updated', entries: plan });
+  const events: UiEvent[] = [{ type: item.status === 'running' ? 'item.updated' : 'item.completed', item }];
+  appendEndedPlan(events, previous, result, isError, publishPlan);
   return { events, state: { ...state, tools } };
 }
 
@@ -704,6 +753,96 @@ function batchTask(parent: UiToolItem | undefined, id: string, index: number | u
   return isRecord(byIndex) ? byIndex : undefined;
 }
 
+function startedBatchRow(
+  payload: Record<string, unknown>,
+  id: string,
+  rowId: string,
+  parent: UiToolItem | undefined,
+  state: OmpUiMapperState,
+  events: UiEvent[],
+): OmpUiMapperState {
+  const agent = string(payload.agent);
+  const task = batchTask(parent, id, number(payload.index));
+  const taskText = task ? string(task.task) : undefined;
+  const label = string(payload.description) ?? taskText ?? agent ?? id;
+  const item: UiToolItem = {
+    kind: 'tool',
+    id: rowId,
+    name: 'task',
+    toolKind: 'task',
+    title: toolDisplay('task', { description: label }).title,
+    status: 'running',
+    input: { ...(agent ? { agent } : {}), ...(taskText ? { task: taskText } : {}) },
+  };
+  const tools = new Map(state.tools);
+  tools.set(rowId, item);
+  events.push({ type: 'item.started', item });
+  return { ...state, tools };
+}
+
+function startSubagentEntry(
+  payload: Record<string, unknown>,
+  id: string,
+  parentToolCallId: string,
+  status: UiToolItem['status'],
+  state: OmpUiMapperState,
+  events: UiEvent[],
+): { entry: OmpSubagentEntry; state: OmpUiMapperState } {
+  const parent = parentToolCallId ? state.tools.get(parentToolCallId) : undefined;
+  // A single-form call IS the sub-agent's row; a batch call (or an unknown parent) gets one
+  // synthetic `task` row per sub-agent so the drawer counts agents, not calls.
+  const single = parent !== undefined && !state.batchCalls.has(parentToolCallId);
+  const rowId = single ? parentToolCallId : `${parentToolCallId || 'omp-subagent'}#${id}`;
+  const entry: OmpSubagentEntry = { rowId, parentToolCallId, status, ended: false };
+  let next = withSubagent(state, id, entry);
+  if (!single) next = startedBatchRow(payload, id, rowId, parent, next, events);
+  return { entry, state: next };
+}
+
+function replaySubagentBuffer(id: string, rowId: string, state: OmpUiMapperState, events: UiEvent[]): OmpUiMapperState {
+  // Replay what arrived before this frame named the parent, ahead of any terminal close.
+  const buffered = state.pendingSubagentEvents.get(id);
+  if (!buffered) return state;
+  const pendingSubagentEvents = new Map(state.pendingSubagentEvents);
+  pendingSubagentEvents.delete(id);
+  let next: OmpUiMapperState = { ...state, pendingSubagentEvents };
+  for (const event of buffered) {
+    const mapped = mapChildEvent(event, rowId, next);
+    next = mapped.state;
+    events.push(...mapped.events);
+  }
+  return next;
+}
+
+function closeSubagentLane(rowId: string, state: OmpUiMapperState, events: UiEvent[]): OmpUiMapperState {
+  // An aborted agent leaves its last block open; it ends with the agent, not the turn.
+  const lane = state.childLanes.get(rowId);
+  if (!lane) return state;
+  const closed = closeLaneText(lane, childScope(rowId));
+  events.push(...closed.events);
+  return withChildLane(state, rowId, closed.lane);
+}
+
+function syncSubagentRow(
+  entry: OmpSubagentEntry,
+  status: UiToolItem['status'],
+  state: OmpUiMapperState,
+  events: UiEvent[],
+): OmpUiMapping {
+  // A batch row is the agent's own; a single-form row is the `task` call, which follows the
+  // lifecycle only once its result has arrived (`toolEnded` reads `status` up to then).
+  const single = entry.rowId === entry.parentToolCallId;
+  const row = !single || (entry.ended && status !== 'running') ? state.tools.get(entry.rowId) : undefined;
+  if (row && row.status !== status && (!single || row.status === 'running')) {
+    const item: UiToolItem = { ...row, status };
+    const tools = new Map(state.tools);
+    tools.set(row.id, item);
+    events.push({ type: status === 'running' ? 'item.updated' : 'item.completed', item });
+    return { events, state: { ...state, tools } };
+  }
+  return { events, state };
+}
+
 function mapSubagentLifecycle(payload: Record<string, unknown>, state: OmpUiMapperState): OmpUiMapping {
   const id = string(payload.id);
   if (!id) return { events: [], state };
@@ -719,55 +858,15 @@ function mapSubagentLifecycle(payload: Record<string, unknown>, state: OmpUiMapp
   }
 
   if (!entry) {
-    const parent = parentToolCallId ? state.tools.get(parentToolCallId) : undefined;
-    // A single-form call IS the sub-agent's row; a batch call (or an unknown parent) gets one
-    // synthetic `task` row per sub-agent so the drawer counts agents, not calls.
-    const single = parent !== undefined && !state.batchCalls.has(parentToolCallId);
-    const rowId = single ? parentToolCallId : `${parentToolCallId || 'omp-subagent'}#${id}`;
-    entry = { rowId, parentToolCallId, status, ended: false };
-    state = withSubagent(state, id, entry);
-    if (!single) {
-      const agent = string(payload.agent);
-      const task = batchTask(parent, id, number(payload.index));
-      const taskText = task ? string(task.task) : undefined;
-      const label = string(payload.description) ?? taskText ?? agent ?? id;
-      const item: UiToolItem = {
-        kind: 'tool',
-        id: rowId,
-        name: 'task',
-        toolKind: 'task',
-        title: toolDisplay('task', { description: label }).title,
-        status: 'running',
-        input: { ...(agent ? { agent } : {}), ...(taskText ? { task: taskText } : {}) },
-      };
-      const tools = new Map(state.tools);
-      tools.set(rowId, item);
-      state = { ...state, tools };
-      events.push({ type: 'item.started', item });
-    }
+    const created = startSubagentEntry(payload, id, parentToolCallId, status, state, events);
+    entry = created.entry;
+    state = created.state;
   }
 
-  // Replay what arrived before this frame named the parent, ahead of any terminal close.
-  const buffered = state.pendingSubagentEvents.get(id);
-  if (buffered) {
-    const pendingSubagentEvents = new Map(state.pendingSubagentEvents);
-    pendingSubagentEvents.delete(id);
-    state = { ...state, pendingSubagentEvents };
-    for (const event of buffered) {
-      const mapped = mapChildEvent(event, entry.rowId, state);
-      state = mapped.state;
-      events.push(...mapped.events);
-    }
-  }
+  state = replaySubagentBuffer(id, entry.rowId, state, events);
 
   if (status !== 'running') {
-    // An aborted agent leaves its last block open; it ends with the agent, not the turn.
-    const lane = state.childLanes.get(entry.rowId);
-    if (lane) {
-      const closed = closeLaneText(lane, childScope(entry.rowId));
-      events.push(...closed.events);
-      state = withChildLane(state, entry.rowId, closed.lane);
-    }
+    state = closeSubagentLane(entry.rowId, state, events);
   }
 
   if (entry.status !== status) {
@@ -775,18 +874,7 @@ function mapSubagentLifecycle(payload: Record<string, unknown>, state: OmpUiMapp
     state = withSubagent(state, id, entry);
   }
 
-  // A batch row is the agent's own; a single-form row is the `task` call, which follows the
-  // lifecycle only once its result has arrived (`toolEnded` reads `status` up to then).
-  const single = entry.rowId === entry.parentToolCallId;
-  const row = !single || (entry.ended && status !== 'running') ? state.tools.get(entry.rowId) : undefined;
-  if (row && row.status !== status && (!single || row.status === 'running')) {
-    const item: UiToolItem = { ...row, status };
-    const tools = new Map(state.tools);
-    tools.set(row.id, item);
-    state = { ...state, tools };
-    events.push({ type: status === 'running' ? 'item.updated' : 'item.completed', item });
-  }
-  return { events, state };
+  return syncSubagentRow(entry, status, state, events);
 }
 
 /** The sub-agent whose single-form `task` call is row `rowId`, with its id. */
