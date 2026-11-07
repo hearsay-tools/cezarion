@@ -3,7 +3,7 @@ import type { AutomationCoordinator } from './coordinator.ts';
 import { AutomationCandidateChangedError, type GithubCandidate, type GithubPoller, type GithubPollResult } from './github-poller.ts';
 import { AutomationProjectUnavailableError, ScheduleRunner, type ScheduleLauncher } from './schedule-runner.ts';
 import type { AutomationLease, AutomationStore } from './store.ts';
-import { isGithubAutomation, isScheduleAutomation, type AutomationRuntimeState, type GithubAutomationDefinition } from './types.ts';
+import { isGithubAutomation, isScheduleAutomation, type AutomationDefinition, type AutomationRuntimeState, type GithubAutomationDefinition } from './types.ts';
 
 export interface AutomationLaunchResult { runId: string; existing?: boolean }
 export type AutomationLauncher = (
@@ -342,6 +342,14 @@ const MIN_RETRY_MS = 60_000;
  */
 export const WORKSPACE_TIMER_CAP_MS = 60_000;
 
+/** One armed workspace timer entry: when it is due, how long a failed fire waits, and what fires. */
+interface WorkspaceDueEntry {
+  key: string;
+  at: number;
+  retryAfterMs: number;
+  fire: () => Promise<unknown>;
+}
+
 export interface WorkspaceAutomationSchedulerOptions {
   coordinator: AutomationCoordinator;
   handle: (projectId: string, store: AutomationStore) => ProjectAutomationHandle | undefined;
@@ -389,47 +397,9 @@ export class WorkspaceAutomationScheduler {
 
   private schedule(): void {
     if (this.stopped) return;
-    const due: Array<{ key: string; at: number; retryAfterMs: number; fire: () => Promise<unknown> }> = [];
+    const due: WorkspaceDueEntry[] = [];
     const live = new Set<string>();
-    for (const projectId of this.options.coordinator.enabledProjectIds()) {
-      const store = this.options.coordinator.store(projectId);
-      if (!store) continue;
-      const handle = this.options.handle(projectId, store);
-      if (!handle) continue;
-      const enabled = store.list().filter((item) => item.enabled);
-      // A poll needs the project's GitHub remote; without one it is never armed, not armed to fail.
-      if (handle.github) {
-        const scheduler = new ProjectAutomationScheduler(handle);
-        for (const definition of enabled.filter(isGithubAutomation)) {
-          const key = `${projectId}:${definition.id}`;
-          live.add(key);
-          const at = Date.parse(store.state(definition.id)?.nextCheckAt ?? new Date().toISOString());
-          due.push({ key, at: Math.max(at, this.retryAfter.get(key) ?? 0), retryAfterMs: Math.max(definition.intervalSeconds * 1_000, MIN_RETRY_MS), fire: () => scheduler.check(definition) });
-        }
-      }
-      const runner = new ScheduleRunner({
-        projectId,
-        store,
-        timeZone: handle.timeZone,
-        ...(handle.launchSchedule ? { launch: handle.launchSchedule } : {}),
-        ...(handle.onChange ? { onChange: handle.onChange } : {}),
-        ...(handle.now ? { now: handle.now } : {}),
-        ...(handle.reconcileReceipts ? { reconcile: handle.reconcileReceipts } : {}),
-        ...(handle.ready ? { ready: handle.ready } : {}),
-      });
-      for (const definition of enabled.filter(isScheduleAutomation)) {
-        const key = `${projectId}:${definition.id}`;
-        let at: number | null;
-        // A throwing `dueAt` (an unknown zone, an unwritable state file) skips this item rather
-        // than stalling the one timer every other automation shares.
-        try { at = runner.dueAt(definition); } catch { continue; }
-        if (at === null) continue;
-        live.add(key);
-        // A rejected fire (a held lease included) re-arms at the floor; the schedule's own next
-        // occurrence is the runner's business, not the timer's.
-        due.push({ key, at: Math.max(at, this.retryAfter.get(key) ?? 0), retryAfterMs: MIN_RETRY_MS, fire: () => runner.fire(definition) });
-      }
-    }
+    for (const projectId of this.options.coordinator.enabledProjectIds()) due.push(...this.projectDue(projectId, live));
     for (const key of this.retryAfter.keys()) if (!live.has(key)) this.retryAfter.delete(key);
     if (!due.length) {
       if (this.options.coordinator.hasProjects()) {
@@ -449,5 +419,62 @@ export class WorkspaceAutomationScheduler {
         () => { this.retryAfter.set(next.key, clock() + next.retryAfterMs); },
       ).finally(() => this.reschedule());
     }, Math.min(WORKSPACE_TIMER_CAP_MS, Math.max(0, next.at - clock())));
+  }
+
+  /** Every timer entry the project's enabled automations arm now, polls first as the handle orders them. */
+  private projectDue(projectId: string, live: Set<string>): WorkspaceDueEntry[] {
+    const store = this.options.coordinator.store(projectId);
+    if (!store) return [];
+    const handle = this.options.handle(projectId, store);
+    if (!handle) return [];
+    const enabled = store.list().filter((item) => item.enabled);
+    const due = this.githubDue(projectId, store, handle, enabled, live);
+    due.push(...this.scheduleDue(projectId, store, handle, enabled, live));
+    return due;
+  }
+
+  /** The project's GitHub polls: each arms at its next check, never before its retry floor. */
+  private githubDue(projectId: string, store: AutomationStore, handle: ProjectAutomationHandle,
+    enabled: AutomationDefinition[], live: Set<string>): WorkspaceDueEntry[] {
+    // A poll needs the project's GitHub remote; without one it is never armed, not armed to fail.
+    if (!handle.github) return [];
+    const scheduler = new ProjectAutomationScheduler(handle);
+    const due: WorkspaceDueEntry[] = [];
+    for (const definition of enabled.filter(isGithubAutomation)) {
+      const key = `${projectId}:${definition.id}`;
+      live.add(key);
+      const at = Date.parse(store.state(definition.id)?.nextCheckAt ?? new Date().toISOString());
+      due.push({ key, at: Math.max(at, this.retryAfter.get(key) ?? 0), retryAfterMs: Math.max(definition.intervalSeconds * 1_000, MIN_RETRY_MS), fire: () => scheduler.check(definition) });
+    }
+    return due;
+  }
+
+  /** The project's schedules: each arms at its next due moment, or drops out until the next wake. */
+  private scheduleDue(projectId: string, store: AutomationStore, handle: ProjectAutomationHandle,
+    enabled: AutomationDefinition[], live: Set<string>): WorkspaceDueEntry[] {
+    const runner = new ScheduleRunner({
+      projectId,
+      store,
+      timeZone: handle.timeZone,
+      ...(handle.launchSchedule ? { launch: handle.launchSchedule } : {}),
+      ...(handle.onChange ? { onChange: handle.onChange } : {}),
+      ...(handle.now ? { now: handle.now } : {}),
+      ...(handle.reconcileReceipts ? { reconcile: handle.reconcileReceipts } : {}),
+      ...(handle.ready ? { ready: handle.ready } : {}),
+    });
+    const due: WorkspaceDueEntry[] = [];
+    for (const definition of enabled.filter(isScheduleAutomation)) {
+      const key = `${projectId}:${definition.id}`;
+      let at: number | null;
+      // A throwing `dueAt` (an unknown zone, an unwritable state file) skips this item rather
+      // than stalling the one timer every other automation shares.
+      try { at = runner.dueAt(definition); } catch { continue; }
+      if (at === null) continue;
+      live.add(key);
+      // A rejected fire (a held lease included) re-arms at the floor; the schedule's own next
+      // occurrence is the runner's business, not the timer's.
+      due.push({ key, at: Math.max(at, this.retryAfter.get(key) ?? 0), retryAfterMs: MIN_RETRY_MS, fire: () => runner.fire(definition) });
+    }
+    return due;
   }
 }
