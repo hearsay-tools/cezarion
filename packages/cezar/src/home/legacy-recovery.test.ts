@@ -187,6 +187,7 @@ it.each(['claude', 'omp'])('keeps the migration account path policy when importi
 
 it('refuses a new legacy-internal account with no relocation and leaves Ignore available', () => {
   const { legacy, home } = fixture();
+  mkdirSync(join(legacy.root, 'new-account'));
   writeFileSync(legacy.agentAccounts, JSON.stringify({ accounts: [{ id: 'new-account', provider: 'claude', configDir: join(legacy.root, 'new-account') }] }));
   const flag = row(home, 'agent-accounts.json');
   expect(() => importHomeRecovery(home, 'agent-accounts.json', flag.detectedAt, true)).toThrow(/account new-account.*no completed relocation/);

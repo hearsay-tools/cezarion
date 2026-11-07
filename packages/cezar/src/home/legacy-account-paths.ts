@@ -1,10 +1,9 @@
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { expandTilde } from '../paths.ts';
 import { AGENT_ACCOUNT_ID_RE } from '../workspace/agent-accounts.ts';
 import type { Home } from './home.ts';
-import { insideDirectory } from './migration-files.ts';
+import { migrationAccountSource } from './migration-account-source.ts';
 import type { MigrationRecord } from './migration-record.ts';
 
 function accountRows(value: Record<string, unknown>): Record<string, unknown>[] {
@@ -20,14 +19,16 @@ export function preserveAccountRelocations(home: Home, record: MigrationRecord, 
     .map(account => [account.id, account]));
   merged.accounts = accountRows(merged).map(account => {
     const source = imported.get(account.id);
-    if (!source || typeof source.configDir !== 'string' || !insideDirectory(record.legacyRoot, expandTilde(source.configDir))) return account;
+    if (!source || typeof source.configDir !== 'string') return account;
+    const canonicalSource = migrationAccountSource(record.legacyRoot, source.configDir);
+    if (canonicalSource === undefined) return account;
     const id = String(account.id);
     if (!AGENT_ACCOUNT_ID_RE.test(id)) throw new Error(`Cannot import account ${id}: invalid account ID.`);
     if (record.notMoved.some(entry => entry.id === id && entry.configDir === source.configDir
       && entry.reason === 'omp-profile-root-inside-legacy-home') && source.provider === 'omp') return account;
     const before = previous.get(id);
     const destination = join(home.data, 'accounts', id);
-    const sameSource = typeof before?.configDir === 'string' && resolve(expandTilde(before.configDir)) === resolve(expandTilde(source.configDir));
+    const sameSource = typeof before?.configDir === 'string' && migrationAccountSource(record.legacyRoot, before.configDir) === canonicalSource;
     const relocated = record.files.some(entry => entry.target?.kind === 'data' && entry.target.path.startsWith(`accounts/${id}/`));
     // Empty account directories have no file mapping. Their migration-created destination,
     // original registry entry, and absence from deferredAccounts prove the same relocation.
