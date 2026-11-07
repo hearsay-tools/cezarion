@@ -58,7 +58,8 @@ export interface OpencodeUiMapperState {
   readonly subtasks: ReadonlyMap<string, SubtaskScope>;
   /** Subtask parts and task tool calls do not carry the child session id.
    *  Pending scopes bind to child sessions first-in-first-out: the oldest
-   *  pending subtask takes the next child session heard from (#5). */
+   *  pending subtask takes the next child session heard from
+   *  (hearsay-tools/cezarion#5). */
   readonly unboundSubtasks: readonly SubtaskScope[];
   /** Child sessions whose scope is over (the child went idle, its task tool
    *  settled, or the main turn ended around it). A late event from one must

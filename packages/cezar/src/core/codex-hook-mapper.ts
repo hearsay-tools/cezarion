@@ -17,7 +17,8 @@ export const HOOK_STATUS: Readonly<Record<string, HookStatus>> = {
 };
 const HOOK_ENTRY_KINDS = new Set<HookEntryKind>(['context', 'feedback', 'warning', 'error', 'stop']);
 
-/** `hook/completed` → one hook item (#961). `run.entries` already are what the agent
+/** `hook/completed` → one hook item
+ *  (hearsay-tools/cezarion#961). `run.entries` already are what the agent
  *  received; `statusMessage` joins them unless an entry already says it. */
 function mapHookCompleted(params: Record<string, unknown>, state: CodexUiMapperState): UiEvent[] {
   const run = isRecord(params.run) ? params.run : undefined;

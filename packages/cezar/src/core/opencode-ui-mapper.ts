@@ -31,7 +31,7 @@ import { opencodeSkillWarning } from './opencode-session-error.ts';
  *    part or a top-level `task` tool call opens a scope: the task tool names
  *    its child (`metadata.sessionId`) and binds to it outright, while a
  *    scope with no wire link queues and child sessions claim queued scopes
- *    first-in-first-out as they are heard from (#5). Closed children are
+ *    first-in-first-out as they are heard from (hearsay-tools/cezarion#5). Closed children are
  *    tombstoned for the mapper's lifetime; anything foreign outside a
  *    subtask scope is dropped.
  */
@@ -803,7 +803,7 @@ function resolveSubtask(
   // A closed child's late events have no home — never a sibling's scope.
   if (state.closedSessions.has(sessionId)) return { state };
   // First-in-first-out: the oldest pending subtask claims this child session
-  // and the rest stay queued for the children still to come (#5).
+  // and the rest stay queued for the children still to come (hearsay-tools/cezarion#5).
   const [subtask, ...rest] = state.unboundSubtasks;
   if (subtask === undefined) return { state };
   const subtasks = new Map(state.subtasks);

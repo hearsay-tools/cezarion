@@ -135,7 +135,8 @@ function mapThreadStartedNotification(params: Record<string, unknown>, state: Co
 }
 
 function mapHookNotification(params: Record<string, unknown>, state: CodexUiMapperState): CodexUiMapping {
-  // `hook/started` renders nothing: hooks are completion-only (#961).
+  // `hook/started` renders nothing: hooks are completion-only
+  // (hearsay-tools/cezarion#961).
   return { events: mapHookCompleted(params, state), state };
 }
 
