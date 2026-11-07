@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Home } from './home.ts';
@@ -11,6 +11,7 @@ import { getHomeRecovery } from './recovery.ts';
 import { resolveHome } from './resolve.ts'; // test-home-read: injected CEZ_HOME selects only the sandbox.
 import { writeLaunchers } from '../self-update/launcher.ts';
 import { RunStore } from '../runs/store.ts';
+import { loadAgentAccounts } from '../workspace/agent-accounts.ts';
 import { migrationFixture, rawJson, json } from './migration.testkit.ts';
 import { cleanStoreRoots, storeRoot } from './store.testkit.ts';
 import { planLegacyMigration } from './migration-plan.ts';
@@ -78,6 +79,48 @@ it('D1: a crash after deferred configDir publication repairs the record without 
   expect(readMigrationRecord(target)!.deferredAccounts).toEqual([]);
   expect(json(join(destination, 'auth.json')).secret).toBe('refreshed live credentials');
   expect(json(join(destination, 'session.json'))).toEqual({ live: true });
+});
+
+it.skipIf(process.platform === 'win32')('B4: account copies keep owner-execute, so a relocated profile hook still runs', () => {
+  const { legacy, target, account, env } = accountFixture();
+  const hook = join(account.configDir, 'hooks', 'check.sh');
+  mkdirSync(join(hook, '..'));
+  writeFileSync(hook, '#!/bin/sh\nprintf hook-ok\n');
+  chmodSync(hook, 0o755);
+  migrateLegacyHome(legacy, target, { env });
+  const destination = join(target.data, 'accounts', account.id);
+  expect(statSync(join(destination, 'hooks', 'check.sh')).mode & 0o777).toBe(0o700);
+  expect(statSync(join(destination, 'auth.json')).mode & 0o777).toBe(0o600);
+  expect(execFileSync(join(destination, 'hooks', 'check.sh'), [], { encoding: 'utf8' })).toBe('hook-ok');
+});
+
+it.each([null, 'not-an-array', 7])('D7: agent-accounts.json with accounts %j migrates as the loader reads it', accounts => {
+  const { legacy, target } = migrationFixture();
+  rawJson(legacy.agentAccounts, { accounts, unknown: 'kept' });
+  expect(planLegacyMigration(legacy, target).accounts).toEqual([]);
+  expect(migrateLegacyHome(legacy, target).status).toBe('migrated');
+  expect(json(target.agentAccounts)).toEqual({ accounts, unknown: 'kept' });
+});
+
+it('H2: accounts imported from config.json agentProfiles relocate like stored accounts', async () => {
+  const { legacy, target } = migrationFixture();
+  const configDir = join(legacy.root, 'credentials', 'work');
+  rawJson(join(configDir, 'auth.json'), { secret: 'old-credentials' });
+  const project = storeRoot();
+  Home.seed(legacy, legacy.workspaceConfig, {
+    projects: [{ id: 'project', root: project, agentProfile: { claude: 'work' } }],
+    agentProfiles: [{ id: 'work', provider: 'claude', configDir }],
+  });
+  expect(planLegacyMigration(legacy, target).accounts.map(account => account.id)).toEqual(['work']);
+  expect(existsSync(legacy.agentAccounts)).toBe(false);
+  migrateLegacyHome(legacy, target);
+  const destination = join(target.data, 'accounts', 'work');
+  expect(json(join(destination, 'auth.json')).secret).toBe('old-credentials');
+  const loaded = await loadAgentAccounts(target);
+  expect(loaded.accounts).toEqual([expect.objectContaining({ id: 'work', configDir: destination })]);
+  expect(loaded.selections[project]).toEqual({ claude: 'work' });
+  expect(existsSync(legacy.agentAccounts)).toBe(false);
+  expect(getHomeRecovery(target)).toEqual({ files: [] });
 });
 
 it('step 7: copies internal account credentials, rewrites configDir with HEAD, and leaves legacy untouched', () => {

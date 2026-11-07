@@ -143,15 +143,22 @@ locks, without extending the short-lock protocol. HomeStore checks for the
 claim before waiting and inside its transaction. This one safety change is
 unconditional; ordinary reads do not probe `.migrating`.
 Boot refuses live migration holders and lets migration reclaim dead holders,
-including a pending copy left by a hard crash. A staged server group has no
-claim and still boots read-only. Recovery inspections recheck the claim and
-pending marker under their lock, then report without changing journal files.
+including a pending copy left by a hard crash. Only a finished
+`commit: false` copy is a staged server group: its record has `stagedAt` and
+boot serves it read-only. A pending home without `stagedAt` is a failed or
+crashed run, and boot restarts it at step 4. Step 5's recovery refusal runs
+before the first target write, so a refused run leaves no pending home.
+Recovery inspections recheck the claim and pending marker under their lock.
+They then run the normal journal interpretation on a report-only VersionLog,
+which keeps every record change in memory: a reset interrupted after its
+replacement (PENDING, stale HEAD) still reports, and no journal file changes.
 
 `installMarkerSchema.state` is `pending | committed | undefined`.
 `writeMigrationMarker` is the migration's only marker writer; ordinary marker
 creation never overwrites one. A pending home refuses HomeStore writes and
 permits reads and cockpit leases. Boot detects `install.json.state ===
-'pending'` and skips migration and seeding so P2c can check the group read-only.
+'pending'` with a staged record and skips migration and seeding so P2c can
+check the group read-only.
 `prepareHomeLifecycle(home, instance?)` passes the instance into its lease.
 
 For P2c, `migrateLegacyHome(..., { commit: false })` leaves a pending copy.
@@ -166,7 +173,8 @@ the recorded pending destinations. Rollback never rewrites legacy registry data.
 `home/migration-record.ts` owns `migrationRecordSchema` (version 1) and the
 private `readMigrationRecord(home)` / `writeMigrationRecord(home, record)` pair.
 Writers hold config then state locks. A record contains `legacyRoot`, all five
-`roots`, `createdAt`, `backup`, `files`, `deferredAccounts`, and `notMoved`.
+`roots`, `createdAt`, `backup`, `files`, `deferredAccounts`, `notMoved`, and
+the optional `stagedAt`.
 Each file has its legacy-relative `path`, SHA-256 `hash`, `mtimeMs`, and a
 nullable `target: { kind: config | state | data, path }`. Unmapped legacy files
 are observed but not imported. `movedHomeSchema` is
@@ -183,6 +191,11 @@ deferred until its claim ends. Live legacy cockpit leases already stop step 2.
 An internal omp account stays in place and records `notMoved` with reason
 `omp-profile-root-inside-legacy-home`; the warning asks to move `PI_CONFIG_DIR`
 outside the legacy home (planner decision for hearsay-tools/cezarion#2933).
+Account inventory reads accounts through the loader's own source,
+`readAgentAccountSource`: `agent-accounts.json` with the loader's salvage
+(a non-array `accounts` names no account), or, when that file is absent, the
+one-time `config.json` `agentProfiles` import. An imported account relocates
+like a stored one; the rewrite publishes the store that import would persist.
 Account inventory uses the loader's first-wins ID rule. Later duplicate IDs
 stay in place and record `notMoved` with reason `duplicate-account-id`.
 Each pending account or managed tree is rebuilt in a fresh staging directory.
@@ -198,8 +211,11 @@ no longer matches, so an unrelated later state cannot inherit it.
 Opaque vendor account
 trees and managed `versions/` are verified byte for byte, since their `.json`
 files can be JSONC. Copies, archives, records and journals use private files
-and split-layout Windows ACLs. Managed executables and launchers use owner-only
-execute permission; the old launchers remain unchanged.
+and split-layout Windows ACLs. Every tree copy keeps the owner-execute bit:
+a file is 0700 when its owner could execute the source (managed executables,
+launchers, account profile hooks) and 0600 otherwise. The old launchers remain
+unchanged. Archive entries record the same 0700 or 0600 mode. Launchers come from `writeLaunchers`, and the PATH line update
+replaces the line `pathHook` defines for `cez install`.
 The managed package link at `versions/<id>/node_modules/@wjarka/cezarion`
 keeps an external checkout only when its version manifest records that same
 checkout with `source: 'link'`. Other escaping links refuse migration.

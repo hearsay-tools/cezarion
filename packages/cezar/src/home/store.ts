@@ -28,9 +28,9 @@ export class HomeStore {
   private writeDepth = 0;
   constructor(private readonly home: Home | string) { this.root = typeof home === 'string' ? home : home.root; }
 
-  private journal(path: string): VersionLog {
+  private journal(path: string, reportOnly = false): VersionLog {
     const { root, file } = homePathLocation(this.home, path);
-    return new VersionLog(root, file);
+    return new VersionLog(root, file, {}, reportOnly);
   }
 
   private lockRoot(path: string): string {
@@ -163,8 +163,8 @@ export class HomeStore {
     if (readInstallMarker(this.root)?.state === 'pending') return;
     this.assertBoundary([path]);
     return this.transaction(reportOnly => {
-      const log = this.journal(path);
-      return log.inspect(readBytes(path), reportOnly);
+      const log = this.journal(path, reportOnly);
+      return log.inspect(readBytes(path));
     }, [path], true);
   }
 
@@ -191,11 +191,11 @@ export class HomeStore {
     // Observing a never-created optional file must not create its first journal.
     if (!existsSync(path) && !existsSync(this.journal(path).directory)) return;
     return this.transaction(reportOnly => {
-      const log = this.journal(path);
+      const log = this.journal(path, reportOnly);
       const bytes = readBytes(path);
-      const outside = log.inspect(bytes, reportOnly);
-      const backupReset = !outside ? flagResetFromBackup(log, bytes, this.home, reportOnly) : undefined;
-      const flag = outside ?? log.reset(reportOnly) ?? backupReset;
+      const outside = log.inspect(bytes);
+      if (!outside) flagResetFromBackup(log, bytes, this.home);
+      const flag = outside ?? log.reset();
       let canRestore = true;
       if (flag) try { log.recoveryBytes(flag); } catch { canRestore = false; }
       return flag ? { reason: outside ? 'outside-write' as const : 'reset' as const, detectedAt: flag.detectedAt, canRestore, restoreHash: flag.restoreHash } : undefined;

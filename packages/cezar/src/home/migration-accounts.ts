@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { expandTilde } from '../paths.ts';
 import { loadWorkspaceConfigSync } from '../workspace/config.ts';
-import { parseAgentAccountEntries } from '../workspace/agent-accounts.ts';
+import { parseAgentAccountEntries, readAgentAccountSource, type AgentAccount } from '../workspace/agent-accounts.ts';
 import { recordedProcessLive } from '../delegation/process-liveness.ts';
 import type { Home } from './home.ts';
 import { replacePrivateTree, insideDirectory, migrationPrivacy } from './migration-files.ts';
@@ -13,13 +13,14 @@ import { VersionLog } from './version-log.ts';
 import { readMigrationRecord, writeMigrationRecord, type MigrationRecord } from './migration-record.ts';
 import { withHomeLock } from './write-lock.ts';
 
-const accountSchema = z.object({ id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/), configDir: z.string(), provider: z.string() }).passthrough();
 export interface MigrationAccount { id: string; configDir: string; source: string; target: string; provider: string }
 
+/** Plain reads: inventory and pending rewrites never create journals in either home. */
+const readUtf8 = (path: string) => readFileSync(path, 'utf8');
+
+/** Accounts come from the loader's own source and salvage, including the config.json import. */
 export function migrationAccountInventory(legacy: Home, target: Home): { accounts: MigrationAccount[]; notMoved: MigrationRecord['notMoved'] } {
-  if (!existsSync(legacy.agentAccounts)) return { accounts: [], notMoved: [] };
-  const store = z.object({ accounts: z.array(z.unknown()).optional() }).parse(JSON.parse(readFileSync(legacy.agentAccounts, 'utf8')));
-  const parsed = parseAgentAccountEntries(store.accounts ?? []);
+  const parsed = parseAgentAccountEntries(readAgentAccountSource(legacy, readUtf8).rows);
   const accounts: MigrationAccount[] = [];
   for (const account of parsed.accounts) {
     let source: string;
@@ -35,6 +36,23 @@ export function migrationAccountInventory(legacy: Home, target: Home): { account
       target: join(target.data, 'accounts', account.id) });
   }
   return { accounts, notMoved: parsed.duplicates.map(account => ({ id: account.id, configDir: account.configDir, reason: 'duplicate-account-id' })) };
+}
+
+/** Rewrite configDir on the rows the loader selects; every other row and key stays as written. */
+function rewriteConfigDirs(value: Record<string, unknown>, rewrite: (account: AgentAccount) => string | undefined): Record<string, unknown> | undefined {
+  if (!Array.isArray(value.accounts)) return undefined;
+  const rows: unknown[] = value.accounts;
+  const parsed = parseAgentAccountEntries(rows);
+  const selected = new Map(parsed.selectedIndices.map((index, position) => [index, parsed.accounts[position]!]));
+  let changed = false;
+  const accounts = rows.map((row, index) => {
+    const account = selected.get(index);
+    const configDir = account && rewrite(account);
+    if (!configDir) return row;
+    changed = true;
+    return { ...(row as object), configDir };
+  });
+  return changed ? { ...value, accounts } : undefined;
 }
 
 export function migrationAccounts(legacy: Home, target: Home): MigrationAccount[] {
@@ -86,13 +104,10 @@ export function copyMigrationAccounts(legacy: Home, target: Home, accounts: Migr
     }
   }
   if (!rewrites.size) return;
-  const value = JSON.parse(readFileSync(target.agentAccounts, 'utf8')) as { accounts: unknown[] };
-  const selected = new Set(parseAgentAccountEntries(value.accounts).selectedIndices);
-  value.accounts = value.accounts.map((row, index) => {
-    const account = accountSchema.safeParse(row);
-    return selected.has(index) && account.success && rewrites.has(account.data.id) ? { ...account.data, configDir: rewrites.get(account.data.id) } : row;
-  });
-  new VersionLog(target.config, 'agent-accounts.json', migrationPrivacy).replace(target.agentAccounts, Buffer.from(`${JSON.stringify(value, null, 2)}\n`));
+  // The copy, or the store the loader would import from the copied config.json.
+  const source = readAgentAccountSource(target, readUtf8).value;
+  const value = source && rewriteConfigDirs(source, account => rewrites.get(account.id));
+  if (value) new VersionLog(target.config, 'agent-accounts.json', migrationPrivacy).replace(target.agentAccounts, Buffer.from(`${JSON.stringify(value, null, 2)}\n`));
 }
 
 /** Only boot calls this, before it starts any sessions. Normal committed writes use HomeStore. */
@@ -104,7 +119,7 @@ export function finishDeferredAccounts(legacy: Home, target: Home): void {
     const accounts = migrationAccounts(legacy, target);
     const pending: MigrationRecord['deferredAccounts'] = [];
     for (const deferred of record.deferredAccounts) {
-      const current = parseAgentAccountEntries(JSON.parse(store.read(target.agentAccounts)).accounts ?? []).accounts.find(account => account.id === deferred.id);
+      const current = parseAgentAccountEntries(readAgentAccountSource(target).rows).accounts.find(account => account.id === deferred.id);
       const destination = join(target.data, 'accounts', deferred.id);
       // The registry rewrite commits before the record. A crash in between must never recopy
       // over credentials that a later session may already have updated in the migrated profile.
@@ -114,14 +129,9 @@ export function finishDeferredAccounts(legacy: Home, target: Home): void {
       if (!account || accountInUse(legacy, deferred.id)) { pending.push(deferred); continue; }
       replacePrivateTree(account.source, account.target);
       store.transaction(() => {
-        const value = JSON.parse(store.read(target.agentAccounts)) as { accounts: unknown[] };
-        const selected = new Set(parseAgentAccountEntries(value.accounts).selectedIndices);
-        value.accounts = value.accounts.map((row, index) => {
-          const parsed = accountSchema.safeParse(row);
-          return selected.has(index) && parsed.success && parsed.data.id === account.id && parsed.data.configDir === deferred.configDir
-            ? { ...parsed.data, configDir: account.target } : row;
-        });
-        store.writeJson(target.agentAccounts, value);
+        const source = readAgentAccountSource(target).value;
+        const value = source && rewriteConfigDirs(source, row => row.id === account.id && row.configDir === deferred.configDir ? account.target : undefined);
+        if (value) store.writeJson(target.agentAccounts, value);
       }, [target.agentAccounts]);
     }
     writeMigrationRecord(target, { ...record, deferredAccounts: pending });

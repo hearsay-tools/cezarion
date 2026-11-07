@@ -32,7 +32,8 @@ it('step 4: writes a private, standard ustar gzip archive with exact file bytes 
   const source = storeRoot(), target = join(storeRoot(), 'backups', 'legacy.tar.gz');
   mkdirSync(join(source, 'versions'));
   mkdirSync(join(source, 'empty'));
-  writeFileSync(join(source, 'config.json'), '{"secret":"token"}\n');
+  writeFileSync(join(source, 'config.json'), '{"secret":"token"}\n', { mode: 0o644 });
+  writeFileSync(join(source, 'hook.sh'), '#!/bin/sh\n', { mode: 0o755 });
   writeFileSync(join(source, 'versions', 'cached'), 'not archived');
   const long = `${'directory-'.repeat(9)}/${'name-'.repeat(15)}.json`;
   mkdirSync(join(source, long, '..'), { recursive: true });
@@ -51,6 +52,8 @@ it('step 4: writes a private, standard ustar gzip archive with exact file bytes 
     expect(statSync(join(extracted, 'empty')).isDirectory()).toBe(true);
     expect(readFileSync(join(extracted, long), 'utf8')).toBe('{"long":true}');
     expect(readFileSync(join(extracted, 'config.json'))).toEqual(readFileSync(join(source, 'config.json')));
+    expect(statSync(join(extracted, 'hook.sh')).mode & 0o100).toBe(0o100);
+    expect(statSync(join(extracted, 'config.json')).mode & 0o111).toBe(0);
   }
 });
 
@@ -58,11 +61,13 @@ it.skipIf(process.platform === 'win32')('copies managed versions privately and p
   const source = storeRoot(), target = join(storeRoot(), 'versions');
   mkdirSync(join(source, 'v1'));
   writeFileSync(join(source, 'v1', 'entry'), 'executable', { mode: 0o755 });
+  writeFileSync(join(source, 'v1', 'data.json'), '{}', { mode: 0o644 });
   symlinkSync('v1', join(source, 'current'));
-  copyPrivateTree(source, target, true);
+  copyPrivateTree(source, target);
   expect(readlinkSync(join(target, 'current'))).toBe('v1');
   expect(readFileSync(join(target, 'current', 'entry'), 'utf8')).toBe('executable');
   expect(statSync(join(target, 'v1', 'entry')).mode & 0o777).toBe(0o700);
+  expect(statSync(join(target, 'v1', 'data.json')).mode & 0o777).toBe(0o600);
   expect(statSync(join(target, 'v1')).mode & 0o777).toBe(0o700);
   expect(readFileSync(join(source, 'current', 'entry'), 'utf8')).toBe('executable');
 });

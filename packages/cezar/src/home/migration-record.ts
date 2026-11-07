@@ -18,6 +18,8 @@ export const migrationFileSchema = z.object({
 export const migrationRecordSchema = z.object({
   version: z.literal(1), legacyRoot: z.string(), roots: migrationRootsSchema,
   createdAt: z.iso.datetime(), backup: z.string(), files: z.array(migrationFileSchema),
+  /** Set only when a commit:false run finished its copy; boot serves such a pending home read-only. */
+  stagedAt: z.iso.datetime().optional(),
   deferredAccounts: z.array(z.object({ id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/), configDir: z.string() })),
   notMoved: z.array(z.object({ id: z.string(), configDir: z.string(), reason: z.enum(['omp-profile-root-inside-legacy-home', 'duplicate-account-id']) })),
 }).passthrough();

@@ -6,6 +6,7 @@ import { REBRAND_SWITCH } from './switch.ts';
 import { assertNoMigration } from './migration-guard.ts';
 import { migrationHolderLive } from './migration-claim.ts';
 import { readInstallMarker } from './install-marker.ts';
+import { readMigrationRecord } from './migration-record.ts';
 import { migrateLegacyHome } from './migrate.ts';
 import { finishDeferredAccounts } from './migration-accounts.ts';
 
@@ -18,9 +19,10 @@ export function prepareMigrationHome(home: Home, env: NodeJS.ProcessEnv, {
   if (!enabled || !legacy) return false;
   if (migrationHolderLive(legacy.root)) assertNoMigration(legacy.root);
   if (migrationHolderLive(home.config)) assertNoMigration(home.config);
-  // A staged server group has no claim. A crashed migration leaves a stale legacy claim;
-  // resume that migration instead of treating its partial copy as a healthy staged home.
-  if (readInstallMarker(home.config)?.state === 'pending' && !existsSync(join(legacy.root, '.migrating'))) return true;
+  // Only a finished commit:false copy is a staged server group. A crashed or failed run leaves a
+  // pending home without stagedAt, or a stale claim: restart it at step 4 (spec §4 step 3).
+  if (readInstallMarker(home.config)?.state === 'pending' && !existsSync(join(legacy.root, '.migrating'))
+    && readMigrationRecord(home)?.stagedAt !== undefined) return true;
   migrateLegacyHome(legacy, home, { env });
   finishDeferredAccounts(legacy, home);
   return false;

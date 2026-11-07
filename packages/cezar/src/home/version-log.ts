@@ -29,35 +29,52 @@ export function digest(bytes: Buffer | null): Hash {
 /** A journal belongs to the root that owns the live file, independent of runtime/env paths. */
 export class VersionLog {
   readonly directory: string;
-  constructor(readonly root: string, readonly relativePath: string, private readonly privacy: PrivateFileOptions = {}) {
+  /** Report-only journals run the same interpretation and keep every record change in memory. */
+  private readonly overlay: Map<string, Buffer | null> | undefined;
+  constructor(readonly root: string, readonly relativePath: string, private readonly privacy: PrivateFileOptions = {}, reportOnly = false) {
     this.directory = join(root, '.versions', relativePath);
+    if (reportOnly) this.overlay = new Map();
+  }
+
+  private readEntry(name: string): Buffer | null {
+    if (this.overlay?.has(name)) return this.overlay.get(name)!;
+    return readBytes(join(this.directory, name));
+  }
+
+  private writeEntry(name: string, bytes: Buffer | null): void {
+    if (this.overlay) this.overlay.set(name, bytes);
+    else if (bytes !== null) replacePrivate(join(this.directory, name), bytes, this.privacy);
+    else { rmSync(join(this.directory, name), { force: true }); syncDirectory(this.directory); }
+  }
+
+  private assertWritable(): void {
+    if (this.overlay) throw new Error(`Report-only HomeStore journal cannot replace ${this.relativePath}`);
   }
 
   record(name: string): unknown | undefined {
-    const bytes = readBytes(join(this.directory, name));
+    const bytes = this.readEntry(name);
     return bytes === null ? undefined : JSON.parse(bytes.toString('utf8'));
   }
 
   setRecord(name: string, record: unknown): void {
-    replacePrivate(join(this.directory, name), `${JSON.stringify(record)}\n`, this.privacy);
+    this.writeEntry(name, Buffer.from(`${JSON.stringify(record)}\n`));
   }
 
   private store(bytes: Buffer | null): Hash {
     const hash = digest(bytes);
-    if (bytes !== null) replacePrivate(join(this.directory, hash!), bytes, this.privacy);
+    if (bytes !== null) this.writeEntry(hash!, bytes);
     return hash;
   }
 
   private clearPending(): void {
-    rmSync(join(this.directory, 'PENDING'), { force: true });
-    syncDirectory(this.directory);
+    this.writeEntry('PENDING', null);
   }
 
   /** Caller owns write.lock. Seed old installs without changing even one live byte. */
-  inspect(bytes: Buffer | null, readOnly = false): OutsideWrite | undefined {
+  inspect(bytes: Buffer | null): OutsideWrite | undefined {
     const record = this.record('HEAD');
     if (record === undefined) {
-      if (!readOnly) this.setRecord('HEAD', { hash: this.store(bytes) });
+      this.setRecord('HEAD', { hash: this.store(bytes) });
       return;
     }
     const head = versionSchema.parse(record).hash;
@@ -66,16 +83,12 @@ export class VersionLog {
     const pending = pendingRecord === undefined ? undefined : versionSchema.parse(pendingRecord);
     if (pending && (actual === pending.hash || actual === head)) {
       // Old bytes: crash before replacement. New bytes: crash after replacement. Both are ours.
-      if (!readOnly) {
-        if (actual === pending.hash) this.setRecord('HEAD', { hash: pending.hash });
-        this.clearPending();
-      }
+      if (actual === pending.hash) this.setRecord('HEAD', { hash: pending.hash });
+      this.clearPending();
     } else if (actual !== head) {
-      if (this.record('OUTSIDE') === undefined) {
-        const outside = { restoreHash: head, observedHash: actual, detectedAt: new Date().toISOString() };
-        if (readOnly) return outside;
-        this.setRecord('OUTSIDE', outside);
-      }
+      if (this.record('OUTSIDE') === undefined) this.setRecord('OUTSIDE', {
+        restoreHash: head, observedHash: actual, detectedAt: new Date().toISOString(),
+      });
     }
     return this.outside();
   }
@@ -87,6 +100,7 @@ export class VersionLog {
 
   /** Crash-safe journal order: durable bytes, PENDING, replace, HEAD, clear PENDING. */
   replace(path: string, bytes: Buffer | null): void {
+    this.assertWritable();
     const hash = this.store(bytes);
     this.setRecord('PENDING', { hash });
     if (bytes === null) {
@@ -102,6 +116,7 @@ export class VersionLog {
 
   /** Install locks must also exclude older binaries, which create their lock with wx. */
   createExclusive(path: string, bytes: Buffer): void {
+    this.assertWritable();
     const hash = this.store(bytes);
     this.setRecord('PENDING', { hash });
     const stage = atomicTmpPath(path);
@@ -117,14 +132,14 @@ export class VersionLog {
     } finally { rmSync(stage, { force: true }); }
   }
 
-  reset(readOnly = false): OutsideWrite | undefined {
+  reset(): OutsideWrite | undefined {
     const record = this.record('RESET');
     if (record === undefined) return;
     const reset = resetSchema.parse(record);
     // A crash before replacement must not turn an unchanged registry into a reset.
     if (reset.pending) {
       if (versionSchema.parse(this.record('HEAD')).hash !== reset.observedHash) return;
-      if (!readOnly) this.setRecord('RESET', { ...reset, pending: false });
+      this.setRecord('RESET', { ...reset, pending: false });
     }
     return reset;
   }
@@ -147,10 +162,7 @@ export class VersionLog {
     const record = source.record('ACCEPTED');
     const accepted = record === undefined ? undefined : acceptedSchema.parse(record);
     if (accepted && accepted.hash === digest(bytes)) this.setRecord('ACCEPTED', accepted);
-    else {
-      rmSync(join(this.directory, 'ACCEPTED'), { force: true });
-      syncDirectory(this.directory);
-    }
+    else this.writeEntry('ACCEPTED', null);
   }
 
   /** Resolve without rewriting the operator's bytes or changing their mtime. */
@@ -162,6 +174,7 @@ export class VersionLog {
   }
 
   clearRecovery(bytes: Buffer | null, keepReset = false): void {
+    this.assertWritable();
     // Record acceptance before clearing flags: an empty accepted registry must not re-alert.
     if (!keepReset) this.setRecord('ACCEPTED', { hash: digest(bytes), empty: registryCount(this.relativePath, bytes) === 0 });
     for (const name of keepReset ? ['OUTSIDE'] : ['OUTSIDE', 'RESET']) rmSync(join(this.directory, name), { force: true });
@@ -169,7 +182,7 @@ export class VersionLog {
   }
 
   recoveryBytes(flag: OutsideWrite): Buffer | null {
-    const bytes = flag.restoreHash === null ? null : readBytes(join(this.directory, flag.restoreHash));
+    const bytes = flag.restoreHash === null ? null : this.readEntry(flag.restoreHash);
     if (digest(bytes) !== flag.restoreHash) throw new Error(`Missing or corrupt pinned HomeStore version: ${this.relativePath}`);
     return bytes;
   }

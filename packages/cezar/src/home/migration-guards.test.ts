@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { HomeStore } from './store.ts';
@@ -15,6 +15,7 @@ import { REBRAND_SWITCH } from './switch.ts';
 import * as writeLock from './write-lock.ts';
 import { migrationFiles } from './migration-files.ts';
 import { Home } from './home.ts';
+import { acceptHomeRecovery } from './recovery.ts';
 
 vi.mock('node:fs', async original => {
   const fs = await original<typeof import('node:fs')>();
@@ -163,6 +164,24 @@ it('boot refuses a migration error and never seeds a fresh home over nonempty le
   rawJson(legacy.workspaceConfig, { outside: true });
   expect(() => prepareOperatorHome(target, 'serve', env, { enabled: true, legacy })).toThrow(/Resolve home recovery/);
   expect(existsSync(target.workspaceConfig)).toBe(false);
+});
+
+it.each(['recovery', 'copy', 'recheck'] as const)('D6: a handled %s failure is not a staged home; the next boot resumes the migration', failure => {
+  const { legacy, target, env } = migrationFixture();
+  const invalid = join(legacy.root, 'tracker-connections', 'invalid.json');
+  if (failure === 'recovery') rawJson(legacy.workspaceConfig, { outside: true });
+  if (failure === 'copy') { rawJson(invalid, {}); writeFileSync(invalid, 'invalid JSON'); }
+  let write = 0;
+  const onStep = (step: string) => { if (failure === 'recheck' && step === 'recheck') rawJson(legacy.workspaceUiState, { write: write++ }); };
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  expect(() => migrateLegacyHome(legacy, target, { onStep })).toThrow();
+  expect(existsSync(join(legacy.root, '.migrating'))).toBe(false);
+  if (failure === 'recovery') acceptHomeRecovery(legacy, 'config.json');
+  if (failure === 'copy') rawJson(invalid, { fixed: true });
+  expect(prepareOperatorHome(target, 'serve', env, { enabled: true, legacy })).toBe(target);
+  expect(readInstallMarker(target.config)?.state).toBe('committed');
+  expect(readMigrationRecord(target)?.stagedAt).toBeUndefined();
+  expect(existsSync(join(legacy.root, 'MOVED.json'))).toBe(true);
 });
 
 it('boot serves a pending home read-only without running migration or seeding missing HEAD records', () => {

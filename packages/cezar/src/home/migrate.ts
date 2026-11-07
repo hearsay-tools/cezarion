@@ -5,21 +5,20 @@ import { homeFileSchema } from '@open-mercato/cezar-contract/home-recovery';
 import { homePaths, type Home } from './home.ts';
 import { assertHomePath } from './boundary.ts';
 import { createInstallMarker, readInstallMarker, underTestRunner, writeMigrationMarker, assertHomeReadable } from './install-marker.ts';
-import { migrationHolderLive, claimMigration } from './migration-claim.ts';
+import { claimMigration, removeStaleMigrationClaim } from './migration-claim.ts';
 import { copyMigrationAccounts } from './migration-accounts.ts';
 import { insideDirectory, migrationFiles, migrationPrivacy, replacePrivateTree, writeLegacyArchive } from './migration-files.ts';
 import { archiveExcludes, isCezarMigrationJson, migrationRecordFor, planLegacyMigration } from './migration-plan.ts';
 import { migrationRecordSchema, movedHomeSchema, readMigrationRecord, writeMigrationRecord, type MigrationFile, type MigrationRecord } from './migration-record.ts';
 import { registryFiles } from './entry-authorization.ts';
-import { privateDirectory, replacePrivate, syncDirectory } from './private-files.ts';
+import { privateDirectory, protectPrivatePath, replacePrivate, syncDirectory } from './private-files.ts';
 import { readCockpitLeases } from './leases.ts';
 import { getHomeRecovery } from './recovery.ts';
 import { withHomeLock } from './write-lock.ts';
 import { digest, readBytes, VersionLog } from './version-log.ts';
 import { loadWorkspaceConfigSync, mergeWriteWorkspaceConfigSync } from '../workspace/config.ts';
-import { writeLaunchers, posixLauncher, windowsLauncher } from '../self-update/launcher.ts';
+import { pathHook, writeLaunchers } from '../self-update/launcher.ts';
 import { readManifest, PACKAGE_NAME } from '../self-update/layout.ts';
-import { shellQuote } from '../core/shell-env.ts';
 
 export type MigrationStep = 'recovered' | 'claimed' | 'pending' | 'archived' | 'copied' | 'recheck' | 'accounts' | 'committed';
 export interface MigrationOptions {
@@ -45,8 +44,9 @@ function recoverLegacyConfig(legacy: Home): void {
   loadWorkspaceConfigSync(legacy.workspaceConfig, recovery, path => readFileSync(path, 'utf8'));
   if (!recovery.base) return;
   createInstallMarker(legacy.root, underTestRunner() ? 'test' : 'live');
+  // The loader's writer refuses any .migrating. A crashed run's claim must not block recovery.
   withHomeLock(legacy.root, () => {
-    if (!migrationHolderLive(legacy.root)) rmSync(join(legacy.root, '.migrating'), { force: true });
+    removeStaleMigrationClaim(legacy.root);
     mergeWriteWorkspaceConfigSync(() => {}, legacy);
   });
 }
@@ -72,7 +72,7 @@ function copyFile(legacy: Home, target: Home, file: MigrationFile): void {
 function copyManagedInstall(legacy: Home, target: Home, env: NodeJS.ProcessEnv): void {
   assertHomePath(target.data, target.versions);
   if (!existsSync(legacy.versions)) { rmSync(target.versions, { recursive: true, force: true }); return; }
-  replacePrivateTree(legacy.versions, target.versions, true, (key, destination) => {
+  replacePrivateTree(legacy.versions, target.versions, (key, destination) => {
     const suffix = `/node_modules/${PACKAGE_NAME}`;
     if (!key.endsWith(suffix)) return false;
     const id = key.slice(0, -suffix.length);
@@ -82,24 +82,23 @@ function copyManagedInstall(legacy: Home, target: Home, env: NodeJS.ProcessEnv):
   });
   privateDirectory(target.bin, migrationPrivacy);
   writeLaunchers(env, target);
-  // writeLaunchers retains the shipped permissions. Migration replaces its files privately.
+  // writeLaunchers keeps the shipped 0755. Every migration copy is private.
   for (const name of ['cezarion', 'cez']) {
     const path = join(target.bin, process.platform === 'win32' ? `${name}.cmd` : name);
-    replacePrivate(path, process.platform === 'win32' ? windowsLauncher(env, target) : posixLauncher(env, target), migrationPrivacy);
-    if (process.platform !== 'win32') chmodSync(path, 0o700);
+    if (process.platform === 'win32') protectPrivatePath(path, false, migrationPrivacy);
+    else chmodSync(path, 0o700);
   }
 }
 
+/** Replace the line `cez install` marked; never append one (the install command owns that). */
 function updateManagedPath(legacy: Home, target: Home, env: NodeJS.ProcessEnv): void {
   if (process.platform === 'win32' || !env.HOME) return;
-  const rc = env.SHELL?.endsWith('/zsh') ? '.zshrc' : env.SHELL?.endsWith('/bash') ? '.bashrc' : '.profile';
-  const profile = join(env.HOME, rc);
+  const { file: profile, line, marker } = pathHook(target.bin, env);
   if (!existsSync(profile)) return;
   const path = realpathSync(profile), bytes = readBytes(path);
   if (!bytes) return;
-  const line = `export PATH=${shellQuote(target.bin)}:"$PATH" # cezar managed install`;
   const text = bytes.toString('utf8');
-  const next = text.replace(/^.*# cezar managed install.*$/m, line);
+  const next = text.replace(new RegExp(`^.*${marker}.*$`, 'm'), line);
   if (next === text) return;
   if (insideDirectory(legacy.root, path)) {
     console.warn(`Managed PATH profile stays unchanged inside the legacy home: ${path}. Add ${target.bin} to PATH.`);
@@ -136,13 +135,14 @@ function discardPendingCopies(target: Home): void {
     assertHomePath(target.data, directory);
     rmSync(directory, { recursive: true, force: true });
   }
-  for (const file of prior.files) {
-    if (!file.target) continue;
-    if (file.target.path.startsWith('versions/') || file.target.path.startsWith('accounts/')) continue;
-    const root = target[file.target.kind], path = join(root, file.target.path);
+  // Step 7 can publish agent-accounts.json from a config.json import that has no recorded source.
+  const copies = [...prior.files.flatMap(file => file.target ? [file.target] : []), { kind: 'config' as const, path: 'agent-accounts.json' }];
+  for (const copy of copies) {
+    if (copy.path.startsWith('versions/') || copy.path.startsWith('accounts/')) continue;
+    const root = target[copy.kind], path = join(root, copy.path);
     assertHomePath(root, path);
     rmSync(path, { force: true });
-    if (homeFileSchema.safeParse(file.target.path).success) new VersionLog(root, file.target.path, migrationPrivacy).replace(path, null);
+    if (homeFileSchema.safeParse(copy.path).success) new VersionLog(root, copy.path, migrationPrivacy).replace(path, null);
   }
 }
 
@@ -151,6 +151,10 @@ function migrateLocked(legacy: Home, target: Home, options: MigrationOptions): M
   if (live.length) throw new Error(`Stop every cockpit before migrating: ${live.map(lease => `pid ${lease.pid}, port ${lease.port}, instance ${lease.instance}`).join('; ')}`);
   const marker = readInstallMarker(target.config);
   if (marker?.migratedFrom && marker.state === 'committed') return { status: 'unchanged', record: readMigrationRecord(target) };
+  // Step 5's refusal runs before the first target write: a refused run leaves no pending home.
+  // The claim makes this a report-only recovery read with the normal journal interpretation.
+  const recovery = getHomeRecovery(legacy);
+  if (recovery.files.length) throw new Error(`Resolve home recovery before migration: ${recovery.files.map(file => `${file.file} (${file.reason})`).join(', ')}`);
   const disposable = marker?.state === 'pending' || existsSync(join(target.config, 'install.json.failed'));
   if (!disposable && registryFiles(target).some(path => existsSync(path))) throw new Error(`Migration target already contains registry data: ${target.config}`);
   if (disposable) discardPendingCopies(target);
@@ -163,8 +167,6 @@ function migrateLocked(legacy: Home, target: Home, options: MigrationOptions): M
   assertHomePath(target.state, record.backup);
   writeLegacyArchive(legacy.root, record.backup, archiveFiles);
   options.onStep?.('archived', 0);
-  const recovery = getHomeRecovery(legacy);
-  if (recovery.files.length) throw new Error(`Resolve home recovery before migration: ${recovery.files.map(file => `${file.file} (${file.reason})`).join(', ')}`);
   writeMigrationRecord(target, record);
   for (const file of plan.files) copyFile(legacy, target, file);
   if (plan.managedInstall) copyManagedInstall(legacy, target, options.env ?? process.env);
@@ -187,6 +189,8 @@ function settleCopies(legacy: Home, target: Home, options: MigrationOptions, rec
     if (!changed.length) {
       const present = new Set(next.files.map(file => file.path));
       record.files = [...next.files, ...record.files.filter(file => file.hash === null && !present.has(file.path))];
+      // Only a complete commit:false copy is a staged home. Any other pending home is a crash.
+      if (options.commit === false) record.stagedAt = new Date().toISOString();
       writeMigrationRecord(target, record);
       if (options.commit === false) return { status: 'pending', record };
       commitLegacyMigration(target, options.env);

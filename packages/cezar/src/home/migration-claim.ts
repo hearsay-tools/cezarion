@@ -22,6 +22,16 @@ export function migrationHolderLive(root: string): boolean {
   }
 }
 
+/** A dead holder's claim is removable; a live one refuses. Takes the root write.lock. */
+export function removeStaleMigrationClaim(root: string): void {
+  const path = join(root, '.migrating');
+  assertHomePath(root, path);
+  withHomeLock(root, () => {
+    if (migrationHolderLive(root)) throw new Error(`Home migration already running: ${path}`);
+    rmSync(path, { force: true });
+  });
+}
+
 export function claimMigration(root: string): () => void {
   const path = join(root, '.migrating');
   assertHomePath(root, path);
@@ -36,11 +46,7 @@ export function claimMigration(root: string): () => void {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     if (migrationHolderLive(root)) throw new Error(`Home migration already running: ${path}`);
     // Serialize stale removal and exclusive create. A second reclaimer sees the new live holder.
-    withHomeLock(root, () => {
-      if (migrationHolderLive(root)) throw new Error(`Home migration already running: ${path}`);
-      rmSync(path, { force: true });
-      claim();
-    });
+    withHomeLock(root, () => { removeStaleMigrationClaim(root); claim(); });
   }
   return () => {
     if (readFileSync(path, 'utf8') !== contents) throw new Error(`Migration claim changed: ${path}`);

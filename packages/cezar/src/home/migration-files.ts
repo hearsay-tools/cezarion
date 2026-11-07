@@ -35,8 +35,9 @@ export function migrationFiles(root: string, exclude: (path: string) => boolean 
   return found;
 }
 
-/** Preserve internal links, including versions/current; refuse links to outside data. */
-export function copyPrivateTree(source: string, target: string, executable = false,
+/** Preserve internal links, including versions/current; refuse links to outside data.
+ *  Files are 0600, or 0700 when the owner could execute the source (launchers, profile hooks). */
+export function copyPrivateTree(source: string, target: string,
   allowExternalLink: (key: string, destination: string) => boolean = () => false, finalTarget = target): void {
   const canonical = realpathSync(source);
   const finalRoot = resolve(finalTarget);
@@ -65,18 +66,18 @@ export function copyPrivateTree(source: string, target: string, executable = fal
       const bytes = readFileSync(from);
       replacePrivate(to, bytes, migrationPrivacy);
       if (!readFileSync(to).equals(bytes)) throw new Error(`Migration copy verification failed: ${from}`);
-      if (executable && (stat.mode & 0o111)) chmodSync(to, 0o700);
+      if (stat.mode & 0o100) chmodSync(to, 0o700);
     }
   }
 }
 
 /** A pending destination is disposable. Publish only a complete fresh copy, never merge trees. */
-export function replacePrivateTree(source: string, target: string, executable = false,
+export function replacePrivateTree(source: string, target: string,
   allowExternalLink: (key: string, destination: string) => boolean = () => false): void {
   assertHomePath(dirname(target), target);
   const stage = atomicTmpPath(target);
   try {
-    copyPrivateTree(source, stage, executable, allowExternalLink, target);
+    copyPrivateTree(source, stage, allowExternalLink, target);
     rmSync(target, { recursive: true, force: true });
     renameSync(stage, target);
     syncDirectory(dirname(target));
@@ -105,7 +106,7 @@ function tarEntry(root: string, key: string): Buffer[] {
     if (valueText.length >= width) throw new Error(`File too large for migration archive: ${path}`);
     header.write(`${valueText.padStart(width - 1, '0')}\0`, at, width);
   };
-  octal(stat.isDirectory() ? 0o700 : 0o600, 100, 8); octal(0, 108, 8); octal(0, 116, 8);
+  octal(stat.isDirectory() || (link === undefined && stat.mode & 0o100) ? 0o700 : 0o600, 100, 8); octal(0, 108, 8); octal(0, 116, 8);
   octal(bytes.length, 124, 12); octal(Math.floor(stat.mtimeMs / 1000), 136, 12);
   header.fill(32, 148, 156);
   header.write(stat.isDirectory() ? '5' : link === undefined ? '0' : '2', 156);

@@ -57,6 +57,24 @@ it('B2: a recopy clears target acceptance when the legacy acceptance no longer m
   expect(getHomeRecovery(target).files).toContainEqual(expect.objectContaining({ file: 'config.json', reason: 'reset' }));
 });
 
+it('B3: a reset interrupted after replacement but before HEAD advanced refuses migration under the claim', () => {
+  const { legacy, target } = migrationFixture();
+  Home.seed(legacy, legacy.agentAccounts, { accounts: [{ id: 'before-crash' }] });
+  const setRecord = VersionLog.prototype.setRecord;
+  vi.spyOn(VersionLog.prototype, 'setRecord').mockImplementation(function (this: VersionLog, name, record) {
+    if (name === 'HEAD') throw new Error('crash before HEAD');
+    setRecord.call(this, name, record);
+  });
+  expect(() => new HomeStore(legacy).writeJson(legacy.agentAccounts, { accounts: [] })).toThrow('crash before HEAD');
+  vi.restoreAllMocks();
+  const journal = join(legacy.root, '.versions/agent-accounts.json');
+  const before = readdirSync(journal).map(name => [name, readFileSync(join(journal, name)).toString('base64')]);
+  expect(() => migrateLegacyHome(legacy, target)).toThrow(/Resolve home recovery before migration: agent-accounts\.json \(reset\)/);
+  expect(readdirSync(journal).map(name => [name, readFileSync(join(journal, name)).toString('base64')])).toEqual(before);
+  expect(readInstallMarker(target.config)?.state).toBeUndefined();
+  expect(getHomeRecovery(legacy).files).toContainEqual(expect.objectContaining({ file: 'agent-accounts.json', reason: 'reset', canRestore: true }));
+});
+
 it.each(['absent', 'empty'])('step 1: an %s legacy home creates only a fresh target marker', kind => {
   const root = storeRoot(), old = join(root, 'legacy');
   if (kind === 'empty') mkdirSync(old);
@@ -190,6 +208,7 @@ it('step 6: recopy removes managed files deleted by an older binary', () => {
 it('step 8: pending copies refuse ordinary writes, allow leases, commit once, and record every root in MOVED.json', () => {
   const { legacy, target } = migrationFixture();
   expect(migrateLegacyHome(legacy, target, { commit: false }).status).toBe('pending');
+  expect(readMigrationRecord(target)!.stagedAt).toEqual(expect.any(String));
   expect(() => new HomeStore(target).writeJson(target.workspaceConfig, {})).toThrow(/pending migration/);
   const release = holdCockpitLease(target, 4322, 'pending-instance');
   release();
