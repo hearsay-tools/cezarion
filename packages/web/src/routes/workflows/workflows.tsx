@@ -919,6 +919,146 @@ function StepCard({
   )
 }
 
+/** `name ?? skill ?? id` — the card title, the legacy fallback chain. */
+function stepTitle(step: WorkflowStepDef): string {
+  return step.name ?? step.skill ?? step.id
+}
+
+/** The prompt the step really runs: the plain `{{task}}` placeholder is not worth showing. */
+function stepSpecificPrompt(step: WorkflowStepDef): string | undefined {
+  return step.prompt?.trim() === '{{task}}' ? undefined : step.prompt?.trim()
+}
+
+/** The `$ command` summary, with the retry policy appended when the step declares one. */
+function stepCommandSummary(step: WorkflowStepDef): string {
+  const onFail = step.onFail
+    ? ` — on fail retry from "${step.onFail.retry}" (×${step.onFail.max ?? 2})`
+    : ''
+  return `$ ${step.command}${onFail}`
+}
+
+/** A skill step's summary: its specific prompt, else the skill catalog's description. */
+function stepSkillSummary(step: WorkflowStepDef, known: Skill | undefined): string {
+  return (
+    stepSpecificPrompt(step) ||
+    known?.description ||
+    'Not in this repo or the team skills — the step runs on its plain prompt.'
+  )
+}
+
+/** The card's summary line: the command, the skill description, or the raw prompt. */
+function stepDescription(step: WorkflowStepDef, known: Skill | undefined): string {
+  if (step.command) return stepCommandSummary(step)
+  if (step.skill) return stepSkillSummary(step, known)
+  return step.prompt ?? ''
+}
+
+/** The `unknown` badge for a skill step whose skill the catalog does not know. */
+function stepBadge(step: WorkflowStepDef, known: Skill | undefined): 'unknown' | null {
+  return step.skill && !known ? 'unknown' : null
+}
+
+/** The one-word kind line under the summary. */
+function stepKindLabel(step: WorkflowStepDef): string {
+  if (step.command) {
+    return `Command step${step.onFail ? ` · Retry ×${step.onFail.max ?? 2}` : ''}`
+  }
+  return step.skill ? 'Skill step' : 'Prompt step'
+}
+
+/** The card's heading row: the drag grip, the title, the unknown badge, the actions menu. */
+function StepCardHeading({
+  index,
+  title,
+  badge,
+  onRemove,
+  gripProps,
+}: {
+  index: number
+  title: string
+  badge: 'unknown' | null
+  onRemove?: (() => void) | undefined
+  gripProps?: Record<string, unknown>
+}) {
+  return (
+    <div data-slot="wb-step-heading" className="flex min-w-0 items-center gap-2.5">
+      <button
+        type="button"
+        data-slot="wb-step-grip"
+        aria-label={`Reorder step ${index + 1}: ${title}`}
+        className="inline-flex size-[26px] shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        {...gripProps}
+      >
+        <span className="rounded bg-accent-strong/10 px-2 py-1 font-mono text-[12px] text-link-foreground">{String(index + 1).padStart(2, '0')}</span>
+      </button>
+      <div className="min-w-0 flex-1 break-words text-sm font-medium [overflow-wrap:anywhere]">{title}</div>
+      {badge ? (
+        <span
+          data-slot="wb-step-badge"
+          className={cn(
+            'shrink-0 rounded-full border px-2 py-px font-mono text-[11px]',
+            badge === 'unknown' && 'border-danger/35 text-danger',
+          )}
+        >
+          {badge}
+        </span>
+      ) : null}
+      {onRemove ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button data-slot="wb-step-actions" variant="ghost" size="icon" className="size-[26px]" aria-label={`Step ${index + 1} actions: ${title}`}>
+              <EllipsisIcon aria-hidden="true" className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem data-slot="wb-step-remove" aria-label={`Remove step ${index + 1}: ${title}`} onSelect={onRemove}>
+              <Trash2Icon aria-hidden="true" /> Remove step
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+    </div>
+  )
+}
+
+/** Move up/down for narrow screens — the no-drag reorder path. */
+function StepMoveButtons({
+  index,
+  onMoveUp,
+  onMoveDown,
+}: {
+  index: number
+  onMoveUp?: (() => void) | undefined
+  onMoveDown?: (() => void) | undefined
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap gap-2 @min-[900px]:hidden">
+      <Button
+        variant="outline"
+        size="sm"
+        className="min-h-11"
+        aria-label={`Move step ${index + 1} up`}
+        disabled={!onMoveUp}
+        onClick={onMoveUp}
+      >
+        <ArrowUpIcon aria-hidden="true" className="size-4" />
+        Move up
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        className="min-h-11"
+        aria-label={`Move step ${index + 1} down`}
+        disabled={!onMoveDown}
+        onClick={onMoveDown}
+      >
+        <ArrowDownIcon aria-hidden="true" className="size-4" />
+        Move down
+      </Button>
+    </div>
+  )
+}
+
 /**
  * The card itself, shared with the DragOverlay (which renders it detached — no sortable hooks).
  * `gripProps` carries dnd-kit's `attributes` (role, tabIndex, aria) onto the grip button so the
@@ -944,15 +1084,9 @@ function StepCardBody({
   overlay?: boolean
 }) {
   const known = skills.find((skill) => skill.name === step.skill)
-  const isCheck = Boolean(step.command)
-  const title = step.name ?? step.skill ?? step.id
-  const specificPrompt = step.prompt?.trim() === '{{task}}' ? undefined : step.prompt?.trim()
-  const description = isCheck
-    ? `$ ${step.command}${step.onFail ? ` — on fail retry from "${step.onFail.retry}" (×${step.onFail.max ?? 2})` : ''}`
-    : step.skill
-      ? (specificPrompt || known?.description || 'Not in this repo or the team skills — the step runs on its plain prompt.')
-      : (step.prompt ?? '')
-  const badge = step.skill && !known ? 'unknown' : null
+  const title = stepTitle(step)
+  const description = stepDescription(step, known)
+  const badge = stepBadge(step, known)
 
   return (
     <div
@@ -966,43 +1100,7 @@ function StepCardBody({
         overlay && 'shadow-md',
       )}
     >
-      <div data-slot="wb-step-heading" className="flex min-w-0 items-center gap-2.5">
-        <button
-          type="button"
-          data-slot="wb-step-grip"
-          aria-label={`Reorder step ${index + 1}: ${title}`}
-          className="inline-flex size-[26px] shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          {...gripProps}
-        >
-          <span className="rounded bg-accent-strong/10 px-2 py-1 font-mono text-[12px] text-link-foreground">{String(index + 1).padStart(2, '0')}</span>
-        </button>
-        <div className="min-w-0 flex-1 break-words text-sm font-medium [overflow-wrap:anywhere]">{title}</div>
-        {badge ? (
-          <span
-            data-slot="wb-step-badge"
-            className={cn(
-              'shrink-0 rounded-full border px-2 py-px font-mono text-[11px]',
-              badge === 'unknown' && 'border-danger/35 text-danger',
-            )}
-          >
-            {badge}
-          </span>
-        ) : null}
-        {onRemove ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button data-slot="wb-step-actions" variant="ghost" size="icon" className="size-[26px]" aria-label={`Step ${index + 1} actions: ${title}`}>
-                <EllipsisIcon aria-hidden="true" className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem data-slot="wb-step-remove" aria-label={`Remove step ${index + 1}: ${title}`} onSelect={onRemove}>
-                <Trash2Icon aria-hidden="true" /> Remove step
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
-      </div>
+      <StepCardHeading index={index} title={title} badge={badge} onRemove={onRemove} gripProps={gripProps} />
       {description ? (
         <div
           data-slot="wb-step-summary"
@@ -1012,37 +1110,10 @@ function StepCardBody({
         </div>
       ) : null}
       <p data-slot="wb-step-kind" className="mt-3 text-[12px] text-link-foreground">
-        {isCheck
-          ? `Command step${step.onFail ? ` · Retry ×${step.onFail.max ?? 2}` : ''}`
-          : step.skill
-            ? 'Skill step'
-            : 'Prompt step'}
+        {stepKindLabel(step)}
       </p>
       {!overlay ? (
-        <div className="mt-3 flex flex-wrap gap-2 @min-[900px]:hidden">
-          <Button
-            variant="outline"
-            size="sm"
-            className="min-h-11"
-            aria-label={`Move step ${index + 1} up`}
-            disabled={!onMoveUp}
-            onClick={onMoveUp}
-          >
-            <ArrowUpIcon aria-hidden="true" className="size-4" />
-            Move up
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="min-h-11"
-            aria-label={`Move step ${index + 1} down`}
-            disabled={!onMoveDown}
-            onClick={onMoveDown}
-          >
-            <ArrowDownIcon aria-hidden="true" className="size-4" />
-            Move down
-          </Button>
-        </div>
+        <StepMoveButtons index={index} onMoveUp={onMoveUp} onMoveDown={onMoveDown} />
       ) : null}
     </div>
   )
