@@ -88,5 +88,8 @@ it never exposes file contents. Metadata fingerprints avoid repeated HomeStore
 transactions for unchanged files. The trusted-only `home:recovery` topic uses
 filesystem watches only while subscribed, including journal directories so another
 cockpit's acceptance clears the banner. Restore and accept POST routes use the
-normal origin guard and the contract's HomeStore file allowlist. See ADR 0060 for
+normal origin guard, `localHandoff`, and the contract's HomeStore file allowlist.
+Remote grant files remain host-CLI-only. Remote banner rows are read-only. Actions
+carry the incident time; resolved retries do nothing, while a different incident
+returns a conflict. See ADR 0060 for
 write ordering and the remaining version-retention and staging-file limits.

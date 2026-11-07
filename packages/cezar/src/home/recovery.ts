@@ -4,7 +4,7 @@ import { homeFileSchema, type HomeFile, type HomeRecovery, type HomeRecoveryFile
 import type { Home } from './home.ts';
 import { registryFiles } from './entry-authorization.ts';
 import { HomeStore } from './store.ts';
-import { restoreBackup } from '../workspace/backup-cli.ts';
+import { restorePinnedRecovery } from '../workspace/backup-cli.ts';
 export { subscribeHomeRecovery } from './recovery-watch.ts';
 
 interface CachedFile { fingerprint: string; state: HomeRecoveryFile | undefined; pinnedPath?: string | undefined }
@@ -56,13 +56,13 @@ export function getHomeRecovery(home: Home): HomeRecovery {
   return { files };
 }
 
-/** Both HTTP and CLI restores select the same pinned target, then the same backup writer. */
-export async function restoreHomeRecovery(home: Home, file: HomeFile): Promise<void> {
+/** Recovery shares the CLI's pinned writer; an already resolved incident never falls back. */
+export async function restoreHomeRecovery(home: Home, file: HomeFile, detectedAt?: string): Promise<void> {
   homeFileSchema.parse(file);
-  await restoreBackup(file, undefined, home);
+  restorePinnedRecovery(file, home, detectedAt);
 }
 
-export function acceptHomeRecovery(home: Home, file: HomeFile): void {
+export function acceptHomeRecovery(home: Home, file: HomeFile, detectedAt?: string): void {
   homeFileSchema.parse(file);
-  new HomeStore(home).acceptOutsideWrite(join(home.root, file));
+  new HomeStore(home).acceptRecovery(join(home.root, file), detectedAt);
 }

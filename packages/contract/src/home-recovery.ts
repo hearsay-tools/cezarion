@@ -17,5 +17,5 @@ export type HomeRecoveryFile = z.infer<typeof homeRecoveryFileSchema>;
 export const homeRecoverySchema = z.object({ files: z.array(homeRecoveryFileSchema) });
 export type HomeRecovery = z.infer<typeof homeRecoverySchema>;
 
-export const homeRecoveryActionSchema = z.object({ file: homeFileSchema }).strict();
+export const homeRecoveryActionSchema = z.object({ file: homeFileSchema, detectedAt: z.iso.datetime() }).strict();
 export type HomeRecoveryAction = z.infer<typeof homeRecoveryActionSchema>;

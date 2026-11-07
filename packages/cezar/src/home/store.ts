@@ -54,13 +54,13 @@ export class HomeStore {
   assertBoundary(paths: readonly string[], backups = false): Map<string, unknown> {
     const unavailable = new Map<string, unknown>();
     const targets = [...paths];
-    for (const path of paths) {
-      if (!/\.(?:json|bak|lock)$/.test(path)) continue;
+    const files = paths.filter(path => /\.(?:json|bak|lock)$/.test(path));
+    for (const path of files) {
       const log = this.journal(path);
       targets.push(join(log.directory, 'HEAD')); // Reads follow HEAD; other records publish by replacement.
     }
     assertHomePaths(this.root, targets);
-    if (backups) for (const path of paths) {
+    if (backups) for (const path of files) {
       const file = this.journal(path).relativePath;
       try { assertHomePaths(this.root, [join(typeof this.home === 'string' ? join(this.root, 'backups') : this.home.backups, file)]); }
       catch (error) { unavailable.set(path, error); }
@@ -184,7 +184,7 @@ export class HomeStore {
     });
   }
 
-  restoreRecovery(path: string): string | undefined {
+  restoreRecovery(path: string, detectedAt?: string): string | undefined {
     this.assertBoundary([path], true);
     return this.transaction(() => {
       const log = this.journal(path);
@@ -192,9 +192,22 @@ export class HomeStore {
       const reset = log.reset();
       const flag = outside ?? reset;
       if (!flag) return;
+      assertRecoveryIncident(flag, detectedAt);
       // Restoring an outside write must not accept a separate, unresolved registry reset.
       this.restoreFile(path, log.recoveryBytes(flag), Boolean(outside && reset));
       return flag.detectedAt;
+    });
+  }
+
+  /** Stale cockpit retries cannot accept a different incident or an unflagged file. */
+  acceptRecovery(path: string, detectedAt?: string): void {
+    this.assertBoundary([path]);
+    this.transaction(() => {
+      const log = this.journal(path);
+      const flag = log.inspect(readBytes(path)) ?? log.reset();
+      if (!flag) return;
+      assertRecoveryIncident(flag, detectedAt);
+      this.acceptOutsideWrite(path);
     });
   }
 
@@ -208,6 +221,12 @@ export class HomeStore {
     });
   }
 
+}
+
+function assertRecoveryIncident(flag: OutsideWrite, detectedAt: string | undefined): void {
+  if (detectedAt !== undefined && flag.detectedAt !== detectedAt) {
+    throw new Error('Recovery incident changed. Refresh and try again.');
+  }
 }
 
 export function readHomeFile(path: string): string {

@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { HomeRecoveryFile } from '@open-mercato/cezar-api-client/contract/home-recovery'
 import { useHomeRecovery } from '@/api/home-recovery'
+import { useHealth } from '@/api/queries'
 import { HomeRecoveryBanner } from './home-recovery-banner'
 
 const actions = vi.hoisted(() => ({
@@ -11,6 +12,7 @@ const actions = vi.hoisted(() => ({
 vi.mock('@/api/home-recovery', () => ({
   useHomeRecovery: vi.fn(), useRestoreHomeRecovery: () => actions.restore, useAcceptHomeRecovery: () => actions.accept,
 }))
+vi.mock('@/api/queries', () => ({ useHealth: vi.fn() }))
 
 function state(files: HomeRecoveryFile[], status: 'ready' | 'pending' | 'error' = 'ready') {
   vi.mocked(useHomeRecovery).mockReturnValue({ data: { files }, isSuccess: status === 'ready',
@@ -24,6 +26,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   for (const action of Object.values(actions)) { action.isPending = false; action.error = null }
   state([])
+  vi.mocked(useHealth).mockReturnValue({ data: { capabilities: { localHandoff: true } } } as ReturnType<typeof useHealth>)
 })
 afterEach(cleanup)
 
@@ -43,21 +46,21 @@ it('shows each reset with its approved copy and both recovery actions', () => {
   expect(screen.getAllByRole('status')).toHaveLength(2)
   expect(projects.getAttribute('aria-live')).toBe('polite')
   fireEvent.click(within(projects as HTMLElement).getByRole('button', { name: 'Restore' }))
-  expect(actions.restore.mutate).toHaveBeenCalledWith('config.json')
+  expect(actions.restore.mutate).toHaveBeenCalledWith({ file: 'config.json', detectedAt: '2026-11-07T09:00:00.000Z' })
   fireEvent.click(within(accounts as HTMLElement).getByRole('button', { name: 'Accept as found' }))
-  expect(actions.accept.mutate).toHaveBeenCalledWith('agent-accounts.json')
+  expect(actions.accept.mutate).toHaveBeenCalledWith({ file: 'agent-accounts.json', detectedAt: '2026-11-07T09:00:00.000Z' })
   expect(actions.restore.reset).toHaveBeenCalledTimes(2)
   expect(actions.accept.reset).toHaveBeenCalledTimes(2)
 })
 
 it('names the outside-written file and leaves accept available when no restore target is readable', () => {
-  state([file('remote-settings/4321.json', 'outside-write', false)])
+  state([file('ui-state.json', 'outside-write', false)])
   render(<HomeRecoveryBanner />)
-  expect(screen.getByText('remote-settings/4321.json changed outside Cezar. Restore the previous version or accept the file as found.')).toBeTruthy()
+  expect(screen.getByText('ui-state.json changed outside Cezar. Restore the previous version or accept the file as found.')).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Restore' }).hasAttribute('disabled')).toBe(true)
   expect(screen.getByRole('button', { name: 'Accept as found' }).hasAttribute('disabled')).toBe(false)
   fireEvent.click(screen.getByRole('button', { name: 'Accept as found' }))
-  expect(actions.accept.mutate).toHaveBeenCalledWith('remote-settings/4321.json')
+  expect(actions.accept.mutate).toHaveBeenCalledWith({ file: 'ui-state.json', detectedAt: '2026-11-07T09:00:00.000Z' })
 })
 
 it.each(['restore', 'accept'] as const)('disables both buttons while %s is in flight', action => {
@@ -88,4 +91,23 @@ it.each(['pending', 'error'] as const)('does not invent a banner while the initi
   expect(container.querySelector('[data-slot="home-recovery-state"]')?.getAttribute('data-state')).toBe(status)
   expect(screen.queryByRole('status')).toBeNull()
   expect(container.textContent).toBe('')
+})
+
+it('shows remote incidents read-only with the host-operator instruction', () => {
+  state([file('config.json'), file('remote-settings/4321.json', 'outside-write')])
+  vi.mocked(useHealth).mockReturnValue({ data: { capabilities: { localHandoff: false, settingsAdmin: true } } } as ReturnType<typeof useHealth>)
+  render(<HomeRecoveryBanner />)
+  expect(screen.getAllByRole('status')).toHaveLength(2)
+  expect(screen.getAllByText('Only the host operator can restore or accept this file.', { exact: false })).toHaveLength(2)
+  expect(screen.queryByRole('button')).toBeNull()
+  expect(actions.restore.mutate).not.toHaveBeenCalled()
+  expect(actions.accept.mutate).not.toHaveBeenCalled()
+})
+
+it('keeps remote grants read-only even in the local cockpit and gives the host CLI command', () => {
+  state([file('remote-settings/4321.json', 'outside-write')])
+  render(<HomeRecoveryBanner />)
+  expect(screen.queryByRole('button')).toBeNull()
+  expect(screen.getByText('cez backup restore remote-settings/4321.json')).toBeTruthy()
+  expect(screen.getByText('Only the host operator can restore or accept this file.', { exact: false })).toBeTruthy()
 })

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { homeRecoverySchema, type HomeFile, type HomeRecovery } from '@open-mercato/cezar-api-client/contract/home-recovery'
+import { homeRecoverySchema, type HomeFile, type HomeRecovery, type HomeRecoveryAction } from '@open-mercato/cezar-api-client/contract/home-recovery'
 import type { HealthResponse } from '@open-mercato/cezar-api-client'
 import { ApiError, cez, init, unwrap, type ReadOptions } from './client'
 import { onLiveReconcile } from './live-coordinator'
@@ -60,10 +60,8 @@ export function useHomeRecoverySubscription(): void {
       if (active) void refresh().catch(() => {})
       else void client.cancelQueries({ queryKey: HOME_RECOVERY_QUERY_KEY, exact: true })
     })
-    const releaseReconcile = onLiveReconcile(async (signal, periodic) => {
-      // Reconnect and visibility restore have a finite HTTP twin. No periodic reads are needed.
-      if (!periodic) await refresh(signal)
-    })
+    // The shared coordinator supplies finite reads when topic delivery is unavailable.
+    const releaseReconcile = onLiveReconcile(signal => refresh(signal))
     return () => { mounted = false; lifetime.abort(); releaseReconcile(); releaseActivity(); releaseCache(); releaseTopic?.() }
   }, [client])
 }
@@ -78,12 +76,12 @@ function invalidateHomeConsumers(client: QueryClient, file: HomeFile): void {
 function useRecoveryAction(action: 'restore' | 'accept') {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: async (file: HomeFile) => parseRecovery(await unwrap(
-      await cez.api.v1.home.recovery[action].$post({ json: { file } }), `/home/recovery/${action}`)),
-    onSuccess: async (snapshot, file) => {
+    mutationFn: async (incident: HomeRecoveryAction) => parseRecovery(await unwrap(
+      await cez.api.v1.home.recovery[action].$post({ json: incident }), `/home/recovery/${action}`)),
+    onSuccess: async (snapshot, incident) => {
       await client.cancelQueries({ queryKey: HOME_RECOVERY_QUERY_KEY, exact: true })
       client.setQueryData(HOME_RECOVERY_QUERY_KEY, snapshot)
-      invalidateHomeConsumers(client, file)
+      invalidateHomeConsumers(client, incident.file)
     },
   })
 }

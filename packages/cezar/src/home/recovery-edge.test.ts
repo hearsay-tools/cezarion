@@ -166,3 +166,39 @@ it('keeps an earlier unresolved reset after restoring a later outside write', as
   expect(JSON.parse(readFileSync(home.workspaceConfig, 'utf8')).projects).toContainEqual(expect.objectContaining({ id: 'kept' }));
   expect(getHomeRecovery(home)).toEqual({ files: [] });
 });
+
+it.each(['restore', 'accept'] as const)('makes a repeated %s after a lost response a no-op', async action => {
+  const home = Home.sandbox(storeRoot());
+  Home.seed(home, home.workspaceUiState, { original: true });
+  writeFileSync(home.workspaceUiState, '{"outside":true}'); // Deliberate outside write creates one incident.
+  const incident = getHomeRecovery(home).files[0]!;
+  const resolve = action === 'restore' ? restoreHomeRecovery : acceptHomeRecovery;
+  await resolve(home, incident.file, incident.detectedAt);
+  const committed = readFileSync(home.workspaceUiState);
+  const modified = statSync(home.workspaceUiState).mtimeMs;
+  await resolve(home, incident.file, incident.detectedAt); // Retry after the first response was lost.
+  expect(readFileSync(home.workspaceUiState)).toEqual(committed);
+  expect(statSync(home.workspaceUiState).mtimeMs).toBe(modified);
+  expect(getHomeRecovery(home)).toEqual({ files: [] });
+});
+
+it.each(['restore', 'accept'] as const)('refuses a stale second cockpit %s for a newer incident', async action => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  try {
+    vi.setSystemTime(new Date('2026-11-07T09:00:00Z'));
+    const home = Home.sandbox(storeRoot());
+    Home.seed(home, home.workspaceUiState, { original: true });
+    writeFileSync(home.workspaceUiState, '{"outside":"first"}'); // Deliberate first incident.
+    const old = getHomeRecovery(home).files[0]!;
+    await restoreHomeRecovery(home, old.file, old.detectedAt);
+    vi.setSystemTime(new Date('2026-11-07T09:00:01Z'));
+    const newer = '{"outside":"second"}';
+    writeFileSync(home.workspaceUiState, newer); // A separate incident follows the first resolution.
+    const current = getHomeRecovery(home).files[0]!;
+    expect(current.detectedAt).not.toBe(old.detectedAt);
+    const resolve = action === 'restore' ? restoreHomeRecovery : acceptHomeRecovery;
+    await expect(async () => { await resolve(home, old.file, old.detectedAt); }).rejects.toThrow('Recovery incident changed');
+    expect(readFileSync(home.workspaceUiState, 'utf8')).toBe(newer);
+    expect(getHomeRecovery(home).files).toEqual([current]);
+  } finally { vi.useRealTimers(); }
+});

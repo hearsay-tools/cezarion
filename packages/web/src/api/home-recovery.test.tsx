@@ -79,21 +79,23 @@ it('holds one local topic after bootstrap, validates frames, and releases it whi
   expect(release).toHaveBeenCalledTimes(1)
 });
 
-it('uses finite authenticated reconciliation in remote mode and does no periodic or hidden read', async () => {
-  const { client, wrapper } = setup(false)
+it.each([false, true])('uses coordinator finite fallback when local=%s and does no hidden read', async local => {
+  const { client, wrapper } = setup(local)
   renderHook(() => useHomeRecoverySubscription(), { wrapper })
-  expect(subscribeTopic).not.toHaveBeenCalled()
+  expect(subscribeTopic).toHaveBeenCalledTimes(local ? 1 : 0)
+  // A local topic can remain registered while a failed SharedWorker uses finite delivery.
   const reconcile = vi.mocked(onLiveReconcile).mock.calls[0]![0]
   const signal = new AbortController().signal
-  await act(async () => { await reconcile(signal, true) })
-  expect(fetchMock).not.toHaveBeenCalled()
   fetchMock.mockResolvedValueOnce(json(flagged))
-  await act(async () => { await reconcile(signal, false) })
+  await act(async () => { await reconcile(signal, true) })
   expect(client.getQueryData(HOME_RECOVERY_QUERY_KEY)).toEqual(flagged)
+  fetchMock.mockResolvedValueOnce(json({ files: [] }))
+  await act(async () => { await reconcile(signal, false) })
+  expect(client.getQueryData(HOME_RECOVERY_QUERY_KEY)).toEqual({ files: [] })
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
   act(() => document.dispatchEvent(new Event('visibilitychange')))
   await act(async () => { await reconcile(signal, false) })
-  expect(fetchMock).toHaveBeenCalledTimes(1)
+  expect(fetchMock).toHaveBeenCalledTimes(2)
 });
 
 it('does not read while hidden and reports an HTTP read error without inventing a banner', async () => {
@@ -131,20 +133,20 @@ it('writes restore and accept actions, keeps their authoritative result, and ref
   const hooks = renderHook(() => ({ restore: useRestoreHomeRecovery(), accept: useAcceptHomeRecovery() }), { wrapper })
   client.setQueryData(HOME_RECOVERY_QUERY_KEY, flagged)
   fetchMock.mockResolvedValueOnce(json({ files: [] }))
-  await act(async () => { await hooks.result.current.restore.mutateAsync('config.json') })
+  await act(async () => { await hooks.result.current.restore.mutateAsync({ file: 'config.json', detectedAt: '2026-11-07T09:00:00.000Z' }) })
   expect(client.getQueryData(HOME_RECOVERY_QUERY_KEY)).toEqual({ files: [] })
   expect(invalidate).toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.projects })
   expect(invalidate).toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.config })
   fetchMock.mockResolvedValueOnce(json({ files: [] }))
-  await act(async () => { await hooks.result.current.accept.mutateAsync('agent-accounts.json') })
+  await act(async () => { await hooks.result.current.accept.mutateAsync({ file: 'agent-accounts.json', detectedAt: '2026-11-07T09:00:00.000Z' }) })
   expect(invalidate).toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.agentProfiles })
   expect(invalidate).toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.providerStatus })
   expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method, init?.body])).toEqual([
-    ['/api/v1/home/recovery/restore', 'POST', JSON.stringify({ file: 'config.json' })],
-    ['/api/v1/home/recovery/accept', 'POST', JSON.stringify({ file: 'agent-accounts.json' })],
+    ['/api/v1/home/recovery/restore', 'POST', JSON.stringify({ file: 'config.json', detectedAt: '2026-11-07T09:00:00.000Z' })],
+    ['/api/v1/home/recovery/accept', 'POST', JSON.stringify({ file: 'agent-accounts.json', detectedAt: '2026-11-07T09:00:00.000Z' })],
   ])
   client.setQueryData(HOME_RECOVERY_QUERY_KEY, flagged)
   fetchMock.mockResolvedValueOnce(json({ error: 'Backup cannot be read' }, 409))
-  await act(async () => { await expect(hooks.result.current.restore.mutateAsync('config.json')).rejects.toThrow('Backup cannot be read') })
+  await act(async () => { await expect(hooks.result.current.restore.mutateAsync({ file: 'config.json', detectedAt: '2026-11-07T09:00:00.000Z' })).rejects.toThrow('Backup cannot be read') })
   expect(client.getQueryData(HOME_RECOVERY_QUERY_KEY)).toEqual(flagged)
 });

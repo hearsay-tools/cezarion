@@ -5,8 +5,20 @@ import { HomeStore } from './store.ts';
 import { cleanStoreRoots, storeRoot } from './store.testkit.ts';
 import { acquireLock, deleteServerState } from '../server-install/state.ts';
 import { loadAgentAccounts } from '../workspace/agent-accounts.ts';
+import { disableRemoteSettings, enableRemoteSettings, isPortGranted } from '../remote-settings.ts';
 
 afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
+
+it('revokes individual and all remote grants while checking the directory boundary', async () => {
+  const home = Home.sandbox(storeRoot());
+  await enableRemoteSettings(4321, {}, undefined, home);
+  await enableRemoteSettings(4322, {}, undefined, home);
+  await disableRemoteSettings({}, 4321, home);
+  expect(isPortGranted({}, 4321, home)).toBe(false);
+  expect(isPortGranted({}, 4322, home)).toBe(true);
+  await disableRemoteSettings({}, undefined, home);
+  expect(isPortGranted({}, 4322, home)).toBe(false);
+});
 
 it('warns and keeps named instance bytes when outside-write enforcement refuses deletion', () => {
   const home = Home.sandbox(storeRoot());

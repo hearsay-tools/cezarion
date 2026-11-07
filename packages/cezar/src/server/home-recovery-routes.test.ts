@@ -21,27 +21,30 @@ const flagged: HomeRecovery = { files: [{ file: 'config.json', reason: 'outside-
 
 it('reads the cached metadata and sends restore and accept through the shared recovery service', async () => {
   const home = Home.sandbox(storeRoot());
-  const app = createHomeRecoveryRoutes({ home });
+  const app = createHomeRecoveryRoutes({ home, localHandoff: () => true });
   vi.mocked(getHomeRecovery).mockReturnValue(flagged);
   const read = await app.request('/home/recovery');
   expect(homeRecoverySchema.parse(await read.json())).toEqual(flagged);
   for (const action of ['restore', 'accept']) {
     vi.mocked(getHomeRecovery).mockReturnValue({ files: [] });
     const response = await app.request(`/home/recovery/${action}`, { method: 'POST',
-      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file: 'config.json' }) });
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file: 'config.json', detectedAt: '2026-11-07T09:00:00.000Z' }) });
     expect(response.status).toBe(200);
     expect(homeRecoverySchema.parse(await response.json())).toEqual({ files: [] });
   }
-  expect(restoreHomeRecovery).toHaveBeenCalledWith(home, 'config.json');
-  expect(acceptHomeRecovery).toHaveBeenCalledWith(home, 'config.json');
+  expect(restoreHomeRecovery).toHaveBeenCalledWith(home, 'config.json', '2026-11-07T09:00:00.000Z');
+  expect(acceptHomeRecovery).toHaveBeenCalledWith(home, 'config.json', '2026-11-07T09:00:00.000Z');
 });
 
 it('rejects path input before the service and surfaces recovery failures as conflicts', async () => {
-  const app = createHomeRecoveryRoutes({ home: Home.sandbox(storeRoot()) });
+  const app = createHomeRecoveryRoutes({ home: Home.sandbox(storeRoot()), localHandoff: () => true });
   for (const action of ['restore', 'accept']) {
     const bad = await app.request(`/home/recovery/${action}`, { method: 'POST',
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file: '../config.json' }) });
     expect(bad.status).toBe(400);
+    const untargeted = await app.request(`/home/recovery/${action}`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file: 'config.json' }) });
+    expect(untargeted.status).toBe(400);
   }
   expect(restoreHomeRecovery).not.toHaveBeenCalled();
   expect(acceptHomeRecovery).not.toHaveBeenCalled();
@@ -49,17 +52,34 @@ it('rejects path input before the service and surfaces recovery failures as conf
   vi.mocked(acceptHomeRecovery).mockImplementation(() => { throw new Error('Home is read-only'); });
   for (const [action, error] of [['restore', 'Backup is unavailable'], ['accept', 'Home is read-only']]) {
     const response = await app.request(`/home/recovery/${action}`, { method: 'POST',
-      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file: 'config.json' }) });
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file: 'config.json', detectedAt: '2026-11-07T09:00:00.000Z' }) });
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error });
   }
+});
+
+const actionCases = ['config.json', 'config.json.bak', 'agent-accounts.json', 'ui-state.json', 'server.json',
+  'server.install.lock', 'remote-settings/4321.json', 'server-instances/other.json',
+  'server-instances/other.install.lock'].flatMap(file => [false, true].map(local => ({
+    file, local, status: local && !file.startsWith('remote-settings/') ? 200 : 403,
+  })));
+
+it.each(actionCases)('protects both recovery actions for $file when local=$local', async ({ file, local, status }) => {
+  const app = createHomeRecoveryRoutes({ home: Home.sandbox(storeRoot()), localHandoff: () => local });
+  for (const action of ['restore', 'accept']) {
+    const response = await app.request(`/home/recovery/${action}`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file, detectedAt: flagged.files[0]!.detectedAt }) });
+    expect(response.status).toBe(status);
+  }
+  expect(restoreHomeRecovery).toHaveBeenCalledTimes(status === 200 ? 1 : 0);
+  expect(acceptHomeRecovery).toHaveBeenCalledTimes(status === 200 ? 1 : 0);
 });
 
 it('registers a trusted-only topic and holds watch demand only while it has a subscriber', async () => {
   const home = Home.sandbox(storeRoot());
   const registerTopic = vi.fn();
   const hub = { registerTopic } as unknown as SocketHub;
-  createHomeRecoveryRoutes({ home, socketHub: hub });
+  createHomeRecoveryRoutes({ home, socketHub: hub, localHandoff: () => true });
   expect(registerTopic).toHaveBeenCalledWith(HOME_RECOVERY_TOPIC, expect.any(Object), { loopbackReadable: false });
   expect(subscribeHomeRecovery).not.toHaveBeenCalled();
   let changed!: () => void;

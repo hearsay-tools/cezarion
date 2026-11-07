@@ -5106,7 +5106,7 @@ export function createApp(deps: ServerDeps) {
   const liveRoutes = createWorkspaceLiveRoutes({ serverGeneration, resolveBootProject,
     projectFailure: workspaceProjects.projectFailure,
     resolveProject: (id) => workspaceProjects.resolveLiveProject(id),
-  }, deps);
+  }, { ...deps, localHandoff: () => capabilities().localHandoff });
   const workspaceV1 = new Hono()
     .route('/', liveRoutes)
     .route('/', healthRoutes)

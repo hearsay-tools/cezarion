@@ -20,3 +20,10 @@ it('describes recovery metadata without exposing saved file content', () => {
   expect(homeRecoverySchema.safeParse({ files: [{ ...file, reason: 'changed' }] }).success).toBe(false);
   expect(homeRecoverySchema.safeParse({ files: [{ ...file, detectedAt: 'yesterday' }] }).success).toBe(false);
 });
+
+it('requires the incident time on recovery actions so stale requests cannot resolve a newer incident', () => {
+  expect(homeRecoveryActionSchema.safeParse({ file: 'config.json' }).success).toBe(false);
+  const action = { file: 'config.json', detectedAt: '2026-11-07T09:00:00.000Z' };
+  expect(homeRecoveryActionSchema.parse(action)).toEqual(action);
+  expect(homeRecoveryActionSchema.safeParse({ ...action, detectedAt: 'yesterday' }).success).toBe(false);
+});

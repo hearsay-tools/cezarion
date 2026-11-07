@@ -22,11 +22,8 @@ export async function restoreBackup(file: BackupFile, at: string | undefined, ho
   if (Number.isNaN(limit)) throw new Error('Invalid --at time; use an ISO UTC time');
   const store = new HomeStore(home);
   if (at === undefined) {
-    const recovered = store.restoreRecovery(join(home.root, file));
-    if (recovered) {
-      if (file === 'config.json') refreshSnapshot(store, home);
-      return recovered;
-    }
+    const recovered = restorePinnedRecovery(file, home);
+    if (recovered) return recovered;
   }
   const entry = listBackups(file, home).find((item) => Date.parse(item.time) <= limit);
   if (!entry) throw new Error(`No backup for ${file}${at ? ` at or before ${at}` : ''}`);
@@ -35,6 +32,15 @@ export async function restoreBackup(file: BackupFile, at: string | undefined, ho
   store.restoreFile(join(home.root, file), restored);
   if (file === 'config.json') refreshSnapshot(store, home);
   return entry.time;
+}
+
+/** Cockpit recovery never falls back to a rotation when another cockpit already resolved it. */
+export function restorePinnedRecovery(file: BackupFile, home: Home, detectedAt?: string): string | undefined {
+  if (!isBackupFile(file)) throw new Error(`Unsupported backup file: ${file}`);
+  const store = new HomeStore(home);
+  const recovered = store.restoreRecovery(join(home.root, file), detectedAt);
+  if (recovered && file === 'config.json') refreshSnapshot(store, home);
+  return recovered;
 }
 
 const warnedSnapshots = new Set<string>();

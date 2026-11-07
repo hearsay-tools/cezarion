@@ -203,3 +203,12 @@ The CLI and HTTP recovery actions share the same restore implementation.
 
 Retained content and crash staging still have the P1b limits above. Pruning them
 requires a separate policy that preserves pinned versions and active writers.
+
+P1c recovery actions carry the incident's `detectedAt`. The HomeStore lock checks
+that it still identifies the current flag before restoring or accepting. A stale
+incident conflicts; a retry after resolution leaves primary bytes unchanged.
+Only explicit CLI backup restore falls back to rotating backups without a flag.
+The HTTP routes require `localHandoff`; remote-settings grants are excluded even
+locally because only the host CLI may write grants. Hosted readers see the same
+incident rows with the host-operator instruction and no action buttons. Finite
+reconciliation uses the existing live coordinator when topic delivery is absent.

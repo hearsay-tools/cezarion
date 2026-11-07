@@ -25,14 +25,27 @@ export function createHomeRecoveryPublisher(home: Home): TopicPublisher {
 }
 
 /** Chained once into the workspace API, behind its existing request-origin guard. */
-export function createHomeRecoveryRoutes({ home, socketHub }: { home: Home; socketHub?: SocketHub | undefined }) {
+export function createHomeRecoveryRoutes({ home, socketHub, localHandoff }: {
+  home: Home; socketHub?: SocketHub | undefined; localHandoff: () => boolean;
+}) {
   socketHub?.registerTopic(HOME_RECOVERY_TOPIC, createHomeRecoveryPublisher(home), { loopbackReadable: false });
   return new Hono()
     .get('/home/recovery', (c) => c.json(getHomeRecovery(home), 200))
+    .use('/home/recovery/*', async (c, next) => {
+      if (!localHandoff()) return c.json({ error: 'Home recovery actions require a local cockpit.' }, 403);
+      return next();
+    })
+    .use('/home/recovery/*', async (c, next) => {
+      // Grant files are host-CLI-only, including in a local cockpit (remote-settings.ts).
+      const body: unknown = await c.req.json().catch(() => undefined);
+      if (body && typeof body === 'object' && 'file' in body && typeof body.file === 'string'
+        && body.file.startsWith('remote-settings/')) return c.json({ error: 'Remote settings grants require the host CLI.' }, 403);
+      return next();
+    })
     .post('/home/recovery/restore', jsonZodValidator(homeRecoveryActionSchema), (c) =>
-      respondRecovery(c, home, () => restoreHomeRecovery(home, c.req.valid('json').file)))
+      respondRecovery(c, home, () => restoreHomeRecovery(home, c.req.valid('json').file, c.req.valid('json').detectedAt)))
     .post('/home/recovery/accept', jsonZodValidator(homeRecoveryActionSchema), (c) =>
-      respondRecovery(c, home, () => acceptHomeRecovery(home, c.req.valid('json').file)));
+      respondRecovery(c, home, () => acceptHomeRecovery(home, c.req.valid('json').file, c.req.valid('json').detectedAt)));
 }
 
 async function respondRecovery(c: Context, home: Home, action: () => void | Promise<void>) {

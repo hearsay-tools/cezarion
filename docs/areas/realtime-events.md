@@ -43,4 +43,4 @@ unfiltered responses. Unrelated workspace events do not invalidate report shelve
 as `GET /api/v1/home/recovery`. One root subscription serves the banner. The server
 holds filesystem watches only while there is demand, including per-file journals
 so an acceptance from another cockpit is visible without a primary-file write.
-Unchanged snapshots produce no frame. There is no recovery polling timer.
+Unchanged snapshots produce no frame. The central live coordinator supplies finite authenticated reads when SharedWorker topic delivery is unavailable, as for other live-backed queries. Recovery adds no timer of its own.
