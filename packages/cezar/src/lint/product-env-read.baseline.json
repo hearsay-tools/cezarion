@@ -592,12 +592,6 @@
     {
       "file": "packages/cezar/src/core/claude-cli-runner.ts",
       "form": "dot",
-      "name": "CEZ_CLAUDE_BIN",
-      "reads": 1
-    },
-    {
-      "file": "packages/cezar/src/core/claude-cli-runner.ts",
-      "form": "dot",
       "name": "CEZ_CLAUDE_PERMISSION_MODE",
       "reads": 1
     },
@@ -605,12 +599,6 @@
       "file": "packages/cezar/src/core/claude-cli-runner.ts",
       "form": "dot",
       "name": "CEZ_CLAUDE_SETTING_SOURCES",
-      "reads": 1
-    },
-    {
-      "file": "packages/cezar/src/core/claude-cli-runner.ts",
-      "form": "dot",
-      "name": "CEZ_DRY_RUN",
       "reads": 1
     },
     {
