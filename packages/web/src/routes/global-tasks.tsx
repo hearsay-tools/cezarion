@@ -9,6 +9,7 @@ import { useMutation } from '@tanstack/react-query'
 import { ArchiveRestoreIcon, EyeIcon, EyeOffIcon } from 'lucide-react'
 import { ArchiveIcon, PlusIcon, SearchIcon, SlidersHorizontalIcon, XIcon } from '@/components/design-icons'
 import * as React from 'react'
+import { useIsDesktop } from '@/lib/use-desktop'
 import { Link } from 'react-router'
 import { controlLocation } from '@open-mercato/cezar-api-client/contract/control-locations'
 import { archiveRun, setRunRead } from '@/api/client'
@@ -728,14 +729,9 @@ function FilterBar({
 function TaskList({
   summary = false,
   expandedRuns, toggleExpandedRun,
-  tasks,
-  now,
-  showProject,
-  onArchive,
-  onSetRead,
-  busy,
-  showCost,
-  automationName,
+  tasks, now, showProject,
+  onArchive, onSetRead,
+  busy, showCost, automationName,
 }: {
   expandedRuns: ReadonlySet<string>
   toggleExpandedRun: (id: string) => void
@@ -750,6 +746,7 @@ function TaskList({
   automationName: (task: GlobalTask) => string | undefined
 }) {
   const aria = taskListRowIndexes(tasks.map((task) => `${task.run.projectId}/${task.run.id}`), expandedRuns)
+  const desktop = useIsDesktop()
   return (
     <div
       role={summary ? "table" : undefined} aria-rowcount={summary ? aria.rowCount : undefined} data-slot="global-tasks-table"
@@ -757,7 +754,7 @@ function TaskList({
     >
       <div data-slot="global-summary-head" className="text-[12px]" role="row" aria-rowindex={1}>{['Task', 'Workflow', 'Changes', 'Pull request', 'Started'].map((label) => <span role="columnheader" key={label}>{label}</span>)}</div>
       <TooltipProvider>
-            <TaskListItems {...(summary ? { itemSize: 115 } : {})} items={tasks} itemKey={(task) => `${task.run.projectId}/${task.run.id}`}>{(task, index) => (
+            <TaskListItems {...(summary ? { itemSize: desktop ? 115 : 218 } : {})} /* measured 114.5 / 217.5 px cards */ items={tasks} itemKey={(task) => `${task.run.projectId}/${task.run.id}`}>{(task, index) => (
               <TaskRow
                 key={`${task.run.projectId}/${task.run.id}`}
                 task={task}
