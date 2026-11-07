@@ -15,9 +15,10 @@ import { providersRequiredByWorkflow, unavailableProviderMessage } from './serve
 import { loadWorkspaceConfig } from './workspace/config.ts';
 import { WorkspaceSemaphore } from './workspace/semaphore.ts';
 
+/** Task access for a headless run (hearsay-tools/cezarion#2784): both on unless a --no-* flag says otherwise. */
 export type TaskAccess = { allowWorkers: boolean; allowMessaging: boolean };
 
-const headlessDefaults = {
+export const defaultHeadlessDeps = {
   loadWorkflows, ProviderAuthService, providersRequiredByWorkflow, loadConfig,
   providerAuthChecksDisabled, loadWorkspaceConfig, unavailableProviderMessage,
   applyProviderEnablement, DelegationController, createHostDiscovery,
@@ -25,7 +26,7 @@ const headlessDefaults = {
   createRunner, process, console,
 };
 
-export type HeadlessDeps = typeof headlessDefaults & {
+export type HeadlessDeps = typeof defaultHeadlessDeps & {
   initWorkspace: (repoRoot: string, home: Home) => Promise<string | undefined>;
   openStore: (repoRoot: string, opts: { repoHandleSignal: AbortSignal }) => RunStore;
   onTerminal: () => boolean;
@@ -175,6 +176,3 @@ function firstLine(s: string): string {
   const line = s.split('\n')[0] ?? '';
   return line.length > 120 ? `${line.slice(0, 117)}…` : line;
 }
-
-
-export const defaultHeadlessDeps = headlessDefaults;
