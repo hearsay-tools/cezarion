@@ -34,7 +34,8 @@ function registryFiles(home: Home): string[] {
 /** Explicit authorization at operator entry points. Resolution itself stays free of IO. */
 export function prepareHome(home: Home, entry: HomeEntry, env: NodeJS.ProcessEnv = process.env): void {
   const store = new HomeStore(home);
-  const files = registryFiles(home);
+  const backup = `${home.workspaceConfig}.bak`;
+  const files = registryFiles(home).filter(path => path !== backup);
   store.assertBoundary(files, true);
   const kind = underTestRunner() ? 'test' : (entry === 'serve' || entry === 'init') && env.CEZ_DRY_RUN === '1' ? 'dev' : 'live';
   createInstallMarker(home.root, kind);
@@ -46,6 +47,8 @@ export function prepareHome(home: Home, entry: HomeEntry, env: NodeJS.ProcessEnv
       }
     }
   });
+  // The recovery snapshot and its journal must never prevent entry authorization.
+  try { store.read(backup); } catch { /* Its writer reports an unavailable snapshot when needed. */ }
 }
 
 /** Prepare before server consumers read, then hold presence only for the listener's lifetime. */

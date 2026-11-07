@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { recordedProcessLive, processStartToken } from '../delegation/process-liveness.ts';
+import { recordedProcessLive } from '../delegation/process-liveness.ts';
 import { privateDirectory } from './private-files.ts';
+import { ownProcessStartToken } from './process-identity.ts';
 import { assertHomeMetadata, assertHomePath } from './boundary.ts';
 
 interface Claim { pid: number; startToken?: string | undefined; ticket: number }
@@ -47,7 +48,7 @@ export function withHomeLock<T>(root: string, operation: () => T): T {
   privateDirectory(directory);
   const name = `${process.pid}-${randomUUID()}.json`;
   const path = join(directory, name);
-  const claim = { pid: process.pid, startToken: processStartToken(process.pid), ticket: 0 };
+  const claim = { pid: process.pid, startToken: ownProcessStartToken(), ticket: 0 };
   const peers = () => readdirSync(directory).filter(entry => entry.endsWith('.json') && entry !== name);
   try {
     publishClaim(path, claim);

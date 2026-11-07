@@ -393,15 +393,28 @@ export async function mergeWriteWorkspaceConfig(
   home: Home,
 ): Promise<WorkspaceConfig> {
   const store = new HomeStore(home);
+  const backup = workspaceConfigBackupPath(home.workspaceConfig);
+  let snapshotReady = true;
+  try { store.assertBoundary([backup]); } catch (error) {
+    snapshotReady = false;
+    warnSnapshot(backup, error);
+  }
   return store.transaction(() => {
     const path = home.workspaceConfig;
     const current = loadWorkspaceConfigSync(path);
     const next = mutator(current) ?? current;
     store.writeJson(path, next);
     // Refresh after empty writes too, so recovery cannot resurrect removed projects.
-    try { store.writeJson(workspaceConfigBackupPath(path), next); } catch {
-      // Best-effort: the primary is already safely committed.
+    if (snapshotReady) try { store.writeJson(backup, next); } catch (error) {
+      warnSnapshot(backup, error); // The primary is already safely committed.
     }
     return next;
-  }, [home.workspaceConfig, workspaceConfigBackupPath(home.workspaceConfig)]);
+  }, [home.workspaceConfig]);
+}
+
+const warnedSnapshots = new Set<string>();
+function warnSnapshot(path: string, error: unknown): void {
+  if (warnedSnapshots.has(path)) return;
+  warnedSnapshots.add(path);
+  console.warn(`[cez] workspace backup ${path} unavailable (${error instanceof Error ? error.message : String(error)}); continuing the write`);
 }

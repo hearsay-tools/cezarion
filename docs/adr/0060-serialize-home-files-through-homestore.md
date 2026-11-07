@@ -10,14 +10,18 @@ HomeStore owns reads and writes for `config.json`, `config.json.bak`,
 `agent-accounts.json`, `ui-state.json`, `remote-settings/<port>.json`, `server.json`,
 `server-instances/<slug>.json`, and default/named server install locks.
 The existing store APIs retain their return values, tolerant parsing, unknown fields,
-backup recovery, and caller-selected error handling. `backupBeforeWrite` runs inside
+backup recovery, and caller-selected error handling. The config.json.bak path and
+its own journal are auxiliary: failed preflight or publication warns once, skips
+that snapshot and never blocks the primary save. `backupBeforeWrite` runs inside
 HomeStore for config and account JSON. Extending rotating backups to every file is P1c.
 
 A synchronous read or read-modify-write holds `<root>/.locks/write.lock/`.
 Atomic Lamport bakery claims have unique names and record pid, process start identity
 and ordering ticket. Recovery removes only dead process claims. A canonical root
 identifies nested transactions in one process. No lock spans an event-loop yield.
-Claims use atomic replacement without fsync: they coordinate live processes and
+The current process start token is read lazily once, including an unavailable
+result. Prepared peer-free reads never invoke macOS ps; only an existing peer
+claim needs a fresh peer liveness check. Claims use atomic replacement without fsync: they coordinate live processes and
 need no crash persistence. Data and journal records retain their durable write order.
 Cockpit lifetime leases use `<root>/.locks/cockpits/<pid>.lease` and the same process
 liveness helper. Each cockpit has its own lease; leases never exclude writers.
@@ -117,3 +121,19 @@ private `*.tmp` file. It is not treated as a committed version or an outside wri
 Pruning it is deferred: an old-looking staging file can still belong to a live
 process, and deleting it is unnecessary for recovery. Content versions are retained
 so a pinned restore target cannot be pruned. Retention policy belongs to a follow-up after P1c; P1b does not add retention.
+
+## Secondary-write audit
+
+| Write besides the primary file and its journal | Contract |
+| --- | --- |
+| config.json.bak and its version log | Auxiliary; preflight best effort before the primary transaction, skip on any failure, warn once. Recheck before publication; a later failure leaves the committed primary intact. |
+| Rotating snapshots and pruning under backups/<file> | Auxiliary; preflight before the first claim, skip every backup mutation on failure, warn once. |
+| Cockpit presence lease and stale-lease cleanup | Advisory operation; lifecycle preparation and close handlers catch failures. It never blocks another writer. |
+| Short lock claims and their staging files | Required serialization protocol, not another application-state write. Failure cannot be ignored safely. |
+| Primary/journal staging, HEAD, PENDING, OUTSIDE and pinned content | Required journal protocol for that file. Snapshot journals are auxiliary with their snapshot. |
+| install.json entry authorization | Required before a state write; operator preparation catches failure so a read-only cockpit can still boot. |
+
+Accounts merge/import and UI-state transactions have one primary file; account
+import does not rewrite its source config. Remote grant removal may name several
+primary grants. Install-lock release removes its own primary lock best effort.
+No other HomeStore transaction writes an application-state companion file.

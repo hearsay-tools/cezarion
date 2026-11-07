@@ -2,10 +2,11 @@ import { readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { Home } from './home.ts';
-import { recordedProcessLive, processStartToken } from '../delegation/process-liveness.ts';
+import { recordedProcessLive } from '../delegation/process-liveness.ts';
 import { assertHomeWritable } from './install-marker.ts';
 import { privateDirectory, replacePrivate } from './private-files.ts';
 import { withHomeLock } from './write-lock.ts';
+import { ownProcessStartToken } from './process-identity.ts';
 import { assertHomePath } from './boundary.ts';
 
 const leaseSchema = z.object({ pid: z.number().int().positive(), startToken: z.string().optional(),
@@ -38,7 +39,7 @@ export function holdCockpitLease(home: Home, port: number, instance = 'default')
   const marker = assertHomeWritable(home.root);
   const path = join(home.root, '.locks', 'cockpits', `${process.pid}.lease`);
   assertHomePath(home.root, path);
-  const lease = { pid: process.pid, startToken: processStartToken(process.pid), installId: marker.installId, port, instance };
+  const lease = { pid: process.pid, startToken: ownProcessStartToken(), installId: marker.installId, port, instance };
   withHomeLock(home.root, () => {
     readCockpitLeases(home);
     privateDirectory(join(home.root, '.locks', 'cockpits'));
