@@ -14,6 +14,17 @@ import { z } from 'zod';
 import { GITHUB_COMMENT_COUNTS_MAX, GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubCommentCountsData, type GithubItemResponse, type GithubProject, type GithubProjectsData } from '@open-mercato/cezar-contract/github';
 import { fetchIssueProjects, fetchRepositoryProjects, fetchViewerLogin } from './github-filters.ts';
 import { fetchGithubMergeRequirements, type GithubMergeRequirements } from './github-merge-requirements.ts';
+import { fetchTimelinePages, normalizeEvents, TIMELINE_PER_PAGE, type TimelinePages } from './github-timeline.ts';
+export {
+  fetchTimelinePages,
+  ghTimelineEventSchema,
+  normalizeEvents,
+  TIMELINE_BUDGET_MS,
+  TIMELINE_EVENT_CAP,
+  TIMELINE_EVENT_KINDS,
+  TIMELINE_MAX_PAGES,
+  TIMELINE_MIN_PAGE_MS,
+} from './github-timeline.ts';
 import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 import type {
   ForgeAvailability,
@@ -33,7 +44,6 @@ import type {
   ForgeRefKind,
   ForgeSearchData,
   ForgeTimelineEvent,
-  ForgeTimelineEventKind,
 } from './types.ts';
 
 /**
@@ -454,157 +464,243 @@ function listPageKey(contextKey: string, page: GithubPageRequest): string {
   return JSON.stringify([contextKey, page.issuesCursor ?? null, page.prsCursor ?? null, !!page.issuesDone, !!page.prsDone]);
 }
 
+type ListCacheHit = NonNullable<ReturnType<typeof listCache.get>>;
+
+function isFirstGithubPage(page: GithubPageRequest): boolean {
+  return !page.issuesCursor && !page.prsCursor && !page.issuesDone && !page.prsDone;
+}
+
+function cachedGithubPage(hit: ListCacheHit | undefined, refresh: boolean, capped: number): GithubData | undefined {
+  if (!refresh && hit && Date.now() - hit.at < CACHE_MS && hit.limit >= capped) return hit.data;
+  return undefined;
+}
+
+function rememberListRefresh(contextKey: string, order: number, key: string): void {
+  listRefreshOrder.delete(contextKey);
+  listRefreshOrder.set(contextKey, order);
+  while (listRefreshOrder.size > LIST_CACHE_MAX) {
+    const oldest = listRefreshOrder.keys().next().value;
+    if (oldest === undefined) break;
+    listRefreshOrder.delete(oldest);
+  }
+  for (const [cached, entry] of [...listCache]) {
+    if (entry.contextKey === contextKey && cached !== key) dropListEntry(cached);
+  }
+}
+
+function githubProjectGraphql(repoRoot: string, context: GithubContext): GraphqlRunner {
+  // Optional project queries have one shared wall-clock budget. A missing scope, a cap,
+  // or malformed metadata must never turn an otherwise working list into unavailable.
+  const deadline = Date.now() + 15_000;
+  return (query, variables) => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return Promise.reject(new Error('Project lookup timed out'));
+    return gh(repoRoot, ghGraphqlArgs(query, variables), Math.min(remaining, 8_000), undefined, context);
+  };
+}
+
+function recordLabelColor(labelColors: Record<string, string>, label: { name: string; color: string }): void {
+  if (label.color && !labelColors[label.name]) labelColors[label.name] = label.color;
+}
+
+function flattenGithubIssue(issue: ListNode, recordColor: (label: { name: string; color: string }) => void): GithubItem {
+  issue.labels.forEach(recordColor);
+  return {
+    kind: 'issue',
+    number: issue.number,
+    title: issue.title,
+    author: issue.author?.login ?? '?',
+    createdAt: issue.createdAt,
+    labels: issue.labels.map((label) => label.name),
+    body: (issue.body ?? '').slice(0, 8_000),
+    url: issue.url,
+    comments: 0,
+    assignees: issue.assignees.map((assignee) => assignee.login),
+  };
+}
+
+function flattenGithubPr(pr: ListNode, recordColor: (label: { name: string; color: string }) => void): GithubItem {
+  pr.labels.forEach(recordColor);
+  const isDraft = pr.isDraft ?? false;
+  return {
+    kind: 'pr',
+    number: pr.number,
+    title: pr.title,
+    author: pr.author?.login ?? '?',
+    createdAt: pr.createdAt,
+    labels: [...pr.labels.map((label) => label.name), ...(isDraft ? ['draft'] : [])],
+    body: (pr.body ?? '').slice(0, 8_000),
+    url: pr.url,
+    comments: 0,
+    isDraft,
+    additions: pr.additions ?? 0,
+    deletions: pr.deletions ?? 0,
+    // Hydrated lazily by `fetchGithubChecks` for on-screen rows (#664) — the list no
+    // longer pays for the CI rollup of every open PR.
+    checks: null,
+  };
+}
+
+function applyPreviousProjectIds(issues: GithubItem[], previous: GithubData | undefined): void {
+  for (const issue of issues) {
+    const known = previous?.issues.find((row) => row.number === issue.number)?.projectIds;
+    if (known !== undefined) issue.projectIds = known;
+  }
+}
+
+function githubListData(input: {
+  repo: string;
+  issues: GithubItem[];
+  prs: GithubItem[];
+  labelColors: Record<string, string>;
+  viewerLogin: string | undefined;
+  generation: string;
+  previous: GithubData | undefined;
+  issuesTotal: number;
+  prsTotal: number;
+  issuesNextCursor: string | null;
+  prsNextCursor: string | null;
+}): GithubData {
+  return {
+    available: true,
+    repo: input.repo,
+    syncedAt: new Date().toISOString(),
+    issues: input.issues,
+    prs: input.prs,
+    labelColors: input.labelColors,
+    ...(input.viewerLogin ? { viewerLogin: input.viewerLogin } : {}),
+    projectsState: 'refreshing',
+    projectsGeneration: input.generation,
+    ...(input.previous?.projects ? { projects: input.previous.projects } : {}),
+    issuesTotal: input.issuesTotal,
+    prsTotal: input.prsTotal,
+    issuesNextCursor: input.issuesNextCursor,
+    prsNextCursor: input.prsNextCursor,
+    commentsDeferred: true,
+  };
+}
+
+function applyReadyProjectMembership(current: ListCacheHit, metadata: Extract<GithubProjectsData, { state: 'ready' }>): void {
+  current.data = {
+    ...current.data,
+    projectsState: metadata.state,
+    projects: metadata.projects,
+    issues: current.data.issues.map((issue) => ({ ...issue, projectIds: metadata.membership?.[issue.number] ?? [] })),
+  };
+}
+
+function attachProjectMetadata(
+  projectLookup: ReturnType<typeof fetchIssueProjects>,
+  generation: string,
+  key: string,
+): Promise<GithubProjectsData> {
+  return projectLookup.then((result): GithubProjectsData => {
+    const metadata: GithubProjectsData = 'membership' in result
+      ? { generation, state: 'ready', projects: result.projects, membership: result.membership }
+      : { generation, state: 'unavailable', reason: result.projectsReason };
+    const current = listCache.get(key);
+    if (current?.data.projectsGeneration === generation) {
+      if (metadata.state === 'ready') applyReadyProjectMembership(current, metadata);
+      else current.data = { ...current.data, projectsState: metadata.state, projectsReason: metadata.reason };
+    }
+    return metadata;
+  });
+}
+
+function storeGithubPage(
+  key: string,
+  contextKey: string,
+  order: number,
+  capped: number,
+  data: GithubData,
+  projects: Promise<GithubProjectsData>,
+  generation: string,
+): void {
+  // Concurrent refreshes may finish in reverse order. An older list must not evict
+  // the newer generation (and invalidate the newer client's metadata follow-up).
+  if ((listCache.get(key)?.order ?? -1) < order && order >= (listRefreshOrder.get(contextKey) ?? 0)) {
+    dropListEntry(key); // re-insert so this key becomes the newest
+    listCache.set(key, { contextKey, order, at: Date.now(), limit: capped, data, projects });
+    projectGenerations.set(generation, key);
+  }
+  while (listCache.size > LIST_CACHE_MAX) {
+    const oldest = listCache.keys().next().value;
+    if (oldest === undefined) break;
+    dropListEntry(oldest);
+  }
+}
+
+async function loadGithubPage(
+  repoRoot: string,
+  context: GithubContext,
+  capped: number,
+  page: GithubPageRequest,
+  key: string,
+  hit: ListCacheHit | undefined,
+  order: number,
+  refresh: boolean,
+): Promise<GithubData> {
+  // No `statusCheckRollup` (#664): it is hydrated lazily per on-screen PR row via
+  // `fetchGithubChecks`. A big aggregate list still gets a little more wall clock.
+  const timeout = capped > 100 ? 30_000 : 15_000;
+  const ownerName = await resolveRepoHandleStrict(repoRoot, context);
+  if (!ownerName) return { available: false, reason: 'Could not resolve this repository on GitHub.', issues: [], prs: [] };
+  const runGraphql: GraphqlRunner = (query, variables) =>
+    gh(repoRoot, ghGraphqlArgs(query, variables), timeout, undefined, context);
+  const projectGraphql = githubProjectGraphql(repoRoot, context);
+  const firstPage = isFirstGithubPage(page);
+  const issueSide = fetchListConnection(runGraphql, ownerName.owner, ownerName.name, 'issues', capped, page.issuesCursor, page.issuesDone);
+  const projectLookup = fetchIssueProjects(projectGraphql, ownerName.owner, ownerName.name,
+    async () => (await issueSide).nodes.map((node) => node.number),
+    () => discoverRepositoryProjects(context.key, refresh,
+      () => fetchRepositoryProjects(projectGraphql, ownerName.owner, ownerName.name)));
+  const [issuesPage, prsPage, viewerLogin] = await Promise.all([
+    issueSide,
+    fetchListConnection(runGraphql, ownerName.owner, ownerName.name, 'pullRequests', capped, page.prsCursor, page.prsDone),
+    // The viewer is the same on every page; only the first one asks.
+    firstPage
+      ? fetchViewerLogin((query) => gh(repoRoot, ghGraphqlArgs(query), 8_000, undefined, context))
+      : Promise.resolve(undefined),
+  ]);
+  // One repo-wide label→color map, filled as we flatten each item's labels.
+  const labelColors: Record<string, string> = {};
+  const recordColor = (label: { name: string; color: string }) => recordLabelColor(labelColors, label);
+  const issues = issuesPage.nodes.map((issue) => flattenGithubIssue(issue, recordColor));
+  const prs = prsPage.nodes.map((pr) => flattenGithubPr(pr, recordColor));
+  // Only verified values from the same repository may survive a refresh.
+  const previous = hit?.data.repo === `${ownerName.owner}/${ownerName.name}` ? hit.data : undefined;
+  applyPreviousProjectIds(issues, previous);
+  const generation = randomUUID();
+  const data = githubListData({
+    repo: `${ownerName.owner}/${ownerName.name}`,
+    issues,
+    prs,
+    labelColors,
+    viewerLogin,
+    generation,
+    previous,
+    issuesTotal: issuesPage.totalCount,
+    prsTotal: prsPage.totalCount,
+    issuesNextCursor: issuesPage.nextCursor,
+    prsNextCursor: prsPage.nextCursor,
+  });
+  const projects = attachProjectMetadata(projectLookup, generation, key);
+  storeGithubPage(key, context.key, order, capped, data, projects, generation);
+  return data;
+}
+
 export async function fetchGithub(repoRoot: string, refresh = false, limit = 30, page: GithubPageRequest = {}): Promise<GithubData> {
   if (process.env.CEZ_DRY_RUN === '1') return mockGithubPage(limit, page);
   const context = githubContext(repoRoot);
   const capped = Math.min(Math.max(limit, 1), GH_MAX_LIMIT);
   const key = listPageKey(context.key, page);
   const hit = listCache.get(key);
-  if (!refresh && hit && Date.now() - hit.at < CACHE_MS && hit.limit >= capped) {
-    return hit.data;
-  }
+  const cached = cachedGithubPage(hit, refresh, capped);
+  if (cached) return cached;
   const order = ++listRequestOrder;
-  if (refresh && !page.issuesCursor && !page.prsCursor && !page.issuesDone && !page.prsDone) {
-    listRefreshOrder.delete(context.key);
-    listRefreshOrder.set(context.key, order);
-    while (listRefreshOrder.size > LIST_CACHE_MAX) {
-      const oldest = listRefreshOrder.keys().next().value;
-      if (oldest === undefined) break;
-      listRefreshOrder.delete(oldest);
-    }
-    for (const [cached, entry] of [...listCache]) {
-      if (entry.contextKey === context.key && cached !== key) dropListEntry(cached);
-    }
-  }
+  if (refresh && isFirstGithubPage(page)) rememberListRefresh(context.key, order, key);
   try {
-    // No `statusCheckRollup` (#664): it is hydrated lazily per on-screen PR row via
-    // `fetchGithubChecks`. A big aggregate list still gets a little more wall clock.
-    const timeout = capped > 100 ? 30_000 : 15_000;
-    const ownerName = await resolveRepoHandleStrict(repoRoot, context);
-    if (!ownerName) return { available: false, reason: 'Could not resolve this repository on GitHub.', issues: [], prs: [] };
-    const runGraphql: GraphqlRunner = (query, variables) =>
-      gh(repoRoot, ghGraphqlArgs(query, variables), timeout, undefined, context);
-    // Optional project queries have one shared wall-clock budget. A missing scope, a cap,
-    // or malformed metadata must never turn an otherwise working list into unavailable.
-    const deadline = Date.now() + 15_000;
-    const projectGraphql: GraphqlRunner = (query, variables) => {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) return Promise.reject(new Error('Project lookup timed out'));
-      return gh(repoRoot, ghGraphqlArgs(query, variables), Math.min(remaining, 8_000), undefined, context);
-    };
-    const firstPage = !page.issuesCursor && !page.prsCursor && !page.issuesDone && !page.prsDone;
-    const issueSide = fetchListConnection(runGraphql, ownerName.owner, ownerName.name, 'issues', capped, page.issuesCursor, page.issuesDone);
-    const projectLookup = fetchIssueProjects(projectGraphql, ownerName.owner, ownerName.name,
-      async () => (await issueSide).nodes.map((node) => node.number),
-      () => discoverRepositoryProjects(context.key, refresh,
-        () => fetchRepositoryProjects(projectGraphql, ownerName.owner, ownerName.name)));
-    const [issuesPage, prsPage, viewerLogin] = await Promise.all([
-      issueSide,
-      fetchListConnection(runGraphql, ownerName.owner, ownerName.name, 'pullRequests', capped, page.prsCursor, page.prsDone),
-      // The viewer is the same on every page; only the first one asks.
-      firstPage
-        ? fetchViewerLogin((query) => gh(repoRoot, ghGraphqlArgs(query), 8_000, undefined, context))
-        : Promise.resolve(undefined),
-    ]);
-    // One repo-wide label→color map, filled as we flatten each item's labels.
-    const labelColors: Record<string, string> = {};
-    const recordColor = (l: { name: string; color: string }) => {
-      if (l.color && !labelColors[l.name]) labelColors[l.name] = l.color;
-    };
-    const issues = issuesPage.nodes.map(
-      (i): GithubItem => {
-        i.labels.forEach(recordColor);
-        return {
-          kind: 'issue',
-          number: i.number,
-          title: i.title,
-          author: i.author?.login ?? '?',
-          createdAt: i.createdAt,
-          labels: i.labels.map((l) => l.name),
-          body: (i.body ?? '').slice(0, 8_000),
-          url: i.url,
-          comments: 0,
-          assignees: i.assignees.map(a => a.login),
-        };
-      },
-    );
-    const prs = prsPage.nodes.map(
-      (p): GithubItem => {
-        p.labels.forEach(recordColor);
-        const isDraft = p.isDraft ?? false;
-        return {
-          kind: 'pr',
-          number: p.number,
-          title: p.title,
-          author: p.author?.login ?? '?',
-          createdAt: p.createdAt,
-          labels: [...p.labels.map((l) => l.name), ...(isDraft ? ['draft'] : [])],
-          body: (p.body ?? '').slice(0, 8_000),
-          url: p.url,
-          comments: 0,
-          isDraft,
-          additions: p.additions ?? 0,
-          deletions: p.deletions ?? 0,
-          // Hydrated lazily by `fetchGithubChecks` for on-screen rows (#664) — the list no
-          // longer pays for the CI rollup of every open PR.
-          checks: null,
-        };
-      },
-    );
-    // Only verified values from the same repository may survive a refresh.
-    const previous = hit?.data.repo === `${ownerName.owner}/${ownerName.name}` ? hit.data : undefined;
-    for (const issue of issues) {
-      const known = previous?.issues.find(row => row.number === issue.number)?.projectIds;
-      if (known !== undefined) issue.projectIds = known;
-    }
-    const generation = randomUUID();
-    const data: GithubData = {
-      available: true,
-      repo: `${ownerName.owner}/${ownerName.name}`,
-      syncedAt: new Date().toISOString(),
-      issues,
-      prs,
-      labelColors,
-      ...(viewerLogin ? { viewerLogin } : {}),
-      projectsState: 'refreshing',
-      projectsGeneration: generation,
-      ...(previous?.projects ? { projects: previous.projects } : {}),
-      issuesTotal: issuesPage.totalCount,
-      prsTotal: prsPage.totalCount,
-      issuesNextCursor: issuesPage.nextCursor,
-      prsNextCursor: prsPage.nextCursor,
-      commentsDeferred: true,
-    };
-    const projects = projectLookup.then((result): GithubProjectsData => {
-      const metadata: GithubProjectsData = 'membership' in result
-        ? { generation, state: 'ready', projects: result.projects, membership: result.membership }
-        : { generation, state: 'unavailable', reason: result.projectsReason };
-      const current = listCache.get(key);
-      if (current?.data.projectsGeneration === generation) {
-        current.data = {
-          ...current.data,
-          projectsState: metadata.state,
-          ...(metadata.state === 'ready' ? {
-            projects: metadata.projects,
-            issues: current.data.issues.map(issue => ({ ...issue, projectIds: metadata.membership?.[issue.number] ?? [] })),
-          } : { projectsReason: metadata.reason }),
-        };
-      }
-      return metadata;
-    });
-    // Concurrent refreshes may finish in reverse order. An older list must not evict
-    // the newer generation (and invalidate the newer client's metadata follow-up).
-    if ((listCache.get(key)?.order ?? -1) < order && order >= (listRefreshOrder.get(context.key) ?? 0)) {
-      dropListEntry(key); // re-insert so this key becomes the newest
-      listCache.set(key, { contextKey: context.key, order, at: Date.now(), limit: capped, data, projects });
-      projectGenerations.set(generation, key);
-    }
-    while (listCache.size > LIST_CACHE_MAX) {
-      const oldest = listCache.keys().next().value;
-      if (oldest === undefined) break;
-      dropListEntry(oldest);
-    }
-    return data;
+    return await loadGithubPage(repoRoot, context, capped, page, key, hit, order, refresh);
   } catch (err) {
     return { available: false, reason: ghFailureReason(err), issues: [], prs: [] };
   }
@@ -1000,86 +1096,6 @@ const ghReviewSchema = z.object({
   html_url: z.string(),
 });
 
-// ---- timeline events (#525) -------------------------------------------------
-// The thread's non-comment history — commits, label changes, assignments, merges, force-pushes,
-// cross-references. Sourced from `/issues/{n}/timeline`, which returns comments AND events in one
-// chronological stream, so the `commented` rows keep flowing through `normalizeComments` unchanged
-// and `comments[]` keeps its existing shape.
-
-/** The event kinds rendered in v1 — an allowlist, so a new GitHub event type is dropped rather
- *  than rendered and can never crash or clutter the thread. Real timelines carry plenty that
- *  github.com itself doesn't surface (`subscribed`, `mentioned`, `review_requested`).
- *
- *  `reviewed` is deliberately absent: timeline `reviewed` rows DO carry a body and would work,
- *  but `/pulls/{n}/reviews` is already normalized, chipped and empty-body-filtered, so sourcing
- *  both would render every review twice. */
-export const TIMELINE_EVENT_KINDS = new Set<ForgeTimelineEventKind>([
-  'committed',
-  'labeled',
-  'unlabeled',
-  'assigned',
-  'unassigned',
-  'merged',
-  'closed',
-  'reopened',
-  'head_ref_force_pushed',
-  'cross-referenced',
-  'renamed',
-]);
-
-/** Events get their OWN cap, independent of `THREAD_ENTRY_CAP`. A combined cap would mean a
- *  thread with 150 comments and 100 events returns ~120 comments — silently removing contents
- *  from a §2-protected response. */
-export const TIMELINE_EVENT_CAP = 200;
-/** `gh api --paginate` has no page limit, so the timeline fetch hand-rolls a bounded loop. */
-export const TIMELINE_MAX_PAGES = 10;
-/** ONE budget shared by every page. `gh()`'s timeout is per invocation, so ten pages at the 15 s
- *  default would put the ceiling at 150 s — an order of magnitude worse than the single
- *  `--paginate` spawn this replaces. The loop tracks a deadline and passes what's left. */
-export const TIMELINE_BUDGET_MS = 15_000;
-/** Never spawn a page that cannot finish. A bare `remaining <= 0` guard catches only the exact
- *  boundary; the realistic case is 300 ms left, which spawns `gh` with a 300 ms timeout, throws,
- *  and is indistinguishable from a real endpoint failure. */
-export const TIMELINE_MIN_PAGE_MS = 2_000;
-/** `committed` messages are trimmed to their first line, then this. */
-const COMMIT_MESSAGE_CAP = 120;
-
-/** One timeline row. `event` stays a loose `z.string()` so unknown kinds parse and are dropped by
- *  the allowlist rather than throwing the whole page. Extras are stripped by default — notably
- *  `author.email`, which is read for nothing and must not reach the wire type. */
-export const ghTimelineEventSchema = z.object({
-  event: z.string(),
-  id: z.number().nullish(),
-  node_id: z.string().nullish(),
-  created_at: z.string().nullish(),
-  actor: z.object({ login: z.string(), avatar_url: z.string().nullish() }).nullish(),
-  url: z.string().nullish(),
-  html_url: z.string().nullish(),
-  // `committed`
-  sha: z.string().nullish(),
-  message: z.string().nullish(),
-  author: z.object({ name: z.string().nullish(), date: z.string().nullish() }).nullish(),
-  // `labeled` / `unlabeled`
-  label: z.object({ name: z.string(), color: z.string().nullish() }).nullish(),
-  // `assigned` / `unassigned`
-  assignee: z.object({ login: z.string() }).nullish(),
-  // `renamed`
-  rename: z.object({ from: z.string().nullish(), to: z.string().nullish() }).nullish(),
-  // `cross-referenced`
-  source: z
-    .object({
-      issue: z
-        .object({
-          number: z.number().nullish(),
-          title: z.string().nullish(),
-          html_url: z.string().nullish(),
-          pull_request: z.unknown().nullish(),
-        })
-        .nullish(),
-    })
-    .nullish(),
-});
-
 const REVIEW_STATE: Record<string, ForgeComment['reviewState']> = {
   APPROVED: 'approved',
   CHANGES_REQUESTED: 'changes_requested',
@@ -1127,112 +1143,6 @@ export function normalizeReviews(raw: unknown): ForgeComment[] {
       reviewState: REVIEW_STATE[r.state.toUpperCase()],
       url: r.html_url,
     }));
-}
-
-/**
- * `gh api …/issues/{n}/timeline` JSON → `ForgeTimelineEvent[]`, plus whether the cap fired.
- *
- * Returns `truncated` rather than just the array because the caller has no other way to learn it:
- * `events.length === TIMELINE_EVENT_CAP` is ambiguous on a thread with exactly that many.
- *
- * Three details here are load-bearing and were verified against a real timeline, not assumed:
- *
- * 1. **`committed` rows return `created_at: null`** — the real timestamp is at `author.date`.
- *    Mapping `created_at` naively yields `createdAt: null` on every commit, which string-sorts to
- *    the top and silently reorders the entire thread.
- * 2. **`committed` carries a git author, not a GitHub actor** — a name, no login, no avatar.
- * 3. **The cap keeps the NEWEST events — `slice(-cap)`**, the opposite of the neighbouring
- *    `mergeThread`, which head-slices. The timeline arrives oldest-first, so `slice(0, cap)` would
- *    retain 200 stale day-one `labeled` rows and discard the merge and the recent commits — the
- *    exact rows #525 asks for.
- *
- * Exported for unit tests.
- */
-export function normalizeEvents(
-  raw: unknown,
-  cap = TIMELINE_EVENT_CAP,
-): { events: ForgeTimelineEvent[]; truncated: boolean } {
-  const rows = z.array(ghTimelineEventSchema).parse(raw);
-  const mapped: ForgeTimelineEvent[] = [];
-
-  rows.forEach((row, index) => {
-    const kind = row.event as ForgeTimelineEventKind;
-    if (!TIMELINE_EVENT_KINDS.has(kind)) return; // unknown//noise → dropped, never rendered
-
-    // Per-kind timestamp resolution — see (1) above.
-    const rawAt = kind === 'committed' ? row.author?.date : row.created_at;
-    if (!rawAt) return; // no resolvable timestamp → drop, rather than merge at an arbitrary spot
-    // `author.date` arrives with a numeric offset (`+02:00`); normalize so the string compare the
-    // thread sorts by stays correct across zones.
-    const parsedAt = new Date(rawAt);
-    if (Number.isNaN(parsedAt.getTime())) return;
-    const createdAt = parsedAt.toISOString();
-
-    // Per-kind actor resolution — see (2) above.
-    const actor = (kind === 'committed' ? row.author?.name : row.actor?.login) ?? '?';
-
-    // Identity: `sha` sits ahead of `node_id` deliberately. `committed` rows carry both, and a
-    // node_id-first order would key commits by an opaque `C_kwDO…` blob instead of the SHA, which
-    // is the natural, debuggable identifier and is already the rollup key. The bare-index fallback
-    // reaches only `cross-referenced`, the one kind with no identity at all — as a general scheme
-    // it would be wrong, since the id becomes the React key and an index over the post-sort array
-    // shifts for every row below an insertion, remounting them on each 60 s refetch.
-    const identity = row.id ?? row.sha ?? row.node_id ?? index;
-
-    const event: ForgeTimelineEvent = {
-      id: `evt-${identity}`,
-      kind,
-      actor,
-      createdAt,
-    };
-    // A git author has no avatar, so `committed` deliberately carries none.
-    if (kind !== 'committed' && row.actor?.avatar_url) event.avatarUrl = row.actor.avatar_url;
-
-    switch (kind) {
-      case 'committed': {
-        // Enforce the full-40-hex invariant the rollup query depends on rather than assuming it:
-        // `oid` rejects anything else, and a malformed value embedded in the batched query would
-        // cost the whole chunk its glyphs instead of just this commit.
-        if (row.sha && /^[0-9a-f]{40}$/i.test(row.sha)) event.sha = row.sha;
-        if (row.message) event.message = (row.message.split('\n')[0] ?? '').slice(0, COMMIT_MESSAGE_CAP);
-        if (row.html_url) event.url = row.html_url;
-        break;
-      }
-      case 'labeled':
-      case 'unlabeled': {
-        if (row.label) {
-          event.label = { name: row.label.name };
-          if (row.label.color) event.label.color = row.label.color;
-        }
-        break;
-      }
-      case 'assigned':
-      case 'unassigned': {
-        if (row.assignee?.login) event.subject = row.assignee.login;
-        break;
-      }
-      case 'renamed': {
-        if (row.rename?.to) event.subject = row.rename.to;
-        break;
-      }
-      case 'cross-referenced': {
-        const issue = row.source?.issue;
-        if (issue?.number != null) event.refNumber = issue.number;
-        if (issue?.title) event.refTitle = issue.title;
-        if (issue) event.refIsPr = Boolean(issue.pull_request);
-        if (issue?.html_url) event.url = issue.html_url;
-        break;
-      }
-      default:
-        break;
-    }
-
-    mapped.push(event);
-  });
-
-  const truncated = mapped.length > cap;
-  // slice(-cap), NOT slice(0, cap) — see (3) above.
-  return { events: truncated ? mapped.slice(-cap) : mapped, truncated };
 }
 
 /** Merge comment/review lists chronologically (oldest first) and apply the entry cap. Exported
@@ -1327,8 +1237,6 @@ export async function fetchGithubItem(
     };
   }
 }
-
-const TIMELINE_PER_PAGE = 100;
 
 // The repo handle for the per-commit checks query (#525 Phase 2). Memoized per repoRoot — stable
 // in practice, and keyed per root rather than globally for multi-project forward-compatibility.
@@ -1439,70 +1347,6 @@ export async function resolveRepoHandle(
 ): Promise<{ owner: string; name: string } | null> {
   const result = await discoverRepoHandle(repoRoot, signal);
   return result.status === 'resolved' ? result.handle : null;
-}
-
-/** What the bounded timeline page loop returns. `stoppedShort` means "the timeline may have more
- *  rows than we fetched" and has exactly three causes — the page cap, the budget floor, and a
- *  failure on page ≥ 2. All three shorten the `commented` stream the same way, so all three feed
- *  `truncated` and arm the comments top-up; the cause does not change the remedy. A short page is
- *  the one exit that does NOT set it: that is the timeline genuinely ending. */
-type TimelinePages = { rows: unknown[]; stoppedShort: boolean };
-
-/**
- * Walk `/issues/{n}/timeline` under ONE shared time budget.
- *
- * `gh api --paginate` is not used here: it pages *"until there are no more pages of results"* and
- * exposes no page-limit flag, so the only way to bound the walk is to hand-roll it. The cap that
- * `paginateCounts` gets comes from being a JS cursor loop, not from a `gh` flag.
- *
- * The budget is a **total**, not a per-page allowance. `gh()` takes its timeout per invocation, so
- * ten sequential spawns at the 15 s default would put the ceiling at 150 s — an order of magnitude
- * worse than the single `--paginate` spawn this replaces. The loop tracks a deadline and passes
- * each page whatever remains.
- *
- * Exported for unit tests; `run` is injected so the loop is testable without shelling out.
- */
-export async function fetchTimelinePages(
-  run: (page: number, timeoutMs: number) => Promise<string>,
-  opts: { maxPages?: number; budgetMs?: number; minPageMs?: number; now?: () => number } = {},
-): Promise<TimelinePages> {
-  const maxPages = opts.maxPages ?? TIMELINE_MAX_PAGES;
-  const budgetMs = opts.budgetMs ?? TIMELINE_BUDGET_MS;
-  const minPageMs = opts.minPageMs ?? TIMELINE_MIN_PAGE_MS;
-  const now = opts.now ?? Date.now;
-
-  const deadline = now() + budgetMs;
-  const rows: unknown[] = [];
-  let stoppedShort = false;
-  let page = 1;
-
-  for (; page <= maxPages; page++) {
-    const remaining = deadline - now();
-    // Never spawn a page that cannot finish. A bare `remaining <= 0` guard catches only the exact
-    // boundary; the realistic case is 300 ms left, which spawns gh with a 300 ms timeout, throws,
-    // and looks indistinguishable from a real endpoint failure.
-    if (remaining < minPageMs) {
-      stoppedShort = true;
-      break;
-    }
-    let parsed: unknown[];
-    try {
-      parsed = z.array(z.unknown()).parse(JSON.parse(await run(page, remaining)));
-    } catch (err) {
-      // Page 1 rethrows so the caller's inner catch can decide whether substitution helps —
-      // nothing was fetched, so there is nothing to lose. A failure on any later page keeps the
-      // pages already in hand: discarding nine good pages to re-fetch comments-only is strictly
-      // worse than what the loop already holds.
-      if (page === 1) throw err;
-      stoppedShort = true;
-      break;
-    }
-    rows.push(...parsed);
-    if (parsed.length < TIMELINE_PER_PAGE) break; // short page — the real end of the timeline
-  }
-  if (page > maxPages) stoppedShort = true; // fell out on the page cap
-
-  return { rows, stoppedShort };
 }
 
 /** SHAs per rollup query. Aliases resolve independently, so a chunk that fails costs only its own
@@ -2141,6 +1985,124 @@ export interface RefStatusBatch {
   reason?: string;
 }
 
+function refStatusGraphqlClean(
+  raw: { errors?: unknown },
+  repository: Record<string, unknown>,
+  owner: string,
+  name: string,
+): boolean {
+  return (!raw.errors || (Array.isArray(raw.errors) && raw.errors.length === 0)) &&
+    typeof repository.nameWithOwner === 'string' && repository.nameWithOwner.toLowerCase() === `${owner}/${name}`.toLowerCase();
+}
+
+function prHeadCommit(pr: GhRefStatusPr): NonNullable<NonNullable<GhRefStatusPr['commits']>['nodes'][0]>['commit'] | undefined {
+  return pr.commits?.nodes[0]?.commit;
+}
+
+function prRollupChecks(head: ReturnType<typeof prHeadCommit>): ChecksGlyph {
+  const rollup = head?.statusCheckRollup;
+  // Adapt the single rollup state into the array shape `rollupToChecks` expects,
+  // reusing the FAILURE/PENDING/SUCCESS vocabulary rather than duplicating it.
+  return rollup ? rollupToChecks([{ state: rollup.state, status: null, conclusion: null }]) ?? null : null;
+}
+
+function resolvePrReference(
+  pr: GhRefStatusPr,
+  raw: { errors?: unknown },
+  repository: Record<string, unknown>,
+  owner: string,
+  name: string,
+  number: number,
+): ResolvedReference {
+  if (refStatusGraphqlClean(raw, repository, owner, name)) {
+    mergedPullRequestObservations.observe({ owner, repo: name, number }, { ...pr, number });
+  }
+  const head = prHeadCommit(pr);
+  const mergeability = mergeabilityOf(pr.state, pr.mergeable);
+  return {
+    kind: 'pr',
+    status: derivePrReferenceStatus({
+      state: pr.state,
+      isDraft: pr.isDraft,
+      reviewDecision: pr.reviewDecision,
+      checks: prRollupChecks(head),
+      headCommittedAt: head?.committedDate,
+      // Two parents = "Update branch", which is dated now and answers nothing on its own —
+      // so the first parent's date, the work it sat on top of, is carried with it.
+      headParentCount: head?.parents?.totalCount,
+      headFirstParentCommittedAt: head?.parents?.nodes?.[0]?.committedDate,
+      // `reviews(last: 1, states: CHANGES_REQUESTED)` — the timestamp only. WHETHER changes
+      // are requested stays `reviewDecision`'s answer, which is the one that accounts for
+      // dismissed and superseded reviews.
+      changesRequestedAt: pr.reviews?.nodes[0]?.submittedAt,
+      reviewRequested: (pr.reviewRequests?.totalCount ?? 0) > 0,
+      // WHEN that standing request was made. `reviewRequests` carries no date of its own,
+      // and without one an old request looks exactly like a re-request.
+      reviewRequestedAt: standingReviewRequestedAt(pr.reviewRequests, pr.timelineItems),
+    }),
+    // The tri-state, not a boolean: `unknown` has to survive as far as the cache, which
+    // is what decides to ask again in seconds rather than in a minute.
+    ...(mergeability ? { mergeable: mergeability } : {}),
+  };
+}
+
+function applyRefStatusNode(
+  out: RefStatusBatch,
+  node: { __typename?: string } | null | undefined,
+  raw: { errors?: unknown },
+  repository: Record<string, unknown>,
+  owner: string,
+  name: string,
+  number: number,
+): void {
+  // Absent alias → the number is not in this repository at all. Left out of the map, which
+  // is what the route reports as "not found" and the chip paints as neutral.
+  if (!node) return;
+  if (node.__typename === 'PullRequest') {
+    const pr = ghRefStatusPrSchema.parse(node);
+    if (!pr) return;
+    out.resolved[number] = resolvePrReference(pr, raw, repository, owner, name, number);
+    return;
+  }
+  if (node.__typename === 'Issue') {
+    const issue = ghRefStatusIssueSchema.parse(node);
+    if (!issue) return;
+    out.resolved[number] = { kind: 'issue', status: deriveIssueReferenceStatus(issue) };
+  }
+}
+
+async function fetchRefStatusChunk(
+  runGraphql: GraphqlRunner,
+  owner: string,
+  name: string,
+  chunk: number[],
+  out: RefStatusBatch,
+): Promise<void> {
+  try {
+    const raw = JSON.parse(await runGraphql(refStatusQuery(chunk), { owner, name })) as {
+      data?: { repository?: unknown };
+      errors?: unknown;
+    };
+    const repository = ghRefStatusSchema.parse(raw?.data?.repository ?? {});
+    chunk.forEach((number, index) => {
+      applyRefStatusNode(
+        out,
+        repository[`r${index}`] as { __typename?: string } | null | undefined,
+        raw,
+        repository,
+        owner,
+        name,
+        number,
+      );
+    });
+  } catch (err) {
+    // A failed chunk costs only its own numbers; the rest still resolve. They are recorded as
+    // FAILED rather than left absent, so nothing downstream mistakes them for "no such number".
+    out.failed.push(...chunk);
+    out.reason ??= firstLine(err instanceof Error ? err.message : String(err));
+  }
+}
+
 /**
  * Status per NUMBER, resolved to whatever that number actually is.
  *
@@ -2161,67 +2123,7 @@ export async function fetchRefStatuses(
   if (numbers.length === 0) return out;
 
   for (let i = 0; i < numbers.length; i += chunkSize) {
-    const chunk = numbers.slice(i, i + chunkSize);
-    try {
-      const raw = JSON.parse(await runGraphql(refStatusQuery(chunk), { owner, name })) as {
-        data?: { repository?: unknown };
-        errors?: unknown;
-      };
-      const repository = ghRefStatusSchema.parse(raw?.data?.repository ?? {});
-      chunk.forEach((number, index) => {
-        const node = repository[`r${index}`] as { __typename?: string } | null | undefined;
-        // Absent alias → the number is not in this repository at all. Left out of the map, which
-        // is what the route reports as "not found" and the chip paints as neutral.
-        if (!node) return;
-        if (node.__typename === 'PullRequest') {
-          const pr = ghRefStatusPrSchema.parse(node);
-          if (!pr) return;
-          if ((!raw.errors || (Array.isArray(raw.errors) && raw.errors.length === 0)) &&
-            typeof repository.nameWithOwner === 'string' && repository.nameWithOwner.toLowerCase() === `${owner}/${name}`.toLowerCase()) {
-            mergedPullRequestObservations.observe({ owner, repo: name, number }, { ...pr, number });
-          }
-          const head = pr.commits?.nodes[0]?.commit;
-          const rollup = head?.statusCheckRollup;
-          const mergeability = mergeabilityOf(pr.state, pr.mergeable);
-          out.resolved[number] = {
-            kind: 'pr',
-            status: derivePrReferenceStatus({
-              state: pr.state,
-              isDraft: pr.isDraft,
-              reviewDecision: pr.reviewDecision,
-              // Adapt the single rollup state into the array shape `rollupToChecks` expects,
-              // reusing the FAILURE/PENDING/SUCCESS vocabulary rather than duplicating it.
-              checks: rollup ? rollupToChecks([{ state: rollup.state, status: null, conclusion: null }]) ?? null : null,
-              headCommittedAt: head?.committedDate,
-              // Two parents = "Update branch", which is dated now and answers nothing on its own —
-              // so the first parent's date, the work it sat on top of, is carried with it.
-              headParentCount: head?.parents?.totalCount,
-              headFirstParentCommittedAt: head?.parents?.nodes?.[0]?.committedDate,
-              // `reviews(last: 1, states: CHANGES_REQUESTED)` — the timestamp only. WHETHER changes
-              // are requested stays `reviewDecision`'s answer, which is the one that accounts for
-              // dismissed and superseded reviews.
-              changesRequestedAt: pr.reviews?.nodes[0]?.submittedAt,
-              reviewRequested: (pr.reviewRequests?.totalCount ?? 0) > 0,
-              // WHEN that standing request was made. `reviewRequests` carries no date of its own,
-              // and without one an old request looks exactly like a re-request.
-              reviewRequestedAt: standingReviewRequestedAt(pr.reviewRequests, pr.timelineItems),
-            }),
-            // The tri-state, not a boolean: `unknown` has to survive as far as the cache, which
-            // is what decides to ask again in seconds rather than in a minute.
-            ...(mergeability ? { mergeable: mergeability } : {}),
-          };
-        } else if (node.__typename === 'Issue') {
-          const issue = ghRefStatusIssueSchema.parse(node);
-          if (!issue) return;
-          out.resolved[number] = { kind: 'issue', status: deriveIssueReferenceStatus(issue) };
-        }
-      });
-    } catch (err) {
-      // A failed chunk costs only its own numbers; the rest still resolve. They are recorded as
-      // FAILED rather than left absent, so nothing downstream mistakes them for "no such number".
-      out.failed.push(...chunk);
-      out.reason ??= firstLine(err instanceof Error ? err.message : String(err));
-    }
+    await fetchRefStatusChunk(runGraphql, owner, name, numbers.slice(i, i + chunkSize), out);
   }
   return out;
 }
@@ -2598,6 +2500,206 @@ function mockGithubRefStatus(prs: number[], issues: number[]): GithubRefStatusDa
  * `normalizeEvents`. `comments[]` therefore keeps its exact pre-#525 shape, contents and cap
  * (BACKWARD_COMPATIBILITY.md) — see the top-up below for the one case that needed defending.
  */
+function commentsCacheKey(repoRoot: string, kind: 'issue' | 'pr', number: number): string {
+  // NUL separator: cannot appear in a filesystem path, so roots can never alias.
+  return `${repoRoot}\0${kind}#${number}`;
+}
+
+function cachedGithubComments(key: string, refresh: boolean): ForgeCommentsData | undefined {
+  const hit = commentsCache.get(key);
+  if (!refresh && hit && Date.now() - hit.at < CACHE_MS) return hit.data;
+  return undefined;
+}
+
+function legacyIssueComments(repoRoot: string, number: number): () => Promise<string> {
+  // PR conversation comments live on the issues endpoint too — always use it for the body thread.
+  return () => gh(repoRoot, ['api', `repos/{owner}/{repo}/issues/${number}/comments`, '--paginate']);
+}
+
+function parseUnknownRows(raw: string): unknown[] {
+  return z.array(z.unknown()).parse(JSON.parse(raw));
+}
+
+function commentedTimelineRows(rows: unknown[]): unknown[] {
+  return rows.filter((row) => (row as { event?: unknown } | null)?.event === 'commented');
+}
+
+async function fetchIssueTimelinePages(repoRoot: string, number: number): Promise<TimelinePages> {
+  return fetchTimelinePages((page, timeoutMs) =>
+    gh(
+      repoRoot,
+      [
+        'api',
+        '-H',
+        'Accept: application/vnd.github+json',
+        `repos/{owner}/{repo}/issues/${number}/timeline?per_page=${TIMELINE_PER_PAGE}&page=${page}`,
+      ],
+      timeoutMs,
+    ),
+  );
+}
+
+async function topUpTimelineComments(
+  commentRows: unknown[],
+  stoppedShort: boolean,
+  legacyComments: () => Promise<string>,
+): Promise<unknown[]> {
+  // Comments top-up. The two ENTRY caps are independent, but the FETCH budget is not: today's
+  // call is an unbounded --paginate over a comments-only endpoint, so every comment is fetched
+  // and mergeThread picks the oldest 200 from the complete set. Under the timeline those same
+  // 200 slots are filled from at most 1000 rows in which events compete with comments — so on
+  // a 1500-row thread with 250 interleaved comments, comments[] would return ~167 where today
+  // it returns 200. Same §2 defect class as a combined entry cap, arriving via the source set.
+  //
+  // The trigger deliberately over-fires: it cannot distinguish "comments were cut off" from
+  // "this thread just has few comments", because the second is only knowable by fetching them.
+  // So on an event-heavy thread with 30 comments it re-fetches 30 complete comments. Accepted
+  // — it fires only past ~1000 timeline rows, behind the 60 s LRU, and the alternative is a §2
+  // regression. In the other direction the threshold is provably sound: with ≥200 commented
+  // rows already in the oldest-first prefix, mergeThread's oldest-200 cut lies inside it.
+  if (!(stoppedShort && commentRows.length < THREAD_ENTRY_CAP)) return commentRows;
+  // Its OWN nested catch. The inner handler's remedy is the fallback — which is this very
+  // call — and the outer handler returns { available: false, comments: [] }, emptying a
+  // thread that was about to render. So a thrown top-up is swallowed: keep the commented
+  // rows the timeline already returned and carry on. That is at worst the short list the
+  // safeguard existed to avoid, never worse than not having attempted it.
+  try {
+    return parseUnknownRows(await legacyComments());
+  } catch {
+    // keep the timeline's own commented rows
+    return commentRows;
+  }
+}
+
+type GithubThreadSource = {
+  commentRows: unknown[];
+  events: ForgeTimelineEvent[] | undefined;
+  eventsTruncated: boolean;
+  stoppedShort: boolean;
+};
+
+async function loadGithubThreadSource(
+  repoRoot: string,
+  number: number,
+  legacyComments: () => Promise<string>,
+): Promise<GithubThreadSource> {
+  const source: GithubThreadSource = {
+    commentRows: [],
+    events: undefined,
+    eventsTruncated: false,
+    stoppedShort: false,
+  };
+  try {
+    const pages = await fetchIssueTimelinePages(repoRoot, number);
+    source.stoppedShort = pages.stoppedShort;
+    source.commentRows = commentedTimelineRows(pages.rows);
+    const normalized = normalizeEvents(pages.rows);
+    source.events = normalized.events;
+    source.eventsTruncated = normalized.truncated;
+    source.commentRows = await topUpTimelineComments(
+      source.commentRows,
+      source.stoppedShort,
+      legacyComments,
+    );
+    return source;
+  } catch (timelineErr) {
+    // Scoped INSIDE the existing outer catch on purpose: the outer handler's /404|not found/i
+    // branch would otherwise turn a timeline 404 into an empty thread. ENOENT is the one failure
+    // the fallback cannot rescue — nothing will work, and a second spawn fails identically.
+    const message = timelineErr instanceof Error ? timelineErr.message : String(timelineErr);
+    if (/ENOENT/.test(message)) throw timelineErr;
+    // Every other endpoint-level failure substitutes the legacy comments call. It is a
+    // substitution, not a retry — a different endpoint, which typically still answers. (A 403
+    // attaches to the token rather than the endpoint, so it cannot succeed either; not
+    // special-cased, since rate-limit replies are immediate and it costs one fast spawn.)
+    source.commentRows = parseUnknownRows(await legacyComments());
+    source.events = undefined;
+    return source;
+  }
+}
+
+function applyCommitChecks(
+  events: ForgeTimelineEvent[],
+  checks: Awaited<ReturnType<typeof fetchCommitChecks>>,
+): void {
+  for (const event of events) {
+    if (event.kind !== 'committed' || !event.sha) continue;
+    if (event.sha in checks) {
+      delete event.checks;
+      Object.assign(event, defined({ checks: checks[event.sha] }));
+    }
+  }
+}
+
+async function attachCommitChecks(repoRoot: string, events: ForgeTimelineEvent[] | undefined): Promise<void> {
+  // Per-commit CI (#525 Phase 2). One extra subprocess per opened thread that contains commits,
+  // behind the same 60 s LRU — a per-thread-open cost, not per-render. Every failure path here
+  // leaves `checks` ABSENT rather than null, so commits simply render unglyphed: the fetch
+  // degrades to "no data" and the render decides what absence looks like.
+  const commitShas = (events ?? []).flatMap((event) => (event.kind === 'committed' && event.sha ? [event.sha] : []));
+  if (commitShas.length === 0) return;
+  const handle = await resolveRepoHandle(repoRoot);
+  if (!handle) return;
+  const runGraphql: GraphqlRunner = (query, variables) => {
+    const args = ghGraphqlArgs(query, variables);
+    return gh(repoRoot, args);
+  };
+  applyCommitChecks(events ?? [], await fetchCommitChecks(runGraphql, handle.owner, handle.name, commitShas));
+}
+
+async function mergeGithubThread(
+  repoRoot: string,
+  kind: 'issue' | 'pr',
+  number: number,
+  commentRows: unknown[],
+): Promise<{ comments: ForgeComment[]; truncated: boolean }> {
+  const parts: ForgeComment[][] = [normalizeComments(commentRows)];
+  if (kind === 'pr') {
+    const reviewsOut = await gh(repoRoot, ['api', `repos/{owner}/{repo}/pulls/${number}/reviews`, '--paginate']);
+    parts.push(normalizeReviews(JSON.parse(reviewsOut)));
+  }
+  return mergeThread(parts);
+}
+
+function commentsFailureReason(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (/ENOENT/.test(message)) return 'gh CLI not found — install it and run `gh auth login`';
+  if (/404|not found/i.test(message)) return 'not found on GitHub — it may be closed or deleted';
+  return firstLine(message);
+}
+
+async function loadGithubComments(
+  repoRoot: string,
+  kind: 'issue' | 'pr',
+  number: number,
+  key: string,
+): Promise<ForgeCommentsData> {
+  const legacyComments = legacyIssueComments(repoRoot, number);
+  // The detail tier (hearsay-tools/cezarion#1183): the list no longer has to carry a body, so
+  // the pane asks for it here, in parallel with the thread. It is attached only to a thread
+  // that loaded, and a failed view never costs the thread.
+  const detail = fetchItemDetail(repoRoot, kind, number);
+  try {
+    const source = await loadGithubThreadSource(repoRoot, number, legacyComments);
+    await attachCommitChecks(repoRoot, source.events);
+    const { comments, truncated } = await mergeGithubThread(repoRoot, kind, number, source.commentRows);
+    const data: ForgeCommentsData = defined({
+      available: true as const,
+      comments,
+      // OR-folded exactly as before, so the pre-existing >200-comments trigger is preserved
+      // rather than replaced.
+      truncated: truncated || source.eventsTruncated || source.stoppedShort || undefined,
+    });
+    if (source.events) data.events = source.events;
+    const itemDetail = await detail;
+    if (itemDetail) data.detail = itemDetail;
+    cacheComments(key, data);
+    return data;
+  } catch (err) {
+    return { available: false, reason: commentsFailureReason(err), comments: [] };
+  }
+}
+
 export async function fetchGithubComments(
   repoRoot: string,
   kind: 'issue' | 'pr',
@@ -2605,133 +2707,10 @@ export async function fetchGithubComments(
   refresh = false,
 ): Promise<ForgeCommentsData> {
   if (process.env.CEZ_DRY_RUN === '1') return mockGithubComments(kind, number);
-  // NUL separator: cannot appear in a filesystem path, so roots can never alias.
-  const key = `${repoRoot}\0${kind}#${number}`;
-  const hit = commentsCache.get(key);
-  if (!refresh && hit && Date.now() - hit.at < CACHE_MS) return hit.data;
-  // PR conversation comments live on the issues endpoint too — always use it for the body thread.
-  const legacyComments = () =>
-    gh(repoRoot, ['api', `repos/{owner}/{repo}/issues/${number}/comments`, '--paginate']);
-  // The detail tier (hearsay-tools/cezarion#1183): the list no longer has to carry a body, so
-  // the pane asks for it here, in parallel with the thread. It is attached only to a thread
-  // that loaded, and a failed view never costs the thread.
-  const detail = fetchItemDetail(repoRoot, kind, number);
-  try {
-    let commentRows: unknown[] = [];
-    let events: ForgeTimelineEvent[] | undefined;
-    let eventsTruncated = false;
-    let stoppedShort = false;
-
-    try {
-      const pages = await fetchTimelinePages((page, timeoutMs) =>
-        gh(
-          repoRoot,
-          [
-            'api',
-            '-H',
-            'Accept: application/vnd.github+json',
-            `repos/{owner}/{repo}/issues/${number}/timeline?per_page=${TIMELINE_PER_PAGE}&page=${page}`,
-          ],
-          timeoutMs,
-        ),
-      );
-      stoppedShort = pages.stoppedShort;
-      commentRows = pages.rows.filter(
-        (r) => (r as { event?: unknown } | null)?.event === 'commented',
-      );
-      const normalized = normalizeEvents(pages.rows);
-      events = normalized.events;
-      eventsTruncated = normalized.truncated;
-
-      // Comments top-up. The two ENTRY caps are independent, but the FETCH budget is not: today's
-      // call is an unbounded --paginate over a comments-only endpoint, so every comment is fetched
-      // and mergeThread picks the oldest 200 from the complete set. Under the timeline those same
-      // 200 slots are filled from at most 1000 rows in which events compete with comments — so on
-      // a 1500-row thread with 250 interleaved comments, comments[] would return ~167 where today
-      // it returns 200. Same §2 defect class as a combined entry cap, arriving via the source set.
-      //
-      // The trigger deliberately over-fires: it cannot distinguish "comments were cut off" from
-      // "this thread just has few comments", because the second is only knowable by fetching them.
-      // So on an event-heavy thread with 30 comments it re-fetches 30 complete comments. Accepted
-      // — it fires only past ~1000 timeline rows, behind the 60 s LRU, and the alternative is a §2
-      // regression. In the other direction the threshold is provably sound: with ≥200 commented
-      // rows already in the oldest-first prefix, mergeThread's oldest-200 cut lies inside it.
-      if (stoppedShort && commentRows.length < THREAD_ENTRY_CAP) {
-        // Its OWN nested catch. The inner handler's remedy is the fallback — which is this very
-        // call — and the outer handler returns { available: false, comments: [] }, emptying a
-        // thread that was about to render. So a thrown top-up is swallowed: keep the commented
-        // rows the timeline already returned and carry on. That is at worst the short list the
-        // safeguard existed to avoid, never worse than not having attempted it.
-        try {
-          commentRows = z.array(z.unknown()).parse(JSON.parse(await legacyComments()));
-        } catch {
-          // keep the timeline's own commented rows
-        }
-      }
-    } catch (timelineErr) {
-      // Scoped INSIDE the existing outer catch on purpose: the outer handler's /404|not found/i
-      // branch would otherwise turn a timeline 404 into an empty thread. ENOENT is the one failure
-      // the fallback cannot rescue — nothing will work, and a second spawn fails identically.
-      const message = timelineErr instanceof Error ? timelineErr.message : String(timelineErr);
-      if (/ENOENT/.test(message)) throw timelineErr;
-      // Every other endpoint-level failure substitutes the legacy comments call. It is a
-      // substitution, not a retry — a different endpoint, which typically still answers. (A 403
-      // attaches to the token rather than the endpoint, so it cannot succeed either; not
-      // special-cased, since rate-limit replies are immediate and it costs one fast spawn.)
-      commentRows = z.array(z.unknown()).parse(JSON.parse(await legacyComments()));
-      events = undefined;
-    }
-
-    // Per-commit CI (#525 Phase 2). One extra subprocess per opened thread that contains commits,
-    // behind the same 60 s LRU — a per-thread-open cost, not per-render. Every failure path here
-    // leaves `checks` ABSENT rather than null, so commits simply render unglyphed: the fetch
-    // degrades to "no data" and the render decides what absence looks like.
-    const commitShas = (events ?? []).flatMap((e) => (e.kind === 'committed' && e.sha ? [e.sha] : []));
-    if (commitShas.length > 0) {
-      const handle = await resolveRepoHandle(repoRoot);
-      if (handle) {
-        const runGraphql: GraphqlRunner = (query, variables) => {
-          const args = ghGraphqlArgs(query, variables);
-          return gh(repoRoot, args);
-        };
-        const checks = await fetchCommitChecks(runGraphql, handle.owner, handle.name, commitShas);
-        for (const event of events ?? []) {
-          if (event.kind !== 'committed' || !event.sha) continue;
-          if (event.sha in checks) {
-            delete event.checks;
-            Object.assign(event, defined({ checks: checks[event.sha] }));
-          }
-        }
-      }
-    }
-
-    const parts: ForgeComment[][] = [normalizeComments(commentRows)];
-    if (kind === 'pr') {
-      const reviewsOut = await gh(repoRoot, ['api', `repos/{owner}/{repo}/pulls/${number}/reviews`, '--paginate']);
-      parts.push(normalizeReviews(JSON.parse(reviewsOut)));
-    }
-    const { comments, truncated } = mergeThread(parts);
-    const data: ForgeCommentsData = defined({
-      available: true as const,
-      comments,
-      // OR-folded exactly as before, so the pre-existing >200-comments trigger is preserved
-      // rather than replaced.
-      truncated: truncated || eventsTruncated || stoppedShort || undefined,
-    });
-    if (events) data.events = events;
-    const itemDetail = await detail;
-    if (itemDetail) data.detail = itemDetail;
-    cacheComments(key, data);
-    return data;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const reason = /ENOENT/.test(message)
-      ? 'gh CLI not found — install it and run `gh auth login`'
-      : /404|not found/i.test(message)
-        ? 'not found on GitHub — it may be closed or deleted'
-        : firstLine(message);
-    return { available: false, reason, comments: [] };
-  }
+  const key = commentsCacheKey(repoRoot, kind, number);
+  const cached = cachedGithubComments(key, refresh);
+  if (cached) return cached;
+  return loadGithubComments(repoRoot, kind, number, key);
 }
 
 /** CEZ_DRY_RUN=1 — a small fixed thread (one image-bearing comment, plus a review for PRs) so
