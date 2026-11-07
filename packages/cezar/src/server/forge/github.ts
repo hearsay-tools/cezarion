@@ -13,8 +13,10 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import { GITHUB_COMMENT_COUNTS_MAX, GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubCommentCountsData, type GithubItemResponse, type GithubProject, type GithubProjectsData } from '@open-mercato/cezar-contract/github';
 import { fetchIssueProjects, fetchRepositoryProjects, fetchViewerLogin } from './github-filters.ts';
-import { fetchGithubMergeRequirements, type GithubMergeRequirements } from './github-merge-requirements.ts';
+import { fetchGithubMergeRequirements } from './github-merge-requirements.ts';
+import { mergePrSchema, normalizeMergeState } from './github-merge-state.ts';
 import { fetchTimelinePages, normalizeEvents, TIMELINE_PER_PAGE, type TimelinePages } from './github-timeline.ts';
+export { normalizeMergeState } from './github-merge-state.ts';
 export {
   fetchTimelinePages,
   ghTimelineEventSchema,
@@ -34,9 +36,7 @@ import type {
   ForgeItem,
   ForgeListOptions,
   ForgeMergeInput,
-  ForgeMergeMethod,
   ForgeMergeResult,
-  ForgePrCheck,
   ForgePrMergeState,
   ForgePrMergeStateResult,
   ForgePrStatus,
@@ -226,37 +226,6 @@ const ghPrViewSchema = z.object({
   statusCheckRollup: ghStatusCheckRollup,
 });
 
-const mergeCheckSchema = z.object({
-  name: z.string().optional(),
-  context: z.string().optional(),
-  targetUrl: z.string().nullish(),
-  state: z.string().nullish(),
-  status: z.string().nullish(),
-  conclusion: z.string().nullish(),
-  detailsUrl: z.string().nullish(),
-});
-const mergePrSchema = z.object({
-  number: z.number(),
-  title: z.string(),
-  url: z.string(),
-  state: z.string(),
-  mergedAt: z.unknown().optional(),
-  isDraft: z.boolean().default(false),
-  headRefName: z.string(),
-  baseRefName: z.string(),
-  headRefOid: z.string().regex(/^[0-9a-f]{40}$/),
-  mergeable: z.string().nullish(),
-  mergeStateStatus: z.string().nullish(),
-  reviewDecision: z.string().nullish(),
-  statusCheckRollup: z.array(mergeCheckSchema).nullish(),
-});
-const repoMergePolicySchema = z.object({
-  allow_merge_commit: z.boolean().default(false),
-  allow_squash_merge: z.boolean().default(false),
-  allow_rebase_merge: z.boolean().default(false),
-  merge_commit_title: z.string().nullish(),
-  squash_merge_commit_title: z.string().nullish(),
-});
 const ghMergeResultSchema = z.object({
   merged: z.boolean(),
   message: z.string().nullish(),
@@ -2908,138 +2877,6 @@ const mergeStateCache = new Map<string, { at: number; value: ForgePrMergeStateRe
 const mergeInflight = new Set<string>();
 const MERGE_CACHE_MS = 15_000;
 
-function mergeCheckState(check: z.infer<typeof mergeCheckSchema>): ForgePrCheck['state'] {
-  const value = (check.conclusion || check.state || check.status || '').toUpperCase();
-  if (['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(value)) return 'passing';
-  if (['FAILURE', 'ERROR', 'TIMED_OUT', 'ACTION_REQUIRED', 'CANCELLED'].includes(value)) return 'failing';
-  if (['PENDING', 'IN_PROGRESS', 'QUEUED', 'EXPECTED', 'WAITING', 'REQUESTED'].includes(value)) return 'pending';
-  return 'unknown';
-}
-
-export function normalizeMergeState(
-  raw: unknown,
-  policyRaw: unknown,
-  requirements: GithubMergeRequirements = {
-    readable: false,
-    requiredChecks: [],
-  },
-): ForgePrMergeState {
-  const pr = mergePrSchema.parse(raw);
-  const policy = repoMergePolicySchema.parse(policyRaw);
-  const state: ForgePrMergeState['state'] =
-    pr.state.toUpperCase() === 'MERGED' ? 'merged' : pr.state.toUpperCase() === 'CLOSED' ? 'closed' : 'open';
-  const mergeable: ForgePrMergeState['mergeable'] =
-    pr.mergeable?.toUpperCase() === 'MERGEABLE'
-      ? 'mergeable'
-      : pr.mergeable?.toUpperCase() === 'CONFLICTING'
-        ? 'conflicting'
-        : 'unknown';
-  const reviewDecision: ForgePrMergeState['reviewDecision'] =
-    pr.reviewDecision?.toUpperCase() === 'APPROVED'
-      ? 'approved'
-      : pr.reviewDecision?.toUpperCase() === 'CHANGES_REQUESTED'
-        ? 'changes-requested'
-        : pr.reviewDecision?.toUpperCase() === 'REVIEW_REQUIRED'
-          ? 'review-required'
-          : !pr.reviewDecision?.trim() && requirements.readable && requirements.requiredApprovingReviews === 0
-            ? 'not-required'
-            : 'unknown';
-  const checks: ForgePrCheck[] = (pr.statusCheckRollup ?? []).map((check) => {
-    const name = check.name ?? check.context ?? 'Check';
-    const url = check.detailsUrl ?? check.targetUrl;
-    return {
-      name,
-      state: mergeCheckState(check),
-      required: requirements.readable ? requirements.requiredChecks.includes(name) : null,
-      ...(url?.startsWith('https://') || url?.startsWith('http://') ? { url } : {}),
-    };
-  });
-  if (requirements.readable) {
-    for (const name of requirements.requiredChecks) {
-      if (!checks.some((check) => check.name === name)) checks.push({ name, state: 'pending', required: true });
-    }
-  }
-  const methods: ForgeMergeMethod[] = [];
-  const methodAllowed = (method: ForgeMergeMethod) => requirements.allowedMergeMethods?.includes(method) ?? true;
-  if (policy.allow_squash_merge && methodAllowed('squash')) methods.push('squash');
-  if (policy.allow_merge_commit && methodAllowed('merge')) methods.push('merge');
-  if (policy.allow_rebase_merge && methodAllowed('rebase')) methods.push('rebase');
-  const defaultMethod =
-    policy.squash_merge_commit_title && methods.includes('squash')
-      ? 'squash'
-      : policy.merge_commit_title && methods.includes('merge')
-        ? 'merge'
-        : methods[0] ?? null;
-  const blockers: ForgePrMergeState['blockers'] = [];
-  let eligibility: ForgePrMergeState['eligibility'] = 'ready';
-  if (state !== 'open') {
-    eligibility = 'terminal';
-    blockers.push({ code: 'terminal', message: state === 'merged' ? 'This pull request is merged.' : 'This pull request is closed.' });
-  } else if (pr.isDraft) {
-    eligibility = 'blocked';
-    blockers.push({ code: 'draft', message: 'Mark the pull request ready for review before merging.' });
-  } else if (mergeable === 'conflicting') {
-    eligibility = 'blocked';
-    blockers.push({ code: 'conflicts', message: 'Conflicts must be resolved before merging.' });
-  } else if (checks.some((check) => check.state === 'failing')) {
-    eligibility = 'blocked';
-    blockers.push({ code: 'checks-failing', message: 'One or more checks are failing.' });
-  } else if (reviewDecision === 'changes-requested' || reviewDecision === 'review-required') {
-    eligibility = 'blocked';
-    blockers.push({ code: 'reviews', message: reviewDecision === 'changes-requested' ? 'Changes were requested.' : 'A required review is missing.' });
-  } else if ((requirements.unresolvedThreads ?? 0) > 0) {
-    eligibility = 'blocked';
-    blockers.push({ code: 'review-threads', message: 'Required review threads must be resolved before merging.' });
-  } else if (
-    reviewDecision === 'unknown' || !requirements.readable ||
-    (requirements.requiresThreadResolution && requirements.unresolvedThreads == null) ||
-    checks.some((check) => check.required === true && check.state === 'unknown')
-  ) {
-    eligibility = 'unknown';
-    blockers.push({
-      code: 'rules-unknown',
-      message: 'GitHub could not confirm review and branch-protection requirements.',
-    });
-  } else if (checks.some((check) => check.state === 'pending') || pr.mergeStateStatus?.toUpperCase() === 'UNSTABLE') {
-    eligibility = 'pending';
-    blockers.push({ code: 'pending', message: 'Checks or GitHub mergeability are still pending.' });
-  // GitHub's aggregate still enforces other rules and required check provider identities.
-  } else if (
-    mergeable !== 'mergeable' ||
-    !['CLEAN', 'HAS_HOOKS'].includes(pr.mergeStateStatus?.toUpperCase() ?? '') ||
-    methods.length === 0
-  ) {
-    eligibility = 'unknown';
-    blockers.push({ code: 'unknown', message: 'GitHub could not confirm every merge requirement.' });
-  }
-  const canMerge = eligibility === 'ready';
-  const canOverride =
-    !canMerge &&
-    state === 'open' &&
-    !pr.isDraft &&
-    mergeable !== 'conflicting' &&
-    methods.length > 0;
-  return {
-    number: pr.number,
-    title: pr.title,
-    url: pr.url,
-    state,
-    isDraft: pr.isDraft,
-    headRef: pr.headRefName,
-    baseRef: pr.baseRefName,
-    headSha: pr.headRefOid,
-    mergeable,
-    reviewDecision,
-    checks,
-    methods,
-    defaultMethod,
-    eligibility,
-    blockers,
-    canMerge,
-    canOverride,
-  };
-}
-
 async function fetchPrMergeState(
   repoRoot: string,
   repoRef: GithubRepoRef | null,
@@ -3116,6 +2953,79 @@ export function evictGithubProjectCaches(repoRoot: string): void {
   });
 }
 
+function mergeCancelledResult(): ForgeMergeResult {
+  return { merged: false, status: 409, error: 'Automatic merging was cancelled.', code: 'cancelled' };
+}
+
+function mergeConflictResult(error: string, code: string, current: ForgePrMergeState): ForgeMergeResult {
+  return { merged: false, status: 409, error, code, current };
+}
+
+function mergePullRequestPreflight(current: ForgePrMergeState, input: ForgeMergeInput): ForgeMergeResult | null {
+  if (current.headSha !== input.expectedHeadSha) {
+    return mergeConflictResult('The pull request head changed. Review the new commits before merging.', 'stale-head', current);
+  }
+  if (input.expectedHeadRef !== undefined && current.headRef !== input.expectedHeadRef) {
+    return mergeConflictResult('The pull request branch changed.', 'stale-branch', current);
+  }
+  if (input.requirePassingChecks && (current.checks.length === 0 || current.checks.some(check => check.state !== 'passing'))) {
+    return mergeConflictResult('Automatic merging requires at least one check and every current-head check passing.', 'checks-not-passing', current);
+  }
+  if (!current.methods.includes(input.method)) {
+    return mergeConflictResult('That merge method is no longer enabled.', 'disabled-method', current);
+  }
+  if (!mergePreflightAllowed(current, !input.requirePassingChecks && input.overrideRules)) {
+    return mergeConflictResult(current.blockers[0]?.message ?? 'The pull request is not eligible to merge.', current.eligibility, current);
+  }
+  return null;
+}
+
+async function mergeActiveCiConflict(
+  repoRoot: string,
+  repoRef: GithubRepoRef | null,
+  current: ForgePrMergeState,
+  input: ForgeMergeInput,
+): Promise<ForgeMergeResult | null> {
+  if (!(input.requirePassingChecks && process.env.CEZ_DRY_RUN !== '1')) return null;
+  if (!repoRef) return { merged: false, status: 404, error: 'GitHub repository not found.' };
+  const active = parseActiveWorkflowRuns(await gh(repoRoot, activeWorkflowRunsArgs({
+    repository: `${repoRef.owner}/${repoRef.repo}`, headSha: current.headSha,
+  })));
+  if (input.canProceed?.() === false) return mergeCancelledResult();
+  if (active) return mergeConflictResult('Waiting for active CI workflows on the current PR head.', 'checks-active', current);
+  return null;
+}
+
+async function executeGithubMerge(
+  repoRoot: string,
+  repoRef: GithubRepoRef | null,
+  number: number,
+  input: ForgeMergeInput,
+  current: ForgePrMergeState,
+): Promise<ForgeMergeResult> {
+  if (process.env.CEZ_DRY_RUN === '1') {
+    evictGithubProjectCaches(repoRoot);
+    return { merged: true, number, url: current.url, method: input.method, mergeCommitSha: 'abcdef0123456789abcdef0123456789abcdef01' };
+  }
+  if (!repoRef) return { merged: false, status: 404, error: 'GitHub repository not found.' };
+  if (input.canProceed?.() === false) return mergeCancelledResult();
+  const out = await gh(repoRoot, [
+    'api', '--method', 'PUT', `repos/${repoRef.owner}/${repoRef.repo}/pulls/${number}/merge`,
+    '-f', `merge_method=${input.method}`, '-f', `sha=${input.expectedHeadSha}`,
+  ]);
+  // Once GitHub accepted the mutation, report its real outcome even if intent changed in flight.
+  const result = ghMergeResultSchema.parse(JSON.parse(out));
+  if (!result.merged) return mergeConflictResult(result.message ?? 'GitHub refused the merge.', 'github-blocked', current);
+  evictGithubProjectCaches(repoRoot);
+  return { merged: true, number, url: current.url, method: input.method, ...(result.sha ? { mergeCommitSha: result.sha } : {}) };
+}
+
+function mergePullRequestFailure(error: unknown): ForgeMergeResult {
+  const message = firstLine(error instanceof Error ? error.message : String(error));
+  const status = /403|permission|forbidden/i.test(message) ? 403 : /404|not found/i.test(message) ? 404 : 502;
+  return { merged: false, status, error: status === 403 ? 'GitHub permission denied.' : status === 404 ? 'Pull request or repository not found.' : 'GitHub could not complete the merge.' };
+}
+
 async function mergePullRequest(
   repoRoot: string,
   repoRef: GithubRepoRef | null,
@@ -3126,53 +3036,18 @@ async function mergePullRequest(
   if (mergeInflight.has(key)) return { merged: false, status: 409, error: 'A merge is already in progress.', code: 'concurrent' };
   mergeInflight.add(key);
   try {
-    if (input.canProceed?.() === false) return { merged: false, status: 409, error: 'Automatic merging was cancelled.', code: 'cancelled' };
+    if (input.canProceed?.() === false) return mergeCancelledResult();
     const fresh = await fetchPrMergeState(repoRoot, repoRef, number, true);
-    if (input.canProceed?.() === false) return { merged: false, status: 409, error: 'Automatic merging was cancelled.', code: 'cancelled' };
+    if (input.canProceed?.() === false) return mergeCancelledResult();
     if (!fresh.available) return { merged: false, status: 502, error: fresh.reason };
     const current = fresh.mergeState;
-    if (current.headSha !== input.expectedHeadSha) {
-      return { merged: false, status: 409, error: 'The pull request head changed. Review the new commits before merging.', code: 'stale-head', current };
-    }
-    if (input.expectedHeadRef !== undefined && current.headRef !== input.expectedHeadRef) {
-      return { merged: false, status: 409, error: 'The pull request branch changed.', code: 'stale-branch', current };
-    }
-    if (input.requirePassingChecks && (current.checks.length === 0 || current.checks.some(check => check.state !== 'passing'))) {
-      return { merged: false, status: 409, error: 'Automatic merging requires at least one check and every current-head check passing.', code: 'checks-not-passing', current };
-    }
-    if (!current.methods.includes(input.method)) {
-      return { merged: false, status: 409, error: 'That merge method is no longer enabled.', code: 'disabled-method', current };
-    }
-    if (!mergePreflightAllowed(current, !input.requirePassingChecks && input.overrideRules)) {
-      return { merged: false, status: 409, error: current.blockers[0]?.message ?? 'The pull request is not eligible to merge.', code: current.eligibility, current };
-    }
-    if (input.requirePassingChecks && process.env.CEZ_DRY_RUN !== '1') {
-      if (!repoRef) return { merged: false, status: 404, error: 'GitHub repository not found.' };
-      const active = parseActiveWorkflowRuns(await gh(repoRoot, activeWorkflowRunsArgs({
-        repository: `${repoRef.owner}/${repoRef.repo}`, headSha: current.headSha,
-      })));
-      if (input.canProceed?.() === false) return { merged: false, status: 409, error: 'Automatic merging was cancelled.', code: 'cancelled' };
-      if (active) return { merged: false, status: 409, error: 'Waiting for active CI workflows on the current PR head.', code: 'checks-active', current };
-    }
-    if (process.env.CEZ_DRY_RUN === '1') {
-      evictGithubProjectCaches(repoRoot);
-      return { merged: true, number, url: current.url, method: input.method, mergeCommitSha: 'abcdef0123456789abcdef0123456789abcdef01' };
-    }
-    if (!repoRef) return { merged: false, status: 404, error: 'GitHub repository not found.' };
-    if (input.canProceed?.() === false) return { merged: false, status: 409, error: 'Automatic merging was cancelled.', code: 'cancelled' };
-    const out = await gh(repoRoot, [
-      'api', '--method', 'PUT', `repos/${repoRef.owner}/${repoRef.repo}/pulls/${number}/merge`,
-      '-f', `merge_method=${input.method}`, '-f', `sha=${input.expectedHeadSha}`,
-    ]);
-    // Once GitHub accepted the mutation, report its real outcome even if intent changed in flight.
-    const result = ghMergeResultSchema.parse(JSON.parse(out));
-    if (!result.merged) return { merged: false, status: 409, error: result.message ?? 'GitHub refused the merge.', code: 'github-blocked', current };
-    evictGithubProjectCaches(repoRoot);
-    return { merged: true, number, url: current.url, method: input.method, ...(result.sha ? { mergeCommitSha: result.sha } : {}) };
+    const preflight = mergePullRequestPreflight(current, input);
+    if (preflight) return preflight;
+    const ciConflict = await mergeActiveCiConflict(repoRoot, repoRef, current, input);
+    if (ciConflict) return ciConflict;
+    return await executeGithubMerge(repoRoot, repoRef, number, input, current);
   } catch (error) {
-    const message = firstLine(error instanceof Error ? error.message : String(error));
-    const status = /403|permission|forbidden/i.test(message) ? 403 : /404|not found/i.test(message) ? 404 : 502;
-    return { merged: false, status, error: status === 403 ? 'GitHub permission denied.' : status === 404 ? 'Pull request or repository not found.' : 'GitHub could not complete the merge.' };
+    return mergePullRequestFailure(error);
   } finally {
     mergeInflight.delete(key);
   }
@@ -3182,45 +3057,93 @@ export function mergePreflightAllowed(current: ForgePrMergeState, overrideRules 
   return current.canMerge || (overrideRules && current.canOverride);
 }
 
+type ReadyPullRequestInput = { expectedHeadSha: string; expectedHeadRef: string; canProceed?: () => boolean };
+
+function readyCancelledResult(): ForgePrMergeStateResult {
+  return { available: false, reason: 'Marking the pull request ready was cancelled.' };
+}
+
+function readyPullRequestInputInvalid(number: number, input: ReadyPullRequestInput): boolean {
+  return !Number.isSafeInteger(number) || number < 1 || !/^[0-9a-f]{40}$/.test(input.expectedHeadSha) || !input.expectedHeadRef;
+}
+
+function readyPullRequestIdentityConflict(
+  pr: { number: number; url: string; state: string; isDraft: boolean; headRefName: string; headRefOid: string },
+  repoRef: GithubRepoRef,
+  number: number,
+  input: ReadyPullRequestInput,
+): ForgePrMergeStateResult | null {
+  if (!matchesGithubPullRequest({ ...repoRef, number }, pr)) return { available: false, reason: 'GitHub returned a different pull request.' };
+  if (pr.headRefOid !== input.expectedHeadSha) return { available: false, reason: 'The pull request head changed.' };
+  if (pr.headRefName !== input.expectedHeadRef) return { available: false, reason: 'The pull request branch changed.' };
+  if (pr.state !== 'OPEN') return { available: false, reason: 'The pull request is no longer open.' };
+  return null;
+}
+
+async function markDraftPullRequestReady(
+  repoRoot: string,
+  repoRef: GithubRepoRef,
+  number: number,
+  input: ReadyPullRequestInput,
+): Promise<ForgePrMergeStateResult | null> {
+  if (input.canProceed?.() === false) return readyCancelledResult();
+  await gh(repoRoot, ['pr', 'ready', String(number), '--repo', `github.com/${repoRef.owner}/${repoRef.repo}`]);
+  evictGithubProjectCaches(repoRoot);
+  if (input.canProceed?.() === false) return readyCancelledResult();
+  return null;
+}
+
+async function readyPullRequestOwnership(
+  repoRoot: string,
+  repoRef: GithubRepoRef | null,
+  number: number,
+  input: ReadyPullRequestInput,
+): Promise<ForgePrMergeStateResult | null> {
+  if (!repoRef) return { available: false, reason: 'GitHub remote could not be resolved' };
+  const pr = mergePrSchema.pick({ number: true, url: true, state: true, isDraft: true, headRefName: true, headRefOid: true }).parse(JSON.parse(await gh(repoRoot, [
+    'pr', 'view', String(number), '--json', 'number,url,state,isDraft,headRefName,headRefOid',
+  ])));
+  if (input.canProceed?.() === false) return readyCancelledResult();
+  const identity = readyPullRequestIdentityConflict(pr, repoRef, number, input);
+  if (identity) return identity;
+  if (!pr.isDraft) return null;
+  return markDraftPullRequestReady(repoRoot, repoRef, number, input);
+}
+
+async function refreshReadyPullRequestState(
+  repoRoot: string,
+  repoRef: GithubRepoRef | null,
+  number: number,
+  input: ReadyPullRequestInput,
+): Promise<ForgePrMergeStateResult> {
+  const fresh = await fetchPrMergeState(repoRoot, repoRef, number, true);
+  if (input.canProceed?.() === false) return readyCancelledResult();
+  if (fresh.available && fresh.mergeState.headSha !== input.expectedHeadSha) return { available: false, reason: 'The pull request head changed.' };
+  if (fresh.available && fresh.mergeState.headRef !== input.expectedHeadRef) return { available: false, reason: 'The pull request branch changed.' };
+  return fresh;
+}
+
 /** gh has no compare-and-swap ready operation. Check ownership immediately before marking ready,
  * then refresh again; the later merge has its own head guard and GitHub's atomic SHA check. */
 async function readyPullRequest(
   repoRoot: string,
   repoRef: GithubRepoRef | null,
   number: number,
-  input: { expectedHeadSha: string; expectedHeadRef: string; canProceed?: () => boolean },
+  input: ReadyPullRequestInput,
 ): Promise<ForgePrMergeStateResult> {
-  if (!Number.isSafeInteger(number) || number < 1 || !/^[0-9a-f]{40}$/.test(input.expectedHeadSha) || !input.expectedHeadRef) {
+  if (readyPullRequestInputInvalid(number, input)) {
     return { available: false, reason: 'A valid pull request, head SHA and task branch are required.' };
   }
   const key = `${repoRoot}:${number}`;
   if (mergeInflight.has(key)) return { available: false, reason: 'A pull request mutation is already in progress.' };
   mergeInflight.add(key);
   try {
-    if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
-    const dryRun = process.env.CEZ_DRY_RUN === '1';
-    if (!dryRun) {
-      if (!repoRef) return { available: false, reason: 'GitHub remote could not be resolved' };
-      const pr = mergePrSchema.pick({ number: true, url: true, state: true, isDraft: true, headRefName: true, headRefOid: true }).parse(JSON.parse(await gh(repoRoot, [
-        'pr', 'view', String(number), '--json', 'number,url,state,isDraft,headRefName,headRefOid',
-      ])));
-      if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
-      if (!matchesGithubPullRequest({ ...repoRef, number }, pr)) return { available: false, reason: 'GitHub returned a different pull request.' };
-      if (pr.headRefOid !== input.expectedHeadSha) return { available: false, reason: 'The pull request head changed.' };
-      if (pr.headRefName !== input.expectedHeadRef) return { available: false, reason: 'The pull request branch changed.' };
-      if (pr.state !== 'OPEN') return { available: false, reason: 'The pull request is no longer open.' };
-      if (pr.isDraft) {
-        if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
-        await gh(repoRoot, ['pr', 'ready', String(number), '--repo', `github.com/${repoRef.owner}/${repoRef.repo}`]);
-        evictGithubProjectCaches(repoRoot);
-        if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
-      }
+    if (input.canProceed?.() === false) return readyCancelledResult();
+    if (process.env.CEZ_DRY_RUN !== '1') {
+      const ownership = await readyPullRequestOwnership(repoRoot, repoRef, number, input);
+      if (ownership) return ownership;
     }
-    const fresh = await fetchPrMergeState(repoRoot, repoRef, number, true);
-    if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
-    if (fresh.available && fresh.mergeState.headSha !== input.expectedHeadSha) return { available: false, reason: 'The pull request head changed.' };
-    if (fresh.available && fresh.mergeState.headRef !== input.expectedHeadRef) return { available: false, reason: 'The pull request branch changed.' };
-    return fresh;
+    return await refreshReadyPullRequestState(repoRoot, repoRef, number, input);
   } catch {
     return { available: false, reason: 'GitHub could not mark the pull request ready for review.' };
   } finally {
