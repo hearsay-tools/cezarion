@@ -89,6 +89,52 @@ function yamlBlock(key: string, text: string, indent: number): string[] {
   return [`${pad}${key}: |`, ...text.split('\n').map((l) => `${pad}  ${l}`)]
 }
 
+/** One step's `name`/`skill` lines — `name` only when it differs from the id. */
+function yamlStepNameAndSkill(step: WorkflowStepDef): string[] {
+  const lines: string[] = []
+  if (step.name && step.name !== step.id) lines.push(`    name: ${yamlScalar(step.name)}`)
+  if (step.skill) lines.push(`    skill: ${yamlScalar(step.skill)}`)
+  return lines
+}
+
+/** The per-step run-configuration scalars, in the order the legacy serializer wrote them. */
+function yamlStepRunFields(step: WorkflowStepDef): string[] {
+  const lines: string[] = []
+  if (step.model) lines.push(`    model: ${yamlScalar(step.model)}`)
+  if (step.timeoutMs !== undefined) lines.push(`    timeoutMs: ${step.timeoutMs}`)
+  if (step.effort !== undefined) lines.push(`    effort: ${yamlScalar(step.effort)}`)
+  if (step.runner) lines.push(`    runner: ${yamlScalar(step.runner)}`)
+  if (step.agentProfile) lines.push(`    agentProfile: ${yamlScalar(step.agentProfile)}`)
+  return lines
+}
+
+/** The per-step string-array fields. */
+function yamlStepAllowlists(step: WorkflowStepDef): string[] {
+  const lines: string[] = []
+  if (step.allowedTools) lines.push(`    allowedTools: [${step.allowedTools.map(yamlScalar).join(', ')}]`)
+  if (step.bashAllowlist) lines.push(`    bashAllowlist: [${step.bashAllowlist.map(yamlScalar).join(', ')}]`)
+  return lines
+}
+
+/** The retry policy lines, omitted for a step without one. */
+function yamlStepOnFail(step: WorkflowStepDef): string[] {
+  if (!step.onFail) return []
+  return ['    onFail:', `      retry: ${yamlScalar(step.onFail.retry)}`, `      max: ${step.onFail.max ?? 2}`]
+}
+
+/** The `steps:` entry for one step — the field order the legacy `wbYamlText()` wrote. */
+function yamlStepLines(step: WorkflowStepDef): string[] {
+  return [
+    `  - id: ${yamlScalar(step.id)}`,
+    ...yamlStepNameAndSkill(step),
+    ...(step.prompt ? yamlBlock('prompt', step.prompt, 4) : []),
+    ...yamlStepRunFields(step),
+    ...yamlStepAllowlists(step),
+    ...(step.command ? yamlBlock('command', step.command, 4) : []),
+    ...yamlStepOnFail(step),
+  ]
+}
+
 /**
  * The `workflow.yaml` text the preview shows, Export downloads and Copy copies — byte-for-byte
  * the legacy `wbYamlText()` serialization. Pure skill stacks emit the portable compact form
@@ -108,23 +154,7 @@ export function workflowYaml(
     for (const s of stack) lines.push(`  - ${yamlScalar(s)}`)
   } else if (steps.length) {
     lines.push('steps:')
-    for (const s of steps) {
-      lines.push(`  - id: ${yamlScalar(s.id)}`)
-      if (s.name && s.name !== s.id) lines.push(`    name: ${yamlScalar(s.name)}`)
-      if (s.skill) lines.push(`    skill: ${yamlScalar(s.skill)}`)
-      if (s.prompt) lines.push(...yamlBlock('prompt', s.prompt, 4))
-      if (s.model) lines.push(`    model: ${yamlScalar(s.model)}`)
-      if (s.timeoutMs !== undefined) lines.push(`    timeoutMs: ${s.timeoutMs}`)
-      if (s.effort !== undefined) lines.push(`    effort: ${yamlScalar(s.effort)}`)
-      if (s.runner) lines.push(`    runner: ${yamlScalar(s.runner)}`)
-      if (s.agentProfile) lines.push(`    agentProfile: ${yamlScalar(s.agentProfile)}`)
-      if (s.allowedTools) lines.push(`    allowedTools: [${s.allowedTools.map(yamlScalar).join(', ')}]`)
-      if (s.bashAllowlist) lines.push(`    bashAllowlist: [${s.bashAllowlist.map(yamlScalar).join(', ')}]`)
-      if (s.command) lines.push(...yamlBlock('command', s.command, 4))
-      if (s.onFail) {
-        lines.push('    onFail:', `      retry: ${yamlScalar(s.onFail.retry)}`, `      max: ${s.onFail.max ?? 2}`)
-      }
-    }
+    for (const s of steps) lines.push(...yamlStepLines(s))
   } else {
     lines.push('skills: []')
   }
