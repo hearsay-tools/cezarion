@@ -6,7 +6,7 @@ import { CANCEL, PreflightError, type InstallContext, type InstallStep, type Pla
 import { brewInstallTool, brewRemoveHint, depCheckStep, HOSTNAME_RE, owned, shared, StepAborted, StepCancelled, verifyCommand } from '../steps.ts';
 import { REBRAND_SWITCH } from '../../home/switch.ts';
 import { migrateLaunchd, rollbackLaunchdMigration, unloadLaunchd } from './macosx-migration.ts';
-import { guardLaunchdWrite } from './macosx-launchd-files.ts';
+import { guardLaunchdWrite, ownsLaunchdPlist, readLaunchdPlist } from './macosx-launchd-files.ts';
 import { refreshNpxCacheForRedeploy } from '../npx-cache.ts';
 
 /**
@@ -38,7 +38,19 @@ function agentCandidates(ctx: InstallContext, step: string, rebrand: boolean, cr
     const fallback = artifact(recorded.name ?? selected);
     return [{ ...recorded, ...fallback, path: recorded.path ?? fallback.path }];
   }
-  return rebrand ? [artifact(selected), artifact(labelFor(agent, false))] : [artifact(selected)];
+  if (!rebrand) return [artifact(selected)];
+  const legacy = artifact(labelFor(agent, false));
+  return legacyCandidateOwned(ctx, step, legacy) ? [artifact(selected), legacy] : [artifact(selected)];
+}
+
+/** Legacy cockpit ownership comes from its launcher; ngrok needs a pre-switch null record. */
+function legacyCandidateOwned(ctx: InstallContext, step: string, artifact: LaunchAgent): boolean {
+  if (step === 'ngrok') return ctx.state.steps[step]?.created === null;
+  try {
+    return ownsLaunchdPlist(ctx, artifact, readLaunchdPlist(artifact.path));
+  } catch {
+    return false;
+  }
 }
 
 function agentArtifact(ctx: InstallContext, step: string, rebrand: boolean, created = ctx.state.steps[step]?.created): LaunchAgent {

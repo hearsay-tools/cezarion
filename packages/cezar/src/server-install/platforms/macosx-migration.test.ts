@@ -34,6 +34,7 @@ describe('macOS launchd migration', () => {
         capture: async (program, args) => {
           commands.push([program, ...args]);
           const name = args[1]?.split('/').pop() ?? '';
+          if (program === 'test') return { code: existsSync(args[1]!) ? 0 : 1, stdout: '', stderr: '' };
           if (args[0] === 'bootout') { loaded.delete(name); return { code: 0, stdout: '', stderr: '' }; }
           if (args[0] === 'print') return { code: loaded.has(name) ? 0 : 113, stdout: '', stderr: '' };
           return { code: 0, stdout: program === 'curl' ? 'public_url' : program === 'bash' ? '/usr/local/bin/cezarion' : '', stderr: '' };
@@ -317,6 +318,30 @@ describe('macOS launchd migration', () => {
       `gui/${process.getuid?.() ?? 0}/ai.cezar.ngrok`, `gui/${process.getuid?.() ?? 0}/ai.cezar.cockpit`,
     ]);
     expect(loaded.size).toBe(0);
+  });
+
+  it.each([
+    { agent: 'cockpit', record: false }, { agent: 'cockpit', record: true },
+    { agent: 'ngrok', record: false },
+  ] as const)('never selects a foreign legacy $agent plist (step record:$record)', async ({ agent, record }) => {
+    const old = plant(agent, false, ['/usr/bin/foreign']);
+    const xml = readFileSync(old.path!, 'utf8');
+    const stepId = agent === 'cockpit' ? 'autostart' : 'ngrok';
+    if (!record) delete ctx.state.steps[stepId];
+    const step = strategy.steps(ctx).find((s) => s.id === stepId)!;
+    expect(await step.check(ctx)).toBe(false);
+    expect(commands.at(-1)).toEqual(['test', '-f', join(dir, `tools.hearsay.squawk.${agent}.plist`)]);
+    await strategy.redeploy!(ctx);
+    await step.undo(ctx, null);
+    expect(readFileSync(old.path!, 'utf8')).toBe(xml);
+    expect(loaded).toEqual(new Set([old.name!]));
+    ctx.ui = { ...ctx.ui, password: async () => 'secret', text: async (opts) => opts.message.includes('domain') ? '' : 'ops' };
+    ctx.reconfigure = new Set([stepId]);
+    const created = await step.run(ctx);
+    expect(created!.artifacts.find((a) => a.type === 'launchd')!.name).toBe(`tools.hearsay.squawk.${agent}`);
+    expect(readFileSync(old.path!, 'utf8')).toBe(xml);
+    expect(loaded).toEqual(new Set([old.name!, `tools.hearsay.squawk.${agent}`]));
+    expect(commands.filter((c) => c[0] === 'launchctl' && c.some((arg) => arg.endsWith(`/${old.name}`) || arg === old.path))).toEqual([]);
   });
 
   it.each(['cockpit', 'ngrok'] as const)('undo selects only the new %s plist and leaves the legacy plist with no ledger', async (agent) => {
