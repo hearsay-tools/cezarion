@@ -727,7 +727,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'P2', backend, kind: 'scenario-unconstructible' as const,
     reason: `${backend}'s native wire carries no permission request at all, so there is no built-in default ask for cezar to answer.`,
   })),
-  ...(['claude', 'pi', 'cursor', 'omp'] as const).flatMap(backend => ([
+  ...(['claude', 'pi', 'cursor', 'omp'] as const).flatMap(backend => { return ([
     ['P3', 'for the backend to settle itself'],
     ['P4', 'to outlive its turn'],
     ['P5', 'whose answer the backend could refuse'],
@@ -737,7 +737,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   ] as const).map(([criterion, situation]) => ({
     criterion, backend, kind: 'scenario-unconstructible' as const,
     reason: `${backend}'s native wire does not carry a native permission request that cezar answers through the cockpit permission card, so there is no pending request ${situation}.`,
-  }))),
+  })); }),
   {
     criterion: 'P5', backend: 'codex', kind: 'scenario-unconstructible',
     reason: 'Codex answers an approval with a JSON-RPC response written to app-server stdin. JSON-RPC sends no reply to a response, so the wire has no per-answer refusal: the write reaches the server, or the transport fails and the session ends.',
@@ -766,18 +766,18 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'S21', backend, kind: 'scenario-unconstructible' as const,
     reason: 'This native wire has no OMP get_state.messageCount response for an implicit autoResume. Fresh/start and explicit resume remain covered by S1/S3/S14 and spec-support rows.',
   })),
-  ...(['R44', 'R45'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
+  ...(['R44', 'R45'] as const).flatMap(criterion => { return (['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion, backend, kind: 'scenario-unconstructible' as const,
     reason: 'The OpenCode server-wide unscoped session.error UnknownError skill diagnostics (an unreadable skill file, or a skill with malformed YAML frontmatter) have no equivalent on this native wire. R2/R46 retain native provider failure coverage.',
-  }))),
-  ...(['H2'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'omp'] as const).map(backend => ({
+  })); }),
+  ...(['H2'] as const).flatMap(criterion => { return (['claude', 'codex', 'pi', 'omp'] as const).map(backend => ({
     criterion, backend, kind: 'capability-absent' as const,
     reason: 'This wire writes or steers a mid-turn human follow-up immediately; discardQueuedMessages cannot unwrite it. OpenCode and Cursor queue and drop (H2 live rows).',
-  }))),
-  ...(['A13', 'A14'] as const).flatMap(criterion => (['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
+  })); }),
+  ...(['A13', 'A14'] as const).flatMap(criterion => { return (['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion, backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no separate portable-answer HTTP ACK retained after turn completion. The executable cell checks ordinary root idle expiry and successful Continue through its native wire instead.',
-  }))),
+  })); }),
   ...(['A13', 'A14'] as const).map(criterion => ({
     criterion, backend: 'opencode' as const, kind: 'scenario-unconstructible' as const,
     reason: 'The refused autonomous nudge was reached only through the retired ask line, whose nudge went out as human input and left its HTTP ACK outstanding (hearsay-tools/cezarion#2397). A tool-era nudge is agent input, which OpenCode admits at the boundary. The executable cell checks ordinary root idle expiry and successful Continue through its native wire instead.',

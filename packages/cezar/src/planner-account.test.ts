@@ -10,7 +10,9 @@ import type { AgentRunner } from './core/agent-runner.ts';
 import { planChain } from './planner.ts';
 
 const run = vi.fn(async () => ({ text: '' }));
-const runners = () => ({ run }) as unknown as AgentRunner;
+function runners(): AgentRunner {
+  return { run } as unknown as AgentRunner;
+}
 
 /**
  * The planner bills the project's agent account like any task (spec 2026-07-29-agent-profiles), so

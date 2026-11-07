@@ -33,6 +33,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
 import type { RunStore as RunStoreInstance } from '../src/runs/store.ts';
 import type { RunManager as RunManagerInstance } from '../src/workflows/run.ts';
+// This benchmark reads settled runs and starts no runner.
+import { noRunners } from '../src/core/runners-under-test.testkit.ts';
 
 process.env.CEZ_DRY_RUN = '1';
 process.env.CEZ_AUTONAME = '0';
@@ -56,8 +58,6 @@ const { DelegationService } = await import('../src/delegation/service.ts');
 const { planOwnedWorkspace, ensureOwnedWorkspace } = await import('../src/delegation/workspace.ts');
 const { WorkspaceSemaphore } = await import('../src/workspace/semaphore.ts');
 const { agentTmpDir } = await import('../src/runs/agent-tmpdir.ts');
-/** This benchmark reads settled runs and starts no runner. */
-const settledRunsOnly = (backend: string | undefined): never => { throw new Error(`benchmark starts no runner; asked for ${String(backend)}`); };
 
 /** Clock ticks of this process's reaped children (`cutime + cstime`), in ms; 0 off Linux. */
 function childrenCpuMs(): number {
@@ -85,7 +85,7 @@ const holders: ChildProcess[] = [];
 let store: RunStoreInstance | undefined, manager: RunManagerInstance | undefined, detach: (() => void) | undefined;
 try {
   store = RunStore.open(dataDir, { keepLive: true });
-  manager = new RunManager(store, root, { home, createRunner: settledRunsOnly, semaphore: new WorkspaceSemaphore({ home, initial: { maxParallel: 1 } }) });
+  manager = new RunManager(store, root, { home, createRunner: noRunners, semaphore: new WorkspaceSemaphore({ home, initial: { maxParallel: 1 } }) });
   const service = new DelegationService();
   detach = service.registerProject({ id: 'bench', root, store, manager, home });
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });

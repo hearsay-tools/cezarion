@@ -30,6 +30,8 @@ import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { parseArgs } from 'node:util';
 import type { ConversationMessage } from '@open-mercato/cezar-contract';
+// This benchmark reads settled runs and starts no runner.
+import { noRunners } from '../src/core/runners-under-test.testkit.ts';
 
 process.env.CEZ_DRY_RUN = '1';
 process.env.CEZ_AUTONAME = '0';
@@ -53,8 +55,6 @@ if (sizes.some(size => !Number.isInteger(size) || size < 1) || !Number.isInteger
 const { RunStore } = await import('../src/runs/store.ts');
 const { RunManager } = await import('../src/workflows/run.ts');
 const home = benchmarkHome((await import('../src/home/resolve.ts')).resolveHome({ purpose: 'cli' }));
-/** This benchmark reads settled runs and starts no runner. */
-const settledRunsOnly = (backend: string | undefined): never => { throw new Error(`benchmark starts no runner; asked for ${String(backend)}`); };
 
 const pad = 'x'.repeat(padBytes);
 let decodes = 0;
@@ -100,7 +100,7 @@ for (const size of sizes) {
     const rootId = seed(dataDir, root, size);
     const store = RunStore.open(dataDir, { keepLive: true });
     if (values.baseline) store.withReadCache = <T>(fn: () => T): T => fn();
-    const manager = new RunManager(store, root, { home, createRunner: settledRunsOnly });
+    const manager = new RunManager(store, root, { home, createRunner: noRunners });
     manager.reconcileWorkerWaits(rootId); // writes the missing projections once
     const times: number[] = [];
     for (let i = 0; i < samples; i++) {
