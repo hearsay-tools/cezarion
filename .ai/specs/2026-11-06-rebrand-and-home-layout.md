@@ -220,8 +220,10 @@ refuses every write, so the cockpits serve read-only and no write can be lost by
 in the group fails its health check, every instance in the group stops, the old units and old
 sites come back, and the new home's marker is renamed to `install.json.failed` so the next run
 migrates again from the untouched legacy home. Old unit files stay as `*.migrated` after
-success. `/etc/cezar/htpasswd[-<slug>]` is copied to `/etc/hearsay-squawk/`; the old file
-stays. Units and sites of an install made before the switch keep working with
+success. When the install owns its nginx site, `/etc/cezar/htpasswd[-<slug>]` is copied to
+`/etc/hearsay-squawk/` (the old file stays) and the site is renamed. An `--external-proxy`
+install has neither; the migration leaves the operator's proxy untouched and moves only the
+unit. Units and sites of an install made before the switch keep working with
 `server-uninstall` and `server-deploy`, which act on the recorded names.
 
 **Desktop installs**: the bundled server runs the same migration at boot. launchd labels move
@@ -326,7 +328,7 @@ release are the single user-visible change.
 | **Switch** | Turn `REBRAND_SWITCH` on; deprecation notices start; docs land. Then owner actions: stable release, npm publish and deprecate, repo rename, store listings, apptension-host server migration. | Yes: the release |
 | **P5 Window end** | Remove aliases and `CEZ_*` fallbacks (except `CEZ_HOME`, section 4) and enable `hsq migrate-project`, two minor releases or 60 days after the release. | Yes |
 
-Dependencies: P1(a-1) before every other P1 slice and P2; P0(c) before P1(b) and P1(c) (same writers); P1(b) before P1(c) and P1(d); P0(b) before P1(d); P0(c) before P2(b); P1(a-2) before P1(b) (they share the test files); P2(a-1) before P2(a-2) before P2(b-1) and P2(d); P2(b-1) before P2(b-2); P2(b-1) and P2(d) before P2(c); P1(b) before P2(b). P0 and P3(a–b) do not depend on P1 and run in parallel with it.
+Dependencies: P1(a-1) before every other P1 slice and P2; P0(c) before P1(b) and P1(c) (same writers); P1(b) before P1(c) and P1(d); P0(b) before P1(d); P0(c) before P2(b); P1(a-2) before P1(b) (they share the test files); every P1 slice before P2(a-2); P2(a-1) before P2(a-2) before P2(b-1) and P2(d); P2(b-1) before P2(b-2); P2(b-1) and P2(d) before P2(c); P1(b) before P2(b). P0 and P3(a–b) do not depend on P1 and run in parallel with it.
 The switch needs P0 to P4 accepted on `main`; P5 follows the release.
 
 Every slice follows `BACKWARD_COMPATIBILITY.md` and updates `.env.example`, the README env table and the area docs it touches.
