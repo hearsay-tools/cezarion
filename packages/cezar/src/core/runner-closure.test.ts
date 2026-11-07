@@ -6,7 +6,9 @@ import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 
 // A test that drives one runner loads that runner's adapter and none of the other five, so an
 // edit to one adapter reruns only its own per-runner tests (hearsay-tools/cezarion#2939). The
-// closure is every module the file reaches through static and dynamic imports.
+// closure is every module the file reaches through static and dynamic imports. The wait parity
+// kit runs its workers on the Claude wire whatever the parent's runner is, so a `waits-*` file
+// also loads the Claude adapter; hearsay-tools/cezarion#2959 can replace those workers.
 const src = join(import.meta.dirname, '..');
 const ADAPTERS: Record<RunnerId, string> = {
   claude: 'core/claude-cli-runner.ts', codex: 'core/codex-app-server-runner.ts', opencode: 'core/opencode-server-runner.ts',
@@ -36,13 +38,14 @@ async function closures(files: readonly string[]): Promise<Map<string, Set<strin
 }
 
 describe('per-runner test closures', () => {
-  it('hold their own adapter and no other runner adapter or the production factory', async () => {
+  it('hold their own adapter, no other runner adapter but the wait kit\'s Claude workers, and not the production factory', async () => {
     const files = perRunnerFiles();
     expect(new Set(files.map(entry => entry.runner))).toEqual(new Set(RUNNER_IDS));
     const byEntry = await closures(files.map(entry => entry.file));
     const loaded = files.map(({ file, runner }) => {
       const closure = byEntry.get(file) ?? new Set();
-      return { file, own: closure.has(ADAPTERS[runner]), others: [...RUNNER_IDS.filter(id => id !== runner && closure.has(ADAPTERS[id])), ...(closure.has('core/runner-factory.ts') ? ['factory'] : [])] };
+      const allowed = new Set<RunnerId>([runner, ...(file.startsWith('workflows/waits-') ? ['claude' as const] : [])]);
+      return { file, own: closure.has(ADAPTERS[runner]), others: [...RUNNER_IDS.filter(id => !allowed.has(id) && closure.has(ADAPTERS[id])), ...(closure.has('core/runner-factory.ts') ? ['factory'] : [])] };
     });
     expect(loaded.filter(entry => !entry.own || entry.others.length)).toEqual([]);
   }, 60_000);

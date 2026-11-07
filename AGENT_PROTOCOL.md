@@ -1378,8 +1378,9 @@ A per-runner file chooses its runner with `useRunners(onlyRunner(<id>, ...))` fr
 `core/runners-under-test.testkit.ts`, and its testkits build managers through
 `workflows/fixture-manager.testkit.ts` and `workflows/worker-wait-core.testkit.ts`, which
 import no adapter. `core/runner-closure.test.ts` fails when a `harness-<runner>-*` or
-`waits-<runner>-*` file reaches another runner's adapter or `runner-factory.ts`
-(hearsay-tools/cezarion#2939).
+`waits-<runner>-*` file reaches another runner's adapter or `runner-factory.ts`. The one
+exception: the wait kit runs its workers on the Claude wire, so a `waits-<runner>-*` file
+also loads the Claude adapter (hearsay-tools/cezarion#2939, hearsay-tools/cezarion#2959).
 
 **P1** (hearsay-tools/cezarion#1049, hearsay-tools/cezarion#1266) routes an
 approval from each native mock that carries one through `RunManager`, the

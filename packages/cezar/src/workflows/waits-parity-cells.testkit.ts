@@ -15,6 +15,7 @@ import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import type { AgentInput, CiWaitResult, ConversationMessage, HumanWaitEntry, ProcessWaitResult, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerFactory, type RunnerId } from '../core/agent-runner.ts';
 import { runnersUnderTest, useRunners } from '../core/runners-under-test.testkit.ts';
+import { ClaudeCliRunner } from '../core/claude-cli-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { ToolsUnavailableError } from '../ci-wait/controller.ts';
@@ -101,6 +102,12 @@ const runnerBoundary = vi.hoisted(() => ({
   beforeReturn: undefined as ((runId: string) => void) | undefined,
   sessionFiles: new Map<string, string>(),
 }));
+/** The test file's runner for its parents, and the Claude runner for the workers this kit runs on
+ *  the Claude wire whatever the parent's runner is (hearsay-tools/cezarion#2939). */
+function withClaudeWorkers(inner: RunnerFactory): RunnerFactory {
+  return (backend, options) => backend === 'claude' || backend === 'claude-cli' ? new ClaudeCliRunner() : inner(backend, options);
+}
+
 /** The test file's runners, with each session recorded at its boundary. */
 function boundaryRunners(inner: RunnerFactory): RunnerFactory {
   return (...args) => {
@@ -655,7 +662,7 @@ function expectWaitParityFamilies(): void {
 
 export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPart; family?: WaitParityFamily['family'] } | 'once'): void {
   const runnersFor = (part: WaitParityPart): RunnerId[] => scope !== 'once' && scope.part === part ? [scope.runner] : [];
-  if (scope !== 'once') useRunners(boundaryRunners(runnersUnderTest()));
+  useRunners(boundaryRunners(withClaudeWorkers(runnersUnderTest())));
   describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', { timeout: 45_000 }, () => {
     useWorkerWaitFixture();
     beforeEach(() => {

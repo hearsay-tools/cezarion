@@ -51,6 +51,7 @@ if (!Number.isInteger(workers) || workers < 0 || !(minutes > 0)) throw new Error
 
 const { RunStore } = await import('../src/runs/store.ts');
 const { RunManager } = await import('../src/workflows/run.ts');
+const { createRunner } = await import('../src/core/runner-factory.ts');
 const home = benchmarkHome((await import('../src/home/resolve.ts')).resolveHome({ purpose: 'cli' }));
 const { DelegationService } = await import('../src/delegation/service.ts');
 const { planOwnedWorkspace, ensureOwnedWorkspace } = await import('../src/delegation/workspace.ts');
@@ -83,7 +84,7 @@ const holders: ChildProcess[] = [];
 let store: RunStoreInstance | undefined, manager: RunManagerInstance | undefined, detach: (() => void) | undefined;
 try {
   store = RunStore.open(dataDir, { keepLive: true });
-  manager = new RunManager(store, root, { home, semaphore: new WorkspaceSemaphore({ home, initial: { maxParallel: 1 } }) });
+  manager = new RunManager(store, root, { home, createRunner, semaphore: new WorkspaceSemaphore({ home, initial: { maxParallel: 1 } }) });
   const service = new DelegationService();
   detach = service.registerProject({ id: 'bench', root, store, manager, home });
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });

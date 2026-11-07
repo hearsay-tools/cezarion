@@ -52,6 +52,7 @@ if (sizes.some(size => !Number.isInteger(size) || size < 1) || !Number.isInteger
 
 const { RunStore } = await import('../src/runs/store.ts');
 const { RunManager } = await import('../src/workflows/run.ts');
+const { createRunner } = await import('../src/core/runner-factory.ts');
 const home = benchmarkHome((await import('../src/home/resolve.ts')).resolveHome({ purpose: 'cli' }));
 
 const pad = 'x'.repeat(padBytes);
@@ -98,7 +99,7 @@ for (const size of sizes) {
     const rootId = seed(dataDir, root, size);
     const store = RunStore.open(dataDir, { keepLive: true });
     if (values.baseline) store.withReadCache = <T>(fn: () => T): T => fn();
-    const manager = new RunManager(store, root, { home });
+    const manager = new RunManager(store, root, { home, createRunner });
     manager.reconcileWorkerWaits(rootId); // writes the missing projections once
     const times: number[] = [];
     for (let i = 0; i < samples; i++) {
