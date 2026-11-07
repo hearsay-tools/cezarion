@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
@@ -150,7 +151,7 @@ describe('automations prompt part and cockpit address (#774)', () => {
     });
     store.updateRun(id, { workflowDef: TASK_DEF });
     manager!.dispose();
-    manager = createFixtureManager(store, repoRoot, { cockpit: ADDRESS });
+    manager = createFixtureManager(store, repoRoot, { home: testHome(), cockpit: ADDRESS });
     await manager.recover();
     const { spec } = await specAt(0);
     expect(spec.env?.CEZ_COCKPIT_URL).toBe(ADDRESS.origin);

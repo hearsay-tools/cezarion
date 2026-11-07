@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -29,7 +30,7 @@ describe('per-task auto-resume cancellation', () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-auto-resume-api-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     cancelled = [];
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager: {

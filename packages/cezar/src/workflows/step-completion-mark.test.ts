@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { bindLaunchSource } from './run/launch-read-resolver.ts';
 import { transitionTurnBoundary } from './run/turn-boundary.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
@@ -45,8 +46,8 @@ describe('step completion mark at settlement callers', () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'cez-step-mark-'));
     store = RunStore.open(join(root, '.ai/cezar'));
-    context = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work: new TrackedWork(),
-      semaphore: new WorkspaceSemaphore(), disposed: () => false };
+    context = { home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work: new TrackedWork(),
+      semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false };
     type SettlementArgs = ConstructorParameters<typeof RunSettlement>;
     settlement = new RunSettlement(context, unused<SettlementArgs[1]>('line'),
       unused<SettlementArgs[2]>('humanWaits', { supersedeWorkerFallback: vi.fn() }),

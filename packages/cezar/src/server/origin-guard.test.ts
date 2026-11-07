@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,7 +35,7 @@ describe('request-origin guard (#426)', () => {
       startRun: (_workflow: WorkflowDef, input: StartRunInput) =>
         store.createRun({ title: 't', workflow: '(planned)', task: input.task, steps: [] }),
     } as unknown as RunManager;
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager,
@@ -307,7 +308,7 @@ describe('request-origin guard — hosted mode (#426)', () => {
       startRun: (_workflow: WorkflowDef, input: StartRunInput) =>
         store.createRun({ title: 't', workflow: '(planned)', task: input.task, steps: [] }),
     } as unknown as RunManager;
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager,

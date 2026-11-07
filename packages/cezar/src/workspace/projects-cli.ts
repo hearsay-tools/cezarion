@@ -52,7 +52,7 @@ const SINGLE_PROJECT_EDIT_ERROR = 'single-project mode is enabled; editing proje
  */
 export async function runProjectsCommand(
   args: string[],
-  opts: { home?: Home; defaultRoot: string; bootProjectId?: string | undefined; env?: NodeJS.ProcessEnv; io?: ProjectsCommandIo },
+  opts: { home: Home; defaultRoot: string; bootProjectId?: string | undefined; env?: NodeJS.ProcessEnv; io?: ProjectsCommandIo },
 ): Promise<number> {
   const io = opts.io ?? defaultIo;
   const singleProject = (opts.env ?? process.env).CEZ_SINGLE_PROJECT === '1';
@@ -102,7 +102,7 @@ async function listCommand(
   io: ProjectsCommandIo,
   singleProject: boolean,
   bootProjectId: string | undefined,
-  home?: Home,
+  home: Home,
 ): Promise<number> {
   const projects = bootProjectId
     ? await listProjects({ projectId: bootProjectId }, home)
@@ -128,7 +128,7 @@ async function listCommand(
   return 0;
 }
 
-async function addCommand(root: string, io: ProjectsCommandIo, home?: Home): Promise<number> {
+async function addCommand(root: string, io: ProjectsCommandIo, home: Home): Promise<number> {
   try {
     if (!(await stat(root)).isDirectory()) throw new Error('not a directory');
   } catch {
@@ -142,7 +142,7 @@ async function addCommand(root: string, io: ProjectsCommandIo, home?: Home): Pro
     io.error(`refusing to register ${root} — cezar task worktrees and your home directory are not projects`);
     return 1;
   }
-  const known = new Set((await loadWorkspaceConfig(home?.workspaceConfig)).projects.map((p) => p.id));
+  const known = new Set((await loadWorkspaceConfig(home.workspaceConfig)).projects.map((p) => p.id));
   const entry = await registerProject(root, undefined, home);
   // Registration dedupes by realpath, so a second `add` of the same folder
   // (or a symlink to it) reports the entry that already exists.
@@ -150,7 +150,7 @@ async function addCommand(root: string, io: ProjectsCommandIo, home?: Home): Pro
   return 0;
 }
 
-async function removeCommand(id: string | undefined, io: ProjectsCommandIo, home?: Home): Promise<number> {
+async function removeCommand(id: string | undefined, io: ProjectsCommandIo, home: Home): Promise<number> {
   if (!id) {
     io.error(USAGE);
     return 1;
@@ -182,7 +182,7 @@ async function tagCommand(
   id: string | undefined,
   tags: string[],
   io: ProjectsCommandIo,
-  home?: Home,
+  home: Home,
 ): Promise<number> {
   if (!id) {
     io.error(USAGE);

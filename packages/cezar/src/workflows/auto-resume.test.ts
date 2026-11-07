@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import {
   RUN_STATUS,
   WAIT_KIND,
@@ -123,8 +124,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
   }, 30_000);
 
   it('leaves the run plainly failed when the setting is off', async () => {
-    manager = createFixtureManager(store, repoRoot, {
-      semaphore: new WorkspaceSemaphore({ initial: { autoResumeOnUsageLimit: false } }),
+    manager = createFixtureManager(store, repoRoot, { home: testHome(),
+      semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { autoResumeOnUsageLimit: false } }),
     });
     const record = manager.startRun(workflow, { task: 'mock:limit ship it', worktree: false });
     await settle(record.id);
@@ -209,8 +210,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // The reported scenario: five tasks, two slots. The two that start hit the limit and become
     // `scheduled`; the other three must not be walked into the same wall just to be marked
     // scheduled too. Before the hold existed this drained the whole queue in ~500 ms.
-    manager = createFixtureManager(store, repoRoot, {
-      semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 2 } }),
+    manager = createFixtureManager(store, repoRoot, { home: testHome(),
+      semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 2 } }),
     });
     // Isolated worktrees — the default, and the shape that matters here: an in-place run parks
     // on the repo-root lease (#438) instead of holding a slot, which is a different queue rule
@@ -253,8 +254,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // dequeue-time gate is long past by the time it spawns. Measured before the spawn-time
     // check: four of five started. In-place runs serialize on that lease, so exactly ONE gets
     // as far as the limit and the rest never start.
-    manager = createFixtureManager(store, repoRoot, {
-      semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 2 } }),
+    manager = createFixtureManager(store, repoRoot, { home: testHome(),
+      semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 2 } }),
     });
     const runs = [1, 2, 3, 4, 5].map((n) =>
       manager!.startRun(workflow, { task: `mock:limit inplace ${n}`, worktree: false }),
@@ -301,8 +302,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // The deadlock this exists to prevent, seen live: two tasks hit the limit together, both
     // schedule, both fire — and if a resume in flight holds the account, each waits for the
     // other to prove a window neither will ever get to test. Everything in the workspace stops.
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 2 } });
-    const first = createFixtureManager(store, repoRoot, { semaphore });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 2 } });
+    const first = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
     async function checkpoint(runId: string, name: string, reached: (run: RunRecord) => boolean): Promise<void> {
       let timer: ReturnType<typeof setTimeout>;
       let onRun: (run: RunRecord) => void;
@@ -345,7 +346,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
         task: 'mock:cezar-done pair',
       });
     }
-    manager = createFixtureManager(store, repoRoot, { semaphore });
+    manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
     await manager.recover();
 
     await Promise.all(runs.map(async (run, index) => {
@@ -365,8 +366,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
 
   it('watchdog: an idle queue with no appointment behind the hold starts work anyway', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
-    manager = createFixtureManager(store, repoRoot, {
-      semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }),
+    manager = createFixtureManager(store, repoRoot, { home: testHome(),
+      semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } }),
     });
     const limited = manager.startRun(workflow, { task: 'mock:limit holder' });
     await settle(limited.id);
@@ -401,8 +402,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // leaves the second one to hand the run straight back, `dropActive` releases the slot, an
     // ordinary pump starts nothing, and sixty seconds later the watchdog repeats the whole cycle
     // — the queue never unwedges and the transcript fills with identical held-in-the-queue notes.
-    manager = createFixtureManager(store, repoRoot, {
-      semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }),
+    manager = createFixtureManager(store, repoRoot, { home: testHome(),
+      semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } }),
     });
     const limited = manager.startRun(workflow, { task: 'mock:limit holder', worktree: false });
     await settle(limited.id);
@@ -441,8 +442,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
     expect(store.getRun(record.id)?.autoResumeAt).toBeDefined();
     first.dispose(); // the timer is gone; the deadline is not
 
-    manager = createFixtureManager(store, repoRoot, {
-      semaphore: new WorkspaceSemaphore({ initial: { autoResumeOnUsageLimit: false } }),
+    manager = createFixtureManager(store, repoRoot, { home: testHome(),
+      semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { autoResumeOnUsageLimit: false } }),
     });
     await manager.recover();
 
@@ -488,8 +489,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
     //
     // One slot, so "who got to spawn" is unambiguous. Two scheduled runs have to be built in
     // sequence, because the hold — correctly — stops the second from ever starting otherwise.
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
-    const first = createFixtureManager(store, repoRoot, { semaphore });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } });
+    const first = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
     const a = first.startRun(workflow, { task: 'mock:limit probe a' });
     await settle(a.id);
     first.cancelAutoResume(a.id); // release the hold so b can take its turn
@@ -501,7 +502,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     for (const run of runs) {
       store.updateRun(run.id, { autoResumeAt: new Date(Date.now() - 1_000).toISOString() });
     }
-    manager = createFixtureManager(store, repoRoot, { semaphore });
+    manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
     await manager.recover();
 
     // Exactly one probe spawns and meets the limit; the other's continuation never runs.
@@ -516,8 +517,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
   }, 90_000);
 
   it('holds only the limited account — other accounts keep running', async () => {
-    manager = createFixtureManager(store, repoRoot, {
-      semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }),
+    manager = createFixtureManager(store, repoRoot, { home: testHome(),
+      semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } }),
     });
     const limited = manager.startRun(workflow, { task: 'mock:limit claude work', worktree: false });
     await settle(limited.id);
@@ -624,11 +625,11 @@ describe('a run stopped by a usage limit resumes itself', () => {
   it('cancels an armed resume when the setting is switched off mid-wait', async () => {
     // The real seam: a config PUT refreshes the shared semaphore, which pumps every manager.
     let enabled = true;
-    const semaphore = new WorkspaceSemaphore({
+    const semaphore = new WorkspaceSemaphore({ home: testHome(),
       initial: { autoResumeOnUsageLimit: true },
       load: async () => ({ maxParallel: 2, memoryLimitMb: null, autoResumeOnUsageLimit: enabled }),
     });
-    manager = createFixtureManager(store, repoRoot, { semaphore });
+    manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
     const record = manager.startRun(workflow, { task: 'mock:limit ship it', worktree: false });
     await settle(record.id);
     expect(store.getRun(record.id)?.autoResumeAt).toBeDefined();
@@ -739,8 +740,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
   it('queues a human Continue while another run holds the same account, and starts it once that hold lifts', async () => {
     // The approved 4a design (hearsay-tools/cezarion#1236): a Continue retires its own appointment
     // and joins the line as a wake, still subject to another run's known deadline on the account.
-    const semaphore = new WorkspaceSemaphore();
-    manager = createFixtureManager(store, repoRoot, { semaphore });
+    const semaphore = new WorkspaceSemaphore({ home: testHome() });
+    manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
     const a = manager.startRun(workflow, { task: 'mock:limit probe a', worktree: false });
     await settle(a.id);
     // B starts on the same account only once A's hold is out of the way, then hits the limit too.

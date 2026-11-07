@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { parse } from '@babel/parser';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -33,7 +34,7 @@ it('hides every AST-derived private member at runtime', () => {
   const { names, members } = privateMembers();
   const root = mkdtempSync(join(tmpdir(), 'cez-private-'));
   const store = RunStore.open(join(root, '.ai/cezar'));
-  const manager = new RunManager(store, root);
+  const manager = new RunManager(store, root, { home: testHome() });
   try {
     // Construction is the product signal: every field has been initialized.
     for (const name of names) expect((manager as unknown as Record<string, unknown>)[name], name).toBeUndefined();

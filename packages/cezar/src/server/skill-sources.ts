@@ -26,7 +26,7 @@ export const SKILL_SOURCES_HOSTED_ERROR =
   'Team skill sources are read-only on this remote cockpit. To allow remote edits, run `cez remote-settings enable` on the machine running cezar.';
 
 export interface SkillSourcesProject {
-  home?: Home | undefined;
+  home: Home;
   root: string;
   dataDir: string;
 }
@@ -54,7 +54,7 @@ export async function readSkillSources(project: SkillSourcesProject, editable: b
   return answerFor(project.root, await readRawConfig(project.dataDir), editable, project.home);
 }
 
-function answerFor(root: string, read: RawConfigRead, editable: boolean, home?: Home): TeamSkillSourcesResponse {
+function answerFor(root: string, read: RawConfigRead, editable: boolean, home: Home): TeamSkillSourcesResponse {
   if (!read.ok) return { sources: [], editable, configIssue: read.issue };
   const statuses = getTeamSourceStatuses(root, home);
   const sources: TeamSkillSource[] = rawSources(read.raw).map((entry) => {

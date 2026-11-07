@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,7 +20,7 @@ const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); vi.restoreAllMocks(); });
 function build(modelCatalog = new RunnerModelCatalog({ adapters: {} }), extra: Partial<ServerDeps> = {}) {
   const root = mkdtempSync(join(tmpdir(), 'cez-nonblocking-')); roots.push(root);
-  return createApp({ repoRoot: root, store: RunStore.open(join(root, '.ai/cezar')), manager: {} as RunManager, version: 'test', modelCatalog, ...extra });
+  return createApp({ home: testHome(), repoRoot: root, store: RunStore.open(join(root, '.ai/cezar')), manager: {} as RunManager, version: 'test', modelCatalog, ...extra });
 }
 
 // hearsay-tools/cezarion#974: the full Node 24.15 run took 1734ms against 1500ms.
@@ -82,7 +83,7 @@ it('prewarms Cursor on the live path and publishes completion to both transports
   const topics = new Map<string, TopicPublisher>();
   const events = new WorkspaceEventBus();
   const sse = vi.fn(); events.on(sse);
-  const app = createApp({
+  const app = createApp({ home: testHome(),
     repoRoot: root, store: RunStore.open(join(root, '.ai/cezar')), manager: {} as RunManager,
     version: 'test', modelCatalog: catalog, workspaceEvents: events,
     providerAuth: new ProviderAuthService({ runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }) }),

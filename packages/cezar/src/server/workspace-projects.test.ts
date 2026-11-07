@@ -1,7 +1,8 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceProject } from '../workspace/config.ts';
 import { loadWorkspaceConfig } from '../workspace/config.ts';
-import { listProjects } from '../workspace/projects.ts';
+import { listProjects} from '../workspace/projects.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { CockpitAlreadyRunningError } from './cockpit-ownership.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContext, type ProjectContextDeps } from './project-context.ts';
@@ -29,7 +30,7 @@ vi.mock('../workspace/projects.ts', async (original) => ({
 }));
 
 const row = (id: string, root = `/repos/${id}`): WorkspaceProject => ({ id, root, name: id, addedAt: '2026-10-30T00:00:00Z', lastOpenedAt: '', source: 'local' });
-const workspace = () => createWorkspaceProjects({ bootRoot: '/repos/boot', bootProjectId: 'boot' });
+const workspace = (home = testHome()) => createWorkspaceProjects({ home, bootRoot: '/repos/boot', bootProjectId: 'boot' });
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -44,7 +45,7 @@ describe('workspace project identity', () => {
   });
 
   it('caches registry hits but does not cache fallback slugs', async () => {
-    const projects = createWorkspaceProjects({ bootRoot: '/repos/boot' });
+    const projects = createWorkspaceProjects({ home: testHome(), bootRoot: '/repos/boot' });
     expect(await projects.resolveBootProject([])).toBe('boot');
     expect(await projects.resolveBootProject([row('registered', '/repos/boot')])).toBe('registered');
     expect(await projects.resolveBootProject([])).toBe('registered');
@@ -52,7 +53,7 @@ describe('workspace project identity', () => {
 
   it('uses the reserved-name allocator when the registry cannot be read', async () => {
     vi.mocked(loadWorkspaceConfig).mockRejectedValue(new Error('unreadable'));
-    expect(await createWorkspaceProjects({ bootRoot: '/repos/default' }).resolveBootProject()).toBe('default-2');
+    expect(await createWorkspaceProjects({ home: testHome(), bootRoot: '/repos/default' }).resolveBootProject()).toBe('default-2');
   });
 
   it('validates ids before alias resolution and preserves raw malformed-id errors', async () => {
@@ -64,16 +65,17 @@ describe('workspace project identity', () => {
   });
 
   it('reads the visible set live and keeps the list selector at its existing boundary', async () => {
-    const projects = workspace();
+    const home = testHome();
+    const projects = workspace(home);
     const registry = [row('boot'), row('other')];
     vi.stubEnv('CEZ_SINGLE_PROJECT', '0');
     expect(await projects.visibleProjects(registry)).toBe(registry);
     await projects.listVisibleProjects();
-    expect(listProjects).toHaveBeenLastCalledWith(undefined);
+    expect(listProjects).toHaveBeenLastCalledWith(undefined, home);
     vi.stubEnv('CEZ_SINGLE_PROJECT', '1');
     expect(await projects.visibleProjects(registry)).toEqual([registry[0]]);
     await projects.listVisibleProjects();
-    expect(listProjects).toHaveBeenLastCalledWith({ projectId: 'boot' });
+    expect(listProjects).toHaveBeenLastCalledWith({ projectId: 'boot' }, home);
   });
 });
 
@@ -101,7 +103,7 @@ describe('project build failure policies', () => {
     const projects = workspace();
     const context = vi.fn().mockRejectedValue(new Error('unexpected'));
     // No boot fields are read here: each request names another project.
-    const boot = {} as ProjectContext;
+    const boot = { home: testHome(),} as ProjectContext;
     projects.bindContexts(boot, { context });
     expect(await projects.lookupProject('../bad')).toBeUndefined();
     expect(context).not.toHaveBeenCalled();
@@ -112,26 +114,26 @@ describe('project build failure policies', () => {
 
   it('preserves boot identity for HTTP and upgrades but canonicalizes live identity', async () => {
     const projects = workspace();
-    const boot = { id: 'default' } as ProjectContext;
+    const boot = { home: testHome(), id: 'default' } as ProjectContext;
     const context = vi.fn();
     projects.bindContexts(boot, { context });
     expect(await projects.resolveProject('default')).toBe(boot);
     expect(await projects.resolveProject(undefined)).toBe(boot);
     expect(await projects.lookupProject('boot')).toBe(boot);
-    expect(await projects.resolveLiveProject('default')).toEqual({ id: 'boot' });
+    expect(await projects.resolveLiveProject('default')).toEqual({ home: boot.home, id: 'boot' });
     expect(context).not.toHaveBeenCalled();
   });
 });
 
 it('keeps injected context and webhook services and builds absent services once', () => {
-  const options = { listProjects: vi.fn() };
+  const options = { home: testHome(), listProjects: vi.fn() };
   const contexts = new ProjectContexts(options);
-  expect(createWorkspaceProjectContexts({ contexts }, createTaskWebhooks({}), options)).toBe(contexts);
-  expect(createWorkspaceProjectContexts({}, createTaskWebhooks({}), options)).toBeInstanceOf(ProjectContexts);
-  const webhooks = createTaskWebhooks({}, '');
+  expect(createWorkspaceProjectContexts({ home: testHome(), contexts }, createTaskWebhooks({ home: testHome(),}), options)).toBe(contexts);
+  expect(createWorkspaceProjectContexts({ home: testHome(),}, createTaskWebhooks({ home: testHome(),}), options)).toBeInstanceOf(ProjectContexts);
+  const webhooks = createTaskWebhooks({ home: testHome(),}, '');
   expect(webhooks.currentOrigin()).toBe('');
-  expect(createTaskWebhooks({}).currentOrigin()).toBeUndefined();
-  expect(createTaskWebhooks({ taskWebhooks: webhooks })).toBe(webhooks);
+  expect(createTaskWebhooks({ home: testHome(),}).currentOrigin()).toBeUndefined();
+  expect(createTaskWebhooks({ home: testHome(), taskWebhooks: webhooks })).toBe(webhooks);
 });
 
 it('assembles shared context options and keeps prepare/recovery side effects in order', () => {
@@ -143,13 +145,13 @@ it('assembles shared context options and keeps prepare/recovery side effects in 
     service: { armDestroyRetries: () => { order.push('destroy retries'); } },
   };
   const list = vi.fn();
-  createWorkspaceProjectContexts({ delegation }, webhooks, {
+  createWorkspaceProjectContexts({ home: testHome(), delegation }, webhooks, {
     listProjects: list,
     addressManager: () => { order.push('address'); },
   });
   const options = constructed.at(-1)!;
   expect(options.listProjects).toBe(list);
-  const project = { id: 'other' } as ProjectContext;
+  const project = { home: testHome(), id: 'other' } as ProjectContext;
   expect(options.prepareManager!(project)).toBe(detach);
   options.afterRecover!(project);
   expect(order).toEqual(['webhooks', 'address', 'delegation', 'destroy retries']);
@@ -157,7 +159,7 @@ it('assembles shared context options and keeps prepare/recovery side effects in 
 
 it('removal validates first and reads boot identity only once, including a fallback alias', async () => {
   vi.mocked(loadWorkspaceConfig).mockRejectedValue(new Error('unreadable'));
-  const projects = createWorkspaceProjects({ bootRoot: '/repos/boot' });
+  const projects = createWorkspaceProjects({ home: testHome(), bootRoot: '/repos/boot' });
   expect(await projects.resolveProjectId('../bad', true)).toEqual({ error: 'unknown project: ../bad' });
   expect(loadWorkspaceConfig).not.toHaveBeenCalled();
   expect(await projects.resolveProjectId('default', true)).toEqual({ id: 'boot', bootId: 'boot' });
@@ -166,7 +168,7 @@ it('removal validates first and reads boot identity only once, including a fallb
 
 it('health uses its already-resolved boot identity without another registry read', async () => {
   vi.stubEnv('CEZ_SINGLE_PROJECT', '1');
-  const projects = createWorkspaceProjects({ bootRoot: '/repos/boot' });
+  const projects = createWorkspaceProjects({ home: testHome(), bootRoot: '/repos/boot' });
   expect(await projects.visibleProjects([row('boot'), row('other')], 'boot')).toEqual([row('boot')]);
   expect(loadWorkspaceConfig).not.toHaveBeenCalled();
 });

@@ -31,7 +31,7 @@ import { ownedByAnotherCockpit, CockpitOwnership } from './cockpit-ownership.ts'
 
 /** The per-project bundle the routes operate on. */
 export interface ProjectContext {
-  home?: Home | undefined;
+  home: Home;
   /** Registry project id (slug). */
   id: string;
   /** Realpath'd repo root the registry holds for this project. */
@@ -75,7 +75,7 @@ export interface ProjectContextDeps {
   afterRecover?: (project: Pick<ProjectContext, 'id' | 'root' | 'store' | 'manager' | 'home'>) => void;
   /** Registry lookup — the workspace `listProjects()` in production. */
   listProjects: () => Promise<readonly ProjectContextSource[]>;
-  home?: Home | undefined;
+  home: Home;
   /** Resolve the one automation store owned by this project. Production
    *  injects the workspace automation coordinator's cached store so API
    *  mutations and scheduler reads share the same in-memory state. */

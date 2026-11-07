@@ -1,3 +1,4 @@
+import { testHome } from '../../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,7 +17,7 @@ it('installs the waiter interrupt before park/release and restores it before unp
   const log: string[] = [];
   const original = () => { log.push('interrupt'); };
   waiter.liveSession.installInterrupt(original);
-  const lease = new RepoRootLease({ store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore(),
+  const lease = new RepoRootLease({ home: testHome(), store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore({ home: testHome() }),
     work: new TrackedWork(), disposed: () => false }, {
     park(id) {
       if (id !== 'waiter') return;

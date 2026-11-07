@@ -36,7 +36,7 @@ import type { QueuedRevivalHost } from './queued-revival.ts';
 import type { ContinuationOpening, Execution, PendingContinuation, RunModuleContext, StartRunInput, StepModel } from './types.ts';
 
 // This view adds no promise continuation before the caller's original post-config gate.
-function readLaunchConfig(repoRoot: string, home?: Home): Promise<LaunchConfig> {
+function readLaunchConfig(repoRoot: string, home: Home): Promise<LaunchConfig> {
   return loadConfig(repoRoot, home) as unknown as Promise<LaunchConfig>;
 }
 
@@ -72,7 +72,7 @@ async function continuationModel(
   toolsStep: WorkflowStepDef | undefined,
   stepIdentity: WorkerStepIdentity | undefined,
   backend: RunnerId,
-  home?: Home,
+  home: Home,
 ): Promise<{ backendModel: string | undefined } | string> {
   // The owning step's authored `model` wins over the run-level pin, exactly as the first
   // spawn resolved `step.model ?? input.model`: a catalog worker keeps the
@@ -102,7 +102,7 @@ function continuationEffort(
   record: RunRecord | undefined,
   toolsStep: WorkflowStepDef | undefined,
   stepIdentity: WorkerStepIdentity | undefined,
-  home?: Home,
+  home: Home,
 ): { effort: string | undefined } | string {
   try {
     const modelsLocked = agentModelsLocked(repoRoot, process.env, home);
@@ -141,7 +141,7 @@ function continuationRunner(
  * beside the free-text `model`. Best-effort here (a per-step `runner`/`model`
  * can still override it); the authoritative fail-loud gate is at spawn.
  */
-async function taskModelIdentity(repoRoot: string, taskBackend: RunnerId, source: SourceInput, home?: Home): Promise<string | undefined> {
+async function taskModelIdentity(repoRoot: string, taskBackend: RunnerId, source: SourceInput, home: Home): Promise<string | undefined> {
   const input = sourceInput(source);
   try {
     const normalized = await resolveLaunchModel(
@@ -172,7 +172,7 @@ async function stepModel(
   source: SourceInput,
   stepBackend: RunnerId,
   stepIdentity: WorkerStepIdentity | undefined,
-  home?: Home,
+  home: Home,
 ): Promise<StepModel | string> {
   const input = sourceInput(source);
   try {
@@ -475,8 +475,8 @@ function workerStep({ store, repoRoot, home }: LaunchContext, runId: string, ste
 }
 
 /** Non-launch readers receive only the setting their operation consumes. */
-export function narrowTitleConfig(repoRoot: string, home?: Home): Promise<Pick<CezConfig, 'liveTitleUpdates'>> { return loadConfig(repoRoot, home); }
-export function narrowReviewConfig(repoRoot: string, home?: Home): Promise<Pick<CezConfig, 'reviewGate'>> { return loadConfig(repoRoot, home); }
+export function narrowTitleConfig(repoRoot: string, home: Home): Promise<Pick<CezConfig, 'liveTitleUpdates'>> { return loadConfig(repoRoot, home); }
+export function narrowReviewConfig(repoRoot: string, home: Home): Promise<Pick<CezConfig, 'reviewGate'>> { return loadConfig(repoRoot, home); }
 function continuationWorktreeSetup(handle: LaunchConfig): unknown {
   return configValue(handle).worktreeSetup;
 }
@@ -547,14 +547,14 @@ function acceptedRunFields(input: StartRunInput, workflow: WorkflowDef, effectiv
     };
 }
 
-function acceptInput(repoRoot: string, input: StartRunInput, home?: Home): StartRunInput {
+function acceptInput(repoRoot: string, input: StartRunInput, home: Home): StartRunInput {
   return agentModelsLocked(repoRoot, process.env, home) ? { ...input, model: undefined, effort: undefined } : input;
 }
 
-function discoverRunSkills(repoRoot: string, builtin: Skill[], home?: Home): Promise<Skill[]> {
+function discoverRunSkills(repoRoot: string, builtin: Skill[], home: Home): Promise<Skill[]> {
   return discoverSkills(repoRoot, { builtin }, home);
 }
-function teamSkills(repoRoot: string, home?: Home): Skill[] {
+function teamSkills(repoRoot: string, home: Home): Skill[] {
   return filterDisabledTeamSources(getTeamSkillsCached(repoRoot, home), readDisabledSkillsReposSync(repoRoot));
 }
 
@@ -687,7 +687,7 @@ function isSyntheticContinuation(run: RunRecord, step: StepState): boolean {
       step.kind === 'agent' && step.name === 'Continue')) && /^continue-\d+$/.test(step.id);
 }
 
-function verifyWorkerIdentity(store: RunStore, repoRoot: string, runId: string, home?: Home): void {
+function verifyWorkerIdentity(store: RunStore, repoRoot: string, runId: string, home: Home): void {
   workerIdentity(store, repoRoot, runId, undefined, home);
 }
 function inputAutonomous(input: StartRunInput): boolean { return input.autonomous === true; }

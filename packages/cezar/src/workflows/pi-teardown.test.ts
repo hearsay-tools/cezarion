@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,7 +27,7 @@ describe('Pi provider failure survives teardown (#73)', () => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
     vi.stubEnv('CEZ_PI_BIN', new URL('../core/__fixtures__/pi/stub-sigterm.mjs', import.meta.url).pathname);
     store = RunStore.open(join(root, '.ai/cezar'));
-    manager = new RunManager(store, root);
+    manager = new RunManager(store, root, { home: testHome() });
   });
   afterEach(() => {
     manager.dispose();

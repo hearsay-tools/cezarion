@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
 import { apiRunSchema } from '@open-mercato/cezar-contract/runs';
@@ -10,7 +11,7 @@ import { setRunStatus, hasPendingAsk } from '../runs/run-store.testkit.ts';
 describe('authoritative finishability (#449)', () => {
   // The race below includes the final autosave, so its worktree keeps the mock's notes.md change.
   useWorkerWaitFixture({ mockNotes: true });
-  const app = () => createApp({ repoRoot: root, store, manager, version: 'test' });
+  const app = () => createApp({ home: testHome(), repoRoot: root, store, manager, version: 'test' });
   const detail = async (id: string) => {
     const response = await apiRequest(app(), `/api/v1/runs/${id}`);
     expect(response.status).toBe(200);

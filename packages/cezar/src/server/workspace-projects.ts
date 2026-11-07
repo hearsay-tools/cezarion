@@ -64,7 +64,7 @@ function classifyProjectBuildFailure(error: unknown) {
 }
 
 /** Workspace identity and lookup rules shared by HTTP, live feeds, upgrades and registry edits. */
-export function createWorkspaceProjects(options: { bootRoot: string; bootProjectId?: string | undefined; bindHost?: string | undefined; home?: Home | undefined }) {
+export function createWorkspaceProjects(options: { bootRoot: string; bootProjectId?: string | undefined; bindHost?: string | undefined; home: Home }) {
   const { bootRoot, bootProjectId, bindHost, home } = options;
   // ---- workspace boot-project identity (multi-project spec) ----------------
   // The boot flow (`initWorkspace` in src/index.ts) registers the boot repo
@@ -80,7 +80,7 @@ export function createWorkspaceProjects(options: { bootRoot: string; bootProject
     if (bootProjectCache) return bootProjectCache;
     let registry = projects ?? [];
     try {
-      registry = projects ?? (await loadWorkspaceConfig(home?.workspaceConfig)).projects;
+      registry = projects ?? (await loadWorkspaceConfig(home.workspaceConfig)).projects;
       const real = await realpath(bootRoot).catch(() => bootRoot);
       const match = registry.find((p) => p.root === real || p.root === bootRoot);
       if (match) bootProjectCache = match.id;
@@ -107,10 +107,10 @@ export function createWorkspaceProjects(options: { bootRoot: string; bootProject
     return registry.filter((project) => project.id === bootId);
   };
   const projectSelector = async () => singleProject() ? { projectId: await resolveBootProject() } : undefined;
-  const listVisibleProjects = async () => home ? listProjects(await projectSelector(), home) : listProjects(await projectSelector());
+  const listVisibleProjects = async () => listProjects(await projectSelector(), home);
   const registryEntry = async (projectId: string): Promise<WorkspaceProject | undefined> => {
     const id = await canonicalProjectId(projectId);
-    return (await loadWorkspaceConfig(home?.workspaceConfig)).projects.find((entry) => entry.id === id);
+    return (await loadWorkspaceConfig(home.workspaceConfig)).projects.find((entry) => entry.id === id);
   };
   const resolveRegistryEntry = async (raw: string): Promise<WorkspaceProject | undefined> => {
     if (!validProjectId(raw)) return undefined;

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,7 +33,7 @@ describe('project repository discovery lifetime', () => {
       let release!: (value: RepoHandleDiscovery) => void;
       discoverRepoHandle.mockReturnValueOnce(new Promise<RepoHandleDiscovery>((resolve) => { release = resolve; }));
       discoverRepoHandle.mockResolvedValue({ status: 'resolved', handle });
-      contexts = new ProjectContexts({
+      contexts = new ProjectContexts({ home: testHome(),
         forgeFactory,
         listProjects: async () => [{ id: 'project', root, status: 'not-git' }],
       });

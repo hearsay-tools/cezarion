@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -39,7 +40,7 @@ describe('parallel variant retirement', () => {
   afterEach(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
 
   it.each([2, 3])('refuses %s candidates at every run API scope without creating a run', async variants => {
-    const app = createApp({ repoRoot: root, store, manager, version: 'test', bootProjectId: 'project', providerAuth: connectedProviderAuth() });
+    const app = createApp({ home: testHome(), repoRoot: root, store, manager, version: 'test', bootProjectId: 'project', providerAuth: connectedProviderAuth() });
     for (const prefix of ['/api/v1', '/api/v1/p/project', '/api/v1/p/default']) {
       const response = await apiRequest(app, `${prefix}/runs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...task, variants }) });
       expect(response.status).toBe(400);
@@ -60,7 +61,7 @@ describe('parallel variant retirement', () => {
       expect(createAutomationInputSchema.safeParse(automation).success).toBe(false);
       expect(updateAutomationInputSchema.safeParse({ ...automation, expectedRevision: 1 }).success).toBe(false);
     }
-    const app = createApp({ repoRoot: root, store, manager, version: 'test', providerAuth: connectedProviderAuth() });
+    const app = createApp({ home: testHome(), repoRoot: root, store, manager, version: 'test', providerAuth: connectedProviderAuth() });
     const response = await apiRequest(app, '/api/v1/runs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(task) });
     expect(response.status).toBe(201);
     expect(await response.json()).toHaveProperty('id');

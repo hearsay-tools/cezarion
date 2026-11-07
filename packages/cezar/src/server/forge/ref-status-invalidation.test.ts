@@ -1,3 +1,4 @@
+import { testHome } from '../../home/test-home.testkit.ts';
 import { setRunStatus } from '../../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
@@ -80,7 +81,7 @@ describe('a reference cezar changes itself is forgotten, not waited out', () => 
     execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoRoot });
     execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/demo.git'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager: { isActive: () => false, claimForPublish: () => () => undefined } as unknown as RunManager,

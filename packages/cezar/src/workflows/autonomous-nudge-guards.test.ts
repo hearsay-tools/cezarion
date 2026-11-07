@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { transitionTurnBoundary } from './run/turn-boundary.ts';
 import { InputFlight } from './run/input-delivery.ts';
 import { runnerHook, setupMonitoringFixture, waitForProduct } from './run-fixture.testkit.ts';
@@ -94,8 +95,8 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     submit.mockReturnValue(true); charge.mockReturnValue(40); count.mockReturnValue(0);
     stopped.mockReturnValue(false); blocked.mockReturnValue(false); queued.mockReturnValue(false);
     settle.mockReturnValue(true); canContinue.mockReturnValue(true); readySubmit.mockReturnValue(true);
-    context = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work: new TrackedWork(),
-      semaphore: new WorkspaceSemaphore(), disposed: () => disposed };
+    context = { home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work: new TrackedWork(),
+      semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => disposed };
     type Args = ConstructorParameters<typeof TurnNudges>;
     nudges = new TurnNudges(context, unused<Args[1]>('nudgeHumanWaits'),
       unused<Args[2]>('nudgeLine', { isParked: () => false }), unused<Args[3]>('completionGate'),
@@ -272,7 +273,7 @@ describe('nudge bounds through a live runner', () => {
   beforeEach(() => {
     session = undefined;
     f.manager.dispose();
-    f.manager = createFixtureManager(f.store, f.repoRoot, { noWaitNudgeReplyMs: 300 });
+    f.manager = createFixtureManager(f.store, f.repoRoot, { home: testHome(), noWaitNudgeReplyMs: 300 });
     runnerHook.runner = {
       backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => {},

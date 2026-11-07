@@ -137,7 +137,7 @@ export async function branchOf(worktree: string): Promise<string> {
  * that was never registered but was linked once keeps showing its siblings), newest commit
  * first, each with what it takes to tell it apart: its task, its last commit, its build age.
  */
-export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env, home?: Home): Promise<CezarCheckout[]> {
+export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env, home: Home): Promise<CezarCheckout[]> {
   const config = await loadWorkspaceConfig(workspaceConfigPath(env, home));
   const links = listLinks(env, home);
   const roots = [...config.projects.map((project) => project.root), ...links.map((link) => link.checkout).filter((p): p is string => !!p)];
@@ -195,7 +195,7 @@ export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env, ho
  * first unlinked checkout on a slug keeps the plain id, later ones get `linkCheckout`'s
  * path-hash suffix — which `linkDiscovered` then passes back so the link lands under it.
  */
-function assignUniqueIds(found: Omit<CezarCheckout, 'commit'>[], links: { id: string; checkout?: string | undefined }[], env: NodeJS.ProcessEnv, home?: Home): void {
+function assignUniqueIds(found: Omit<CezarCheckout, 'commit'>[], links: { id: string; checkout?: string | undefined }[], env: NodeJS.ProcessEnv, home: Home): void {
   const owner = new Map<string, string>();
   for (const link of links) owner.set(link.id, link.checkout ?? '');
   for (const checkout of found) {

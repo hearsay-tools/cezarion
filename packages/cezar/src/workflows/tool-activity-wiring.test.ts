@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 // The fixture's runner mock must load before anything that imports the run manager.
 import { runnerHook, setupMonitoringFixture } from './run-fixture.testkit.ts';
 import { describe, expect, it } from 'vitest';
@@ -15,7 +16,7 @@ describe('RunManager tool activity', () => {
   it('feeds a live session’s tool items to the tracker, and drops the run when it is cancelled', async () => {
     fixture.manager.dispose();
     const toolActivity = new ToolActivityTracker();
-    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { semaphore: fixture.semaphore, toolActivity });
+    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { home: testHome(), semaphore: fixture.semaphore, toolActivity });
     const record = fixture.manager.startRun(fixture.SINGLE_STEP, { task: 'mock:schedule-wakeup keep going', runner: 'claude', worktree: false });
     fixture.currentId = record.id;
     await fixture.waitFor(record.id, (run) => run?.status === 'waiting');
@@ -38,7 +39,7 @@ describe('RunManager tool activity', () => {
   it('clears its runs from the tracker when the manager is disposed', async () => {
     fixture.manager.dispose();
     const toolActivity = new ToolActivityTracker();
-    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { semaphore: fixture.semaphore, toolActivity });
+    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { home: testHome(), semaphore: fixture.semaphore, toolActivity });
     const record = fixture.manager.startRun(fixture.SINGLE_STEP, { task: 'mock:schedule-wakeup keep going', runner: 'claude', worktree: false });
     fixture.currentId = record.id;
     await fixture.waitFor(record.id, (run) => run?.status === 'waiting');

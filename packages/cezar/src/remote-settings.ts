@@ -15,7 +15,6 @@
  * closed: a missing, malformed or unreadable file grants nothing.
  */
 
-import { resolveHome } from './home/resolve.ts';
 import type { Home } from './home/home.ts';
 import { readdirSync, readFileSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
@@ -40,15 +39,15 @@ export interface RemoteSettingsState {
   issue?: string;
 }
 
-export function remoteSettingsPath(env: NodeJS.ProcessEnv = process.env, home?: Home): string {
-  return (home ?? resolveHome({ purpose: 'compatibility', env })).remoteSettings;
+export function remoteSettingsPath(env: NodeJS.ProcessEnv = process.env, home: Home): string {
+  return home.remoteSettings;
 }
 
 function isPort(port: number): boolean {
   return Number.isInteger(port) && port >= 1 && port <= 65_535;
 }
 
-function grantFile(env: NodeJS.ProcessEnv, port: number, home?: Home): string {
+function grantFile(env: NodeJS.ProcessEnv, port: number, home: Home): string {
   return join(remoteSettingsPath(env, home), `${port}.json`);
 }
 
@@ -71,7 +70,7 @@ function readGrant(path: string, port: number): RemoteSettingsGrant | { issue: s
 }
 
 /** True when the host operator granted the cockpit listening on `port`. Read per call. */
-export function isPortGranted(env: NodeJS.ProcessEnv, port: number | undefined, home?: Home): boolean {
+export function isPortGranted(env: NodeJS.ProcessEnv, port: number | undefined, home: Home): boolean {
   if (port === undefined || !isPort(port)) return false;
   const grant = readGrant(grantFile(env, port, home), port);
   return grant !== null && 'port' in grant;
@@ -83,7 +82,7 @@ export function isGranted(state: RemoteSettingsState, port: number | undefined):
 }
 
 /** Every grant on this host. Never throws. */
-export function readRemoteSettings(env: NodeJS.ProcessEnv = process.env, home?: Home): RemoteSettingsState {
+export function readRemoteSettings(env: NodeJS.ProcessEnv = process.env, home: Home): RemoteSettingsState {
   const path = remoteSettingsPath(env, home);
   let names: string[];
   try {
@@ -110,7 +109,7 @@ export async function enableRemoteSettings(
   port: number,
   env: NodeJS.ProcessEnv = process.env,
   now: Date = new Date(),
-  home?: Home,
+  home: Home,
 ): Promise<RemoteSettingsState> {
   if (!isPort(port)) throw new RangeError(`not a port: ${port}`);
   const dir = remoteSettingsPath(env, home);
@@ -123,7 +122,7 @@ export async function enableRemoteSettings(
 }
 
 /** Withdraw the grant for `port`, or every grant when no port is given. */
-export async function disableRemoteSettings(env: NodeJS.ProcessEnv = process.env, port?: number, home?: Home): Promise<RemoteSettingsState> {
+export async function disableRemoteSettings(env: NodeJS.ProcessEnv = process.env, port: number | undefined, home: Home): Promise<RemoteSettingsState> {
   assertCezarHomeWriteIsSandboxed(remoteSettingsPath(env, home), env);
   if (port === undefined) await rm(remoteSettingsPath(env, home), { recursive: true, force: true });
   else await rm(grantFile(env, port, home), { force: true });

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
@@ -32,7 +33,7 @@ describe('recover() reads legacy generated-inbox records — hearsay-tools/cezar
 
   // Capped at 0 — recover() re-queues, the queue never drains, no agent is spawned.
   const frozen = () =>
-    new WorkspaceSemaphore({ initial: { maxParallel: 0 } });
+    new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } });
 
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
@@ -67,7 +68,7 @@ describe('recover() reads legacy generated-inbox records — hearsay-tools/cezar
     const id = queuedRun(true);
     expect(store.getRun(id)?.generateFollowups).toBe(true); // the pre-restart truth
 
-    await createFixtureManager(store, repoRoot, { semaphore: frozen() }).recover();
+    await createFixtureManager(store, repoRoot, { home: testHome(), semaphore: frozen() }).recover();
 
     // Preserve historical data without using it to control generation.
     expect(store.getRun(id)?.generateFollowups).toBe(true);
@@ -78,7 +79,7 @@ describe('recover() reads legacy generated-inbox records — hearsay-tools/cezar
     process.env.CEZ_FOLLOWUPS = '1';
     const id = queuedRun(preference);
 
-    await createFixtureManager(store, repoRoot, { semaphore: frozen() }).recover();
+    await createFixtureManager(store, repoRoot, { home: testHome(), semaphore: frozen() }).recover();
 
     expect(store.getRun(id)?.generateFollowups).toBe(preference);
     expect(store.getRun(id)?.status).toBe('queued');
@@ -88,7 +89,7 @@ describe('recover() reads legacy generated-inbox records — hearsay-tools/cezar
     process.env.CEZ_FOLLOWUPS = '1';
     const id = queuedRun(false);
 
-    await createFixtureManager(store, repoRoot, { semaphore: frozen() }).recover();
+    await createFixtureManager(store, repoRoot, { home: testHome(), semaphore: frozen() }).recover();
 
     expect(store.getRun(id)?.generateFollowups).toBe(false);
   });

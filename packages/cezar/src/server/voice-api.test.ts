@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -53,7 +54,7 @@ describe('voice routes', () => {
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
-  const app = () => createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
+  const app = () => createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
   const dryRun = () => {
     vi.stubEnv('CEZ_VOICE', '1');
     vi.stubEnv('CEZ_DRY_RUN', '1');

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -25,7 +26,7 @@ describe('a repeated query key stays 200 (c.req.query took the first value)', ()
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-rq-'))
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true })
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot, store: RunStore.open(join(repoRoot, '.ai/cezar')),
       manager: {} as RunManager, version: '0.0.0-test',
       providerAuth: new ProviderAuthService({

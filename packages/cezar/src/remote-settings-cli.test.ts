@@ -1,3 +1,4 @@
+import { testHome } from './home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,11 +19,11 @@ afterEach(() => {
 
 async function run(argv: string[], cockpits: CockpitHealth[] = []) {
   const lines: string[] = [];
-  const code = await runRemoteSettingsCommand(argv, env, { stdout: (line) => lines.push(line), cockpits: async () => cockpits });
+  const code = await runRemoteSettingsCommand(argv, env, { stdout: (line) => lines.push(line), cockpits: async () => cockpits }, testHome(env));
   return { code, body: JSON.parse(lines.join('\n')) as Record<string, unknown> };
 }
 
-const ports = () => readRemoteSettings(env).grants.map((grant) => grant.port);
+const ports = () => readRemoteSettings(env, testHome(env)).grants.map((grant) => grant.port);
 const remote = (port: number, settingsAdmin = false): CockpitHealth => ({ url: `http://127.0.0.1:${port}`, localHandoff: false, settingsAdmin });
 
 describe('cez remote-settings', () => {
@@ -61,8 +62,8 @@ describe('cez remote-settings', () => {
   });
 
   it('status reports the grants and what each cockpit does with them', async () => {
-    await enableRemoteSettings(4321, env);
-    await enableRemoteSettings(4322, env);
+    await enableRemoteSettings(4321, env, undefined, testHome(env));
+    await enableRemoteSettings(4322, env, undefined, testHome(env));
     const { body } = await run(['status'], [
       remote(4321, true),
       remote(4322, false),

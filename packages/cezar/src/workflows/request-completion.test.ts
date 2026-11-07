@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { runnerHook } from './run-fixture.testkit.ts';
 import { completionRefusal, type CompletionGateHost } from './run/completion-gate.ts';
@@ -35,8 +36,8 @@ function obligation(senderRunId: string, recipientRunId: string, kind: 'request'
     createdAt: new Date().toISOString(), deadline: new Date(Date.now() + 600_000).toISOString(), state: 'accepted' as const, requestHash: 'a'.repeat(64) };
 }
 function completionRefusalFor(id: string) {
-  const context: RunModuleContext = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
-    work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => false };
+  const context: RunModuleContext = { home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
+    work: new TrackedWork(), semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false };
   const host = unused<CompletionGateHost>('completionHost', { active: new Map(),
     unansweredQuestions: () => [], parentCompletionBlockers: () => [] });
   return completionRefusal(context, host, id);

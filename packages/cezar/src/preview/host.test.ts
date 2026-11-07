@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PreviewServer } from '@open-mercato/cezar-contract';
@@ -116,7 +117,7 @@ describe('PreviewHost', () => {
       progress = onProgress;
       return new Promise<string>(resolve => { finish = resolve; });
     });
-    const { host, ctx, browsers } = make(undefined, undefined, undefined, { download });
+    const { host, ctx, browsers } = make(undefined, undefined, undefined, { home: testHome(), download });
     const a = fakeViewer(), b = fakeViewer();
     const other = { ...ctx, runId: 'run-2' };
     await host.open(ctx, a, { url: 'http://localhost:3000/a' });
@@ -148,7 +149,7 @@ describe('PreviewHost', () => {
 
   it.each([new Error('network refused'), 'download refused'])('reports download failure %s and permits a new download', async error => {
     const download = vi.fn().mockRejectedValue(error);
-    const { host, ctx } = make(undefined, undefined, undefined, { download });
+    const { host, ctx } = make(undefined, undefined, undefined, { home: testHome(), download });
     const viewer = fakeViewer();
     await host.open(ctx, viewer, { port: 5173 });
     await host.handle(ctx, viewer, { t: 'download' });
@@ -170,7 +171,7 @@ describe('PreviewHost', () => {
         signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
       });
     };
-    const { host, ctx } = make(undefined, undefined, undefined, { download });
+    const { host, ctx } = make(undefined, undefined, undefined, { home: testHome(), download });
     const viewer = fakeViewer();
     await host.open(ctx, viewer, { port: 5173 });
     const pending = host.handle(ctx, viewer, { t: 'download' });
@@ -304,7 +305,7 @@ describe('PreviewHost', () => {
       progress = opts.onProgress;
       return new Promise<string>((resolve, reject) => { finish = resolve; fail = reject; });
     };
-    const { host, ctx, browsers } = make(undefined, undefined, undefined, { download });
+    const { host, ctx, browsers } = make(undefined, undefined, undefined, { home: testHome(), download });
     const viewer = fakeViewer();
     await host.open(ctx, viewer, { port: 5173 });
     const pending = host.handle(ctx, viewer, { t: 'download' });
@@ -384,7 +385,7 @@ describe('PreviewHost', () => {
       cdp: cdp.cdp, connection: fakeConnection().connection, pageTargetId: 'PANE', close,
       exited: new Promise<BrowserExit>(() => {}),
     }));
-    const { host, ctx } = make(undefined, undefined, undefined, { launchBrowser });
+    const { host, ctx } = make(undefined, undefined, undefined, { home: testHome(), launchBrowser });
     const viewer = fakeViewer();
     await host.open(ctx, viewer, { agent: true });
     const grant = host.grantAgent(ctx.runId, () => ctx);

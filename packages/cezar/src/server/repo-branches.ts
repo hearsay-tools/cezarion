@@ -83,7 +83,7 @@ export interface ClassifyInput {
 /** The project a classification reads: its root, its runs and the run manager's liveness. */
 export interface ClassifyProject {
   root: string;
-  home?: Home | undefined;
+  home: Home;
   store: Pick<RunStore, 'listBranchOwners'>;
   manager: Pick<RunManager, 'isActive' | 'claimForBranchCleanup'>;
 }

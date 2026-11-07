@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,7 +37,7 @@ describe('the branch sweep', () => {
     return release;
   }
   function project(runs: readonly RunRecord[], claim: (ids: readonly string[]) => (() => void) | null = claimAll): ClassifyProject {
-    return {
+    return { home: testHome(),
       root,
       store: { listBranchOwners: () => owners(runs) },
       manager: { isActive: () => false, claimForBranchCleanup: claim },

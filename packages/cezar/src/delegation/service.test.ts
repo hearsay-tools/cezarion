@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS, STEP_KIND, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { setRunStatus, runIds } from '../runs/run-store.testkit.ts';
@@ -232,7 +233,7 @@ describe('delegation service durable authority', () => {
       });
       it('resolves a YAML agentProfile per step and refuses an account the registry does not know', async () => {
         const work = join(f.root, 'codex-work'); mkdirSync(work);
-        await mergeWriteAgentAccounts(store => { store.accounts = [{ id: 'work', provider: 'codex', configDir: work, label: 'Work', addedAt: '' }]; });
+        await mergeWriteAgentAccounts(store => { store.accounts = [{ id: 'work', provider: 'codex', configDir: work, label: 'Work', addedAt: '' }]; }, testHome());
         catalog('profiled', ['name: profiled', 'steps:', '  - id: a', '    prompt: "{{task}}"', '    runner: codex', '    agentProfile: work'].join('\n'));
         const { workerId } = await f.service.spawn(f.caller, { ...input(), workflow: 'profiled' });
         expect(f.store.getRun(workerId)).toMatchObject({ runner: 'codex', agentProfile: 'work', workflowDef: { steps: [{ id: 'a', runner: 'codex', agentProfile: 'work' }] } });
@@ -387,7 +388,7 @@ describe('delegation service durable authority', () => {
     } } }]);
 
     const restarted = new DelegationService({ backoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
-    const detach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
+    const detach = restarted.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: f.manager });
     restarted.armDestroyRetries('project');
     detach();
     // bound: negative window. The ticks are 50 ms apart, so 120 ms spans two of them: a retry the detach failed to cancel would have run by now.
@@ -395,10 +396,10 @@ describe('delegation service durable authority', () => {
     expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'incomplete' } });
     expect(existsSync(workspace.path)).toBe(true);
 
-    const stale = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
+    const stale = restarted.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: f.manager });
     restarted.armDestroyRetries('project');
     const replacementManager = createFixtureManager(f.store, f.root);
-    const replaced = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
+    const replaced = restarted.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: replacementManager });
     stale(); // a stale detach must not detach the replacement
     // bound: negative window, as above. The replaced project's armed timer fires within one 50 ms tick and must find itself replaced; 120 ms spans two ticks.
     await new Promise(resolve => setTimeout(resolve, 120));
@@ -406,7 +407,7 @@ describe('delegation service durable authority', () => {
     replaced();
     replacementManager.dispose();
 
-    const attach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
+    const attach = restarted.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: f.manager });
     restarted.armDestroyRetries('project');
     await vi.waitFor(() => expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } }), { timeout: 10_000 });
     expect(existsSync(workspace.path)).toBe(false);
@@ -432,7 +433,7 @@ describe('delegation service durable authority', () => {
     f.service.armDestroyRetries('project');
     await vi.waitFor(() => expect(termination).toHaveBeenCalledOnce(), { timeout: 10_000 });
     const replacementManager = createFixtureManager(f.store, f.root);
-    const detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
+    const detachReplacement = f.service.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: replacementManager });
     const writes = vi.spyOn(f.store, 'commitDelegation');
     const results = vi.spyOn(f.store, 'commitWorkerResult');
     const events = vi.spyOn(f.store, 'appendEvent');
@@ -488,7 +489,7 @@ describe('delegation service durable authority', () => {
     try {
       await vi.waitFor(() => expect(existsSync(blocked)).toBe(true), { timeout: 10_000 });
       replacementManager = createFixtureManager(f.store, f.root);
-      detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
+      detachReplacement = f.service.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: replacementManager });
       const oldResults = results.mock.calls.length;
       const writes = vi.spyOn(f.store, 'commitDelegation');
       const events = vi.spyOn(f.store, 'appendEvent');
@@ -605,7 +606,7 @@ describe('delegation service durable authority', () => {
     f.manager.dispose(); f.store.close();
     // The restarted cezar: a fresh manager owns no execution or queue entry for the worker.
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); const manager = createFixtureManager(reopened, f.root);
-    f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager });
+    f.service.registerProject({ home: testHome(), id: 'project', root: f.root, store: reopened, manager });
     try {
       // Under full-suite load the host-wide process scan can transiently return alive/unknown.
       // collect caches that conservative result for 2 s; poll it (not the finalizer) so the

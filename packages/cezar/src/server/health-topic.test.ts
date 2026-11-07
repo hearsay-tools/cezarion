@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -86,7 +87,7 @@ describe('health topic + cache (live-server path)', () => {
 
   const build = () => {
     const { hub, topics, families } = stubHub();
-    const deps: ServerDeps = {
+    const deps: ServerDeps = { home: testHome(),
       repoRoot,
       store,
       manager: {} as RunManager,
@@ -193,12 +194,12 @@ describe('health topic + cache (live-server path)', () => {
     };
     try {
       expect((await capabilities()).settingsAdmin).toBe(false);
-      await enableRemoteSettings(4321);
+      await enableRemoteSettings(4321, undefined, undefined, testHome());
       expect(await capabilities()).toMatchObject({ settingsAdmin: true, remoteSettingsAdmin: true });
-      await disableRemoteSettings();
+      await disableRemoteSettings(undefined, undefined, testHome());
       expect((await capabilities()).settingsAdmin).toBe(false);
     } finally {
-      await disableRemoteSettings();
+      await disableRemoteSettings(undefined, undefined, testHome());
     }
   }, TEST_BUDGET_MS);
 
@@ -308,7 +309,7 @@ describe('health topic + cache (live-server path)', () => {
 
   it('a hub-less app is unchanged: no cache, every request computes fresh', async () => {
     setRunner('claude');
-    const app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
+    const app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
     currentApp = app;
     expect(await runner()).toBe('claude');
     setRunner('codex');

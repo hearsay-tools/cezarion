@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setupMonitoringFixture, runnerHook } from './run-fixture.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 import { existsSync, readFileSync } from 'node:fs';
@@ -25,8 +26,8 @@ describe('RunManager monitoring timers', () => {
 
   it('park mode remains reachable as an explicit operator choice (#810)', async () => {
     fixture.manager.dispose();
-    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, {
-      semaphore: new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: null } }),
+    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { home: testHome(),
+      semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { monitoringWakeIntervalMinutes: null } }),
     });
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:schedule-wakeup keep going', runner: 'claude', worktree: false });
     fixture.currentId = record.id;
@@ -41,8 +42,8 @@ describe('RunManager monitoring timers', () => {
 
   it('optionally wakes a parked monitor without fabricating a user message', async () => {
     fixture.manager.dispose();
-    const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.001 } });
-    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { semaphore });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { monitoringWakeIntervalMinutes: 0.001 } });
+    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { home: testHome(), semaphore });
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:schedule-wakeup keep going', runner: 'claude', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, () => {
@@ -105,8 +106,8 @@ describe('RunManager monitoring timers', () => {
 
   it('a passive backend diagnostic keeps a parked monitor wakeable', async () => {
     fixture.manager.dispose();
-    const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.01, maxMonitoringSessions: 0 } });
-    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { semaphore });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { monitoringWakeIntervalMinutes: 0.01, maxMonitoringSessions: 0 } });
+    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { home: testHome(), semaphore });
     const record = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:schedule-wakeup keep going', runner: 'claude', worktree: false });
     fixture.currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));

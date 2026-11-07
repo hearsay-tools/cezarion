@@ -1,3 +1,4 @@
+import { testHome } from './home/test-home.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -54,9 +55,9 @@ describe('provisionSkills after an interrupted write', { timeout: 30_000 }, () =
   it('writes a generated SKILL.md whose first write failed at the next pass', async () => {
     const builtin: Skill = { name: 'auto-skill', description: 'Built in.', body: 'BUILTIN-BODY', path: 'builtin:auto-skill', source: 'builtin' };
     fault.failNextSkillWrite = true;
-    await provisionSkills(worktree, [builtin], [builtin]);
+    await provisionSkills(worktree, [builtin], [builtin], { home: testHome() });
     expect(fault.failNextSkillWrite).toBe(false);
-    await provisionSkills(worktree, [builtin], [builtin]);
+    await provisionSkills(worktree, [builtin], [builtin], { home: testHome() });
     for (const dir of ['.claude', '.agents', '.cursor']) {
       expect(readFileSync(join(worktree, dir, 'skills', 'auto-skill', 'SKILL.md'), 'utf8'))
         .toBe('---\nname: "auto-skill"\ndescription: "Built in."\n---\n\nBUILTIN-BODY\n');

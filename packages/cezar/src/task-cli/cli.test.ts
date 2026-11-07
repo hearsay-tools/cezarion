@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -64,11 +65,11 @@ describe('cez task', () => {
   const run = (argv: string[], stdin?: string) => runTaskCommand(argv, {}, io(stdin));
   /** Register the harness repo with a task webhook (#589); CEZ_HOME is a per-worker sandbox. */
   const withWebhook = async () => {
-    const entry = await registerProject(harness.repoRoot);
+    const entry = await registerProject(harness.repoRoot, undefined, testHome());
     await mergeWriteWorkspaceConfig((config) => {
       const found = config.projects.find((p) => p.id === entry.id)!;
       found.webhook = { url: 'https://bot.example/hook', token: 't' };
-    });
+    }, testHome());
   };
   const last = () => JSON.parse(out.at(-1) ?? 'null') as Record<string, unknown>;
   const start = async (task = 'do the thing') => {
@@ -101,7 +102,7 @@ describe('cez task', () => {
       )),
     );
     it.each(cases)('$operation with --$flag $position ($form) resolves and requests the same cockpit', async ({ operation, flag, position, form }) => {
-      const project = await registerProject(harness.repoRoot);
+      const project = await registerProject(harness.repoRoot, undefined, testHome());
       const api = `${cockpit.origin}/api/v1/p/${project.id}`;
       const id = await start();
       const value = flag === 'url' ? cockpit.origin : harness.repoRoot;

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,10 +15,10 @@ describe('agentModelsLocked', () => {
   it('is off by default and only exact 1 enables it', () => {
     const home = mkdtempSync(join(tmpdir(), 'cez-model-policy-home-'));
     roots.push(home);
-    expect(agentModelsLocked(undefined, { CEZ_HOME: home })).toBe(false);
-    expect(agentModelsLocked(undefined, { CEZ_HOME: home, CEZ_AGENT_MODELS_LOCKED: '0' })).toBe(false);
-    expect(agentModelsLocked(undefined, { CEZ_HOME: home, CEZ_AGENT_MODELS_LOCKED: 'true' })).toBe(false);
-    expect(agentModelsLocked(undefined, { CEZ_HOME: home, CEZ_AGENT_MODELS_LOCKED: '1' })).toBe(true);
+    expect(agentModelsLocked(undefined, { CEZ_HOME: home }, testHome({ CEZ_HOME: home }))).toBe(false);
+    expect(agentModelsLocked(undefined, { CEZ_HOME: home, CEZ_AGENT_MODELS_LOCKED: '0' }, testHome({ CEZ_HOME: home, CEZ_AGENT_MODELS_LOCKED: '0' }))).toBe(false);
+    expect(agentModelsLocked(undefined, { CEZ_HOME: home, CEZ_AGENT_MODELS_LOCKED: 'true' }, testHome({ CEZ_HOME: home, CEZ_AGENT_MODELS_LOCKED: 'true' }))).toBe(false);
+    expect(agentModelsLocked(undefined, { CEZ_HOME: home, CEZ_AGENT_MODELS_LOCKED: '1' }, testHome({ CEZ_HOME: home, CEZ_AGENT_MODELS_LOCKED: '1' }))).toBe(true);
   });
 
   it('also accepts the optional repo config flag and degrades malformed files', () => {
@@ -27,13 +28,13 @@ describe('agentModelsLocked', () => {
     mkdirSync(join(repoRoot, '.ai', 'cezar'), { recursive: true });
 
     writeFileSync(join(repoRoot, '.ai', 'cezar', 'config.json'), '{"modelsLocked":true}\n');
-    expect(agentModelsLocked(repoRoot, { CEZ_HOME: home })).toBe(true);
+    expect(agentModelsLocked(repoRoot, { CEZ_HOME: home }, testHome({ CEZ_HOME: home }))).toBe(true);
 
     writeFileSync(join(repoRoot, '.ai', 'cezar', 'config.json'), '{"modelsLocked":false}\n');
-    expect(agentModelsLocked(repoRoot, { CEZ_HOME: home })).toBe(false);
+    expect(agentModelsLocked(repoRoot, { CEZ_HOME: home }, testHome({ CEZ_HOME: home }))).toBe(false);
 
     writeFileSync(join(repoRoot, '.ai', 'cezar', 'config.json'), '{broken');
-    expect(agentModelsLocked(repoRoot, { CEZ_HOME: home })).toBe(false);
+    expect(agentModelsLocked(repoRoot, { CEZ_HOME: home }, testHome({ CEZ_HOME: home }))).toBe(false);
   });
 
   it('accepts the global workspace flag for every repository', () => {
@@ -42,7 +43,7 @@ describe('agentModelsLocked', () => {
     roots.push(repoRoot, home);
     writeFileSync(join(home, 'config.json'), '{"modelsLocked":true}\n');
 
-    expect(agentModelsLocked(repoRoot, { CEZ_HOME: home })).toBe(true);
-    expect(agentModelsLocked(undefined, { CEZ_HOME: home })).toBe(true);
+    expect(agentModelsLocked(repoRoot, { CEZ_HOME: home }, testHome({ CEZ_HOME: home }))).toBe(true);
+    expect(agentModelsLocked(undefined, { CEZ_HOME: home }, testHome({ CEZ_HOME: home }))).toBe(true);
   });
 });

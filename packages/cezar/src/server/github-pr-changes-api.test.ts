@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { resolveForgeRoot } from './forge/index.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,7 +31,7 @@ describe('the GitHub PR changes API', () => {
   });
 
   it('serves deterministic bounded structured changes through both route mounts', async () => {
-    const app = createApp({ repoRoot, store, manager: {} as RunManager, version: 'test' });
+    const app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: 'test' });
     const legacy = await apiRequest(app, '/api/v1/github/prs/128/changes');
     const scoped = await apiRequest(app, '/api/v1/p/default/github/prs/128/changes');
     expect(legacy.status).toBe(200);
@@ -45,14 +46,14 @@ describe('the GitHub PR changes API', () => {
   });
 
   it('validates the number and exact refresh flag', async () => {
-    const app = createApp({ repoRoot, store, manager: {} as RunManager, version: 'test' });
+    const app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: 'test' });
     expect((await apiRequest(app, '/api/v1/github/prs/0/changes')).status).toBe(400);
     expect((await apiRequest(app, '/api/v1/github/prs/abc/changes')).status).toBe(400);
     expect((await apiRequest(app, '/api/v1/github/prs/1/changes?refresh=true')).status).toBe(400);
     expect((await apiRequest(app, '/api/v1/github/prs/1/changes?refresh=1')).status).toBe(200);
   });
   it('degrades when the driver omits prDiff', async () => {
-    const withoutCapability = createApp({
+    const withoutCapability = createApp({ home: testHome(),
       repoRoot, store, manager: {} as RunManager, version: 'test',
       forgeFactory: (root) => {
         const driver = resolveForgeRoot(root);

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { defined } from '../core/defined.ts';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,7 +27,7 @@ describe('generated inbox retirement — hearsay-tools/cezarion#1543', () => {
     else process.env.CEZ_FOLLOWUPS = previous;
   });
   it('removes todo endpoints under every alias without touching retained bytes', async () => {
-    const app = createApp({ repoRoot: root, store, manager: {} as RunManager, version: '0.0.0-test' });
+    const app = createApp({ home: testHome(), repoRoot: root, store, manager: {} as RunManager, version: '0.0.0-test' });
     for (const prefix of ['/api/v1', '/api/v1/p/default']) {
       for (const [method, path] of [['GET', '/todos'], ['DELETE', '/todos/old'], ['POST', '/todos/old/start']]) {
         const response = await apiRequest(app, `${prefix}${path}`, defined({ method }));

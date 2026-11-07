@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,7 +25,7 @@ describe('task file links', () => {
     writeFileSync(join(root, 'ADR space.md'), '# project copy');
   });
   afterEach(() => { store.flush(); rmSync(root, { recursive: true, force: true }); });
-  const get = (suffix: string, alias = '') => apiRequest(createApp({ repoRoot: root, store, manager: {} as RunManager, version: 'test' }), `/api/v1${alias}/runs/${runId}${suffix}`);
+  const get = (suffix: string, alias = '') => apiRequest(createApp({ home: testHome(), repoRoot: root, store, manager: {} as RunManager, version: 'test' }), `/api/v1${alias}/runs/${runId}${suffix}`);
   const link = (path: string, alias = '') => get(`/file-link?path=${encodeURIComponent(path)}`, alias);
 
   it('previews an absolute task path rather than resolving it against the web origin', async () => {
@@ -83,7 +84,7 @@ describe('task file links', () => {
       expect((await get(`/artifacts/${artifact.id}/image`)).status).toBe(409);
       expect(artifactListSchema.parse(await (await get('/artifacts')).json()).artifacts).toHaveLength(1);
       const other = store.createRun({ title: 'other', task: 'other', workflow: 'quick-task', steps: [] });
-      const app = createApp({ repoRoot: root, store, manager: {} as RunManager, version: 'test' });
+      const app = createApp({ home: testHome(), repoRoot: root, store, manager: {} as RunManager, version: 'test' });
       expect((await apiRequest(app, `/api/v1/runs/${other.id}/artifacts/${artifact.id}`)).status).toBe(404);
     } finally { rmSync(outside, { recursive: true, force: true }); }
   });
@@ -109,9 +110,9 @@ describe('task file links', () => {
     const path = join(working, 'report.html'); writeFileSync(path, '<title>Owned</title>');
     const artifact = await publishArtifact(artifactDirectory(dataDir, runId), runId, path);
     const otherRoot = join(root, 'other'); mkdirSync(otherRoot);
-    const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'other', root: otherRoot, status: 'not-git' }] });
+    const contexts = new ProjectContexts({ home: testHome(), listProjects: async () => [{ id: 'other', root: otherRoot, status: 'not-git' }] });
     try {
-      const app = createApp({ repoRoot: root, store, contexts, manager: {} as RunManager, version: 'test' });
+      const app = createApp({ home: testHome(), repoRoot: root, store, contexts, manager: {} as RunManager, version: 'test' });
       expect((await apiRequest(app, `/api/v1/p/default/runs/${runId}/artifacts/${artifact.id}/metadata`)).status).toBe(200);
       expect((await apiRequest(app, `/api/v1/p/other/runs/${runId}/artifacts/${artifact.id}/metadata`)).status).toBe(404);
     } finally { contexts.disposeAll(); }

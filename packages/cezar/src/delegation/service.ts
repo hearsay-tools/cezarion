@@ -86,7 +86,7 @@ export type DelegationManager = Pick<RunManager,
   | 'reserveInboxInputs' | 'selectDelegationExecutionSettings' | 'settleOrphanedWorkerExecution'
   | 'steerWorker' | 'takeWorkerTerminationBlocker'>;
 
-export type DelegationProject = { home?: Home | undefined; id: string; root: string; store: RunStore; manager: DelegationManager };
+export type DelegationProject = { home: Home; id: string; root: string; store: RunStore; manager: DelegationManager };
 
 /**
  * Resolve an explicit workflow or skill. With neither, use the built-in quick-task constant, not

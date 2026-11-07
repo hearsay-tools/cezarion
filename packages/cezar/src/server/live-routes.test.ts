@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { LIVE_BYTE_LIMIT } from '@open-mercato/cezar-contract/live-limits';
@@ -20,7 +21,7 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'cez-live-'));
   store = RunStore.open(join(root, '.ai/cezar'));
   runId = store.createRun({ title: 'Stream', workflow: 'quick-task', task: 'Stream', steps: [] }).id;
-  app = createApp({ repoRoot: root, store, manager: {} as RunManager, version: 'test', bootProjectId: 'boot' });
+  app = createApp({ home: testHome(), repoRoot: root, store, manager: {} as RunManager, version: 'test', bootProjectId: 'boot' });
 });
 afterEach(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
 const batch = (runs: unknown[]) => apiRequest(app, '/api/v1/workspace/run-event-batches', {
@@ -59,7 +60,7 @@ describe('finite multi-run catch-up', () => {
     if (priorText) store.emitEphemeral(runId, { type: 'item.delta', itemId: 'typing', field: 'text', delta: 'before ' });
     if (cold) {
       store.close(); store = RunStore.open(join(root, '.ai/cezar'));
-      app = createApp({ repoRoot: root, store, manager: {} as RunManager, version: 'test', bootProjectId: 'boot' });
+      app = createApp({ home: testHome(), repoRoot: root, store, manager: {} as RunManager, version: 'test', bootProjectId: 'boot' });
     }
     const other = store.createRun({ title: 'Other', task: 'Other', workflow: 'quick-task', steps: [] }).id;
     const before = store.listenerCount('event');

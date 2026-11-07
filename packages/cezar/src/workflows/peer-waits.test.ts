@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { observationClock } from '../core/observation-clock.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -40,7 +41,7 @@ async function heldParent() {
 /** The delegation service the peers send through, and a credential per run. */
 function conversations() {
   const service = new DelegationService();
-  const detach = service.registerProject({ id: 'project', root, store, manager });
+  const detach = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
   const credentials = new CredentialRegistry();
   onTestFinished(() => { detach(); credentials.close(); });
   const callerFor = (runId: string) => credentials.authenticate(credentials.issue('project', runId, randomUUID()))!;

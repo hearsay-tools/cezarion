@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import * as runners from '../core/runner-factory.ts';
@@ -45,7 +46,7 @@ describe('recover() and the autonomous flag (#489)', () => {
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
   });
 
-  const frozen = () => new WorkspaceSemaphore({ initial: { maxParallel: 0 } });
+  const frozen = () => new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } });
 
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
@@ -78,7 +79,7 @@ describe('recover() and the autonomous flag (#489)', () => {
     const id = queuedRun(true);
     expect(store.getRun(id)?.autonomous).toBe(true);
 
-    await createFixtureManager(store, repoRoot, { semaphore: frozen() }).recover();
+    await createFixtureManager(store, repoRoot, { home: testHome(), semaphore: frozen() }).recover();
 
     // Still recovered (queued), still autonomous — so a later settleSuccess lands it at `done`.
     expect(store.getRun(id)?.status).toBe('queued');
@@ -87,7 +88,7 @@ describe('recover() and the autonomous flag (#489)', () => {
 
   it('leaves a non-autonomous recovered run non-autonomous', async () => {
     const id = queuedRun(false);
-    await createFixtureManager(store, repoRoot, { semaphore: frozen() }).recover();
+    await createFixtureManager(store, repoRoot, { home: testHome(), semaphore: frozen() }).recover();
     expect(store.getRun(id)?.autonomous).toBe(false);
   });
 
@@ -97,7 +98,7 @@ describe('recover() and the autonomous flag (#489)', () => {
     const id = queuedRun(autonomous);
     store.updateStep(id, 'work', { status: STEP_STATUS.done, sessionId: 'previous-session', backend: 'claude' });
     setRunStatus(store, id, RUN_STATUS.done, { runner: 'claude' });
-    const manager = createFixtureManager(store, repoRoot, { semaphore: frozen() });
+    const manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore: frozen() });
     try {
       expect(manager.continueRun(id, { text: 'Continue setup' }, true)).toEqual({ ok: true });
       expect(store.getRun(id)?.autonomous).toBe(autonomous);
@@ -108,7 +109,7 @@ describe('recover() and the autonomous flag (#489)', () => {
     }
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
     const semaphore = frozen();
-    const recovered = createFixtureManager(store, repoRoot, { semaphore });
+    const recovered = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
     try {
       await recovered.recover();
       expect(store.getRun(id)?.autonomous).toBe(autonomous);

@@ -53,7 +53,7 @@ export type DevServerLike = Pick<DevServer, 'state' | 'attempts' | 'exitCode' | 
 };
 
 export type PreviewHostDeps = {
-  home?: Home;
+  home: Home;
   probe?: (port: number) => Promise<boolean>;
   createServer?: (opts: { server: PreviewServer; worktreePath: string; dir: string }) => DevServerLike;
   launchBrowser?: (profileDir: string) => Promise<BrowserHandle>;
@@ -126,13 +126,13 @@ export class PreviewHost implements PreviewHostLike {
   /** Chromium lands in one shared cache, so there is one download for the whole host. */
   private download?: { controller: AbortController; promise: Promise<string>; watchers: Set<RunEntry> } | undefined;
 
-  constructor(deps: PreviewHostDeps = {}) {
+  constructor(deps: PreviewHostDeps) {
     const env = deps.env ?? process.env;
     this.deps = {
       probe: deps.probe ?? probePort,
       createServer: deps.createServer ?? (opts => new DevServer(opts)),
       launchBrowser: deps.launchBrowser ?? (profileDir => launchBrowser(profileDir, env, deps.home)),
-      download: deps.download ?? (opts => downloadChromium({ ...opts, ...(deps.home ? { cacheDir: deps.home.cache } : {}) })),
+      download: deps.download ?? (opts => downloadChromium({ ...opts, cacheDir: deps.home.cache })),
       osRelease: deps.osRelease ?? readOsRelease,
       env,
       platform: deps.platform ?? process.platform,

@@ -1,3 +1,4 @@
+import { testHome } from '../../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -32,9 +33,9 @@ function fixture(retention?: number) {
 /** Unit-test retention where it lives; public completion also runs other settlement work. */
 function settlement(root: string, store: RunStore, sweepBranches?: (keep: number) => void) {
   const work = new TrackedWork();
-  const semaphore = new WorkspaceSemaphore();
-  createFixtureManager(store, root, { work, semaphore });
-  const context = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work, semaphore, disposed: () => false, sweepBranches };
+  const semaphore = new WorkspaceSemaphore({ home: testHome() });
+  createFixtureManager(store, root, { home: testHome(), work, semaphore });
+  const context = { home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work, semaphore, disposed: () => false, sweepBranches };
   const host = unused<ConstructorParameters<typeof RunSettlement>[9]>('RunSettlement.host', { claimWorktreeReclaim: () => null, preview: undefined });
   return new RunSettlement(context, unused('HumanWaits'), unused('WorkerQuestions'), unused('WorktreeAutosave'),
     unused('TurnBookkeeper'), unused('RunLine'), unused('AutoResumeScheduler'), unused('WorkerExecutions'),

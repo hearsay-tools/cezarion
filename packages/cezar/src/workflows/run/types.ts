@@ -216,7 +216,7 @@ export type AutomationToolService = {
 
 /** Shared dependencies for state-owning run modules. */
 export interface RunModuleContext {
-  home?: Home | undefined;
+  home: Home;
   readonly work: TrackedWork;
   store: import('../../runs/store.ts').RunStore;
   repoRoot: string;

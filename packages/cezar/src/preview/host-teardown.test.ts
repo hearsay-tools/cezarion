@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -27,7 +28,7 @@ it.each(['release', 'replacement'] as const)('reopening during real process tear
   const run = { id: 'run-1', previewServers: [registration] };
   const ctx: RunContext = { runId: run.id, title: 'teardown', worktreePath: root, dataDir: root, store: { getRun: () => run, appendEvent: () => undefined } as unknown as RunContext['store'] };
   let dev!: DevServer;
-  const host = new PreviewHost({
+  const host = new PreviewHost({ home: testHome(),
     createServer: opts => (dev = new DevServer({ ...opts, probeMs: 20 })),
     launchBrowser: async () => { throw new ChromiumMissingError(); },
   });

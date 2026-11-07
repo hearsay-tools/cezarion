@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 /**
  * #486 review: a held human follow-up that drains without opening a turn must
  * not leave the run stuck `running`. The backstop timer re-settles that boundary.
@@ -64,7 +65,7 @@ describe('held human input liveness bound (#486)', () => {
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot, { unreadInputGraceMs: 300 });
+    manager = createFixtureManager(store, repoRoot, { home: testHome(), unreadInputGraceMs: 300 });
     const handlers = manager.cezarToolHandlers.bind(manager);
     vi.spyOn(manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
       const tools = handlers(id, generation);
