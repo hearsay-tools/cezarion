@@ -53,3 +53,12 @@ describe('desktop stop request on stdin', () => {
     expect(shutdown).not.toHaveBeenCalled();
   });
 });
+
+it('reads preferred desktop supervisor signals and preserves intentional clears', () => {
+  const shutdown = vi.fn(); const stdin = new PassThrough();
+  const stop = watchSupervisor(shutdown, {HSQ_DESKTOP: '1', CEZ_DESKTOP: '0', HSQ_SUPERVISOR_STDIN: '1', CEZ_SUPERVISOR_STDIN: '0'}, stdin);
+  stdin.emit('end'); expect(shutdown).toHaveBeenCalledOnce(); stop();
+  const ignored = vi.fn();
+  const cleanup = watchSupervisor(ignored, {HSQ_DESKTOP: '', CEZ_DESKTOP: '1', CEZ_SUPERVISOR_STDIN: '1'}, stdin);
+  stdin.emit('close'); expect(ignored).not.toHaveBeenCalled(); cleanup();
+});

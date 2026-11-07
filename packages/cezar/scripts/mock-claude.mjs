@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { productEnv } from './product-env.mjs';
 import { loadControls } from './mock-controls.mjs';
 import { scenarioFor, play, afterParityPark } from './mock-scenario.mjs';
 import { closeSync } from 'node:fs';
@@ -110,7 +111,7 @@ const MOCK_SCREENSHOT_B64 =
 // append a progress line to CEZ_HANDOFF_FILE so handoff continuity is testable without tokens.
 function writeHandoff() {
   try {
-    const handoff = process.env.CEZ_HANDOFF_FILE;
+    const handoff = productEnv('HANDOFF_FILE');
     if (handoff) {
       const text = readFileSync(handoff, 'utf8');
       const line = `- ${new Date().toISOString()} — mock: implemented the change (dry run)\n`;

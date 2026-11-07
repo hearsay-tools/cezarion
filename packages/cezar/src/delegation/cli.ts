@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { execFileSync } from 'node:child_process';
 import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
@@ -265,8 +266,8 @@ async function runDelegationCommand(argv: string[], env: NodeJS.ProcessEnv, help
     const { path, body } = await commandPayload(operation, values, positionals, argv);
     let endpoint: URL;
     try {
-      endpoint = delegationEndpoint(env.CEZ_DELEGATION_URL);
-      token = z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(env.CEZ_DELEGATION_TOKEN);
+      endpoint = delegationEndpoint(productEnv('DELEGATION_URL', env));
+      token = z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(productEnv('DELEGATION_TOKEN', env));
     } catch { throw new DelegationPolicyError('unavailable_transport', 'Delegation session is unavailable'); }
     let dispatchedMessageId: string | undefined;
     try {

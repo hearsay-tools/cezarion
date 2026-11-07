@@ -1,3 +1,4 @@
+import { autosaveOwnerEnv } from './autosave-git.ts';
 import * as childProcess from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as liveness from './delegation/process-liveness.ts';
@@ -97,13 +98,16 @@ describe('autosave cwd-holder proof', () => {
     candidates = [101, 202]; tokens.set(202, 'brief'); owners.set(202, 'gone');
     expect(await pending()).toBe(false);
   });
-  it('reads the Darwin marker from ps and fails closed when ps hides the environment', async () => {
+  it.each([false, true])('reads the same Darwin owner marker with rebrand=%s and fails closed when ps hides the environment', async rebrand => {
     vi.stubGlobal('process', { ...process, platform: 'darwin' });
     vi.spyOn(process, 'kill').mockReturnValue(true);
+    const generated = autosaveOwnerEnv('marker', {}, rebrand);
+    expect(generated[AUTOSAVE_OWNER_ENV]).toBe('marker');
+    expect(generated.HSQ_AUTOSAVE_OWNER).toBe(rebrand ? 'marker' : undefined);
     let scans = 0;
     const environment: Record<number, string> = {
       303: `1 node squeal.js PATH=/usr/bin HOME=/Users/a\n`,
-      404: `1 git hook PATH=/usr/bin ${AUTOSAVE_OWNER_ENV}=marker\n`,
+      404: `1 git hook PATH=/usr/bin ${AUTOSAVE_OWNER_ENV}=${generated[AUTOSAVE_OWNER_ENV]}\n`,
       505: `1 /usr/libexec/hardened\n`,
     };
     vi.mocked(childProcess.execFile).mockImplementation(((command: string, args: string[], _options: unknown, callback: (error: null, stdout: string) => void) => {

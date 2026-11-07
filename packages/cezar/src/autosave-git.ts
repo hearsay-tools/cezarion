@@ -1,11 +1,17 @@
+import { productEnvEntries } from './core/product-env.ts';
 import { autosaveGroupExists, autosaveGroupSnapshotAlive, groupInspectionFailed } from './autosave-group.ts';
 import type { AutosaveCleanupProof } from './autosave-cleanup.ts';
 import { processStartToken } from './delegation/process-liveness.ts';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
-import { AUTOSAVE_OWNER_ENV, watchAutosaveHolders } from './autosave-holders.ts';
+import { watchAutosaveHolders } from './autosave-holders.ts';
 import { watchWindowsAutosave } from './autosave-windows.ts';
+
+/** The legacy marker stays present for process-attribution readers during the rename. */
+export function autosaveOwnerEnv(marker: string, source: NodeJS.ProcessEnv = process.env, rebrand?: boolean): NodeJS.ProcessEnv {
+  return { ...source, ...productEnvEntries('AUTOSAVE_OWNER', marker, rebrand) };
+}
 
 /** Internal budgets, shared by every autosave command; no user configuration required. */
 export interface AutosaveOptions {
@@ -68,7 +74,7 @@ export async function autosaveGit(cwd: string, args: string[], options: Autosave
     // Git maintenance detaches and may move to the shared git directory.
     // Suppress it for this command only; never rewrite the repository config.
     const child = spawn('git', ['-c', 'gc.auto=0', '-c', 'maintenance.auto=false', ...args], {
-      cwd, detached: grouped, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, [AUTOSAVE_OWNER_ENV]: marker },
+      cwd, detached: grouped, stdio: ['ignore', 'pipe', 'pipe'], env: autosaveOwnerEnv(marker),
     });
     leader = child.pid;
     let stdout = '';

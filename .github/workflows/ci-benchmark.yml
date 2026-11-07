@@ -260,6 +260,7 @@ jobs:
           REPETITION: ${{ matrix.repetition }}
           VARIANT: ${{ matrix.variant }}
           CEZ_RELEASE_CHANNEL: nightly
+          HSQ_RELEASE_CHANNEL: nightly
           NIGHTLY_DATE: '20260908'
         run: python harness/.github/benchmarks/156/measure.py --root application --out results --variant "$VARIANT" --phase snapshot
       - name: Preserve raw snapshot results

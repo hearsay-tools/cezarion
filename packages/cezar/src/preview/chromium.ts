@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import type { Home } from '../home/home.ts';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -383,7 +384,7 @@ const KILLED_EXIT_WAIT_MS = 5_000;
  *  through cezar's CDP proxy alone (hearsay-tools/cezarion#784). */
 export function chromiumArgs(profileDir: string, env: NodeJS.ProcessEnv): string[] {
   const args = ['--headless=new', '--enable-gpu', '--remote-debugging-pipe', `--user-data-dir=${profileDir}`, '--no-first-run', '--no-default-browser-check', '--proxy-server=direct://', 'about:blank'];
-  return env.CEZ_PREVIEW_NO_SANDBOX === '1' ? ['--no-sandbox', ...args] : args;
+  return productEnv('PREVIEW_NO_SANDBOX', env) === '1' ? ['--no-sandbox', ...args] : args;
 }
 
 /**

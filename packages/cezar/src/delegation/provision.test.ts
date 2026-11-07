@@ -12,6 +12,15 @@ describe('session provisioning', () => {
   beforeEach(() => { f = fixture(); });
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   const provision = (id = f.parent.id) => provisionDelegationSession({ projectId: 'project', runId: id, store: f.store, credentials: f.credentials, url: 'http://127.0.0.1:12345/api/v1/delegation' });
+  it.each([false, true])('delegation emits matching controller authority aliases with rebrand=%s', rebrand => {
+    const session = provisionDelegationSession({projectId: 'project', runId: f.parent.id, store: f.store, credentials: f.credentials, url: 'http://127.0.0.1:12345/api/v1/delegation', rebrand})!;
+    for (const suffix of ['DELEGATION_URL', 'DELEGATION_TOKEN']) {
+      expect(session.env[`CEZ_${suffix}`]).toBeDefined();
+      expect(session.env[`HSQ_${suffix}`]).toBe(rebrand ? session.env[`CEZ_${suffix}`] : undefined);
+    }
+    expect(f.credentials.authenticate(session.env.CEZ_DELEGATION_TOKEN!)).toBeDefined();
+    session.revoke(); expect(f.credentials.authenticate(session.env.CEZ_DELEGATION_TOKEN!)).toBeUndefined();
+  });
   it('rotates session identity, revokes on teardown, and never includes a token in instructions/events', () => {
     expect(provision()!.instructions).toContain('--runner <claude|codex|opencode|pi|cursor|omp>');
     const first = provision()!; const old = f.credentials.authenticate(first.env.CEZ_DELEGATION_TOKEN!)!;

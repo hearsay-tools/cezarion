@@ -1,3 +1,4 @@
+import { productEnv } from '../../core/product-env.ts';
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../../autosave-cleanup.ts';
 import { autosaveCommit, type AutosaveOutcome, type AutosaveReason } from '../../git-worktree.ts';
 import { recordHandoffAutosave, recordHandoffPeriodicAutosave } from '../../handoff.ts';
@@ -41,7 +42,7 @@ export function createAutosaveGroup(): AutosaveGroup { return new AutosaveGroup(
  * pre-PR follows a repointed HEAD. Coalesce timer-save evidence in the handoff.
  */
 export function periodicAutosaveEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CEZ_AUTOSAVE === '1';
+  return productEnv('AUTOSAVE', env) === '1';
 }
 
 /** The handoff block's autosave record and cockpit note for a save that committed or left work

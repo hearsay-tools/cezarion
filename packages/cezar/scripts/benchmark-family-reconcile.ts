@@ -1,3 +1,4 @@
+import { legacyHomeEnv } from '../src/core/product-env.ts';
 import { benchmarkHome } from './benchmark-home.ts';
 import { setRunStatus } from '../src/runs/run-store.testkit.ts';
 /**
@@ -33,11 +34,11 @@ import type { ConversationMessage } from '@open-mercato/cezar-contract';
 // This benchmark reads settled runs and starts no runner.
 import { noRunners } from '../src/core/runners-under-test.testkit.ts';
 
-process.env.CEZ_DRY_RUN = '1';
-process.env.CEZ_AUTONAME = '0';
-process.env.CEZ_PROJECT_WARMUP = '0';
-const ownHome = process.env.CEZ_HOME ? undefined : mkdtempSync(join(tmpdir(), 'cez-bench-home-'));
-if (ownHome) process.env.CEZ_HOME = ownHome;
+process.env.HSQ_DRY_RUN = process.env.CEZ_DRY_RUN = '1';
+process.env.HSQ_AUTONAME = process.env.CEZ_AUTONAME = '0';
+process.env.HSQ_PROJECT_WARMUP = process.env.CEZ_PROJECT_WARMUP = '0';
+const ownHome = legacyHomeEnv(process.env) ? undefined : mkdtempSync(join(tmpdir(), 'cez-bench-home-'));
+if (ownHome) process.env.HSQ_HOME = process.env.CEZ_HOME = ownHome;
 
 const { values } = parseArgs({ options: {
   messages: { type: 'string', default: '50,300,1000' },

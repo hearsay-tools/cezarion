@@ -4,6 +4,7 @@
 // The build and pack gate run beforehand; publishing uses --ignore-scripts.
 // Without supported credentials, preserve the visible dry-run behavior.
 
+import { productEnv } from '../packages/cezar/dist/core/product-env.js';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -15,8 +16,8 @@ import {
   stampStableManifests,
 } from '../packages/cezar/dist/release/stable.js';
 
-const repoRoot = process.env.CEZ_RELEASE_ROOT
-  ? path.resolve(process.env.CEZ_RELEASE_ROOT)
+const repoRoot = productEnv('RELEASE_ROOT')
+  ? path.resolve(productEnv('RELEASE_ROOT'))
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The workspace root publishes nothing; every stamped manifest is named by RELEASE_MANIFEST_DIRS.
 const order = Object.keys(RELEASE_MANIFEST_DIRS);

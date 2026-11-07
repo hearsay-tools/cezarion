@@ -34,7 +34,7 @@ export function createDeliveryControl(root, options) {
  * through to an ordinary native turn. Absence is handled by each mock before
  * importing, so its ordinary scheduling stays unchanged. */
 export function readDeliveryControl(supportedKinds) {
-  const path = process.env[ENV];
+  const path = process.env.CEZ_MOCK_DELIVERY_CONTROL;
   let config;
   try {
     if (!path || !isAbsolute(path)) throw new Error('expected an absolute control path');

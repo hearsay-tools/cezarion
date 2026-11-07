@@ -1,3 +1,4 @@
+import { productEnv, productEnvEntries } from '../core/product-env.ts';
 /**
  * How a cockpit comes back after an update. Two modes:
  *
@@ -35,10 +36,11 @@ export interface RestartOptions {
   /** The entry selected by the caller from its managed Home. */
   entry: string;
   env?: NodeJS.ProcessEnv;
+  rebrand?: boolean;
 }
 
 export function isSupervised(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CEZ_SUPERVISED === '1' || env.CEZ_DESKTOP === '1';
+  return productEnv('SUPERVISED', env) === '1' || productEnv('DESKTOP', env) === '1';
 }
 
 /** Build the child argv: the same command and flags, the port pinned, no second browser tab. */
@@ -57,6 +59,12 @@ export function restartArgs(args: string[], port: number): string[] {
   return [...kept, '--port', String(port), '--no-open'];
 }
 
+/** A restart marker belongs to this process; an inherited alias cannot shadow it. */
+export function restartEnv(source: NodeJS.ProcessEnv = process.env, rebrand?: boolean): NodeJS.ProcessEnv {
+  const kept = Object.fromEntries(Object.entries(source).filter(([name]) => !/^(CEZ|HSQ)_RESTARTED_FROM$/i.test(name)));
+  return { ...kept, ...productEnvEntries('RESTARTED_FROM', process.pid.toString(), rebrand) };
+}
+
 export function restartProcess(opts: RestartOptions): void {
   let started = false;
   const done = () => {
@@ -70,7 +78,7 @@ export function restartProcess(opts: RestartOptions): void {
     const child = spawnDetached(process.execPath, [...process.execArgv, entry, ...restartArgs(opts.args, opts.port)], {
       stdio: 'inherit',
       cwd: process.cwd(),
-      env: { ...(opts.env ?? process.env), CEZ_RESTARTED_FROM: process.pid.toString() },
+      env: restartEnv(opts.env, opts.rebrand),
     });
     child.on('error', (error) => {
       console.error(`cezar: restart failed — ${error.message}`);

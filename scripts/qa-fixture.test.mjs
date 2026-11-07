@@ -105,7 +105,7 @@ async function until(predicate, what) {
 
 test('up serves a registered project and down leaves no process or directory behind', async (t) => {
   const f = fixture(t);
-  const ambient = { ...process.env, CEZ_AMBIENT: 'leak', GIT_DIR: '/nowhere' };
+  const ambient = { ...process.env, CEZ_AMBIENT: 'leak', HSQ_AMBIENT: 'leak', HSQ_DRY_RUN: '0', GIT_DIR: '/nowhere' };
   await up(f.options({ args: ['--server-env=CEZ_STUB_MODE=serve'], env: ambient }));
 
   const out = values(f.stdout.text);
@@ -128,6 +128,8 @@ test('up serves a registered project and down leaves no process or directory beh
   assert.equal(stub.env.CEZ_HOME, join(root, 'home'));
   assert.equal(stub.env.CEZ_STUB_MODE, 'serve');
   assert.equal(stub.env.CEZ_AMBIENT, undefined, 'an ambient CEZ_* reached the server');
+  assert.equal(stub.env.HSQ_AMBIENT, undefined);
+  assert.equal(stub.env.HSQ_DRY_RUN, undefined);
   assert.equal(stub.env.GIT_DIR, undefined, 'an ambient GIT_* reached the server');
   assert.equal(stub.env.GIT_CONFIG_GLOBAL, join(root, 'gitconfig'));
 

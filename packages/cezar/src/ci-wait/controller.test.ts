@@ -427,3 +427,14 @@ it('reports unknown after both registration responses are lost, with a stable re
 it('says nothing was created when no local tool capability exists before dispatch', async () => {
   expect(await callCezarWait({ kind: WAIT_KIND.timer, seconds: 60 }, {})).toMatchObject({ ok: false, effect: 'refused', message: expect.stringContaining('Nothing was created') });
 });
+
+it.each([false, true])('controller emits matching generated env names with rebrand=%s', async rebrand => {
+  vi.stubEnv('HSQ_PREVIEW', '1'); vi.stubEnv('HSQ_AUTOMATIONS', '0');
+  const session = (await controller()).provision(handlers(), rebrand);
+  for (const suffix of ['TOOL_TOKEN', 'TOOL_SOCKET', 'PREVIEW', 'AUTOMATIONS']) {
+    expect(session.env[`CEZ_${suffix}`]).toBeDefined();
+    expect(session.env[`HSQ_${suffix}`]).toBe(rebrand ? session.env[`CEZ_${suffix}`] : undefined);
+  }
+  expect(session.env.CEZ_AUTOMATIONS).toBe('0');
+  expect(session.env.CEZ_PREVIEW).toBe('1');
+});

@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 /**
  * Server capabilities reported by `/api/health` — the UI hides what the server
  * says isn't there, and the matching endpoints refuse as defense in depth.
@@ -140,22 +141,22 @@ export function resolveCapabilities(env?: NodeJS.ProcessEnv, bindHost?: string):
 export function resolveCapabilities(env: NodeJS.ProcessEnv | undefined, bindHost: string | undefined, port: number | undefined, home: Home): Capabilities;
 export function resolveCapabilities(env: NodeJS.ProcessEnv = process.env, bindHost?: string, port?: number, home?: Home): Capabilities {
   const loopbackBind = isLoopbackHost(bindHost);
-  const localHandoff = env.CEZ_REMOTE !== '1' && loopbackBind;
+  const localHandoff = productEnv('REMOTE', env) !== '1' && loopbackBind;
   // The host file is read only where it can matter: a remote cockpit bound to loopback.
   const remoteSettingsAdmin = !localHandoff && loopbackBind && port !== undefined && home !== undefined && isPortGranted(env, port, home);
-  const hideAllUsage = env.CEZ_HIDE_TOKEN_METRICS === '1';
-  const tokenUsageMetrics = !hideAllUsage && env.CEZ_HIDE_TOKEN_USAGE !== '1';
-  const costMetrics = !hideAllUsage && env.CEZ_HIDE_COST !== '1';
+  const hideAllUsage = productEnv('HIDE_TOKEN_METRICS', env) === '1';
+  const tokenUsageMetrics = !hideAllUsage && productEnv('HIDE_TOKEN_USAGE', env) !== '1';
+  const costMetrics = !hideAllUsage && productEnv('HIDE_COST', env) !== '1';
   return {
     localHandoff,
     settingsAdmin: localHandoff || remoteSettingsAdmin,
     remoteSettingsAdmin,
-    singleProject: env.CEZ_SINGLE_PROJECT === '1',
-    automations: env.CEZ_AUTOMATIONS !== '0',
-    preview: env.CEZ_PREVIEW === '1',
+    singleProject: productEnv('SINGLE_PROJECT', env) === '1',
+    automations: productEnv('AUTOMATIONS', env) !== '0',
+    preview: productEnv('PREVIEW', env) === '1',
     // Boot-time flag, like `automations`. The key is read here only as present or absent; the
     // fake engine under CEZ_DRY_RUN needs none.
-    voice: env.CEZ_VOICE === '1' && (!!env.TYPESAFE_API_KEY || env.CEZ_DRY_RUN === '1'),
+    voice: productEnv('VOICE', env) === '1' && (!!env.TYPESAFE_API_KEY || productEnv('DRY_RUN', env) === '1'),
     tokenMetrics: tokenUsageMetrics && costMetrics,
     tokenUsageMetrics,
     costMetrics,

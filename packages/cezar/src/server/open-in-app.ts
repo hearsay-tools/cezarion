@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { accessSync, constants, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -126,12 +127,12 @@ function editorAvailable(editor: EditorDef): boolean {
  *  terminal that resumes THIS run's session when the runner matches, or launches a fresh CLI in
  *  the worktree otherwise. The actual command is built server-side (needs the run's session). */
 const AGENT_CLIS: Array<{ runner: RunnerId; label: string; icon: string; bin: string; envBin?: string | undefined }> = [
-  { runner: 'claude', label: 'Claude CLI', icon: 'claude', bin: 'claude', envBin: process.env.CEZ_CLAUDE_BIN },
-  { runner: 'codex', label: 'Codex CLI', icon: 'codex', bin: 'codex', envBin: process.env.CEZ_CODEX_BIN },
-  { runner: 'opencode', label: 'OpenCode', icon: 'opencode', bin: 'opencode', envBin: process.env.CEZ_OPENCODE_BIN },
-  { runner: 'cursor', label: 'Cursor CLI', icon: 'cursor', bin: 'agent', envBin: process.env.CEZ_CURSOR_BIN },
-  { runner: 'pi', label: 'pi CLI', icon: 'pi', bin: 'pi', envBin: process.env.CEZ_PI_BIN },
-  { runner: 'omp', label: 'OMP CLI', icon: 'omp', bin: 'omp', envBin: process.env.CEZ_OMP_BIN },
+  { runner: 'claude', label: 'Claude CLI', icon: 'claude', bin: 'claude', envBin: productEnv('CLAUDE_BIN') },
+  { runner: 'codex', label: 'Codex CLI', icon: 'codex', bin: 'codex', envBin: productEnv('CODEX_BIN') },
+  { runner: 'opencode', label: 'OpenCode', icon: 'opencode', bin: 'opencode', envBin: productEnv('OPENCODE_BIN') },
+  { runner: 'cursor', label: 'Cursor CLI', icon: 'cursor', bin: 'agent', envBin: productEnv('CURSOR_BIN') },
+  { runner: 'pi', label: 'pi CLI', icon: 'pi', bin: 'pi', envBin: productEnv('PI_BIN') },
+  { runner: 'omp', label: 'OMP CLI', icon: 'omp', bin: 'omp', envBin: productEnv('OMP_BIN') },
 ];
 
 /** The runner behind a `cli:<runner>` open target, or null when the id isn't a CLI handoff. */

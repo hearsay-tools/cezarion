@@ -117,7 +117,7 @@ BUILD_INPUT_PATHS="packages/contract/src packages/contract/package.json packages
 # (CEZ_TASK_ID, CEZ_DELEGATION_*, …), so a local boot differed from CI in ways nobody chose.
 # Every CEZ_* goes rather than a list of known opt-ins: a list is one new flag away from the
 # same leak. A run that wants a flag asks for it with --server-env=CEZ_NAME=value below.
-for name in $(node -e 'for (const key of Object.keys(process.env)) if (/^CEZ_\w+$/i.test(key)) console.log(key)'); do
+for name in $(node -e 'for (const key of Object.keys(process.env)) if (/^(CEZ|HSQ)_\w+$/i.test(key)) console.log(key)'); do
   unset "$name"
 done
 

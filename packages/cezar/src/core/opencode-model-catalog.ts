@@ -1,3 +1,4 @@
+import { productEnv } from './product-env.ts';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { effortLevelSchema, type EffortLevel } from '@open-mercato/cezar-contract/effort';
 import { trackChildExit } from './agent-runner.ts';
@@ -31,7 +32,7 @@ const ANSI_RE = /\u001B\[[0-9;]*[A-Za-z]/g;
 
 /** The host binary, resolved exactly like `OpencodeServerRunner` and the backend probe. */
 export function resolveOpencodeExecutable(bin?: string): string {
-  return bin ?? process.env.CEZ_OPENCODE_BIN ?? 'opencode';
+  return bin ?? productEnv('OPENCODE_BIN') ?? 'opencode';
 }
 
 /**

@@ -1,3 +1,4 @@
+import { productEnv } from './core/product-env.ts';
 import type { Home } from './home/home.ts';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
@@ -60,7 +61,8 @@ async function probe(url: string): Promise<CockpitHealth | null> {
 
 /** `CEZ_URL` when set, otherwise every cockpit answering on the loopback ports. */
 export async function scanCockpits(env: NodeJS.ProcessEnv): Promise<CockpitHealth[]> {
-  const urls = env.CEZ_URL ? [env.CEZ_URL.replace(/\/+$/, '')] : COCKPIT_PORTS.map((port) => `http://127.0.0.1:${port}`);
+  const url = productEnv('URL', env);
+  const urls = url ? [url.replace(/\/+$/, '')] : COCKPIT_PORTS.map((port) => `http://127.0.0.1:${port}`);
   return (await Promise.all(urls.map(probe))).filter((found): found is CockpitHealth => found !== null);
 }
 
@@ -103,7 +105,7 @@ function parsePort(value: string | undefined): number | undefined {
 /** `--port`, or the only remote cockpit running on the loopback ports. */
 async function portToEnable(port: number | undefined, env: NodeJS.ProcessEnv, io: RemoteSettingsIo): Promise<number> {
   if (port !== undefined) return port;
-  const remote = (await (io.cockpits ?? scanCockpits)({ ...env, CEZ_URL: '' }))
+  const remote = (await (io.cockpits ?? scanCockpits)({ ...env, CEZ_URL: '', HSQ_URL: '' }))
     .filter((cockpit) => !cockpit.localHandoff)
     .flatMap((cockpit) => loopbackPort(cockpit.url) ?? []);
   if (remote.length === 1) return remote[0]!;

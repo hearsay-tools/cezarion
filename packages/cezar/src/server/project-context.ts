@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import type { Home } from '../home/home.ts';
 import type { ForgeFactory } from './forge/index.ts';
 import { join } from 'node:path';
@@ -63,7 +64,7 @@ export interface ProjectWarmCandidate extends ProjectContextSource {
 
 /** The background warm-up (#667) is on unless `CEZ_PROJECT_WARMUP` is exactly `0`. */
 export function projectWarmupEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CEZ_PROJECT_WARMUP !== '0';
+  return productEnv('PROJECT_WARMUP', env) !== '0';
 }
 
 export interface ProjectContextDeps {

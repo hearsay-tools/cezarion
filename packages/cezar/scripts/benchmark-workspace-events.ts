@@ -47,7 +47,8 @@ type RunManager = import('../src/workflows/run.ts').RunManager;
 type RunRecord = import('../src/runs/store.ts').RunRecord;
 interface Frame { event: string; data: string; bytes: number }
 
-const BENCH_ENV = ['CEZ_DRY_RUN', 'CEZ_AUTONAME', 'CEZ_PROJECT_WARMUP', 'CEZ_REMOTE', 'CEZ_HOME'] as const;
+const BENCH_ENV = ['DRY_RUN', 'AUTONAME', 'PROJECT_WARMUP', 'REMOTE', 'HOME']
+  .flatMap(suffix => [`CEZ_${suffix}`, `HSQ_${suffix}`]);
 
 /** One run of the workload with these CLI arguments; returns the result the CLI prints. */
 export async function runWorkspaceEventsBenchmark(argv: string[]): Promise<unknown> {
@@ -66,14 +67,16 @@ export async function runWorkspaceEventsBenchmark(argv: string[]): Promise<unkno
 }
 
 async function benchmark(argv: string[], cleanups: Array<() => unknown>): Promise<unknown> {
-  process.env.CEZ_DRY_RUN = '1';
-  process.env.CEZ_AUTONAME = '0';
-  process.env.CEZ_PROJECT_WARMUP = '0';
+  // Pin both names so operator aliases cannot change this isolated workload.
+  process.env.HSQ_DRY_RUN = process.env.CEZ_DRY_RUN = '1';
+  process.env.HSQ_AUTONAME = process.env.CEZ_AUTONAME = '0';
+  process.env.HSQ_PROJECT_WARMUP = process.env.CEZ_PROJECT_WARMUP = '0';
   delete process.env.CEZ_REMOTE;
+  delete process.env.HSQ_REMOTE;
   const home = mkdtempSync(join(tmpdir(), 'cez-bench-wsev-home-'));
   const repoRoot = mkdtempSync(join(tmpdir(), 'cez-bench-wsev-repo-'));
   cleanups.push(() => { for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true }); });
-  process.env.CEZ_HOME = home;
+  process.env.HSQ_HOME = process.env.CEZ_HOME = home;
   const selectedHome = resolveHome({ purpose: 'server' });
   Home.sandbox(selectedHome.root);
   mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });

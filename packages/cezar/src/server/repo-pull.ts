@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { RepoPullBranchesResponse, RepoPullConfirmation, RepoPullError, RepoPullInput, RepoPullResponse } from '@open-mercato/cezar-contract';
@@ -83,7 +84,7 @@ export async function pullRepoCheckout(
     if (risks.length && !input.confirm) {
       return { ok: false, value: { error: 'Confirm the repository risks before pulling.', branch, risks } };
     }
-    if (process.env.CEZ_DRY_RUN === '1') {
+    if (productEnv('DRY_RUN') === '1') {
       return { ok: true, value: { branch, pulled: true, summary: 'Dry run: pull simulated.' } };
     }
     if (branch !== current) await git(root, ['switch', '--no-guess', branch]);

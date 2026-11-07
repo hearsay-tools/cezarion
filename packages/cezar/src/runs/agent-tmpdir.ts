@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 /**
  * Task-owned temp directories with real-byte write probes and a Unix socket path budget. Prefer
  * short repo-local paths; fall back to marked digest directories. CEZ_AGENT_TMPDIR=0 bypasses
@@ -495,7 +496,7 @@ export class AgentTempDirError extends Error {
 /** Opt-out spelling matches the house style for default-on behaviour
  *  (`CEZ_AUTONAME=0`): only an exact `0` disables. */
 export function agentTmpDirEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CEZ_AGENT_TMPDIR !== '0';
+  return productEnv('AGENT_TMPDIR', env) !== '0';
 }
 
 /** Distinguishes concurrent probes from one process; the pid alone would let two

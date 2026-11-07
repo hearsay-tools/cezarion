@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import type { Home } from '../home/home.ts';
 import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
@@ -291,7 +292,7 @@ export class TaskWebhook {
     const { projectId, target } = current;
     const payload = await this.payload(pending, projectId, target);
     const runId = pending.run.id;
-    if (this.options.dryRun ?? process.env.CEZ_DRY_RUN === '1') {
+    if (this.options.dryRun ?? productEnv('DRY_RUN') === '1') {
       this.store.appendEvent(runId, { type: 'webhook.dry-run', event: payload.event, payload });
       this.recordOutcome(runId, target, { ok: true });
       return;
@@ -414,7 +415,7 @@ export async function sendAgentReport(options: AgentReportOptions): Promise<Agen
     ...(input.data === undefined ? {} : { data: input.data }),
     ...(run && url ? { task: projectStatus(run as unknown as ApiRun, url, undefined) as unknown as Record<string, unknown> } : {}),
   };
-  const dryRun = options.dryRun ?? process.env.CEZ_DRY_RUN === '1';
+  const dryRun = options.dryRun ?? productEnv('DRY_RUN') === '1';
   const outcome: AgentReportResult = dryRun
     ? { ok: true, deliveryId: payload.deliveryId, attempts: 0, dryRun: true }
     : await deliverWithRetries(webhook, payload, options).then(({ result, attempts }) => ({

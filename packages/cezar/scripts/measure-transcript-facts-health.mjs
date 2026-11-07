@@ -12,7 +12,7 @@ import { seedColdHistories, verifyFacts } from './transcript-facts-fixture.mjs';
 
 const root = mkdtempSync(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'cez-facts-health-'));
 // The experiment has no external peers, credentials, background updater, or real home.
-for (const key of Object.keys(process.env)) if (key.startsWith('CEZ_')) delete process.env[key];
+for (const key of Object.keys(process.env)) if (/^(CEZ|HSQ)_/.test(key)) delete process.env[key];
 process.env.CEZ_HOME = join(root, 'home');
 process.env.CEZ_DRY_RUN = '1';
 const runtime = { url: new URL('../dist/', import.meta.url), ext: 'js' };

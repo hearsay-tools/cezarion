@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import { delegationErrorResponseSchema } from '@open-mercato/cezar-contract/delegation';
@@ -41,8 +42,8 @@ Catalogs describe host default accounts, not every named account or spawn policy
 /** Discovery through the session's own controller. A failure never escapes to another cockpit. */
 async function sessionDiscovery(env: NodeJS.ProcessEnv, request: z.infer<typeof discoveryRequestSchema>, schema: z.ZodType, print: (value: unknown) => void): Promise<number> {
   try {
-    const endpoint = delegationEndpoint(env.CEZ_DELEGATION_URL);
-    const token = z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(env.CEZ_DELEGATION_TOKEN);
+    const endpoint = delegationEndpoint(productEnv('DELEGATION_URL', env));
+    const token = z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(productEnv('DELEGATION_TOKEN', env));
     const response = await fetch(`${endpoint.href}/discover`, { method: 'POST', redirect: 'error', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(request), signal: AbortSignal.timeout(45_000) });
     const data = await boundedJson(response);
     if (!response.ok) { print(delegationErrorResponseSchema.parse(data)); return 2; }
@@ -54,7 +55,7 @@ async function sessionDiscovery(env: NodeJS.ProcessEnv, request: z.infer<typeof 
 
 /** Discover through an existing cockpit; never starts one. Fetches and decodes the catalog for one request kind. */
 async function cockpitDiscovery(io: DiscoveryIo, env: NodeJS.ProcessEnv, values: { url?: string; repo?: string }, request: z.infer<typeof discoveryRequestSchema>, print: (value: unknown) => void): Promise<number> {
-  const cockpit = await (io.discover ?? discoverCockpit)({ repoDir: values.repo ?? process.cwd(), ...(values.url ?? env.CEZ_URL ? { url: values.url ?? env.CEZ_URL } : {}) });
+  const cockpit = await (io.discover ?? discoverCockpit)({ repoDir: values.repo ?? process.cwd(), ...(values.url ?? productEnv('URL', env) ? { url: values.url ?? productEnv('URL', env) } : {}) });
   const response = await fetchJson(`${cockpit.origin}/api/v1/${request.kind === 'runners' ? 'providers/status' : `models?runner=${encodeURIComponent(request.runner)}`}`);
   if (response.status !== 200) refuse(response);
   if (request.kind === 'runners') {
@@ -88,7 +89,8 @@ function parseDiscoveryRequest(argv: string[]): ParsedDiscovery {
 export async function runDiscoverCommand(argv: string[], env: NodeJS.ProcessEnv = process.env, io: DiscoveryIo = { stdout: line => console.log(line) }): Promise<number> {
   const print = (value: unknown) => {
     let line = JSON.stringify(value);
-    if (env.CEZ_DELEGATION_TOKEN) line = line.replaceAll(env.CEZ_DELEGATION_TOKEN, '[REDACTED]');
+    const token = productEnv('DELEGATION_TOKEN', env);
+    if (token) line = line.replaceAll(token, '[REDACTED]');
     io.stdout(line);
   };
   try {
@@ -96,7 +98,7 @@ export async function runDiscoverCommand(argv: string[], env: NodeJS.ProcessEnv 
     if (parsed.help) { io.stdout(HELP); return 0; }
     const { values, request, schema } = parsed;
     // Even a partial/expired session must not silently escape its controller or scope.
-    if (env.CEZ_DELEGATION_URL !== undefined || env.CEZ_DELEGATION_TOKEN !== undefined) {
+    if (productEnv('DELEGATION_URL', env) !== undefined || productEnv('DELEGATION_TOKEN', env) !== undefined) {
       if (values.url !== undefined || values.repo !== undefined) throw new TaskCliError(64, { code: 'invalid_input', error: 'A delegation session uses its own controller; --url and --repo are unavailable.' });
       return await sessionDiscovery(env, request, schema, print);
     }

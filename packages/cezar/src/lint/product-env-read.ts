@@ -8,7 +8,7 @@ import { productEnvCalls, scannedEnvFile } from './undocumented-env-name.ts';
 
 export const productEnvBaselineFile = 'packages/cezar/src/lint/product-env-read.baseline.json';
 const ACCESSOR = 'packages/cezar/src/core/product-env.ts';
-export interface EnvRead { form: 'dot' | 'bracket' | 'computed' | 'destructure' | 'helper-dynamic'; name: string; offset: number }
+export interface EnvRead { form: 'dot' | 'bracket' | 'computed' | 'destructure' | 'helper-dynamic'; name: string; offset: number; expression?: string }
 export interface EnvReadAllowance { file: string; form: EnvRead['form']; name: string; reads: number }
 
 export const productEnvFile = (file: string): boolean => file !== ACCESSOR && scannedEnvFile(file);
@@ -156,11 +156,11 @@ function writeTargets(ast: Node): Set<Node> {
   return targets;
 }
 
-function memberRead(node: Node, aliases: EnvBindings, writes: Set<Node>): EnvRead[] {
+function memberRead(node: Node, aliases: EnvBindings, writes: Set<Node>, source: string, staticNames: Map<string, string>): EnvRead[] {
   if ((node.type !== 'MemberExpression' && node.type !== 'OptionalMemberExpression') || writes.has(node)) return [];
-  const name = property(node);
+  const name = property(node) ?? (node.computed && node.property.type === 'Identifier' ? staticNames.get(node.property.name) : undefined);
   if (!productName(name) && !(node.computed && name === undefined && reference(node.object, aliases) === 'env')) return [];
-  return [{ form: node.computed ? name === undefined ? 'computed' : 'bracket' : 'dot', name: name ?? '*', offset: node.start ?? 0 }];
+  return [{ form: node.computed ? name === undefined ? 'computed' : 'bracket' : 'dot', name: name ?? '*', offset: node.start ?? 0, expression: source.slice(node.start ?? 0, node.end ?? 0) }];
 }
 
 /** AST scanning avoids strings/comments, supports env arguments, brackets, aliases and destructuring. */
@@ -170,11 +170,19 @@ export function productEnvReads(source: string, file = 'file.ts'): EnvRead[] {
   visit(ast, node => {
     if (node.type === 'TSTypeAliasDeclaration') types.set(node.id.name, node);
   });
+  // Resolve literal key constants before permanent anonymous-read exemptions.
+  const staticNames = new Map<string, string>();
+  visit(ast, node => {
+    if (node.type !== 'VariableDeclarator' || node.id.type !== 'Identifier' || !node.init) return;
+    const target = unwrapped(node.init);
+    const value = target.type === 'Identifier' ? undefined : property(target);
+    if (value !== undefined) staticNames.set(node.id.name, value);
+  });
   const aliases = envBindings(ast, types);
   const writes = writeTargets(ast);
   const reads: EnvRead[] = [];
   visit(ast, node => {
-    reads.push(...memberRead(node, aliases, writes));
+    reads.push(...memberRead(node, aliases, writes, source, staticNames));
     reads.push(...bindingReads(node, aliases, types));
   });
   for (const call of productEnvCalls(ast)) {
@@ -183,12 +191,40 @@ export function productEnvReads(source: string, file = 'file.ts'): EnvRead[] {
   return reads.sort((a, b) => a.offset - b.offset);
 }
 
+/** Permanent non-setting reads, separate from the migration baseline. Exact expressions
+ * keep new indexing sites visible; named product settings can never use this exemption. */
+export const nonSettingEnvReads = [
+  { file: 'packages/cezar/src/ci-wait/tools.ts', form: 'computed', expression: 'env[preferred]', reason: 'Include a defined preferred controller entry in native adapter allowlists, including clears.' },
+  { file: 'packages/cezar/src/application-update/npm-process.ts', form: 'computed', expression: "process.env[Object.keys(process.env).find(key => key.toLowerCase() === 'path') ?? 'PATH']", reason: 'OS PATH lookup preserves Windows casing.' },
+  { file: 'packages/cezar/src/core/agent-env.ts', form: 'computed', expression: 'source[name]', reason: 'Generic case-insensitive Bedrock/Vertex third-party toggle lookup.' },
+  { file: 'packages/cezar/src/core/cursor-print-runner.ts', form: 'computed', expression: 'this.spec.env?.[name]', reason: 'Forward controller tool-authority entries to the native MCP adapter.' },
+  { file: 'packages/cezar/src/home/kind-roots.ts', form: 'computed', expression: 'env[name]', reason: 'XDG kind-root lookup; not a product setting.' },
+  { file: 'packages/cezar/src/home/resolve.ts', form: 'computed', expression: 'env[name]', reason: 'Project HOME_LAYOUT_ENV OS/XDG roots into the layout resolver.' },
+  { file: 'packages/cezar/scripts/benchmark-workspace-events.ts', form: 'computed', expression: 'process.env[name]', reason: 'Snapshot exact names for sandbox restoration, without prefix precedence.' },
+  { file: 'packages/cezar/scripts/benchmark-workspace-events.ts', form: 'computed', expression: 'savedEnv[name]', reason: 'Restore the original sandbox environment snapshot.' },
+  { file: 'packages/cezar/scripts/mock-ci-tool.mjs', form: 'computed', expression: 'process.env[name]', reason: 'Native fixture MCP environment interpolation and allowlist forwarding.' },
+  { file: 'packages/cezar/scripts/mock-env-record.mjs', form: 'computed', expression: 'process.env[name]', reason: 'Fixture records exact configured environment names.' },
+] as const;
+
+export const mockEnvReadExemption = {
+  path: /^packages\/cezar\/scripts\/mock-[^/]+\.mjs$/,
+  name: /^CEZ_MOCK_[A-Z0-9_]+$/,
+  reason: 'Native mock controls are test fixtures, never operator product settings.',
+};
+
+export function nonSettingEnvRead(file: string, site: EnvRead): boolean {
+  if (mockEnvReadExemption.path.test(file) && mockEnvReadExemption.name.test(site.name)) return true;
+  // Only anonymous computed transport/lookups qualify. A literal product name never does.
+  return site.name === '*' && site.form === 'computed' && nonSettingEnvReads.some(entry =>
+    entry.file === file && entry.form === site.form && entry.expression === site.expression);
+}
+
 const key = (site: Pick<EnvRead, 'form' | 'name'>) => `${site.form}:${site.name}`;
 let baseline: EnvReadAllowance[] | undefined;
 export function scanProductEnvReads(file: string, source: string, allowances = (baseline ??= readProductEnvBaseline())): EnvRead[] {
   if (!productEnvFile(file)) return [];
   const counts = new Map(allowances.filter(entry => entry.file === file).map(entry => [key(entry), entry.reads]));
-  return productEnvReads(source, file).filter(site => {
+  return productEnvReads(source, file).filter(site => !nonSettingEnvRead(file, site)).filter(site => {
     const remaining = counts.get(key(site)) ?? 0;
     counts.set(key(site), remaining - 1);
     return remaining <= 0;

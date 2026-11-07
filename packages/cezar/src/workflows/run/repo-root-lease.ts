@@ -1,3 +1,4 @@
+import { productEnv } from '../../core/product-env.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { RunModuleContext } from './types.ts';
 
@@ -69,5 +70,5 @@ export class RepoRootLease {
  * files or Git state. Isolated worktree runs are unaffected.
  */
 export function repositoryRootLockDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CEZ_DISABLE_REPO_LOCK === '1';
+  return productEnv('DISABLE_REPO_LOCK', env) === '1';
 }

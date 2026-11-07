@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 /**
  * The record write rules (ADR 0056, Decision 4 of .ai/specs/2026-11-03-run-store-owns-exits.md):
  * one ordered list, `RECORD_WRITE_RULES`, that every write path runs with its path as input.
@@ -250,7 +251,7 @@ function isStaleResume(run: RunRecord): boolean {
 
 export function redactText(text: string, sessionSecrets: readonly string[], hostSecrets: () => readonly string[]): string {
   const safe = sessionSecrets.length ? redactSecrets(text, sessionSecrets) : text;
-  if (process.env.CEZ_REDACT_SECRETS === '0') return safe;
+  if (productEnv('REDACT_SECRETS') === '0') return safe;
   return redactSecrets(safe, hostSecrets());
 }
 

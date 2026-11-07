@@ -1,3 +1,4 @@
+import { productEnvEntries } from '../../core/product-env.ts';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { homedir, userInfo } from 'node:os';
@@ -10,9 +11,7 @@ import { failedRestart, freshRestartOrFail, readExecStart, resolveRedeployScope,
 import { recordedSite, recordedUnit, sitePathsToRemove, unitHint } from './ubuntu-vps-names.ts';
 import { migrateUbuntu, rollbackUbuntuMigration, startUbuntuService, stopUbuntuService } from './ubuntu-vps-migration.ts';
 import { REBRAND_SWITCH } from '../../home/switch.ts';
-
 export { isForeignNpxExecStart, isNpxExecStart, refreshNpxCacheForRedeploy };
-
 /**
  * The `ubuntu-vps` strategy: stand up an authenticated, proxied cezar on a bare
  * Ubuntu/Debian VPS. cezar itself stays loopback-bound; nginx is the single
@@ -595,6 +594,7 @@ export function systemdUnit(
   scope: 'user' | 'system',
   execStart: string,
   bindHost?: string,
+  rebrand = REBRAND_SWITCH,
 ): string {
   const userLine = scope === 'system' ? `User=${userInfo().username}\n` : '';
   const installTarget = scope === 'system' ? 'multi-user.target' : 'default.target';
@@ -619,7 +619,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ${userLine}WorkingDirectory=${repoRoot}
-Environment=CEZ_REMOTE=1
+${Object.entries(productEnvEntries('REMOTE', '1', rebrand)).map(([key, value]) => `Environment=${key}=${value}`).join('\n')}
 Environment=PATH=${sysd(pathDirs.join(':'))}
 ExecStart=${sysd(execStart)} serve --no-open --port ${port}${sysd(bind)}
 Restart=on-failure
@@ -714,7 +714,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
         mkdirSync(join(homedir(), '.config', 'systemd', 'user'), { recursive: true });
         writeFileSync(
           unitPath,
-          systemdUnit(ctx.repoRoot, ctx.state.primaryPort, 'user', execStart, ctx.state.bindHost),
+          systemdUnit(ctx.repoRoot, ctx.state.primaryPort, 'user', execStart, ctx.state.bindHost, rebrand),
           'utf8',
         );
         await ctx.runner.interactive('systemctl', ['--user', 'daemon-reload']);
@@ -749,7 +749,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
     await writeFileStep(ctx, {
       description: 'Install the cezar systemd unit, start it now, and enable it at boot.',
       path: `/etc/systemd/system/${UNIT_NAME}`,
-      content: systemdUnit(ctx.repoRoot, ctx.state.primaryPort, 'system', execStart, ctx.state.bindHost),
+      content: systemdUnit(ctx.repoRoot, ctx.state.primaryPort, 'system', execStart, ctx.state.bindHost, rebrand),
       extra: `systemctl daemon-reload && systemctl enable --now ${UNIT_NAME}`,
       verify: (c) => verifyCommand(c, 'systemctl', ['is-enabled', UNIT_NAME]),
     });

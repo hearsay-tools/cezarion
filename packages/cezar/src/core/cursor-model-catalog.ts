@@ -1,3 +1,4 @@
+import { productEnv } from './product-env.ts';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { z } from 'zod';
 import { trackChildExit } from './agent-runner.ts';
@@ -22,7 +23,7 @@ const MAX_OUTPUT_CHARS = 512 * 1_024;
 const ANSI_RE = /\u001B\[[0-9;]*[A-Za-z]/g;
 
 export function resolveCursorExecutable(bin?: string): string {
-  return bin ?? process.env.CEZ_CURSOR_BIN ?? 'agent';
+  return bin ?? productEnv('CURSOR_BIN') ?? 'agent';
 }
 
 const effortLevelSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -51,7 +52,7 @@ class UnsupportedPickerError extends Error {}
 
 /** Prefer the read-only ACP extension. Older agents still expose the opaque variant listing. */
 export async function discoverCursorModels(options: CursorModelDiscoveryOptions): Promise<ModelOption[]> {
-  if (options.bin === undefined && process.env.CEZ_CURSOR_BIN === undefined && process.env.CEZ_DRY_RUN === '1') {
+  if (options.bin === undefined && productEnv('CURSOR_BIN') === undefined && productEnv('DRY_RUN') === '1') {
     return [];
   }
   try {
@@ -189,7 +190,7 @@ function probeCursorParameterizedModels(
  * The catalog handles failures as cached/unavailable results; no credential files are read.
  */
 export async function discoverCursorVariantModels(options: CursorModelDiscoveryOptions): Promise<ModelOption[]> {
-  if (options.bin === undefined && process.env.CEZ_CURSOR_BIN === undefined && process.env.CEZ_DRY_RUN === '1') {
+  if (options.bin === undefined && productEnv('CURSOR_BIN') === undefined && productEnv('DRY_RUN') === '1') {
     return [];
   }
   const bin = resolveCursorExecutable(options.bin);

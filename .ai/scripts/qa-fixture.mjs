@@ -61,7 +61,7 @@ export function parseUpArgs(args) {
  *  carries the live cockpit's opt-ins and its per-task plumbing. */
 function serverEnv(ambient, root, optIns) {
   ensureTestInstallMarker(join(root, 'home'));
-  const env = Object.fromEntries(Object.entries(ambient).filter(([key]) => !/^(CEZ|GIT)_/i.test(key)));
+  const env = Object.fromEntries(Object.entries(ambient).filter(([key]) => !/^(CEZ|HSQ|GIT)_/i.test(key)));
   return {
     ...env,
     GIT_CONFIG_GLOBAL: join(root, 'gitconfig'),

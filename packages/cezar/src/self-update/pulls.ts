@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 /**
  * cezar's own open pull requests, for the development channel's "PR builds" picker. CI publishes
  * a preview of every green same-repo PR under the npm dist-tag `pr-<N>` (spec
@@ -106,7 +107,7 @@ export async function fetchOpenPulls(
   opts: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch; gh?: (repo: string) => Promise<OpenPull[]> } = {},
 ): Promise<OpenPulls> {
   const env = opts.env ?? process.env;
-  if (env.CEZ_DRY_RUN === '1') return { available: false, reason: 'Dry run: GitHub is not asked.', items: [] };
+  if (productEnv('DRY_RUN', env) === '1') return { available: false, reason: 'Dry run: GitHub is not asked.', items: [] };
   let ghError: string;
   try {
     return { available: true, items: sortByUpdated(await (opts.gh ?? viaGh)(repo)) };

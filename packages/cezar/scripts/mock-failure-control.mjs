@@ -33,7 +33,7 @@ export function createFailureControl(root, options) {
  * through to a successful native turn. Absence is handled by each mock before
  * importing, so its ordinary scheduling stays unchanged. */
 export function readFailureControl(supportedFailures = ['provider']) {
-  const path = process.env[ENV];
+  const path = process.env.CEZ_MOCK_FAILURE_CONTROL;
   let config;
   try {
     if (!path || !isAbsolute(path)) throw new Error('expected an absolute control path');

@@ -1,3 +1,4 @@
+import { productEnv } from './product-env.ts';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { effortLevelSchema, type EffortLevel } from '@open-mercato/cezar-contract/effort';
 import { trackChildExit } from './agent-runner.ts';
@@ -31,7 +32,7 @@ const ANSI_RE = /\u001B\[[0-9;]*[A-Za-z]/g;
 
 /** The host binary, resolved exactly like `PiRunner` and the backend probe. */
 export function resolvePiExecutable(bin?: string): string {
-  return bin ?? process.env.CEZ_PI_BIN ?? 'pi';
+  return bin ?? productEnv('PI_BIN') ?? 'pi';
 }
 
 /**
@@ -46,7 +47,7 @@ export function resolvePiExecutable(bin?: string): string {
 export async function discoverPiModels(options: PiModelDiscoveryOptions): Promise<ModelOption[]> {
   // `PiRunner` swaps in the bundled mock under CEZ_DRY_RUN=1. Without an explicit binary, skip
   // both host probes so an offline dry-run cockpit never shells out to a real `pi`.
-  if (options.bin === undefined && process.env.CEZ_PI_BIN === undefined && process.env.CEZ_DRY_RUN === '1') {
+  if (options.bin === undefined && productEnv('PI_BIN') === undefined && productEnv('DRY_RUN') === '1') {
     return [];
   }
 

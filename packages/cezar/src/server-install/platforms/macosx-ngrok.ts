@@ -1,3 +1,4 @@
+import { productEnvEntries } from '../../core/product-env.ts';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -315,8 +316,7 @@ ${argXml}
     <string>${escapeXml(repoRoot)}</string>
     <key>EnvironmentVariables</key>
     <dict>
-      <key>CEZ_REMOTE</key>
-      <string>1</string>
+${Object.entries(productEnvEntries('REMOTE', '1', rebrand)).map(([key, value]) => `      <key>${key}</key>\n      <string>${value}</string>`).join('\n')}
       <key>PATH</key>
       <string>${escapeXml(pathDirs.join(':'))}</string>
     </dict>

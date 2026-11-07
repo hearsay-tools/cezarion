@@ -78,7 +78,7 @@ export function ghConfigDir(env = process.env) {
 export function serverEnv(base, { home, gitConfig, extra }) {
   const env = {};
   for (const [key, value] of Object.entries(base)) {
-    if (!/^(CEZ|GIT)_/i.test(key)) env[key] = value;
+    if (!/^(CEZ|HSQ|GIT)_/i.test(key)) env[key] = value;
   }
   return {
     ...env,

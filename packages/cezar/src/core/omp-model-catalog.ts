@@ -1,3 +1,4 @@
+import { productEnv } from './product-env.ts';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { effortLevelSchema, type EffortLevel } from '@open-mercato/cezar-contract/effort';
 import { trackChildExit } from './agent-runner.ts';
@@ -26,7 +27,7 @@ const MAX_OUTPUT_CHARS = 2 * 1_024 * 1_024;
 
 /** The host binary, resolved exactly like `OmpRunner` and the backend probe. */
 export function resolveOmpExecutable(bin?: string): string {
-  return bin ?? process.env.CEZ_OMP_BIN ?? 'omp';
+  return bin ?? productEnv('OMP_BIN') ?? 'omp';
 }
 
 /**
@@ -44,7 +45,7 @@ export function resolveOmpExecutable(bin?: string): string {
 export async function discoverOmpModels(options: OmpModelDiscoveryOptions): Promise<ModelOption[]> {
   // `OmpRunner` swaps in the bundled mock under CEZ_DRY_RUN=1. Without an explicit binary, skip
   // the host probe so an offline dry-run cockpit never shells out to a real `omp`.
-  if (options.bin === undefined && process.env.CEZ_OMP_BIN === undefined && process.env.CEZ_DRY_RUN === '1') {
+  if (options.bin === undefined && productEnv('OMP_BIN') === undefined && productEnv('DRY_RUN') === '1') {
     return [];
   }
 

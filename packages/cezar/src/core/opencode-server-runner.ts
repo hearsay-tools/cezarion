@@ -1,3 +1,4 @@
+import { productEnv } from './product-env.ts';
 import { uiAskQuestions } from './ask.ts';
 import { opencodeSkillWarning } from './opencode-session-error.ts';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
@@ -48,7 +49,6 @@ import {
   type OpencodeUiMapperState,
   type OpencodeUiMapping,
 } from './opencode-ui-mapper.ts';
-
 export interface OpencodeRunnerOptions {
   /** Override the binary name/path; defaults to `opencode` on PATH. */
   bin?: string;
@@ -177,7 +177,7 @@ export class OpencodeServerRunner implements AgentRunner {
   private lastSession: OpencodeSession | null = null;
 
   constructor(opts: OpencodeRunnerOptions = {}) {
-    this.bin = opts.bin ?? process.env.CEZ_OPENCODE_BIN ?? (process.env.CEZ_DRY_RUN === '1'
+    this.bin = opts.bin ?? productEnv('OPENCODE_BIN') ?? (productEnv('DRY_RUN') === '1'
       ? fileURLToPath(new URL('../../scripts/mock-opencode-serve.mjs', import.meta.url)) : 'opencode');
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
     this.serverStartTimeoutMs = opts.serverStartTimeoutMs ?? SERVER_START_TIMEOUT_MS;

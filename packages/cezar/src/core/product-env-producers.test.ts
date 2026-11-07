@@ -1,0 +1,77 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, expect, it, vi } from 'vitest';
+import { Home } from '../home/home.ts';
+import { agentEnv } from '../workflows/run/launch-context.ts';
+import { worktreeSetupEnv } from '../worktree-setup.ts';
+import { withPreviewCdp } from '../preview/agent-address.ts';
+import { restartEnv } from '../self-update/restart.ts';
+import { buildChildEnv } from './agent-env.ts';
+import { productEnvEntries } from './product-env.ts';
+import { cezarToolEnvNames } from '../ci-wait/tools.ts';
+import { systemdUnit } from '../server-install/platforms/ubuntu-vps.ts';
+import { cezarLaunchdPlist } from '../server-install/platforms/macosx-ngrok.ts';
+
+const roots: string[] = [];
+afterEach(() => { vi.unstubAllEnvs(); for (const root of roots.splice(0)) rmSync(root, {recursive: true, force: true}); });
+
+it.each([false, true])('launch context and continuation env generate matching names with rebrand=%s', rebrand => {
+  const root = mkdtempSync(join(tmpdir(), 'env-launch-')); roots.push(root);
+  const context = {dataDir: root, repoRoot: root, home: Home.sandbox(join(root, 'home'))} as Parameters<typeof agentEnv>[0];
+  const generated = agentEnv(context, {origin: 'http://127.0.0.1:4321', projectId: 'project'}, 'run-id', rebrand);
+  for (const suffix of ['ARTIFACTS_DIR', 'HANDOFF_FILE', 'TASK_ID', 'TODOS_FILE', 'COCKPIT_URL', 'PROJECT_ID']) {
+    expect(generated[`CEZ_${suffix}`]).toBeDefined();
+    expect(generated[`HSQ_${suffix}`]).toBe(rebrand ? generated[`CEZ_${suffix}`] : undefined);
+  }
+  expect(generated.CEZ_TODOS_FILE).toBe('');
+  expect(agentEnv(context, undefined, 'run-id', rebrand).CEZ_COCKPIT_URL).toBeUndefined();
+  for (const full of ['0', '1']) {
+    const env = buildChildEnv({backend: 'codex', source: {CEZ_HOME: '/host', HSQ_HOME: '/host-new', HSQ_AGENT_ENV_FULL: full, HSQ_ENV_PASSTHROUGH: 'HSQ_PROJECT_ID,HSQ_TOOL_TOKEN', HSQ_PROJECT_ID: 'wrong', HSQ_TOOL_TOKEN: 'parent'}, extraEnv: generated});
+    expect(env.CEZ_PROJECT_ID).toBe('project');
+    expect(env.HSQ_PROJECT_ID).toBe(rebrand ? 'project' : undefined);
+    expect(env.HSQ_TOOL_TOKEN).toBeUndefined(); expect(env.CEZ_HOME).toBeUndefined(); expect(env.HSQ_HOME).toBeUndefined();
+  }
+});
+
+it.each([false, true])('worktree setup owns both aliases and keeps command auth curated with rebrand=%s', rebrand => {
+  const env = worktreeSetupEnv({projectRoot: '/project', runId: 'task', tmpEnv: {TMPDIR: '/scratch'}, rebrand,
+    source: {HSQ_TASK_ID: 'parent', HSQ_PROJECT_ROOT: '/parent', GITHUB_TOKEN: 'host', HSQ_HOME: '/host', PATH: '/bin'}});
+  expect(env).toMatchObject({CEZ_TASK_ID: 'task', CEZ_PROJECT_ROOT: '/project', TMPDIR: '/scratch', PATH: '/bin'});
+  expect(env.HSQ_TASK_ID).toBe(rebrand ? 'task' : undefined);
+  expect(env.HSQ_PROJECT_ROOT).toBe(rebrand ? '/project' : undefined);
+  expect(env.GITHUB_TOKEN).toBeUndefined(); expect(env.HSQ_HOME).toBeUndefined();
+});
+
+it.each([false, true])('preview capability binds matching aliases and revokes both resources with rebrand=%s', rebrand => {
+  const session = {env: {CEZ_TOOL_TOKEN: 'tool'} as Record<string, string>, revoke: vi.fn()};
+  const grant = {token: 'preview-token', revoke: vi.fn()};
+  const decorated = withPreviewCdp(session, grant, 'https://cockpit.example', rebrand);
+  expect(decorated.env.CEZ_PREVIEW_CDP_URL).toBe('wss://cockpit.example/api/v1/preview/cdp/preview-token');
+  expect(decorated.env.HSQ_PREVIEW_CDP_URL).toBe(rebrand ? decorated.env.CEZ_PREVIEW_CDP_URL : undefined);
+  decorated.revoke(); expect(session.revoke).toHaveBeenCalledOnce(); expect(grant.revoke).toHaveBeenCalledOnce();
+});
+
+it.each([false, true])('restart marker replaces inherited aliases with rebrand=%s', rebrand => {
+  const env = restartEnv({HSQ_RESTARTED_FROM: 'old', CEZ_RESTARTED_FROM: 'older', hsq_restarted_from: 'mixed', KEEP: ''}, rebrand);
+  expect(env.CEZ_RESTARTED_FROM).toBe(process.pid.toString());
+  expect(env.HSQ_RESTARTED_FROM).toBe(rebrand ? env.CEZ_RESTARTED_FROM : undefined);
+  expect(env.hsq_restarted_from).toBeUndefined(); expect(env.KEEP).toBe('');
+});
+
+it('generated intentional clears and native adapter allowlists preserve preferred empty values', () => {
+  expect(productEnvEntries('TODOS_FILE', '', false)).toEqual({CEZ_TODOS_FILE: ''});
+  expect(productEnvEntries('TODOS_FILE', '', true)).toEqual({HSQ_TODOS_FILE: '', CEZ_TODOS_FILE: ''});
+  expect(cezarToolEnvNames({CEZ_AUTOMATIONS: '0', HSQ_AUTOMATIONS: '', HSQ_TOOL_TOKEN: 'token'})).toEqual([
+    'CEZ_TOOL_TOKEN', 'HSQ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET', 'CEZ_AUTOMATIONS', 'HSQ_AUTOMATIONS',
+  ]);
+});
+
+it.each([false, true])('service installers emit matching REMOTE env names with rebrand=%s', rebrand => {
+  const legacyUnit = systemdUnit('/repo', 4321, 'user', '/bin/cez', undefined, false);
+  const unit = systemdUnit('/repo', 4321, 'user', '/bin/cez', undefined, rebrand);
+  expect(unit).toBe(rebrand ? legacyUnit.replace('Environment=CEZ_REMOTE=1', 'Environment=HSQ_REMOTE=1\nEnvironment=CEZ_REMOTE=1') : legacyUnit);
+  const plist = cezarLaunchdPlist('/repo', 4321, ['/bin/cez'], rebrand);
+  expect(plist).toContain('<key>CEZ_REMOTE</key>\n      <string>1</string>');
+  expect(plist.includes('<key>HSQ_REMOTE</key>\n      <string>1</string>')).toBe(rebrand);
+});

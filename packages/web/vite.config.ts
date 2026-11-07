@@ -1,3 +1,4 @@
+import { preferredBuildEnv, e2eBuildEnabled } from './src/lib/build-env.ts'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
@@ -11,7 +12,7 @@ const packagesDir = resolve(appDir, '..')
 // `npm run dev` (scripts/dev.mjs) picks a free port and pins both processes to it via
 // CEZ_API_PORT, so a stray cockpit already sitting on 4321 (another repo, an older install)
 // can never end up behind the proxy. Standalone `npm run dev:web` keeps the 4321 default.
-const API_TARGET = `http://127.0.0.1:${process.env.CEZ_API_PORT ?? 4321}`
+const API_TARGET = `http://127.0.0.1:${preferredBuildEnv(process.env.HSQ_API_PORT, process.env.CEZ_API_PORT) ?? 4321}`
 
 // React DOM is large enough to push the otherwise route-split entry chunk over Vite's 500 kB
 // warning threshold. Keep the tightly coupled React runtime in one stable, cacheable chunk
@@ -22,15 +23,14 @@ export const reactRuntimeChunk = {
   test: /node_modules\/(?:react(?:-dom)?|scheduler)\//,
 }
 
-function e2eBuildMarker(): Plugin {
+export function e2eBuildMarker(): Plugin {
   let e2eBuild = false
   return {
     name: 'cez-e2e-build-marker',
     apply: 'build' as const,
     configResolved(config) {
       // Read Vite's resolved env, the same value compiled into isCockpitE2e().
-      const value = config.env.VITE_CEZ_E2E
-      e2eBuild = value === '1' || value === 'true'
+      e2eBuild = e2eBuildEnabled(config.env.VITE_HSQ_E2E, config.env.VITE_CEZ_E2E)
     },
     generateBundle() {
       // hearsay-tools/cezarion#649: the e2e bootstrap reuses only a bundle carrying this proof

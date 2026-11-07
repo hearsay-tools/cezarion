@@ -169,3 +169,27 @@ it('does not classify arrays, tuples, keys, scalar indexed types or unrelated al
     function named(collection: Array<ProcessEnv>) { return collection[key]; }`;
   expect(productEnvReads(source)).toEqual([]);
 });
+
+it('keeps permanent non-setting exemptions exact and rejects product settings in each file', async () => {
+  const { nonSettingEnvReads, nonSettingEnvRead } = await import('./product-env-read.ts');
+  for (const entry of nonSettingEnvReads) {
+    expect(entry.reason.length).toBeGreaterThan(10);
+    expect(scanProductEnvReads(entry.file, `${entry.expression};`, [])).toEqual([]);
+    expect(scanProductEnvReads(entry.file, 'process.env[other];', [])).toHaveLength(1);
+    for (const source of ['env.CEZ_DRY_RUN;', "env['HSQ_DRY_RUN'];", 'const {CEZ_DRY_RUN} = env;', 'productEnv(suffix);']) {
+      expect(scanProductEnvReads(entry.file, source, [])).toHaveLength(1);
+    }
+    if (entry.expression.endsWith('[name]')) expect(scanProductEnvReads(entry.file, `const name = 'CEZ_DRY_RUN'; const source = process.env; ${entry.expression};`, [])).toHaveLength(1);
+    expect(nonSettingEnvRead(entry.file, {form: 'dot', name: 'CEZ_DRY_RUN', offset: 0, expression: entry.expression})).toBe(false);
+  }
+});
+
+it('exempts only fixture control names in mock scripts, not product settings or other paths', () => {
+  const mock = 'packages/cezar/scripts/mock-native.mjs';
+  expect(scanProductEnvReads(mock, "process.env.CEZ_MOCK_CONTROL; env['CEZ_MOCK_CONTROL'];", [])).toEqual([]);
+  for (const file of [mock, 'packages/cezar/scripts/probe.mjs', 'packages/cezar/src/mock-native.ts']) {
+    expect(scanProductEnvReads(file, 'process.env.CEZ_DRY_RUN; env.HSQ_DRY_RUN;', [])).toHaveLength(2);
+  }
+  expect(scanProductEnvReads('packages/cezar/src/mock-native.ts', 'env.CEZ_MOCK_CONTROL;', [])).toHaveLength(1);
+  expect(scanProductEnvReads(mock, 'process.env.HSQ_MOCK_CONTROL;', [])).toHaveLength(1);
+});

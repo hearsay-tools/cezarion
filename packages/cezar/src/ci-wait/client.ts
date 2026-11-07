@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { randomUUID } from 'node:crypto';
 import { request } from 'node:http';
 import { previewStopResult } from '../preview/registration.ts';
@@ -23,7 +24,7 @@ export function callPreviewStop(input: unknown, env: NodeJS.ProcessEnv = process
 
 /** hearsay-tools/cezarion#1233: unparsed like preview, so the server names the failing field. */
 export async function callCezarWait(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<CezarWaitAnswer> {
-  if (!env.CEZ_TOOL_SOCKET || !env.CEZ_TOOL_TOKEN) return { ok: false, effect: 'refused', code: 'unavailable', message: 'No local tool capability is configured. Nothing was created.' };
+  if (!productEnv('TOOL_SOCKET', env) || !productEnv('TOOL_TOKEN', env)) return { ok: false, effect: 'refused', code: 'unavailable', message: 'No local tool capability is configured. Nothing was created.' };
   const identified = input && typeof input === 'object' && !Array.isArray(input)
     ? { ...input, operation_id: 'operation_id' in input ? input.operation_id : randomUUID() } : input;
   const operationId = identified && typeof identified === 'object' && 'operation_id' in identified && typeof identified.operation_id === 'string' ? identified.operation_id : undefined;
@@ -62,7 +63,7 @@ export function callScheduledTasks(input: unknown, env: NodeJS.ProcessEnv = proc
 }
 
 function callTool<T>(input: unknown, env: NodeJS.ProcessEnv, route: string, schema: { safeParse(input: unknown): { success: true; data: T } | { success: false } }, unavailable: T, maxAnswerBytes = 32_768, timeoutMs = 15_000, typedErrors = false): Promise<T> {
-  const socketPath = env.CEZ_TOOL_SOCKET; const token = env.CEZ_TOOL_TOKEN;
+  const socketPath = productEnv('TOOL_SOCKET', env); const token = productEnv('TOOL_TOKEN', env);
   if (!socketPath || !token) return Promise.resolve(unavailable);
   return new Promise(resolve => {
     let done = false;
@@ -94,8 +95,8 @@ function callTool<T>(input: unknown, env: NodeJS.ProcessEnv, route: string, sche
 export function monitorCiOwner(onClose: () => void, env: NodeJS.ProcessEnv = process.env): () => void {
   let stopped = false;
   const close = () => { if (!stopped) { stopped = true; onClose(); } };
-  if (!env.CEZ_TOOL_SOCKET || !env.CEZ_TOOL_TOKEN) { queueMicrotask(close); return () => { stopped = true; }; }
-  const req = request({ socketPath: env.CEZ_TOOL_SOCKET, path: '/api/v1/tools/ci-wait', headers: { authorization: `Bearer ${env.CEZ_TOOL_TOKEN}` } }, response => {
+  if (!productEnv('TOOL_SOCKET', env) || !productEnv('TOOL_TOKEN', env)) { queueMicrotask(close); return () => { stopped = true; }; }
+  const req = request({ socketPath: productEnv('TOOL_SOCKET', env), path: '/api/v1/tools/ci-wait', headers: { authorization: `Bearer ${productEnv('TOOL_TOKEN', env)}` } }, response => {
     if (response.statusCode !== 200) { response.resume(); close(); return; }
     response.resume(); response.on('end', close); response.on('error', close); response.on('close', close);
   });

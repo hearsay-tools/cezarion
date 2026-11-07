@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 /**
  * The self-update service behind `/api/v1/workspace/self-update` and `cezar update`. Owns the
  * registry cache, the release-channel setting, the managed-layout view and the ONE install job
@@ -68,7 +69,7 @@ export class SelfUpdateService {
   async channel(): Promise<UpdateChannel> {
     const config = await loadWorkspaceConfig(this.deps.home.workspaceConfig);
     if (config.updateChannel) return config.updateChannel;
-    const seed = this.env.CEZ_UPDATE_CHANNEL;
+    const seed = productEnv('UPDATE_CHANNEL', this.env);
     return seed === 'nightly' || seed === 'development' ? seed : 'stable';
   }
 
