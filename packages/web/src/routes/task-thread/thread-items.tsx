@@ -671,6 +671,29 @@ function defaultOpen(item: UiToolItem): boolean {
  * user's explicit open/close in the per-run open-card cache, so revisiting a thread restores
  * the cards as left. Without a key or outside a ThreadCardCache, the state is plain local.
  */
+/** The card's non-state view bits: busy flag, title parts, expandable command and icon. */
+function toolCardHeader(item: UiToolItem) {
+  const busy = item.status === 'running' || item.status === 'pending'
+  const title = splitToolTitle(item.title)
+  // OpenCode sends the command itself as an execute title, without a "Ran" prefix.
+  const { verb, detail } = item.toolKind === 'execute' && title.detail === undefined
+    ? { verb: 'Ran', detail: item.title }
+    : title
+  const expandedCommand = item.toolKind === 'execute' ? (fullExecCommand(item.input) ?? detail) : detail
+  const Icon = TOOL_ICONS[item.toolKind] ?? WrenchIcon
+  return { busy, verb, detail, expandedCommand, Icon }
+}
+
+/** Anything a card can expand to show: command, output, error, diffs or nested sub-agent items. */
+function toolHasContent(item: UiToolItem, nestedCount: number): boolean {
+  return (
+    (item.output !== undefined && item.output !== '') ||
+    (item.error !== undefined && item.error !== '') ||
+    (item.diffs !== undefined && item.diffs.length > 0) ||
+    nestedCount > 0
+  )
+}
+
 export function ToolCard({
   item,
   nested = [],
@@ -690,23 +713,11 @@ export function ToolCard({
     if (cacheKey !== undefined) cache?.set(cacheKey, open)
     setUserOpenState(open)
   }
-  const busy = item.status === 'running' || item.status === 'pending'
-  const title = splitToolTitle(item.title)
-  // OpenCode sends the command itself as an execute title, without a "Ran" prefix.
-  const { verb, detail } = item.toolKind === 'execute' && title.detail === undefined
-    ? { verb: 'Ran', detail: item.title }
-    : title
-  const expandedCommand = item.toolKind === 'execute' ? (fullExecCommand(item.input) ?? detail) : detail
-  const hasContent =
-    (item.output !== undefined && item.output !== '') ||
-    (item.error !== undefined && item.error !== '') ||
-    (item.diffs !== undefined && item.diffs.length > 0) ||
-    nested.length > 0
+  const { busy, verb, detail, expandedCommand, Icon } = toolCardHeader(item)
+  const hasContent = toolHasContent(item, nested.length)
   const hasDetail = expandedCommand !== undefined || hasContent
   // Commands are expandable even when silent, without auto-opening a running empty card.
   const open = hasDetail && (userOpen ?? (hasContent && defaultOpen(item)))
-
-  const Icon = TOOL_ICONS[item.toolKind] ?? WrenchIcon
   return (
     <Collapsible
       data-slot="tool-card"
