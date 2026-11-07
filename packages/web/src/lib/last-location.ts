@@ -39,46 +39,70 @@ export function writeStoredLastLocation(location: WorkspaceLastLocation): void {
 
 const LAST_LOCATION_KEYS = new Set(['projectId', 'pathname', 'search', 'hash'])
 
+function parsedLastLocationProjectId(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 64) {
+    return null
+  }
+  return value
+}
+
+function parsedLastLocationPathname(value: unknown): string | null {
+  if (
+    typeof value !== 'string' ||
+    value.length < 1 ||
+    value.length > 2_048 ||
+    !value.startsWith('/p/')
+  ) {
+    return null
+  }
+  return value
+}
+
+function parsedLastLocationSearch(value: unknown): string | undefined | null {
+  if (
+    value !== undefined &&
+    (typeof value !== 'string' || value.length > 4_096 || !value.startsWith('?'))
+  ) {
+    return null
+  }
+  return value as string | undefined
+}
+
+function parsedLastLocationHash(value: unknown): string | undefined | null {
+  if (
+    value !== undefined &&
+    (typeof value !== 'string' || value.length > 2_048 || !value.startsWith('#'))
+  ) {
+    return null
+  }
+  return value as string | undefined
+}
+
 function parsedLastLocation(value: unknown): WorkspaceLastLocation | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
 
   const record = value as Record<string, unknown>
   if (Object.keys(record).some((key) => !LAST_LOCATION_KEYS.has(key))) return null
-  if (typeof record.projectId !== 'string' || record.projectId.length < 1 || record.projectId.length > 64) {
-    return null
-  }
-  if (
-    typeof record.pathname !== 'string' ||
-    record.pathname.length < 1 ||
-    record.pathname.length > 2_048 ||
-    !record.pathname.startsWith('/p/')
-  ) {
-    return null
-  }
-  if (
-    record.search !== undefined &&
-    (typeof record.search !== 'string' || record.search.length > 4_096 || !record.search.startsWith('?'))
-  ) {
-    return null
-  }
-  if (
-    record.hash !== undefined &&
-    (typeof record.hash !== 'string' || record.hash.length > 2_048 || !record.hash.startsWith('#'))
-  ) {
-    return null
-  }
+  const projectId = parsedLastLocationProjectId(record.projectId)
+  if (projectId === null) return null
+  const pathname = parsedLastLocationPathname(record.pathname)
+  if (pathname === null) return null
+  const search = parsedLastLocationSearch(record.search)
+  if (search === null) return null
+  const hash = parsedLastLocationHash(record.hash)
+  if (hash === null) return null
 
   try {
-    if (pathnameProjectId(record.pathname) !== record.projectId) return null
+    if (pathnameProjectId(pathname) !== projectId) return null
   } catch {
     return null
   }
 
   return {
-    projectId: record.projectId,
-    pathname: record.pathname,
-    ...(record.search === undefined ? {} : { search: record.search }),
-    ...(record.hash === undefined ? {} : { hash: record.hash }),
+    projectId,
+    pathname,
+    ...(search === undefined ? {} : { search }),
+    ...(hash === undefined ? {} : { hash }),
   }
 }
 

@@ -234,6 +234,77 @@ function NewTaskProjectRoute() {
   return <NewTaskRoute key={projectId} />
 }
 
+const FLAT_TASK_RUN_ID = /^\/tasks\/([0-9a-f-]{36})(?=\/|$)/i
+
+function legacyBootProject(
+  health: ReturnType<typeof useHealth>,
+  projects: ReturnType<typeof useProjects>,
+): { resolved: string | undefined; settled: boolean; boot: string } {
+  const resolved = health.data?.bootProject ?? projects.data?.bootProject
+  const settled =
+    (health.data !== undefined || health.isError) &&
+    (projects.data !== undefined || projects.isError)
+  // Health and the registry normally name the same boot project. If neither can answer after
+  // both queries settle, the server-side `default` alias remains the no-config fallback.
+  return { resolved, settled, boot: resolved ?? 'default' }
+}
+
+function legacyBareRootRedirect(
+  location: { pathname: string; search: string; hash: string },
+  projects: ReturnType<typeof useProjects>,
+  resolvedBoot: string | undefined,
+) {
+  const isBareRoot =
+    location.pathname === '/' && location.search === '' && location.hash === ''
+  if (!isBareRoot) return undefined
+  // The remembered location itself is local and synchronous; only the registry that validates
+  // its project is still worth waiting for.
+  if (projects.data === undefined && !projects.isError) return <ScopeResolving />
+
+  const restored = locationToRestore(
+    readStoredLastLocation(),
+    projects.data,
+    resolvedBoot,
+  )
+  if (restored !== null) return <Navigate to={restored} replace />
+  return undefined
+}
+
+function legacyFlatRunOwner(
+  flatRunId: string,
+  boot: string,
+  indexSettled: boolean,
+  indexMissed: boolean,
+  runsIndex: ReturnType<typeof useRunsIndex>,
+  runsSearch: ReturnType<typeof useRunsSearch>,
+): string | null {
+  if (!indexSettled) return null
+  const indexed = runsIndex.data?.runs.find((row) => row.id === flatRunId)?.projectId
+  if (indexed !== undefined) {
+    return indexed
+  }
+  if (indexMissed) {
+    if (runsSearch.data === undefined && !runsSearch.isError) return null
+    return runsSearch.data?.runs.find((row) => row.id === flatRunId)?.projectId ?? boot
+  }
+  return boot
+}
+
+function legacyScopedNavigate(
+  target: string,
+  location: { pathname: string; search: string; hash: string },
+) {
+  // A bare `/p` (or `/p/`) names no project — send it to the boot project's home rather than
+  // minting a nonsense `/p/<boot>/p` path.
+  const path = location.pathname === '/p' || location.pathname === '/p/' ? '/' : location.pathname
+  return (
+    <Navigate
+      to={`/p/${encodeURIComponent(target)}${path}${location.search}${location.hash}`}
+      replace
+    />
+  )
+}
+
 /**
  * Legacy flat URLs — every pre-multi-project path, `/tasks/:id` bookmarks and the `/new?...`
  * bookmarklet grammar included — redirect to the boot project's scoped twin, preserving path,
@@ -254,8 +325,6 @@ function NewTaskProjectRoute() {
  * (deleted, or never registered), a search/index that cannot answer, or any other flat path —
  * keeps the boot project, exactly as before.
  */
-const FLAT_TASK_RUN_ID = /^\/tasks\/([0-9a-f-]{36})(?=\/|$)/i
-
 function LegacyPathRedirect() {
   const location = useLocation()
   const health = useHealth()
@@ -269,53 +338,22 @@ function LegacyPathRedirect() {
   const indexSettled = runsIndex.data !== undefined || runsIndex.isError
   const indexMissed = runsIndex.data !== undefined && !runsIndex.data.runs.some((row) => row.id === flatRunId)
   const runsSearch = useRunsSearch(flatRunId !== null && indexMissed ? flatRunId : '')
-  const resolvedBoot = health.data?.bootProject ?? projects.data?.bootProject
-  const bootSourcesSettled =
-    (health.data !== undefined || health.isError) &&
-    (projects.data !== undefined || projects.isError)
+  const { resolved: resolvedBoot, settled: bootSourcesSettled, boot } = legacyBootProject(health, projects)
   if (resolvedBoot === undefined && !bootSourcesSettled) return <ScopeResolving />
-  // Health and the registry normally name the same boot project. If neither can answer after
-  // both queries settle, the server-side `default` alias remains the no-config fallback.
-  const boot = resolvedBoot ?? 'default'
 
-  const isBareRoot =
-    location.pathname === '/' && location.search === '' && location.hash === ''
-  if (isBareRoot) {
-    // The remembered location itself is local and synchronous; only the registry that validates
-    // its project is still worth waiting for.
-    if (projects.data === undefined && !projects.isError) return <ScopeResolving />
-
-    const restored = locationToRestore(
-      readStoredLastLocation(),
-      projects.data,
-      resolvedBoot,
-    )
-    if (restored !== null) return <Navigate to={restored} replace />
-  }
+  const restored = legacyBareRootRedirect(location, projects, resolvedBoot)
+  if (restored !== undefined) return restored
 
   // Owner resolution waits for each source like the boot sources above: routing a foreign run
   // to boot is the 404 this exists to fix, so "not answered yet" must not read as "unknown".
   let target = boot
   if (flatRunId !== null) {
-    if (!indexSettled) return <ScopeResolving />
-    const indexed = runsIndex.data?.runs.find((row) => row.id === flatRunId)?.projectId
-    if (indexed !== undefined) {
-      target = indexed
-    } else if (indexMissed) {
-      if (runsSearch.data === undefined && !runsSearch.isError) return <ScopeResolving />
-      target = runsSearch.data?.runs.find((row) => row.id === flatRunId)?.projectId ?? boot
-    }
+    const owner = legacyFlatRunOwner(flatRunId, boot, indexSettled, indexMissed, runsIndex, runsSearch)
+    if (owner === null) return <ScopeResolving />
+    target = owner
   }
 
-  // A bare `/p` (or `/p/`) names no project — send it to the boot project's home rather than
-  // minting a nonsense `/p/<boot>/p` path.
-  const path = location.pathname === '/p' || location.pathname === '/p/' ? '/' : location.pathname
-  return (
-    <Navigate
-      to={`/p/${encodeURIComponent(target)}${path}${location.search}${location.hash}`}
-      replace
-    />
-  )
+  return legacyScopedNavigate(target, location)
 }
 
 export interface PageTitleContext {
