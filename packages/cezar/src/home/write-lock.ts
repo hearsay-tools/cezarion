@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { recordedProcessLive } from '../delegation/process-liveness.ts';
+import { processStartToken, recordedProcessLive } from '../delegation/process-liveness.ts';
 import { privateDirectory } from './private-files.ts';
 import { ownProcessStartToken } from './process-identity.ts';
 import { assertHomeMetadata, assertHomePath } from './boundary.ts';
@@ -19,16 +19,26 @@ function publishClaim(path: string, claim: Claim): void {
   } finally { rmSync(stage, { force: true }); }
 }
 
+/** Bound recovery after PID reuse when either side cannot supply a start token. */
+function unconfirmedClaimExpired(mtimeMs: number, claim: Claim): boolean {
+  if (Date.now() - mtimeMs <= 30_000) return false;
+  return claim.startToken === undefined || processStartToken(claim.pid) === undefined;
+}
+
 function readClaim(path: string): Claim | undefined {
   let value: Claim;
-  try { value = JSON.parse(readFileSync(path, 'utf8')) as Claim; } catch (error) {
+  let mtimeMs: number;
+  try {
+    value = JSON.parse(readFileSync(path, 'utf8')) as Claim;
+    mtimeMs = statSync(path).mtimeMs;
+  } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw error;
   }
   if (!Number.isSafeInteger(value.pid) || value.pid <= 0 || !Number.isSafeInteger(value.ticket) || value.ticket < 0) {
     throw new Error(`Invalid HomeStore lock claim: ${path}`);
   }
-  if (recordedProcessLive(value)) return value;
+  if (recordedProcessLive(value) && !unconfirmedClaimExpired(mtimeMs, value)) return value;
   // A unique claim name cannot be reused by a later owner. Recovery never unlinks its lock.
   rmSync(path, { force: true });
   return;

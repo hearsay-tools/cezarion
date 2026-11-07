@@ -1,6 +1,7 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
 import { Home, homePaths } from './home.ts';
 import { HomeStore, readHomeFile } from './store.ts';
@@ -43,6 +44,23 @@ it('benchmarks mark new homes while preserving selected paths and refuse inherit
   storeChild(live, 'prepare', 'run');
   expect(() => benchmarkHome(homePaths(live, join(live, 'cache'), live))).toThrow(/refuses a live install marker/);
   expect(readInstallMarker(live)?.kind).toBe('live');
+});
+
+it('refuses the project-probe fixture command before it can modify an inherited live home', () => {
+  const root = storeRoot();
+  storeChild(root, 'prepare', 'run');
+  storeChild(root, 'write', '{"saved":true}');
+  const path = join(root, 'config.json');
+  const before = readFileSync(path);
+  const script = fileURLToPath(new URL('../../scripts/benchmark-project-probes.mjs', import.meta.url));
+  const result = spawnSync(process.execPath, ['--import', 'tsx', script, '--fixture-server'], {
+    env: childEnv({ CEZ_HOME: root }), encoding: 'utf8',
+    timeout: 10_000, // bound: a regression may start a server that never exits instead of refusing.
+  });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('Benchmark refuses a live install marker');
+  expect(readFileSync(path)).toEqual(before);
+  expect(readInstallMarker(root)?.kind).toBe('live');
 });
 
 it('keeps saved registry data readable when auxiliary marker JSON is invalid', () => {

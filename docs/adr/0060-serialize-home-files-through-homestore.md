@@ -110,6 +110,22 @@ No public setting exposes it. Marker, lock, journal and replacement files are pr
 
 ## Limits
 
+Mutual exclusion supports cockpits in one PID namespace. A bind-mounted home shared
+across container PID namespaces can lose exclusion: local liveness may remove a
+foreign claim whose PID is absent or whose readable start token differs. Writes
+then have the pre-P1b last-writer-wins behavior. Advisory `<pid>.lease` files can
+also overwrite each other across namespaces. Cross-namespace identity belongs to
+a follow-up after P1b; this slice does not add it.
+
+An undefined recorded token or unreadable current token makes a live PID count as
+the holder. To recover from a crashed holder followed by PID reuse, an unconfirmed
+claim expires after its mtime is more than 30 seconds old, three times the 10-second
+wait. A confirmed matching token never expires. This trades exclusion during a
+write stalled for over 30 seconds for recovery on Windows and unreadable-token
+systems. Such a stalled writer already makes each waiter time out. A foreign PID
+collision can still block a waiter until recovery; cross-namespace homes remain
+unsupported.
+
 Canonical passwd-home checks cover existing symlinks and unresolved descendants.
 Marker checks read the selected directory, so lexical aliases of the same home see
 the same kind. Locks use the canonical root for nested transactions. An outside

@@ -4,6 +4,7 @@ const testHome = (env: NodeJS.ProcessEnv = process.env) => resolveHome({ purpose
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tmpdir, userInfo } from 'node:os';
 import { join, resolve, sep } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 const mutationScope = vi.hoisted(() => ({ root: undefined as string | undefined, active: false }));
 vi.hoisted(() => vi.resetModules());
 
@@ -18,7 +19,8 @@ vi.mock('node:fs', async (importOriginal) => {
   const check = (path?: unknown) => {
     if (!mutationScope.active) return;
     if (!mutationScope.root) throw new Error('Test filesystem mutation was not authorized');
-    if (typeof path === 'string' && path !== mutationScope.root && !resolve(path).startsWith(resolve(mutationScope.root) + sep)) throw new Error('Test filesystem mutation escaped its fixture');
+    const target = path instanceof URL ? fileURLToPath(path) : Buffer.isBuffer(path) ? path.toString() : path;
+    if (typeof target === 'string' && target !== mutationScope.root && !resolve(target).startsWith(resolve(mutationScope.root) + sep)) throw new Error('Test filesystem mutation escaped its fixture');
   };
   return { ...fs, existsSync: vi.fn(fs.existsSync), realpathSync: vi.fn(fs.realpathSync), lstatSync: vi.fn(fs.lstatSync),
     mkdirSync: vi.fn((...args: Parameters<typeof fs.mkdirSync>) => { check(args[0]); return fs.mkdirSync(...args); }),
@@ -50,6 +52,17 @@ beforeEach(() => { mutationScope.active = true; });
 afterEach(() => { mutationScope.active = false; mutationScope.root = undefined; vi.unstubAllEnvs(); vi.mocked(existsSync).mockRestore(); vi.mocked(realpathSync).mockRestore(); vi.mocked(lstatSync).mockRestore(); vi.mocked(userInfo).mockRestore(); vi.clearAllMocks(); });
 
 describe('home write guard with HOME pinned to a sandbox', () => {
+  it.each(['Buffer', 'URL'])('rejects a %s path outside the authorized fixture', async kind => {
+    const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const fixture = fs.mkdtempSync(join(tmpdir(), 'cez-guard-path-'));
+    const target = join(fixture, 'outside.json');
+    mutationScope.root = join(fixture, 'allowed');
+    try {
+      expect(() => writeFileSync(kind === 'URL' ? pathToFileURL(target) : Buffer.from(target), '{}')).toThrow('escaped its fixture');
+      expect(fs.existsSync(target)).toBe(false);
+    } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
+  });
+
   it.each([['realpath', 'EACCES'], ['realpath', 'ELOOP'], ['lstat', 'EACCES']])('fails closed on %s lookup error %s', async (lookup, code) => {
     vi.resetModules();
     const { Home } = await import('./home/home.ts');

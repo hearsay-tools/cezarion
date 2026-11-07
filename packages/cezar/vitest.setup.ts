@@ -1,5 +1,5 @@
-import { Home } from './src/home/home.ts'
-import { configureTestHomeSelector } from './src/home/test-home.testkit.ts'
+import { ensureTestInstallMarker } from '../../scripts/test-install-marker.mjs'
+import { configureTestHomeSelector } from './src/home/test-home-selector.testkit.ts'
 import { checkWorkspaceResolution } from '../../scripts/check-workspace-resolution.mjs'
 
 checkWorkspaceResolution()
@@ -68,7 +68,7 @@ configureTestHomeSelector(home => {
   else process.env.CEZ_HOME = home.root
 })
 const pinSandboxHome = (): void => {
-  if (!process.env.CEZ_HOME) process.env.CEZ_HOME = Home.sandbox(sandboxHome).root
+  if (!process.env.CEZ_HOME) { ensureTestInstallMarker(sandboxHome); process.env.CEZ_HOME = sandboxHome }
 }
 
 // Nor may a test resolve the developer's own agent folders (hearsay-tools/cezarion#1361).

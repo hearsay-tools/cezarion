@@ -444,8 +444,8 @@ export function fixtureServeEnv(
     throw new Error(`cezar e2e: cannot verify fixture repository ${fixtureRoot}; refusing server boot`, { cause: discovery.error })
   }
   // Production skill discovery reads os.homedir() (USERPROFILE on Windows), independently
-  // of CEZ_HOME. Reset only
-  // this fixture-owned directory; the caller's tools keep their original HOME.
+  // of CEZ_HOME. Mark this fixture-owned directory as a test home and keep its contents;
+  // the caller's tools keep their original HOME.
   Home.sandbox(resolve(fixtureRoot, '.cez-home'))
   const serverHome = resolve(fixtureRoot, '.server-home')
   rmSync(serverHome, { recursive: true, force: true })

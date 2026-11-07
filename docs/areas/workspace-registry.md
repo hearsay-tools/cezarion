@@ -37,6 +37,10 @@ across the read, mutation and replacement. The lock lives in `<home>/.locks/writ
 It uses unique process claims; stale claims use the process identity checks in
 `delegation/process-liveness.ts`. Serving cockpits hold independent
 `<home>/.locks/cockpits/<pid>.lease` files. A lease does not block a CLI writer.
+Mutual exclusion requires one PID namespace; cross-container bind-mounted homes
+are a stated limit. An unconfirmed process claim expires after 30 seconds to recover
+from PID reuse. A confirmed live process token never expires. See ADR 0060 for
+the stalled-write trade-off and cross-namespace lease collisions.
 
 Operator entry points create an install marker before calling library writers.
 Library writes require a marker. The marker check uses the actual process to refuse
