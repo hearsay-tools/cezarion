@@ -8,6 +8,70 @@ export class LiveFeedReset extends Error {
   readonly status = 413;
 }
 
+function parsePersistedRunEvent(line: string): RunEvent | undefined {
+  try {
+    const value = JSON.parse(line) as RunEvent;
+    if (Number.isSafeInteger(value.seq) && typeof value.type === 'string' && typeof value.ts === 'string') return value;
+  } catch { /* Malformed historical lines have never belonged to replay. */ }
+  return undefined;
+}
+
+interface RunEventBatchScan {
+  offset: number;
+  afterSeq: number;
+  events: LiveRunBatch['events'];
+  bytes: number;
+  hasMore: boolean;
+  laterWrites: boolean;
+  snapshots: RunEvent[];
+  snapshotIndex: number;
+  snapshot?: ReturnType<ProjectContext['store']['liveReadSnapshot']>;
+}
+
+function acceptRunEvent(scan: RunEventBatchScan, event: RunEvent, length: number, byteLimit: number): boolean {
+  if (event.seq <= scan.afterSeq) return true;
+  if (length > byteLimit) throw new LiveFeedReset('event exceeds live batch limit — reload history');
+  if (scan.events.length >= LIVE_EVENT_LIMIT || scan.bytes + length > byteLimit) {
+    scan.hasMore = true;
+    return false;
+  }
+  scan.events.push(event);
+  scan.bytes += length;
+  scan.afterSeq = event.seq;
+  return true;
+}
+
+function acceptSnapshotsBefore(scan: RunEventBatchScan, seq: number, byteLimit: number): boolean {
+  while (scan.snapshotIndex < scan.snapshots.length && scan.snapshots[scan.snapshotIndex]!.seq < seq) {
+    const snapshot = scan.snapshots[scan.snapshotIndex]!;
+    if (!acceptRunEvent(scan, snapshot, Buffer.byteLength(JSON.stringify(snapshot)) + 1, byteLimit)) return false;
+    scan.snapshotIndex++;
+  }
+  return true;
+}
+
+/** Persist one complete history line, or stop the scan when the batch is full. */
+function consumePersistedLine(
+  scan: RunEventBatchScan,
+  line: Buffer,
+  byteLimit: number,
+): 'continue' | 'stop' {
+  const length = line.length + 1;
+  if (length > byteLimit) throw new LiveFeedReset('event exceeds live batch limit — reload history');
+  const event = parsePersistedRunEvent(line.toString('utf8'));
+  if (event && scan.snapshot && event.seq > scan.snapshot.throughSeq) {
+    scan.laterWrites = true;
+    return 'stop';
+  }
+  if (event && event.seq > scan.afterSeq) {
+    if (!acceptSnapshotsBefore(scan, event.seq, byteLimit) || !acceptRunEvent(scan, event, length, byteLimit)) {
+      return 'stop';
+    }
+  }
+  scan.offset += length;
+  return 'continue';
+}
+
 /** The returned cursor covers exactly the accepted prefix, including complete ignored lines.
  * Capture sorted live snapshots and their sequence boundary together BEFORE disk IO.
  * Later writes wait for the next capture: otherwise a newer persisted event could
@@ -16,60 +80,35 @@ export class LiveFeedReset extends Error {
 export async function readRunEventBatch(dataDir: string, demand: LiveRunDemand, signal: AbortSignal, byteLimit = LIVE_BYTE_LIMIT, snapshot?: ReturnType<ProjectContext['store']['liveReadSnapshot']>): Promise<LiveRunBatch> {
   signal.throwIfAborted();
   const start = demand.cursor ? decodeLiveCursor(demand.cursor) : { offset: 0, boundarySeq: 0 };
-  let offset = start.offset;
-  let afterSeq = Math.max(demand.afterSeq, start.boundarySeq);
-  const events: LiveRunBatch['events'] = [];
-  let bytes = 0;
+  const scan: RunEventBatchScan = {
+    offset: start.offset,
+    afterSeq: Math.max(demand.afterSeq, start.boundarySeq),
+    events: [],
+    bytes: 0,
+    hasMore: false,
+    laterWrites: false,
+    snapshots: snapshot?.events ?? [],
+    snapshotIndex: 0,
+    ...(snapshot ? { snapshot } : {}),
+  };
   let pending: Buffer = Buffer.alloc(0);
-  let hasMore = false;
-  let laterWrites = false;
-  const snapshots = snapshot?.events ?? [];
-  let snapshotIndex = 0;
-  const accept = (event: RunEvent, length: number): boolean => {
-    if (event.seq <= afterSeq) return true;
-    if (length > byteLimit) throw new LiveFeedReset('event exceeds live batch limit — reload history');
-    if (events.length >= LIVE_EVENT_LIMIT || bytes + length > byteLimit) { hasMore = true; return false; }
-    events.push(event);
-    bytes += length;
-    afterSeq = event.seq;
-    return true;
-  };
-  const acceptSnapshotsBefore = (seq: number): boolean => {
-    while (snapshotIndex < snapshots.length && snapshots[snapshotIndex]!.seq < seq) {
-      const snapshot = snapshots[snapshotIndex]!;
-      if (!accept(snapshot, Buffer.byteLength(JSON.stringify(snapshot)) + 1)) return false;
-      snapshotIndex++;
-    }
-    return true;
-  };
-  outer: for await (const chunk of streamHistoryAfter(dataDir, demand.runId, offset, signal)) {
+  outer: for await (const chunk of streamHistoryAfter(dataDir, demand.runId, scan.offset, signal)) {
     pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
     let boundary: number;
     while ((boundary = pending.indexOf(10)) !== -1) {
       signal.throwIfAborted();
-      const length = boundary + 1;
-      if (length > byteLimit) throw new LiveFeedReset('event exceeds live batch limit — reload history');
-      const line = pending.subarray(0, boundary).toString('utf8');
-      let event: RunEvent | undefined;
-      try {
-        const value = JSON.parse(line) as RunEvent;
-        if (Number.isSafeInteger(value.seq) && typeof value.type === 'string' && typeof value.ts === 'string') event = value;
-      } catch { /* Malformed historical lines have never belonged to replay. */ }
-      if (event && snapshot && event.seq > snapshot.throughSeq) { laterWrites = true; break outer; }
-      if (event && event.seq > afterSeq) {
-        if (!acceptSnapshotsBefore(event.seq) || !accept(event, length)) break outer;
-      }
-      offset += length;
-      pending = pending.subarray(length);
+      const line = pending.subarray(0, boundary);
+      if (consumePersistedLine(scan, line, byteLimit) === 'stop') break outer;
+      pending = pending.subarray(boundary + 1);
     }
     if (pending.length > byteLimit) throw new LiveFeedReset('event exceeds live batch limit — reload history');
   }
   signal.throwIfAborted();
-  if (!hasMore) acceptSnapshotsBefore(Infinity);
+  if (!scan.hasMore) acceptSnapshotsBefore(scan, Infinity, byteLimit);
   // No newline means a writer is still appending: do not acknowledge that partial record.
   return {
-    type: 'batch', projectId: demand.projectId, runId: demand.runId, events, afterSeq, hasMore: hasMore || laterWrites,
-    cursor: Buffer.from(JSON.stringify({ v: 1, kind: 'live', offset, boundarySeq: afterSeq })).toString('base64url'),
+    type: 'batch', projectId: demand.projectId, runId: demand.runId, events: scan.events, afterSeq: scan.afterSeq, hasMore: scan.hasMore || scan.laterWrites,
+    cursor: Buffer.from(JSON.stringify({ v: 1, kind: 'live', offset: scan.offset, boundarySeq: scan.afterSeq })).toString('base64url'),
   };
 }
 

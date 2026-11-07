@@ -479,17 +479,13 @@ async function sniffBinary(path: string, size: number): Promise<boolean> {
   }
 }
 
-/**
- * Directory listing or file content from inside `root`, traversal-safe:
- * anything resolving outside the root (dot-segments, absolute paths, NUL) is
- * rejected — same "not a file we serve" stance as `isSafeAssetFilename` in
- * src/server/static-ui.ts. `.git` and symlinks are off-limits too.
- */
-export async function readWorktreePath(
-  root: string,
-  relPath: string,
-  contentCap = FILE_CONTENT_CAP,
-): Promise<FilesResult> {
+interface ResolvedWorktreePath {
+  rootAbs: string;
+  target: string;
+  display: string;
+}
+
+function resolveWorktreeTarget(root: string, relPath: string): FilesResult | ResolvedWorktreePath {
   if (relPath.includes('\0')) return { kind: 'invalid', error: 'invalid path' };
   const rootAbs = resolve(root);
   const target = resolve(rootAbs, relPath);
@@ -501,6 +497,59 @@ export async function readWorktreePath(
     return { kind: 'invalid', error: '.git internals are not browsable' };
   }
   const display = target === rootAbs ? '' : target.slice(rootAbs.length + 1).split(sep).join('/');
+  return { rootAbs, target, display };
+}
+
+/** Directory listing: skip `.git`, omit non-file/non-dir entries, dirs first. */
+async function listWorktreeDirectory(target: string, display: string): Promise<FilesResult> {
+  const dirents = await readdir(target, { withFileTypes: true });
+  const entries: DirEntry[] = [];
+  for (const d of dirents) {
+    if (d.name === '.git') continue;
+    if (d.isDirectory()) {
+      entries.push({ name: d.name, type: 'dir' });
+    } else if (d.isFile()) {
+      const size = await stat(join(target, d.name))
+        .then((s) => s.size)
+        .catch(() => undefined);
+      entries.push({ name: d.name, type: 'file', ...(size !== undefined ? { size } : {}) });
+    }
+    // Symlinks, sockets, … deliberately omitted from the listing.
+  }
+  entries.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
+  return { kind: 'dir', path: display, entries };
+}
+
+/** Regular-file content, or the binary/too-large flags the Files tab shows instead. */
+async function readWorktreeFile(
+  target: string,
+  display: string,
+  size: number,
+  contentCap: number,
+): Promise<FilesResult> {
+  const binary = await sniffBinary(target, size).catch(() => true);
+  const tooLarge = size > contentCap;
+  if (binary || tooLarge) {
+    return { kind: 'file', path: display, size, binary, tooLarge };
+  }
+  const content = await readFile(target, 'utf8');
+  return { kind: 'file', path: display, size, binary: false, tooLarge: false, content };
+}
+
+/**
+ * Directory listing or file content from inside `root`, traversal-safe:
+ * anything resolving outside the root (dot-segments, absolute paths, NUL) is
+ * rejected — same "not a file we serve" stance as `isSafeAssetFilename` in
+ * src/server/static-ui.ts. `.git` and symlinks are off-limits too.
+ */
+export async function readWorktreePath(
+  root: string,
+  relPath: string,
+  contentCap = FILE_CONTENT_CAP,
+): Promise<FilesResult> {
+  const resolved = resolveWorktreeTarget(root, relPath);
+  if ('kind' in resolved) return resolved;
+  const { rootAbs, target, display } = resolved;
 
   let info;
   try {
@@ -527,34 +576,9 @@ export async function readWorktreePath(
     return { kind: 'invalid', error: `path escapes the worktree: ${relPath}` };
   }
 
-  if (info.isDirectory()) {
-    const dirents = await readdir(target, { withFileTypes: true });
-    const entries: DirEntry[] = [];
-    for (const d of dirents) {
-      if (d.name === '.git') continue;
-      if (d.isDirectory()) {
-        entries.push({ name: d.name, type: 'dir' });
-      } else if (d.isFile()) {
-        const size = await stat(join(target, d.name))
-          .then((s) => s.size)
-          .catch(() => undefined);
-        entries.push({ name: d.name, type: 'file', ...(size !== undefined ? { size } : {}) });
-      }
-      // Symlinks, sockets, … deliberately omitted from the listing.
-    }
-    entries.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
-    return { kind: 'dir', path: display, entries };
-  }
-
+  if (info.isDirectory()) return listWorktreeDirectory(target, display);
   if (!info.isFile()) return { kind: 'invalid', error: `not a regular file: ${display}` };
-
-  const binary = await sniffBinary(target, info.size).catch(() => true);
-  const tooLarge = info.size > contentCap;
-  if (binary || tooLarge) {
-    return { kind: 'file', path: display, size: info.size, binary, tooLarge };
-  }
-  const content = await readFile(target, 'utf8');
-  return { kind: 'file', path: display, size: info.size, binary: false, tooLarge: false, content };
+  return readWorktreeFile(target, display, info.size, contentCap);
 }
 
 // ---- branches -------------------------------------------------------------
