@@ -180,8 +180,7 @@ function keyNoteTone(isError: boolean) {
 }
 
 /** The launch-key note under the auto-submit switch (hearsay-tools/cezarion#896): an alert while
- *  the key fetch failed, a status line while it is still loading, nothing once the key exists.
- *  Extracted from BookmarkletPanel (hearsay-tools/cezarion#2862). */
+ *  the key fetch failed, a status line while it is still loading, nothing once the key exists. */
 function LaunchKeyNote({
   launchKey,
   hasKey,
@@ -202,8 +201,7 @@ function LaunchKeyNote({
 }
 
 /** The filtered launcher list inside the bookmarklet panel: one row per matching skill, or the
- *  "(no skills match)" / "(no skills yet)" hint. Extracted from BookmarkletPanel
- *  (hearsay-tools/cezarion#2862). */
+ *  "(no skills match)" / "(no skills yet)" hint. */
 function BookmarkletList({
   skills,
   shown,

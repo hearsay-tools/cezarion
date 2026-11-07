@@ -192,8 +192,7 @@ function ResourcesForm({ config }: { config: WorkspaceConfigResponse }) {
   )
 }
 
-/** The "Max parallel tasks" workspace select plus its per-project-limits link. Extracted from
- *  ResourcesForm (hearsay-tools/cezarion#2862). */
+/** The "Max parallel tasks" workspace select plus its per-project-limits link. */
 function MaxParallelField({
   maxParallel,
   onSelect,
@@ -239,8 +238,7 @@ function MaxParallelField({
   )
 }
 
-/** The "Extra monitoring sessions" select and its capacity summary over the two pools. Extracted
- *  from ResourcesForm (hearsay-tools/cezarion#2862). */
+/** The "Extra monitoring sessions" select and its capacity summary over the two pools. */
 function MaxMonitoringField({
   maxParallel,
   maxMonitoringSessions,
@@ -277,8 +275,7 @@ function MaxMonitoringField({
 }
 
 /** The monitoring wake-up field: parked by default, an explicit interval when switched on
- *  (checked), with its own Save button and invalid-value note. Extracted from ResourcesForm
- *  (hearsay-tools/cezarion#2862). */
+ *  (checked), with its own Save button and invalid-value note. */
 function WakeField({
   wakeMode,
   setWakeMode,
@@ -340,8 +337,7 @@ function WakeField({
   )
 }
 
-/** The per-task memory limit field: a blank input means "no limit". Extracted from ResourcesForm
- *  (hearsay-tools/cezarion#2862). */
+/** The per-task memory limit field: a blank input means "no limit". */
 function MemoryField({
   memory,
   setMemory,
@@ -405,7 +401,7 @@ function triStateValue(value: boolean | null): 'inherit' | 'on' | 'off' {
 }
 
 /** The "New task defaults" field: the autonomous and worktree tri-state selects with their
- *  inherited-value captions. Extracted from ResourcesForm (hearsay-tools/cezarion#2862). */
+ *  inherited-value captions. */
 function ComposerDefaultsField({
   composerDefaults,
   saveComposerDefault,

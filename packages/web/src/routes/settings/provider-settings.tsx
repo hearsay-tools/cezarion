@@ -63,8 +63,7 @@ function withProviderEnabled(
 type ProviderState = ProviderStatus['status']
 
 /** What the status dot and its label say for a provider card: the row's own presentation when the
- *  row exists, "Checking…" while the first status fetch is in flight, "Could not verify" otherwise.
- *  Extracted from the per-provider card map (hearsay-tools/cezarion#2862). */
+ *  row exists, "Checking…" while the first status fetch is in flight, "Could not verify" otherwise. */
 function presentationFor(
   state: ProviderState | undefined,
   statusPending: boolean,
@@ -79,8 +78,7 @@ function verificationFailed(state: ProviderState | undefined, statusIsError: boo
 }
 
 /** The explanation line under a provider card's status: install instructions for a missing
- *  provider, the verification-failure note, or the row's own hint. Extracted from the
- *  per-provider card map (hearsay-tools/cezarion#2862). */
+ *  provider, the verification-failure note, or the row's own hint. */
 function ProviderHint({
   provider,
   state,
@@ -113,15 +111,13 @@ function ProviderHint({
 }
 
 /** The card's action column: the enable switch (hidden until the provider is installed), the
- *  explicit re-check, Connect, and the post-failure "Try again". Extracted from the
- *  per-provider card map (hearsay-tools/cezarion#2862). */
+ *  explicit re-check, Connect, and the post-failure "Try again". */
 function ProviderActions({
   provider,
   state,
   current,
   isConnecting,
   incidentId,
-  status,
   refresh,
   connect,
   retry,
@@ -132,7 +128,6 @@ function ProviderActions({
   current: ProviderStatus | undefined
   isConnecting: boolean
   incidentId: string | undefined
-  status: ReturnType<typeof useProviderStatus>
   refresh: ReturnType<typeof useRefreshProviderStatus>
   connect: UseMutationResult<Awaited<ReturnType<typeof connectProvider>>, Error, ProviderId>
   retry: ReturnType<typeof useRetryProviderAuth>
@@ -196,8 +191,7 @@ function ProviderActions({
 }
 
 /** The manual sign-in card that appears under a provider whose Connect failed with a terminal
- *  command, until that provider verifies as connected. Extracted from the per-provider card map
- *  (hearsay-tools/cezarion#2862). */
+ *  command, until that provider verifies as connected. */
 function ManualSignIn({
   manual,
   provider,
@@ -421,7 +415,6 @@ export function ProviderSettings() {
                     current={current}
                     isConnecting={isConnecting}
                     incidentId={incidentId}
-                    status={status}
                     refresh={refresh}
                     connect={connect}
                     retry={retry}
