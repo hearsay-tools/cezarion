@@ -1,0 +1,198 @@
+import { parseArgs } from 'node:util';
+import { resolve } from 'node:path';
+import { productEnv } from './core/product-env.ts';
+import { operatorHomeEntry, prepareOperatorHome } from './home/entry.ts';
+import { REBRAND_SWITCH } from './home/switch.ts';
+import type { Home } from './home/home.ts';
+import { runManagedCommand } from './self-update/cli.ts';
+import { runSubcommand } from './subcommands.ts';
+import { getRepoInfo } from './server/git.ts';
+import { runProjectsCommand } from './workspace/projects-cli.ts';
+import type { serverCommand } from './server-command.ts';
+import type { TaskAccess } from './headless-run.ts';
+
+export const defaultCliDeps = {
+  parseArgs, productEnv, operatorHomeEntry, prepareOperatorHome, runManagedCommand,
+  runSubcommand, getRepoInfo, runProjectsCommand, process, console,
+};
+
+export type CliDeps = typeof defaultCliDeps & {
+  resolveCliHome: () => Home;
+  readOwnName: () => string;
+  readOwnVersion: () => string;
+  serveCommand: (home: Home, root: string, port: number, open: boolean, bindHost: string | undefined, restartExact: boolean) => Promise<void>;
+  serverCommand: typeof serverCommand;
+  runCommand: (home: Home, root: string, task: string, workflow: string | undefined, model: string | undefined, access: TaskAccess) => Promise<void>;
+  initCommand: (root: string) => void;
+  initWorkspace: (root: string, home: Home) => Promise<string | undefined>;
+};
+
+const HELP = `cezar — local cockpit for AI agent tasks in your repo
+
+Usage:
+  cez                       start the cockpit (server + GUI) for the current repo
+  cez run "<task>"          run a task headless in the terminal
+  cez init                  scaffold .ai/cezar/ (example workflow + skill)
+  cez projects              list the projects this cockpit serves
+                            (also: projects add [<dir>] · projects remove|rm <id> ·
+                             projects tag <id> [<tag>…])
+  cez backup list [<file>]   list rotating registry and account backups
+  cez backup restore <file> [--at <time>] restore JSON from a backup
+  cez discover              list host runners, models, and advertised effort levels
+  cez worker                manage owned workers (see: worker --help)
+  cez message               message tasks (see: message --help)
+  cez task                  start/watch/steer cockpit tasks from the terminal (see: task --help)
+  cez automation            create and manage automations from a task (see: automation --help)
+  cez webhook               list and send to the project webhooks open to agents (see: webhook --help)
+  cez artifact publish <path> publish a local task artifact (see: artifact --help)
+  cez server-install        interactive wizard to host cezar on a server
+  cez server-deploy         redeploy a new version (reload the service) + verify
+  cez server-uninstall      reverse a server-install
+${REBRAND_SWITCH ? '  hsq migrate [--dry-run]  migrate the legacy home into the split layout\n  hsq migrate --resolve-legacy <file> restore|accept  resolve legacy recovery first\n' : ''}  cez remote-settings       enable|status|disable remote edits of agent config and worktree setup
+  cez install | update      manage the desktop installation under ~/.cezar/versions
+  cez versions | use <id>   list or switch managed versions
+  cez link [dir] [--use]    link a built development checkout (unlink <id> removes it)
+
+Options:
+  -p, --port <n>              cockpit port (default 4321; server-install: this
+                              instance's loopback port — auto-picked per domain)
+      --repo <dir>            repo to operate on (default: cwd)
+      --workflow <name>       workflow for \`run\` (default: quick-task)
+      --model <model>         model override for \`run\`
+      --no-workers            \`run\`: the task cannot start or resume Cezar workers
+      --no-messaging          \`run\`: no new peer-task messages; worker messages and replies stay
+      --no-open               don't open the browser
+      --platform <id>         server-install target (ubuntu-vps | macosx-ngrok)
+      --domain <host>         server-install (ubuntu-vps): host a SECOND, independent
+                              cockpit for this domain (own nginx site + service + port).
+                              A new domain never resumes/clobbers the first install.
+      --external-proxy        server-install (ubuntu-vps): the box ALREADY has a
+                              reverse proxy owning :80/:443 (Dokploy/Traefik, Coolify,
+                              Caddy, your own nginx). Installs the service only — no
+                              nginx, no certbot. That proxy must provide TLS + auth.
+      --bind-host <host>      host the cockpit binds (default 127.0.0.1). Use with
+                              --external-proxy when the proxy runs in a container and
+                              cannot reach loopback (e.g. docker bridge 172.17.0.1).
+                              cezar has NO built-in auth — never expose this publicly.
+      --yes                   server-install: accept safe defaults (never auto-sudo)
+      --reconfigure <ids>     server-install: force re-run of step id(s), comma-separated
+      --reinstall             server-install: force re-run of every step (full reinstall)
+  -h, --help                  show this help
+
+Zero config: uses your logged-in \`claude\` CLI (and \`gh\` for GitHub bits).
+Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repos
+(team skills come from "skillsRepos" in .ai/cezar/config.json, which the Skills page edits; none by default);
+workflows in .ai/cezar/workflows/.`;
+
+export async function main(deps: CliDeps): Promise<void> {
+  let resolvedHome: Home | undefined;
+  let homeEntry = deps.operatorHomeEntry(deps.process.argv.slice(2));
+  // Dispatch task commands without invoking this factory or giving them a Home.
+  const home = () => resolvedHome ??= deps.prepareOperatorHome(deps.resolveCliHome(), homeEntry);
+  const managedExit = await deps.runManagedCommand(deps.process.argv.slice(2), { pkgName: deps.readOwnName(), version: deps.readOwnVersion(), entry: resolve(deps.process.argv[1] ?? '') }, home);
+  if (managedExit !== undefined) {
+    deps.process.exitCode = managedExit;
+    return;
+  }
+  // Subcommands with flags of their own run before the global deps.parseArgs (#504, #774, #1576).
+  const subcommandExit = await deps.runSubcommand(deps.process.argv.slice(2), deps.process.env, home);
+  if (subcommandExit !== undefined) {
+    deps.process.exitCode = subcommandExit;
+    return;
+  }
+  const { values, positionals } = deps.parseArgs({
+    args: deps.process.argv.slice(2),
+    options: {
+      port: { type: 'string', short: 'p', default: '4321' },
+      repo: { type: 'string' },
+      workflow: { type: 'string' },
+      model: { type: 'string' },
+      'no-workers': { type: 'boolean', default: false },
+      'no-messaging': { type: 'boolean', default: false },
+      'no-open': { type: 'boolean', default: false },
+      platform: { type: 'string' },
+      domain: { type: 'string' },
+      'bind-host': { type: 'string' },
+      'external-proxy': { type: 'boolean', default: false },
+      yes: { type: 'boolean', default: false },
+      reconfigure: { type: 'string' },
+      reinstall: { type: 'boolean', default: false },
+      help: { type: 'boolean', short: 'h', default: false },
+      'restart-exact': { type: 'boolean', default: false },
+    },
+    allowPositionals: true,
+  });
+
+  // `port` carries a default, so its presence can't tell an explicit `--port`
+  // from the fallback. server-install needs that distinction (explicit port
+  // wins; otherwise a new named instance auto-picks a free one), so detect the
+  // flag straight from argv.
+  const portExplicit = deps.process.argv
+    .slice(2)
+    .some((a) => a === '-p' || a === '--port' || a.startsWith('--port=') || a.startsWith('-p='));
+
+  if (values.help) {
+    deps.console.log(HELP);
+    return;
+  }
+
+  const command = positionals[0] ?? 'serve';
+  homeEntry = command;
+  const cwd = resolve(values.repo ?? deps.process.cwd());
+  const repoInfo = await deps.getRepoInfo(cwd);
+  const repoRoot = repoInfo?.root ?? cwd;
+
+  switch (command) {
+    case 'serve':
+      await deps.serveCommand(home(), repoRoot, Number(values.port), !values['no-open'], values['bind-host'], Boolean(values['restart-exact']));
+      return;
+    case 'run':
+      await deps.runCommand(home(), repoRoot, positionals.slice(1).join(' ').trim(), values.workflow, values.model,
+        { allowWorkers: !values['no-workers'], allowMessaging: !values['no-messaging'] });
+      return;
+    case 'init':
+      home();
+      deps.initCommand(repoRoot);
+      return;
+    case 'projects':
+      // Registry-only (no server, no HTTP) — see workspace/projects-cli.ts.
+      // In single-project mode a listing is a launch-context read: register
+      // the boot repo through the normal self-healing path and pin the output
+      // to that explicit identity. Mutations are left to their own guards.
+      const projectArgs = positionals.slice(1);
+      const isList = projectArgs.length === 0 || projectArgs[0] === 'list';
+      const bootProjectId = deps.productEnv('SINGLE_PROJECT') === '1' && isList
+        ? await deps.initWorkspace(repoRoot, home())
+        : undefined;
+      deps.process.exitCode = await deps.runProjectsCommand(projectArgs, { defaultRoot: repoRoot, bootProjectId, home: home() });
+      return;
+    case 'server-install':
+      await deps.serverCommand('install', home(), repoRoot, values.platform, {
+        yes: Boolean(values.yes),
+        reconfigure: values.reconfigure,
+        reinstall: Boolean(values.reinstall),
+        domain: values.domain,
+        port: portExplicit ? Number(values.port) : undefined,
+        externalProxy: Boolean(values['external-proxy']),
+        bindHost: values['bind-host'],
+      });
+      return;
+    case 'server-deploy':
+      await deps.serverCommand('deploy', home(), repoRoot, values.platform, {
+        yes: Boolean(values.yes),
+        domain: values.domain,
+      });
+      return;
+    case 'server-uninstall':
+      await deps.serverCommand('uninstall', home(), repoRoot, values.platform, {
+        yes: Boolean(values.yes),
+        domain: values.domain,
+      });
+      return;
+    default:
+      deps.console.error(`unknown command: ${command}\n`);
+      deps.console.log(HELP);
+      deps.process.exitCode = 1;
+  }
+}
+

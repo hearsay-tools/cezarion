@@ -31,8 +31,8 @@ afterEach(async () => {
 
 function terminal(platform: NodeJS.Platform, stdin: boolean | undefined, stdout: boolean | undefined): void {
   Object.defineProperty(process, 'platform', { ...platformDescriptor, value: platform });
-  vi.spyOn(process, 'stdin', 'get').mockReturnValue({ isTTY: stdin } as NodeJS.ReadStream);
-  vi.spyOn(process, 'stdout', 'get').mockReturnValue({ isTTY: stdout } as NodeJS.WriteStream);
+  vi.spyOn(process, 'stdin', 'get').mockReturnValue({ isTTY: stdin } as typeof process.stdin);
+  vi.spyOn(process, 'stdout', 'get').mockReturnValue({ isTTY: stdout } as typeof process.stdout);
 }
 
 describe('acquireServeListener', () => {

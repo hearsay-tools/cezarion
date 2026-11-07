@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { testHome } from './home/test-home.testkit.ts';
@@ -32,8 +33,8 @@ function fixture() {
     trace.push(`startRun listeners=${store.listenerCount('run')}`);
     state.duringStart();
     queueMicrotask(() => {
-      store.emit('run', { id: 'other', status: 'done' });
-      store.emit('run', { id: 'task', status: 'running' });
+      store.emit('run', { id: 'other', status: RUN_STATUS.done });
+      store.emit('run', { id: 'task', status: RUN_STATUS.running });
       store.emit('event', { event: { type: 'text', text: 'task output' } });
       store.emit('run', { id: 'task', status: state.final });
     });

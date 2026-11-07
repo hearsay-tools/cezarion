@@ -46,7 +46,7 @@ export async function serveCommand(
   preferredPort: number,
   openBrowser: boolean,
   bindHost: string | undefined,
-  restartExact = false,
+  restartExact: boolean,
   deps: ServeDeps,
 ): Promise<void> {
   const ownership = new deps.CockpitOwnership();
