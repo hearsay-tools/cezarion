@@ -156,6 +156,90 @@ export function shquote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+/** Decide how one privileged command runs: `--yes` picks by passwordless sudo,
+ *  a remembered answer is reused (issue #6), otherwise the operator chooses. */
+async function chooseSudoMode(ctx: InstallContext, passwordless: boolean): Promise<'sudo' | 'delegate'> {
+  const { ui } = ctx;
+  if (ctx.assumeYes) {
+    return passwordless ? 'sudo' : 'delegate';
+  }
+  if (ctx.prefs.sudoMode) {
+    // Remembered from an earlier answer — don't ask again this run (issue #6).
+    return ctx.prefs.sudoMode;
+  }
+  // Default to "I'll run it myself as root" — the safe, no-surprise choice
+  // for operators who prefer to paste privileged commands into a root shell.
+  const choice = await ui.select<'sudo' | 'delegate'>({
+    message: 'How should this privileged command run?',
+    options: [
+      { value: 'delegate', label: "I'll run it myself as root", hint: 'paste & run as root, then confirm' },
+      { value: 'sudo', label: 'Run it now via sudo', hint: 'streams output here' },
+    ],
+    initialValue: 'delegate',
+  });
+  if (choice === CANCEL) throw new StepCancelled();
+  ctx.prefs.sudoMode = choice; // reuse this choice for every later privileged command
+  return choice;
+}
+
+/** Execute one chosen attempt. Sudo runs it here; delegate hands it to the
+ *  operator and confirms. Returns the exit code (`undefined` in delegate mode,
+ *  where the operator ran the command in a separate root shell). */
+async function runPrivilegedCommand(
+  ctx: InstallContext,
+  opts: SudoStepOpts,
+  mode: 'sudo' | 'delegate',
+): Promise<number | undefined> {
+  const { ui } = ctx;
+  if (mode === 'sudo') {
+    const commandCode = await ctx.runner.interactive(
+      'sudo',
+      ['bash', '-lc', opts.command],
+      opts.input != null ? { input: opts.input } : undefined,
+    );
+    if (commandCode !== 0) ui.warn(`command exited with code ${commandCode}`);
+    return commandCode;
+  }
+  ui.info('Copy the command above and run it as root on the server (paste into a root shell, or prefix with sudo), then confirm below.');
+  if (opts.input != null) {
+    // Screen-only: pasted as stdin it stays out of argv AND shell history.
+    ui.info(`The command reads from stdin — after starting it, paste this ${opts.inputLabel ?? 'line'} and press Ctrl-D:`);
+    ui.message(opts.input);
+  }
+  if (!ctx.assumeYes) {
+    const done = await ui.confirm({ message: 'Have you run it as root?', initialValue: true });
+    if (done === CANCEL) throw new StepCancelled();
+  }
+  return undefined;
+}
+
+/** React to one failed verification: give up under `--yes`, offer skip for a
+ *  skippable step, otherwise ask to retry (returning re-runs the loop). */
+async function handleFailedVerification(ctx: InstallContext, opts: SudoStepOpts): Promise<void> {
+  const { ui } = ctx;
+  ui.error('That did not take effect — the verification check still fails.');
+  if (ctx.assumeYes) {
+    throw opts.skippable
+      ? new StepSkipped(`verification failed for: ${opts.command}`)
+      : new StepAborted(`verification failed for: ${opts.command}`);
+  }
+  if (opts.skippable) {
+    const next = await ui.select<'retry' | 'skip'>({
+      message: 'That did not verify. What now?',
+      options: [
+        { value: 'retry', label: 'Try again' },
+        { value: 'skip', label: 'Skip this step', hint: opts.skipHint },
+      ],
+      initialValue: 'retry',
+    });
+    if (next === CANCEL) throw new StepCancelled();
+    if (next === 'skip') throw new StepSkipped(`skipped: ${opts.command}`);
+    return; // retry: the caller's loop re-runs the command
+  }
+  const redo = await ui.confirm({ message: 'Try again?', initialValue: true });
+  if (redo === CANCEL || redo === false) throw new StepAborted(`gave up on: ${opts.command}`);
+}
+
 export async function sudoStep(ctx: InstallContext, opts: SudoStepOpts): Promise<void> {
   const { ui } = ctx;
   // What we actually run — and what the operator copy-pastes in the delegate path.
@@ -177,75 +261,15 @@ export async function sudoStep(ctx: InstallContext, opts: SudoStepOpts): Promise
     if (opts.note) ui.message(opts.note);
     ui.message(display);
 
-    let mode: 'sudo' | 'delegate';
-    if (ctx.assumeYes) {
-      mode = passwordless ? 'sudo' : 'delegate';
-    } else if (ctx.prefs.sudoMode) {
-      // Remembered from an earlier answer — don't ask again this run (issue #6).
-      mode = ctx.prefs.sudoMode;
-    } else {
-      // Default to "I'll run it myself as root" — the safe, no-surprise choice
-      // for operators who prefer to paste privileged commands into a root shell.
-      const choice = await ui.select<'sudo' | 'delegate'>({
-        message: 'How should this privileged command run?',
-        options: [
-          { value: 'delegate', label: "I'll run it myself as root", hint: 'paste & run as root, then confirm' },
-          { value: 'sudo', label: 'Run it now via sudo', hint: 'streams output here' },
-        ],
-        initialValue: 'delegate',
-      });
-      if (choice === CANCEL) throw new StepCancelled();
-      mode = choice;
-      ctx.prefs.sudoMode = choice; // reuse this choice for every later privileged command
-    }
-
-    let commandCode: number | undefined;
-    if (mode === 'sudo') {
-      commandCode = await ctx.runner.interactive(
-        'sudo',
-        ['bash', '-lc', opts.command],
-        opts.input != null ? { input: opts.input } : undefined,
-      );
-      if (commandCode !== 0) ui.warn(`command exited with code ${commandCode}`);
-    } else {
-      ui.info('Copy the command above and run it as root on the server (paste into a root shell, or prefix with sudo), then confirm below.');
-      if (opts.input != null) {
-        // Screen-only: pasted as stdin it stays out of argv AND shell history.
-        ui.info(`The command reads from stdin — after starting it, paste this ${opts.inputLabel ?? 'line'} and press Ctrl-D:`);
-        ui.message(opts.input);
-      }
-      if (!ctx.assumeYes) {
-        const done = await ui.confirm({ message: 'Have you run it as root?', initialValue: true });
-        if (done === CANCEL) throw new StepCancelled();
-      }
-    }
+    const mode = await chooseSudoMode(ctx, passwordless);
+    const commandCode = await runPrivilegedCommand(ctx, opts, mode);
 
     if (await opts.verify(ctx, commandCode)) {
       ui.success('Verified.');
       return;
     }
 
-    ui.error('That did not take effect — the verification check still fails.');
-    if (ctx.assumeYes) {
-      throw opts.skippable
-        ? new StepSkipped(`verification failed for: ${opts.command}`)
-        : new StepAborted(`verification failed for: ${opts.command}`);
-    }
-    if (opts.skippable) {
-      const next = await ui.select<'retry' | 'skip'>({
-        message: 'That did not verify. What now?',
-        options: [
-          { value: 'retry', label: 'Try again' },
-          { value: 'skip', label: 'Skip this step', hint: opts.skipHint },
-        ],
-        initialValue: 'retry',
-      });
-      if (next === CANCEL) throw new StepCancelled();
-      if (next === 'skip') throw new StepSkipped(`skipped: ${opts.command}`);
-      continue;
-    }
-    const redo = await ui.confirm({ message: 'Try again?', initialValue: true });
-    if (redo === CANCEL || redo === false) throw new StepAborted(`gave up on: ${opts.command}`);
+    await handleFailedVerification(ctx, opts);
   }
 }
 
