@@ -24,105 +24,26 @@
 
 import { codexStreamError } from './codex-stream-error.ts';
 
+import { collabParentItemId, mapHookCompleted, threadIdOf } from './codex-hook-mapper.ts';
+import type { CodexCollabTask, CodexUiMapperState, ReasoningAccumulator } from './codex-ui-mapper-state.ts';
 import type {
   FileDiff,
-  HookEntryKind,
-  HookStatus,
   PlanEntry,
   PlanStatus,
   TokenUsage,
   ToolLocation,
   ToolStatus,
   UiEvent,
-  UiHookItem,
   UiItem,
   UiMessageItem,
   UiReasoningItem,
   UiToolItem,
 } from './ui-events.ts';
-import { hookEventName, isVisibleHookItem } from './hook-items.ts';
 import { toolDisplay } from '@open-mercato/cezar-contract/tool-display';
 import { codexTurnOutcome } from './codex-turn-outcome.ts';
 
-/** The two reasoning delta channels, accumulated separately — see
- *  `CodexUiMapperState.reasonings`. */
-export interface ReasoningAccumulator {
-  /** `item/reasoning/textDelta` — the raw chain of thought. */
-  readonly text: string;
-  /** `item/reasoning/summaryDelta` + `summaryTextDelta` — the condensed summary. */
-  readonly summary: string;
-}
-
-interface CodexCollabTask {
-  readonly itemId: string;
-  readonly prompt?: string;
-  readonly model?: string;
-}
-
-export interface CodexUiMapperState {
-  /** True once `session.started` was emitted (thread/started notification or
-   *  the runner's `codexSessionStarted` after the thread/start result —
-   *  whichever lands first wins; the other is deduplicated). */
-  readonly sessionStarted: boolean;
-  /** Fallback counter for turn frames that arrive without a wire turn id. */
-  readonly turnSeq: number;
-  readonly currentTurnId: string | null;
-  /** Fresh `tokenUsage.last` received while the current turn is active.
-   * Consumed exactly once by its matching turn end; cumulative `total` is
-   * never used as a persisted per-turn delta. */
-  readonly pendingTurnUsage: TokenUsage | null;
-  /** Item ids already introduced — a delta for an unknown id synthesizes an
-   *  `item.started` first so consumers always have something to upsert. */
-  readonly knownItems: ReadonlySet<string>;
-  /** Accumulated `outputDelta` text per commandExecution item, attached to
-   *  the final snapshot when the wire `item/completed` carries no output. */
-  readonly outputs: ReadonlyMap<string, string>;
-  /** Accumulated reasoning deltas per reasoning item, attached to the final
-   *  snapshot when the wire `item/completed` carries no `content`. Deltas are
-   *  live-only (never persisted), so without this the reasoning text is
-   *  unrecoverable on replay and the row reads back empty (#528).
-   *
-   *  Kept PER CHANNEL: `item/reasoning/textDelta` streams the raw chain of
-   *  thought while `summaryDelta`/`summaryTextDelta` stream the condensed
-   *  summary, and codex emits both when raw reasoning is enabled. One shared
-   *  bucket would concatenate the two into `"<raw CoT><summary>"` and persist
-   *  that garble over the clean wire `summary`.
-   *
-   *  Turn-scoped, and reset by `turn/started`: an interrupted item is never
-   *  completed, so without the reset its text would both leak into a later
-   *  turn that reuses the id and pin whole chains of thought in memory. */
-  readonly reasonings: ReadonlyMap<string, ReasoningAccumulator>;
-  /** True once `turn/plan/updated` has spoken IN THE CURRENT TURN. Both that
-   *  notification and the `plan`/`todoList` item arm write `plan.updated`, so
-   *  without a precedence rule the last frame wins and a prose plan item would
-   *  flatten the real checklist into one entry. The authoritative channel
-   *  latches this and the item arm stands down (see `mapItemLifecycle`).
-   *
-   *  Turn-scoped, and reset by `turn/started`: a plan belongs to a turn (hence
-   *  `turn/plan/updated`), so a latch that outlived its turn would gag the item
-   *  arm for the rest of the session and strand the dock on a stale checklist. */
-  readonly planFromNotification: boolean;
-  /** The open review-mode item's id, or `null` when review mode is not active.
-   *
-   *  Codex announces review mode as two disjoint frames (`enteredReviewMode`,
-   *  `exitedReviewMode`) with different ids. Mapped literally that is two
-   *  childless `task` items — which the Agents dock would read as two separate
-   *  sub-agents that each did nothing (spec
-   *  `.ai/specs/2026-07-20-grouped-subagent-display.md` §"Codex-mapper fix",
-   *  #474). This latch folds the pair into ONE item with a running→completed
-   *  lifecycle: the entered frame opens it, the exited frame completes that
-   *  same id. An unpaired exit falls back to its own item, so a stream that
-   *  starts mid-review still renders. */
-  readonly reviewItemId: string | null;
-  /** Child thread → stable task item created by a Codex collaboration spawn.
-   * Installed 0.144.6 uses `collabAgentToolCall`; newer protocol revisions use
-   * `collabToolCall`. Both carry the receiver ids used for child attribution. */
-  readonly collabTasks: ReadonlyMap<string, CodexCollabTask>;
-  /** Background spawn rows still running, keyed by item id (hearsay-tools/cezarion#2431): a
-   *  `subAgentActivity(kind: started)` child outlives the parent turn, so its row stays running
-   *  until the child's `subAgentActivity(kind: completed)`. */
-  readonly backgroundTasks: ReadonlyMap<string, UiToolItem>;
-}
+export type { CodexUiMapperState, ReasoningAccumulator } from './codex-ui-mapper-state.ts';
+export { HOOK_STATUS } from './codex-hook-mapper.ts';
 
 export interface CodexUiMapping {
   events: UiEvent[];
@@ -165,48 +86,58 @@ export function mapCodexNotification(frame: unknown, state: CodexUiMapperState):
   // Server requests are answered by CodexSession, not the notification mapper.
   if (frame.id !== undefined) return { events: [], state };
   const params = isRecord(frame.params) ? frame.params : {};
-  switch (frame.method) {
-    case 'error': {
-      const message = codexStreamError(params);
-      return { events: message ? [{ type: 'session.error', message, fatal: params.willRetry === false }] : [], state };
-    }
-    case 'warning': {
-      const message = str(params.message);
-      return { events: message ? [{ type: 'session.error', message, fatal: false }] : [], state };
-    }
-    case 'thread/started':
-      return codexSessionStarted(threadIdOf(params) ?? '', state);
-    case 'turn/started':
-      return mapTurnStarted(params, state);
-    case 'turn/completed':
-    case 'turn/failed':
-      return mapTurnEnd(params, state, codexTurnOutcome(frame.method, params));
-    case 'turn/plan/updated':
-      return mapTurnPlanUpdated(params, state);
-    case 'item/started':
-      return mapItemLifecycle(params, state, 'item.started');
-    case 'item/updated':
-      return mapItemLifecycle(params, state, 'item.updated');
-    case 'item/completed':
-      return mapItemLifecycle(params, state, 'item.completed');
-    case 'item/agentMessage/delta':
-      return mapDelta(params, state, 'text');
-    case 'item/reasoning/textDelta':
-      return mapDelta(params, state, 'reasoning', 'text');
-    case 'item/reasoning/summaryDelta':
-    case 'item/reasoning/summaryTextDelta':
-      return mapDelta(params, state, 'reasoning', 'summary');
-    case 'item/commandExecution/outputDelta':
-      return mapDelta(params, state, 'output');
-    case 'thread/tokenUsage/updated':
-      return mapTokenUsage(params, state);
-    // `hook/started` renders nothing: hooks are completion-only (#961).
-    case 'hook/completed':
-      return { events: mapHookCompleted(params, state), state };
-    default:
-      // thread/status/changed, thread/closed, … — nothing to render yet.
-      return { events: [], state };
+  const mapper = CODEX_NOTIFICATION_MAPPERS.get(frame.method);
+  if (mapper === undefined) {
+    // thread/status/changed, thread/closed, … — nothing to render yet.
+    return { events: [], state };
   }
+  return mapper(params, state);
+}
+
+type CodexNotificationMapper = (
+  params: Record<string, unknown>,
+  state: CodexUiMapperState,
+) => CodexUiMapping;
+
+/** Method → mapper for the notification arms of the §7.1 mapping. */
+const CODEX_NOTIFICATION_MAPPERS: ReadonlyMap<string, CodexNotificationMapper> = new Map([
+  ['error', mapErrorNotification],
+  ['warning', mapWarningNotification],
+  ['thread/started', mapThreadStartedNotification],
+  ['turn/started', mapTurnStarted],
+  ['turn/completed', (params, state) => mapTurnEnd(params, state, codexTurnOutcome('turn/completed', params))],
+  ['turn/failed', (params, state) => mapTurnEnd(params, state, codexTurnOutcome('turn/failed', params))],
+  ['turn/plan/updated', mapTurnPlanUpdated],
+  ['item/started', (params, state) => mapItemLifecycle(params, state, 'item.started')],
+  ['item/updated', (params, state) => mapItemLifecycle(params, state, 'item.updated')],
+  ['item/completed', (params, state) => mapItemLifecycle(params, state, 'item.completed')],
+  ['item/agentMessage/delta', (params, state) => mapDelta(params, state, 'text')],
+  ['item/reasoning/textDelta', (params, state) => mapDelta(params, state, 'reasoning', 'text')],
+  ['item/reasoning/summaryDelta', (params, state) => mapDelta(params, state, 'reasoning', 'summary')],
+  ['item/reasoning/summaryTextDelta', (params, state) => mapDelta(params, state, 'reasoning', 'summary')],
+  ['item/commandExecution/outputDelta', (params, state) => mapDelta(params, state, 'output')],
+  ['thread/tokenUsage/updated', mapTokenUsage],
+  ['hook/completed', mapHookNotification],
+]);
+
+function mapErrorNotification(params: Record<string, unknown>, state: CodexUiMapperState): CodexUiMapping {
+  const message = codexStreamError(params);
+  return { events: message ? [{ type: 'session.error', message, fatal: params.willRetry === false }] : [], state };
+}
+
+function mapWarningNotification(params: Record<string, unknown>, state: CodexUiMapperState): CodexUiMapping {
+  const message = str(params.message);
+  return { events: message ? [{ type: 'session.error', message, fatal: false }] : [], state };
+}
+
+function mapThreadStartedNotification(params: Record<string, unknown>, state: CodexUiMapperState): CodexUiMapping {
+  return codexSessionStarted(threadIdOf(params) ?? '', state);
+}
+
+function mapHookNotification(params: Record<string, unknown>, state: CodexUiMapperState): CodexUiMapping {
+  // `hook/started` renders nothing: hooks are completion-only
+  // (hearsay-tools/cezarion#961).
+  return { events: mapHookCompleted(params, state), state };
 }
 
 // ---- turn lifecycle ---------------------------------------------------------
@@ -559,47 +490,6 @@ function collabStatus(raw: Record<string, unknown>, receiverIds: string[], event
   if (statuses.length > 0 && statuses.every((status) => status === 'completed' || status === 'shutdown')) return 'completed';
   if (statuses.some((status) => status === 'running' || status === 'pendingInit' || status === 'pending_init')) return 'running';
   return toolStatus(raw, eventType);
-}
-
-export const HOOK_STATUS: Readonly<Record<string, HookStatus>> = {
-  completed: 'completed',
-  failed: 'failed',
-  blocked: 'blocked',
-  stopped: 'cancelled',
-};
-const HOOK_ENTRY_KINDS = new Set<HookEntryKind>(['context', 'feedback', 'warning', 'error', 'stop']);
-
-/** `hook/completed` → one hook item (#961). `run.entries` already are what the agent
- *  received; `statusMessage` joins them unless an entry already says it. */
-function mapHookCompleted(params: Record<string, unknown>, state: CodexUiMapperState): UiEvent[] {
-  const run = isRecord(params.run) ? params.run : undefined;
-  const id = str(run?.id);
-  const eventName = str(run?.eventName);
-  const status = typeof run?.status === 'string' ? HOOK_STATUS[run.status] : undefined;
-  if (!run || id === undefined || eventName === undefined || status === undefined) return [];
-  const entries: UiHookItem['entries'] = [];
-  for (const raw of Array.isArray(run.entries) ? run.entries : []) {
-    if (!isRecord(raw) || typeof raw.text !== 'string' || raw.text.trim() === '') continue;
-    const kind = raw.kind as HookEntryKind;
-    if (HOOK_ENTRY_KINDS.has(kind)) entries.push({ kind, text: raw.text });
-  }
-  const message = str(run.statusMessage)?.trim();
-  if (message && !entries.some((entry) => entry.text.trim() === message)) {
-    entries.push({ kind: status === 'completed' ? 'warning' : 'error', text: message });
-  }
-  const item: UiHookItem = { kind: 'hook', id: `hook_${id}`, event: hookEventName(eventName), status, entries };
-  const source = str(run.sourcePath);
-  if (source !== undefined) item.source = source;
-  const durationMs = num(run.durationMs);
-  if (durationMs !== undefined) item.durationMs = durationMs;
-  const parentItemId = collabParentItemId(params, state);
-  if (parentItemId !== undefined) item.parentItemId = parentItemId;
-  return isVisibleHookItem(item) ? [{ type: 'item.completed', item }] : [];
-}
-
-function collabParentItemId(params: Record<string, unknown>, state: CodexUiMapperState): string | undefined {
-  const threadId = threadIdOf(params);
-  return threadId ? state.collabTasks.get(threadId)?.itemId : undefined;
 }
 
 /**
@@ -974,11 +864,6 @@ function stringArray(value: unknown): string[] {
 function turnIdOf(params: Record<string, unknown>): string | undefined {
   const turn = isRecord(params.turn) ? params.turn : undefined;
   return (turn && str(turn.id)) ?? str(params.turnId);
-}
-
-function threadIdOf(params: Record<string, unknown>): string | undefined {
-  const thread = isRecord(params.thread) ? params.thread : undefined;
-  return (thread && str(thread.id)) ?? str(params.threadId);
 }
 
 function errorMessage(error: unknown): string | undefined {
