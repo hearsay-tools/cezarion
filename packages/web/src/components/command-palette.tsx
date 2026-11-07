@@ -404,152 +404,58 @@ function TaskItem({
   )
 }
 
-function PaletteContent({
-  open,
-  docked,
-  selected,
-  close,
-}: {
-  open: boolean
-  docked: boolean
-  selected: string
-  close: () => void
-}) {
-  const navigate = useNavigate()
-  // The UNSCOPED twin, for the handful of targets that live outside every project (`/tasks`).
-  const routerNavigate = useRouterNavigate()
-  // Controlled so the body can tell the default view from a search. cmdk still owns filtering and
-  // the order within a group (`paletteScore`); this decides which SECTIONS exist and, through
-  // `rankGroups`, their order.
-  const [search, setSearch] = React.useState('')
-  const searching = search.trim() !== ''
-  const activeProjectId = useActiveProjectId()
-  const { theme, setTheme } = useTheme()
-  // Runs are already cached by the sidebar's quick-list; skills fetch here, on first open.
-  const runs = useRuns()
-  const skills = useSkills()
-  // The registry is workspace-scoped (not project-scoped), so this is the ONE list the palette
-  // can offer everywhere — including global settings, which has no active project at all. The
-  // shell already holds this cache entry; opening the palette costs no extra request.
-  const projects = useProjects()
-  // Skills list most-used → project → global (#519) — the same order every picker renders.
-  const uiState = useUiState()
-  // Health is cached by the shell's chips; here it gates the forge-gated Views row (R6 1.1) —
-  // the palette must not offer a GitHub view the sidebar honestly hides.
-  const health = useHealth()
-  const now = Date.now()
-  // Health loading counts as off: no request, no row, and the palette renders as it always has.
-  const voice = useVoiceCommand({
-    enabled: health.data?.capabilities.voice === true,
-    text: search,
-    selected,
-    close,
-    clearText: () => setSearch(''),
-  })
-  // The body outlives `open` for the length of the exit animation; the hook's unmount cleanup
-  // covers the rest. Both are safe to run twice.
-  const { onClose: closeVoice } = voice
-  React.useEffect(() => {
-    if (!open) closeVoice()
-  }, [open, closeVoice])
+/** One ranked palette section: the rows a search scores (`rankGroups`) and the group node that
+ *  renders them. */
+type PaletteGroup = { rows: PaletteMatch[]; node: React.ReactNode }
 
-  // Same threshold as the sidebar's grouped nav (`app-shell-container.tsx`): with one registered
-  // project there is nowhere to switch TO, and a one-row group would be pure noise.
-  const registry = projects.data
-  const multiProject = registry !== undefined && registry.projects.length > 1
-  // The cross-project index answers "which project is this task in", so it is only worth asking
-  // when that question has more than one answer. A single-project cockpit issues no request.
-  const runsIndex = useRunsIndex(multiProject)
+/** A Views row: the global All tasks, or a health-gated nav item. */
+type PaletteView = {
+  label: string
+  to: string
+  icon: React.ComponentType<React.SVGProps<SVGSVGElement>>
+  global: boolean
+}
 
-  // The hand-picked project order (hearsay-tools/cezarion#438), read from the same cached
-  // workspace ui-state the rail writes — so a project dragged to the top of the rail is also the
-  // top of this list.
-  const { order: projectOrder } = useProjectOrder()
-  const orderedProjects = React.useMemo(
-    () => (multiProject ? orderProjects(registry.projects, activeProjectId, projectOrder) : []),
-    [multiProject, registry, activeProjectId, projectOrder],
-  )
-  const projectNames = React.useMemo(
-    () => new Map((registry?.projects ?? []).map((project) => [project.id, project.name])),
-    [registry],
-  )
-  // Which project `useRuns()` just answered for — see `mergeTasks`. The active id when there is
-  // one, else the boot project, which is what an unscoped API client always reaches.
-  const runsProjectId = activeProjectId ?? registry?.bootProject ?? null
-  // What the server finds for the query (#864), a beat after typing stops: every project's runs,
-  // at any age, including the ones past each run list's window. In a single-project cockpit too,
-  // since its own run list is windowed as well.
-  const [searched, setSearched] = React.useState('')
-  React.useEffect(() => {
-    const timer = setTimeout(() => setSearched(search), PALETTE_SEARCH_DEBOUNCE_MS)
-    return () => clearTimeout(timer)
-  }, [search])
-  const serverSearch = useRunsSearch(searched)
-  const serverHits = searching ? serverSearch.data?.runs : undefined
-  // Projects whose matches the server capped (#864): said, not silently cut.
-  const cappedProjects = searching && !serverSearch.isPlaceholderData
-    ? (serverSearch.data?.truncated ?? []).map((id) => projectNames.get(id) ?? id)
-    : []
-  const tasks = React.useMemo(
-    () => mergeTasks(runs.data ?? [], runsProjectId, runsIndex.data?.runs, serverHits),
-    [runs.data, runsProjectId, runsIndex.data, serverHits],
-  )
-  const partitioned = React.useMemo(() => partitionTasks(tasks), [tasks])
-  // Searching flattens the two task sections into one ranked list — see the Tasks group below.
-  const recentlyFinished = searching ? [] : partitioned.recentlyFinished
-  const otherTasks = searching ? tasks : partitioned.otherTasks
-  const showProjectOnTasks = multiProject
-  const taskProjectName = (task: PaletteTask): string | null =>
-    task.projectId === null ? null : (projectNames.get(task.projectId) ?? null)
-  const skillUsage = uiState.data?.skillUsage
-  const orderedSkills = React.useMemo(
-    () => orderSkillsByUsage(skills.data ?? [], skillUsage),
-    [skills.data, skillUsage],
-  )
-
-  const go = (to: string) => {
-    close()
-    navigate(to)
-  }
-  /** A target OUTSIDE every project (`/tasks`, and anything else global that lands later). The
-   *  scope-wrapping navigate would prefix it with the active `/p/<id>`, which is not a route. */
-  const goGlobal = (to: string) => {
-    close()
-    routerNavigate(to)
-  }
-  // An explicit `/p/<id>/…` target, which the scoping wrapper passes through untouched — the
-  // whole point of this group is landing in a project that is NOT the active one. `/` is that
-  // project's tasks pane, the same door the sidebar group's "More…" opens.
-  const projectSwitch = useProjectSwitch()
-  const goProject = (projectId: string) => {
-    close()
-    void projectSwitch.go(projectId)
-  }
-  /** A task thread in its OWN project — the one navigation that must ignore the active scope.
-   *  A row with no project id belongs to wherever we already are, which is exactly what an
-   *  unprefixed target means to the scope-wrapping navigate. */
-  const selectTask = (task: PaletteTask) => {
-    close()
-    navigate(task.projectId === null ? `/tasks/${task.id}` : scopeTo(task.projectId, `/tasks/${task.id}`))
-  }
-  const nextTheme = NEXT_THEME[theme]
-
-  // The ranked groups, in their default order. Each carries the matches of its rows, so a search
-  // can order the groups by their best row (`rankGroups`). The voice rows and New task render
-  // above them and are never ranked: the voice rows answer the sentence itself, and New task is
-  // the palette's default action, headless, so ranked below a heading it would read as that
-  // group's row.
-  const views = [
-    // The one GLOBAL view, listed first because it is the only row here that is not about the
-    // project you are standing in. Multi-project only, matching the sidebar: with one project it
-    // would be that project's own Tasks page under another name.
+/** The Views rows: the one GLOBAL view first (multi-project only — with one project it would be
+ *  that project's own Tasks page under another name), then the health-gated nav items. */
+function paletteViews({ multiProject, health }: { multiProject: boolean; health: ReturnType<typeof useHealth> }): PaletteView[] {
+  return [
     ...(multiProject ? [{ label: 'All tasks', to: '/tasks', icon: LayersIcon, global: true }] : []),
     ...visibleNavItems({
       forge: health.data?.forge?.available === true,
       automations: health.data?.capabilities.automations === true,
     }).map((item) => ({ label: item.label, to: item.to, icon: item.icon, global: false })),
   ]
-  const groups: { rows: PaletteMatch[]; node: React.ReactNode }[] = [
+}
+
+/** The ranked groups, in their default order. Each carries the matches of its rows, so a search
+ *  can order the groups by their best row (`rankGroups`). The voice rows and New task render
+ *  above them and are never ranked: the voice rows answer the sentence itself, and New task is
+ *  the palette's default action, headless, so ranked below a heading it would read as that
+ *  group's row. */
+function paletteGroups({
+  views, go, goGlobal, orderedProjects, activeProjectId, goProject, otherTasks, searching,
+  taskProjectName, showProjectOnTasks, now, selectTask, orderedSkills, theme, nextTheme, setTheme, close,
+}: {
+  views: PaletteView[]
+  go: (to: string) => void
+  goGlobal: (to: string) => void
+  orderedProjects: ProjectListEntry[]
+  activeProjectId: string | null
+  goProject: (projectId: string) => void
+  otherTasks: PaletteTask[]
+  searching: boolean
+  taskProjectName: (task: PaletteTask) => string | null
+  showProjectOnTasks: boolean
+  now: number
+  selectTask: (task: PaletteTask) => void
+  orderedSkills: Skill[]
+  theme: ReturnType<typeof useTheme>['theme']
+  nextTheme: ReturnType<typeof useTheme>['theme']
+  setTheme: ReturnType<typeof useTheme>['setTheme']
+  close: () => void
+}): PaletteGroup[] {
+  const groups: PaletteGroup[] = [
     {
       rows: views.map((view) => viewMatch(view.label)),
       node: (
@@ -677,80 +583,283 @@ function PaletteContent({
       ),
     })
   }
+  return groups
+}
+
+/** The query input. Return confirms a voice proposal while one is open. */
+function paletteInput({ voice, search, setSearch }: {
+  voice: ReturnType<typeof useVoiceCommand>
+  search: string
+  setSearch: (value: string) => void
+}) {
+  return (
+    <CommandInput
+      placeholder={voice.confirm ? CONFIRM_PLACEHOLDER : 'Search projects, tasks, views, actions, skills…'}
+      value={search}
+      onValueChange={setSearch}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' && !event.nativeEvent.isComposing) voice.onEnter(event)
+      }}
+    />
+  )
+}
+
+/** The results list: voice rows or the ranked groups, with New task pinned first and the
+ *  recently-finished section only in the default view. */
+function paletteResults({ docked, voice, search, searching, recentlyFinished, groups, taskProjectName, showProjectOnTasks, now, selectTask, go }: {
+  docked: boolean
+  voice: ReturnType<typeof useVoiceCommand>
+  search: string
+  searching: boolean
+  recentlyFinished: PaletteTask[]
+  groups: PaletteGroup[]
+  taskProjectName: (task: PaletteTask) => string | null
+  showProjectOnTasks: boolean
+  now: number
+  selectTask: (task: PaletteTask) => void
+  go: (to: string) => void
+}) {
+  return (
+    // The shadcn default is a flat `max-h-[300px]` — about seven rows, on any monitor. Scaled
+    // to the viewport instead, so a large screen actually shows the list it has room for.
+    // `min-h` keeps a short result set from collapsing the box to nothing, which would move
+    // the bottom edge as violently as the old centring moved the top.
+    // Docked, the list stays short so the palette covers less of the card behind it.
+    <CommandList className={docked ? 'max-h-[28vh]' : 'max-h-[55vh] min-h-[14rem] sm:max-h-[60vh] lg:max-h-[68vh]'}>
+      {/* A proposal waiting for its confirmation replaces the search: one panel, so the screen
+          says what Return does (hearsay-tools/cezarion#1461). Typing brings the search back. */}
+      {voice.confirm ? (
+        <VoiceConfirm
+          confirm={voice.confirm}
+          notice={voice.row?.kind === 'notice' ? voice.row.text : undefined}
+          onConfirm={voice.onConfirm}
+        />
+      ) : (
+        <>
+          <VoiceRows row={voice.row} committable={search.trim() !== ''} onSelect={voice.onSelect} />
+          {/* A voice row answers the sentence; "nothing matches" would contradict it. */}
+          {voice.row ? null : <CommandEmpty>Nothing matches.</CommandEmpty>}
+
+          {/* First, headless, and the row an empty query pre-selects: opening ⌘K and pressing
+              Enter starts a task. It used to sit ninth in Views with a duplicate down in Actions;
+              one authoritative row at the top is what "New task" being the default means. */}
+          <CommandGroup>
+            <CommandItem
+              value="new task"
+              data-slot="palette-view"
+              data-nav-to="/new"
+              onSelect={() => go('/new')}
+            >
+              <PlusIcon aria-hidden="true" />
+              New task
+              <CommandShortcut>C</CommandShortcut>
+            </CommandItem>
+          </CommandGroup>
+
+          {/* Only in the DEFAULT view. Once you type, splitting tasks by read-state is noise: it
+              floats a section of near-misses above the exact match you are looking for, purely
+              because that section renders first. Searching gets one ranked Tasks list. */}
+          {!searching && recentlyFinished.length > 0 ? (
+            <CommandGroup heading="Recently finished">
+              {recentlyFinished.map((task) => (
+                <TaskItem
+                  key={taskKey(task)}
+                  task={task}
+                  projectName={taskProjectName(task)}
+                  showProject={showProjectOnTasks}
+                  now={now}
+                  onSelect={selectTask}
+                />
+              ))}
+            </CommandGroup>
+          ) : null}
+
+          {rankGroups(groups, search).map((group) => group.node)}
+        </>
+      )}
+    </CommandList>
+  )
+}
+
+/** Said, not silently cut: which projects' matches the server capped (hearsay-tools/cezarion#864). */
+function paletteCappedNote({ cappedProjects }: { cappedProjects: string[] }) {
+  if (cappedProjects.length === 0) return null
+  return (
+    <p data-slot="palette-search-truncated" role="status" className="border-t border-border px-3 py-2 text-[11px] text-soft-foreground">
+      More matches in {cappedProjects.join(', ')}. Type more to narrow them.
+    </p>
+  )
+}
+
+function PaletteContent({
+  open,
+  docked,
+  selected,
+  close,
+}: {
+  open: boolean
+  docked: boolean
+  selected: string
+  close: () => void
+}) {
+  const navigate = useNavigate()
+  // The UNSCOPED twin, for the handful of targets that live outside every project (`/tasks`).
+  const routerNavigate = useRouterNavigate()
+  // Controlled so the body can tell the default view from a search. cmdk still owns filtering and
+  // the order within a group (`paletteScore`); this decides which SECTIONS exist and, through
+  // `rankGroups`, their order.
+  const [search, setSearch] = React.useState('')
+  const searching = search.trim() !== ''
+  const activeProjectId = useActiveProjectId()
+  const { theme, setTheme } = useTheme()
+  // Runs are already cached by the sidebar's quick-list; skills fetch here, on first open.
+  const runs = useRuns()
+  const skills = useSkills()
+  // The registry is workspace-scoped (not project-scoped), so this is the ONE list the palette
+  // can offer everywhere — including global settings, which has no active project at all. The
+  // shell already holds this cache entry; opening the palette costs no extra request.
+  const projects = useProjects()
+  // Skills list most-used → project → global (#519) — the same order every picker renders.
+  const uiState = useUiState()
+  // Health is cached by the shell's chips; here it gates the forge-gated Views row (R6 1.1) —
+  // the palette must not offer a GitHub view the sidebar honestly hides.
+  const health = useHealth()
+  const now = Date.now()
+  // Health loading counts as off: no request, no row, and the palette renders as it always has.
+  const voice = useVoiceCommand({
+    enabled: health.data?.capabilities.voice === true,
+    text: search,
+    selected,
+    close,
+    clearText: () => setSearch(''),
+  })
+  // The body outlives `open` for the length of the exit animation; the hook's unmount cleanup
+  // covers the rest. Both are safe to run twice.
+  const { onClose: closeVoice } = voice
+  React.useEffect(() => {
+    if (!open) closeVoice()
+  }, [open, closeVoice])
+
+  // Same threshold as the sidebar's grouped nav (`app-shell-container.tsx`): with one registered
+  // project there is nowhere to switch TO, and a one-row group would be pure noise.
+  const registry = projects.data
+  const multiProject = registry !== undefined && registry.projects.length > 1
+  // The cross-project index answers "which project is this task in", so it is only worth asking
+  // when that question has more than one answer. A single-project cockpit issues no request.
+  const runsIndex = useRunsIndex(multiProject)
+
+  // The hand-picked project order (hearsay-tools/cezarion#438), read from the same cached
+  // workspace ui-state the rail writes — so a project dragged to the top of the rail is also the
+  // top of this list.
+  const { order: projectOrder } = useProjectOrder()
+  const orderedProjects = React.useMemo(
+    () => (multiProject ? orderProjects(registry.projects, activeProjectId, projectOrder) : []),
+    [multiProject, registry, activeProjectId, projectOrder],
+  )
+  const projectNames = React.useMemo(
+    () => new Map((registry?.projects ?? []).map((project) => [project.id, project.name])),
+    [registry],
+  )
+  // Which project `useRuns()` just answered for — see `mergeTasks`. The active id when there is
+  // one, else the boot project, which is what an unscoped API client always reaches.
+  const runsProjectId = activeProjectId ?? registry?.bootProject ?? null
+  // What the server finds for the query (hearsay-tools/cezarion#864), a beat after typing stops: every project's runs,
+  // at any age, including the ones past each run list's window. In a single-project cockpit too,
+  // since its own run list is windowed as well.
+  const [searched, setSearched] = React.useState('')
+  React.useEffect(() => {
+    const timer = setTimeout(() => setSearched(search), PALETTE_SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [search])
+  const serverSearch = useRunsSearch(searched)
+  const serverHits = searching ? serverSearch.data?.runs : undefined
+  // Projects whose matches the server capped (hearsay-tools/cezarion#864): said, not silently cut.
+  const cappedProjects = searching && !serverSearch.isPlaceholderData
+    ? (serverSearch.data?.truncated ?? []).map((id) => projectNames.get(id) ?? id)
+    : []
+  const tasks = React.useMemo(
+    () => mergeTasks(runs.data ?? [], runsProjectId, runsIndex.data?.runs, serverHits),
+    [runs.data, runsProjectId, runsIndex.data, serverHits],
+  )
+  const partitioned = React.useMemo(() => partitionTasks(tasks), [tasks])
+  // Searching flattens the two task sections into one ranked list — see the Tasks group in
+  // `paletteGroups` above.
+  const recentlyFinished = searching ? [] : partitioned.recentlyFinished
+  const otherTasks = searching ? tasks : partitioned.otherTasks
+  const showProjectOnTasks = multiProject
+  const taskProjectName = (task: PaletteTask): string | null =>
+    task.projectId === null ? null : (projectNames.get(task.projectId) ?? null)
+  const skillUsage = uiState.data?.skillUsage
+  const orderedSkills = React.useMemo(
+    () => orderSkillsByUsage(skills.data ?? [], skillUsage),
+    [skills.data, skillUsage],
+  )
+
+  const go = (to: string) => {
+    close()
+    navigate(to)
+  }
+  /** A target OUTSIDE every project (`/tasks`, and anything else global that lands later). The
+   *  scope-wrapping navigate would prefix it with the active `/p/<id>`, which is not a route. */
+  const goGlobal = (to: string) => {
+    close()
+    routerNavigate(to)
+  }
+  // An explicit `/p/<id>/…` target, which the scoping wrapper passes through untouched — the
+  // whole point of this group is landing in a project that is NOT the active one. `/` is that
+  // project's tasks pane, the same door the sidebar group's "More…" opens.
+  const projectSwitch = useProjectSwitch()
+  const goProject = (projectId: string) => {
+    close()
+    void projectSwitch.go(projectId)
+  }
+  /** A task thread in its OWN project — the one navigation that must ignore the active scope.
+   *  A row with no project id belongs to wherever we already are, which is exactly what an
+   *  unprefixed target means to the scope-wrapping navigate. */
+  const selectTask = (task: PaletteTask) => {
+    close()
+    navigate(task.projectId === null ? `/tasks/${task.id}` : scopeTo(task.projectId, `/tasks/${task.id}`))
+  }
+  const nextTheme = NEXT_THEME[theme]
+
+  const views = paletteViews({ multiProject, health })
+  const groups = paletteGroups({
+    views,
+    go,
+    goGlobal,
+    orderedProjects,
+    activeProjectId,
+    goProject,
+    otherTasks,
+    searching,
+    taskProjectName,
+    showProjectOnTasks,
+    now,
+    selectTask,
+    orderedSkills,
+    theme,
+    nextTheme,
+    setTheme,
+    close,
+  })
 
   return (
     <>
-      <CommandInput
-        placeholder={voice.confirm ? CONFIRM_PLACEHOLDER : 'Search projects, tasks, views, actions, skills…'}
-        value={search}
-        onValueChange={setSearch}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.nativeEvent.isComposing) voice.onEnter(event)
-        }}
-      />
-      {/* The shadcn default is a flat `max-h-[300px]` — about seven rows, on any monitor. Scaled
-          to the viewport instead, so a large screen actually shows the list it has room for.
-          `min-h` keeps a short result set from collapsing the box to nothing, which would move
-          the bottom edge as violently as the old centring moved the top. */}
-      {/* Docked, the list stays short so the palette covers less of the card behind it. */}
-      <CommandList className={docked ? 'max-h-[28vh]' : 'max-h-[55vh] min-h-[14rem] sm:max-h-[60vh] lg:max-h-[68vh]'}>
-        {/* A proposal waiting for its confirmation replaces the search: one panel, so the screen
-            says what Return does (hearsay-tools/cezarion#1461). Typing brings the search back. */}
-        {voice.confirm ? (
-          <VoiceConfirm
-            confirm={voice.confirm}
-            notice={voice.row?.kind === 'notice' ? voice.row.text : undefined}
-            onConfirm={voice.onConfirm}
-          />
-        ) : (
-          <>
-            <VoiceRows row={voice.row} committable={search.trim() !== ''} onSelect={voice.onSelect} />
-            {/* A voice row answers the sentence; "nothing matches" would contradict it. */}
-            {voice.row ? null : <CommandEmpty>Nothing matches.</CommandEmpty>}
-
-            {/* First, headless, and the row an empty query pre-selects: opening ⌘K and pressing
-                Enter starts a task. It used to sit ninth in Views with a duplicate down in Actions;
-                one authoritative row at the top is what "New task" being the default means. */}
-            <CommandGroup>
-              <CommandItem
-                value="new task"
-                data-slot="palette-view"
-                data-nav-to="/new"
-                onSelect={() => go('/new')}
-              >
-                <PlusIcon aria-hidden="true" />
-                New task
-                <CommandShortcut>C</CommandShortcut>
-              </CommandItem>
-            </CommandGroup>
-
-            {/* Only in the DEFAULT view. Once you type, splitting tasks by read-state is noise: it
-                floats a section of near-misses above the exact match you are looking for, purely
-                because that section renders first. Searching gets one ranked Tasks list. */}
-            {!searching && recentlyFinished.length > 0 ? (
-              <CommandGroup heading="Recently finished">
-                {recentlyFinished.map((task) => (
-                  <TaskItem
-                    key={taskKey(task)}
-                    task={task}
-                    projectName={taskProjectName(task)}
-                    showProject={showProjectOnTasks}
-                    now={now}
-                    onSelect={selectTask}
-                  />
-                ))}
-              </CommandGroup>
-            ) : null}
-
-            {rankGroups(groups, search).map((group) => group.node)}
-          </>
-        )}
-      </CommandList>
-      {cappedProjects.length > 0 ? (
-        <p data-slot="palette-search-truncated" role="status" className="border-t border-border px-3 py-2 text-[11px] text-soft-foreground">
-          More matches in {cappedProjects.join(', ')}. Type more to narrow them.
-        </p>
-      ) : null}
+      {paletteInput({ voice, search, setSearch })}
+      {paletteResults({
+        docked,
+        voice,
+        search,
+        searching,
+        recentlyFinished,
+        groups,
+        taskProjectName,
+        showProjectOnTasks,
+        now,
+        selectTask,
+        go,
+      })}
+      {paletteCappedNote({ cappedProjects })}
     </>
   )
 }
