@@ -17,6 +17,7 @@ valid:
   # Rows an older build stored.
   - 'export function upgradeLegacyWaits(row) { row.lastWaits = [] }'
   - "export function ciWaitEntry(wait) { return { phase: 'delivered', ...(deliveredAt ? { deliveredAt } : {}) } }"
+  - "function settleLegacyAgentWait(entry, deliveredAt) { Object.assign(entry, { phase: 'delivered', deliveredAt }) }"
 invalid:
   - 'this.store.updateRun(id, { automaticWakes: 0 })'
   - 'const input = { ...queued, deliveredAt: now }'
