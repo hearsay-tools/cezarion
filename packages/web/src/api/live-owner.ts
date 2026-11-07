@@ -190,17 +190,15 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
       }
     })
   }
-  const reconcile = () => {
-    scheduled = false
-    if (disposed) return
-    const workspace = held('workspace')
-    const runEntries = held('run')
+  const capRuns = () => {
     const keys = new Set<string>()
-    for (const { doc, entry } of runEntries) {
+    for (const { doc, entry } of held('run')) {
       const key = runKey(entry.demand as Extract<LiveDemand, { kind: 'run' }>)
       if (!keys.has(key) && keys.size >= LIVE_RUN_LIMIT) reset(doc, entry, 'shared task capacity reached')
       else keys.add(key)
     }
+  }
+  const reconcileLanes = (workspace: ReturnType<typeof held>) => {
     const signatures = {
       workspace: workspace.length ? 'workspace' : '',
       runs: held('run').map(({ doc, entry }) => `${doc.id}:${doc.epoch}:${entry.id}`).sort().join('|'),
@@ -213,6 +211,8 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
       if (lane.signature) startLane(kind)
       else if (kind === 'workspace') workspaceReady = false
     }
+  }
+  const reconcileTopics = () => {
     const wantedTopics = new Set(held('topic').map(({ entry }) => (entry.demand as Extract<LiveDemand, { kind: 'topic' }>).topic))
     for (const [topic, off] of topics) if (!wantedTopics.has(topic)) { off(); topics.delete(topic); topicValues.delete(topic) }
     for (const topic of wantedTopics) if (!topics.has(topic)) topics.set(topic, deps.topic(topic, value => {
@@ -221,6 +221,8 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
         send(doc, { type: 'value', version: LIVE_PROTOCOL, epoch: doc.epoch, id: entry.id, value })
       }
     }))
+  }
+  const reconcileReads = () => {
     const wantedReads = new Map<string, number>()
     for (const { entry } of held('read')) if (entry.demand.kind === 'read') {
       wantedReads.set(entry.demand.path, Math.min(wantedReads.get(entry.demand.path) ?? Infinity, entry.demand.intervalMs))
@@ -239,6 +241,15 @@ export function createLiveOwner(deps: LiveOwnerDeps) {
       const job: ReadJob = { controller: new AbortController(), revision: 0, interval, nextAt: Date.now() + interval }
       reads.set(path, job); job.timer = setTimeout(() => refreshRead(path, job), interval)
     }
+  }
+  const reconcile = () => {
+    scheduled = false
+    if (disposed) return
+    const workspace = held('workspace')
+    capRuns()
+    reconcileLanes(workspace)
+    reconcileTopics()
+    reconcileReads()
     if (!documents.size) { clearInterval(tick); tick = undefined }
   }
   function schedule() {
