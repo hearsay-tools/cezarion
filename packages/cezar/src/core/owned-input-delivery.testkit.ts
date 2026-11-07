@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDeliveryControl, type DeliveryControlOptions } from '../../scripts/mock-delivery-control.mjs';
 import type { RunnerId } from './agent-runner.ts';
-import { HARNESS_ADAPTERS } from './harness-parity.testkit.ts';
+import { HARNESS_ADAPTERS } from './harness-parity-core.testkit.ts';
 
 /** Run `body` with a Native delivery control set for the fixture: the real native mock
  * reads it (`CEZ_MOCK_DELIVERY_CONTROL`); nothing rewrites mock source. Every

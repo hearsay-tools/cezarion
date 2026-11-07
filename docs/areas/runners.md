@@ -23,7 +23,7 @@ coverage to a separate issue.
 
 A per-runner parity file loads only its own adapter: it picks its runner with
 `useRunners(onlyRunner(...))`, and a testkit it imports never imports
-`runner-factory.ts`, `fixture-cleanup.testkit.ts` or `worker-wait.testkit.ts`. A wait
+`runner-factory.ts`, `fixture-cleanup.testkit.ts`, `worker-wait.testkit.ts` or `harness-parity.testkit.ts`. A wait
 parity file also loads the Claude adapter for its workers.
 `core/runner-closure.test.ts` enforces it (hearsay-tools/cezarion#2939).
 

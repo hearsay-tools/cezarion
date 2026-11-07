@@ -16,7 +16,7 @@ import type { AgentInput, CiWaitResult, ConversationMessage, HumanWaitEntry, Pro
 import { RUNNER_IDS, type AgentSession, type RunnerFactory, type RunnerId } from '../core/agent-runner.ts';
 import { runnersUnderTest, useRunners } from '../core/runners-under-test.testkit.ts';
 import { ClaudeCliRunner } from '../core/claude-cli-runner.ts';
-import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { ToolsUnavailableError } from '../ci-wait/controller.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';

@@ -6,7 +6,7 @@ import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import type { SubagentWaitEntry, TimerWaitEntry, Wait } from '@open-mercato/cezar-contract/waits';
 import { RUN_STATUS, SUBAGENT_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
-import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
 import { reportsNativeSubagents } from './run/subagent-waits.ts';
 import { MAX_AUTO_CONTINUES } from './run.ts';
 import { stateOf } from './run-states.ts';

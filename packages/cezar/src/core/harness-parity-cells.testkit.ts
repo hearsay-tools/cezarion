@@ -112,7 +112,7 @@ import {
   type ScenarioName,
   type SeamObservation,
   waitFor,
-} from './harness-parity.testkit.ts';
+} from './harness-parity-core.testkit.ts';
 import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns, seedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { createFixtureManager, drainFixtureManagers, fixtureWork } from '../workflows/fixture-manager.testkit.ts';
@@ -2236,7 +2236,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         const countedRunners = /\b(?:[2-9]\d*|1\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:(?:real|offline|native|supported|existing|unrelated|passing|per-runner|wire)\s+)*(?:runners?|backends?|mocks?|mock selectors|test files)\b/gi;
         for (const path of ['AGENT_PROTOCOL.md', '.ai/specs/2026-09-04-harness-parity-matrix.md',
           'packages/cezar/src/core/harness-parity.test.ts', 'packages/cezar/src/core/harness-parity-cells.testkit.ts',
-          'packages/cezar/src/core/harness-parity.testkit.ts']) {
+          'packages/cezar/src/core/harness-parity.testkit.ts', 'packages/cezar/src/core/harness-parity-core.testkit.ts']) {
           const source = readFileSync(new URL(`../../../../${path}`, import.meta.url), 'utf8');
           expect(source.match(countedRunners) ?? [], path).toEqual([]);
         }
