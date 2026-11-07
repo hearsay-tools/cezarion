@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { AutomationStore } from '../automations/store.ts';
+import type { RunnerFactory } from '../core/agent-runner.ts';
 import { reconcileAutomationReceipts } from '../automations/task-template.ts';
 import { DEFAULT_WORKTREE_RETENTION, resolveWorktreeRetention } from '../config.ts';
 import { pruneOrphans } from '../git-worktree.ts';
@@ -93,6 +94,8 @@ export interface ProjectContextDeps {
   cezarPort?: (() => number | undefined) | undefined;
   /** The ONE tool activity tracker of the process: every project's manager feeds it. */
   toolActivity?: ToolActivityTracker | undefined;
+  /** Builds each manager's runners: the entry point's choice (hearsay-tools/cezarion#2939). */
+  createRunner: RunnerFactory;
 }
 
 /** Data dirs this process has swept: the sweep cleans up after a crashed cezar, never this one. */
@@ -446,6 +449,7 @@ export class ProjectContexts {
     armPreview(store, dataDir, this.deps.preview);
     const manager: RunManager = new RunManager(store, project.root, {
       home: this.deps.home,
+      createRunner: this.deps.createRunner,
       semaphore: this.semaphore, preview: this.deps.preview, cezarPort: this.deps.cezarPort, toolActivity: this.deps.toolActivity,
       sweepBranches: (keep) => void sweepMergedBranches({ root: project.root, store, manager, home: this.deps.home }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
     });

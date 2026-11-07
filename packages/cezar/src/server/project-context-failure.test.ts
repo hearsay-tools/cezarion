@@ -13,6 +13,7 @@ import { clearProjectProbeCache, listProjects, registerProject } from '../worksp
 import { ProjectContexts } from './project-context.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp } from './server.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 // hearsay-tools/cezarion#2321: one project context failure answers the same on every transport.
 const runId = '00000000-0000-4000-8000-000000002321';
@@ -37,7 +38,7 @@ describe('project context failures over HTTP and live feeds', () => {
     for (const root of [bootRoot, otherRoot]) mkdirSync(join(root, '.ai/cezar'), { recursive: true });
     clearProjectProbeCache();
     store = RunStore.open(join(bootRoot, '.ai/cezar'));
-    contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     bootProjectId = (await registerProject(bootRoot, undefined, testHome())).id;
     otherId = (await registerProject(otherRoot, undefined, testHome())).id;
     app = createApp({ home: testHome(), repoRoot: bootRoot, store, manager: {} as RunManager, version: 'test', bootProjectId, contexts });

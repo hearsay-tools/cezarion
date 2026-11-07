@@ -25,7 +25,6 @@ import type { AgentEvent, AgentSession } from './agent-runner.js';
 import type { UiEvent } from './ui-events.js';
 import { buildChildEnv } from './agent-env.js';
 import { detectEnvironment } from './backend-detect.js';
-import { createRunner } from './runner-factory.js';
 import { buildPiArgs, PiRunner } from './pi-runner.js';
 import { cezarToolNames } from '../ci-wait/tools.js';
 import { appendTurnText } from '../workflows/run.js';
@@ -39,14 +38,6 @@ import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
  * pi CLI is absent, and the documented RPC protocol emits the normalized
  * streams every backend shares.
  */
-
-describe('createRunner returns the pi runner', () => {
-  it('maps the "pi" id to a PiRunner with backend "pi"', () => {
-    const runner = createRunner('pi');
-    expect(runner).toBeInstanceOf(PiRunner);
-    expect(runner.backend).toBe('pi');
-  });
-});
 
 describe('backend-detect handles an absent pi CLI', () => {
   const saved = { bin: process.env.CEZ_PI_BIN, dry: process.env.CEZ_DRY_RUN };

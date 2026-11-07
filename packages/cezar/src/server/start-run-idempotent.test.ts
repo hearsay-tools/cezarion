@@ -10,6 +10,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { connectedProviderAuth } from './provider-auth.testkit.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 /**
  * Idempotent `POST /runs` (#504, spec 2026-09-24-cez-task-cli). A real manager with no slots, so
@@ -28,7 +29,7 @@ describe('POST /api/v1/runs clientRequestId', () => {
     process.env.CEZ_DRY_RUN = '1';
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-idempotent-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
+    manager = new RunManager(store, repoRoot, { createRunner, home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
     app = createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test', providerAuth: connectedProviderAuth() });
   });
 

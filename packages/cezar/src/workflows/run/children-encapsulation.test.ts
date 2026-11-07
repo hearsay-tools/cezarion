@@ -11,6 +11,7 @@ import { WorkspaceSemaphore } from '../../workspace/semaphore.ts';
 import { createActiveRun } from '../active-run.ts';
 import { SubagentWaits, liveSubagents } from './subagent-waits.ts';
 import { TrackedWork } from './tracked-work.ts';
+import { noRunners } from '../../core/runners-under-test.testkit.ts';
 
 const unused = (): never => { throw new Error('unused child wait collaborator'); };
 let root: string;
@@ -29,7 +30,7 @@ it('keeps a live read view, immutable child records and independent owner state'
     end: unused, interrupt: unused };
   state.liveSession.attachSession(session);
   // This observation-only case calls no wait/line policy. A read of one fails the test.
-  const owner = new SubagentWaits({ home: testHome(), store, repoRoot: root, dataDir: root,
+  const owner = new SubagentWaits({ createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: root,
     semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false }, {
     active: new Map(), isParked: unused, isAdmitted: unused, settleWait: unused,
     armWait: unused, disarmWait: unused, releaseHeldPark: unused,

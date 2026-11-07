@@ -9,6 +9,7 @@ import { createFixtureManager, removeFixtureRepo, unused } from '../fixture-clea
 import { RunSettlement } from './run-settlement.ts';
 import { TrackedWork } from './tracked-work.ts';
 import { WorkspaceSemaphore } from '../../workspace/semaphore.ts';
+import { noRunners } from '../../core/runners-under-test.testkit.ts';
 
 /** The post-terminal trigger of the branch sweep (hearsay-tools/cezarion#2268): every retention
  *  pass hands the sweep its keep-count, which turns it off at 0. */
@@ -35,7 +36,7 @@ function settlement(root: string, store: RunStore, sweepBranches?: (keep: number
   const work = new TrackedWork();
   const semaphore = new WorkspaceSemaphore({ home: testHome() });
   createFixtureManager(store, root, { home: testHome(), work, semaphore });
-  const context = { home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work, semaphore, disposed: () => false, sweepBranches };
+  const context = { createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work, semaphore, disposed: () => false, sweepBranches };
   const host = unused<ConstructorParameters<typeof RunSettlement>[9]>('RunSettlement.host', { claimWorktreeReclaim: () => null, preview: undefined });
   return new RunSettlement(context, unused('HumanWaits'), unused('WorkerQuestions'), unused('WorktreeAutosave'),
     unused('TurnBookkeeper'), unused('RunLine'), unused('AutoResumeScheduler'), unused('WorkerExecutions'),

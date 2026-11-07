@@ -8,6 +8,7 @@ import type { ConversationMessage } from '@open-mercato/cezar-contract';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
 import { seedSettledFamily } from './delegation-reconcile.testkit.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 /** Successful `decodeRunRow` calls, by run id: the store calls `collectRawExtras` once per decode. */
 const decodes = vi.hoisted(() => new Map<string, number>());
@@ -44,7 +45,7 @@ describe('family reconcile decodes each cold run once per pass', () => {
     seeding.close();
     // Reopened, nothing is held: every member of the settled family is a cold row.
     store = RunStore.open(join(root, '.ai/cezar'));
-    manager = new RunManager(store, root, { home: testHome() });
+    manager = new RunManager(store, root, { createRunner, home: testHome() });
     decodes.clear();
   });
   afterEach(() => {

@@ -200,7 +200,7 @@ declared `PARITY_EXEMPTIONS` entry or an existing fall-through.
 The copies differ (see Evidence). A scenario script has one version. For each
 difference, the slice that adopts the script picks one version by this rule:
 
-1. The parity catalog row in `harness-parity.testkit.ts` (`SCENARIOS`) decides
+1. The parity catalog row in `harness-parity-core.testkit.ts` (`SCENARIOS`) decides
    what the mock must do.
 2. A detail the catalog does not name takes the version most mocks use, unless a
    test pins another version; then the pinned version wins.

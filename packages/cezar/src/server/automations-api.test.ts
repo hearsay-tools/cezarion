@@ -27,6 +27,7 @@ import { ProjectContexts } from './project-context.ts';
 import { RunManager, type AutomationToolService, type StartRunInput } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp, startServer, WorkspaceEventBus } from './server.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 // Server prewarming outlives the HTTP response. Keep unrelated host discovery
 // from starting CLIs that write HOME caches during fixture teardown. GitHub
@@ -899,7 +900,7 @@ describe('GitHub automation API', () => {
     }));
     writeFileSync(join(dataDir, 'automation-state.json'), JSON.stringify({ version: 1, states: { nightly: { revision: 1, nextRunAt: occurrenceAt } } }));
     const startRun = vi.fn();
-    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome()),
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome()),
       prepareManager: ({ store: projectStore, manager }) => {
         const launch = vi.spyOn(manager, 'startRun').mockImplementation((workflow, input) => {
           startRun();

@@ -9,7 +9,7 @@ import { importClosure } from '../lint/import-closure.testkit.ts';
  * erases type-only ones.
  */
 const src = join(import.meta.dirname, '..');
-const ENGINE = ['workflows/run.ts', 'delegation/provision.ts', 'delegation/workspace.ts', 'workflows/fixture-cleanup.testkit.ts'];
+const ENGINE = ['workflows/run.ts', 'delegation/provision.ts', 'delegation/workspace.ts', 'workflows/fixture-manager.testkit.ts'];
 
 function engineFilesIn(entry: string): string[] {
   const closure = importClosure(join(src, entry)).map(path => relative(src, path));
@@ -17,11 +17,13 @@ function engineFilesIn(entry: string): string[] {
 }
 
 describe('the harness parity kits', () => {
-  it('keeps the workflow engine out of the adapter-level kit', () => {
-    expect(engineFilesIn('core/harness-parity.testkit.ts')).toEqual([]);
+  // Each kit's `-core` file imports no runner adapter; the plain name re-exports it with every
+  // adapter chosen (hearsay-tools/cezarion#2939).
+  it.each(['core/harness-parity.testkit.ts', 'core/harness-parity-core.testkit.ts'])('keeps the workflow engine out of the adapter-level kit %s', (kit) => {
+    expect(engineFilesIn(kit)).toEqual([]);
   });
 
-  it('loads the workflow engine through the workflow-level kit', () => {
-    expect(engineFilesIn('core/workflow-parity.testkit.ts')).toEqual(ENGINE);
+  it.each(['core/workflow-parity.testkit.ts', 'core/workflow-parity-core.testkit.ts'])('loads the workflow engine through the workflow-level kit %s', (kit) => {
+    expect(engineFilesIn(kit)).toEqual(ENGINE);
   });
 });

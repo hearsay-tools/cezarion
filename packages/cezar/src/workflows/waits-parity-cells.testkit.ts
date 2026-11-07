@@ -13,13 +13,15 @@ import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { RUN_STATUS, STEP_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import type { AgentInput, CiWaitResult, ConversationMessage, HumanWaitEntry, ProcessWaitResult, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
-import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
-import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { RUNNER_IDS, type AgentSession, type RunnerFactory, type RunnerId } from '../core/agent-runner.ts';
+import { runnersUnderTest, useRunners } from '../core/runners-under-test.testkit.ts';
+import { ClaudeCliRunner } from '../core/claude-cli-runner.ts';
+import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { ToolsUnavailableError } from '../ci-wait/controller.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
 import { parkNoticeId } from '../delegation/park-notice.ts';
-import { checkpoint, collect, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, toolGenerationOf, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { checkpoint, collect, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, toolGenerationOf, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait-core.testkit.ts';
 import { fireCapturedTimer, timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingAskOf } from '@open-mercato/cezar-contract/pending-ask';
@@ -100,10 +102,16 @@ const runnerBoundary = vi.hoisted(() => ({
   beforeReturn: undefined as ((runId: string) => void) | undefined,
   sessionFiles: new Map<string, string>(),
 }));
-vi.mock('../core/runner-factory.ts', async importOriginal => {
-  const actual = await importOriginal<typeof import('../core/runner-factory.ts')>();
-  return { ...actual, createRunner: (...args: Parameters<typeof actual.createRunner>) => {
-    const runner = actual.createRunner(...args);
+/** The test file's runner for its parents, and the Claude runner for the workers this kit runs on
+ *  the Claude wire whatever the parent's runner is (hearsay-tools/cezarion#2939). */
+function withClaudeWorkers(inner: RunnerFactory): RunnerFactory {
+  return (backend, options) => backend === 'claude' || backend === 'claude-cli' ? new ClaudeCliRunner() : inner(backend, options);
+}
+
+/** The test file's runners, with each session recorded at its boundary. */
+function boundaryRunners(inner: RunnerFactory): RunnerFactory {
+  return (...args) => {
+    const runner = inner(...args);
     const start = runner.startSession.bind(runner);
     runner.startSession = (spec, ...rest) => {
       const runId = spec.env!.CEZ_TASK_ID!;
@@ -123,8 +131,8 @@ vi.mock('../core/runner-factory.ts', async importOriginal => {
       }
     };
     return runner;
-  } };
-});
+  };
+}
 const sessionOf = (id: string) => runnerBoundary.sessions.get(id)!;
 let idleClock: ReturnType<typeof observationClock>;
 let retryClock: ReturnType<typeof observationClock>;
@@ -654,6 +662,7 @@ function expectWaitParityFamilies(): void {
 
 export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPart; family?: WaitParityFamily['family'] } | 'once'): void {
   const runnersFor = (part: WaitParityPart): RunnerId[] => scope !== 'once' && scope.part === part ? [scope.runner] : [];
+  useRunners(boundaryRunners(withClaudeWorkers(runnersUnderTest())));
   describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', { timeout: 45_000 }, () => {
     useWorkerWaitFixture();
     beforeEach(() => {

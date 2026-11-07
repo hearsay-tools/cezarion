@@ -43,6 +43,12 @@ single factory `createRunner(backend)` in `packages/cezar/src/core/runner-factor
 outside `packages/cezar/src/core/` should ever `new` a concrete runner or branch on the backend
 id — that is the whole point of the seam.
 
+The engine depends on the `RunnerFactory` type, not on that module. `RunManager` takes a
+factory in its options and puts it on `RunModuleContext`; the planner and the task namer take
+one as an argument. The entry points (`src/index.ts`, and serve through the boot manager)
+pass `createRunner`. A test that drives one runner passes a factory for that runner only, so
+its import closure holds one adapter (hearsay-tools/cezarion#2939).
+
 ### Identity
 
 ```ts
@@ -1368,6 +1374,18 @@ The cells are defined in `core/harness-parity-cells.testkit.ts`. Each runner's
 a guard that every runner has its file (hearsay-tools/cezarion#1288). Below,
 `core/harness-parity.test.ts` names this whole matrix.
 
+A per-runner file chooses its runner with `useRunners(onlyRunner(<id>, ...))` from
+`core/runners-under-test.testkit.ts`, and its testkits build managers through
+`workflows/fixture-manager.testkit.ts`, `workflows/worker-wait-core.testkit.ts`,
+`core/harness-parity-core.testkit.ts` and `core/workflow-parity-core.testkit.ts`, which import
+no adapter. Their plain names (`fixture-cleanup`, `worker-wait`, `harness-parity`,
+`workflow-parity`) re-export them with every adapter chosen. `core/runner-closure.test.ts` fails when a `harness-<runner>-*` or
+`waits-<runner>-*` file reaches another runner's adapter or `runner-factory.ts`. Two
+exceptions: the wait kit runs its workers on the Claude wire, so a `waits-<runner>-*` file
+also loads the Claude adapter (hearsay-tools/cezarion#2959); and R14 runs a mixed-runner chain,
+so a `harness-<runner>-owned-workflows` file also loads the next runner in `RUNNER_IDS`
+(hearsay-tools/cezarion#2939).
+
 **P1** (hearsay-tools/cezarion#1049, hearsay-tools/cezarion#1266) routes an
 approval from each native mock that carries one through `RunManager`, the
 cockpit HTTP decision route, and the exact native reply: the Codex JSON-RPC
@@ -2116,7 +2134,7 @@ it, so no existing marker is renamed. A new runner declares its own map:
 | `subagent-after-park` | wait for the manager to park, then emit native child updates without a new parent turn |
 
 The full catalog, with each scenario's contract, is the `SCENARIOS` comment in
-`core/harness-parity.testkit.ts`.
+`core/harness-parity-core.testkit.ts`.
 
 S9 also pins parent-only v1/result text while child messages remain nested on v2.
 R12 asserts the `subagent` turn parks on its open `cezar_wait` timer (`waiting`, label
@@ -2187,7 +2205,7 @@ run on OMP's native mock wire including `subagent` and `subagent-after-park`. Th
 frames after `session_settled` are constructed (real OMP settles only when it has no pending
 async work) and kept as a stricter robustness check.
 
-**OMP exemptions** (`PARITY_EXEMPTIONS` in `harness-parity.testkit.ts`; each names a wire fact,
+**OMP exemptions** (`PARITY_EXEMPTIONS` in `harness-parity-core.testkit.ts`; each names a wire fact,
 never "not implemented"):
 
 | Row | Kind | Why |
@@ -2710,7 +2728,7 @@ To be first-class:
    row must pass. (If the backend has no wire parent attribution, document the
    nesting cell's substitute the way codex's review-mode items are handled.)
 8. **Harness parity** — add the runner to `HARNESS_ADAPTERS`
-   (`packages/cezar/src/core/harness-parity.testkit.ts`): the env var that points it at an
+   (`packages/cezar/src/core/harness-parity-core.testkit.ts`): the env var that points it at an
    offline mock, and a prompt for every name in the shared scenario catalog (§7). Then make
    that mock a wire encoder over `scripts/mock-scenario.mjs`: shared scenario
    selection and scripts belong to that module; the encoder emits the backend's

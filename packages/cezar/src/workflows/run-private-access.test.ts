@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 function privateMembers() {
   const source = readFileSync(new URL('./run.ts', import.meta.url), 'utf8');
@@ -34,7 +35,7 @@ it('hides every AST-derived private member at runtime', () => {
   const { names, members } = privateMembers();
   const root = mkdtempSync(join(tmpdir(), 'cez-private-'));
   const store = RunStore.open(join(root, '.ai/cezar'));
-  const manager = new RunManager(store, root, { home: testHome() });
+  const manager = new RunManager(store, root, { createRunner, home: testHome() });
   try {
     // Construction is the product signal: every field has been initialized.
     for (const name of names) expect((manager as unknown as Record<string, unknown>)[name], name).toBeUndefined();

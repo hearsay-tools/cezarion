@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { createFailureControl, type FailureControlOptions } from '../../scripts/mock-failure-control.mjs';
 import { expect } from 'vitest';
 import type { RunnerId } from '../core/agent-runner.ts';
-import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
 import { readMockRecords } from '../mock-records.testkit.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's RUNNER_IDS cells. U0 (tool admission) lives in

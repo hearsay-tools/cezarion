@@ -20,6 +20,7 @@ import { RunStore } from '../runs/store.ts';
 import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { createFixtureManager, drainFixtureManagers, fixtureWork, fixtureWorkSettled, unused } from './fixture-cleanup.testkit.ts';
 import type { RunManager } from './run.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 const hook = vi.hoisted(() => ({ runner: undefined as AgentRunner | undefined }));
 vi.mock('../core/runner-factory.ts', async original => ({
@@ -160,7 +161,7 @@ for (const mode of ['fresh', 'continuation'] as const) {
 it('the receipt setup contract propagates recordProcess failure before marking prepared or reading the result', () => {
   const runner = controlledRunner();
   Object.defineProperty(runner.session, 'pid', { value: 12345 });
-  const context: RunModuleContext = { home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
+  const context: RunModuleContext = { createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
     semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false };
   const state = createActiveRun({ cwd: root, autonomous: false, pendingHumanAsk: false });
   const calls: string[] = [];

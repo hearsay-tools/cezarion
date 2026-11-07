@@ -14,6 +14,7 @@ import { ProjectContexts } from './project-context.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp, projectRouteManifest, type ProjectRouteInfo } from './server.ts';
 import { setRunStatus, seedRuns } from '../runs/run-store.testkit.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 /**
  * Alias parity for the mirrored project-route table (spec
@@ -76,7 +77,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
       task: 'parity',
       steps: [],
     }).id;
-    contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     bootId = (await registerProject(repoRoot, undefined, testHome())).id;
     app = createApp({ home: testHome(),
       repoRoot,
