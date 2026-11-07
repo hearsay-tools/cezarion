@@ -1,7 +1,7 @@
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,7 +48,7 @@ describe('workspace config', () => {
   });
 
   const write = (value: unknown) =>
-    writeFileSync(workspaceConfigPath(undefined, testHome()), typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
+    Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)));
 
   const project = (id: string) => ({
     id,
@@ -387,7 +387,7 @@ describe('workspace config', () => {
 
     it('falls back to the defaults when neither the config nor a usable snapshot exists', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      writeFileSync(workspaceConfigBackupPath(testHome().workspaceConfig), JSON.stringify({ projects: [] }), 'utf8');
+      Home.seedBytes(testHome(), workspaceConfigBackupPath(testHome().workspaceConfig), Buffer.from(JSON.stringify({ projects: [] })));
       write('{ not json');
 
       expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects).toEqual([]);

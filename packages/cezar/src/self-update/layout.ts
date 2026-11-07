@@ -27,6 +27,7 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
+import { prepareAuthorizedHomeWrite } from '../home/store.ts';
 
 export const PACKAGE_NAME = '@wjarka/cezarion';
 export const CURRENT_LINK = 'current';
@@ -93,6 +94,7 @@ export function readManifest(id: string, env: NodeJS.ProcessEnv = process.env, h
 export function writeManifest(id: string, manifest: InstallManifest, env: NodeJS.ProcessEnv = process.env, home: Home): void {
   const dir = versionDir(id, env, home);
   assertCezarHomeWriteIsSandboxed(dir, env);
+  prepareAuthorizedHomeWrite(home);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`);
 }
@@ -178,6 +180,7 @@ export function activate(id: string, env: NodeJS.ProcessEnv = process.env, home:
   if (!existsSync(versionEntry(id, env, home))) throw new Error(`version ${id} is not installed`);
   const dir = versionsDir(env, home);
   assertCezarHomeWriteIsSandboxed(dir, env);
+  prepareAuthorizedHomeWrite(home);
   const link = join(dir, CURRENT_LINK);
   const tmp = join(dir, `.${CURRENT_LINK}.${process.pid}.tmp`);
   if (process.platform === 'win32') {
@@ -193,6 +196,7 @@ export function activate(id: string, env: NodeJS.ProcessEnv = process.env, home:
 export function removeInstalled(id: string, env: NodeJS.ProcessEnv = process.env, home: Home): void {
   assertCezarHomeWriteIsSandboxed(versionDir(id, env, home), env);
   if (id === activeId(env, home)) throw new Error(`version ${id} is active — switch first`);
+  prepareAuthorizedHomeWrite(home);
   // `rmSync` never follows symlinks, so a linked checkout loses its link, not its files.
   rmSync(versionDir(id, env, home), { recursive: true, force: true });
 }
@@ -257,6 +261,7 @@ export function linkCheckout(packageRoot: string, branch: string, env: NodeJS.Pr
   const scopeDir = join(versionDir(id, env, home), 'node_modules', ...PACKAGE_NAME.split('/').slice(0, -1));
   const link = join(scopeDir, PACKAGE_NAME.split('/').pop()!);
   assertCezarHomeWriteIsSandboxed(scopeDir, env);
+  prepareAuthorizedHomeWrite(home);
   mkdirSync(scopeDir, { recursive: true });
   removeLink(link);
   symlinkSync(root, link, process.platform === 'win32' ? 'junction' : 'dir');

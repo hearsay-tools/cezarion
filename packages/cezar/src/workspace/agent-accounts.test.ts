@@ -10,7 +10,6 @@ import {
   rmSync,
   statSync,
   symlinkSync,
-  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -49,7 +48,7 @@ describe('agent accounts store', () => {
   });
 
   const write = (value: unknown) =>
-    writeFileSync(agentAccountsPath(testHome()), typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
+    Home.seedBytes(testHome(), agentAccountsPath(testHome()), Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)));
 
   const account = (id: string, over: Record<string, unknown> = {}) => ({
     id,
@@ -94,7 +93,7 @@ describe('agent accounts store', () => {
       }, testHome());
       // THE case passthrough could never cover: an unparseable config.json degrades to in-memory
       // defaults, and the next merge-write persists those — wiping anything it did not understand.
-      writeFileSync(workspaceConfigPath(undefined, testHome()), '{ not json', 'utf8');
+      Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from('{ not json'));
       await mergeWriteWorkspaceConfig((config) => {
         config.resources.maxParallel = 3;
       }, testHome());
@@ -121,7 +120,7 @@ describe('agent accounts store', () => {
             agentProfile: { claude: 'work' } },
         ],
       };
-      writeFileSync(workspaceConfigPath(undefined, testHome()), JSON.stringify(legacy), 'utf8');
+      Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify(legacy)));
 
       const store = await loadAgentAccounts(testHome());
       expect(store.accounts.map((a) => a.id)).toEqual(['work']);
@@ -134,11 +133,7 @@ describe('agent accounts store', () => {
     });
 
     it('does not re-import once the file exists, so a deleted account stays deleted', async () => {
-      writeFileSync(
-        workspaceConfigPath(undefined, testHome()),
-        JSON.stringify({ agentProfiles: [account('work')] }),
-        'utf8',
-      );
+      Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({ agentProfiles: [account('work')] })));
       await loadAgentAccounts(testHome()); // imports
       await mergeWriteAgentAccounts((store) => {
         store.accounts = [];
@@ -147,7 +142,7 @@ describe('agent accounts store', () => {
     });
 
     it('imports nothing from a config.json that has no accounts', async () => {
-      writeFileSync(workspaceConfigPath(undefined, testHome()), JSON.stringify({ schemaVersion: 1 }), 'utf8');
+      Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({ schemaVersion: 1 })));
       expect((await loadAgentAccounts(testHome())).accounts).toEqual([]);
       expect(existsSync(agentAccountsPath(testHome()))).toBe(false);
     });

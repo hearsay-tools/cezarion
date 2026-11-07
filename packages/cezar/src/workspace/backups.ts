@@ -51,7 +51,7 @@ function prune(home: string, file: BackupFile, now: Date): void {
 
 const warned = new Set<string>();
 /** Best effort, before replacement. Only the two registry writers call this; ui-state does not. */
-export function backupBeforeWrite(path: string, next: unknown): void {
+export function backupBeforeWrite(path: string, next: unknown, options: { unavailable?: unknown } = {}): void {
   const file = basename(path);
   if (!isBackupFile(file)) throw new Error(`Unsupported backup file: ${file}`);
   let raw: Buffer;
@@ -61,6 +61,7 @@ export function backupBeforeWrite(path: string, next: unknown): void {
     return;
   }
   if (raw.equals(Buffer.from(`${JSON.stringify(next, null, 2)}\n`))) return;
+  if (options.unavailable !== undefined) { warn(path, options.unavailable); return; }
   try {
     const home = dirname(path);
     const root = join(home, 'backups');
@@ -107,6 +108,6 @@ function writeSnapshot(dir: string, timestamp: Date, sha: string, raw: Buffer): 
 function warn(path: string, error: unknown): void {
   if (warned.has(path)) return;
   warned.add(path);
-  const code = (error as NodeJS.ErrnoException).code ?? 'unavailable';
+  const code = (error as NodeJS.ErrnoException).code ?? (error instanceof Error ? error.message : 'unavailable');
   console.warn(`[cez] backups for ${path} are unavailable (${code}); continuing the write`);
 }

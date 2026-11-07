@@ -1,3 +1,4 @@
+import { prepareHomeLifecycle } from '../home/entry.ts';
 import { reportsRoutes } from './reports-api.ts';
 import { writeMergedConfig } from './config-merge.ts';
 import { automationCreateSchema, automationUpdateSchema, automationCheckRequestSchema, automationLogQuerySchema } from '@open-mercato/cezar-contract/automation-requests';
@@ -286,6 +287,7 @@ import {
 } from './provider-action-gate.ts';
 import {
   attachProjectWebhooks,
+  cockpitOriginFor,
   createBootContext,
   createProviderStatus,
   emitProviderRow,
@@ -5155,19 +5157,12 @@ function builtinSkillsOf(manager: Partial<Pick<RunManager, 'builtinSkills'>>): S
   return manager.builtinSkills?.() ?? [];
 }
 
-function taskWebhookHost(bindHost: string | undefined): string {
-  if (!bindHost || bindHost === '0.0.0.0' || bindHost === '::') return '127.0.0.1';
-  return bindHost.includes(':') ? `[${bindHost}]` : bindHost;
-}
-
-/** The origin a local client reaches this cockpit at: `CEZ_COCKPIT_URL` and the task webhook's links (#774, #594). */
-export function cockpitOriginFor(bindHost: string | undefined, port: number): string {
-  return `http://${taskWebhookHost(bindHost)}:${port}`;
-}
+export { cockpitOriginFor } from './server-deps.ts';
 
 const webhookNameTakenError = (name: string) => `this project already has a webhook named "${name.trim()}" — pick another name`;
 
 export function startServer(deps: ServerDeps, port: number, listener?: Server): ServerType & { shutdownForRestart: () => Promise<void> } {
+  const attachHomeLifecycle = prepareHomeLifecycle(deps.home);
   const workspaceEvents = deps.workspaceEvents ?? new WorkspaceEventBus();
   // The subscription hub rides the same HTTP server (one port, zero config):
   // createApp registers the topics, the `upgrade` hook below owns the socket.
@@ -5282,6 +5277,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     listener.on('request', getRequestListener(serverOptions.fetch, defined({ hostname: serverOptions.hostname })));
   }
   const server = listener ?? serve(serverOptions);
+  attachHomeLifecycle(server);
   // EVERY registered project, remote or not: a schedule needs none. `github` is present only for
   // a github.com remote, and only then does the project's handle poll.
   const automationProjects = new Map<string, { root: string; github?: { owner: string; repo: string } }>();

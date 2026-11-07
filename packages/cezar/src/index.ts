@@ -27,6 +27,7 @@ import { RunStoreOpenError } from './runs/store-open-error.ts';
 import { ensureDataGitignore } from './data-gitignore.ts';
 import { TaskWebhooks } from './runs/webhook.ts';
 import { resolveHome } from './home/resolve.ts';
+import { operatorHomeEntry, prepareOperatorHome } from './home/entry.ts';
 import type { Home } from './home/home.ts';
 import { runSubcommand } from './subcommands.ts';
 import { RunManager } from './workflows/run.ts';
@@ -110,8 +111,9 @@ workflows in .ai/cezar/workflows/.`;
 
 async function main(): Promise<void> {
   let resolvedHome: Home | undefined;
+  let homeEntry = operatorHomeEntry(process.argv.slice(2));
   // Dispatch task commands without invoking this factory or giving them a Home.
-  const home = () => resolvedHome ??= resolveHome({ purpose: 'cli' });
+  const home = () => resolvedHome ??= prepareOperatorHome(resolveHome({ purpose: 'cli' }), homeEntry);
   const managedExit = await runManagedCommand(process.argv.slice(2), { pkgName: readOwnName(), version: readOwnVersion(), entry: resolve(process.argv[1] ?? '') }, home);
   if (managedExit !== undefined) {
     process.exitCode = managedExit;
@@ -159,6 +161,7 @@ async function main(): Promise<void> {
   }
 
   const command = positionals[0] ?? 'serve';
+  homeEntry = command;
   const cwd = resolve(values.repo ?? process.cwd());
   const repoInfo = await getRepoInfo(cwd);
   const repoRoot = repoInfo?.root ?? cwd;
@@ -172,6 +175,7 @@ async function main(): Promise<void> {
         { allowWorkers: !values['no-workers'], allowMessaging: !values['no-messaging'] });
       return;
     case 'init':
+      home();
       initCommand(repoRoot);
       return;
     case 'projects':

@@ -1,3 +1,4 @@
+import { benchmarkHome } from './benchmark-home.ts';
 import { setRunStatus } from '../src/runs/run-store.testkit.ts';
 /**
  * Stuck-destroy benchmark (hearsay-tools/cezarion#879): what permanently stuck worker destroys
@@ -50,7 +51,7 @@ if (!Number.isInteger(workers) || workers < 0 || !(minutes > 0)) throw new Error
 
 const { RunStore } = await import('../src/runs/store.ts');
 const { RunManager } = await import('../src/workflows/run.ts');
-const home = (await import('../src/home/resolve.ts')).resolveHome({ purpose: 'cli' });
+const home = benchmarkHome((await import('../src/home/resolve.ts')).resolveHome({ purpose: 'cli' }));
 const { DelegationService } = await import('../src/delegation/service.ts');
 const { planOwnedWorkspace, ensureOwnedWorkspace } = await import('../src/delegation/workspace.ts');
 const { WorkspaceSemaphore } = await import('../src/workspace/semaphore.ts');

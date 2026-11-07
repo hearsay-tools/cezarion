@@ -1,3 +1,4 @@
+import { assertHomeWritable } from './home/install-marker.ts';
 /**
  * The host grants for remote settings administration (hearsay-tools/cezarion#2428).
  *
@@ -16,11 +17,10 @@
  */
 
 import type { Home } from './home/home.ts';
-import { readdirSync, readFileSync } from 'node:fs';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { readdirSync } from 'node:fs';
+import { HomeStore, readHomeFile } from './home/store.ts';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { assertCezarHomeWriteIsSandboxed } from './paths.ts';
 
 export const REMOTE_SETTINGS_DIR = 'remote-settings';
 
@@ -55,7 +55,7 @@ function grantFile(env: NodeJS.ProcessEnv, port: number, home: Home): string {
 function readGrant(path: string, port: number): RemoteSettingsGrant | { issue: string } | null {
   let raw: string;
   try {
-    raw = readFileSync(path, 'utf8');
+    raw = readHomeFile(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     return { issue: `cannot read ${path}: ${error instanceof Error ? error.message : String(error)}` };
@@ -112,19 +112,26 @@ export async function enableRemoteSettings(
   home: Home,
 ): Promise<RemoteSettingsState> {
   if (!isPort(port)) throw new RangeError(`not a port: ${port}`);
-  const dir = remoteSettingsPath(env, home);
-  assertCezarHomeWriteIsSandboxed(dir, env);
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  const temporary = join(dir, `.${port}.${process.pid}.${Date.now()}.tmp`);
-  await writeFile(temporary, `${JSON.stringify({ enabledAt: now.toISOString() }, null, 2)}\n`, { mode: 0o600 });
-  await rename(temporary, join(dir, `${port}.json`));
+  new HomeStore(home).writeJson(grantFile(env, port, home), { enabledAt: now.toISOString() });
   return readRemoteSettings(env, home);
 }
 
 /** Withdraw the grant for `port`, or every grant when no port is given. */
 export async function disableRemoteSettings(env: NodeJS.ProcessEnv = process.env, port: number | undefined, home: Home): Promise<RemoteSettingsState> {
-  assertCezarHomeWriteIsSandboxed(remoteSettingsPath(env, home), env);
-  if (port === undefined) await rm(remoteSettingsPath(env, home), { recursive: true, force: true });
-  else await rm(grantFile(env, port, home), { force: true });
+  const store = new HomeStore(home);
+  assertHomeWritable(home.root);
+  let paths: string[];
+  if (port !== undefined) paths = [grantFile(env, port, home)];
+  else {
+    let names: string[];
+    try { names = readdirSync(remoteSettingsPath(env, home)); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      names = [];
+    }
+    paths = names.filter(name => GRANT_FILE.test(name)).map(name => join(home.remoteSettings, name));
+  }
+  store.transaction(() => {
+    for (const path of paths) store.replace(path, null);
+  }, [remoteSettingsPath(env, home), ...paths]);
   return readRemoteSettings(env, home);
 }

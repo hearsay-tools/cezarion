@@ -1,6 +1,7 @@
 import './test-git-env.mjs'
 import { join } from 'node:path'
 import { createTestSandbox } from './test-sandbox.mjs'
+import { ensureTestInstallMarker } from './test-install-marker.mjs'
 
 // Only node:test entry points load this file. Browser workers keep their host
 // home so the browser can find its installed runtime and credentials.
@@ -9,6 +10,7 @@ for (const key of Object.keys(process.env)) {
   if (key.startsWith('CEZ_')) delete process.env[key]
 }
 process.env.CEZ_HOME = join(sandbox, '.cezar')
+ensureTestInstallMarker(process.env.CEZ_HOME)
 process.env.HOME = sandbox
 process.env.USERPROFILE = sandbox
 // Match AGENT_HOME_KEYS in packages/cezar/vitest.setup.ts. With these overrides

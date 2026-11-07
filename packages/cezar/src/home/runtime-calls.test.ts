@@ -1,7 +1,6 @@
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { runtimeHomes } from './runtime-isolation.testkit.ts';
-import { atomicWriteJsonSync } from '../workspace/config.ts';
 import { planChain } from '../planner.ts';
 import { generateRunName } from '../runs/auto-name.ts';
 import { createRunner } from '../core/runner-factory.ts';
@@ -15,7 +14,7 @@ afterEach(() => { vi.clearAllMocks(); });
 
 it('uses the selected config and account for planner calls', async () => {
   const { root, selected } = runtimeHomes();
-  atomicWriteJsonSync(selected.workspaceConfig, { agentDefaults: { runner: 'claude' } });
+  Home.seed(Home.sandbox(selected.root), selected.workspaceConfig, { agentDefaults: { runner: 'claude' } });
   run.mockResolvedValue({ text: JSON.stringify({ title: 'test-plan', steps: [{ prompt: '{{task}}', name: 'Task' }] }) });
   expect((await planChain(root, 'Plan a task', [], selected)).fallback).toBe(false);
   expect(run).toHaveBeenCalledWith(expect.objectContaining({ env: { CLAUDE_CONFIG_DIR: join(root, 'selected-account') } }));
@@ -23,7 +22,7 @@ it('uses the selected config and account for planner calls', async () => {
 
 it('uses the selected config and account for task naming', async () => {
   const { root, selected } = runtimeHomes();
-  atomicWriteJsonSync(selected.workspaceConfig, { agentDefaults: { runner: 'claude' } });
+  Home.seed(Home.sandbox(selected.root), selected.workspaceConfig, { agentDefaults: { runner: 'claude' } });
   run.mockResolvedValue({ text: '{"title":"testing home isolation"}' });
   expect(await generateRunName(root, { task: 'Test home isolation' }, selected)).toMatchObject({ titleSummary: 'testing home isolation' });
   expect(run).toHaveBeenCalledWith(expect.objectContaining({ env: expect.objectContaining({ CLAUDE_CONFIG_DIR: join(root, 'selected-account') }) }));
@@ -45,3 +44,4 @@ it('applies selected provider preferences to host discovery', async () => {
   const discovery = createHostDiscovery(root, auth, selected);
   expect((await discovery.providers()).providers).toEqual([expect.objectContaining({ provider: 'claude', enabled: false })]);
 });
+import { Home } from './home.ts';

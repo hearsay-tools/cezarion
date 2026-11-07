@@ -1,0 +1,49 @@
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { z } from 'zod';
+import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
+import { replacePrivate } from './private-files.ts';
+import { withHomeLock } from './write-lock.ts';
+import { assertHomeMetadata } from './boundary.ts';
+
+export const installMarkerSchema = z.object({
+  installId: z.uuid(), kind: z.enum(['live', 'dev', 'test']), createdAt: z.iso.datetime(),
+  migratedFrom: z.string().optional(), state: z.unknown().optional(),
+}).passthrough();
+export type InstallMarker = z.infer<typeof installMarkerSchema>;
+
+export function underTestRunner(): boolean {
+  return !!(process.env.VITEST || process.env.NODE_TEST_CONTEXT || process.env.JEST_WORKER_ID
+    || Object.keys(process.env).some(key => key.startsWith('STRYKER_')));
+}
+
+export function readInstallMarker(root: string): InstallMarker | undefined {
+  try { return installMarkerSchema.parse(JSON.parse(readFileSync(join(root, 'install.json'), 'utf8'))); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+}
+
+export function assertHomeWritable(root: string): InstallMarker {
+  const marker = readInstallMarker(root);
+  if (marker?.kind === 'live' && underTestRunner()) throw new Error(`[cez] refusing to write live home ${root} from a test runner`);
+  assertCezarHomeWriteIsSandboxed(root);
+  if (!marker) throw new Error(`[cez] refusing to write home ${root} without an install marker; start it through a CLI entry point`);
+  return marker;
+}
+
+/** Only sandbox construction and marker-creating entry points call this. Never downgrades live. */
+export function createInstallMarker(root: string, kind: InstallMarker['kind']): InstallMarker {
+  assertCezarHomeWriteIsSandboxed(root);
+  const marker = readInstallMarker(root);
+  if (marker) return marker;
+  assertHomeMetadata(root);
+  return withHomeLock(root, () => {
+    const existing = readInstallMarker(root);
+    if (existing) return existing;
+    const marker = { installId: randomUUID(), kind, createdAt: new Date().toISOString() };
+    replacePrivate(join(root, 'install.json'), `${JSON.stringify(marker, null, 2)}\n`);
+    return marker;
+  });
+}

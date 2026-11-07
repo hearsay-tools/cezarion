@@ -147,3 +147,13 @@ export function attachProjectWebhooks(
   }
   contexts.onContextBuilt((ctx) => taskWebhooks.attach(ctx));
 }
+
+function taskWebhookHost(bindHost: string | undefined): string {
+  if (!bindHost || bindHost === '0.0.0.0' || bindHost === '::') return '127.0.0.1';
+  return bindHost.includes(':') ? `[${bindHost}]` : bindHost;
+}
+
+/** The origin a local client reaches this cockpit at: `CEZ_COCKPIT_URL` and the task webhook's links (hearsay-tools/cezarion#774, hearsay-tools/cezarion#594). */
+export function cockpitOriginFor(bindHost: string | undefined, port: number): string {
+  return `http://${taskWebhookHost(bindHost)}:${port}`;
+}

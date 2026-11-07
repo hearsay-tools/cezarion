@@ -159,11 +159,7 @@ describe('the config API', () => {
   });
 
   it('supports a global workspace config lock across repositories', async () => {
-    writeFileSync(
-      join(homeRoot, 'cezar-sandbox', 'config.json'),
-      JSON.stringify({ modelsLocked: true }),
-      'utf8',
-    );
+    Home.seed(testHome(), testHome().workspaceConfig, { modelsLocked: true });
 
     expect((await getBody()).modelsLocked).toBe(true);
     expect((await put({ defaultModels: { claude: 'opus' } })).status).toBe(409);

@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
+import { prepareAuthorizedHomeWrite } from '../home/store.ts';
 
 import { assertSafeId, installId, PACKAGE_NAME, versionDir, versionEntry, versionsDir, writeManifest } from './layout.ts';
 
@@ -95,6 +96,7 @@ async function installSpec(
   // recursively removed — make that invariant structural rather than a property of call order.
   const staging = join(versionsDir(env, opts.home), `.staging-${assertSafeId(id)}-${process.pid}`);
   assertCezarHomeWriteIsSandboxed(staging, env);
+  prepareAuthorizedHomeWrite(opts.home);
   rmSync(staging, { recursive: true, force: true });
   mkdirSync(staging, { recursive: true });
   try {

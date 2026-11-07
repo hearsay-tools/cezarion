@@ -84,16 +84,8 @@ describe('workspace migrations', () => {
   });
 
   it('never overwrites keys already set globally (crash-interrupted re-run safety)', async () => {
-    writeFileSync(
-      workspaceConfigPath(undefined, testHome()),
-      JSON.stringify({ resources: { maxParallel: 8 } }),
-      'utf8',
-    );
-    writeFileSync(
-      workspaceUiStatePath(testHome()),
-      JSON.stringify({ appearance: { accent: 'lime' } }),
-      'utf8',
-    );
+    Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({ resources: { maxParallel: 8 } })));
+    Home.seedBytes(testHome(), workspaceUiStatePath(testHome()), Buffer.from(JSON.stringify({ appearance: { accent: 'lime' } })));
     writeRepoFile('config.json', { maxParallel: 5, memoryLimitMb: 1024 });
     writeRepoFile('ui-state.json', { appearance: { accent: 'violet' }, notifications: { enabled: true } });
 
@@ -116,7 +108,7 @@ describe('workspace migrations', () => {
     // schemaVersion back to 0 and re-run against CHANGED repo values. The
     // first pass wrote the keys globally, so the re-run must not overwrite.
     const raw = rawGlobalConfig();
-    writeFileSync(workspaceConfigPath(undefined, testHome()), JSON.stringify({ ...raw, schemaVersion: 0 }), 'utf8');
+    Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({ ...raw, schemaVersion: 0 })));
     writeRepoFile('config.json', { maxParallel: 3 });
     writeRepoFile('ui-state.json', { appearance: { accent: 'lime' } });
     await runMigrations({ home: testHome(), bootRepoRoot: repoRoot });

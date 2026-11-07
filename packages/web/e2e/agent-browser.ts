@@ -1,3 +1,4 @@
+import { Home } from '../../cezar/src/home/home.ts'
 import { captureLaunchArguments, sessionLaunchArguments } from './browser-launch'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -443,8 +444,9 @@ export function fixtureServeEnv(
     throw new Error(`cezar e2e: cannot verify fixture repository ${fixtureRoot}; refusing server boot`, { cause: discovery.error })
   }
   // Production skill discovery reads os.homedir() (USERPROFILE on Windows), independently
-  // of CEZ_HOME. Reset only
-  // this fixture-owned directory; the caller's tools keep their original HOME.
+  // of CEZ_HOME. Mark this fixture-owned directory as a test home and keep its contents;
+  // the caller's tools keep their original HOME.
+  Home.sandbox(resolve(fixtureRoot, '.cez-home'))
   const serverHome = resolve(fixtureRoot, '.server-home')
   rmSync(serverHome, { recursive: true, force: true })
   mkdirSync(serverHome)
@@ -462,7 +464,6 @@ export function fixtureServeEnv(
     CEZ_REMOTE: extra.CEZ_REMOTE ?? '0',
   }
 }
-
 /**
  * A JSON GET that survives a RESET idle connection.
  *
@@ -481,7 +482,6 @@ export async function getJson<T>(url: string): Promise<T> {
     }
   }
 }
-
 /**
  * The id of the project a server booted in — the `/p/<projectId>` prefix every cockpit URL
  * carries since the multi-project spec's step 3.2.

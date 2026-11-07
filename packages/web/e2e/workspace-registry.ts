@@ -1,4 +1,6 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { Home } from '../../cezar/src/home/home.ts'
+import { HomeStore } from '../../cezar/src/home/store.ts'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 
@@ -61,7 +63,7 @@ function readSharedConfig(): SharedConfig {
   const path = sharedFile('config.json')
   if (!existsSync(path)) return {}
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as SharedConfig
+    return JSON.parse(new HomeStore(Home.sandbox(sharedHome)).read(path)) as SharedConfig
   } catch {
     // A corrupt scratch config is the app's problem to degrade over, not this module's.
     return {}
@@ -82,9 +84,7 @@ export function writeSharedProjects(projects: RegistryProject[]): void {
   const config = readSharedConfig()
   // mode 0600 to match what the app writes (src/workspace/config.ts) — it only applies when the
   // file is created, which is the one case where the default would be wrong.
-  writeFileSync(sharedFile('config.json'), `${JSON.stringify({ ...config, projects }, null, 2)}\n`, {
-    mode: 0o600,
-  })
+  Home.seed(Home.sandbox(sharedHome), sharedFile('config.json'), { ...config, projects })
 }
 
 /**
@@ -97,12 +97,11 @@ export function writeSharedProjects(projects: RegistryProject[]): void {
 export function snapshotSharedHome(...names: string[]): () => void {
   const before = names.map((name) => {
     const path = sharedFile(name)
-    return { path, content: existsSync(path) ? readFileSync(path, 'utf8') : null }
+    return { path, content: existsSync(path) ? new HomeStore(Home.sandbox(sharedHome)).read(path) : null }
   })
   return () => {
     for (const { path, content } of before) {
-      if (content === null) rmSync(path, { force: true })
-      else writeFileSync(path, content, { mode: 0o600 })
+      Home.seedBytes(Home.sandbox(sharedHome), path, content === null ? null : Buffer.from(content))
     }
   }
 }

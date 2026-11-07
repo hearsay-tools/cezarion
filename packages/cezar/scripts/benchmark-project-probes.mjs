@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs, promisify } from 'node:util';
+import { benchmarkHome } from './benchmark-home.ts';
 
 const { values } = parseArgs({ options: {
   out: { type: 'string' }, repeats: { type: 'string', default: '5' },
@@ -43,7 +44,7 @@ async function serveFixture() {
   const { listProjects, clearProjectProbeCache } = await import('../src/workspace/projects.ts');
   const { mergeWriteWorkspaceConfig } = await import('../src/workspace/config.ts');
   const { resolveHome } = await import('../src/home/resolve.ts');
-  const home = resolveHome({ purpose: 'cli' });
+  const home = benchmarkHome(resolveHome({ purpose: 'cli' }));
   const hz = Number(childProcess.execFileSync('getconf', ['CLK_TCK'], { encoding: 'utf8' }).trim());
   const gitCpuMs = () => {
     const fields = readFileSync('/proc/self/stat', 'utf8').split(') ')[1].split(' ');

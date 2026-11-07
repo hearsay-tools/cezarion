@@ -1,3 +1,4 @@
+import { Home } from '../src/home/home.ts';
 import { resolveHome } from '../src/home/resolve.ts';
 /**
  * Workspace stream benchmark (hearsay-tools/cezarion#2730): what one large delegation family costs
@@ -74,6 +75,7 @@ async function benchmark(argv: string[], cleanups: Array<() => unknown>): Promis
   cleanups.push(() => { for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true }); });
   process.env.CEZ_HOME = home;
   const selectedHome = resolveHome({ purpose: 'server' });
+  Home.sandbox(selectedHome.root);
   mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
 
   const { values } = parseArgs({ args: argv, options: {

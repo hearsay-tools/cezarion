@@ -241,7 +241,7 @@ describe('the workspace settings API (step 2.7)', () => {
 
   it('PUT ignores a retired skillsAutoUpdate key and an old stored key survives unrelated writes', async () => {
     mkdirSync(home, { recursive: true });
-    writeFileSync(workspaceConfigPath(undefined, testHome()), JSON.stringify({ skillsAutoUpdate: true }));
+    Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({ skillsAutoUpdate: true })));
     const res = await putConfig({ skillsAutoUpdate: false, archiveOnMerge: true });
     expect(res.status).toBe(200);
     expect(await res.json()).not.toHaveProperty('skillsAutoUpdate');
@@ -249,7 +249,7 @@ describe('the workspace settings API (step 2.7)', () => {
   });
 
   it('boots and answers health with a retired skillsAutoUpdate key stored and its env var set', async () => {
-    writeFileSync(workspaceConfigPath(undefined, testHome()), JSON.stringify({ skillsAutoUpdate: true }));
+    Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({ skillsAutoUpdate: true })));
     vi.stubEnv('CEZ_SKILLS_AUTO_UPDATE', '1');
     vi.stubEnv('CEZ_DRY_RUN', '1');
     vi.stubEnv('CEZ_PROJECT_WARMUP', '0');
@@ -301,14 +301,10 @@ describe('the workspace settings API (step 2.7)', () => {
   });
 
   it('a merge-written PUT never clobbers the registry or unknown keys (passthrough)', async () => {
-    writeFileSync(
-      workspaceConfigPath(undefined, testHome()),
-      JSON.stringify({
+    Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({
         projects: [{ id: 'cezar', root: '/tmp/projects/cezar' }],
         futureKey: true,
-      }),
-      'utf8',
-    );
+      })));
     await putConfig({ resources: { maxParallel: 4 } });
     const raw = rawConfig();
     // The merge-write materializes the entry's schema defaults (name, dates…) —

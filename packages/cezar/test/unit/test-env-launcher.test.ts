@@ -69,6 +69,8 @@ function makeFixture(withSetsid: boolean): { root: string; path: string } {
   mkdirSync(join(root, '.ai/scripts'), { recursive: true });
   mkdirSync(join(root, '.ai/browsers'), { recursive: true });
   mkdirSync(join(root, 'bin'), { recursive: true });
+  mkdirSync(join(root, 'scripts'), { recursive: true });
+  copyFileSync(join(repoRoot, 'scripts/test-install-marker.mjs'), join(root, 'scripts/test-install-marker.mjs'));
   copyFileSync(join(repoRoot, '.ai/scripts/test-env-up.sh'), join(root, '.ai/scripts/test-env-up.sh'));
   copyFileSync(join(repoRoot, '.ai/scripts/test-env-down.sh'), join(root, '.ai/scripts/test-env-down.sh'));
   copyFileSync(join(repoRoot, '.ai/scripts/e2e.sh'), join(root, '.ai/scripts/e2e.sh'));

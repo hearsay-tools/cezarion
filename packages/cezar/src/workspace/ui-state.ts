@@ -1,7 +1,6 @@
 import type { Home } from '../home/home.ts';
-import { readFile } from 'node:fs/promises';
+import { HomeStore, readHomeFile } from '../home/store.ts';
 import type { WorkspaceUiState } from '@open-mercato/cezar-contract';
-import { atomicWriteJsonSync } from './config.ts';
 
 /**
  * `~/.cezar/ui-state.json` — global GUI state, the workspace twin of the
@@ -24,17 +23,19 @@ import { atomicWriteJsonSync } from './config.ts';
  *  `src/ui-state.ts`: `GET /api/v1/workspace/ui-state` answers this value verbatim, so a loose
  *  record left the route naming no key. The schema is a `z.looseObject`, so unknown prefs keep
  *  round-tripping (BACKWARD_COMPATIBILITY.md) — the type only adds the known names. */
-export async function readWorkspaceUiState(
-  path: string,
-): Promise<WorkspaceUiState> {
+function readWorkspaceUiStateSync(path: string): WorkspaceUiState {
   try {
-    const parsed: unknown = JSON.parse(await readFile(path, 'utf8'));
+    const parsed: unknown = JSON.parse(readHomeFile(path));
     return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
       ? (parsed as WorkspaceUiState)
       : {};
   } catch {
     return {};
   }
+}
+
+export async function readWorkspaceUiState(path: string): Promise<WorkspaceUiState> {
+  return readWorkspaceUiStateSync(path);
 }
 
 /**
@@ -54,9 +55,12 @@ export async function mergeWriteWorkspaceUiState(
   mutator: (state: WorkspaceUiState) => WorkspaceUiState | void,
   home: Home,
 ): Promise<WorkspaceUiState> {
-  const path = home.workspaceUiState;
-  const current = await readWorkspaceUiState(path);
-  const next = mutator(current) ?? current;
-  atomicWriteJsonSync(path, next);
-  return next;
+  const store = new HomeStore(home);
+  return store.transaction(() => {
+    const path = home.workspaceUiState;
+    const current = readWorkspaceUiStateSync(path);
+    const next = mutator(current) ?? current;
+    store.writeJson(path, next);
+    return next;
+  }, [home.workspaceUiState]);
 }

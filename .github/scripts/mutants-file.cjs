@@ -254,6 +254,7 @@ async function runMeasurement(opts, deps, signal = new AbortController().signal)
   try {
     standaloneCheckout(deps.git, source, head, cwd);
     deps.mkdir(env.CEZ_HOME);
+    deps.write(path.join(env.CEZ_HOME, 'install.json'), JSON.stringify({ installId: require('node:crypto').randomUUID(), kind: 'test', createdAt: new Date().toISOString() }));
     await deps.command('pnpm', ['install', '--frozen-lockfile'], cwd, signal, env);
     await deps.command('npm', ['run', 'build:server'], cwd, signal, env);
     signal.throwIfAborted();

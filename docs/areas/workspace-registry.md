@@ -12,7 +12,7 @@
 
 **Agent accounts** (spec `2026-07-29-agent-profiles`) live in this directory too, but in their OWN file — `~/.cezar/agent-accounts.json`, never a key in `config.json`, so a cezar that has never heard of accounts cannot drop them; `src/workspace/agent-accounts.ts` owns the store, `src/core/agent-profiles.ts` the vendor knowledge and `src/workspace/agent-profiles.ts` the resolution.
 
-Changed writes to `config.json` and `agent-accounts.json` first copy the previous content to `backups/<file>/<UTC>-<sha8>.json` under the same home. Private snapshots keep the last 20 plus one per day for 30 days. Backup failures warn once per file and do not block writes. `cez backup list [<file>]` lists them; `cez backup restore <file> [--at <time>]` restores the newest snapshot at or before that UTC time through the normal writer, which backs up the replaced file. Restore covers JSON only, not account config directories. The separate `config.json.bak` recovery behavior remains unchanged.
+Changed writes to `config.json` and `agent-accounts.json` first copy the previous content to `backups/<file>/<UTC>-<sha8>.json` under the same home. Private snapshots keep the last 20 plus one per day for 30 days. Backup failures warn once per file and do not block writes. HomeStore preflights the backup directory chain before the write lock. If a backup directory is unavailable, dangling or resolves outside the canonical home, it skips backup creation and pruning while the primary save proceeds. This also skips backups linked to another disk; that backup layout remains a known limit. `cez backup list [<file>]` lists them; `cez backup restore <file> [--at <time>]` restores the newest snapshot at or before that UTC time through the normal writer, which backs up the replaced file. Restore covers JSON only, not account config directories. The separate `config.json.bak` recovery behavior remains unchanged. Its path and version journal are auxiliary too: failed preflight or publication skips the snapshot with one warning; the primary save still succeeds.
 
 ### Explicit home paths
 
@@ -24,5 +24,44 @@ the shrink-only OS-user reader list (hearsay-tools/cezarion#2810).
 
 Tests select `Home.sandbox(dir)` and use the shared setup's selector for process
 entry tests. The factory contains cache and config paths under that directory and
-creates a test `install.json` marker without replacing an existing one. Marker
-validation and HomeStore remain deferred to P1b.
+creates a test `install.json` marker without replacing an existing one. Seed fixtures
+with `Home.seed` or `Home.seedBytes`; both use HomeStore. A direct file write belongs
+only in a test that deliberately simulates an outside writer.
+
+### HomeStore
+
+`home/store.ts` owns registry file reads and writes, including `config.json.bak`,
+remote grants, server instance state and install locks. Existing tolerant readers
+keep their schema and error behavior. Merge writers hold one short per-root lock
+across the read, mutation and replacement. The lock lives in `<home>/.locks/write.lock/`.
+It uses unique process claims; stale claims use the process identity checks in
+`delegation/process-liveness.ts`. Serving cockpits hold independent
+`<home>/.locks/cockpits/<pid>.lease` files. A lease does not block a CLI writer.
+Mutual exclusion requires one PID namespace; cross-container bind-mounted homes
+are a stated limit. An unconfirmed process claim expires after 30 seconds to recover
+from PID reuse. A confirmed live process token never expires. See ADR 0060 for
+the long-running-holder trade-off and cross-namespace lease collisions.
+
+Serve, init, run and backup restore prepare an install marker unconditionally.
+Other authorized operator entries prepare existing registry files at entry. On an
+empty home, they record authorization in process memory and create nothing until
+the first write. That write creates the marker and seeds HEAD under the same lock.
+Help, invalid commands and pure reads leave an empty home untouched. Managed-layout
+writes consume their entry authorization after validation too. Library writes
+without entry authorization still require a marker. The marker check uses the actual process to refuse
+a `live` home under Vitest, node:test, Jest or Stryker. An env argument cannot bypass
+it. The passwd-home guard remains a separate check. Read-only homes stay readable,
+even when their auxiliary lock or version directory cannot be written.
+
+The first entry seeds each existing registry file's committed version without
+changing its bytes or mode. Marker publication and seeding hold one write lock.
+Each file seeds best effort; an unreadable file cannot stop other files or an
+unrelated primary save. Every entry and the first authorized transaction retry
+missing HEAD records even when the marker exists. Each later write stores content by hash, writes `PENDING`,
+replaces the live file, advances `HEAD`, then clears `PENDING`. A read finishes an
+interrupted commit or records an outside write and pins its original restore target.
+Outside-write enforcement stays **off** in P1b (hearsay-tools/cezarion#2811). Later
+writes still work and cannot change the pinned target. P1c
+(hearsay-tools/cezarion#2812) owns blocking, the banner, and restore/accept routes.
+See [ADR 0060](../adr/0060-serialize-home-files-through-homestore.md) for the caller
+audit, write ordering and remaining limits.

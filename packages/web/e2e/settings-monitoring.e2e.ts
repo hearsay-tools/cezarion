@@ -1,3 +1,4 @@
+import { Home } from '../../cezar/src/home/home.ts';
 import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -161,17 +162,13 @@ beforeAll(async () => {
 
   cezHome = join(dataRoot, '.cez-home')
   mkdirSync(cezHome, { recursive: true })
-  writeFileSync(
-    join(cezHome, 'config.json'),
-    `${JSON.stringify({
+  Home.seedBytes(Home.sandbox(cezHome), join(cezHome, 'config.json'), Buffer.from(`${JSON.stringify({
       resources: {
         maxParallel: 2,
         maxMonitoringSessions: 2,
         monitoringWakeIntervalMinutes: null,
       },
-    }, null, 2)}\n`,
-    'utf8',
-  )
+    }, null, 2)}\n`))
 
   port = 0
   server = startServer()

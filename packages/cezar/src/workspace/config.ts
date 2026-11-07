@@ -1,9 +1,5 @@
 import type { Home } from '../home/home.ts';
-import { backupBeforeWrite } from './backups.ts';
-import { randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { HomeStore, homeFileRoot, readHomeFile } from '../home/store.ts';
 import { z } from 'zod';
 // Contract VALUES, like `workspaceUiStateSchema` in workspace/migrations.ts: the tag bounds this
 // file must not `.catch` away are the same constants the PATCH route validates against, so they
@@ -21,7 +17,6 @@ import {
 import { WEBHOOK_TRIGGERS, type WebhookTrigger } from '@open-mercato/cezar-contract/attention';
 import { projectWebhookUrlSchema } from '@open-mercato/cezar-contract/projects';
 import { PROVIDER_IDS, type ProviderId } from '../core/provider-auth.ts';
-import { assertCezarHomeWriteIsSandboxed, } from '../paths.ts';
 
 /**
  * `~/.cezar/config.json` — the per-user workspace config + project registry
@@ -336,10 +331,10 @@ function parseWorkspaceConfig(raw: string): WorkspaceConfig | null {
 
 /** The snapshot is only worth restoring while it still holds projects — an
  *  empty one carries no information the defaults do not already have. */
-async function loadWorkspaceConfigBackup(path: string): Promise<WorkspaceConfig | null> {
+function loadWorkspaceConfigBackup(path: string): WorkspaceConfig | null {
   let raw: string;
   try {
-    raw = await readFile(workspaceConfigBackupPath(path), 'utf8');
+    raw = readHomeFile(workspaceConfigBackupPath(path));
   } catch {
     return null;
   }
@@ -352,10 +347,10 @@ async function loadWorkspaceConfigBackup(path: string): Promise<WorkspaceConfig 
  * backup; preserve a valid empty primary. Failures degrade to defaults. Merge writers pass their
  * once-resolved path.
  */
-export async function loadWorkspaceConfig(path: string): Promise<WorkspaceConfig> {
+function loadWorkspaceConfigSync(path: string): WorkspaceConfig {
   let raw: string | null = null;
   try {
-    raw = await readFile(path, 'utf8');
+    raw = readHomeFile(path);
   } catch {
     // missing/unreadable — the backup below is the next chance
   }
@@ -363,7 +358,7 @@ export async function loadWorkspaceConfig(path: string): Promise<WorkspaceConfig
     const parsed = parseWorkspaceConfig(raw);
     if (parsed) return parsed;
   }
-  const restored = await loadWorkspaceConfigBackup(path);
+  const restored = loadWorkspaceConfigBackup(path);
   if (restored) {
     const cause = raw === null ? 'is missing' : 'is empty or corrupt';
     console.warn(
@@ -376,57 +371,50 @@ export async function loadWorkspaceConfig(path: string): Promise<WorkspaceConfig
   return defaultWorkspaceConfig();
 }
 
-/**
- * The tmp path an atomic write stages through — UNIQUE PER WRITE, never a
- * fixed `${path}.tmp`. `~/.cezar/` is shared by every cezar process on the
- * machine (a `serve` per repo, `cezar run`s, a settings PUT), and two writers
- * staging through the same tmp name interleave: writer B's `O_TRUNC` open can
- * empty the file between writer A's write and rename, so A renames a
- * truncated/half-written file into place — and B's own rename then throws
- * `ENOENT` on the name A consumed. The pid + random suffix gives every writer
- * its own staging file, so the only cross-process contention left is the
- * rename itself, which is atomic.
- */
-export function atomicTmpPath(path: string): string {
-  return `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+/** Async public contract; the transaction uses the same parser without yielding. */
+export async function loadWorkspaceConfig(path: string): Promise<WorkspaceConfig> {
+  return loadWorkspaceConfigSync(path);
 }
 
-/** Atomic JSON write (`0600`, dir `0700`) via a per-writer tmp + rename —
- *  shared by the workspace config and ui-state writers. Throws on write
- *  failure (e.g. a read-only home) — degrading is the caller's policy. */
+// Kept for callers that inspect staging names; the HomeStore writer owns replacement.
+export { atomicTmpPath } from '../home/private-files.ts';
+
+/** Compatibility name for registry writers. It cannot bypass the install marker or journal. */
 export function atomicWriteJsonSync(path: string, value: unknown): void {
-  assertCezarHomeWriteIsSandboxed(path);
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const tmp = atomicTmpPath(path);
-  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-  renameSync(tmp, path);
-  try {
-    chmodSync(path, 0o600); // best-effort — ignored on some filesystems
-  } catch {
-    // non-fatal
-  }
+  new HomeStore(homeFileRoot(path)).writeJson(path, value);
 }
 
 /**
- * Re-read, mutate and atomically replace one once-resolved config path. Concurrent
- * read-to-rename windows can still lose updates. Return the written config; throw on write
+ * Re-read, mutate and atomically replace one once-resolved config path under write.lock. Return the written config; throw on write
  * failure so callers choose degradation.
  */
 export async function mergeWriteWorkspaceConfig(
   mutator: (config: WorkspaceConfig) => WorkspaceConfig | void,
   home: Home,
 ): Promise<WorkspaceConfig> {
-  const path = home.workspaceConfig;
-  const current = await loadWorkspaceConfig(path);
-  const next = mutator(current) ?? current;
-  backupBeforeWrite(path, next);
-  atomicWriteJsonSync(path, next);
-  // Refresh after empty writes too, so recovery cannot resurrect removed projects.
-  try {
-    atomicWriteJsonSync(workspaceConfigBackupPath(path), next);
-  } catch {
-    // Best-effort: the registry itself is already safely on disk, and a
-    // failed snapshot must never turn a successful write into an error.
+  const store = new HomeStore(home);
+  const backup = workspaceConfigBackupPath(home.workspaceConfig);
+  let snapshotReady = true;
+  try { store.assertBoundary([backup]); } catch (error) {
+    snapshotReady = false;
+    warnSnapshot(backup, error);
   }
-  return next;
+  return store.transaction(() => {
+    const path = home.workspaceConfig;
+    const current = loadWorkspaceConfigSync(path);
+    const next = mutator(current) ?? current;
+    store.writeJson(path, next);
+    // Refresh after empty writes too, so recovery cannot resurrect removed projects.
+    if (snapshotReady) try { store.writeJson(backup, next); } catch (error) {
+      warnSnapshot(backup, error); // The primary is already safely committed.
+    }
+    return next;
+  }, [home.workspaceConfig]);
+}
+
+const warnedSnapshots = new Set<string>();
+function warnSnapshot(path: string, error: unknown): void {
+  if (warnedSnapshots.has(path)) return;
+  warnedSnapshots.add(path);
+  console.warn(`[cez] workspace backup ${path} unavailable (${error instanceof Error ? error.message : String(error)}); continuing the write`);
 }

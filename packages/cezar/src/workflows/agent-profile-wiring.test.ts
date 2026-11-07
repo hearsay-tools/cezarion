@@ -161,7 +161,7 @@ describe('RunManager agent-profile resolution', () => {
   });
 
   it('degrades to the default when the accounts file is unreadable', async () => {
-    writeFileSync(agentAccountsPath(testHome()), '{ not json', 'utf8');
+    Home.seedBytes(testHome(), agentAccountsPath(testHome()), Buffer.from('{ not json'));
     const run = newRun();
     expect((await resolveStepEnv(run.id, 'claude')).profileId).toBe('default');
   });

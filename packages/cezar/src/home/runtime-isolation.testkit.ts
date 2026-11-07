@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, vi } from 'vitest';
 import { resolveHome } from './resolve.ts';
-import { atomicWriteJsonSync } from '../workspace/config.ts';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -17,6 +16,7 @@ afterEach(() => {
 export function runtimeHomes() {
   const root = mkdtempSync(join(tmpdir(), 'cez-runtime-home-')); roots.push(root);
   const selected = resolveHome({ purpose: 'server', env: { CEZ_HOME: join(root, 'selected') } });
+  Home.sandbox(selected.root);
   const ambient = resolveHome({ purpose: 'server', env: { CEZ_HOME: join(root, 'ambient') } });
   useTestHome(ambient.root ? Home.sandbox(ambient.root) : undefined);
   vi.stubEnv('CEZ_AGENT_MODELS_LOCKED', '0');
@@ -24,12 +24,12 @@ export function runtimeHomes() {
   mkdirSync(join(root, 'ambient-account'));
   const account = (path: string) => ({ accounts: [{ id: 'work', provider: 'claude', configDir: path, label: 'Work', addedAt: '' }],
     defaults: { claude: 'work' }, selections: {} });
-  atomicWriteJsonSync(selected.agentAccounts, account(join(root, 'selected-account')));
-  atomicWriteJsonSync(ambient.agentAccounts, account(join(root, 'ambient-account')));
-  atomicWriteJsonSync(selected.workspaceConfig, { agentDefaults: { runner: 'codex' }, modelsLocked: true,
+  Home.seed(selected, selected.agentAccounts, account(join(root, 'selected-account')));
+  Home.seed(ambient, ambient.agentAccounts, account(join(root, 'ambient-account')));
+  Home.seed(selected, selected.workspaceConfig, { agentDefaults: { runner: 'codex' }, modelsLocked: true,
     resources: { maxParallel: 7, worktreeRetentionDefault: 17 }, disabledProviders: ['claude'],
     projects: [{ id: 'selected', root, name: 'Selected' }] });
-  atomicWriteJsonSync(ambient.workspaceConfig, { agentDefaults: { runner: 'claude' }, modelsLocked: false,
+  Home.seed(ambient, ambient.workspaceConfig, { agentDefaults: { runner: 'claude' }, modelsLocked: false,
     resources: { maxParallel: 2, worktreeRetentionDefault: 2 }, projects: [{ id: 'ambient', root, name: 'Ambient' }] });
   return { root, selected, ambient };
 }

@@ -1,13 +1,11 @@
 import type { Home } from '../home/home.ts';
-import { backupBeforeWrite } from './backups.ts';
+import { HomeStore, readHomeFile } from '../home/store.ts';
 import { realpathSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
 import { posix, resolve, win32 } from 'node:path';
 import { z } from 'zod';
 import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-contract/agent-profiles';
 import { PROVIDER_IDS, type ProviderId } from '../core/provider-auth.ts';
 import { ompProfileName, supportsProfiles } from '../core/agent-profiles.ts';
-import { atomicWriteJsonSync } from './config.ts';
 
 /**
  * Optional agent-account store with root-keyed selections. Preserve unknown keys and salvage
@@ -168,11 +166,11 @@ export function defaultAgentAccountStore(): AgentAccountStore {
  * one-line warning and is left on disk untouched, so the user can repair it by hand — the next
  * successful merge-write is what replaces it.
  */
-export async function loadAgentAccounts(home: Home): Promise<AgentAccountStore> {
+function loadAgentAccountsSync(home: Home): AgentAccountStore {
   const path = home.agentAccounts;
   let raw: string;
   try {
-    raw = await readFile(path, 'utf8');
+    raw = readHomeFile(path);
   } catch {
     // Absent — but accounts may predate this file (they lived in config.json on the branch that
     // introduced them), so give those one chance to come across.
@@ -188,24 +186,29 @@ export async function loadAgentAccounts(home: Home): Promise<AgentAccountStore> 
   return defaultAgentAccountStore();
 }
 
+/** Retain the async caller contract while transactions remain synchronous. */
+export async function loadAgentAccounts(home: Home): Promise<AgentAccountStore> {
+  return loadAgentAccountsSync(home);
+}
+
 /**
  * Read-modify-write merge: re-read, apply `mutator`, atomic-rename write.
  *
- * Because every writer re-reads immediately before writing, two cezar processes editing different
- * accounts converge instead of dropping each other's — last-writer-wins only inside the tiny
- * read→rename window, which is the same bargain `config.json` makes. Throws on write failure (a
+ * Every writer holds the root write.lock across the re-read and replacement, so concurrent
+ * processes cannot drop each other's account changes. Throws on write failure (a
  * read-only home); degrading is the caller's policy.
  */
 export async function mergeWriteAgentAccounts(
   mutator: (store: AgentAccountStore) => AgentAccountStore | void,
   home: Home,
 ): Promise<AgentAccountStore> {
-  const current = await loadAgentAccounts(home);
-  const next = mutator(current) ?? current;
-  const path = home.agentAccounts;
-  backupBeforeWrite(path, next);
-  atomicWriteJsonSync(path, next);
-  return next;
+  const store = new HomeStore(home);
+  return store.transaction(() => {
+    const current = loadAgentAccountsSync(home);
+    const next = mutator(current) ?? current;
+    store.writeJson(home.agentAccounts, next);
+    return next;
+  }, [home.agentAccounts]);
 }
 
 /**
@@ -217,10 +220,26 @@ export async function mergeWriteAgentAccounts(
  * `config.json`: an older cezar sharing this home keeps reading what it has always read, and this
  * import is idempotent because it only runs while `agent-accounts.json` is absent.
  */
-async function importLegacyAccounts(home: Home): Promise<AgentAccountStore> {
+function importLegacyAccounts(home: Home): AgentAccountStore {
+  // A load may have observed absence just before another process created the store.
+  // Keep that recheck, import and publication inside one transaction as well.
+  try {
+    return new HomeStore(home).transaction(() => {
+      try { readHomeFile(home.agentAccounts); return loadAgentAccountsSync(home); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      return readLegacyAccounts(home, true);
+    }, [home.agentAccounts]);
+  } catch {
+    // A missing marker or read-only home still permits the historical in-memory import.
+    return readLegacyAccounts(home, false);
+  }
+}
+
+function readLegacyAccounts(home: Home, persist: boolean): AgentAccountStore {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readFile(home.workspaceConfig, 'utf8'));
+    parsed = JSON.parse(readHomeFile(home.workspaceConfig));
   } catch {
     return defaultAgentAccountStore();
   }
@@ -241,11 +260,10 @@ async function importLegacyAccounts(home: Home): Promise<AgentAccountStore> {
   // Only worth persisting when there was something to carry over; an empty import must not create
   // a file, or the zero-config promise ("delete any of them and cezar rebuilds") gains a file that
   // exists for no reason.
-  if (imported.data.accounts.length === 0) return imported.data;
+  if (!persist || imported.data.accounts.length === 0) return imported.data;
   try {
     const path = home.agentAccounts;
-    backupBeforeWrite(path, imported.data);
-    atomicWriteJsonSync(path, imported.data);
+    new HomeStore(home).writeJson(path, imported.data);
   } catch {
     // read-only home: the import stays in memory for this process, which is still correct
   }
