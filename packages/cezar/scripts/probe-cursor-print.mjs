@@ -91,6 +91,32 @@ function resultOf(frames) {
   return frames.findLast(frame => frame.type === 'result');
 }
 
+function askQuestionQueryOf(frames) {
+  const request = frames.find(frame => frame.type === 'interaction_query' && frame.subtype === 'request' && frame.query_type === 'askQuestionInteractionQuery');
+  const response = frames.find(frame => frame.type === 'interaction_query' && frame.subtype === 'response' && frame.query_type === 'askQuestionInteractionQuery');
+  const rejection = response?.response?.askQuestionInteractionResponse?.result?.rejected?.reason;
+  return { request, response, rejection };
+}
+
+function askQuestionKindOf(response, rejection) {
+  return {
+    responseKind: rejection ? 'rejected' : response ? 'other' : 'none',
+    rejectionKind: typeof rejection === 'string' && rejection.includes('skipped') ? 'skipped' : rejection ? 'other' : 'none',
+  };
+}
+
+function askQuestionSessionOf(request, response) {
+  return {
+    sameSession: Boolean(request && response && request.session_id === response.session_id),
+    responseDelayMs: request && response ? response.timestamp_ms - request.timestamp_ms : null,
+  };
+}
+
+function nativeQuestionOutcome(run, request, response, rejection) {
+  return run.code === 0 && !run.timedOut && !run.truncated && request && response && request.session_id === response.session_id && rejection?.includes('skipped')
+    ? 'blocked' : request && response ? 'unqualified' : 'inconclusive';
+}
+
 async function probeNativeQuestion(version) {
   const run = await runAgent([
     '-p', '--force', '--trust', '--output-format', 'stream-json',
@@ -99,9 +125,7 @@ async function probeNativeQuestion(version) {
   ], checkout, 45_000);
 
   const frames = framesOf(run.stdout);
-  const request = frames.find(frame => frame.type === 'interaction_query' && frame.subtype === 'request' && frame.query_type === 'askQuestionInteractionQuery');
-  const response = frames.find(frame => frame.type === 'interaction_query' && frame.subtype === 'response' && frame.query_type === 'askQuestionInteractionQuery');
-  const rejection = response?.response?.askQuestionInteractionResponse?.result?.rejected?.reason;
+  const { request, response, rejection } = askQuestionQueryOf(frames);
   return {
     schema: 1,
     case: 'native-question',
@@ -113,12 +137,9 @@ async function probeNativeQuestion(version) {
     outputTruncated: run.truncated,
     nativeQuestionRequested: Boolean(request),
     nativeQuestionAnswered: Boolean(response),
-    responseKind: rejection ? 'rejected' : response ? 'other' : 'none',
-    rejectionKind: typeof rejection === 'string' && rejection.includes('skipped') ? 'skipped' : rejection ? 'other' : 'none',
-    sameSession: Boolean(request && response && request.session_id === response.session_id),
-    responseDelayMs: request && response ? response.timestamp_ms - request.timestamp_ms : null,
-    outcome: run.code === 0 && !run.timedOut && !run.truncated && request && response && request.session_id === response.session_id && rejection?.includes('skipped')
-      ? 'blocked' : request && response ? 'unqualified' : 'inconclusive',
+    ...askQuestionKindOf(response, rejection),
+    ...askQuestionSessionOf(request, response),
+    outcome: nativeQuestionOutcome(run, request, response, rejection),
   };
 }
 
@@ -214,6 +235,16 @@ async function probeDelegation(version) {
   };
 }
 
+function mcpCatalogSafe(catalogRun, names, safeAllowedTools) {
+  return catalogRun.code === 1 && names.includes('mcp_tool_call')
+    && nativeDelegationEntries.every(name => names.includes(name) && !safeAllowedTools.includes(name));
+}
+
+function mcpOutcome(catalogSafe, first, second) {
+  return catalogSafe && first.ok && second?.ok && first.id === second.id
+    && !first.stderrMentionsApproval && !second.stderrMentionsApproval ? 'pass' : 'blocked';
+}
+
 async function probeMcp(version) {
   const { catalogRun, names, safeAllowedTools } = await discoverSafeAllowedTools();
   const pluginDir = join(checkout, 'cez-probe-plugin');
@@ -280,8 +311,7 @@ process.stdin.on('data', chunk => {
   };
   const first = await runTurn();
   const second = first.id ? await runTurn(first.id) : undefined;
-  const catalogSafe = catalogRun.code === 1 && names.includes('mcp_tool_call')
-    && nativeDelegationEntries.every(name => names.includes(name) && !safeAllowedTools.includes(name));
+  const catalogSafe = mcpCatalogSafe(catalogRun, names, safeAllowedTools);
   return {
     schema: 1, case: 'mcp', cliVersion: version, model: values.model,
     invocation: ['-p', '--force', '--trust', '--output-format stream-json', '--allowed-tools <non-agent catalog>', '--plugin-dir <disposable local plugin>', '--resume <exact native id>'],
@@ -293,8 +323,7 @@ process.stdin.on('data', chunk => {
     resumedEnvironmentHashSeen: second?.environmentHashSeen ?? false,
     sameNativeSession: Boolean(first.id && first.id === second?.id),
     stderrMentionsApproval: first.stderrMentionsApproval || Boolean(second?.stderrMentionsApproval),
-    outcome: catalogSafe && first.ok && second?.ok && first.id === second.id
-      && !first.stderrMentionsApproval && !second.stderrMentionsApproval ? 'pass' : 'blocked',
+    outcome: mcpOutcome(catalogSafe, first, second),
   };
 }
 
