@@ -6,6 +6,7 @@ import { CANCEL, PreflightError, type InstallContext, type InstallStep, type Pla
 import { brewInstallTool, brewRemoveHint, depCheckStep, HOSTNAME_RE, owned, shared, StepAborted, StepCancelled, verifyCommand } from '../steps.ts';
 import { REBRAND_SWITCH } from '../../home/switch.ts';
 import { migrateLaunchd, rollbackLaunchdMigration, unloadLaunchd } from './macosx-migration.ts';
+import { guardLaunchdWrite } from './macosx-launchd-files.ts';
 import { refreshNpxCacheForRedeploy } from '../npx-cache.ts';
 
 /**
@@ -68,8 +69,10 @@ async function bootstrapVerified(ctx: InstallContext, uid: number, label: string
 
 /** Both agents use private plists; ngrok's plist contains plaintext credentials. */
 async function installAgent(ctx: InstallContext, previous: LaunchAgent, name: string, path: string, xml: string, what: string): Promise<void> {
+  const target: LaunchAgent = { kind: 'owned', type: 'launchd', name, path };
+  const existing = guardLaunchdWrite(ctx, target, { selected: previous });
   mkdirSync(launchAgentsDir(ctx), { recursive: true });
-  writeFileSync(path, xml, { encoding: 'utf8', mode: 0o600 });
+  writeFileSync(path, xml, { encoding: 'utf8', mode: 0o600, flag: existing === undefined ? 'wx' : 'w' });
   // mode only applies on create; protect re-installs over an existing 0644 plist too.
   chmodSync(path, 0o600);
   const uid = process.getuid ? process.getuid() : 0;
@@ -82,6 +85,7 @@ async function installAgent(ctx: InstallContext, previous: LaunchAgent, name: st
     if (previous.path !== path) rmSync(previous.path, { force: true });
   } catch (error) {
     if (previous.name !== name) {
+      guardLaunchdWrite(ctx, target, { selected: target, expectedXml: xml });
       await unloadLaunchd(ctx, name);
       rmSync(path, { force: true });
       const oldLoaded = (await ctx.runner.capture('launchctl', ['print', `gui/${uid}/${previous.name}`])).code === 0;

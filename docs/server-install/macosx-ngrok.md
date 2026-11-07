@@ -44,7 +44,9 @@ npx cezarion server-install --platform macosx-ngrok
 The staged rebrand keeps these labels until the release switch is enabled. New
 installs then use `tools.hearsay.squawk.cockpit` and `tools.hearsay.squawk.ngrok`.
 Migration replaces only owned old agents and keeps private `*.plist.migrated`
-backups for rollback. It reports foreign agents and leaves them alone. Uninstall
+backups for rollback. A successful rollback removes its backup. Migration,
+reconfigure and rollback refuse foreign destination plists. Migration reports
+foreign old agents and leaves them alone. Uninstall
 and deploy use the recorded label and path, including for pre-switch installs.
 
 The **username + password** you set become the ngrok `--basic-auth`

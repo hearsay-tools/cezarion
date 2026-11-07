@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Home } from '../../home/home.ts';
@@ -130,6 +130,7 @@ describe('macOS launchd migration', () => {
     expect(rollback.moved[0]!.to).toEqual(old);
     expect(readFileSync(old.path!, 'utf8')).toBe(xml);
     expect(existsSync(report.moved[0]!.to.path!)).toBe(false);
+    expect(existsSync(report.moved[0]!.backup!.path!)).toBe(false);
     expect(loaded).toEqual(new Set(['ai.cezar.cockpit']));
     commands.length = 0;
     expect(await strategy.rollbackMigration!(ctx, report)).toEqual({ moved: [], leftAloneForeign: [], errors: [] });
@@ -168,6 +169,49 @@ describe('macOS launchd migration', () => {
     expect(commands).toEqual([]);
   });
 
+  it('migrates again after rollback and a credential rotation, without a stale backup', async () => {
+    const old = plant('ngrok');
+    const report = await strategy.migrate!(ctx);
+    expect(existsSync(report.moved[0]!.backup!.path!)).toBe(true);
+    expect((await strategy.rollbackMigration!(ctx, report)).errors).toEqual([]);
+    expect(existsSync(report.moved[0]!.backup!.path!)).toBe(false);
+    const rotated = launchdPlist(4321, 'ops:rotated-secret');
+    writeFileSync(old.path!, rotated);
+    commands.length = 0;
+    expect(await strategy.rollbackMigration!(ctx, report)).toEqual({ moved: [], leftAloneForeign: [], errors: [] });
+    expect(commands).toEqual([]);
+    const next = await strategy.migrate!(ctx);
+    expect(next.errors).toEqual([]);
+    expect(next.moved).toHaveLength(1);
+    expect(readFileSync(next.moved[0]!.backup!.path!, 'utf8')).toBe(rotated);
+    expect(loaded).toEqual(new Set(['tools.hearsay.squawk.ngrok']));
+  });
+
+  it('cleans an internally rolled-back migration backup so later credentials can migrate', async () => {
+    const old = plant('ngrok');
+    failBootstrap = 'tools.hearsay.squawk.ngrok';
+    expect((await strategy.migrate!(ctx)).errors).toHaveLength(1);
+    expect(existsSync(`${old.path}.migrated`)).toBe(false);
+    writeFileSync(old.path!, launchdPlist(4321, 'ops:rotated-secret'));
+    failBootstrap = undefined;
+    const next = await strategy.migrate!(ctx);
+    expect(next.errors).toEqual([]);
+    expect(next.moved).toHaveLength(1);
+  });
+
+  it('finishes backup cleanup after rollback already restored the old file and removed the new one', async () => {
+    const old = plant('ngrok');
+    const report = await strategy.migrate!(ctx);
+    const move = report.moved[0]!;
+    writeFileSync(old.path!, readFileSync(move.backup!.path!));
+    rmSync(move.to.path!);
+    loaded = new Set([old.name!]);
+    commands.length = 0;
+    expect(await strategy.rollbackMigration!(ctx, report)).toEqual({ moved: [], leftAloneForeign: [], errors: [] });
+    expect(existsSync(move.backup!.path!)).toBe(false);
+    expect(commands).toEqual([]);
+  });
+
   it('refuses rollback over a changed destination plist without touching its job', async () => {
     plant('ngrok');
     const report = await strategy.migrate!(ctx);
@@ -192,9 +236,9 @@ describe('macOS launchd migration', () => {
     expect(loaded).toEqual(new Set(['ai.cezar.ngrok']));
   });
 
-  it('refuses to replace an existing destination', async () => {
-    plant('ngrok');
-    const path = join(dir, 'tools.hearsay.squawk.ngrok.plist');
+  it.each(['cockpit', 'ngrok'] as const)('migration refuses an existing foreign %s destination', async (agent) => {
+    plant(agent);
+    const path = join(dir, `tools.hearsay.squawk.${agent}.plist`);
     writeFileSync(path, 'foreign target');
     const report = await strategy.migrate!(ctx);
     expect(report.errors[0]!.message).toContain('Destination already exists');
@@ -312,6 +356,65 @@ describe('macOS launchd migration', () => {
     const oldBootout = commands.findIndex((c) => c[1] === 'bootout' && c[2]?.endsWith(`/${old.name}`));
     expect(newProof).toBeGreaterThan(-1);
     expect(oldBootout).toBeGreaterThan(newProof);
+  });
+
+  it.each(['cockpit', 'ngrok'] as const)('refuses a foreign destination on reconfigure of %s without touching either job', async (agent) => {
+    const old = plant(agent);
+    const oldXml = readFileSync(old.path!, 'utf8');
+    const name = `tools.hearsay.squawk.${agent}`;
+    const path = join(dir, `${name}.plist`);
+    const foreignXml = cezarLaunchdPlist('/foreign', 9876, ['/usr/bin/foreign'], true).replace('tools.hearsay.squawk.cockpit', name);
+    writeFileSync(path, foreignXml);
+    loaded.add(name);
+    ctx.ui = { ...ctx.ui, password: async () => 'secret', text: async () => 'ops' };
+    const before = structuredClone(ctx.state);
+    const stepId = agent === 'cockpit' ? 'autostart' : 'ngrok';
+    await expect(strategy.steps(ctx).find((s) => s.id === stepId)!.run(ctx)).rejects.toThrow('Destination already exists');
+    expect(readFileSync(path, 'utf8')).toBe(foreignXml);
+    expect(readFileSync(old.path!, 'utf8')).toBe(oldXml);
+    expect(loaded).toEqual(new Set([old.name!, name]));
+    expect(commands.filter((c) => c[0] === 'launchctl')).toEqual([]);
+    expect(ctx.state).toEqual(before);
+  });
+
+  it('can replace a destination cockpit whose launcher independently proves it is ours', async () => {
+    plant('cockpit');
+    const name = 'tools.hearsay.squawk.cockpit';
+    const path = join(dir, `${name}.plist`);
+    writeFileSync(path, cezarLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true));
+    loaded.add(name);
+    const created = await strategy.steps(ctx).find((s) => s.id === 'autostart')!.run(ctx);
+    expect(created!.artifacts[0]!.name).toBe(name);
+    expect(loaded).toEqual(new Set([name]));
+  });
+
+  it('can replace a destination tunnel that the ledger independently records as owned', async () => {
+    const old = plant('ngrok');
+    const name = 'tools.hearsay.squawk.ngrok';
+    const path = join(dir, `${name}.plist`);
+    writeFileSync(path, launchdPlist(4321, 'ops:old-secret', undefined, '/n/ngrok', true));
+    ctx.state.steps.ngrok!.created!.artifacts.push({ kind: 'owned', type: 'launchd', name, path });
+    loaded.add(name);
+    ctx.ui = { ...ctx.ui, password: async () => 'secret', text: async () => 'ops' };
+    const created = await strategy.steps(ctx).find((s) => s.id === 'ngrok')!.run(ctx);
+    expect(created!.artifacts.find((a) => a.type === 'launchd')!.name).toBe(name);
+    expect(existsSync(old.path!)).toBe(false);
+    expect(loaded).toEqual(new Set([name]));
+  });
+
+  it.each(['cockpit', 'ngrok'] as const)('refuses a symlink destination on reconfigure of %s', async (agent) => {
+    const old = plant(agent);
+    const name = `tools.hearsay.squawk.${agent}`;
+    const foreign = join(dir, 'foreign.plist');
+    writeFileSync(foreign, 'foreign bytes');
+    symlinkSync(foreign, join(dir, `${name}.plist`));
+    loaded.add(name);
+    ctx.ui = { ...ctx.ui, password: async () => 'secret', text: async () => 'ops' };
+    const stepId = agent === 'cockpit' ? 'autostart' : 'ngrok';
+    await expect(strategy.steps(ctx).find((s) => s.id === stepId)!.run(ctx)).rejects.toThrow('non-regular plist');
+    expect(readFileSync(foreign, 'utf8')).toBe('foreign bytes');
+    expect(loaded).toEqual(new Set([old.name!, name]));
+    expect(commands.filter((c) => c[0] === 'launchctl')).toEqual([]);
   });
 
   it.each(['cockpit', 'ngrok'] as const)('a failed reconfigure leaves only the previous %s job and its ledger', async (agent) => {

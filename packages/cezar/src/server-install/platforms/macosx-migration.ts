@@ -1,6 +1,6 @@
-import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync, lstatSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { guardLaunchdWrite, ownsLaunchdPlist, readLaunchdPlist } from './macosx-launchd-files.ts';
 import type { InstallContext, PlatformMigrationReport, StepArtifact } from '../types.ts';
 
 const emptyReport = (): PlatformMigrationReport => ({ moved: [], leftAloneForeign: [], errors: [] });
@@ -13,31 +13,6 @@ function label(xml: string): string | undefined {
 function relabel(xml: string, from: string, to: string): string {
   if (label(xml) !== from) throw new Error(`Unexpected launchd label (expected ${from})`);
   return xml.replace(/(<key>Label<\/key>\s*<string>)[^<]+(<\/string>)/, `$1${to}$2`);
-}
-
-function readPlist(path: string): string {
-  if (!lstatSync(path).isFile()) throw new Error(`Refusing non-regular plist: ${path}`);
-  return readFileSync(path, 'utf8');
-}
-
-/** Only the exact installer launch forms establish ownership without a ledger. */
-function isOurLauncher(xml: string): boolean {
-  const inner = xml.match(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/)?.[1] ?? '';
-  const args = [...inner.matchAll(/<string>([\s\S]*?)<\/string>/g)]
-    .map((m) => m[1]!.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&'));
-  const serve = args.indexOf('serve');
-  if (serve < 1) return false;
-  const command = args.slice(0, serve);
-  if (basename(command[0]!) === 'npx') return command.length === 3 && command[1] === '--yes' && command[2] === 'cezarion';
-  if (command.length !== 2 || !/^node(?:\.exe)?$/.test(basename(command[0]!))) return false;
-  const entry = command[1]!;
-  const ownEntry = resolve(fileURLToPath(new URL('../../../dist/index.js', import.meta.url)));
-  return entry === ownEntry || ['cezarion', 'cez'].includes(basename(entry));
-}
-
-function isRecorded(ctx: InstallContext, stepId: string, from: StepArtifact): boolean {
-  return ctx.state.steps[stepId]?.created?.artifacts.some((a) =>
-    a.kind === 'owned' && a.type === from.type && a.name === from.name && a.path === from.path) ?? false;
 }
 
 export async function unloadLaunchd(ctx: InstallContext, name: string): Promise<void> {
@@ -59,28 +34,42 @@ async function bootstrap(ctx: InstallContext, artifact: StepArtifact): Promise<v
 /** Keep the previous bytes as a private, durable rollback artifact. */
 function backupPlist(path: string, xml: string): void {
   if (existsSync(path)) {
-    if (readPlist(path) !== xml || (lstatSync(path).mode & 0o777) !== 0o600) throw new Error(`Backup already exists: ${path}`);
+    if (readLaunchdPlist(path) !== xml || (lstatSync(path).mode & 0o777) !== 0o600) throw new Error(`Backup already exists: ${path}`);
     return;
   }
   writeFileSync(path, xml, { encoding: 'utf8', mode: 0o600, flag: 'wx', flush: true });
 }
 
+/** Consume rollback state only after its bytes are restored to the active old path. */
+function removeBackup(move: Move, xml: string): void {
+  const path = move.backup!.path!;
+  if (!existsSync(path)) return;
+  if (readLaunchdPlist(path) !== xml) throw new Error(`Backup changed: ${path}`);
+  rmSync(path);
+}
+
 async function movePlist(ctx: InstallContext, move: Move, xml: string): Promise<void> {
   const { from, to, backup } = move;
-  if (existsSync(to.path!)) throw new Error(`Destination already exists: ${to.path}`);
+  if (guardLaunchdWrite(ctx, to) !== undefined) throw new Error(`Destination already exists: ${to.path}`);
   backupPlist(backup!.path!, xml);
   const nextXml = relabel(xml, from.name!, to.name!);
-  // Exclusive creation refuses another install's plist, even if it appeared after preflight.
-  writeFileSync(to.path!, nextXml, { encoding: 'utf8', mode: 0o600, flag: 'wx', flush: true });
+  let published = false;
   try {
+    // Exclusive creation refuses a destination that appeared after preflight.
+    writeFileSync(to.path!, nextXml, { encoding: 'utf8', mode: 0o600, flag: 'wx', flush: true });
+    published = true;
     await unloadLaunchd(ctx, from.name!);
     await bootstrap(ctx, to);
     rmSync(from.path!);
   } catch (error) {
-    // An unsuccessful move leaves the original ledger valid.
-    await unloadLaunchd(ctx, to.name!);
-    rmSync(to.path!);
-    await bootstrap(ctx, from);
+    // Do not touch a destination we did not create, or whose bytes have changed.
+    if (published) {
+      guardLaunchdWrite(ctx, to, { selected: to, expectedXml: nextXml });
+      await unloadLaunchd(ctx, to.name!);
+      rmSync(to.path!);
+      if (!(await isLoaded(ctx, from))) await bootstrap(ctx, from);
+    }
+    removeBackup(move, xml);
     throw error;
   }
 }
@@ -93,8 +82,8 @@ export async function migrateLaunchd(ctx: InstallContext, dir: string, rebrand: 
     const from: StepArtifact = { kind: 'owned', type: 'launchd', name: `ai.cezar.${agent}`, path: join(dir, `ai.cezar.${agent}.plist`) };
     if (!existsSync(from.path!)) continue;
     try {
-      const xml = readPlist(from.path!);
-      if (!isRecorded(ctx, stepId, from) && !(agent === 'cockpit' && isOurLauncher(xml))) {
+      const xml = readLaunchdPlist(from.path!);
+      if (!ownsLaunchdPlist(ctx, from, xml)) {
         report.leftAloneForeign.push({ ...from, kind: 'shared' });
         continue;
       }
@@ -103,7 +92,7 @@ export async function migrateLaunchd(ctx: InstallContext, dir: string, rebrand: 
       const move: Move = { stepId, from, to, backup };
       // Validate the same collision and label cases in dry runs.
       relabel(xml, from.name!, to.name!);
-      if (existsSync(to.path!)) throw new Error(`Destination already exists: ${to.path}`);
+      if (guardLaunchdWrite(ctx, to) !== undefined) throw new Error(`Destination already exists: ${to.path}`);
       if (!ctx.dryRun) await movePlist(ctx, move, xml);
       report.moved.push(move);
     } catch (error) {
@@ -113,19 +102,24 @@ export async function migrateLaunchd(ctx: InstallContext, dir: string, rebrand: 
   return report;
 }
 
-function inspectRollback(move: Move): { xml: string; restoreFile: boolean; complete: boolean } {
+function inspectRollback(ctx: InstallContext, move: Move): { xml: string; restoreFile: boolean; complete: boolean } {
   const { from, to, backup } = move;
   if (from.kind !== 'owned' || to.kind !== 'owned' || from.type !== 'launchd' ||
       !from.name?.startsWith('ai.cezar.') || to.name !== from.name.replace('ai.cezar.', 'tools.hearsay.squawk.') ||
       backup?.path !== `${from.path}.migrated`) throw new Error('Invalid launchd rollback entry');
-  const xml = readPlist(backup.path);
+  if (!existsSync(backup.path) && existsSync(from.path!) && !existsSync(to.path!)) {
+    readLaunchdPlist(from.path!);
+    return { xml: '', restoreFile: false, complete: true };
+  }
+  const xml = readLaunchdPlist(backup.path);
   const nextXml = relabel(xml, from.name, to.name);
   const restoreFile = !existsSync(from.path!);
   if (!restoreFile) {
-    if (readPlist(from.path!) !== xml) throw new Error(`Original path is occupied: ${from.path}`);
+    if (readLaunchdPlist(from.path!) !== xml) throw new Error(`Original path is occupied: ${from.path}`);
     if (!existsSync(to.path!)) return { xml, restoreFile, complete: true };
   }
-  if (readPlist(to.path!) !== nextXml) throw new Error(`Destination plist changed: ${to.path}`);
+  guardLaunchdWrite(ctx, from, { selected: from, expectedXml: xml });
+  if (guardLaunchdWrite(ctx, to, { selected: to, expectedXml: nextXml }) === undefined) throw new Error(`Destination plist missing: ${to.path}`);
   return { xml, restoreFile, complete: false };
 }
 
@@ -136,8 +130,11 @@ async function isLoaded(ctx: InstallContext, artifact: StepArtifact): Promise<bo
 
 async function restorePlist(ctx: InstallContext, move: Move): Promise<boolean> {
   const { from, to } = move;
-  const { xml, restoreFile, complete } = inspectRollback(move);
-  if (complete) return false;
+  const { xml, restoreFile, complete } = inspectRollback(ctx, move);
+  if (complete) {
+    if (!ctx.dryRun && existsSync(move.backup!.path!)) removeBackup(move, xml);
+    return false;
+  }
   if (ctx.dryRun) return true;
   const oldLoaded = await isLoaded(ctx, from);
   if (restoreFile) writeFileSync(from.path!, xml, { encoding: 'utf8', mode: 0o600, flag: 'wx', flush: true });
@@ -152,6 +149,7 @@ async function restorePlist(ctx: InstallContext, move: Move): Promise<boolean> {
     if (!(await isLoaded(ctx, to))) await bootstrap(ctx, to);
     throw error;
   }
+  removeBackup(move, xml);
   return true;
 }
 
