@@ -42,53 +42,81 @@ function hasForkLink(fork, keys) {
   return keys.some((k) => (k === 'commits' ? Array.isArray(fork.commits) && fork.commits.length > 0 : Number.isInteger(fork[k]) && fork[k] > 0));
 }
 
-/** Every rule the ledger must satisfy, as human-readable problems; empty means valid. */
-function validateLedger(ledger) {
-  const problems = [];
-  if (!ledger || typeof ledger !== 'object') return ['ledger is not an object'];
+/** The ledger's own metadata: upstream and fork repos, merge base. */
+function validateMetadata(ledger, problems) {
   if (typeof ledger.upstream?.repo !== 'string' || !ledger.upstream.repo.includes('/')) problems.push('upstream.repo must be "owner/name"');
   if (typeof ledger.fork?.repo !== 'string' || !ledger.fork.repo.includes('/')) problems.push('fork.repo must be "owner/name"');
   if (!SHA_RE.test(ledger.origin?.mergeBase ?? '')) problems.push('origin.mergeBase must be a commit sha');
-  if (!Array.isArray(ledger.scans)) problems.push('scans must be a list');
-  else ledger.scans.forEach((scan, i) => {
+}
+
+/** One recorded scan: date, upstream head, report path. */
+function validateScans(ledger, problems) {
+  if (!Array.isArray(ledger.scans)) { problems.push('scans must be a list'); return; }
+  ledger.scans.forEach((scan, i) => {
     if (!DATE_RE.test(scan?.date ?? '')) problems.push(`scans[${i}].date must be YYYY-MM-DD`);
     if (!SHA_RE.test(scan?.upstreamHead ?? '')) problems.push(`scans[${i}].upstreamHead must be a commit sha`);
     if (typeof scan?.report !== 'string') problems.push(`scans[${i}].report must name the report file`);
   });
-  if (!Array.isArray(ledger.entries)) return [...problems, 'entries must be a list'];
-  const seen = new Set();
-  for (const e of ledger.entries) {
-    const id = typeof e?.sha === 'string' ? e.sha.slice(0, 8) : String(e?.sha);
-    const at = (msg) => problems.push(`entry ${id}: ${msg}`);
-    if (!SHA_RE.test(e?.sha ?? '')) at('sha must be a commit sha');
-    else if (seen.has(e.sha)) at('duplicate sha');
-    seen.add(e?.sha);
-    if (typeof e?.title !== 'string' || !e.title) at('title is required');
-    if (!DATE_RE.test(e?.date ?? '')) at('date must be YYYY-MM-DD');
-    if (e?.pr !== undefined && !(Number.isInteger(e.pr) && e.pr > 0)) at('pr must be a positive integer');
-    if (!STATUSES.includes(e?.status)) { at(`status "${e?.status}" is not one of ${STATUSES.join(', ')}`); continue; }
-    if (e.status === 'pending') continue;
-    if (!DATE_RE.test(e.decided ?? '')) at(`${e.status} needs a decided date`);
-    const reason = typeof e.reason === 'string' && e.reason.trim().length > 0;
-    switch (e.status) {
-      case 'planned':
-        if (!hasForkLink(e.fork, ['issue'])) at('planned needs fork.issue');
-        break;
-      case 'ported':
-        if (!hasForkLink(e.fork, ['pr', 'commits'])) at('ported needs fork.pr or fork.commits');
-        break;
-      case 'partial':
-        if (!hasForkLink(e.fork, ['pr', 'issue', 'commits'])) at('partial needs fork.pr, fork.issue or fork.commits');
-        if (!reason) at('partial needs a reason');
-        break;
-      case 'diverged':
-        if (!hasForkLink(e.fork, ['pr', 'commits'])) at('diverged needs fork.pr or fork.commits');
-        if (!reason) at('diverged needs a reason');
-        break;
-      default: // rejected, n/a
-        if (!reason) at(`${e.status} needs a reason`);
-    }
+}
+
+/** An entry's fixed fields: sha, title, date and optional pr. */
+function validateEntryFields(e, seen, at) {
+  if (!SHA_RE.test(e?.sha ?? '')) at('sha must be a commit sha');
+  else if (seen.has(e.sha)) at('duplicate sha');
+  seen.add(e?.sha);
+  if (typeof e?.title !== 'string' || !e.title) at('title is required');
+  if (!DATE_RE.test(e?.date ?? '')) at('date must be YYYY-MM-DD');
+  if (e?.pr !== undefined && !(Number.isInteger(e.pr) && e.pr > 0)) at('pr must be a positive integer');
+}
+
+/** The per-status rules an entry satisfies once its status is known; pending has none. */
+function validateEntryStatus(e, at) {
+  if (e.status === 'pending') return;
+  if (!DATE_RE.test(e.decided ?? '')) at(`${e.status} needs a decided date`);
+  const reason = typeof e.reason === 'string' && e.reason.trim().length > 0;
+  switch (e.status) {
+    case 'planned':
+      if (!hasForkLink(e.fork, ['issue'])) at('planned needs fork.issue');
+      break;
+    case 'ported':
+      if (!hasForkLink(e.fork, ['pr', 'commits'])) at('ported needs fork.pr or fork.commits');
+      break;
+    case 'partial':
+      if (!hasForkLink(e.fork, ['pr', 'issue', 'commits'])) at('partial needs fork.pr, fork.issue or fork.commits');
+      if (!reason) at('partial needs a reason');
+      break;
+    case 'diverged':
+      if (!hasForkLink(e.fork, ['pr', 'commits'])) at('diverged needs fork.pr or fork.commits');
+      if (!reason) at('diverged needs a reason');
+      break;
+    default: // rejected, n/a
+      if (!reason) at(`${e.status} needs a reason`);
   }
+}
+
+/** One ledger entry: its fixed fields, then the rules its status implies. */
+function validateEntry(e, seen, problems) {
+  const id = typeof e?.sha === 'string' ? e.sha.slice(0, 8) : String(e?.sha);
+  const at = (msg) => problems.push(`entry ${id}: ${msg}`);
+  validateEntryFields(e, seen, at);
+  if (!STATUSES.includes(e?.status)) { at(`status "${e?.status}" is not one of ${STATUSES.join(', ')}`); return; }
+  validateEntryStatus(e, at);
+}
+
+/** Every entry, each into the shared problem list; unknown shape leaves one list-level problem. */
+function validateEntries(ledger, problems) {
+  if (!Array.isArray(ledger.entries)) { problems.push('entries must be a list'); return; }
+  const seen = new Set();
+  for (const e of ledger.entries) validateEntry(e, seen, problems);
+}
+
+/** Every rule the ledger must satisfy, as human-readable problems; empty means valid. */
+function validateLedger(ledger) {
+  if (!ledger || typeof ledger !== 'object') return ['ledger is not an object'];
+  const problems = [];
+  validateMetadata(ledger, problems);
+  validateScans(ledger, problems);
+  validateEntries(ledger, problems);
   return problems;
 }
 
