@@ -199,6 +199,57 @@ describe('the cez rules under oxlint', () => {
     expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
   }, OXLINT_TIMEOUT_MS);
 
+  it.each(['"CEZ_HOME"', '`CEZ_HOME`', '"CEZ_" + "HOME"'].flatMap(key => {
+    return [
+      `vi.stubEnv(${key}, dir)`,
+      `process.env[${key}] = dir`,
+      `delete process.env[${key}]`,
+      `process.env[${key}]++`,
+      `Object.assign(process.env, { [${key}]: dir })`,
+      `Reflect.set(process.env, ${key}, dir)`,
+      `Reflect.defineProperty(process.env, ${key}, { value: dir })`,
+      `Object.defineProperty(process.env, ${key}, { value: dir })`,
+    ];
+  }))('oxlint rejects static selection keys: %s', async source => {
+    const file = 'packages/cezar/src/ambient.test.ts';
+    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
+  }, OXLINT_TIMEOUT_MS);
+
+  it.each([
+    'os["homedir"]()',
+    'os[`homedir`]()',
+    'os["home" + "dir"]()',
+    'homes[`resolveHome`]()',
+    'homes["resolve" + "Home"]()',
+    'paths[`cezarHomeDir`]()',
+    'paths["cezar" + "HomeDir"]()',
+  ])('oxlint rejects static callee keys: %s', async source => {
+    const file = 'packages/cezar/src/ambient.ts';
+    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
+  }, OXLINT_TIMEOUT_MS);
+
+  it.each([
+    'vi[`stubEnv`]("CEZ_HOME", dir)',
+    'vi["stub" + "Env"]("CEZ_HOME", dir)',
+    'process[`env`].CEZ_HOME = dir',
+    'process["en" + "v"].CEZ_HOME = dir',
+  ])('oxlint rejects static selection path keys: %s', async source => {
+    const file = 'packages/cezar/src/ambient.test.ts';
+    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
+  }, OXLINT_TIMEOUT_MS);
+
+  it.each([
+    'process.env[name] = dir',
+    'process.env[`CEZ_${suffix}`] = dir',
+    'process.env["CEZ_" + suffix] = dir',
+    'Reflect.set(process.env, name, dir)',
+    'Object.assign(process.env, { [name]: dir })',
+    'vi.stubEnv(CEZ_HOME, dir)',
+  ])('oxlint leaves unresolved keys outside the static rule: %s', async source => {
+    const file = 'packages/cezar/src/ambient.test.ts';
+    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([]);
+  }, OXLINT_TIMEOUT_MS);
+
   it('fails a file oxlint cannot parse', () => {
     expect(problems).toContainEqual(expect.stringMatching(/^packages\/cezar\/src\/broken\.ts:1:\d+ oxlint: /));
   });

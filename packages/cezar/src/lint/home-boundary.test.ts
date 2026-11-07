@@ -99,6 +99,53 @@ describe('explicit Home boundaries', () => {
     expect(scanHomeBoundary(test, source, [])).toEqual([]);
   });
 
+  it.each(['"CEZ_HOME"', '`CEZ_HOME`', '"CEZ_" + "HOME"'].flatMap(key => {
+    return [
+      `vi.stubEnv(${key}, dir)`,
+      `process.env[${key}] = dir`,
+      `delete process.env[${key}]`,
+      `process.env[${key}]++`,
+      `Object.assign(process.env, { [${key}]: dir })`,
+      `Reflect.set(process.env, ${key}, dir)`,
+      `Reflect.defineProperty(process.env, ${key}, { value: dir })`,
+      `Object.defineProperty(process.env, ${key}, { value: dir })`,
+    ];
+  }))('rejects a statically known selection key: %s', source => {
+    expect(scanHomeBoundary(test, source, [])).toEqual([expect.objectContaining({ kind: 'test-selection' })]);
+  });
+
+  it.each([
+    ['os["homedir"]()', 'homedir'],
+    ['os[`homedir`]()', 'homedir'],
+    ['os["home" + "dir"]()', 'homedir'],
+    ['homes[`resolveHome`]()', 'resolveHome'],
+    ['homes["resolve" + "Home"]()', 'resolveHome'],
+    ['paths[`cezarHomeDir`]()', 'cezarHomeDir'],
+    ['paths["cezar" + "HomeDir"]()', 'cezarHomeDir'],
+  ])('rejects a statically known callee key: %s', (source, kind) => {
+    expect(scanHomeBoundary(product, source, [])).toEqual([expect.objectContaining({ kind })]);
+  });
+
+  it.each([
+    'vi[`stubEnv`]("CEZ_HOME", dir)',
+    'vi["stub" + "Env"]("CEZ_HOME", dir)',
+    'process[`env`].CEZ_HOME = dir',
+    'process["en" + "v"].CEZ_HOME = dir',
+  ])('rejects static keys along the selection path: %s', source => {
+    expect(scanHomeBoundary(test, source, [])).toEqual([expect.objectContaining({ kind: 'test-selection' })]);
+  });
+
+  it.each([
+    'process.env[name] = dir',
+    'process.env[`CEZ_${suffix}`] = dir',
+    'process.env["CEZ_" + suffix] = dir',
+    'Reflect.set(process.env, name, dir)',
+    'Object.assign(process.env, { [name]: dir })',
+    'vi.stubEnv(CEZ_HOME, dir)',
+  ])('leaves unresolved keys outside the static rule: %s', source => {
+    expect(scanHomeBoundary(test, source, [])).toEqual([]);
+  });
+
   it('allows resolver entry points and the home module', () => {
     for (const file of ['packages/cezar/src/index.ts', 'packages/cezar/src/subcommands.ts', 'packages/cezar/src/home/resolve.ts']) {
       expect(scanHomeBoundary(file, 'resolveHome()', [])).toEqual([]);

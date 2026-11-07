@@ -76,6 +76,8 @@ New calls fail per-file lint. Removed calls or files fail the whole-repository
 stale-entry check until the count or entry shrinks. CI's baseline-growth gate
 refuses additions and increased counts after this list lands.
 
+The home-boundary rule resolves statically known keys and callee forms; dynamic keys, computed variables and eval are out of scope.
+
 Tests use `Home.sandbox(dir)` and the shared test selector. Reading CEZ_HOME and
 passing it in a child process environment remain allowed. Test fixtures prove each
 forbidden form, parser errors, stale entries and the CI growth ratchet.

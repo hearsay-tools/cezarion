@@ -25,15 +25,26 @@ function visit(node: Node, accept: (node: Node) => void): void {
   }
 }
 
-function name(node: Node | null | undefined): string | undefined {
-  if (node?.type === 'Identifier') return node.name;
-  if (node?.type === 'StringLiteral') return node.value;
+function staticKey(node: Node | null | undefined): string | undefined {
+  if (!node) return undefined;
+  const target = unwrapped(node);
+  if (target.type === 'StringLiteral') return target.value;
+  if (target.type === 'TemplateLiteral' && target.expressions.length === 0) return target.quasis[0]?.value.cooked ?? undefined;
+  if (target.type === 'BinaryExpression' && target.operator === '+') {
+    const left = staticKey(target.left);
+    const right = staticKey(target.right);
+    return left === undefined || right === undefined ? undefined : left + right;
+  }
   return undefined;
+}
+
+function name(node: Node | null | undefined): string | undefined {
+  return node?.type === 'Identifier' ? node.name : staticKey(node);
 }
 
 function property(node: Node | null | undefined): string | undefined {
   if (node?.type !== 'MemberExpression' && node?.type !== 'OptionalMemberExpression') return name(node);
-  return !node.computed || node.property.type === 'StringLiteral' ? name(node.property) : undefined;
+  return node.computed ? staticKey(node.property) : name(node.property);
 }
 
 function unwrapped(node: Node): Node {
@@ -88,7 +99,7 @@ function homeProperty(node: Node): boolean {
   const source = unwrapped(node);
   return source.type === 'ObjectExpression' && source.properties.some(field => {
     return (field.type === 'ObjectProperty' || field.type === 'ObjectMethod')
-      && (!field.computed || field.key.type === 'StringLiteral') && name(field.key) === 'CEZ_HOME';
+      && (field.computed ? staticKey(field.key) : name(field.key)) === 'CEZ_HOME';
   });
 }
 
@@ -96,14 +107,13 @@ function selectsHomeCall(node: Node): boolean {
   if (node.type !== 'CallExpression' && node.type !== 'OptionalCallExpression') return false;
   const callee = unwrapped(node.callee);
   const method = property(callee);
-  if (method === 'stubEnv') return name(node.arguments[0]) === 'CEZ_HOME';
+  if (method === 'stubEnv') return staticKey(node.arguments[0]) === 'CEZ_HOME';
   if (callee.type !== 'MemberExpression' && callee.type !== 'OptionalMemberExpression') return false;
   if (!processEnv(node.arguments[0])) return false;
   const owner = name(unwrapped(callee.object));
   if (owner === 'Object' && method === 'assign') return node.arguments.slice(1).some(homeProperty);
-  const key = node.arguments[1];
   return ['Reflect.set', 'Reflect.defineProperty', 'Object.defineProperty'].includes(`${owner}.${method}`)
-    && key?.type === 'StringLiteral' && key.value === 'CEZ_HOME';
+    && staticKey(node.arguments[1]) === 'CEZ_HOME';
 }
 
 function selectsHome(node: Node): boolean {
