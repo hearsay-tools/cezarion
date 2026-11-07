@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { runHeadless, defaultHeadlessDeps, type TaskAccess } from './headless-run.ts';
 import { productEnv } from './core/product-env.ts';
 import { createHostDiscovery } from './discovery/catalog.ts';
 import { DelegationController } from './delegation/provision.ts';
@@ -12,12 +13,8 @@ import { fileURLToPath } from 'node:url';
 import { detectEnvironment } from './core/backend-detect.ts';
 import {
   ProviderAuthService,
-  providerAuthChecksDisabled,
 } from './core/provider-auth.ts';
-import { applyProviderEnablement } from './core/provider-availability.ts';
-import { forwardToSessionGroups } from './core/session-process.ts';
 import { getRepoInfo } from './server/git.ts';
-import { loadConfig } from './config.ts';
 import { SWEEP_MIN_INTERVAL_MS, sweepMergedBranches } from './server/repo-branch-sweep.ts';
 import { previewToolEnabled } from './ci-wait/tools.ts';
 import { PreviewHost } from './preview/host.ts';
@@ -36,19 +33,13 @@ import type { Home } from './home/home.ts';
 import { runSubcommand } from './subcommands.ts';
 import { RunManager } from './workflows/run.ts';
 import { createRunner } from './core/runner-factory.ts';
-import { loadWorkflows } from './workflows/load.ts';
 import { cockpitOriginFor, startServer, WorkspaceEventBus } from './server/server.ts';
 import {
   ProviderRuntimeAuthObserver,
 } from './server/provider-auth-runtime.ts';
-import {
-  providersRequiredByWorkflow,
-  unavailableProviderMessage,
-} from './server/provider-action-gate.ts';
 import { runManagedCommand } from './self-update/cli.ts';
 import { watchSupervisor } from './self-update/supervisor.ts';
 import { checkForUpdate } from './update-check.ts';
-import { loadWorkspaceConfig } from './workspace/config.ts';
 import { runMigrations } from './workspace/migrations.ts';
 import { registerProject, shouldRegisterProject } from './workspace/projects.ts';
 import { runProjectsCommand } from './workspace/projects-cli.ts';
@@ -464,7 +455,7 @@ function hintRunningCockpit(repoRoot: string): () => void {
 }
 
 /** Task access for a headless run (hearsay-tools/cezarion#2784): both on unless a --no-* flag says otherwise. */
-type TaskAccess = { allowWorkers: boolean; allowMessaging: boolean };
+
 
 async function runCommand(
   home: Home,
@@ -481,137 +472,9 @@ async function runCommand(
   }
   const stopHint = hintRunningCockpit(repoRoot);
   try {
-    await runHeadless(home, repoRoot, task, workflowName, model, access);
+    await runHeadless(home, repoRoot, task, workflowName, model, access, { ...defaultHeadlessDeps, initWorkspace, openStore, onTerminal });
   } finally {
     stopHint();
-  }
-}
-
-async function runHeadless(
-  home: Home,
-  repoRoot: string,
-  task: string,
-  workflowName: string | undefined,
-  model: string | undefined,
-  access: TaskAccess,
-): Promise<void> {
-  await initWorkspace(repoRoot, home);
-  const { workflows, issues } = await loadWorkflows(repoRoot);
-  for (const issue of issues) console.error(`! skipped ${issue.path}: ${issue.message}`);
-  const name = workflowName ?? 'quick-task';
-  const workflow = workflows.find((w) => w.name === name);
-  if (!workflow) {
-    console.error(`unknown workflow: ${name} (available: ${workflows.map((w) => w.name).join(', ')})`);
-    process.exitCode = 1;
-    return;
-  }
-
-  const providerAuth = new ProviderAuthService();
-  const requiredProviders = providersRequiredByWorkflow(
-    workflow,
-    (await loadConfig(repoRoot, home)).defaultRunner,
-  );
-  if (requiredProviders.length > 0 && !providerAuthChecksDisabled()) {
-    const [discovered, workspace] = await Promise.all([
-      providerAuth.status(),
-      loadWorkspaceConfig(home.workspaceConfig),
-    ]);
-    const blocked = unavailableProviderMessage(
-      requiredProviders,
-      applyProviderEnablement(discovered, workspace.disabledProviders),
-    );
-    if (blocked) {
-      console.error(blocked);
-      process.exitCode = 1;
-      return;
-    }
-  }
-
-  const repoHandleController = new AbortController();
-  let store: RunStore;
-  try {
-    store = openStore(repoRoot, { repoHandleSignal: repoHandleController.signal });
-  } catch (error) {
-    if (!(error instanceof RunStoreOpenError)) throw error;
-    console.error(error.message);
-    process.exitCode = 1;
-    return;
-  }
-  const delegation = await DelegationController.start();
-  delegation.service.setDiscovery(createHostDiscovery(repoRoot, providerAuth, home));
-  // Agent sessions lead their own process groups (hearsay-tools/cezarion#890): pass Ctrl-C and
-  // SIGTERM on, then end by the same signal, as this process did before it had a handler.
-  const forward = (signal: NodeJS.Signals) => {
-    forwardToSessionGroups(signal);
-    process.off('SIGINT', onSigint); process.off('SIGTERM', onSigterm); process.off('SIGHUP', onSighup);
-    process.kill(process.pid, signal);
-  };
-  const onSigint = () => forward('SIGINT');
-  const onSigterm = () => forward('SIGTERM');
-  // Off a terminal the listener is a no-op that ignores the hangup (see onTerminal).
-  const onSighup = onTerminal() ? () => forward('SIGHUP') : () => {};
-  process.on('SIGINT', onSigint); process.on('SIGTERM', onSigterm);
-  if (process.platform !== 'win32') process.on('SIGHUP', onSighup);
-  try {
-    // Headless tasks still appear in the cockpit later, so persist the same
-    // task-local recovery event when a credential expires after the preflight.
-    const providerRuntimeAuth = new ProviderRuntimeAuthObserver(providerAuth, () => {}, undefined, home);
-    providerRuntimeAuth.watch(store);
-    // Headless runs enforce the same workspace-level cap/memory limit (step
-    // 2.5) — one refreshed semaphore, even with just one manager in play.
-    const semaphore = new WorkspaceSemaphore({ home });
-    await semaphore.refresh();
-    const manager = new RunManager(store, repoRoot, { home, createRunner, semaphore });
-    delegation.attachProject({ id: 'headless', root: repoRoot, store, manager, home });
-
-    store.on('event', ({ event }) => {
-      switch (event.type) {
-        case 'text':
-          console.log(String(event.text ?? ''));
-          break;
-        case 'tool-call':
-          console.log(`  → ${String(event.tool)} ${previewJson(event.input)}`);
-          break;
-        case 'tool-result':
-          console.log(`  ← ${firstLine(String(event.result ?? ''))}`);
-          break;
-        case 'check-output':
-          console.log(String(event.text ?? ''));
-          break;
-        case 'step-start':
-          console.log(`\n── step: ${String(event.name)} ${Number(event.iteration) > 1 ? `(attempt ${event.iteration})` : ''}`);
-          break;
-        case 'note':
-        case 'lifecycle':
-          console.log(`  · ${String(event.message ?? '')}`);
-          break;
-        case 'error':
-          console.error(`  ✗ ${String(event.message ?? '')}`);
-          break;
-      }
-    });
-
-    const run = manager.startRun(workflow, { task, model, ...access });
-    // `review` is terminal here too (spec 009) — headless runs must not hang on
-    // the GUI's review gate; the diff waits on the task branch/cockpit instead.
-    const final = await new Promise<string>((resolveStatus) => {
-      store.on('run', (r) => {
-        if (r.id === run.id && ['done', 'review', 'failed', 'cancelled'].includes(r.status)) resolveStatus(r.status);
-      });
-    });
-    const record = store.getRun(run.id);
-    if (final === 'review') {
-      console.log(`\n  changes ready for review on branch ${record?.branch ?? '?'} — inspect them in the cockpit: npx cezarion`);
-    }
-    console.log(`\nrun ${final} — ${record?.tokensUsed ?? 0} tokens — details in the cockpit: npx cezarion`);
-    process.exitCode = final === 'done' || final === 'review' ? 0 : 1;
-  } finally {
-    process.off('SIGINT', onSigint); process.off('SIGTERM', onSigterm); process.off('SIGHUP', onSighup);
-    await delegation.close();
-    // A slow GitHub child must not keep a completed headless task alive. Any handle that
-    // already arrived has repaired the store; an unfinished lookup remains unknown.
-    repoHandleController.abort();
-    store.close();
   }
 }
 
@@ -956,20 +819,6 @@ function readOwnVersion(): string {
   } catch {
     return '0.0.0';
   }
-}
-
-function previewJson(input: unknown): string {
-  try {
-    const s = JSON.stringify(input);
-    return s.length > 120 ? `${s.slice(0, 117)}…` : s;
-  } catch {
-    return '';
-  }
-}
-
-function firstLine(s: string): string {
-  const line = s.split('\n')[0] ?? '';
-  return line.length > 120 ? `${line.slice(0, 117)}…` : line;
 }
 
 main().catch((err: unknown) => {
