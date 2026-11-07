@@ -27,14 +27,19 @@ XDG_DATA_HOME `undefined` assertions with exact sandbox paths. The named guarant
 is stronger: host config, data, state, cache and runtime directories never reach a
 test. Other test outcomes stay unchanged.
 
+The coordinator directed a source ban after two review rounds found new flow-analysis
+bypasses. Calls to homedir/cezarHomeDir now need a reasoned read-only annotation;
+writers use an explicit sandbox. CEZ_HOME assignment checks stay unchanged. The
+seven existing test files with direct calls were audited as read-only and annotated.
+
 ## Behavior cases
 
 | Input or event | Required result | Evidence |
 | --- | --- | --- |
 | Test writes `join(cezarHomeDir(), 'config.json')` | Lint fails | Scanner fixture and real oxlint plugin fixture; baseline accepts, changed plugin refuses |
-| Ambient home flows through static bindings or path helpers | Write fails lint | Lexical binding, destructuring, callback and promise fixtures |
+| Test calls an ambient home source, with any later use | Lint fails at the source | Import/require alias, assignment, iterator, open and mkdtemp fixtures |
 | Rename uses ambient home as source or destination | Lint fails for either path | Scanner fixtures |
-| Explicit sandbox write or read-only ambient lookup | Lint passes | Scanner fixtures |
+| Explicit sandbox write or read-only ambient lookup with a reasoned line annotation | Lint passes | Scanner and annotation fixtures |
 | Test selects CEZ_HOME directly outside server package | Lint fails | External repository scanner fixture |
 | Worker inherits CEZ and XDG overrides | Overrides disappear before test import; test marker exists | Real server/web worker and node preload tests |
 | Browser worker inherits host HOME | HOME/USERPROFILE stay; other home paths use its marked sandbox | Browser preload test and browser shard |

@@ -137,7 +137,7 @@ describe('cezar projects CLI', () => {
     it('refuses a task worktree and $HOME, exactly like boot registration', async () => {
       const worktree = makeDir('host', '.ai', 'cezar', 'worktrees', 'abc12345');
       expect(await run('add', worktree)).toBe(1);
-      expect(await run('add', homedir())).toBe(1);
+      expect(await run('add', homedir())).toBe(1); // test-home-read: verify home registration is refused before any write
       expect(io.err.join('\n')).toContain('refusing to register');
       expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects).toEqual([]);
     });

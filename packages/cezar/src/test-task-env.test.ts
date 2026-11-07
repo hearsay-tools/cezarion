@@ -46,7 +46,7 @@ describe('test runs never read the host home (hearsay-tools/cezarion#1361)', () 
     expect(home).not.toBe(userInfo().homedir);
     expect(basename(home)).toMatch(/^cez-vitest-user-home-/);
     expect(process.env.USERPROFILE).toBe(home);
-    expect(homedir()).toBe(home);
+    expect(homedir()).toBe(home); // test-home-read: verify the runner selected its sandbox HOME
   });
 
   it('keeps both sandbox homes inside the owned temp sandbox, so its cleanup removes them (hearsay-tools/cezarion#1395)', () => {
@@ -69,7 +69,7 @@ describe('test runs never read the host home (hearsay-tools/cezarion#1361)', () 
   });
 
   it('links the sandbox home to one omp natives cache outside every sandbox (hearsay-tools/cezarion#1911)', () => {
-    const natives = join(homedir(), '.omp', 'natives');
+    const natives = join(homedir(), '.omp', 'natives'); // test-home-read: inspect the sandbox native-cache symlink without writing
     expect(lstatSync(natives).isSymbolicLink()).toBe(true);
     const cache = readlinkSync(natives);
     expect(isAbsolute(cache)).toBe(true);

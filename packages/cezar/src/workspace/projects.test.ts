@@ -318,8 +318,8 @@ describe('workspace projects', () => {
     });
 
     it('suppresses the home directory itself, in any spelling', async () => {
-      expect(await shouldRegisterProject(homedir())).toBe(false);
-      expect(await shouldRegisterProject(`${homedir()}/`)).toBe(false);
+      expect(await shouldRegisterProject(homedir())).toBe(false); // test-home-read: verify the home refusal predicate without registering
+      expect(await shouldRegisterProject(`${homedir()}/`)).toBe(false); // test-home-read: verify the home refusal predicate without registering
     });
   });
 

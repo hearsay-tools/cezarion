@@ -257,7 +257,7 @@ describe('discoverSkills global dirs', () => {
   it('does not merge the real (or planted) global skill dirs under vitest', async () => {
     const { home, repoRoot, restore } = await plantGlobalHome();
     try {
-      expect(homedir()).toBe(home);
+      expect(homedir()).toBe(home); // test-home-read: verify the planted HOME before discovery
       const skills = await discoverSkills(repoRoot, undefined, testHome());
       expect(skills.find((skill) => skill.name === planted.agents)).toBeUndefined();
       expect(skills.find((skill) => skill.name === planted.claude)).toBeUndefined();
@@ -272,7 +272,7 @@ describe('discoverSkills global dirs', () => {
     const vitest = process.env.VITEST;
     delete process.env.VITEST;
     try {
-      expect(homedir()).toBe(home);
+      expect(homedir()).toBe(home); // test-home-read: verify the planted HOME before discovery
       const skills = (await discoverSkills(repoRoot, undefined, testHome())).filter((skill) => skill.source === 'global');
       expect(skills.map((skill) => skill.name).sort()).toEqual([planted.agents, planted.claude].sort());
     } finally {

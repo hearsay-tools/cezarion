@@ -90,16 +90,23 @@ forbidden form, parser errors, stale entries and the CI growth ratchet.
 refuses CEZ_HOME selection on these surfaces. Oxlint scans package tests. The lint
 runner applies the same two scanners to tracked and unignored new test files outside
 `packages/`, including the two node:test projects. Neither rule has a test baseline.
-The write scanner resolves lexical function, block and test-callback bindings.
-It follows plain assignments, reassignments, object/array destructuring (including
-nested patterns, renamed fields, defaults and rest), object fields, templates,
-concatenation and path helpers into synchronous, callback and promise filesystem
-writes. Filesystem aliases may use require, named/default/namespace imports or
-the promises namespace. Rename and copy operations check both paths. The scan is
-conservative across assignments to one binding; independent scopes never share
-values just because their variables have the same name. Strings and comments are
-data, not calls. Dynamic computed keys, values flowing through function calls
-other than path helpers, cross-module flow and eval are outside the static scan.
+The scanner bans calls of `homedir()` and `cezarHomeDir()` at their source,
+including named/renamed imports, default/namespace members and require/destructured
+require forms. It does not need to follow values into assignments, iterators or
+filesystem writers. Two independent reviews found new binding forms that escaped
+the earlier flow analysis; the source ban removes that open-ended sink model.
+The other Cezar path helpers in `paths.ts` take an explicit `Home`; its agent-home
+and tilde helpers remain separate APIs. This rule does not ban those APIs.
+
+A read-only call requires `// test-home-read: <reason>` on the call line. The
+reason must be nonempty. Only a real line comment grants an exception; strings,
+block comments and comments on other lines do not. Each existing exception was
+checked to compare a path, inspect a sandbox or probe a refusal guard without
+writing. The annotation is a review contract, not proof of read-only behavior.
+Strings and fixture text are data, not calls. Import-level source aliases are
+resolved; arbitrary value aliases, dynamic computed keys, cross-module flow and
+eval are outside this static scan. Use `Home.sandbox` or the selected sandbox HOME
+for all writes.
 
 The following are operational tools or read-only helpers, not test source. This
 classification preserves existing commands and legacy paths (hearsay-tools/cezarion#2813).

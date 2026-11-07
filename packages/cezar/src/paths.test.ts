@@ -26,7 +26,7 @@ describe('paths', () => {
 
   it('defaults the Home root to ~/.cezar', () => {
     delete env.CEZ_HOME;
-    expect(testHome().root).toBe(join(homedir(), '.cezar'));
+    expect(testHome().root).toBe(join(homedir(), '.cezar')); // test-home-read: compare the legacy default path without writing
   });
 
   it('honors the CEZ_HOME override', () => {
@@ -44,8 +44,8 @@ describe('paths', () => {
 
   it('workspace config/ui-state live directly under the cezar home', () => {
     delete env.CEZ_HOME;
-    expect(workspaceConfigPath(undefined, testHome())).toBe(join(homedir(), '.cezar', 'config.json'));
-    expect(workspaceUiStatePath(testHome())).toBe(join(homedir(), '.cezar', 'ui-state.json'));
+    expect(workspaceConfigPath(undefined, testHome())).toBe(join(homedir(), '.cezar', 'config.json')); // test-home-read: compare the workspace config path without writing
+    expect(workspaceUiStatePath(testHome())).toBe(join(homedir(), '.cezar', 'ui-state.json')); // test-home-read: compare the workspace UI path without writing
   });
 
   it('workspace paths honor the CEZ_HOME override', () => {

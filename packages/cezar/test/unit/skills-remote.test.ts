@@ -72,7 +72,7 @@ test('safeRemoteFor keeps Windows local paths working (BC §5: local path)', () 
 
 test('safeRemoteFor expands ~/ so git (no shell) can actually find it', () => {
   // execFile gives git no shell, so a literal `~` would be a directory name.
-  assert.equal(safeRemoteFor('~/skills'), join(homedir(), 'skills'));
+  assert.equal(safeRemoteFor('~/skills'), join(homedir(), 'skills')); // test-home-read: compare tilde expansion without fetching or writing
 });
 
 test('node test Git fixtures use isolated config and a fixed identity', (t) => {

@@ -26,13 +26,10 @@ describe('test writes use explicit sandbox paths', () => {
 
   it.each([
     "writeFileSync(join(Home.sandbox(dir).root, 'config.json'), '{}')",
-    "readFileSync(join(homedir(), 'config.json'))",
-    "const home = homedir(); expect(path).toBe(join(home, 'x')); writeFileSync(join(tmp, 'x'), home)",
+    "readFileSync(join(homedir(), 'config.json')); // test-home-read: inspect the selected home",
     "const file = join(tmp, 'x'); writeFileSync(file, 'homedir()')",
     "// writeFileSync(homedir(), 'x')\nconst sample = `mkdirSync(cezarHomeDir())`",
-    "const home = homedir(); writeFileSync(fixtures.home, home)",
-    "const homedir = () => '/tmp'; writeFileSync(homedir(), '{}')",
-  ])('allows sandbox writes and read-only home paths: %s', source => {
+  ])('allows explicit sandbox writes and annotated reads: %s', source => {
     expect(unsafeHomeWrites(source)).toEqual([]);
   });
 
@@ -111,24 +108,45 @@ describe('test writes use explicit sandbox paths', () => {
   });
 
   it.each([
-    "it('reads', () => { const root = homedir(); expect(root).toBeDefined() }); it('writes', () => { const root = Home.sandbox(dir).root; writeFileSync(root, '{}') })",
-    "const root = homedir(); { const root = Home.sandbox(dir).root; fs.rmSync(root) }",
-    "const root = homedir(); function save(root) { fs.rmSync(root) }",
-    "const root = homedir(); function save() { var root = '/tmp'; fs.rmSync(root) }",
-    "const root = homedir(); { let root = '/tmp'; root = '/tmp/a'; fs.rmSync(root) }",
-    "const root = homedir(); class Fixture { #save(root) { fs.rmSync(root) } }",
-    "const root = homedir(); class Fixture { static { const root = '/tmp'; fs.rmSync(root) } }",
-    "const save = fs.writeFileSync; function read(save) { save(homedir(), '{}') }",
-    "const {root, ...safe} = {root: homedir(), tmp: '/tmp'}; fs.rmSync(safe.tmp)",
-    "const {root = homedir()} = {root: '/tmp'}; fs.rmSync(root)",
-    "const {cfg: {root} = {root: homedir()}} = {cfg: {root: '/tmp'}}; fs.rmSync(root)",
-    "const {writeFile, ...reads} = fs; reads.writeFile(homedir(), '{}')",
-    "const roots = {root: homedir()}; const safe = {...roots, root: '/tmp'}; fs.rmSync(safe.root)",
+    "const box = {}; box.root = homedir(); rmSync(box.root)",
+    "for (const root of [homedir()]) rmSync(root)",
+    "for (const {root} of [{root: homedir()}]) rmSync(root)",
+    "openSync(join(homedir(), 'config.json'), 'w')",
+    "mkdtempSync(join(homedir(), 'tmp-'))",
+    "it('reads', () => { const root = homedir() }); it('writes', () => { const root = Home.sandbox(dir).root; writeFileSync(root, '{}') })",
     "const home = () => homedir(); rmSync(home())",
-    "function save(path) { writeFileSync(path, '{}') } save(homedir())",
-    "const obj = {root: homedir()}; writeFileSync(obj[key], '{}')",
-  ])('separates scopes and respects the static scan limits: %s', source => {
-    expect(unsafeHomeWrites(source)).toEqual([]);
+  ])('refuses ambient sources regardless of subsequent value flow: %s', source => {
+    expect(unsafeHomeWrites(source)).toHaveLength(1);
+  });
+
+  it.each([
+    "import {homedir} from 'node:os'; homedir()",
+    "import {homedir as read} from 'os'; read()",
+    "import os from 'node:os'; os.homedir()",
+    "import * as os from 'os'; os.homedir()",
+    "const os = require('node:os'); os.homedir()",
+    "require('os').homedir()",
+    "const {homedir: read} = require('node:os'); read()",
+    "import {cezarHomeDir as read} from '../paths.ts'; read()",
+    "import * as paths from '../paths.ts'; paths.cezarHomeDir()",
+    "const {cezarHomeDir: read} = require('../paths.cjs'); read()",
+    "os['homedir']()",
+    "os.homedir?.()",
+    "os.homedir.call(null)",
+    "Reflect.apply(os.homedir, null, [])",
+    "os.homedir.bind(null)()",
+  ])('refuses direct and imported source aliases: %s', source => {
+    expect(unsafeHomeWrites(source).length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    'homedir(); // test-home-read:',
+    'homedir(); // test-home-read:   ',
+    '// test-home-read: reason on the wrong line\nhomedir()',
+    'homedir(); /* test-home-read: block comments cannot grant a line exception */',
+    'homedir(); const fake = "// test-home-read: text is not a comment"',
+  ])('requires a real line comment with a nonempty reason: %s', source => {
+    expect(unsafeHomeWrites(source)).toHaveLength(1);
   });
 
   it.each(['writeFile', 'writeFileSync', 'mkdir', 'mkdirSync', 'rm', 'rmSync', 'rmdir', 'rmdirSync',

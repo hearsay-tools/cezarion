@@ -168,7 +168,7 @@ describe('cezar home write safety', () => {
 
     expect(() => assertCezarHomeWriteIsSandboxed(sandboxed)).not.toThrow();
     expect(() =>
-      assertCezarHomeWriteIsSandboxed(join(homedir(), '.cezar', 'config.json'), { VITEST: undefined }),
+      assertCezarHomeWriteIsSandboxed(join(homedir(), '.cezar', 'config.json'), { VITEST: undefined }), // test-home-read: probe the write refusal guard without writing
     ).not.toThrow();
   });
 });
