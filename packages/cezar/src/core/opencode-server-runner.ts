@@ -1086,35 +1086,13 @@ class OpencodeSession implements AgentSession {
     const type = evt.type ?? '';
     const props = evt.properties ?? {};
     if (type === 'message.updated' || type === 'message.created' || type === 'message.completed') {
-      const info = (props.info as Record<string, unknown>) ?? props;
-      const mid = stringField(info, 'id');
-      const role = stringField(info, 'role');
-      if (mid && role) this.msgRole.set(mid, role);
-      // The model answers a steered user message: it has read it (#505).
-      const parent = role === 'assistant' ? stringField(info, 'parentID') : undefined;
-      const submission = parent ? this.userMessageSubmission.get(parent) : undefined;
-      if (parent && submission) {
-        this.userMessageSubmission.delete(parent);
-        // After an idle, the server started a new run for steered input: a new turn.
-        if (!this.turnActive && this.serverOpen) { this.openTurn(); this.emitUi(opencodeTurnStarted); }
-        const ids = this.submissions.consume(submission);
-        if (ids.length) this.opts.onAgentInputConsumed?.(ids);
-      }
-      this.absorbUsage(info);
+      this.handleMessageEvent(props);
     } else if (type === 'message.part.updated' || type === 'message.part.created') {
       this.handlePart((props.part as Record<string, unknown>) ?? props);
     } else if (type === 'permission.asked') {
       this.handlePermissionAsked(props);
     } else if (type === 'permission.replied') {
-      // OpenCode settled the request, in any phase: our own reply, another client's, or its own.
-      const nativeId = stringField(props, 'requestID');
-      const pending = nativeId === undefined ? undefined : this.pendingPermissions.get(nativeId);
-      // OpenCode publishes this before it answers the reply route, so a human reply in flight
-      // that it echoes is that human's answer.
-      if (pending) {
-        const answered = pending.phase === 'answering' && pending.answer?.reply === stringField(props, 'reply');
-        this.settlePermission(pending, answered ? { optionId: pending.answer!.optionId } : { reason: 'resolved by OpenCode' });
-      }
+      this.handlePermissionReplied(props);
     } else if (type === 'session.idle') {
       // THE turn-end signal. The SSE bus is server-wide, so a child session's
       // (sub-agent's) idle must not close the main turn; an idle with no
@@ -1122,42 +1100,53 @@ class OpencodeSession implements AgentSession {
       const sid = stringField(props, 'sessionID');
       if (sid === undefined || sid === this.sessionId) this.finishTurn();
     } else if (type === 'session.error') {
-      const warning = opencodeSkillWarning(props);
-      if (warning) {
-        this.emit({ type: 'note', message: warning });
-        return;
-      }
-      // The wire's failure signal, now that the prompt POST returns
-      // before the turn runs: forward it to v1, whose `error` events are what
-      // run.ts records failed steps from — dropped, the terminal idle would
-      // file a provider/auth failure as a successful step. The idle that
-      // follows still closes the turn.
-      const sid = stringField(props, 'sessionID');
-      if (sid === undefined || sid === this.sessionId) {
-        this.turnErrored = true;
-        this.emit({ type: 'error', message: this.sessionErrorMessage(props.error) });
-      }
+      this.handleSessionError(props);
     }
   }
-
-  private handlePart(part: Record<string, unknown>): void {
-    // The SSE bus carries every session on the server — drop parts that
-    // belong to another one (a sub-agent's stream is surfaced by v2 only).
-    const partSession = stringField(part, 'sessionID');
-    if (partSession !== undefined && this.sessionId !== undefined && partSession !== this.sessionId)
-      return;
-    // Only surface parts of assistant messages — the user's own message streams
-    // over the same feed. Role is known early (the message.updated event
-    // precedes its parts); an unknown role means "not assistant yet" → skip.
-    const messageID = stringField(part, 'messageID');
-    if (messageID && this.msgRole.get(messageID) !== 'assistant') {
-      // A user message carrying submitted agent text: remember which submission it is.
-      if (this.msgRole.get(messageID) === 'user' && stringField(part, 'type') === 'text' && !this.userMessageSubmission.has(messageID)) {
-        const submission = this.submissions.findByText(stringField(part, 'text') ?? '');
-        if (submission && ![...this.userMessageSubmission.values()].includes(submission)) this.userMessageSubmission.set(messageID, submission);
-      }
-      return;
+  private handleMessageEvent(props: Record<string, unknown>): void {
+    const info = (props.info as Record<string, unknown>) ?? props;
+    const mid = stringField(info, 'id');
+    const role = stringField(info, 'role');
+    if (mid && role) this.msgRole.set(mid, role);
+    // The model answers a steered user message: it has read it (#505).
+    const parent = role === 'assistant' ? stringField(info, 'parentID') : undefined;
+    const submission = parent ? this.userMessageSubmission.get(parent) : undefined;
+    if (parent && submission) {
+      this.userMessageSubmission.delete(parent);
+      // After an idle, the server started a new run for steered input: a new turn.
+      if (!this.turnActive && this.serverOpen) { this.openTurn(); this.emitUi(opencodeTurnStarted); }
+      const ids = this.submissions.consume(submission);
+      if (ids.length) this.opts.onAgentInputConsumed?.(ids);
     }
+    this.absorbUsage(info);
+  }
+  private handlePermissionReplied(props: Record<string, unknown>): void {
+    // OpenCode settled the request, in any phase: our own reply, another client's, or its own.
+    const nativeId = stringField(props, 'requestID');
+    const pending = nativeId === undefined ? undefined : this.pendingPermissions.get(nativeId);
+    // OpenCode publishes this before it answers the reply route, so a human reply in flight
+    // that it echoes is that human's answer.
+    if (!pending) return;
+    const answered = pending.phase === 'answering' && pending.answer?.reply === stringField(props, 'reply');
+    this.settlePermission(pending, answered ? { optionId: pending.answer!.optionId } : { reason: 'resolved by OpenCode' });
+  }
+  private handleSessionError(props: Record<string, unknown>): void {
+    const warning = opencodeSkillWarning(props);
+    if (warning) { this.emit({ type: 'note', message: warning }); return; }
+    // The wire's failure signal, now that the prompt POST returns
+    // before the turn runs: forward it to v1, whose `error` events are what
+    // run.ts records failed steps from — dropped, the terminal idle would
+    // file a provider/auth failure as a successful step. The idle that
+    // follows still closes the turn.
+    const sid = stringField(props, 'sessionID');
+    if (sid === undefined || sid === this.sessionId) {
+      this.turnErrored = true;
+      this.emit({ type: 'error', message: this.sessionErrorMessage(props.error) });
+    }
+  }
+  private handlePart(part: Record<string, unknown>): void {
+    if (!this.partBelongsToUs(part)) return;
+    const messageID = stringField(part, 'messageID');
     const kind = stringField(part, 'type');
     const id = stringField(part, 'id') ?? messageID ?? '';
     if (kind === 'text') {
@@ -1174,45 +1163,54 @@ class OpencodeSession implements AgentSession {
         this.textCoalescer.complete(id, full);
       }
     } else if (kind === 'tool') {
-      const state = (part.state as Record<string, unknown> | undefined) ?? {};
-      const status = stringField(state, 'status');
-      const name = stringField(part, 'tool') ?? stringField(part, 'name') ?? 'tool';
-      const questionPartId =
-        stringField(part, 'id') ?? stringField(part, 'callID') ?? messageID;
-      const questionInput = state.input ?? state;
-      const questionReady =
-        name === 'question' && (toCezarQuestions(questionInput) !== null || status !== 'pending');
-      if (
-        questionReady &&
-        this.turnActive &&
-        this.pendingQuestion === undefined &&
-        this.questionCapture === undefined &&
-        this.questionReply === undefined &&
-        (questionPartId === undefined || !this.handledQuestionParts.has(questionPartId))
-      ) {
-        if (questionPartId) this.handledQuestionParts.add(questionPartId);
-        const capture = this.captureQuestion(questionInput);
-        this.questionCapture = capture;
-        const clearCapture = () => {
-          if (this.questionCapture === capture) this.questionCapture = undefined;
-        };
-        void capture.then(clearCapture, clearCapture);
-      }
-      const callId = id || `${name}-${this.toolsSeen.size}`;
-      if (!this.toolsSeen.has(callId)) {
-        this.toolsSeen.add(callId);
-        this.toolCalls.push({ id: callId, name, input: state.input ?? state });
-        this.emit({ type: 'tool-call', id: callId, tool: name, input: state.input ?? state });
-      }
-      if (status === 'completed' || status === 'error') {
-        this.emit({
-          type: 'tool-result',
-          toolCallId: callId,
-          result: safeStringify(state.output ?? state.result ?? state),
-          isError: status === 'error',
-        });
-      }
+      this.handleToolPart(part, id, messageID);
     }
+  }
+  private partBelongsToUs(part: Record<string, unknown>): boolean {
+    // The SSE bus carries every session on the server — drop parts that
+    // belong to another one (a sub-agent's stream is surfaced by v2 only).
+    const partSession = stringField(part, 'sessionID');
+    if (partSession !== undefined && this.sessionId !== undefined && partSession !== this.sessionId)
+      return false;
+    // Only surface parts of assistant messages — the user's own message streams
+    // over the same feed. Role is known early (the message.updated event
+    // precedes its parts); an unknown role means "not assistant yet" → skip.
+    const messageID = stringField(part, 'messageID');
+    if (messageID && this.msgRole.get(messageID) !== 'assistant') {
+      // A user message carrying submitted agent text: remember which submission it is.
+      if (this.msgRole.get(messageID) === 'user' && stringField(part, 'type') === 'text' && !this.userMessageSubmission.has(messageID)) {
+        const submission = this.submissions.findByText(stringField(part, 'text') ?? '');
+        if (submission && ![...this.userMessageSubmission.values()].includes(submission)) this.userMessageSubmission.set(messageID, submission);
+      }
+      return false;
+    }
+    return true;
+  }
+  private handleToolPart(part: Record<string, unknown>, id: string, messageID: string | undefined): void {
+    const state = (part.state as Record<string, unknown> | undefined) ?? {};
+    const status = stringField(state, 'status');
+    const name = stringField(part, 'tool') ?? stringField(part, 'name') ?? 'tool';
+    this.maybeCaptureQuestion(part, state, status, name, messageID);
+    const callId = id || `${name}-${this.toolsSeen.size}`;
+    if (!this.toolsSeen.has(callId)) {
+      this.toolsSeen.add(callId);
+      this.toolCalls.push({ id: callId, name, input: state.input ?? state });
+      this.emit({ type: 'tool-call', id: callId, tool: name, input: state.input ?? state });
+    }
+    if (status === 'completed' || status === 'error') {
+      this.emit({ type: 'tool-result', toolCallId: callId, result: safeStringify(state.output ?? state.result ?? state), isError: status === 'error' });
+    }
+  }
+  private maybeCaptureQuestion(part: Record<string, unknown>, state: Record<string, unknown>, status: string | undefined, name: string, messageID: string | undefined): void {
+    const questionPartId = stringField(part, 'id') ?? stringField(part, 'callID') ?? messageID;
+    const questionInput = state.input ?? state;
+    const questionReady = name === 'question' && (toCezarQuestions(questionInput) !== null || status !== 'pending');
+    if (!questionReady || !this.turnActive || this.pendingQuestion !== undefined || this.questionCapture !== undefined || this.questionReply !== undefined || (questionPartId !== undefined && this.handledQuestionParts.has(questionPartId))) return;
+    if (questionPartId) this.handledQuestionParts.add(questionPartId);
+    const capture = this.captureQuestion(questionInput);
+    this.questionCapture = capture;
+    const clearCapture = () => { if (this.questionCapture === capture) this.questionCapture = undefined; };
+    void capture.then(clearCapture, clearCapture);
   }
 
   /** Pull cumulative tokens/cost out of an assistant message info object. */
