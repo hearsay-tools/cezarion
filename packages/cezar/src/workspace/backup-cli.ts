@@ -1,6 +1,6 @@
 import type { Home } from '../home/home.ts';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { homeFileLocation } from '../home/file-location.ts';
 import { HomeStore } from '../home/store.ts';
 import { parseArgs } from 'node:util';
 import { isBackupFile, listBackups, type BackupFile } from './backups.ts';
@@ -29,7 +29,7 @@ export async function restoreBackup(file: BackupFile, at: string | undefined, ho
   if (!entry) throw new Error(`No backup for ${file}${at ? ` at or before ${at}` : ''}`);
   const bytes = readFileSync(entry.path);
   const restored = restoreBytes(file, bytes);
-  store.restoreFile(join(home.root, file), restored);
+  store.restoreFile(homeFileLocation(home, file).path, restored);
   if (file === 'config.json') refreshSnapshot(store, home);
   return entry.time;
 }
@@ -38,7 +38,7 @@ export async function restoreBackup(file: BackupFile, at: string | undefined, ho
 export function restorePinnedRecovery(file: BackupFile, home: Home, detectedAt?: string): string | undefined {
   if (!isBackupFile(file)) throw new Error(`Unsupported backup file: ${file}`);
   const store = new HomeStore(home);
-  const recovered = store.restoreRecovery(join(home.root, file), detectedAt);
+  const recovered = store.restoreRecovery(homeFileLocation(home, file).path, detectedAt);
   if (recovered && file === 'config.json') refreshSnapshot(store, home);
   return recovered;
 }

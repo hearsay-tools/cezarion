@@ -23,9 +23,9 @@ import type { WorkspaceUiState } from '@open-mercato/cezar-contract';
  *  `src/ui-state.ts`: `GET /api/v1/workspace/ui-state` answers this value verbatim, so a loose
  *  record left the route naming no key. The schema is a `z.looseObject`, so unknown prefs keep
  *  round-tripping (BACKWARD_COMPATIBILITY.md) — the type only adds the known names. */
-function readWorkspaceUiStateSync(path: string): WorkspaceUiState {
+function readWorkspaceUiStateSync(path: string, home?: Home): WorkspaceUiState {
   try {
-    const parsed: unknown = JSON.parse(readHomeFile(path));
+    const parsed: unknown = JSON.parse(readHomeFile(path, home));
     return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
       ? (parsed as WorkspaceUiState)
       : {};
@@ -34,8 +34,8 @@ function readWorkspaceUiStateSync(path: string): WorkspaceUiState {
   }
 }
 
-export async function readWorkspaceUiState(path: string): Promise<WorkspaceUiState> {
-  return readWorkspaceUiStateSync(path);
+export async function readWorkspaceUiState(path: string, home?: Home): Promise<WorkspaceUiState> {
+  return readWorkspaceUiStateSync(path, home);
 }
 
 /**
@@ -58,7 +58,7 @@ export async function mergeWriteWorkspaceUiState(
   const store = new HomeStore(home);
   return store.transaction(() => {
     const path = home.workspaceUiState;
-    const current = readWorkspaceUiStateSync(path);
+    const current = readWorkspaceUiStateSync(path, home);
     const next = mutator(current) ?? current;
     store.writeJson(path, next);
     return next;

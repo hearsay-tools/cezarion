@@ -1,5 +1,5 @@
-import { join, posix, sep, win32 } from 'node:path';
-import { oneRootKinds, type HomeLayout, type HomeRoots } from './kind-roots.ts';
+import { join, posix, win32 } from 'node:path';
+import { nativePathPlatform, oneRootKinds, type HomeLayout, type HomeRoots } from './kind-roots.ts';
 import { REBRAND_SWITCH } from './switch.ts';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 import { createInstallMarker, readInstallMarker } from './install-marker.ts';
@@ -32,9 +32,6 @@ export interface Home {
   serverState(instance?: string): string;
   serverLock(instance?: string): string;
 }
-
-/** Filesystem factories keep Node's native spelling even when a caller mocks process.platform. */
-const nativePathPlatform: NodeJS.Platform = sep === '\\' ? 'win32' : 'linux';
 
 /** Build the legacy path names from explicit roots. No environment or filesystem access. */
 export function homePaths(root: string, cache: string, override: string | undefined): Home {

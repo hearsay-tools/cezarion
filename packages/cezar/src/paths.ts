@@ -4,7 +4,7 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 import type { AgentHomePaths } from './agent-config/catalog.ts';
 import { isOmpProfileName } from './core/agent-profiles.ts';
 
-import { platformKindRoots } from './home/kind-roots.ts';
+import { nativePathPlatform, platformKindRoots } from './home/kind-roots.ts';
 import type { Home } from './home/home.ts';
 
 /**
@@ -17,7 +17,7 @@ export function assertCezarHomeWriteIsSandboxed(path: string, _env: NodeJS.Proce
     || Object.keys(process.env).some((key) => key.startsWith('STRYKER_'));
   if (!testing) return;
   const accountHome = userInfo().homedir;
-  const protectedRoots = [join(accountHome, '.cezar'), ...Object.values(platformKindRoots(accountHome, { TMPDIR: process.env.TMPDIR }, process.platform))];
+  const protectedRoots = [join(accountHome, '.cezar'), ...Object.values(platformKindRoots(accountHome, { TMPDIR: process.env.TMPDIR }, nativePathPlatform))];
   const refusal = () => new Error(
     `[cez] refusing to write ${path} from a test run — CEZ_HOME is not pinned to a sandbox. ` +
       'Pin it to a test sandbox so the suite never touches the real cezar home.',
