@@ -6,6 +6,8 @@ import { parseArgs } from 'node:util';
 import { isBackupFile, listBackups, type BackupFile } from './backups.ts';
 import { storeSchema } from './agent-accounts.ts';
 import { workspaceConfigSchema } from './config.ts';
+import { resolveLegacyRecovery } from '../home/legacy-recovery.ts';
+import { REBRAND_SWITCH } from '../home/switch.ts';
 
 const HELP = `usage:
   cez backup list [<file>]
@@ -14,6 +16,23 @@ const HELP = `usage:
 Restore the newest backup, or the newest at or before an ISO UTC time.
 Use a home-relative file, such as config.json or remote-settings/4321.json.
 Account config directories are not restored.`;
+
+function backupHelp(legacyCanary: boolean): string {
+  return HELP + (legacyCanary ? `\n\nLegacy home changes:
+  cez backup import <file>   merge changes from the old home
+  cez backup ignore <file>   keep the live file and clear the old-home incident
+Import requires a successful backup. Deleted legacy files can only be ignored.` : '');
+}
+
+/** Host CLI actions share the recovery writer; grant files remain blocked in HTTP. */
+function resolveLegacyCommand(command: string | undefined, file: string | undefined, validArgs: boolean, home: Home, enabled: boolean): boolean {
+  if (command !== 'import' && command !== 'ignore') return false;
+  if (!enabled) throw new Error('Legacy home import and ignore are not enabled.');
+  if (!file || !validArgs) throw new Error(backupHelp(enabled));
+  resolveLegacyRecovery(home, file, undefined, command, enabled);
+  console.log(`Resolved legacy home change for ${file} with ${command}.`);
+  return true;
+}
 
 export async function restoreBackup(file: BackupFile, at: string | undefined, home: Home): Promise<string> {
   if (!isBackupFile(file)) throw new Error(`Unsupported backup file: ${file}`);
@@ -86,14 +105,15 @@ function warnDroppedEntries(raw: object, key: 'projects' | 'accounts', kept: num
   }
 }
 
-export async function runBackupCommand(argv: string[], _env: NodeJS.ProcessEnv, home: Home): Promise<number> {
+export async function runBackupCommand(argv: string[], _env: NodeJS.ProcessEnv, home: Home, legacyCanary: boolean = REBRAND_SWITCH): Promise<number> {
   try {
     const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
       at: { type: 'string' }, help: { type: 'boolean', short: 'h' },
     } });
-    if (values.help) { console.log(HELP); return 0; }
+    if (values.help) { console.log(backupHelp(legacyCanary)); return 0; }
     const [command, file] = positionals;
     if (file !== undefined && !isBackupFile(file)) throw new Error('File must be a supported home-relative HomeStore file');
+    if (resolveLegacyCommand(command, file, positionals.length === 2 && values.at === undefined, home, legacyCanary)) return 0;
     if (command === 'list' && positionals.length <= 2 && values.at === undefined) {
       console.log(JSON.stringify(listBackups(file as BackupFile | undefined, home), null, 2));
       return 0;
@@ -103,7 +123,7 @@ export async function runBackupCommand(argv: string[], _env: NodeJS.ProcessEnv, 
       console.log(`Restored ${file} from ${time}. Only the home file was restored.`);
       return 0;
     }
-    throw new Error(HELP);
+    throw new Error(backupHelp(legacyCanary));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     return 1;

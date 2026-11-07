@@ -269,3 +269,9 @@ entry and created destination) prove relocation; deferred accounts do not. An im
 legacy-internal account without relocation refuses Import and names the account.
 Accounts recorded as intentionally unmoved omp profiles retain their original path.
 Remote sessions see the global banner read-only, with the existing host instruction.
+
+Legacy grant rows remain read-only in every cockpit. The host operator resolves
+them with `cez backup import remote-settings/<id>.json` or `cez backup ignore
+remote-settings/<id>.json`. The banner shows Import only for an importable source
+and always names Ignore. These staged CLI actions use the same recovery writer
+and are unavailable while the release switch is disabled.
