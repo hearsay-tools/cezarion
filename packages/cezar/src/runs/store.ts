@@ -80,6 +80,7 @@ import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.
 import { ColdReadCache, storedRow, type StoredRow } from './cold-reads.ts';
 import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
 import { RunStoreOpenError, toRunStoreOpenError } from './store-open-error.ts';
+import { claimStoreFamilies } from './claim-families.ts';
 import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } from './run-claims.ts';
 
 /** Per-store persistence adapter; the second argument is the normal fenced transaction. */
@@ -596,10 +597,6 @@ export class RunWriteRefusedError extends Error {
   }
 }
 
-/** How many times open (or an adoption) tries to take its claims while another connection holds
- *  the write lock, each waiting out the 50 ms busy timeout: recovery cannot start without them. */
-const ADOPT_CLAIM_ATTEMPTS = 10;
-
 /** The `run_claims` family of a run: a worker's parent, else the run itself (`parent_run_id ?? id`). */
 function familyKey(run: Pick<RunRecord, 'id' | 'delegation'>): string {
   return run.delegation?.role === 'worker' ? run.delegation.parentRunId : run.id;
@@ -972,70 +969,15 @@ export class RunStore extends EventEmitter {
     }
   }
 
-  /**
-   * Make sure this store claims each of `families`, taking every one no live process holds, and
-   * return the ones it now holds. Liveness is judged here (`claimOwnerLive`), outside the write
-   * transaction; `takeClaims` then takes a claim only if it is still exactly what was judged.
-   *
-   * `allowLive` also takes a family that still has a live row although no live process owns it.
-   * Open and `adoptFamily` pass it, because recovery follows both, and so does a write moving a
-   * run this store holds into a new family (a worker quarantined to `invalid` becomes its own):
-   * an ordinary write must not quietly inherit a dead process's live run and leave it unrecovered.
-   * `wait` retries a busy database instead of leaving the claim to the next write: recovery
-   * cannot start without it.
-   */
+  /** Make sure this store claims each of `families`; `claimStoreFamilies` takes the free ones. */
   private claimFamilies(families: Iterable<string>, opts: { allowLive?: boolean; wait?: boolean } = {}): Set<string> {
-    const owned = new Set<string>();
-    const wanted: string[] = [];
-    for (const family of new Set(families)) {
-      if (this.claimed.has(family) || this.pendingClaims.has(family)) owned.add(family);
-      else wanted.push(family);
-    }
-    if (!this.db || !this.owner || wanted.length === 0) return owned;
-    const claims = this.db.getClaims(wanted);
-    const take: Array<{ family: string; expect: { session: string; generation: number } | null }> = [];
-    for (const family of wanted) {
-      const claim = claims.get(family);
-      if (claim && claimOwnerLive(claim)) continue;
-      if (!opts.allowLive && this.db.familyHasLive(family)) continue;
-      take.push({ family, expect: claim ? { session: claim.session, generation: claim.generation } : null });
-    }
-    if (take.length === 0) return owned;
-    let taken: Map<string, number>;
-    try {
-      taken = this.takeClaims(take, opts.wait ? ADOPT_CLAIM_ATTEMPTS : 1);
-    } catch (error) {
-      if (!(error instanceof RunDatabaseBusyError)) throw error;
-      // Recovery follows an adoption, so it must hold the claim first: those families stay
-      // unclaimed and orphaned (a control or the next restart adopts them). A write does not wait:
-      // its next transaction takes the claim (`fence`), or meets whoever took it meanwhile.
-      if (opts.wait) return owned;
-      for (const { family, expect } of take) {
-        this.pendingClaims.set(family, expect);
-        owned.add(family);
-      }
-      this.scheduleSave();
-      return owned;
-    }
-    for (const [family, generation] of taken) {
-      this.claimed.set(family, generation);
-      owned.add(family);
-    }
-    // A claim taken for a write that then changes nothing still leaves at the next sweep.
-    if (taken.size > 0) this.scheduleSave();
-    return owned;
-  }
-
-  /** `takeClaims`, retried while another connection holds the write lock (each try waits out the
-   *  busy timeout), then the busy error. */
-  private takeClaims(take: Parameters<RunDatabase['takeClaims']>[1], attempts: number): Map<string, number> {
-    for (let attempt = 1; ; attempt++) {
-      try {
-        return this.db!.takeClaims(this.owner!, take);
-      } catch (error) {
-        if (!(error instanceof RunDatabaseBusyError) || attempt >= attempts) throw error;
-      }
-    }
+    return claimStoreFamilies({
+      claimed: this.claimed,
+      pendingClaims: this.pendingClaims,
+      db: this.db,
+      owner: this.owner,
+      scheduleSave: () => this.scheduleSave(),
+    }, families, opts);
   }
 
   /** Release the claim of every family with nothing left in memory, once nothing is pending: a
