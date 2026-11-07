@@ -21,6 +21,7 @@ export interface AutomationCoordinatorOptions {
 export class AutomationCoordinator {
   private readonly stores = new Map<string, AutomationStore>();
   private readonly roots = new Map<string, string>();
+  private seenProject = false;
 
   constructor(private readonly options: AutomationCoordinatorOptions) {}
 
@@ -42,6 +43,7 @@ export class AutomationCoordinator {
         continue;
       }
       this.roots.set(project.id, project.root);
+      this.seenProject = true;
       // A store this process already holds is re-read when another cockpit changed its files;
       // a project whose definitions file appeared since the last refresh is opened here.
       const existing = this.stores.get(project.id);
@@ -57,6 +59,16 @@ export class AutomationCoordinator {
    */
   hasProjects(): boolean {
     return this.roots.size > 0;
+  }
+
+  /**
+   * A project was registered at some earlier refresh, even if a later registry read lists none. The
+   * workspace timer keeps its idle wake on this: a briefly empty or unreadable registry must not
+   * stop the only timer, because nothing else would arm it again. Recorded at refresh time, so a
+   * refresh that a newer one supersedes still counts.
+   */
+  hasSeenProject(): boolean {
+    return this.seenProject;
   }
 
   private reloadQuietly(store: AutomationStore): void {

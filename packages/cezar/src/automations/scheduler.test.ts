@@ -472,6 +472,7 @@ describe('WorkspaceAutomationScheduler', () => {
       store: () => store,
       // No idle wake here: this case pins the reschedule path a local enable takes.
       hasProjects: () => false,
+      hasSeenProject: () => false,
     };
     const scheduler = new WorkspaceAutomationScheduler({
       coordinator: coordinator as never,

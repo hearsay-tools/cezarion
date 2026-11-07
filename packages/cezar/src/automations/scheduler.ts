@@ -363,14 +363,13 @@ export interface WorkspaceAutomationSchedulerOptions {
  * `reschedule`, whose coordinator refresh re-reads a store another cockpit changed and opens a
  * project whose definitions file appeared, so their edits arm here within one cap. A workspace
  * that has never had a project arms no timer. One that had a project keeps the idle wake even when
- * a later registry read lists none: an unreadable or briefly emptied registry file must not stop
- * the only timer, because nothing else would ever arm it again.
+ * a later registry read lists none (`hasSeenProject`): an unreadable or briefly emptied registry
+ * file must not stop the only timer, because nothing else would ever arm it again.
  */
 export class WorkspaceAutomationScheduler {
   private timer?: ReturnType<typeof setTimeout> | undefined;
   private stopped = true;
   private scheduleGeneration = 0;
-  private sawProject = false;
   private readonly retryAfter = new Map<string, number>();
   constructor(private readonly options: WorkspaceAutomationSchedulerOptions) {}
 
@@ -404,9 +403,8 @@ export class WorkspaceAutomationScheduler {
     const live = new Set<string>();
     for (const projectId of this.options.coordinator.enabledProjectIds()) due.push(...this.projectDue(projectId, live));
     for (const key of this.retryAfter.keys()) if (!live.has(key)) this.retryAfter.delete(key);
-    if (due.length || this.options.coordinator.hasProjects()) this.sawProject = true;
     if (!due.length) {
-      if (this.sawProject) {
+      if (this.options.coordinator.hasProjects() || this.options.coordinator.hasSeenProject()) {
         this.timer = setTimeout(() => { this.timer = undefined; void this.reschedule(); }, WORKSPACE_TIMER_CAP_MS);
       }
       return;
