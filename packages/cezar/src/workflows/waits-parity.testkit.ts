@@ -151,19 +151,30 @@ type NativeInput = {
   body?: { parts?: Array<{ text?: string }> };
 };
 
+/** A stdin-wire row is one prompt, or nothing when the mock recorded no user text. */
+const stdinRowText = (row: NativeInput): string[] => row.userText === undefined ? [] : [row.userText];
+/** A Cursor combined-wire array row holds one multi-line prompt as its last entry. */
+const cursorCombinedRowText = (runner: RunnerId, row: string[]): string[] =>
+  runner === 'cursor' && row.at(-1)?.includes('\n\n---\n\n') ? [row.at(-1)!] : [];
+/** The per-backend prompt carrier: Codex turn input, Cursor session prompts, OpenCode body parts. */
+const providerRowParts = (runner: RunnerId, row: NativeInput) =>
+  runner === 'codex' && row.method === 'turn/start' ? row.params?.input
+    : runner === 'cursor' && row.method === 'session/prompt' ? row.params?.prompt
+    : runner === 'opencode' && /\/(message|prompt_async)$/.test(row.url ?? '') ? row.body?.parts : undefined;
+const joinRowParts = (parts: Array<{ text?: string }>): string =>
+  parts.map((part: { text?: string }) => part.text ?? '').join('\n');
+
 /** Read the prompts admitted by each runner's native mock, not normalized events. */
 export function ciNativeMessages(runner: RunnerId, dir: string): string[] {
   const records = (name: string) => readMockRecords<NativeInput | string[]>(join(dir, name));
   const stdin = runner === 'claude' || runner === 'pi' || runner === 'omp';
   const rows = runner === 'cursor' ? [...records('args'), ...records('stdin')] : records(stdin ? 'stdin' : 'args');
   return rows.flatMap(row => {
-    if (Array.isArray(row)) return runner === 'cursor' && row.at(-1)?.includes('\n\n---\n\n') ? [row.at(-1)!] : [];
-    if (stdin) return row.userText === undefined ? [] : [row.userText];
+    if (Array.isArray(row)) return cursorCombinedRowText(runner, row);
+    if (stdin) return stdinRowText(row);
     if (runner === 'cursor' && row.method === 'cursor-print/stdin' && row.prompt !== undefined) return [row.prompt];
-    const parts = runner === 'codex' && row.method === 'turn/start' ? row.params?.input
-      : runner === 'cursor' && row.method === 'session/prompt' ? row.params?.prompt
-      : runner === 'opencode' && /\/(message|prompt_async)$/.test(row.url ?? '') ? row.body?.parts : undefined;
-    return parts ? [parts.map((part: { text?: string }) => part.text ?? '').join('\n')] : [];
+    const parts = providerRowParts(runner, row);
+    return parts ? [joinRowParts(parts)] : [];
   });
 }
 
