@@ -1,6 +1,8 @@
 import { prepareHomeLifecycle } from '../home/entry.ts';
 import { reportsRoutes } from './reports-api.ts';
 import { writeMergedConfig } from './config-merge.ts';
+import { applyWorkspaceConfigPatch } from './workspace-config-patch.ts';
+import { retryAutomationLogReceipt } from './automation-log-retry.ts';
 import { automationCreateSchema, automationUpdateSchema, automationCheckRequestSchema, automationLogQuerySchema } from '@open-mercato/cezar-contract/automation-requests';
 import { providerConnectSchema, createAgentProfileSchema, openAgentAccountFileSchema, updateAgentProfileSchema, selectAgentProfileSchema, providerEnabledSchema, providerRetrySchema, providerRouteParamsSchema, agentProfileRouteParamsSchema } from '@open-mercato/cezar-contract/provider-requests';
 import { planSchema, parseWorkflowSchema } from '@open-mercato/cezar-contract/workflow-requests';
@@ -66,10 +68,10 @@ import { AutomationStore } from '../automations/store.ts';
 import { createAutomationService, onceCreateAnswer } from '../automations/service.ts';
 import { createAutomationToolService } from '../automations/tool-adapter.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
-import { AutomationCandidateChangedError, GithubPoller } from '../automations/github-poller.ts';
+import { GithubPoller } from '../automations/github-poller.ts';
 
 import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
-import { AutomationProjectUnavailableError, SCHEDULE_LEASE_HELD_REASON, ScheduleRunner, type ScheduleRunnerHandle } from '../automations/schedule-runner.ts';
+import { AutomationProjectUnavailableError, type ScheduleRunnerHandle } from '../automations/schedule-runner.ts';
 import {
   launchAutomationRun,
   launchScheduledRun,
@@ -78,7 +80,6 @@ import {
 } from '../automations/task-template.ts';
 import {
   isGithubAutomation,
-  isScheduleAutomation,
 } from '../automations/types.ts';
 import type { IncomingMessage, Server } from 'node:http';
 import { access, constants as fsConstants, mkdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
@@ -2625,7 +2626,7 @@ export function createApp(deps: ServerDeps) {
 
     .put('/workspace/config', jsonZodValidator(() => workspaceConfigUpdateSchema), async (c) => {
       const parsed = { data: c.req.valid('json') };
-      const { browseRoot, projectsDir, archiveOnMerge, composerDefaults, resources, agentDefaults } = parsed.data;
+      const { browseRoot, projectsDir, archiveOnMerge, resources } = parsed.data;
       for (const [configuredRoot, create] of [
         [browseRoot, false],
         [projectsDir, true],
@@ -2656,47 +2657,7 @@ export function createApp(deps: ServerDeps) {
       let written: WorkspaceConfig;
       try {
         written = await mergeWriteWorkspaceConfig((config) => {
-          // Roots are stored as written (`~` kept); only the probe expands them.
-          if (browseRoot !== undefined) config.browseRoot = browseRoot;
-          if (projectsDir !== undefined) config.projectsDir = projectsDir;
-          if (archiveOnMerge === null) delete config.archiveOnMerge;
-          else if (archiveOnMerge !== undefined) config.archiveOnMerge = archiveOnMerge;
-          if (composerDefaults?.autonomous === null) delete config.composerDefaults.autonomous;
-          else if (composerDefaults?.autonomous !== undefined) {
-            config.composerDefaults.autonomous = composerDefaults.autonomous;
-          }
-          if (composerDefaults?.worktree === null) delete config.composerDefaults.worktree;
-          else if (composerDefaults?.worktree !== undefined) {
-            config.composerDefaults.worktree = composerDefaults.worktree;
-          }
-          if (resources?.maxParallel !== undefined) config.resources.maxParallel = resources.maxParallel;
-          if (resources?.maxMonitoringSessions !== undefined) {
-            config.resources.maxMonitoringSessions = resources.maxMonitoringSessions;
-          }
-          if (resources?.monitoringWakeIntervalMinutes !== undefined) {
-            config.resources.monitoringWakeIntervalMinutes = resources.monitoringWakeIntervalMinutes;
-          }
-          if (resources?.autoResumeOnUsageLimit !== undefined) {
-            config.resources.autoResumeOnUsageLimit = resources.autoResumeOnUsageLimit;
-          }
-          if (resources?.memoryLimitMb !== undefined) config.resources.memoryLimitMb = resources.memoryLimitMb;
-          if (resources?.worktreeRetentionDefault !== undefined) {
-            config.resources.worktreeRetentionDefault = resources.worktreeRetentionDefault;
-          }
-          // `null` CLEARS back to "no opinion" — a partial patch cannot say that by omission,
-          // and leaving a stale runner behind would keep overriding repos that never chose.
-          if (agentDefaults?.runner === null) delete config.agentDefaults.runner;
-          else if (agentDefaults?.runner !== undefined) config.agentDefaults.runner = agentDefaults.runner;
-          for (const runner of PROVIDER_IDS) {
-            const model = agentDefaults?.models?.[runner];
-            if (model === undefined) continue;
-            const models = config.agentDefaults.models ?? {};
-            if (model === null) delete models[runner];
-            else models[runner] = model;
-            // An empty object would persist a key that says nothing; absence is the same answer.
-            if (Object.keys(models).length === 0) delete config.agentDefaults.models;
-            else config.agentDefaults.models = models;
-          }
+          applyWorkspaceConfigPatch(config, parsed.data);
         }, deps.home);
       } catch (err) {
         // e.g. a read-only home — nothing was persisted (atomic tmp+rename).
@@ -3126,46 +3087,14 @@ export function createApp(deps: ServerDeps) {
     })
 
     .post('/automation-log/:receiptId/retry', async (c) => {
-      const project = c.get('project');
-      const store = project.automationStore;
-      const receipt = [...store.latestReceipts().values()].find((row) => row.receiptId === c.req.param('receiptId'));
-      if (!receipt) return c.json({ error: 'not found' }, 404);
-      if (receipt.status !== 'launch-error' || receipt.runId) return c.json({ error: 'receipt is not retryable' }, 409);
-      const scheduled = store.get(receipt.automationId);
-      // A schedule receipt carries its occurrence instead of a GitHub candidate; it is fired
-      // again by hand through the runner, under the lease, as the same receipt.
-      if (scheduled && isScheduleAutomation(scheduled) && receipt.occurrenceAt) {
-        const outcome = await new ScheduleRunner(scheduleHandle(project)).retry(scheduled, receipt);
-        // Gone, or no longer a schedule, once re-read under the lease: nothing was launched.
-        if (outcome.result === 'skipped') return c.json({ error: 'not found' }, 404);
-        if (outcome.result === 'manual') {
-          emitAutomationChange(project, scheduled.id, store.get(scheduled.id)?.revision ?? scheduled.revision);
-          return c.json({ receiptId: receipt.receiptId, runId: outcome.runId }, 202);
-        }
-        if (outcome.result === 'lease-held') return c.json({ error: SCHEDULE_LEASE_HELD_REASON }, 409);
-        if (outcome.result === 'duplicate') return c.json({ error: 'receipt is not retryable' }, 409);
-        const latest = store.latestReceipts().get(receipt.receiptKey);
-        return c.json({ error: latest?.error ?? 'the run could not be launched' }, 409);
-      }
-      if (!receipt.candidate) return c.json({ error: 'receipt predates retry context and cannot be retried safely' }, 409);
-      const definition = scheduled;
-      if (!definition) return c.json({ error: 'automation not found' }, 404);
-      if (!isGithubAutomation(definition)) return c.json({ error: 'receipt is not retryable' }, 409);
-      const lease = store.acquireLease();
-      if (!lease) return c.json({ error: 'automation polling lease is held by another process' }, 409);
-      const reserved = { ...receipt, status: 'reserved' as const, error: undefined, updatedAt: new Date().toISOString() };
-      store.appendReceipt(reserved);
-      try {
-        const launched = await launchAutomationRun({ root: project.root, manager: project.manager, store: project.store, definition, candidate: receipt.candidate, receiptId: receipt.receiptId });
-        store.appendReceipt({ ...reserved, status: 'launched', runId: launched.runId, updatedAt: new Date().toISOString() });
-        emitAutomationChange(project, definition.id, definition.revision);
-        return c.json({ receiptId: receipt.receiptId, runId: launched.runId }, 202);
-      } catch (error) {
-        store.appendReceipt({ ...reserved, status: error instanceof AutomationCandidateChangedError ? 'released' : 'launch-error', error: error instanceof Error ? error.message : String(error), updatedAt: new Date().toISOString() });
-        return c.json({ error: error instanceof Error ? error.message : String(error) }, 409);
-      } finally {
-        lease.release();
-      }
+      const result = await retryAutomationLogReceipt({
+        project: c.get('project'),
+        receiptId: c.req.param('receiptId'),
+        scheduleHandle,
+        emitChange: emitAutomationChange,
+      });
+      if ('error' in result.body) return c.json({ error: result.body.error }, result.status);
+      return c.json(result.body, result.status);
     });
 
   // ---- chained family: manual automation checks (workspace-level) ----
