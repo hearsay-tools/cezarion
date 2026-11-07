@@ -244,6 +244,8 @@ function legacyBootProject(
   const settled =
     (health.data !== undefined || health.isError) &&
     (projects.data !== undefined || projects.isError)
+  // Health and the registry normally name the same boot project. If neither can answer after
+  // both queries settle, the server-side `default` alias remains the no-config fallback.
   return { resolved, settled, boot: resolved ?? 'default' }
 }
 
@@ -338,8 +340,6 @@ function LegacyPathRedirect() {
   const runsSearch = useRunsSearch(flatRunId !== null && indexMissed ? flatRunId : '')
   const { resolved: resolvedBoot, settled: bootSourcesSettled, boot } = legacyBootProject(health, projects)
   if (resolvedBoot === undefined && !bootSourcesSettled) return <ScopeResolving />
-  // Health and the registry normally name the same boot project. If neither can answer after
-  // both queries settle, the server-side `default` alias remains the no-config fallback.
 
   const restored = legacyBareRootRedirect(location, projects, resolvedBoot)
   if (restored !== undefined) return restored
