@@ -49,6 +49,50 @@ function Section({ title, failure, section, children }: { title: string; failure
   )
 }
 
+/** The trigger picker for a new automation; an existing one keeps its kind and says which it is. */
+function TriggerFields({ draft, patch, forge, automation }: {
+  draft: AutomationDraft
+  patch: (next: Partial<AutomationDraft>) => void
+  forge: { available: boolean; reason?: string | undefined }
+  automation?: AutomationDefinition | undefined
+}) {
+  return (
+    <>
+      {automation ? (
+        <p className="text-sm"><span className="text-muted-foreground">Trigger · </span>{KIND_LABEL[draft.kind]}</p>
+      ) : (
+        <div className="grid justify-items-start gap-2">
+          <SegmentedControl<AutomationKind>
+            slot="automation-kind"
+            label="Trigger"
+            size="touch"
+            value={draft.kind}
+            onChange={(kind) => patch({ kind })}
+            options={[
+              { value: 'schedule', label: KIND_LABEL.schedule },
+              { value: 'github', label: KIND_LABEL.github, disabled: !forge.available, ...(forge.available ? {} : { title: forge.reason ?? 'GitHub is unavailable' }) },
+            ]}
+          />
+          {forge.available ? null : <p className="text-xs break-words text-muted-foreground">{`GitHub unavailable · ${forge.reason ?? 'no GitHub access'}`}</p>}
+        </div>
+      )}
+    </>
+  )
+}
+
+/** The schedule the trigger fires on, or the GitHub events and filters it polls. */
+function KindFields({ draft, patch, forge, timeZone, automation }: {
+  draft: AutomationDraft
+  patch: (next: Partial<AutomationDraft>) => void
+  forge: { available: boolean; reason?: string | undefined }
+  timeZone: string
+  automation?: AutomationDefinition | undefined
+}) {
+  return draft.kind === 'schedule'
+    ? <ScheduleFields value={draft.schedule} stored={automation?.schedule} onChange={(schedule) => patch({ schedule })} timeZone={timeZone} />
+    : <GithubFields draft={draft} onChange={patch} {...(forge.available ? {} : { disabledReason: forge.reason ?? 'no GitHub access' })} />
+}
+
 export function AutomationEditor({ automation, forge, timeZone, onSaved, onReload }: {
   automation?: AutomationDefinition
   forge: { available: boolean; reason?: string | undefined }
@@ -141,27 +185,8 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
           </Section>
 
           <Section title="When" section="when" failure={failure}>
-            {automation ? (
-              <p className="text-sm"><span className="text-muted-foreground">Trigger · </span>{KIND_LABEL[draft.kind]}</p>
-            ) : (
-              <div className="grid justify-items-start gap-2">
-                <SegmentedControl<AutomationKind>
-                  slot="automation-kind"
-                  label="Trigger"
-                  size="touch"
-                  value={draft.kind}
-                  onChange={(kind) => patch({ kind })}
-                  options={[
-                    { value: 'schedule', label: KIND_LABEL.schedule },
-                    { value: 'github', label: KIND_LABEL.github, disabled: !forge.available, ...(forge.available ? {} : { title: forge.reason ?? 'GitHub is unavailable' }) },
-                  ]}
-                />
-                {forge.available ? null : <p className="text-xs break-words text-muted-foreground">{`GitHub unavailable · ${forge.reason ?? 'no GitHub access'}`}</p>}
-              </div>
-            )}
-            {isSchedule
-              ? <ScheduleFields value={draft.schedule} stored={automation?.schedule} onChange={(schedule) => patch({ schedule })} timeZone={timeZone} />
-              : <GithubFields draft={draft} onChange={patch} {...(forge.available ? {} : { disabledReason: forge.reason ?? 'no GitHub access' })} />}
+            <TriggerFields draft={draft} patch={patch} forge={forge} automation={automation} />
+            <KindFields draft={draft} patch={patch} forge={forge} timeZone={timeZone} automation={automation} />
           </Section>
 
           <Section title="What to run" section="run" failure={failure}>
