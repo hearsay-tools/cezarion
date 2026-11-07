@@ -7,7 +7,7 @@ import { onLiveReconcile } from './live-coordinator'
 import { queryKeys, workspaceQueryKeys } from './queries'
 import { subscribeTopic } from './ws'
 import { getHomeRecovery, HOME_RECOVERY_QUERY_KEY, useAcceptHomeRecovery, useHomeRecovery,
-  useHomeRecoverySubscription, useRestoreHomeRecovery } from './home-recovery'
+  useHomeRecoverySubscription, useImportHomeRecovery, useRestoreHomeRecovery } from './home-recovery'
 
 vi.mock('./ws', () => ({ subscribeTopic: vi.fn() }))
 vi.mock('./live-coordinator', async original => ({
@@ -150,3 +150,13 @@ it('writes restore and accept actions, keeps their authoritative result, and ref
   await act(async () => { await expect(hooks.result.current.restore.mutateAsync({ file: 'config.json', detectedAt: '2026-11-07T09:00:00.000Z' })).rejects.toThrow('Backup cannot be read') })
   expect(client.getQueryData(HOME_RECOVERY_QUERY_KEY)).toEqual(flagged)
 });
+
+
+it('posts legacy Import through the typed client and tolerates future recovery reasons', async () => {
+  const { client, wrapper } = setup()
+  const hooks = renderHook(() => useImportHomeRecovery(), { wrapper })
+  fetchMock.mockResolvedValueOnce(json({ files: [{ ...flagged.files[0], reason: 'future-incident' }] }))
+  await act(async () => { await hooks.result.current.mutateAsync({ file: 'config.json', detectedAt: flagged.files[0]!.detectedAt }) })
+  expect(client.getQueryData(HOME_RECOVERY_QUERY_KEY)).toEqual({ files: [] })
+  expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/home/recovery/import')
+})

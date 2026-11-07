@@ -1,8 +1,11 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { Home } from '../../cezar/src/home/home'
 import { HomeStore } from '../../cezar/src/home/store'
+import { migrateLegacyHome } from '../../cezar/src/home/migrate'
+import { acceptHomeRecovery, getHomeRecovery } from '../../cezar/src/home/recovery'
+import { readMigrationRecord } from '../../cezar/src/home/migration-record'
 import { mergeWriteWorkspaceConfig } from '../../cezar/src/workspace/config'
 import { cezarCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
@@ -12,18 +15,22 @@ export type HomeRecoveryControl =
   | { kind: 'outside-ui-state' }
   | { kind: 'add-project' }
   | { kind: 'write-ui-state'; value: string }
+  | { kind: 'legacy-ui-state'; value: string }
 
 /** Real CLI and HomeStore share one sandbox. Only the deliberate outside-write case bypasses it. */
 export async function createHomeRecoveryFixture() {
   const root = mkdtempSync(join(tmpdir(), 'cez-home-recovery-e2e-'))
   const env = fixtureServeEnv(root)
-  const home = Home.sandbox(env.CEZ_HOME!)
+  const legacy = Home.sandbox(join(root, 'legacy'))
+  const home = Home.sandbox(env.CEZ_HOME!, { layout: 'split' })
   const store = new HomeStore(home)
   const project = { id: 'recovery-project', root, name: 'Recovery project', source: 'local' as const,
     addedAt: '2026-11-07T00:00:00Z', lastOpenedAt: '2026-11-07T00:00:00Z' }
-  Home.seed(home, home.workspaceConfig, { projects: [project] })
-  Home.seed(home, home.workspaceUiState, { recoveryFixture: 'original' })
-  const server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env })
+  Home.seed(legacy, legacy.workspaceConfig, { projects: [project] })
+  Home.seed(legacy, legacy.workspaceUiState, { recoveryFixture: 'original' })
+  migrateLegacyHome(legacy, home)
+  const server = spawnFixtureServer([join(import.meta.dirname, 'home-recovery-server.mjs'),
+    dirname(cezarCli), root, env.CEZ_HOME!], { env })
   try {
     const origin = await waitForFixtureServer(server)
     const control = async (command: HomeRecoveryControl): Promise<void> => {
@@ -34,6 +41,9 @@ export async function createHomeRecoveryFixture() {
       } else if (command.kind === 'outside-ui-state') {
         // Deliberate bypass: this case proves the server discovers a foreign process's write.
         writeFileSync(home.workspaceUiState, JSON.stringify({ recoveryFixture: 'outside' }))
+      } else if (command.kind === 'legacy-ui-state') {
+        // Deliberate older-binary write to the migrated home, never the user's home.
+        writeFileSync(legacy.workspaceUiState, JSON.stringify({ recoveryFixture: command.value }))
       } else {
         store.writeJson(home.workspaceUiState, { recoveryFixture: command.value })
       }
@@ -42,11 +52,17 @@ export async function createHomeRecoveryFixture() {
       origin,
       project,
       control,
+      legacyHash() {
+        return readMigrationRecord(home)?.files.find(file => file.path === 'ui-state.json')?.hash
+      },
       readState() {
         return { projects: (JSON.parse(store.read(home.workspaceConfig)) as { projects: Array<{ id: string; root: string }> }).projects,
           uiState: JSON.parse(store.read(home.workspaceUiState)) as { recoveryFixture: string } }
       },
       async reset() {
+        for (const incident of getHomeRecovery(home, true).files) {
+          if (incident.reason === 'legacy-change') acceptHomeRecovery(home, incident.file, incident.detectedAt, true)
+        }
         // Each case starts from an explicitly accepted, then reseeded private home.
         for (const path of [home.workspaceConfig, `${home.workspaceConfig}.bak`, home.workspaceUiState]) store.acceptOutsideWrite(path)
         await mergeWriteWorkspaceConfig(config => { config.projects = [project] }, home)

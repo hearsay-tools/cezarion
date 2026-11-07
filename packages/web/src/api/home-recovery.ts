@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { homeRecoverySchema, type HomeFile, type HomeRecovery, type HomeRecoveryAction } from '@open-mercato/cezar-api-client/contract/home-recovery'
+import { homeRecoveryReaderSchema, type HomeFile, type HomeRecovery, type HomeRecoveryAction } from '@open-mercato/cezar-api-client/contract/home-recovery'
 import type { HealthResponse } from '@open-mercato/cezar-api-client'
 import { ApiError, cez, init, unwrap, type ReadOptions } from './client'
 import { onLiveReconcile } from './live-coordinator'
@@ -11,7 +11,7 @@ import { subscribeTopic } from './ws'
 export const HOME_RECOVERY_QUERY_KEY = ['workspace', 'home-recovery'] as const
 
 function parseRecovery(value: unknown): HomeRecovery {
-  const parsed = homeRecoverySchema.safeParse(value)
+  const parsed = homeRecoveryReaderSchema.safeParse(value)
   if (!parsed.success) throw new ApiError(200, 'the cezar server answered /home/recovery with an unexpected body')
   return parsed.data
 }
@@ -73,7 +73,7 @@ function invalidateHomeConsumers(client: QueryClient, file: HomeFile): void {
   for (const queryKey of keys) void client.invalidateQueries({ queryKey })
 }
 
-function useRecoveryAction(action: 'restore' | 'accept') {
+function useRecoveryAction(action: 'restore' | 'accept' | 'import') {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (incident: HomeRecoveryAction) => parseRecovery(await unwrap(
@@ -88,3 +88,4 @@ function useRecoveryAction(action: 'restore' | 'accept') {
 
 export const useRestoreHomeRecovery = () => useRecoveryAction('restore')
 export const useAcceptHomeRecovery = () => useRecoveryAction('accept')
+export const useImportHomeRecovery = () => useRecoveryAction('import')

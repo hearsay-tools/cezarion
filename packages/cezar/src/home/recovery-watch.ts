@@ -4,9 +4,11 @@ import type { Home } from './home.ts';
 import { onHomeChange } from './changes.ts';
 import { getHomeRecovery, recoveryFiles } from './recovery.ts';
 import { homeFileLocation } from './file-location.ts';
+import { legacyWatchDirectories } from './legacy-source.ts';
+import { REBRAND_SWITCH } from './switch.ts';
 
 /** A subscription owns its watchers; no timer or watcher survives the last listener. */
-export function subscribeHomeRecovery(home: Home, listener: () => void): () => void {
+export function subscribeHomeRecovery(home: Home, listener: () => void, legacyCanary = REBRAND_SWITCH): () => void {
   let closed = false;
   let scheduled = false;
   const watchers = new Map<string, FSWatcher>();
@@ -20,7 +22,7 @@ export function subscribeHomeRecovery(home: Home, listener: () => void): () => v
       scheduled = false;
       if (closed) return;
       bind();
-      getHomeRecovery(home); // Inspect changed files before publishing the authoritative snapshot.
+      getHomeRecovery(home, legacyCanary); // Inspect changed files before publishing the authoritative snapshot.
       listener();
     });
   };
@@ -28,7 +30,8 @@ export function subscribeHomeRecovery(home: Home, listener: () => void): () => v
     const journals = recoveryFiles(home).map(file => join(homeFileLocation(home, file).root, '.versions', file));
     // Split state may not exist yet. Watch its nearest parent until the root appears.
     const roots = [home.config, home.state].map(existingParent);
-    const wanted = new Set([...directories, ...journals, ...roots]);
+    const legacy = legacyWatchDirectories(home, legacyCanary).map(existingParent);
+    const wanted = new Set([...directories, ...journals, ...roots, ...legacy]);
     for (const [directory, watcher] of watchers) {
       if (!wanted.has(directory)) { watcher.close(); watchers.delete(directory); }
     }

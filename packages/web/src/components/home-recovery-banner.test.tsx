@@ -6,11 +6,12 @@ import { useHealth } from '@/api/queries'
 import { HomeRecoveryBanner } from './home-recovery-banner'
 
 const actions = vi.hoisted(() => ({
+  import: { mutate: vi.fn(), reset: vi.fn(), isPending: false, error: null as Error | null },
   restore: { mutate: vi.fn(), reset: vi.fn(), isPending: false, error: null as Error | null },
   accept: { mutate: vi.fn(), reset: vi.fn(), isPending: false, error: null as Error | null },
 }))
 vi.mock('@/api/home-recovery', () => ({
-  useHomeRecovery: vi.fn(), useRestoreHomeRecovery: () => actions.restore, useAcceptHomeRecovery: () => actions.accept,
+  useHomeRecovery: vi.fn(), useImportHomeRecovery: () => actions.import, useRestoreHomeRecovery: () => actions.restore, useAcceptHomeRecovery: () => actions.accept,
 }))
 vi.mock('@/api/queries', () => ({ useHealth: vi.fn() }))
 
@@ -19,7 +20,8 @@ function state(files: HomeRecoveryFile[], status: 'ready' | 'pending' | 'error' 
     isError: status === 'error' } as ReturnType<typeof useHomeRecovery>)
 }
 function file(name: string, reason: HomeRecoveryFile['reason'] = 'reset', canRestore = true): HomeRecoveryFile {
-  return { file: name, reason, detectedAt: '2026-11-07T09:00:00.000Z', canRestore }
+  const common = { file: name, detectedAt: '2026-11-07T09:00:00.000Z', canRestore }
+  return reason === 'legacy-change' ? { ...common, reason, canImport: true } : { ...common, reason }
 }
 
 beforeEach(() => {
@@ -122,4 +124,30 @@ it.each(['pending', 'error'] as const)('keeps capability-dependent actions unset
   expect(screen.queryByRole('button')).toBeNull()
   expect(screen.getAllByText('Only the host operator can restore or accept this file.', { exact: false })).toHaveLength(1)
   expect(screen.getByText('cez backup restore remote-settings/4321.json')).toBeTruthy()
+})
+
+
+it('offers Import and Ignore for a legacy change and explains the conflict winner', () => {
+  state([file('config.json', 'legacy-change')])
+  render(<HomeRecoveryBanner />)
+  expect(screen.getByRole('status').textContent).toContain('Old-home changes win')
+  fireEvent.click(screen.getByRole('button', { name: 'Import changes from the old home' }))
+  expect(actions.import.mutate).toHaveBeenCalledWith({ file: 'config.json', detectedAt: '2026-11-07T09:00:00.000Z' })
+  fireEvent.click(screen.getByRole('button', { name: 'Ignore' }))
+  expect(actions.accept.mutate).toHaveBeenCalledWith({ file: 'config.json', detectedAt: '2026-11-07T09:00:00.000Z' })
+})
+
+it('keeps legacy changes read-only for remote sessions', () => {
+  state([file('config.json', 'legacy-change')])
+  vi.mocked(useHealth).mockReturnValue({ data: { capabilities: { localHandoff: false } } } as ReturnType<typeof useHealth>)
+  render(<HomeRecoveryBanner />)
+  expect(screen.queryByRole('button')).toBeNull()
+  expect(screen.getByText('Only the host operator can restore or accept this file.')).toBeTruthy()
+})
+
+it('allows Ignore while disabling Import for a deleted legacy file', () => {
+  state([{ ...file('config.json', 'legacy-change'), reason: 'legacy-change', canImport: false }])
+  render(<HomeRecoveryBanner />)
+  expect(screen.getByRole('button', { name: 'Import changes from the old home' }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('button', { name: 'Ignore' }).hasAttribute('disabled')).toBe(false)
 })

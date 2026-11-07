@@ -2,12 +2,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { homeRecoverySchema, type HomeRecovery } from '@open-mercato/cezar-contract/home-recovery';
 import { Home } from '../home/home.ts';
 import { cleanStoreRoots, storeRoot } from '../home/store.testkit.ts';
-import { acceptHomeRecovery, getHomeRecovery, restoreHomeRecovery, subscribeHomeRecovery } from '../home/recovery.ts';
+import { acceptHomeRecovery, getHomeRecovery, importHomeRecovery, restoreHomeRecovery, subscribeHomeRecovery } from '../home/recovery.ts';
 import { createHomeRecoveryPublisher, createHomeRecoveryRoutes, HOME_RECOVERY_TOPIC } from './home-recovery-routes.ts';
 import type { SocketHub } from './ws.ts';
 
 vi.mock('../home/recovery.ts', () => ({
-  getHomeRecovery: vi.fn(), restoreHomeRecovery: vi.fn(), acceptHomeRecovery: vi.fn(), subscribeHomeRecovery: vi.fn(),
+  getHomeRecovery: vi.fn(), restoreHomeRecovery: vi.fn(), acceptHomeRecovery: vi.fn(), importHomeRecovery: vi.fn(), subscribeHomeRecovery: vi.fn(),
 }));
 
 beforeEach(() => {
@@ -25,7 +25,7 @@ it('reads the cached metadata and sends restore and accept through the shared re
   vi.mocked(getHomeRecovery).mockReturnValue(flagged);
   const read = await app.request('/home/recovery');
   expect(homeRecoverySchema.parse(await read.json())).toEqual(flagged);
-  for (const action of ['restore', 'accept']) {
+  for (const action of ['restore', 'accept', 'import']) {
     vi.mocked(getHomeRecovery).mockReturnValue({ files: [] });
     const response = await app.request(`/home/recovery/${action}`, { method: 'POST',
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file: 'config.json', detectedAt: '2026-11-07T09:00:00.000Z' }) });
@@ -33,12 +33,13 @@ it('reads the cached metadata and sends restore and accept through the shared re
     expect(homeRecoverySchema.parse(await response.json())).toEqual({ files: [] });
   }
   expect(restoreHomeRecovery).toHaveBeenCalledWith(home, 'config.json', '2026-11-07T09:00:00.000Z');
-  expect(acceptHomeRecovery).toHaveBeenCalledWith(home, 'config.json', '2026-11-07T09:00:00.000Z');
+  expect(acceptHomeRecovery).toHaveBeenCalledWith(home, 'config.json', '2026-11-07T09:00:00.000Z', false);
+  expect(importHomeRecovery).toHaveBeenCalledWith(home, 'config.json', '2026-11-07T09:00:00.000Z', false);
 });
 
 it('rejects path input before the service and surfaces recovery failures as conflicts', async () => {
   const app = createHomeRecoveryRoutes({ home: Home.sandbox(storeRoot()), localHandoff: () => true });
-  for (const action of ['restore', 'accept']) {
+  for (const action of ['restore', 'accept', 'import']) {
     const bad = await app.request(`/home/recovery/${action}`, { method: 'POST',
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file: '../config.json' }) });
     expect(bad.status).toBe(400);
@@ -66,13 +67,14 @@ const actionCases = ['config.json', 'config.json.bak', 'agent-accounts.json', 'u
 
 it.each(actionCases)('protects both recovery actions for $file when local=$local', async ({ file, local, status }) => {
   const app = createHomeRecoveryRoutes({ home: Home.sandbox(storeRoot()), localHandoff: () => local });
-  for (const action of ['restore', 'accept']) {
+  for (const action of ['restore', 'accept', 'import']) {
     const response = await app.request(`/home/recovery/${action}`, { method: 'POST',
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file, detectedAt: flagged.files[0]!.detectedAt }) });
     expect(response.status).toBe(status);
   }
   expect(restoreHomeRecovery).toHaveBeenCalledTimes(status === 200 ? 1 : 0);
   expect(acceptHomeRecovery).toHaveBeenCalledTimes(status === 200 ? 1 : 0);
+  expect(importHomeRecovery).toHaveBeenCalledTimes(status === 200 ? 1 : 0);
 });
 
 it('registers a trusted-only topic and holds watch demand only while it has a subscriber', async () => {

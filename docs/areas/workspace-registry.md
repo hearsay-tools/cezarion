@@ -242,3 +242,30 @@ absolute links and Windows junctions never retain staging paths.
 The archive writes one gzip member per tar entry, followed by tar end blocks.
 This standard concatenated gzip stream bounds buffers by the largest file,
 while retaining legacy journal history and backups in the archive.
+
+## Legacy home canary (staged)
+
+The canary shares the recovery snapshot, journal and demand-owned watchers. It runs
+only with `REBRAND_SWITCH` enabled and a committed marker with `migratedFrom`.
+`migration.json` supplies the hash baseline; FRESH decisions also discover later
+registry files. Each changed HomeFile with a non-null target gets one legacy row,
+after any live-file recovery incident for that file. Opaque trees and observed-only
+`target: null` files have no banner row in this slice.
+
+Import uses the exact legacy bytes retained under the migration hash in the owning
+VersionLog as its base. It applies top-level legacy key changes and per-ID changes
+in `config.json` projects and `agent-accounts.json` accounts; other arrays change as
+one value. Live-only changes survive. Legacy wins where both changed the same key
+or entry, as the row explains. A missing base refuses Import. Unlike ordinary writes,
+Import requires its HomeStore backup to succeed before replacement. A deleted legacy
+file offers Ignore only. Import and Ignore retain the exact observed legacy bytes
+as the next base, then update the migration hash (null for deletion). Incident times
+are pinned in the existing per-file journal's `LEGACY` record, so stale requests
+conflict and multiple cockpits see the same incident.
+
+Imported account entries retain completed step-7 relocations into
+`<data>/accounts/<id>`. The migration's file mappings (or an empty account's original
+entry and created destination) prove relocation; deferred accounts do not. An imported
+legacy-internal account without relocation refuses Import and names the account.
+Accounts recorded as intentionally unmoved omp profiles retain their original path.
+Remote sessions see the global banner read-only, with the existing host instruction.
