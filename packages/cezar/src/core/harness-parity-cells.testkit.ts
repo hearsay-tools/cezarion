@@ -2884,19 +2884,25 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
     const records = (path: string) => readMockRecords<Wire | string[]>(path);
     // Print carries its combined prompt on stdin; Claude/Pi/OMP keep the system prompt in argv.
     const stdinWire = (backend: RunnerId) => backend === 'claude' || backend === 'pi' || backend === 'omp';
+    const stdinRowText = (row: Wire): string[] => row.userText === undefined ? [] : [row.userText];
+    const cursorCombinedRowText = (backend: RunnerId, row: string[]): string[] =>
+      backend === 'cursor' && row.at(-1)?.includes('\n\n---\n\n') ? [row.at(-1)!] : [];
+    // The per-backend prompt carrier: Codex turn input, Cursor session prompts, OpenCode body parts.
+    const providerRowParts = (backend: RunnerId, row: Wire) =>
+      backend === 'codex' && row.method === 'turn/start' ? row.params?.input
+        : backend === 'cursor' && row.method === 'session/prompt' ? row.params?.prompt
+        : backend === 'opencode' && /\/(message|prompt_async)$/.test(row.url ?? '') ? row.body?.parts : undefined;
+    const joinRowParts = (parts: { text?: string }[]): string => parts.map(part => part.text ?? '').join('\n');
     const messages = (backend: RunnerId, dir: string): string[] => {
       const channel = stdinWire(backend) ? 'stdin' : 'args';
       const wire = backend === 'cursor' ? [...records(join(dir, 'args')), ...records(join(dir, 'stdin'))]
         : records(join(dir, channel));
       return wire.flatMap(row => {
-        if (Array.isArray(row)) return backend === 'cursor' && row.at(-1)?.includes('\n\n---\n\n')
-          ? [row.at(-1)!] : [];
-        if (stdinWire(backend)) return row.userText === undefined ? [] : [row.userText];
+        if (Array.isArray(row)) return cursorCombinedRowText(backend, row);
+        if (stdinWire(backend)) return stdinRowText(row);
         if (backend === 'cursor' && row.method === 'cursor-print/stdin' && row.prompt !== undefined) return [row.prompt];
-        const parts = backend === 'codex' && row.method === 'turn/start' ? row.params?.input
-          : backend === 'cursor' && row.method === 'session/prompt' ? row.params?.prompt
-          : backend === 'opencode' && /\/(message|prompt_async)$/.test(row.url ?? '') ? row.body?.parts : undefined;
-        return parts ? [parts.map(part => part.text ?? '').join('\n')] : [];
+        const parts = providerRowParts(backend, row);
+        return parts ? [joinRowParts(parts)] : [];
       });
     };
     const systemPrompt = (backend: RunnerId, dir: string): string => {
