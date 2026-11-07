@@ -32,7 +32,7 @@ test. Other test outcomes stay unchanged.
 | Input or event | Required result | Evidence |
 | --- | --- | --- |
 | Test writes `join(cezarHomeDir(), 'config.json')` | Lint fails | Scanner fixture and real oxlint plugin fixture; baseline accepts, changed plugin refuses |
-| Ambient home flows through a local alias or function | Write fails lint | Alias, callback, promise and local-function fixtures |
+| Ambient home flows through static bindings or path helpers | Write fails lint | Lexical binding, destructuring, callback and promise fixtures |
 | Rename uses ambient home as source or destination | Lint fails for either path | Scanner fixtures |
 | Explicit sandbox write or read-only ambient lookup | Lint passes | Scanner fixtures |
 | Test selects CEZ_HOME directly outside server package | Lint fails | External repository scanner fixture |

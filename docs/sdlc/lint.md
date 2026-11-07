@@ -90,10 +90,16 @@ forbidden form, parser errors, stale entries and the CI growth ratchet.
 refuses CEZ_HOME selection on these surfaces. Oxlint scans package tests. The lint
 runner applies the same two scanners to tracked and unignored new test files outside
 `packages/`, including the two node:test projects. Neither rule has a test baseline.
-The write scanner follows local value aliases, home-function aliases and returned
-home paths into synchronous, callback and promise filesystem writes. Rename and
-copy operations check both paths. Strings and comments are data, not calls.
-Dynamic dispatch, eval and cross-module data flow are outside the static scan.
+The write scanner resolves lexical function, block and test-callback bindings.
+It follows plain assignments, reassignments, object/array destructuring (including
+nested patterns, renamed fields, defaults and rest), object fields, templates,
+concatenation and path helpers into synchronous, callback and promise filesystem
+writes. Filesystem aliases may use require, named/default/namespace imports or
+the promises namespace. Rename and copy operations check both paths. The scan is
+conservative across assignments to one binding; independent scopes never share
+values just because their variables have the same name. Strings and comments are
+data, not calls. Dynamic computed keys, values flowing through function calls
+other than path helpers, cross-module flow and eval are outside the static scan.
 
 The following are operational tools or read-only helpers, not test source. This
 classification preserves existing commands and legacy paths (hearsay-tools/cezarion#2813).
