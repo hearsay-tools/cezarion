@@ -799,6 +799,32 @@ describe('WorkspaceAutomationScheduler', () => {
       } finally { vi.useRealTimers(); }
     });
 
+    it('a refresh that sees a project after a newer empty one still arms the idle wake', async () => {
+      vi.useFakeTimers();
+      try {
+        const { root, dataDir } = await workspace();
+        AutomationStore.open(dataDir).create({ name: 'Paused', enabled: false, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'x' } }, 'paused');
+        const reads: Array<(projects: { id: string; root: string; status: 'ok' }[]) => void> = [];
+        const coordinator = new AutomationCoordinator({ listProjects: () => new Promise(resolve => { reads.push(resolve); }) });
+        const scheduler = new WorkspaceAutomationScheduler({
+          coordinator,
+          handle: (projectId, store) => ({ projectId, store, timeZone: 'UTC' }),
+        });
+        try {
+          const older = scheduler.start();
+          const newer = scheduler.reschedule();
+          expect(reads).toHaveLength(2);
+          reads[1]!([]);
+          await newer;
+          expect(scheduler.hasTimer()).toBe(false);
+          reads[0]!([{ id: 'a', root, status: 'ok' }]);
+          await older;
+          expect(scheduler.hasTimer()).toBe(true);
+          expect(vi.getTimerCount()).toBe(1);
+        } finally { scheduler.stop(); }
+      } finally { vi.useRealTimers(); }
+    });
+
     it('a registered project without definitions keeps an idle wake that discovers a schedule another process creates and exits (finding 4172236277)', async () => {
       vi.useFakeTimers();
       try {

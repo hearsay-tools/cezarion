@@ -384,7 +384,13 @@ export class WorkspaceAutomationScheduler {
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
     await this.options.coordinator.refresh();
-    if (this.stopped || generation !== this.scheduleGeneration) return;
+    if (this.stopped) return;
+    // A newer refresh may have read the registry before this one saw a project and armed nothing;
+    // this one's sighting must still arm the timer.
+    if (generation !== this.scheduleGeneration) {
+      if (!this.timer) this.schedule();
+      return;
+    }
     this.schedule();
   }
 
@@ -399,6 +405,8 @@ export class WorkspaceAutomationScheduler {
 
   private schedule(): void {
     if (this.stopped) return;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = undefined;
     const due: WorkspaceDueEntry[] = [];
     const live = new Set<string>();
     for (const projectId of this.options.coordinator.enabledProjectIds()) due.push(...this.projectDue(projectId, live));
