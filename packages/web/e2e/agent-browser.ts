@@ -9,6 +9,7 @@ export { lastAttachedBrowser } from './browser-page'
 import { visualSampleExpression } from './visual-ready'
 import { tmpdirExceedsSocketBudget } from '../../../.ai/scripts/resolve-browser-launch.mjs'
 import { readTestEnvDescriptor } from '../../../.ai/scripts/test-env-inputs.mjs'
+import { defaultWaitTimeoutMs, pause, sameSample, summarize } from './wait-support'
 
 /**
  * The agent-browser provider seam. Every e2e spec drives the app through this module and
@@ -118,43 +119,6 @@ type FailureReason =
   | { kind: 'wait-fn'; predicate: string }
   | { kind: 'wait-value'; expression: string; lastValue: unknown; lastError?: string }
   | { kind: 'test' }
-
-/**
- * The CLI's own default wait budget, read from the variable agent-browser reads
- * (`AGENT_BROWSER_DEFAULT_TIMEOUT`, milliseconds), so a seam-side poll gives up when a
- * `wait <selector>` would. 25 s bounds each polled command too, and stays inside the suite's 60 s test
- * timeout; a unit test shortens it through the same variable.
- */
-function defaultWaitTimeoutMs(): number {
-  const fromEnv = Number(process.env.AGENT_BROWSER_DEFAULT_TIMEOUT)
-  return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 25_000
-}
-
-/** A blocking pause. The seam is synchronous end to end (`execFileSync`), so a poll interval
- *  cannot `await`; `Atomics.wait` sleeps the thread without spinning it. */
-function pause(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
-}
-
-/** `JSON.stringify` bounded for an error message: a sample can be a whole layout snapshot. */
-function summarize(value: unknown, max = 400): string {
-  let text: string
-  try {
-    text = JSON.stringify(value) ?? String(value)
-  } catch {
-    text = String(value)
-  }
-  return text.length > max ? `${text.slice(0, max)}…` : text
-}
-
-/** Identity for a hold window: two samples are the same state when they serialize the same. */
-function sameSample(left: unknown, right: unknown): boolean {
-  try {
-    return JSON.stringify(left) === JSON.stringify(right)
-  } catch {
-    return left === right
-  }
-}
 
 /**
  * What `waitForValue` throws when the matcher never passed. Carries the last sample so a helper
