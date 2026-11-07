@@ -156,7 +156,26 @@ interface FinishingStep {
   run: () => Promise<CommandResult>;
 }
 
-export async function createProject(opts: CreateProjectOptions): Promise<CreateProjectResult> {
+type ProjectCommand = (
+  cmd: 'git' | 'gh',
+  args: string[],
+  cancellable: boolean,
+  cwd?: string,
+) => Promise<CommandResult>;
+
+type ParsedCreateProject =
+  | CreateProjectFailure
+  | {
+      ok: true;
+      name: string;
+      root: string;
+      target: string;
+      slug?: string;
+      template?: string;
+    };
+
+/** Name, owner, template and destination — nothing is created yet. */
+function parseCreateProjectRequest(opts: CreateProjectOptions): ParsedCreateProject {
   const name = opts.name.trim();
   // GitHub's repository-name rules, even for a local-only project: the name is
   // the folder AND (now or later) the repo, and GitHub would silently rewrite
@@ -185,7 +204,98 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
   }
   const destination = checkoutTarget(opts.projectsDir, name);
   if (destination.ok === false) return destination;
-  const { root, target } = destination;
+  return {
+    ok: true,
+    name,
+    root: destination.root,
+    target: destination.target,
+    ...(slug ? { slug } : {}),
+    ...(template ? { template } : {}),
+  };
+}
+
+interface GithubCreateInput {
+  opts: CreateProjectOptions;
+  slug: string;
+  say: (line: string) => void;
+  exec: ProjectCommand;
+  fail: (status: 400 | 500, error: string) => Promise<CreateProjectFailure>;
+  finishAfterCreate: (steps: FinishingStep[]) => Promise<string | undefined>;
+  createFailed: (error: string) => Promise<CreateProjectFailure>;
+  done: (kind: 'local' | 'github' | 'template', warning: string | undefined) => CreateProjectResult;
+  credentialStep: FinishingStep;
+}
+
+interface TemplateCreateInput extends GithubCreateInput {
+  template: string;
+  root: string;
+  target: string;
+  refuse: <F extends CreateProjectFailure>(failure: F) => F;
+}
+
+/** `gh repo create` after the abort check; extra args follow `--private`. */
+async function createPrivateGithubRepo(
+  input: GithubCreateInput,
+  message: string,
+  extraArgs: string[] = [],
+): Promise<CreateProjectFailure | undefined> {
+  const { opts, slug, say, exec, fail, createFailed } = input;
+  if (opts.signal?.aborted) return fail(500, CANCELLED);
+  say(message);
+  const created = await exec('gh', ['repo', 'create', slug, '--private', ...extraArgs], false);
+  if (!created.ok) return createFailed(created.error);
+  return undefined;
+}
+
+/** `gh repo create --template`, wait for the first commit, clone, then credentials. */
+async function createFromTemplate(input: TemplateCreateInput): Promise<CreateProjectResult> {
+  const { opts, slug, template, root, target, say, refuse, exec, finishAfterCreate, done, credentialStep } = input;
+  const created = await createPrivateGithubRepo(
+    input,
+    `Creating private repository ${slug} from ${template}…`,
+    ['--template', template],
+  );
+  if (created) return created;
+  // Template generation is asynchronous on GitHub: an immediate clone can
+  // land an empty repo. Wait until the first commit is visible — and since
+  // the wait gives up eventually, the clone is checked for a commit below.
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  for (let attempt = 0; attempt < TEMPLATE_WAIT_ATTEMPTS; attempt++) {
+    const probe = await exec('gh', ['api', `repos/${slug}/commits?per_page=1`, '--jq', 'length'], false);
+    if (probe.ok && Number.parseInt(probe.stdout.trim(), 10) > 0) break;
+    if (attempt === 0) say('Waiting for GitHub to generate the repository…');
+    await sleep(TEMPLATE_WAIT_MS);
+  }
+  const cloned = await exec('gh', ['repo', 'clone', cloneUrl(slug), target, '--', '--progress'], false);
+  if (!cloned.ok) {
+    // Nothing local is worth keeping (the folder holds at most a partial
+    // clone), so this is the one post-create failure that cleans up — and
+    // says how to finish from the repository that now exists.
+    await cleanupCheckout(root, target);
+    return refuse({
+      ok: false,
+      status: 500,
+      error: `${cloned.error}\nThe private repository ${webUrl(slug)} was created on GitHub — add it with Add project → Clone from GitHub (${slug}).`,
+    });
+  }
+  // git clones an empty remote without complaint, and a project with no
+  // commit cannot host a task: that is a failed clone, not a success.
+  const head = await exec('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], false);
+  if (!head.ok) {
+    await cleanupCheckout(root, target);
+    return refuse({
+      ok: false,
+      status: 500,
+      error: `GitHub had not finished generating ${slug} from ${template}, so the clone has no commit. The private repository ${webUrl(slug)} was created on GitHub — once it shows the template's files, add it with Add project → Clone from GitHub (${slug}).`,
+    });
+  }
+  return done('template', await finishAfterCreate([credentialStep]));
+}
+
+export async function createProject(opts: CreateProjectOptions): Promise<CreateProjectResult> {
+  const parsed = parseCreateProjectRequest(opts);
+  if (!parsed.ok) return parsed;
+  const { name, root, target, slug, template } = parsed;
 
   const emit = (event: Omit<CheckoutProgressEvent, 'name' | 'checkoutId'>): void =>
     opts.onProgress({ ...event, name, ...(opts.checkoutId ? { checkoutId: opts.checkoutId } : {}) });
@@ -275,44 +385,9 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
   };
 
   if (slug && template) {
-    if (opts.signal?.aborted) return fail(500, CANCELLED);
-    say(`Creating private repository ${slug} from ${template}…`);
-    const created = await exec('gh', ['repo', 'create', slug, '--private', '--template', template], false);
-    if (!created.ok) return createFailed(created.error);
-    // Template generation is asynchronous on GitHub: an immediate clone can
-    // land an empty repo. Wait until the first commit is visible — and since
-    // the wait gives up eventually, the clone is checked for a commit below.
-    const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-    for (let attempt = 0; attempt < TEMPLATE_WAIT_ATTEMPTS; attempt++) {
-      const probe = await exec('gh', ['api', `repos/${slug}/commits?per_page=1`, '--jq', 'length'], false);
-      if (probe.ok && Number.parseInt(probe.stdout.trim(), 10) > 0) break;
-      if (attempt === 0) say('Waiting for GitHub to generate the repository…');
-      await sleep(TEMPLATE_WAIT_MS);
-    }
-    const cloned = await exec('gh', ['repo', 'clone', cloneUrl(slug), target, '--', '--progress'], false);
-    if (!cloned.ok) {
-      // Nothing local is worth keeping (the folder holds at most a partial
-      // clone), so this is the one post-create failure that cleans up — and
-      // says how to finish from the repository that now exists.
-      await cleanupCheckout(root, target);
-      return refuse({
-        ok: false,
-        status: 500,
-        error: `${cloned.error}\nThe private repository ${webUrl(slug)} was created on GitHub — add it with Add project → Clone from GitHub (${slug}).`,
-      });
-    }
-    // git clones an empty remote without complaint, and a project with no
-    // commit cannot host a task: that is a failed clone, not a success.
-    const head = await exec('git', ['rev-parse', '--verify', '--quiet', 'HEAD'], false);
-    if (!head.ok) {
-      await cleanupCheckout(root, target);
-      return refuse({
-        ok: false,
-        status: 500,
-        error: `GitHub had not finished generating ${slug} from ${template}, so the clone has no commit. The private repository ${webUrl(slug)} was created on GitHub — once it shows the template's files, add it with Add project → Clone from GitHub (${slug}).`,
-      });
-    }
-    return done('template', await finishAfterCreate([credentialStep]));
+    return createFromTemplate({
+      opts, slug, template, root, target, say, refuse, exec, fail, finishAfterCreate, createFailed, done, credentialStep,
+    });
   }
 
   say('Initializing a git repository…');
@@ -330,11 +405,16 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
     );
   }
   if (!slug) return done('local', undefined);
+  return attachEmptyGithubRepo({
+    opts, slug, say, exec, fail, finishAfterCreate, createFailed, done, credentialStep,
+  });
+}
 
-  if (opts.signal?.aborted) return fail(500, CANCELLED);
-  say(`Creating private repository ${slug}…`);
-  const created = await exec('gh', ['repo', 'create', slug, '--private'], false);
-  if (!created.ok) return createFailed(created.error);
+/** Empty GitHub-backed project: `gh repo create`, origin, credentials, then push. */
+async function attachEmptyGithubRepo(input: GithubCreateInput): Promise<CreateProjectResult> {
+  const { slug, say, exec, finishAfterCreate, done, credentialStep } = input;
+  const created = await createPrivateGithubRepo(input, `Creating private repository ${slug}…`);
+  if (created) return created;
   // HTTPS remote + gh credential helper, exactly as a clone gets (#968); the
   // push then goes through plain git, proving the setup a task push relies on.
   const warning = await finishAfterCreate([
