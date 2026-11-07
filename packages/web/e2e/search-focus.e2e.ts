@@ -63,10 +63,12 @@ for (const picker of [
             settleVisual(browser, picker.trigger)
             browser.click(picker.trigger)
             browser.waitForFunction(`document.activeElement === document.querySelector('${picker.input}')`)
+            const row = picker.name === 'branch' ? '[data-slot="picker-search"]' : '[data-slot="command-input-wrapper"]'
+            // Geometry and outline contrast come from one held observation of the open picker.
             const sample = () => waitForSettledSample<{
               focused: boolean; frame: string; ink: string; background: string; line: number; inset: number;
               innerLine: number; innerInk: string; remaining: number; iconInside: boolean;
-              left: number; right: number; rowBottom: number; resultTop: number; menuWidth: number;
+              left: number; right: number; rowBottom: number; resultTop: number; menuWidth: number; contrast: ContrastSample;
             }>(browser, `(() => {
               const input = document.querySelector('${picker.input}');
               const row = input.parentElement, menu = document.querySelector('${picker.content}');
@@ -76,7 +78,8 @@ for (const picker of [
               return { focused: input.matches(':focus-visible'), frame: s.outlineStyle, ink: s.outlineColor, background: getComputedStyle(menu).backgroundColor,
                 line: parseFloat(s.outlineWidth), inset: parseFloat(s.outlineOffset), innerLine: parseFloat(inner.outlineWidth), innerInk: inner.outlineColor,
                 remaining: r.right - parseFloat(s.paddingRight) - i.right, iconInside: icon.left >= r.left && icon.right <= r.right,
-                left: r.left, right: r.right, rowBottom: r.bottom, resultTop: result.getBoundingClientRect().top, menuWidth: menu.getBoundingClientRect().width };
+                left: r.left, right: r.right, rowBottom: r.bottom, resultTop: result.getBoundingClientRect().top, menuWidth: menu.getBoundingClientRect().width,
+                contrast: ${contrastSampleExpression(row, 'outline-color')} };
             })()`)
             const before = sample()
             expect(before.focused).toBe(true)
@@ -90,9 +93,7 @@ for (const picker of [
             expect(before.left).toBeGreaterThanOrEqual(0)
             expect(before.right).toBeLessThanOrEqual(width)
             expect(before.rowBottom).toBeLessThanOrEqual(before.resultTop)
-            const row = picker.name === 'branch' ? '[data-slot="picker-search"]' : '[data-slot="command-input-wrapper"]'
-            const contrast = waitForSettledSample<ContrastSample>(browser, contrastSampleExpression(row, 'outline-color'))
-            expect(contrast.ratio, JSON.stringify(contrast)).toBeGreaterThanOrEqual(3)
+            expect(before.contrast.ratio, JSON.stringify(before.contrast)).toBeGreaterThanOrEqual(3)
             if (picker.name === 'branch' && width === 1440) expect(before.menuWidth).toBeGreaterThan(400)
             browser.fill(picker.input, picker.name === 'branch' ? 'long-branch' : 'focus-fixture')
             browser.waitForFunction(`document.querySelector('${picker.content}')?.textContent.includes('${picker.name === 'branch' ? 'feature/a-long' : 'focus-fixture'}') === true`)
@@ -100,6 +101,7 @@ for (const picker of [
             expect(after.line).toBe(before.line)
             expect(after.rowBottom).toBe(before.rowBottom)
             expect(after.remaining).toBeCloseTo(0, 0)
+            expect(after.contrast.ratio, JSON.stringify(after.contrast)).toBeGreaterThanOrEqual(3)
             browser.screenshot(join(artifacts, `${picker.name}-${width}-${theme}.png`))
             dismissWithEscape(browser, { content: picker.content, focus: picker.trigger })
           } finally {
