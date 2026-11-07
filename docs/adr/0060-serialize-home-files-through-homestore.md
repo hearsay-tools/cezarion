@@ -17,8 +17,17 @@ A synchronous read or read-modify-write holds `<root>/.locks/write.lock/`.
 Atomic Lamport bakery claims have unique names and record pid, process start identity
 and ordering ticket. Recovery removes only dead process claims. A canonical root
 identifies nested transactions in one process. No lock spans an event-loop yield.
+Claims use atomic replacement without fsync: they coordinate live processes and
+need no crash persistence. Data and journal records retain their durable write order.
 Cockpit lifetime leases use `<root>/.locks/cockpits/<pid>.lease` and the same process
 liveness helper. Each cockpit has its own lease; leases never exclude writers.
+
+Before a mutation, target files and parent directories must resolve inside the
+canonical home and pass the passwd-home guard. The same check covers install.json
+and existing lock and version directory chains, including symlinked journal records.
+An auxiliary failure during a read always falls back to the live file. This includes
+full disks, malformed auxiliary records and permission failures. Only failure to read
+the live file may propagate to the tolerant parser.
 
 Only sandbox construction and operator entry preparation create install markers.
 Preparation selects `test` under the actual test process, `dev` for dry `serve`/`init`,
@@ -62,6 +71,14 @@ immutable bytes. `HEAD` names the committed hash; null means absent. The first
 entry seeds existing and absent files without changing live bytes, permissions or
 mtime. Each replacement flushes the new bytes, flushes `PENDING`, atomically replaces
 the live file, flushes `HEAD`, then removes and flushes `PENDING`.
+
+Install locks retain the historical exclusive-create contract for older binaries.
+HomeStore stores durable bytes and PENDING, flushes a private staging file, then
+publishes it with an exclusive hard link. HEAD advances only after publication.
+An EEXIST result clears PENDING before the original held/stale/self checks and single
+reclaim retry. It never replaces another live holder. Crashes before or after the
+link recover through PENDING. If an older writer creates its lock during a failed
+exclusive attempt, a crash in the EEXIST window can flag that real outside write.
 
 | Observed state on next read | Result |
 | --- | --- |

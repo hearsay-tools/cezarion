@@ -8,6 +8,7 @@ import { readInstallMarker } from './install-marker.ts';
 import { prepareHome } from './entry.ts';
 import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { enableRemoteSettings } from '../remote-settings.ts';
+import { benchmarkHome } from '../../scripts/benchmark-home.ts';
 import { childEnv, cleanStoreRoots, storeChild, storeFixture, storeRoot } from './store.testkit.ts';
 
 afterEach(cleanStoreRoots);
@@ -31,6 +32,17 @@ it('rejects an unmarked library write without creating a marker', () => {
   const dir = storeRoot();
   expect(() => new HomeStore(dir).writeJson(join(dir, 'config.json'), {})).toThrow(/without an install marker/);
   expect(readdirSync(dir)).toEqual([]);
+});
+
+it('benchmarks mark new homes while preserving selected paths and refuse inherited live homes', () => {
+  const dir = storeRoot();
+  const selected = homePaths(dir, join(dir, 'chosen-cache'), dir);
+  expect(benchmarkHome(selected)).toBe(selected);
+  expect(readInstallMarker(dir)?.kind).toBe('test');
+  const live = storeRoot();
+  storeChild(live, 'prepare', 'run');
+  expect(() => benchmarkHome(homePaths(live, join(live, 'cache'), live))).toThrow(/refuses a live install marker/);
+  expect(readInstallMarker(live)?.kind).toBe('live');
 });
 
 it('keeps saved registry data readable when auxiliary marker JSON is invalid', () => {

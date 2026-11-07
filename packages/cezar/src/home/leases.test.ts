@@ -1,9 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { Home } from './home.ts';
+import { Home, homePaths } from './home.ts';
+import { prepareHomeLifecycle } from './entry.ts';
 import { readCockpitLeases } from './leases.ts';
 import { HomeStore } from './store.ts';
 import { childEnv, cleanStoreRoots, storeFixture, storeRoot } from './store.testkit.ts';
@@ -17,6 +19,23 @@ afterEach(async () => {
     await exited;
   }));
   cleanStoreRoots();
+});
+
+it('prepares embedded server homes and keeps their lease until close', async () => {
+  const root = storeRoot();
+  const home = homePaths(root, join(root, 'cache'), root);
+  const server = createServer();
+  prepareHomeLifecycle(home)(server);
+  server.listen(0, '127.0.0.1');
+  try {
+    await once(server, 'listening');
+    expect(readCockpitLeases(home)).toHaveLength(1);
+  } finally {
+    const closed = once(server, 'close');
+    server.close();
+    await closed;
+  }
+  expect(readCockpitLeases(home)).toEqual([]);
 });
 
 it('keeps two serving cockpits independent and prunes a dead pid lease', async () => {

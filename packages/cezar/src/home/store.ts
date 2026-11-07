@@ -5,6 +5,7 @@ import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 import { assertHomeWritable, readInstallMarker, underTestRunner } from './install-marker.ts';
 import { OUTSIDE_WRITE_ENFORCEMENT, readBytes, VersionLog, type OutsideWrite } from './version-log.ts';
 import { withHomeLock } from './write-lock.ts';
+import { assertHomeDirectory, assertHomePath } from './boundary.ts';
 
 /** A path-derived reader preserves APIs that already accept a resolved Home path (ADR 0059). */
 export function homeFileRoot(path: string): string {
@@ -33,8 +34,15 @@ export class HomeStore {
   /** Synchronous transactions never retain the filesystem lock over an event-loop yield. */
   transaction<T>(operation: () => T, writePaths: readonly string[] = []): T {
     assertHomeWritable(this.root);
-    for (const path of writePaths) assertCezarHomeWriteIsSandboxed(path);
+    this.assertBoundary(writePaths);
     return withHomeLock(this.root, () => { assertHomeWritable(this.root); return operation(); });
+  }
+
+  assertBoundary(paths: readonly string[]): void {
+    for (const path of paths) {
+      assertHomePath(this.root, path);
+      if (!/\.(?:json|bak|lock)$/.test(path)) assertHomeDirectory(this.root, path);
+    }
   }
 
   read(path: string): string {
@@ -42,15 +50,14 @@ export class HomeStore {
     // Reading an old or protected home never creates a marker or lets a test mutate a live home.
     if (!this.canJournal()) return this.requiredBytes(path).toString('utf8');
     try {
+      this.assertBoundary([path]);
       return withHomeLock(this.root, () => {
         const bytes = readBytes(path);
         log.inspect(bytes);
         return this.requiredBytes(path, bytes).toString('utf8');
       });
-    } catch (error) {
-      // A readable home must remain readable on read-only media. Journaling is unavailable;
-      // never turn a permission error in auxiliary state into an empty project registry.
-      if (!['EACCES', 'EPERM', 'EROFS'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+    } catch {
+      // Auxiliary failures must never hide readable saved data. Only this live read may throw.
       return this.requiredBytes(path).toString('utf8');
     }
   }
@@ -73,7 +80,7 @@ export class HomeStore {
   }
 
   writeJson(path: string, value: unknown): void {
-    assertCezarHomeWriteIsSandboxed(path);
+    this.assertBoundary([path]);
     this.transaction(() => {
       assertCezarHomeWriteIsSandboxed(path);
       if (isBackupFile(basename(path))) backupBeforeWrite(path, value);
@@ -82,7 +89,7 @@ export class HomeStore {
   }
 
   replace(path: string, bytes: Buffer | null): void {
-    assertCezarHomeWriteIsSandboxed(path);
+    this.assertBoundary([path]);
     this.transaction(() => {
       assertCezarHomeWriteIsSandboxed(path);
       const log = this.journal(path);
@@ -93,14 +100,24 @@ export class HomeStore {
   }
 
   outsideWrite(path: string): OutsideWrite | undefined {
+    this.assertBoundary([path]);
     return this.transaction(() => {
       const log = this.journal(path);
       return log.inspect(readBytes(path));
     });
   }
 
+  createExclusive(path: string, bytes: Buffer): void {
+    this.assertBoundary([path]);
+    this.transaction(() => {
+      const log = this.journal(path);
+      log.inspect(readBytes(path));
+      log.createExclusive(path, bytes);
+    });
+  }
+
   restoreOutsideWrite(path: string): void {
-    assertCezarHomeWriteIsSandboxed(path);
+    this.assertBoundary([path]);
     this.transaction(() => this.journal(path).restore(path));
   }
 }

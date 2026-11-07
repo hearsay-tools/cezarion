@@ -1,12 +1,22 @@
 import { randomUUID } from 'node:crypto';
-import { readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { recordedProcessLive, processStartToken } from '../delegation/process-liveness.ts';
-import { privateDirectory, replacePrivate } from './private-files.ts';
+import { privateDirectory } from './private-files.ts';
+import { assertHomeMetadata, assertHomePath } from './boundary.ts';
 
-interface Claim { pid: number; startToken?: string; ticket: number }
+interface Claim { pid: number; startToken?: string | undefined; ticket: number }
 const held = new Set<string>();
 const pause = new Int32Array(new SharedArrayBuffer(4));
+
+/** Claims need atomic visibility, not persistence. A crash makes the recorded owner stale. */
+function publishClaim(path: string, claim: Claim): void {
+  const stage = `${path}.tmp`;
+  try {
+    writeFileSync(stage, JSON.stringify(claim), { flag: 'wx', mode: 0o600 });
+    renameSync(stage, path);
+  } finally { rmSync(stage, { force: true }); }
+}
 
 function readClaim(path: string): Claim | undefined {
   let value: Claim;
@@ -29,9 +39,10 @@ function readClaim(path: string): Claim | undefined {
  * The callback is synchronous: no task in this process can wait on a lock across an await.
  */
 export function withHomeLock<T>(root: string, operation: () => T): T {
-  privateDirectory(root);
-  const canonical = realpathSync(root);
+  const canonical = assertHomePath(root, root);
   if (held.has(canonical)) return operation();
+  assertHomeMetadata(root);
+  privateDirectory(root);
   const directory = join(canonical, '.locks', 'write.lock');
   privateDirectory(directory);
   const name = `${process.pid}-${randomUUID()}.json`;
@@ -39,11 +50,11 @@ export function withHomeLock<T>(root: string, operation: () => T): T {
   const claim = { pid: process.pid, startToken: processStartToken(process.pid), ticket: 0 };
   const peers = () => readdirSync(directory).filter(entry => entry.endsWith('.json') && entry !== name);
   try {
-    replacePrivate(path, JSON.stringify(claim));
+    publishClaim(path, claim);
     let ticket = 1;
     for (const entry of peers()) ticket = Math.max(ticket, (readClaim(join(directory, entry))?.ticket ?? 0) + 1);
     claim.ticket = ticket;
-    replacePrivate(path, JSON.stringify(claim));
+    publishClaim(path, claim);
     const deadline = Date.now() + 10_000;
     for (;;) {
       const blocked = peers().some(entry => {

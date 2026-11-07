@@ -120,20 +120,34 @@ export function acquireLock(instance: string = DEFAULT_SERVER_INSTANCE, home: Ho
   const path = serverLockPath(instance, home);
   const store = new HomeStore(home);
   return store.transaction(() => {
-    const holder = readLockPid(path);
-    if (holder !== null && holder !== process.pid && isProcessAlive(holder)) {
-      throw new LockHeldError(`another server-install/uninstall is already running (pid ${holder}). If that is wrong, remove ${path} and retry.`);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        store.createExclusive(path, Buffer.from(`${process.pid}\n`));
+        return lockRelease(store, path);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        const holder = readLockPid(path);
+        if (holder !== null && holder !== process.pid && isProcessAlive(holder)) {
+          throw new LockHeldError(`another server-install/uninstall is already running (pid ${holder}). If that is wrong, remove ${path} and retry.`);
+        }
+        // Same historical reclaim retry: stale, unreadable, or our own lock.
+        try { store.replace(path, null); } catch { /* The exclusive retry decides. */ }
+      }
     }
-    store.replace(path, Buffer.from(`${process.pid}\n`));
-    let released = false;
-    return () => {
-      if (released) return;
-      store.transaction(() => {
-        if (readLockPid(path) === process.pid) store.replace(path, null);
-        released = true;
-      }, [path]);
-    };
+    throw new LockHeldError(`could not acquire ${path} — another server-install/uninstall grabbed it first; retry in a moment.`);
   }, [path]);
+}
+
+function lockRelease(store: HomeStore, path: string): () => void {
+  let released = false;
+  return () => {
+    if (released) return;
+    assertHomeWritable(store.root);
+    released = true;
+    try {
+      store.transaction(() => { if (readLockPid(path) === process.pid) store.replace(path, null); }, [path]);
+    } catch { /* Release has always been best-effort. */ }
+  };
 }
 
 function readLockPid(path: string): number | null {

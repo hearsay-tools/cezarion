@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 import { replacePrivate } from './private-files.ts';
 import { withHomeLock } from './write-lock.ts';
+import { assertHomeMetadata } from './boundary.ts';
 
 export const installMarkerSchema = z.object({
   installId: z.uuid(), kind: z.enum(['live', 'dev', 'test']), createdAt: z.iso.datetime(),
@@ -37,6 +38,7 @@ export function createInstallMarker(root: string, kind: InstallMarker['kind']): 
   assertCezarHomeWriteIsSandboxed(root);
   const marker = readInstallMarker(root);
   if (marker) return marker;
+  assertHomeMetadata(root);
   return withHomeLock(root, () => {
     const existing = readInstallMarker(root);
     if (existing) return existing;

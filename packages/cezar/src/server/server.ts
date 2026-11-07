@@ -1,5 +1,4 @@
-import { prepareOperatorHome } from '../home/entry.ts';
-import { holdCockpitLease } from '../home/leases.ts';
+import { prepareHomeLifecycle } from '../home/entry.ts';
 import { reportsRoutes } from './reports-api.ts';
 import { writeMergedConfig } from './config-merge.ts';
 import { automationCreateSchema, automationUpdateSchema, automationCheckRequestSchema, automationLogQuerySchema } from '@open-mercato/cezar-contract/automation-requests';
@@ -288,6 +287,7 @@ import {
 } from './provider-action-gate.ts';
 import {
   attachProjectWebhooks,
+  cockpitOriginFor,
   createBootContext,
   createProviderStatus,
   emitProviderRow,
@@ -5157,20 +5157,12 @@ function builtinSkillsOf(manager: Partial<Pick<RunManager, 'builtinSkills'>>): S
   return manager.builtinSkills?.() ?? [];
 }
 
-function taskWebhookHost(bindHost: string | undefined): string {
-  if (!bindHost || bindHost === '0.0.0.0' || bindHost === '::') return '127.0.0.1';
-  return bindHost.includes(':') ? `[${bindHost}]` : bindHost;
-}
-
-/** The origin a local client reaches this cockpit at: `CEZ_COCKPIT_URL` and the task webhook's links (#774, #594). */
-export function cockpitOriginFor(bindHost: string | undefined, port: number): string {
-  return `http://${taskWebhookHost(bindHost)}:${port}`;
-}
+export { cockpitOriginFor } from './server-deps.ts';
 
 const webhookNameTakenError = (name: string) => `this project already has a webhook named "${name.trim()}" — pick another name`;
 
 export function startServer(deps: ServerDeps, port: number, listener?: Server): ServerType & { shutdownForRestart: () => Promise<void> } {
-  prepareOperatorHome(deps.home, 'serve');
+  const attachHomeLifecycle = prepareHomeLifecycle(deps.home);
   const workspaceEvents = deps.workspaceEvents ?? new WorkspaceEventBus();
   // The subscription hub rides the same HTTP server (one port, zero config):
   // createApp registers the topics, the `upgrade` hook below owns the socket.
@@ -5179,6 +5171,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   let listeningPort: number | undefined;
   const cezarPort = deps.cezarPort ?? (() => listeningPort);
   const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot: deps.repoRoot, bootProjectId: deps.bootProjectId, bindHost: deps.bindHost, home: deps.home });
+  // Every registry reader below sees what createApp sees: single-project mode hides other projects.
   const visibleProjects = () => workspaceProjects.listVisibleProjects();
   const automationCoordinator = new AutomationCoordinator({ listProjects: visibleProjects });
   const bootProjectId = deps.bootProjectId ?? 'default';
@@ -5284,6 +5277,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     listener.on('request', getRequestListener(serverOptions.fetch, defined({ hostname: serverOptions.hostname })));
   }
   const server = listener ?? serve(serverOptions);
+  attachHomeLifecycle(server);
   // EVERY registered project, remote or not: a schedule needs none. `github` is present only for
   // a github.com remote, and only then does the project's handle poll.
   const automationProjects = new Map<string, { root: string; github?: { owner: string; repo: string } }>();
@@ -5468,10 +5462,6 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     const address = server.address();
     const bound = address && typeof address === 'object' ? address.port : port;
     listeningPort = bound;
-    try {
-      const release = holdCockpitLease(deps.home, bound);
-      server.once('close', () => { try { release(); } catch { /* Read-only home: presence is advisory. */ } });
-    } catch { /* A read-only home must not stop the cockpit. */ }
     cockpitOrigin = cockpitOriginFor(deps.bindHost, bound);
     taskWebhooks.setOrigin(cockpitOrigin);
     addressManager({ id: bootProjectId, manager: deps.manager });
@@ -5484,6 +5474,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   else server.once('listening', setTaskWebhookOrigin);
   return Object.assign(server, { shutdownForRestart });
 }
+
 /**
  * Validate topic-bus upgrades before handshake. Local Host must be loopback. Same-authority or
  * native clients are trusted; verified dev proxies are trusted. Metadata-free foreign loopback
@@ -5517,11 +5508,13 @@ export function verifyWsUpgrade(req: IncomingMessage, bindHost?: string): WsUpgr
   // indistinguishable: admit as UNTRUSTED so only `loopbackReadable` topics show.
   return { trusted: fetchSite === 'same-origin' };
 }
+
 /** The bare hostname of a `Host` header — see `normalizeHostname`. `''` when the
  *  header is absent, which no allowlist matches. */
 function hostnameOfHost(host: string | undefined): string {
   return host ? normalizeHostname(host) : '';
 }
+
 /** The `hostname:port` authority of a `Host` header, e.g. `127.0.0.1:4321`.
  *
  *  The port is kept verbatim and is `''` when the header omits it — which is
@@ -5533,6 +5526,7 @@ function authorityOfHost(host: string | undefined): string {
   const port = host.match(/^\[[^\]]*\]:(\d+)$/)?.[1] ?? host.match(/^[^:]*:(\d+)$/)?.[1] ?? '';
   return `${normalizeHostname(host)}:${port}`;
 }
+
 /** The `hostname:port` authority of an `Origin` header, or `null` when it is not
  *  a parseable http(s) URL (the opaque `"null"` origin of a sandboxed iframe, a
  *  `file://` page). `URL.port` is `''` for a scheme's default port, matching
@@ -5546,6 +5540,7 @@ function authorityOfOrigin(origin: string): string | null {
     return null;
   }
 }
+
 /** The hostname of an `Origin` header, or `null` when it is not a parseable URL
  *  (e.g. the opaque `"null"` origin of a sandboxed iframe). Normalized through
  *  the same path as `hostnameOfHost` so the two compare equal for IPv6 and for
@@ -5557,6 +5552,7 @@ function hostnameOfOrigin(origin: string): string | null {
     return null;
   }
 }
+
 function resolveWebDir(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   // here = <pkg>/dist/server (built) or <pkg>/src/server (tsx dev).

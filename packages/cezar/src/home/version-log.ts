@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, rmSync } from 'node:fs';
+import { linkSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
-import { replacePrivate, syncDirectory } from './private-files.ts';
+import { atomicTmpPath, replacePrivate, syncDirectory } from './private-files.ts';
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/).nullable();
 const versionSchema = z.object({ hash: hashSchema });
@@ -90,6 +90,23 @@ export class VersionLog {
     } else replacePrivate(path, bytes);
     this.setRecord('HEAD', { hash });
     this.clearPending();
+  }
+
+  /** Install locks must also exclude older binaries, which create their lock with wx. */
+  createExclusive(path: string, bytes: Buffer): void {
+    const hash = this.store(bytes);
+    this.setRecord('PENDING', { hash });
+    const stage = atomicTmpPath(path);
+    try {
+      replacePrivate(stage, bytes);
+      linkSync(stage, path);
+      syncDirectory(dirname(path));
+      this.setRecord('HEAD', { hash });
+      this.clearPending();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') this.clearPending();
+      throw error;
+    } finally { rmSync(stage, { force: true }); }
   }
 
   restore(path: string): void {
