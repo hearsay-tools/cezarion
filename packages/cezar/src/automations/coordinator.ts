@@ -22,17 +22,22 @@ export class AutomationCoordinator {
   private readonly stores = new Map<string, AutomationStore>();
   private readonly roots = new Map<string, string>();
   private seenProject = false;
+  private refreshSeq = 0;
 
   constructor(private readonly options: AutomationCoordinatorOptions) {}
 
   async refresh(): Promise<void> {
     let projects: readonly AutomationProjectSource[];
+    const seq = ++this.refreshSeq;
     try {
       projects = await this.options.listProjects();
     } catch (error) {
       this.options.warn?.(`Unable to refresh GitHub automations: ${error instanceof Error ? error.message : String(error)}`);
       return;
     }
+    if (projects.some((project) => project.status !== 'missing')) this.seenProject = true;
+    // A read that a newer one overtook keeps its sighting but never applies its project state.
+    if (seq !== this.refreshSeq) return;
     const present = new Set(projects.map((project) => project.id));
     for (const id of this.stores.keys()) {
       if (!present.has(id)) this.remove(id);
@@ -43,7 +48,6 @@ export class AutomationCoordinator {
         continue;
       }
       this.roots.set(project.id, project.root);
-      this.seenProject = true;
       // A store this process already holds is re-read when another cockpit changed its files;
       // a project whose definitions file appeared since the last refresh is opened here.
       const existing = this.stores.get(project.id);

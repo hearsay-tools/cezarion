@@ -825,6 +825,40 @@ describe('WorkspaceAutomationScheduler', () => {
       } finally { vi.useRealTimers(); }
     });
 
+    it('a registry read that a newer empty one overtook does not restore its project', async () => {
+      vi.useFakeTimers();
+      try {
+        const { root, dataDir } = await workspace();
+        AutomationStore.open(dataDir).create({ name: 'Nightly', enabled: true, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'x' } }, 'nightly');
+        type Read = (projects: { id: string; root: string; status: 'ok' }[]) => void;
+        const reads: Read[] = [];
+        const coordinator = new AutomationCoordinator({ listProjects: () => new Promise(resolve => { reads.push(resolve); }) });
+        const launchSchedule = vi.fn(async () => ({ runId: 'scheduled' }));
+        const scheduler = new WorkspaceAutomationScheduler({
+          coordinator,
+          handle: (projectId, store) => ({ projectId, store, timeZone: 'UTC', launchSchedule }),
+        });
+        try {
+          const first = scheduler.start();
+          reads[0]!([{ id: 'a', root, status: 'ok' }]);
+          await first;
+          expect(coordinator.ids()).toEqual(['a']);
+          const older = scheduler.reschedule();
+          const newer = scheduler.reschedule();
+          reads[2]!([]);
+          await newer;
+          expect(coordinator.ids()).toEqual([]);
+          reads[1]!([{ id: 'a', root, status: 'ok' }]);
+          await older;
+          expect(coordinator.ids()).toEqual([]);
+          expect(coordinator.enabledProjectIds()).toEqual([]);
+          expect(scheduler.hasTimer()).toBe(true);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(launchSchedule).not.toHaveBeenCalled();
+        } finally { scheduler.stop(); }
+      } finally { vi.useRealTimers(); }
+    });
+
     it('a registered project without definitions keeps an idle wake that discovers a schedule another process creates and exits (finding 4172236277)', async () => {
       vi.useFakeTimers();
       try {
