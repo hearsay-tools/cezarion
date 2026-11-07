@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { expect, it, vi } from 'vitest';
 import { withHeldAck } from './owned-input-delivery.testkit.ts';
 
-import { driveSeam, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { driveSeam, waitFor } from './harness-parity.testkit.ts';
+import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 
 
 for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {

@@ -2,7 +2,8 @@ import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { expect, it } from 'vitest';
 import type { AgentInput, ConversationMessage } from '@open-mercato/cezar-contract';
-import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { waitFor } from './harness-parity.testkit.ts';
+import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 import { withHeldAck } from './owned-input-delivery.testkit.ts';
 
 for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {

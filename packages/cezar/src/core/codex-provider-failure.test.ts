@@ -1,6 +1,7 @@
 import { STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
-import { driveRun, driveSeam } from './harness-parity.testkit.ts';
+import { driveSeam } from './harness-parity.testkit.ts';
+import { driveRun } from './workflow-parity.testkit.ts';
 
 describe('Codex 0.147 provider completion (#83)', () => {
   it('surfaces the provider 400 before the v1 turn boundary and marks v2 as error', async () => {

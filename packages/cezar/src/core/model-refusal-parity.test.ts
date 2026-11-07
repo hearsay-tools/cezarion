@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { driveRun, driveSeam, MODEL_REFUSAL_CRITERIA, promptFor, waitFor } from './harness-parity.testkit.ts';
+import { driveSeam, MODEL_REFUSAL_CRITERIA, promptFor, waitFor } from './harness-parity.testkit.ts';
+import { driveRun } from './workflow-parity.testkit.ts';
 
 // Use each runner's native rejection. Claude alone has the selected-model +
 // zero-usage result that this change classifies; other wires keep their existing

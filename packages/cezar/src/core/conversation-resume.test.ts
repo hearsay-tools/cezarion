@@ -5,7 +5,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { waitFor } from './harness-parity.testkit.ts';
+import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 
 // This suite enters through the opt-in service, unlike the manager-only fixtures.
 afterEach(() => vi.unstubAllEnvs());

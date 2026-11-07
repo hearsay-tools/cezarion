@@ -10,7 +10,8 @@ import { setTimeout as realDelay } from 'node:timers/promises';
 import { describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
-import { FINAL_MESSAGE_CRITERIA, HARNESS_ADAPTERS, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { FINAL_MESSAGE_CRITERIA, HARNESS_ADAPTERS, driveSeam, exemptionFor, promptFor, waitFor } from './harness-parity.testkit.ts';
+import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 import { IDLE_TIMEOUT_MS, NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE } from '../workflows/run.ts';
 
 function replyObservationClock() {

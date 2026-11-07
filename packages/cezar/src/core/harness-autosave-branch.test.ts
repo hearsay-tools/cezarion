@@ -5,7 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { readHandoff } from '../handoff.ts';
 import { AUTOSAVE_INTERVAL_MS } from '../workflows/run.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { withOwnedInputRun, waitFor } from './harness-parity.testkit.ts';
+import { waitFor } from './harness-parity.testkit.ts';
+import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 
 const FOREIGN = 'fix/1004-x';
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
