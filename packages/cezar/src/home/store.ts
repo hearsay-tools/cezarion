@@ -1,10 +1,9 @@
 import type { Home } from './home.ts';
 import { existsSync } from 'node:fs';
-import { homeFileSchema } from '@open-mercato/cezar-contract/home-recovery';
 import { registryCount } from './registry-content.ts';
 import { homeChanged } from './changes.ts';
 import { flagResetFromBackup, flagResetOnWrite } from './reset-detection.ts';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { backupBeforeWrite } from '../workspace/backups.ts';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 import { assertHomeWritable, createInstallMarker, readInstallMarker, underTestRunner } from './install-marker.ts';
@@ -12,6 +11,7 @@ import { digest, OUTSIDE_WRITE_ENFORCEMENT, readBytes, VersionLog, type OutsideW
 import { withHomeLock } from './write-lock.ts';
 import { assertHomePaths } from './boundary.ts';
 import { homeEntryAuthorization, registryFiles, seedHomeRegistry } from './entry-authorization.ts';
+import { homePathLocation } from './file-location.ts';
 
 /** A path-derived reader preserves APIs that already accept a resolved Home path (ADR 0059). */
 export function homeFileRoot(path: string): string {
@@ -27,9 +27,16 @@ export class HomeStore {
   constructor(private readonly home: Home | string) { this.root = typeof home === 'string' ? home : home.root; }
 
   private journal(path: string): VersionLog {
-    const rel = relative(resolve(this.root), resolve(path));
-    if (!homeFileSchema.safeParse(rel.split(sep).join('/')).success) throw new Error(`Not a HomeStore file: ${path}`);
-    return new VersionLog(this.root, rel);
+    const { root, file } = homePathLocation(this.home, path);
+    return new VersionLog(root, file);
+  }
+
+  private lockRoot(path: string): string {
+    if (typeof this.home !== 'string') {
+      if ([this.home.config, this.home.remoteSettings].includes(path)) return this.home.config;
+      if ([this.home.state, this.home.serverInstances].includes(path)) return this.home.state;
+    }
+    return this.journal(path).root;
   }
 
   /** Synchronous transactions never retain the filesystem lock over an event-loop yield. */
@@ -44,26 +51,32 @@ export class HomeStore {
     const seedable = files.filter(path => {
       try { this.assertBoundary([path]); return true; } catch { return false; }
     });
-    return withHomeLock(this.root, () => {
+    const roots = [...new Set([...(entry ? [this.root] : []), ...writePaths.map(path => this.lockRoot(path))])];
+    if (!roots.length) roots.push(this.root);
+    // Entry seeding takes config before state too; keep that order for multi-file callers.
+    roots.sort((a, b) => Number(b === this.root) - Number(a === this.root));
+    const operationWithEntry = () => {
       if (entry) createInstallMarker(this.root, underTestRunner() ? 'test' : entry.kind);
       assertHomeWritable(this.root);
-      if (entry) entry.seeded = seedHomeRegistry(this, seedable) && seedable.length === files.length;
+      if (entry) entry.seeded = seedHomeRegistry(this, seedable, entry.home) && seedable.length === files.length;
       return operation();
-    });
+    };
+    return roots.reduceRight<() => T>((next, root) => () => withHomeLock(root, next), operationWithEntry)();
   }
 
   assertBoundary(paths: readonly string[], backups = false): Map<string, unknown> {
     const unavailable = new Map<string, unknown>();
-    const targets = [...paths];
+    assertHomePaths(this.root, [join(this.root, 'install.json')]);
     const files = paths.filter(path => /\.(?:json|bak|lock)$/.test(path));
-    for (const path of files) {
-      const log = this.journal(path);
-      targets.push(join(log.directory, 'HEAD')); // Reads follow HEAD; other records publish by replacement.
+    for (const path of paths) {
+      const targets = [path];
+      if (files.includes(path)) targets.push(join(this.journal(path).directory, 'HEAD'));
+      assertHomePaths(this.lockRoot(path), targets);
     }
-    assertHomePaths(this.root, targets);
     if (backups) for (const path of files) {
       const file = this.journal(path).relativePath;
-      try { assertHomePaths(this.root, [join(typeof this.home === 'string' ? join(this.root, 'backups') : this.home.backups, file)]); }
+      const root = typeof this.home === 'string' ? this.root : this.home.state;
+      try { assertHomePaths(root, [join(typeof this.home === 'string' ? join(root, 'backups') : this.home.backups, file)]); }
       catch (error) { unavailable.set(path, error); }
     }
     return unavailable;
@@ -75,7 +88,7 @@ export class HomeStore {
     if (!this.canJournal()) return this.requiredBytes(path).toString('utf8');
     try {
       this.assertBoundary([path]);
-      return withHomeLock(this.root, () => {
+      return withHomeLock(log.root, () => {
         const bytes = readBytes(path);
         log.inspect(bytes);
         return this.requiredBytes(path, bytes).toString('utf8');
@@ -121,7 +134,7 @@ export class HomeStore {
       log.reset(); // The durable reset now survives later ordinary writes.
       if (keepAcceptance || restoredDeletion) log.clearRecovery(bytes);
       homeChanged(this.root);
-    });
+    }, [path]);
   }
 
   private checkOutside(path: string, log: VersionLog, previous: Buffer | null, recoveredBase?: Buffer): boolean {
@@ -142,7 +155,7 @@ export class HomeStore {
     return this.transaction(() => {
       const log = this.journal(path);
       return log.inspect(readBytes(path));
-    });
+    }, [path]);
   }
 
   createExclusive(path: string, bytes: Buffer): void {
@@ -153,7 +166,7 @@ export class HomeStore {
       // Exclusive publication can only replace absence, which needs no snapshot.
       log.createExclusive(path, bytes);
       homeChanged(this.root);
-    });
+    }, [path]);
   }
 
   restoreOutsideWrite(path: string): void {
@@ -171,12 +184,12 @@ export class HomeStore {
       const log = this.journal(path);
       const bytes = readBytes(path);
       const outside = log.inspect(bytes);
-      if (!outside) flagResetFromBackup(log, bytes);
+      if (!outside) flagResetFromBackup(log, bytes, this.home);
       const flag = outside ?? log.reset();
       let canRestore = true;
       if (flag) try { log.recoveryBytes(flag); } catch { canRestore = false; }
       return flag ? { reason: outside ? 'outside-write' as const : 'reset' as const, detectedAt: flag.detectedAt, canRestore, restoreHash: flag.restoreHash } : undefined;
-    });
+    }, [path]);
   }
 
   /** Explicit restore resolves any incident; normal writes only self-heal a proven registry deletion. */
@@ -189,7 +202,7 @@ export class HomeStore {
       log.replace(path, bytes);
       log.clearRecovery(bytes, keepReset);
       homeChanged(this.root);
-    });
+    }, [path]);
   }
 
   restoreRecovery(path: string, detectedAt?: string): string | undefined {
@@ -204,7 +217,7 @@ export class HomeStore {
       // Restoring an outside write must not accept a separate, unresolved registry reset.
       this.restoreFile(path, log.recoveryBytes(flag), Boolean(outside && reset));
       return flag.detectedAt;
-    });
+    }, [path]);
   }
 
   /** Stale cockpit retries cannot accept a different incident or an unflagged file. */
@@ -216,7 +229,7 @@ export class HomeStore {
       if (!flag) return;
       assertRecoveryIncident(flag, detectedAt);
       this.acceptOutsideWrite(path);
-    });
+    }, [path]);
   }
 
   acceptOutsideWrite(path: string): void {
@@ -226,7 +239,7 @@ export class HomeStore {
       log.inspect(readBytes(path));
       log.accept(path);
       homeChanged(this.root);
-    });
+    }, [path]);
   }
 
 }
@@ -237,8 +250,8 @@ function assertRecoveryIncident(flag: OutsideWrite, detectedAt: string | undefin
   }
 }
 
-export function readHomeFile(path: string): string {
-  return new HomeStore(homeFileRoot(path)).read(path);
+export function readHomeFile(path: string, home?: Home): string {
+  return new HomeStore(home ?? homeFileRoot(path)).read(path);
 }
 
 /** Managed-layout files stay outside HomeStore, but their entry's first write still marks it. */

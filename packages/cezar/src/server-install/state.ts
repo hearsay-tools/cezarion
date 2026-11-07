@@ -21,7 +21,7 @@ export function loadServerState(instance: string = DEFAULT_SERVER_INSTANCE, home
   const path = serverStatePath(instance, home);
   let raw: string;
   try {
-    raw = readHomeFile(path);
+    raw = readHomeFile(path, home);
   } catch {
     return freshServerState();
   }
@@ -124,10 +124,10 @@ export function acquireLock(instance: string = DEFAULT_SERVER_INSTANCE, home: Ho
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         store.createExclusive(path, Buffer.from(`${process.pid}\n`));
-        return lockRelease(store, path);
+        return lockRelease(store, path, home);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        const holder = readLockPid(path);
+        const holder = readLockPid(path, home);
         if (holder !== null && holder !== process.pid && isProcessAlive(holder)) {
           throw new LockHeldError(`another server-install/uninstall is already running (pid ${holder}). If that is wrong, remove ${path} and retry.`);
         }
@@ -139,14 +139,14 @@ export function acquireLock(instance: string = DEFAULT_SERVER_INSTANCE, home: Ho
   }, [path]);
 }
 
-function lockRelease(store: HomeStore, path: string): () => void {
+function lockRelease(store: HomeStore, path: string, home: Home): () => void {
   let released = false;
   return () => {
     if (released) return;
     assertHomeWritable(store.root);
     released = true;
     try {
-      store.transaction(() => { if (readLockPid(path) === process.pid) store.replace(path, null); }, [path]);
+      store.transaction(() => { if (readLockPid(path, home) === process.pid) store.replace(path, null); }, [path]);
     } catch (error) {
       if (error instanceof HomeOutsideWriteError) console.warn(`[cez] ${error.message}; install lock was kept`);
       // Release has always been best-effort.
@@ -154,9 +154,9 @@ function lockRelease(store: HomeStore, path: string): () => void {
   };
 }
 
-function readLockPid(path: string): number | null {
+function readLockPid(path: string, home: Home): number | null {
   try {
-    const pid = Number.parseInt(readHomeFile(path).trim(), 10);
+    const pid = Number.parseInt(readHomeFile(path, home).trim(), 10);
     return Number.isInteger(pid) && pid > 0 ? pid : null;
   } catch {
     return null;

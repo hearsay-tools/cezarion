@@ -78,12 +78,17 @@ external replacement or unreadable identity gets a fresh grant.
 New files inherit that ACL, so atomic replacement starts no ACL subprocess.
 Unix private modes stay unchanged.
 
-HomeStore routing across kind roots belongs to P2a-2. P2a-1 only defines paths;
-passing an explicit split Home to current HomeStore is not yet supported.
+P2a-2 (hearsay-tools/cezarion#2932) routes HomeStore through the shared
+`home/file-location.ts` map. The marker and cockpit leases stay in config.
+Per-file short locks and version logs use the file's config or state root.
+Recovery lists live files and deleted-file journals across both roots and keeps
+HomeFile keys unchanged. See the [registry rules](../areas/workspace-registry.md#split-home-roots-staged).
 
-Backups still derive their write directory from the file being replaced. An
-explicit backup-list root still selects that root's `backups/` directory. Home
-injection adds the named backup path without changing either rule.
+With an injected Home, backups of both kinds use `Home.backups` in state.
+The legacy path-only backup helper still derives its write directory from the
+file being replaced. An explicit backup-list root still selects that root's
+`backups/` directory. Historical nested named-instance snapshots remain readable
+in the legacy layout.
 
 ## Evidence
 
