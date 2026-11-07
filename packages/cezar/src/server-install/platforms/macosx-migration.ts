@@ -87,6 +87,7 @@ export async function migrateLaunchd(ctx: InstallContext, dir: string, rebrand: 
         report.leftAloneForeign.push({ ...from, kind: 'shared' });
         continue;
       }
+      if (!ctx.state.steps[stepId]) throw new Error(`Unknown migration step: ${stepId}`);
       const to: StepArtifact = { ...from, name: `tools.hearsay.squawk.${agent}`, path: join(dir, `tools.hearsay.squawk.${agent}.plist`) };
       const backup: StepArtifact = { kind: 'owned', type: 'file', path: `${from.path}.migrated` };
       const move: Move = { stepId, from, to, backup };

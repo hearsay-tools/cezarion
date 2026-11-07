@@ -99,6 +99,26 @@ describe('macOS launchd migration', () => {
     expect(commands).toEqual([]);
   });
 
+  it.each([
+    { agent: 'cockpit', dryRun: false }, { agent: 'cockpit', dryRun: true },
+    { agent: 'ngrok', dryRun: false }, { agent: 'ngrok', dryRun: true },
+  ] as const)('rejects missing $agent ledger step before mutation (dryRun:$dryRun)', async ({ agent, dryRun }) => {
+    const old = plant(agent);
+    const xml = readFileSync(old.path!, 'utf8');
+    const stepId = agent === 'cockpit' ? 'autostart' : 'ngrok';
+    ctx.state.steps.other = ctx.state.steps[stepId]!;
+    delete ctx.state.steps[stepId];
+    ctx.dryRun = dryRun;
+    const report = await strategy.migrate!(ctx);
+    expect(report.errors).toEqual([{ artifact: old, message: `Unknown migration step: ${stepId}` }]);
+    expect(report.moved).toEqual([]);
+    expect(readFileSync(old.path!, 'utf8')).toBe(xml);
+    expect(existsSync(`${old.path}.migrated`)).toBe(false);
+    expect(existsSync(join(dir, `tools.hearsay.squawk.${agent}.plist`))).toBe(false);
+    expect(loaded).toEqual(new Set([old.name!]));
+    expect(commands).toEqual([]);
+  });
+
   it('recognizes our npx launcher when check() left created:null', async () => {
     plant('cockpit', false);
     const report = await strategy.migrate!(ctx);
