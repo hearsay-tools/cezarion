@@ -16,3 +16,13 @@ The staged host CLI actions `cez backup import <file>` and `cez backup ignore
 refuse while `REBRAND_SWITCH` is disabled and appear in backup help only when
 enabled. Grant files remain unavailable to cockpit mutations; the host CLI uses
 the existing HomeFile allowlist and shared recovery writer.
+
+The staged `hsq migrate --resolve-legacy <file> restore|accept` action opens the
+resolved legacy home before migration. Restore uses only the pinned recovery
+version; Accept keeps the current bytes. Both use HomeStore locks and journals,
+and Restore keeps its normal backups. A retry after resolution is a no-op.
+Success prints one JSON object `{ "file": "<file>", "action": "restore|accept" }`
+to stdout and exits 0. Invalid arguments or recovery failures print an error to
+stderr and exit 1. Help exits 0. The action rejects `--dry-run` and does not
+start migration; the operator runs `hsq migrate` again. The entire `migrate`
+command and its help entry remain absent while `REBRAND_SWITCH` is disabled.

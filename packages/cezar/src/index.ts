@@ -77,7 +77,7 @@ Usage:
   cez server-install        interactive wizard to host cezar on a server
   cez server-deploy         redeploy a new version (reload the service) + verify
   cez server-uninstall      reverse a server-install
-${REBRAND_SWITCH ? '  cez migrate [--dry-run]  migrate the legacy home into the split layout\n' : ''}  cez remote-settings       enable|status|disable remote edits of agent config and worktree setup
+${REBRAND_SWITCH ? '  hsq migrate [--dry-run]  migrate the legacy home into the split layout\n  hsq migrate --resolve-legacy <file> restore|accept  resolve legacy recovery first\n' : ''}  cez remote-settings       enable|status|disable remote edits of agent config and worktree setup
   cez install | update      manage the desktop installation under ~/.cezar/versions
   cez versions | use <id>   list or switch managed versions
   cez link [dir] [--use]    link a built development checkout (unlink <id> removes it)
