@@ -361,8 +361,10 @@ export interface WorkspaceAutomationSchedulerOptions {
  * least one project is registered with the coordinator. With nothing enabled it is an idle wake
  * at the cap, even before any project has a definitions file: every wake goes through
  * `reschedule`, whose coordinator refresh re-reads a store another cockpit changed and opens a
- * project whose definitions file appeared, so their edits arm here within one cap. No registered
- * project: no timer.
+ * project whose definitions file appeared, so their edits arm here within one cap. A workspace
+ * that has never had a project arms no timer. One that had a project keeps the idle wake even when
+ * a later registry read lists none (`hasSeenProject`): an unreadable or briefly emptied registry
+ * file must not stop the only timer, because nothing else would ever arm it again.
  */
 export class WorkspaceAutomationScheduler {
   private timer?: ReturnType<typeof setTimeout> | undefined;
@@ -382,7 +384,13 @@ export class WorkspaceAutomationScheduler {
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
     await this.options.coordinator.refresh();
-    if (this.stopped || generation !== this.scheduleGeneration) return;
+    if (this.stopped) return;
+    // A newer refresh may have read the registry before this one saw a project and armed nothing;
+    // this one's sighting must still arm the timer.
+    if (generation !== this.scheduleGeneration) {
+      if (!this.timer) this.schedule();
+      return;
+    }
     this.schedule();
   }
 
@@ -397,12 +405,14 @@ export class WorkspaceAutomationScheduler {
 
   private schedule(): void {
     if (this.stopped) return;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = undefined;
     const due: WorkspaceDueEntry[] = [];
     const live = new Set<string>();
     for (const projectId of this.options.coordinator.enabledProjectIds()) due.push(...this.projectDue(projectId, live));
     for (const key of this.retryAfter.keys()) if (!live.has(key)) this.retryAfter.delete(key);
     if (!due.length) {
-      if (this.options.coordinator.hasProjects()) {
+      if (this.options.coordinator.hasProjects() || this.options.coordinator.hasSeenProject()) {
         this.timer = setTimeout(() => { this.timer = undefined; void this.reschedule(); }, WORKSPACE_TIMER_CAP_MS);
       }
       return;

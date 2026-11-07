@@ -472,6 +472,7 @@ describe('WorkspaceAutomationScheduler', () => {
       store: () => store,
       // No idle wake here: this case pins the reschedule path a local enable takes.
       hasProjects: () => false,
+      hasSeenProject: () => false,
     };
     const scheduler = new WorkspaceAutomationScheduler({
       coordinator: coordinator as never,
@@ -768,6 +769,92 @@ describe('WorkspaceAutomationScheduler', () => {
           await scheduler.start();
           expect(scheduler.hasTimer()).toBe(false);
           expect(vi.getTimerCount()).toBe(0);
+        } finally { scheduler.stop(); }
+      } finally { vi.useRealTimers(); }
+    });
+
+    it('a workspace whose registry once listed a project keeps its idle wake through an empty read', async () => {
+      vi.useFakeTimers();
+      try {
+        const { root, dataDir } = await workspace();
+        AutomationStore.open(dataDir).create({ name: 'Paused', enabled: false, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'x' } }, 'paused');
+        let projects: { id: string; root: string; status: 'ok' }[] = [{ id: 'a', root, status: 'ok' }];
+        const coordinator = new AutomationCoordinator({ listProjects: async () => projects });
+        const scheduler = new WorkspaceAutomationScheduler({
+          coordinator,
+          handle: (projectId, store) => ({ projectId, store, timeZone: 'UTC' }),
+        });
+        try {
+          await scheduler.start();
+          expect(scheduler.hasTimer()).toBe(true);
+          projects = [];
+          await vi.advanceTimersByTimeAsync(WORKSPACE_TIMER_CAP_MS);
+          expect(coordinator.ids()).toEqual([]);
+          expect(scheduler.hasTimer()).toBe(true);
+          projects = [{ id: 'a', root, status: 'ok' }];
+          await vi.advanceTimersByTimeAsync(WORKSPACE_TIMER_CAP_MS);
+          expect(coordinator.ids()).toEqual(['a']);
+          expect(scheduler.hasTimer()).toBe(true);
+        } finally { scheduler.stop(); }
+      } finally { vi.useRealTimers(); }
+    });
+
+    it('a refresh that sees a project after a newer empty one still arms the idle wake', async () => {
+      vi.useFakeTimers();
+      try {
+        const { root, dataDir } = await workspace();
+        AutomationStore.open(dataDir).create({ name: 'Paused', enabled: false, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'x' } }, 'paused');
+        const reads: Array<(projects: { id: string; root: string; status: 'ok' }[]) => void> = [];
+        const coordinator = new AutomationCoordinator({ listProjects: () => new Promise(resolve => { reads.push(resolve); }) });
+        const scheduler = new WorkspaceAutomationScheduler({
+          coordinator,
+          handle: (projectId, store) => ({ projectId, store, timeZone: 'UTC' }),
+        });
+        try {
+          const older = scheduler.start();
+          const newer = scheduler.reschedule();
+          expect(reads).toHaveLength(2);
+          reads[1]!([]);
+          await newer;
+          expect(scheduler.hasTimer()).toBe(false);
+          reads[0]!([{ id: 'a', root, status: 'ok' }]);
+          await older;
+          expect(scheduler.hasTimer()).toBe(true);
+          expect(vi.getTimerCount()).toBe(1);
+        } finally { scheduler.stop(); }
+      } finally { vi.useRealTimers(); }
+    });
+
+    it('a registry read that a newer empty one overtook does not restore its project', async () => {
+      vi.useFakeTimers();
+      try {
+        const { root, dataDir } = await workspace();
+        AutomationStore.open(dataDir).create({ name: 'Nightly', enabled: true, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'x' } }, 'nightly');
+        type Read = (projects: { id: string; root: string; status: 'ok' }[]) => void;
+        const reads: Read[] = [];
+        const coordinator = new AutomationCoordinator({ listProjects: () => new Promise(resolve => { reads.push(resolve); }) });
+        const launchSchedule = vi.fn(async () => ({ runId: 'scheduled' }));
+        const scheduler = new WorkspaceAutomationScheduler({
+          coordinator,
+          handle: (projectId, store) => ({ projectId, store, timeZone: 'UTC', launchSchedule }),
+        });
+        try {
+          const first = scheduler.start();
+          reads[0]!([{ id: 'a', root, status: 'ok' }]);
+          await first;
+          expect(coordinator.ids()).toEqual(['a']);
+          const older = scheduler.reschedule();
+          const newer = scheduler.reschedule();
+          reads[2]!([]);
+          await newer;
+          expect(coordinator.ids()).toEqual([]);
+          reads[1]!([{ id: 'a', root, status: 'ok' }]);
+          await older;
+          expect(coordinator.ids()).toEqual([]);
+          expect(coordinator.enabledProjectIds()).toEqual([]);
+          expect(scheduler.hasTimer()).toBe(true);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(launchSchedule).not.toHaveBeenCalled();
         } finally { scheduler.stop(); }
       } finally { vi.useRealTimers(); }
     });
