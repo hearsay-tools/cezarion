@@ -50,9 +50,11 @@ CI builds and tests switch off, switch on and the final old-app mode on each pla
 It also checks IDs and names in the built APKs and iOS bundles.
 
 The **final old-app** mode is a separate release input. It forces the old IDs even
-with `--rebrand on`. It shows only a move screen. It does not read the saved connection,
-create a WebView or clear the old app's data. Ordinary switch-off builds keep the
-connection flow. The owner must supply each platform's actual HTTPS store URL:
+with `--rebrand on`. It shows only a move screen. The move screen does not read the
+saved connection, create a WebView, copy data or clear data. On Android, a data wipe
+the user requested before the update still runs at app start. Without a pending
+wipe, the old data stays unchanged. Ordinary switch-off builds keep the connection
+flow. The owner must supply each platform's actual HTTPS store URL:
 
 ```sh
 # Set android_store_url to the owner-supplied Play Store URL first.
