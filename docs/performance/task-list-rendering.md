@@ -717,7 +717,7 @@ above measured the old path. This section makes no new timing claim.
 
 QA at `0b304aa96` found three defects that the final-position checks missed:
 one animation frame with no task row in the viewport on every project fold and
-unfold, a 3.0 px drift after a phone project fold over a flat Finished group
+unfold, a 3.0 px drift after a phone project fold over an 80-row Finished group
 (direct and from another tab), and a one-frame jump on a global phone status
 move. Traces of the first two confirm one cause. After a fold, a virtual list's
 start margin was refreshed only by its ResizeObserver, a later render. The sync
@@ -728,11 +728,14 @@ compensated, because virtua took them to be in view.
 The anchor now refreshes every virtual list's start margin in the same
 synchronous render as the sync event, after the commit and before paint.
 
+Traces load `?tasks=virtual`, so the 80-row Finished group is virtual there;
+the browser checks below also cover it in its default flat tier.
+
 | Fold above a virtual Working group | Before (`0b304aa96`) | After |
 | --- | --- | --- |
-| Project 360×640, flat Finished, direct fold (3 offsets) | 1 empty frame each; drift +2.41/+2.41/+3.20 px | 0 empty frames; max frame deviation 0.01 px; drift 0.02 px |
-| Project 360×640, flat Finished, other-tab fold (3 offsets) | 1 empty frame each; drift +2.41/+2.41/+3.20 px | 0 empty frames; 0.01 px; 0.02 px |
-| Project 1440×900, flat Finished, direct fold (2 offsets) | 1 empty frame each; drift 0 px | 0 empty frames; 0 px |
+| Project 360×640, Finished 80, direct fold (3 offsets) | 1 empty frame each; drift +2.41/+2.41/+3.20 px | 0 empty frames; max frame deviation 0.01 px; drift 0.02 px |
+| Project 360×640, Finished 80, other-tab fold (3 offsets) | 1 empty frame each; drift +2.41/+2.41/+3.20 px | 0 empty frames; 0.01 px; 0.02 px |
+| Project 1440×900, Finished 80, direct fold (2 offsets) | 1 empty frame each; drift 0 px | 0 empty frames; 0 px |
 
 The global phone status move held its row within 0.5 px on every frame in 14
 traces on both builds (fixtures 310×3 and 1000×2 projects, seven offsets). There
@@ -746,5 +749,6 @@ the layout at mount: 115 px for desktop rows and 218 px for phone cards
 The browser checks for status moves and earlier folds, previews and other-tab
 folds now sample every frame after the change. Each frame must show rows in the
 viewport and the saved row mounted within 2 px. Three cases add a flat Finished
-group. On the anchor code of `0b304aa96` four of these checks fail: empty
-frames, an unmounted row, and +2.4 px. [Trace summary](task-list-rendering/s3b/anchor-trace.json).
+group (80 rows, default tiers) above the virtual Working group. On the anchor
+code of `0b304aa96` these three fail (an empty frame at 1440×900, +3.02 px at
+360×640), and so does the project desktop status move (an unmounted row). [Trace summary](task-list-rendering/s3b/anchor-trace.json).
