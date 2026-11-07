@@ -90,6 +90,21 @@ const agentAccountSchema = z
 
 export type AgentAccount = z.infer<typeof agentAccountSchema>;
 
+/** Shared salvage and first-wins policy; migration also needs the discarded duplicate rows. */
+export function parseAgentAccountEntries(entries: unknown[]): { accounts: AgentAccount[]; duplicates: AgentAccount[]; selectedIndices: number[] } {
+  const accounts: AgentAccount[] = [], duplicates: AgentAccount[] = [], selectedIndices: number[] = [];
+  const seen = new Set<string>();
+  entries.forEach((entry, index) => {
+    const parsed = agentAccountSchema.safeParse(entry);
+    if (!parsed.success) return;
+    if (seen.has(parsed.data.id)) { duplicates.push(parsed.data); return; }
+    seen.add(parsed.data.id);
+    accounts.push(parsed.data);
+    selectedIndices.push(index);
+  });
+  return { accounts, duplicates, selectedIndices };
+}
+
 /** One project's choice, per provider. Explicit keys so `PROVIDER_IDS` stays the one source of
  *  truth and the value is bounded. An absent key means the discovered default. */
 const selectionSchema = z
@@ -114,16 +129,7 @@ export const storeSchema = z
       .array(z.unknown())
       .default(() => [])
       .catch(() => [])
-      .transform((entries) => {
-        const seen = new Set<string>();
-        return entries.flatMap((entry) => {
-          const parsed = agentAccountSchema.safeParse(entry);
-          // First-wins on a duplicated id, so two consumers never resolve the same id differently.
-          if (!parsed.success || seen.has(parsed.data.id)) return [];
-          seen.add(parsed.data.id);
-          return [parsed.data];
-        });
-      }),
+      .transform((entries) => parseAgentAccountEntries(entries).accounts),
     /**
      * The per-provider account a repo with no selection of its own uses.
      *

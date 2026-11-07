@@ -1,8 +1,8 @@
-import { chmodSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { chmodSync, closeSync, fsyncSync, lstatSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { assertHomePath } from './boundary.ts';
-import { privateDirectory, replacePrivate } from './private-files.ts';
+import { atomicTmpPath, privateDirectory, replacePrivate, syncDirectory } from './private-files.ts';
 
 /** All migration copies opt into private ACLs even before the release switch is enabled. */
 export const migrationPrivacy = { layout: 'split' } as const;
@@ -68,6 +68,19 @@ export function copyPrivateTree(source: string, target: string, executable = fal
   }
 }
 
+/** A pending destination is disposable. Publish only a complete fresh copy, never merge trees. */
+export function replacePrivateTree(source: string, target: string, executable = false,
+  allowExternalLink: (key: string, destination: string) => boolean = () => false): void {
+  assertHomePath(dirname(target), target);
+  const stage = atomicTmpPath(target);
+  try {
+    copyPrivateTree(source, stage, executable, allowExternalLink);
+    rmSync(target, { recursive: true, force: true });
+    renameSync(stage, target);
+    syncDirectory(dirname(target));
+  } finally { rmSync(stage, { recursive: true, force: true }); }
+}
+
 /** ustar stores a UTF-8 name in 100 bytes and an optional 155-byte prefix. */
 function archiveName(header: Buffer, key: string): void {
   if (Buffer.byteLength(key) <= 100) { header.write(key); return; }
@@ -103,7 +116,21 @@ function tarEntry(root: string, key: string): Buffer[] {
 
 /** Synchronous so the migration never yields while it holds the legacy write lock. */
 export function writeLegacyArchive(root: string, path: string, files: readonly string[]): void {
-  const blocks = files.flatMap(key => tarEntry(root, key));
-  blocks.push(Buffer.alloc(1024));
-  replacePrivate(path, gzipSync(Buffer.concat(blocks)), migrationPrivacy);
+  privateDirectory(dirname(path), migrationPrivacy);
+  const stage = atomicTmpPath(path);
+  try {
+    const fd = openSync(stage, 'wx', 0o600);
+    try {
+      // Concatenated gzip members decompress to one tar stream. Retain only one entry at a time.
+      const write = (bytes: Buffer) => {
+        const member = gzipSync(bytes);
+        for (let offset = 0; offset < member.length;) offset += writeSync(fd, member, offset, member.length - offset);
+      };
+      for (const key of files) write(Buffer.concat(tarEntry(root, key)));
+      write(Buffer.alloc(1024));
+      fsyncSync(fd);
+    } finally { closeSync(fd); }
+    renameSync(stage, path);
+    syncDirectory(dirname(path));
+  } finally { rmSync(stage, { force: true }); }
 }

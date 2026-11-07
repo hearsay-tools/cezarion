@@ -1,12 +1,32 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { gunzipSync } from 'node:zlib';
-import { afterEach, expect, it } from 'vitest';
+import { gzipSync, gunzipSync } from 'node:zlib';
+import { afterEach, expect, it, vi } from 'vitest';
 import { cleanStoreRoots, storeRoot } from './store.testkit.ts';
 import { copyPrivateTree, migrationFiles, writeLegacyArchive } from './migration-files.ts';
 
-afterEach(cleanStoreRoots);
+vi.mock('node:zlib', async original => {
+  const zlib = await original<typeof import('node:zlib')>();
+  return { ...zlib, gzipSync: vi.fn(zlib.gzipSync) };
+});
+afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
+
+it('E1: writes one gzip member per tar entry with buffers bounded by the largest file', () => {
+  const source = storeRoot(), target = join(storeRoot(), 'archive.tar.gz');
+  const size = 128 * 1024;
+  for (const name of ['a', 'b', 'c']) writeFileSync(join(source, name), Buffer.alloc(size, name));
+  const gzip = vi.mocked(gzipSync).mockClear();
+  writeLegacyArchive(source, target, migrationFiles(source));
+  expect(gzip.mock.calls.map(([bytes]) => Buffer.byteLength(bytes))).toEqual([size + 512, size + 512, size + 512, 1024]);
+  const expanded = gunzipSync(readFileSync(target));
+  expect(expanded.length).toBe(3 * (size + 512) + 1024);
+  if (process.platform !== 'win32') {
+    const extracted = storeRoot();
+    execFileSync('tar', ['-xzf', target, '-C', extracted]);
+    for (const name of ['a', 'b', 'c']) expect(readFileSync(join(extracted, name))).toEqual(readFileSync(join(source, name)));
+  }
+});
 
 it('step 4: writes a private, standard ustar gzip archive with exact file bytes and exclusions', () => {
   const source = storeRoot(), target = join(storeRoot(), 'backups', 'legacy.tar.gz');

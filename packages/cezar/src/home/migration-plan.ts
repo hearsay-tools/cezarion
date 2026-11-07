@@ -6,7 +6,7 @@ import { registryFiles } from './entry-authorization.ts';
 import { homeFileKind } from './file-location.ts';
 import { digest } from './version-log.ts';
 import { insideDirectory, migrationFiles } from './migration-files.ts';
-import { accountInUse, accountMigrationPolicy, migrationAccounts, type MigrationAccount } from './migration-accounts.ts';
+import { accountInUse, accountMigrationPolicy, migrationAccountInventory, type MigrationAccount } from './migration-accounts.ts';
 import { migrationRoots, type MigrationFile, type MigrationRecord } from './migration-record.ts';
 
 export interface MigrationPlan {
@@ -41,7 +41,7 @@ export function planLegacyMigration(legacy: Home, target: Home): MigrationPlan {
   if (target.layout !== 'split') throw new Error('Legacy migration requires an explicit split target');
   const legacyRoot = resolve(legacy.root);
   if (resolve(target.config) === legacyRoot) throw new Error('Migration target must differ from the legacy root');
-  const accounts = migrationAccounts(legacy, target);
+  const { accounts, notMoved } = migrationAccountInventory(legacy, target);
   const targetRoots = Object.values(migrationRoots(target)).map(path => resolve(path));
   const keys = migrationFiles(legacy.root, key => ignored.test(key)
     || targetRoots.some(root => insideDirectory(legacyRoot, root) && insideDirectory(root, join(legacyRoot, key))));
@@ -58,8 +58,8 @@ export function planLegacyMigration(legacy: Home, target: Home): MigrationPlan {
   return { legacyRoot, roots: migrationRoots(target), files, accounts,
     deferredAccounts: accounts.filter(account => accountMigrationPolicy(account) === 'copy' && accountInUse(legacy, account.id))
       .map(account => ({ id: account.id, configDir: account.configDir })),
-    notMoved: accounts.filter(account => accountMigrationPolicy(account) === 'keep')
-      .map(account => ({ id: account.id, configDir: account.configDir, reason: 'omp-profile-root-inside-legacy-home' })),
+    notMoved: [...notMoved, ...accounts.filter(account => accountMigrationPolicy(account) === 'keep')
+      .map(account => ({ id: account.id, configDir: account.configDir, reason: 'omp-profile-root-inside-legacy-home' as const }))],
     managedInstall: existsSync(legacy.versions),
     backup: join(target.backups, `legacy-cezar-home-${new Date().toISOString().replaceAll(':', '-')}.tar.gz`),
     empty: !registryFiles(legacy).some(path => existsSync(path)) && !existsSync(legacy.backups)

@@ -142,6 +142,10 @@ Steps 2–8 run synchronously under that lock, then target config and state
 locks, without extending the short-lock protocol. HomeStore checks for the
 claim before waiting and inside its transaction. This one safety change is
 unconditional; ordinary reads do not probe `.migrating`.
+Boot refuses live migration holders and lets migration reclaim dead holders,
+including a pending copy left by a hard crash. A staged server group has no
+claim and still boots read-only. Recovery inspections recheck the claim and
+pending marker under their lock, then report without changing journal files.
 
 `installMarkerSchema.state` is `pending | committed | undefined`.
 `writeMigrationMarker` is the migration's only marker writer; ordinary marker
@@ -179,6 +183,11 @@ deferred until its claim ends. Live legacy cockpit leases already stop step 2.
 An internal omp account stays in place and records `notMoved` with reason
 `omp-profile-root-inside-legacy-home`; the warning asks to move `PI_CONFIG_DIR`
 outside the legacy home (planner decision for hearsay-tools/cezarion#2933).
+Account inventory uses the loader's first-wins ID rule. Later duplicate IDs
+stay in place and record `notMoved` with reason `duplicate-account-id`.
+Each pending account or managed tree is rebuilt in a fresh staging directory.
+Deferred retries first check the target registry: an already rewritten
+configDir repairs the migration record without copying over live credentials.
 
 `isCezarMigrationJson` defines the strict JSON set. It covers cezar's registry,
 state, grants, connections, backups and update JSON. Opaque vendor account
@@ -189,3 +198,6 @@ execute permission; the old launchers remain unchanged.
 The managed package link at `versions/<id>/node_modules/@wjarka/cezarion`
 keeps an external checkout only when its version manifest records that same
 checkout with `source: 'link'`. Other escaping links refuse migration.
+The archive writes one gzip member per tar entry, followed by tar end blocks.
+This standard concatenated gzip stream bounds buffers by the largest file,
+while retaining legacy journal history and backups in the archive.

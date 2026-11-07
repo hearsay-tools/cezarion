@@ -42,7 +42,7 @@ export class HomeStore {
   }
 
   /** Synchronous transactions never retain the filesystem lock over an event-loop yield. */
-  transaction<T>(operation: () => T, writePaths: readonly string[] = [], readOnly = false): T {
+  transaction<T>(operation: (reportOnly?: boolean) => T, writePaths: readonly string[] = [], readOnly = false): T {
     if (!readOnly && this.writeDepth === 0) assertNoMigration(this.root);
     const marker = readInstallMarker(this.root);
     const authorization = homeEntryAuthorization(this.root);
@@ -61,11 +61,12 @@ export class HomeStore {
     roots.sort((a, b) => Number(b === this.root) - Number(a === this.root));
     const operationWithEntry = () => {
       if (!readOnly) assertNoMigration(this.root, true);
-      if (entry) createInstallMarker(this.root, underTestRunner() ? 'test' : entry.kind);
+      const reportOnly = readOnly && (existsSync(join(this.root, '.migrating')) || readInstallMarker(this.root)?.state === 'pending');
+      if (entry && !reportOnly) createInstallMarker(this.root, underTestRunner() ? 'test' : entry.kind);
       if (!readOnly) assertHomeWritable(this.root);
-      if (entry) entry.seeded = seedHomeRegistry(this, seedable, entry.home) && seedable.length === files.length;
+      if (entry && !reportOnly) entry.seeded = seedHomeRegistry(this, seedable, entry.home) && seedable.length === files.length;
       if (!readOnly) this.writeDepth++;
-      try { return operation(); } finally { if (!readOnly) this.writeDepth--; }
+      try { return operation(reportOnly); } finally { if (!readOnly) this.writeDepth--; }
     };
     return roots.reduceRight<() => T>((next, root) => () => withHomeLock(root, next), operationWithEntry)();
   }
@@ -96,7 +97,9 @@ export class HomeStore {
       this.assertBoundary([path]);
       return withHomeLock(log.root, () => {
         const bytes = readBytes(path);
-        log.inspect(bytes);
+        // A pending transition can happen while waiting. Ordinary reads do not probe .migrating:
+        // their legacy journal is excluded from copied files and the legacy hash comparison.
+        if (this.canJournal()) log.inspect(bytes);
         return this.requiredBytes(path, bytes).toString('utf8');
       });
     } catch {
@@ -159,9 +162,9 @@ export class HomeStore {
   outsideWrite(path: string): OutsideWrite | undefined {
     if (readInstallMarker(this.root)?.state === 'pending') return;
     this.assertBoundary([path]);
-    return this.transaction(() => {
+    return this.transaction(reportOnly => {
       const log = this.journal(path);
-      return log.inspect(readBytes(path));
+      return log.inspect(readBytes(path), reportOnly);
     }, [path], true);
   }
 
@@ -187,12 +190,12 @@ export class HomeStore {
     this.assertBoundary([path]);
     // Observing a never-created optional file must not create its first journal.
     if (!existsSync(path) && !existsSync(this.journal(path).directory)) return;
-    return this.transaction(() => {
+    return this.transaction(reportOnly => {
       const log = this.journal(path);
       const bytes = readBytes(path);
-      const outside = log.inspect(bytes);
-      if (!outside) flagResetFromBackup(log, bytes, this.home);
-      const flag = outside ?? log.reset();
+      const outside = log.inspect(bytes, reportOnly);
+      const backupReset = !outside ? flagResetFromBackup(log, bytes, this.home, reportOnly) : undefined;
+      const flag = outside ?? log.reset(reportOnly) ?? backupReset;
       let canRestore = true;
       if (flag) try { log.recoveryBytes(flag); } catch { canRestore = false; }
       return flag ? { reason: outside ? 'outside-write' as const : 'reset' as const, detectedAt: flag.detectedAt, canRestore, restoreHash: flag.restoreHash } : undefined;

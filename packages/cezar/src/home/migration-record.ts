@@ -19,7 +19,7 @@ export const migrationRecordSchema = z.object({
   version: z.literal(1), legacyRoot: z.string(), roots: migrationRootsSchema,
   createdAt: z.iso.datetime(), backup: z.string(), files: z.array(migrationFileSchema),
   deferredAccounts: z.array(z.object({ id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/), configDir: z.string() })),
-  notMoved: z.array(z.object({ id: z.string(), configDir: z.string(), reason: z.literal('omp-profile-root-inside-legacy-home') })),
+  notMoved: z.array(z.object({ id: z.string(), configDir: z.string(), reason: z.enum(['omp-profile-root-inside-legacy-home', 'duplicate-account-id']) })),
 }).passthrough();
 export type MigrationRecord = z.infer<typeof migrationRecordSchema>;
 export type MigrationFile = z.infer<typeof migrationFileSchema>;

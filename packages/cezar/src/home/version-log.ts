@@ -53,10 +53,10 @@ export class VersionLog {
   }
 
   /** Caller owns write.lock. Seed old installs without changing even one live byte. */
-  inspect(bytes: Buffer | null): OutsideWrite | undefined {
+  inspect(bytes: Buffer | null, readOnly = false): OutsideWrite | undefined {
     const record = this.record('HEAD');
     if (record === undefined) {
-      this.setRecord('HEAD', { hash: this.store(bytes) });
+      if (!readOnly) this.setRecord('HEAD', { hash: this.store(bytes) });
       return;
     }
     const head = versionSchema.parse(record).hash;
@@ -65,12 +65,16 @@ export class VersionLog {
     const pending = pendingRecord === undefined ? undefined : versionSchema.parse(pendingRecord);
     if (pending && (actual === pending.hash || actual === head)) {
       // Old bytes: crash before replacement. New bytes: crash after replacement. Both are ours.
-      if (actual === pending.hash) this.setRecord('HEAD', { hash: pending.hash });
-      this.clearPending();
+      if (!readOnly) {
+        if (actual === pending.hash) this.setRecord('HEAD', { hash: pending.hash });
+        this.clearPending();
+      }
     } else if (actual !== head) {
-      if (this.record('OUTSIDE') === undefined) this.setRecord('OUTSIDE', {
-        restoreHash: head, observedHash: actual, detectedAt: new Date().toISOString(),
-      });
+      if (this.record('OUTSIDE') === undefined) {
+        const outside = { restoreHash: head, observedHash: actual, detectedAt: new Date().toISOString() };
+        if (readOnly) return outside;
+        this.setRecord('OUTSIDE', outside);
+      }
     }
     return this.outside();
   }
@@ -112,14 +116,14 @@ export class VersionLog {
     } finally { rmSync(stage, { force: true }); }
   }
 
-  reset(): OutsideWrite | undefined {
+  reset(readOnly = false): OutsideWrite | undefined {
     const record = this.record('RESET');
     if (record === undefined) return;
     const reset = resetSchema.parse(record);
     // A crash before replacement must not turn an unchanged registry into a reset.
     if (reset.pending) {
       if (versionSchema.parse(this.record('HEAD')).hash !== reset.observedHash) return;
-      this.setRecord('RESET', { ...reset, pending: false });
+      if (!readOnly) this.setRecord('RESET', { ...reset, pending: false });
     }
     return reset;
   }

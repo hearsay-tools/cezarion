@@ -7,7 +7,7 @@ import { assertHomePath } from './boundary.ts';
 import { createInstallMarker, readInstallMarker, underTestRunner, writeMigrationMarker, assertHomeReadable } from './install-marker.ts';
 import { migrationHolderLive, claimMigration } from './migration-claim.ts';
 import { copyMigrationAccounts } from './migration-accounts.ts';
-import { insideDirectory, migrationFiles, migrationPrivacy, copyPrivateTree, writeLegacyArchive } from './migration-files.ts';
+import { insideDirectory, migrationFiles, migrationPrivacy, replacePrivateTree, writeLegacyArchive } from './migration-files.ts';
 import { archiveExcludes, isCezarMigrationJson, migrationRecordFor, planLegacyMigration } from './migration-plan.ts';
 import { migrationRecordSchema, movedHomeSchema, readMigrationRecord, writeMigrationRecord, type MigrationFile, type MigrationRecord } from './migration-record.ts';
 import { registryFiles } from './entry-authorization.ts';
@@ -67,9 +67,8 @@ function copyFile(legacy: Home, target: Home, file: MigrationFile): void {
 
 function copyManagedInstall(legacy: Home, target: Home, env: NodeJS.ProcessEnv): void {
   assertHomePath(target.data, target.versions);
-  rmSync(target.versions, { recursive: true, force: true });
-  if (!existsSync(legacy.versions)) return;
-  copyPrivateTree(legacy.versions, target.versions, true, (key, destination) => {
+  if (!existsSync(legacy.versions)) { rmSync(target.versions, { recursive: true, force: true }); return; }
+  replacePrivateTree(legacy.versions, target.versions, true, (key, destination) => {
     const suffix = `/node_modules/${PACKAGE_NAME}`;
     if (!key.endsWith(suffix)) return false;
     const id = key.slice(0, -suffix.length);
@@ -175,6 +174,7 @@ function settleCopies(legacy: Home, target: Home, options: MigrationOptions, rec
     let next = planLegacyMigration(legacy, target);
     let changed = changedFiles(record.files, next.files);
     if (!changed.length) {
+      record.notMoved = next.notMoved;
       copyMigrationAccounts(legacy, target, next.accounts, record);
       options.onStep?.('accounts', attempt);
       next = planLegacyMigration(legacy, target);

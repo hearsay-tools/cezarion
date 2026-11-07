@@ -12,6 +12,9 @@ import { loadSubcommand, SUBCOMMAND_NAMES } from '../subcommands.ts';
 import { migrationFixture, rawJson, json } from './migration.testkit.ts';
 import { cleanStoreRoots } from './store.testkit.ts';
 import { REBRAND_SWITCH } from './switch.ts';
+import * as writeLock from './write-lock.ts';
+import { migrationFiles } from './migration-files.ts';
+import { Home } from './home.ts';
 
 vi.mock('node:fs', async original => {
   const fs = await original<typeof import('node:fs')>();
@@ -85,6 +88,74 @@ it('a cockpit refuses to start on .migrating before registry preparation', () =>
   expect(() => prepareOperatorHome(target, 'serve', env, { enabled: true, legacy })).toThrow(/migration in progress/);
   expect(readInstallMarker(target.config)?.state).toBeUndefined();
   expect(existsSync(target.workspaceConfig)).toBe(false);
+});
+
+it('D2: boot reclaims a dead migration holder and rebuilds its crashed pending copy', () => {
+  const { legacy, target, env } = migrationFixture();
+  migrateLegacyHome(legacy, target, { commit: false });
+  rawJson(target.workspaceConfig, { crashed: true });
+  rawJson(join(legacy.root, '.migrating'), { pid: process.pid, startToken: 'dead-process-incarnation' });
+  prepareOperatorHome(target, 'serve', env, { enabled: true, legacy });
+  expect(readInstallMarker(target.config)?.state).toBe('committed');
+  expect(json(target.workspaceConfig).saved).toBe('original');
+  expect(existsSync(join(legacy.root, '.migrating'))).toBe(false);
+});
+
+it.each(['migrating', 'pending'] as const)('D3: %s inspections report without changing HEAD, OUTSIDE, RESET or journal bytes', protection => {
+  for (const scenario of ['outside', 'missing-head', 'pending-reset', 'backup-reset']) {
+    const { legacy } = migrationFixture();
+    const journal = join(legacy.root, '.versions');
+    if (scenario === 'pending-reset') {
+      Home.seed(legacy, legacy.workspaceConfig, { projects: [{ id: 'kept', root: '/kept' }] });
+      Home.seed(legacy, legacy.workspaceConfig, { projects: [] });
+      const reset = join(journal, 'config.json/RESET');
+      rawJson(reset, { ...json(reset), pending: true });
+    } else if (scenario === 'backup-reset') {
+      rawJson(`${legacy.workspaceConfig}.bak`, { projects: [{ id: 'kept', root: '/kept' }] });
+    } else {
+      rawJson(legacy.workspaceConfig, { changedOutside: true });
+      if (scenario === 'missing-head') rmSync(join(journal, 'config.json/HEAD'));
+    }
+    const snapshot = () => migrationFiles(journal).map(path => [path, readFileSync(join(journal, path)).toString('base64'), lstatSync(join(journal, path)).mtimeMs]);
+    const before = snapshot();
+    const lock = writeLock.withHomeLock;
+    let switched = false;
+    vi.spyOn(writeLock, 'withHomeLock').mockImplementation((root, operation) => lock(root, () => {
+      if (!switched) {
+        switched = true;
+        if (protection === 'migrating') rawJson(join(legacy.root, '.migrating'), { pid: process.pid });
+        else rawJson(join(legacy.root, 'install.json'), { ...readInstallMarker(legacy.root), state: 'pending' });
+      }
+      return operation();
+    }));
+    const store = new HomeStore(legacy);
+    const outside = store.outsideWrite(legacy.workspaceConfig);
+    if (scenario === 'outside') expect(outside).toBeDefined();
+    if (protection === 'migrating') rmSync(join(legacy.root, '.migrating'));
+    else rawJson(join(legacy.root, 'install.json'), { ...readInstallMarker(legacy.root), state: undefined });
+    switched = false;
+    const recovery = store.recovery(legacy.workspaceConfig);
+    if (scenario !== 'missing-head') expect(recovery, scenario).toBeDefined();
+    expect(snapshot(), scenario).toEqual(before);
+    vi.restoreAllMocks();
+  }
+});
+
+it('D3: a normal read rechecks pending under its lock without probing .migrating', () => {
+  const { legacy } = migrationFixture();
+  const head = join(legacy.root, '.versions/config.json/HEAD');
+  rmSync(head);
+  const lock = writeLock.withHomeLock;
+  vi.spyOn(writeLock, 'withHomeLock').mockImplementation((root, operation) => lock(root, () => {
+    rawJson(join(legacy.root, 'install.json'), { ...readInstallMarker(legacy.root), state: 'pending' });
+    return operation();
+  }));
+  vi.mocked(readFileSync).mockClear(); vi.mocked(lstatSync).mockClear();
+  expect(new HomeStore(legacy).read(legacy.workspaceConfig)).toContain('original');
+  expect(existsSync(head)).toBe(false);
+  const guard = join(legacy.root, '.migrating');
+  expect(vi.mocked(readFileSync).mock.calls.filter(([path]) => path === guard)).toHaveLength(0);
+  expect(vi.mocked(lstatSync).mock.calls.filter(([path]) => path === guard)).toHaveLength(0);
 });
 
 it('boot refuses a migration error and never seeds a fresh home over nonempty legacy data', () => {

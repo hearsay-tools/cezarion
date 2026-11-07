@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Home } from './home.ts';
@@ -15,6 +15,7 @@ import { migrationFixture, rawJson, json } from './migration.testkit.ts';
 import { cleanStoreRoots, storeRoot } from './store.testkit.ts';
 import { planLegacyMigration } from './migration-plan.ts';
 import * as privateFiles from './private-files.ts';
+import * as migrationRecord from './migration-record.ts';
 
 afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
 
@@ -27,6 +28,57 @@ function accountFixture(provider = 'claude') {
   Home.seed(fixture.legacy, fixture.legacy.agentAccounts, { accounts: [account], unknown: 'kept' });
   return { ...fixture, account };
 }
+
+it('C1: duplicate account IDs use the loader first-wins rule and never mix credential trees', () => {
+  const { legacy, target, account } = accountFixture();
+  const duplicate = { ...account, provider: 'codex', configDir: join(legacy.root, 'other-account') };
+  rawJson(join(duplicate.configDir, 'duplicate-only.json'), { secret: 'other login' });
+  Home.seed(legacy, legacy.agentAccounts, { accounts: [{ id: account.id, provider: 'invalid', configDir: duplicate.configDir }, account, duplicate] });
+  const skipped = { id: duplicate.id, configDir: duplicate.configDir, reason: 'duplicate-account-id' };
+  const plan = planLegacyMigration(legacy, target);
+  expect(plan.accounts).toHaveLength(1);
+  expect(plan.notMoved).toEqual([skipped]);
+  expect(plan.files.find(file => file.path === 'other-account/duplicate-only.json')?.target).toBeNull();
+  migrateLegacyHome(legacy, target);
+  expect(readMigrationRecord(target)!.notMoved).toEqual([skipped]);
+  expect(json(target.agentAccounts).accounts[1].configDir).toBe(join(target.data, 'accounts', account.id));
+  expect(json(target.agentAccounts).accounts[2].configDir).toBe(duplicate.configDir);
+  expect(existsSync(join(target.data, 'accounts', account.id, 'duplicate-only.json'))).toBe(false);
+});
+
+it('B1: an account recopy replaces its pending tree and drops files deleted since the first copy', () => {
+  const { legacy, target, account } = accountFixture();
+  migrateLegacyHome(legacy, target, { onStep(step, attempt) {
+    if (step !== 'accounts' || attempt !== 0) return;
+    rmSync(join(account.configDir, 'auth.json'));
+    rawJson(join(account.configDir, 'new.json'), { new: true });
+  } });
+  const destination = join(target.data, 'accounts', account.id);
+  expect(existsSync(join(destination, 'auth.json'))).toBe(false);
+  expect(json(join(destination, 'new.json'))).toEqual({ new: true });
+});
+
+it('D1: a crash after deferred configDir publication repairs the record without recopying live credentials', () => {
+  const { legacy, target, account, env } = accountFixture();
+  const project = storeRoot();
+  Home.seed(legacy, legacy.workspaceConfig, { projects: [{ id: 'project', root: project }] });
+  const store = RunStore.open(join(project, '.ai', 'cezar'), { keepLive: true });
+  const run = store.createRun({ title: 'defer account', workflow: 'quick-task', task: 'test', steps: [], agentProfile: account.id });
+  store.move(run.id, 'start'); store.flush();
+  try { migrateLegacyHome(legacy, target); } finally { store.close(); }
+  vi.spyOn(migrationRecord, 'writeMigrationRecord').mockImplementation(() => { throw new Error('crash before record publication'); });
+  expect(() => prepareMigrationHome(target, env, { enabled: true, legacy })).toThrow('crash before record publication');
+  const destination = join(target.data, 'accounts', account.id);
+  expect(json(target.agentAccounts).accounts[0].configDir).toBe(destination);
+  expect(readMigrationRecord(target)!.deferredAccounts).toHaveLength(1);
+  rawJson(join(destination, 'auth.json'), { secret: 'refreshed live credentials' });
+  rawJson(join(destination, 'session.json'), { live: true });
+  vi.restoreAllMocks();
+  prepareMigrationHome(target, env, { enabled: true, legacy });
+  expect(readMigrationRecord(target)!.deferredAccounts).toEqual([]);
+  expect(json(join(destination, 'auth.json')).secret).toBe('refreshed live credentials');
+  expect(json(join(destination, 'session.json'))).toEqual({ live: true });
+});
 
 it('step 7: copies internal account credentials, rewrites configDir with HEAD, and leaves legacy untouched', () => {
   const { legacy, target, account } = accountFixture();
