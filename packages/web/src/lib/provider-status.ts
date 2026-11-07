@@ -9,6 +9,42 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export type ProviderStatusEventRow = Omit<ProviderStatus, 'enabled'> & { enabled?: boolean }
 
+/** Complete HTTP rows must carry `enabled`; SSE event rows may omit it. */
+function enabledAcceptable(enabled: unknown, requireEnabled: boolean): boolean {
+  if (typeof enabled === 'boolean') return true
+  return !requireEnabled && enabled === undefined
+}
+
+/** An incident id may appear only on a `disconnected` row and must be a short string. */
+function authFailureIdAcceptable(authFailureId: unknown, status: string): boolean {
+  if (authFailureId === undefined) return true
+  return (
+    typeof authFailureId === 'string'
+    && authFailureId.length >= 1
+    && authFailureId.length <= 128
+    && status === 'disconnected'
+  )
+}
+
+function rowFieldsAcceptable(
+  provider: unknown,
+  status: unknown,
+  enabled: unknown,
+  hint: unknown,
+  authFailureId: unknown,
+  requireEnabled: boolean,
+): boolean {
+  return (
+    typeof provider === 'string'
+    && RUNNER_ORDER.includes(provider as Runner)
+    && typeof status === 'string'
+    && PROVIDER_STATES.has(status)
+    && enabledAcceptable(enabled, requireEnabled)
+    && (hint === undefined || typeof hint === 'string')
+    && authFailureIdAcceptable(authFailureId, status as string)
+  )
+}
+
 function parseProviderStatusRow(
   value: unknown,
   requireEnabled: boolean,
@@ -16,29 +52,14 @@ function parseProviderStatusRow(
   if (!isRecord(value)) return null
   const { provider, status, enabled, hint, authFailureId } = value
   if (
-    typeof provider !== 'string'
-    || !RUNNER_ORDER.includes(provider as Runner)
-    || typeof status !== 'string'
-    || !PROVIDER_STATES.has(status)
-    || (requireEnabled && typeof enabled !== 'boolean')
-    || (!requireEnabled && enabled !== undefined && typeof enabled !== 'boolean')
-    || (hint !== undefined && typeof hint !== 'string')
-    || (
-      authFailureId !== undefined
-      && (
-        typeof authFailureId !== 'string'
-        || authFailureId.length < 1
-        || authFailureId.length > 128
-        || status !== 'disconnected'
-      )
-    )
+    !rowFieldsAcceptable(provider, status, enabled, hint, authFailureId, requireEnabled)
   ) return null
   return {
     provider: provider as Runner,
     status: status as ProviderStatus['status'],
     ...(typeof enabled === 'boolean' ? { enabled } : {}),
-    ...(hint === undefined ? {} : { hint }),
-    ...(authFailureId === undefined ? {} : { authFailureId }),
+    ...(typeof hint === 'string' ? { hint } : {}),
+    ...(typeof authFailureId === 'string' ? { authFailureId } : {}),
   }
 }
 

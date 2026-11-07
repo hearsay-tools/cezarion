@@ -52,6 +52,50 @@ function pathFromMarker(line: string): string | undefined {
   return raw.replace(/^[ab]\//, '')
 }
 
+function newDiffFile(header: string): DiffFile {
+  return {
+    path: pathFromHeader(header),
+    status: 'modified',
+    binary: false,
+    additions: 0,
+    deletions: 0,
+    lines: [],
+  }
+}
+
+/** One extended-header line (rename/mode/binary metadata plus the ---/+++ markers).
+ *  Unrecognized lines (e.g. `index abc..def`) leave the file untouched. */
+function applyExtendedHeaderLine(file: DiffFile, line: string): void {
+  if (line.startsWith('rename from ')) {
+    file.status = 'renamed'
+    file.oldPath = unquote(line.slice('rename from '.length))
+  } else if (line.startsWith('rename to ')) {
+    file.status = 'renamed'
+    file.path = unquote(line.slice('rename to '.length))
+  } else if (line.startsWith('new file mode')) {
+    file.status = 'added'
+  } else if (line.startsWith('deleted file mode')) {
+    file.status = 'deleted'
+  } else if (line.startsWith('Binary files ') || line === 'GIT binary patch') {
+    file.binary = true
+  } else if (line.startsWith('+++ ')) {
+    const path = pathFromMarker(line)
+    if (path !== undefined) file.path = path
+  } else if (line.startsWith('--- ')) {
+    const path = pathFromMarker(line)
+    // A deletion has `+++ /dev/null`; the honest display path is the old one.
+    if (path !== undefined && file.status === 'deleted') file.path = path
+  }
+}
+
+/** One hunk-body line: always rendered; `+`/`-` prefixes count toward the totals.
+ *  `\ No newline at end of file` renders but counts as neither side. */
+function applyHunkLine(file: DiffFile, line: string): void {
+  file.lines.push(line)
+  if (line.startsWith('+')) file.additions += 1
+  else if (line.startsWith('-')) file.deletions += 1
+}
+
 export function parseUnifiedDiff(text: string): DiffFile[] {
   const files: DiffFile[] = []
   let current: DiffFile | null = null
@@ -59,14 +103,7 @@ export function parseUnifiedDiff(text: string): DiffFile[] {
 
   for (const line of text.split('\n')) {
     if (FILE_HEADER.test(line)) {
-      current = {
-        path: pathFromHeader(line),
-        status: 'modified',
-        binary: false,
-        additions: 0,
-        deletions: 0,
-        lines: [],
-      }
+      current = newDiffFile(line)
       files.push(current)
       inHunks = false
       continue
@@ -74,37 +111,16 @@ export function parseUnifiedDiff(text: string): DiffFile[] {
     if (!current) continue // preamble before any file header — not a diff, ignore
 
     if (!inHunks) {
-      // Extended header block: rename/mode/binary metadata plus the ---/+++ markers.
       if (line.startsWith('@@')) {
         inHunks = true
         current.lines.push(line)
-      } else if (line.startsWith('rename from ')) {
-        current.status = 'renamed'
-        current.oldPath = unquote(line.slice('rename from '.length))
-      } else if (line.startsWith('rename to ')) {
-        current.status = 'renamed'
-        current.path = unquote(line.slice('rename to '.length))
-      } else if (line.startsWith('new file mode')) {
-        current.status = 'added'
-      } else if (line.startsWith('deleted file mode')) {
-        current.status = 'deleted'
-      } else if (line.startsWith('Binary files ') || line === 'GIT binary patch') {
-        current.binary = true
-      } else if (line.startsWith('+++ ')) {
-        const path = pathFromMarker(line)
-        if (path !== undefined) current.path = path
-      } else if (line.startsWith('--- ')) {
-        const path = pathFromMarker(line)
-        // A deletion has `+++ /dev/null`; the honest display path is the old one.
-        if (path !== undefined && current.status === 'deleted') current.path = path
+      } else {
+        applyExtendedHeaderLine(current, line)
       }
       continue
     }
 
-    // Hunk body. `\ No newline at end of file` renders but counts as neither side.
-    current.lines.push(line)
-    if (line.startsWith('+')) current.additions += 1
-    else if (line.startsWith('-')) current.deletions += 1
+    applyHunkLine(current, line)
   }
 
   // git ends the diff with a newline; the split leaves a trailing '' on the last file.
