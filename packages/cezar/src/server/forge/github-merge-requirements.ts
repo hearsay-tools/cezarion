@@ -48,6 +48,43 @@ const threadsPageSchema = z.object({
   errors: z.array(z.unknown()).max(0).optional(),
 });
 type GithubRunner = (args: string[]) => Promise<string>;
+type MergePolicyAcc = {
+  checks: Set<string>;
+  approvals: number;
+  resolveThreads: boolean;
+  methods: NonNullable<GithubMergeRequirements['allowedMergeMethods']>;
+};
+
+function legacyProtectionAbsent(branchState: z.infer<typeof branchSchema> | null): boolean {
+  return branchState !== null && (
+    branchState.protection?.enabled === false ||
+    (!branchState.protected && branchState.protection?.enabled !== true)
+  );
+}
+
+function applyRulesetPolicy(rules: z.infer<typeof ruleSchema>[], acc: MergePolicyAcc): void {
+  for (const rule of rules) {
+    if (rule.type === 'required_status_checks') {
+      for (const check of checkRuleSchema.parse(rule.parameters).required_status_checks) acc.checks.add(check.context);
+    } else if (rule.type === 'pull_request') {
+      const review = reviewRuleSchema.parse(rule.parameters);
+      acc.approvals = Math.max(acc.approvals, review.required_approving_review_count,
+        review.require_code_owner_review || review.require_last_push_approval || review.required_reviewers?.some((group) => group.minimum_approvals > 0) ? 1 : 0);
+      acc.resolveThreads ||= review.required_review_thread_resolution;
+      const allowed = review.allowed_merge_methods;
+      if (allowed) acc.methods = acc.methods.filter((method) => allowed.includes(method));
+    }
+  }
+}
+
+function applyLegacyProtection(legacy: z.infer<typeof protectionSchema>, acc: MergePolicyAcc): void {
+  for (const context of legacy.required_status_checks?.contexts ?? []) acc.checks.add(context);
+  for (const check of legacy.required_status_checks?.checks ?? []) acc.checks.add(check.context);
+  const review = legacy.required_pull_request_reviews;
+  if (review) acc.approvals = Math.max(acc.approvals, review.required_approving_review_count,
+    review.require_code_owner_reviews || review.require_last_push_approval ? 1 : 0);
+  acc.resolveThreads ||= legacy.required_conversation_resolution.enabled;
+}
 
 /** A capped/incomplete read stays unknown; outdated threads still require resolution. */
 async function unresolvedThreads(run: GithubRunner, owner: string, repo: string, number: number): Promise<number | null> {
@@ -95,44 +132,26 @@ export async function fetchGithubMergeRequirements(
     // never falls back to assuming legacy protection is the complete policy.
     const rules = z.array(z.array(ruleSchema)).min(1).parse(JSON.parse(rulesOut)).flat();
     const branchState = branchOut === null ? null : branchSchema.parse(JSON.parse(branchOut));
-    const legacyAbsent = branchState !== null && (
-      branchState.protection?.enabled === false ||
-      (!branchState.protected && branchState.protection?.enabled !== true)
-    );
     // A protection-endpoint 404 can hide permissions. Only the branch's readable
     // legacy-disabled/unprotected metadata confirms absence, never that 404 alone.
-    const legacy = legacyAbsent ? null : protectionSchema.parse(JSON.parse(await run(['api', `${branchPath}/protection`])));
-    const checks = new Set<string>();
-    let approvals = 0;
-    let resolveThreads = false;
-    let methods: NonNullable<GithubMergeRequirements['allowedMergeMethods']> = ['merge', 'squash', 'rebase'];
-    for (const rule of rules) {
-      if (rule.type === 'required_status_checks') {
-        for (const check of checkRuleSchema.parse(rule.parameters).required_status_checks) checks.add(check.context);
-      } else if (rule.type === 'pull_request') {
-        const review = reviewRuleSchema.parse(rule.parameters);
-        approvals = Math.max(approvals, review.required_approving_review_count,
-          review.require_code_owner_review || review.require_last_push_approval || review.required_reviewers?.some((group) => group.minimum_approvals > 0) ? 1 : 0);
-        resolveThreads ||= review.required_review_thread_resolution;
-        const allowed = review.allowed_merge_methods;
-        if (allowed) methods = methods.filter((method) => allowed.includes(method));
-      }
-    }
-    if (legacy) {
-      for (const context of legacy.required_status_checks?.contexts ?? []) checks.add(context);
-      for (const check of legacy.required_status_checks?.checks ?? []) checks.add(check.context);
-      const review = legacy.required_pull_request_reviews;
-      if (review) approvals = Math.max(approvals, review.required_approving_review_count,
-        review.require_code_owner_reviews || review.require_last_push_approval ? 1 : 0);
-      resolveThreads ||= legacy.required_conversation_resolution.enabled;
-    }
+    const legacy = legacyProtectionAbsent(branchState)
+      ? null
+      : protectionSchema.parse(JSON.parse(await run(['api', `${branchPath}/protection`])));
+    const acc: MergePolicyAcc = {
+      checks: new Set<string>(),
+      approvals: 0,
+      resolveThreads: false,
+      methods: ['merge', 'squash', 'rebase'],
+    };
+    applyRulesetPolicy(rules, acc);
+    if (legacy) applyLegacyProtection(legacy, acc);
     return {
       readable: true,
-      requiredChecks: [...checks],
-      requiredApprovingReviews: approvals,
-      requiresThreadResolution: resolveThreads,
-      unresolvedThreads: resolveThreads ? await unresolvedThreads(run, owner, repo, number) : 0,
-      allowedMergeMethods: methods,
+      requiredChecks: [...acc.checks],
+      requiredApprovingReviews: acc.approvals,
+      requiresThreadResolution: acc.resolveThreads,
+      unresolvedThreads: acc.resolveThreads ? await unresolvedThreads(run, owner, repo, number) : 0,
+      allowedMergeMethods: acc.methods,
     };
   } catch {
     return unknown;
