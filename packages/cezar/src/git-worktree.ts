@@ -386,16 +386,6 @@ async function runBeforeWorktreeRemove(
   }
 }
 
-async function ownedDirectoryStillRegistered(
-  repoRoot: string, worktreePath: string, git: WorktreeGit,
-): Promise<boolean> {
-  const listed = await git(repoRoot, ['worktree', 'list', '--porcelain', '-z']);
-  if (!listed.ok) return false;
-  return listed.stdout.split('\0').some(
-    (entry) => entry.startsWith('worktree ') && canonicalPath(entry.slice(9)) === canonicalPath(worktreePath),
-  );
-}
-
 async function removeCleanWorktree(
   repoRoot: string, worktreePath: string, protection: OwnedCleanupProtection,
   git: WorktreeGit, beforeRemove: () => Promise<void>,
@@ -445,8 +435,14 @@ async function removeWorktreeLocked(
   if (protection.uncertain) return;
   if (protection.paths.has(worktreePath) && !reclaimOwnedDirectory) return;
   if (branch !== undefined && protection.branches.has(branch)) return;
-  if (reclaimOwnedDirectory && protection.paths.has(worktreePath) &&
-      !await ownedDirectoryStillRegistered(repoRoot, worktreePath, git)) return;
+  if (reclaimOwnedDirectory && protection.paths.has(worktreePath)) {
+    const listed = await git(repoRoot, ['worktree', 'list', '--porcelain', '-z']);
+    if (!listed.ok) return;
+    const registered = listed.stdout.split(' ').some(
+      (entry) => entry.startsWith('worktree ') && canonicalPath(entry.slice(9)) === canonicalPath(worktreePath),
+    );
+    if (!registered) return;
+  }
   // Reclaim keeps the branch and calls the work recoverable, which holds only for what a REF keeps:
   // staged, unstaged and untracked files, and commits made on a detached HEAD, exist in this
   // checkout alone. So the HEAD must be reachable from a branch or remote-tracking ref, and the
