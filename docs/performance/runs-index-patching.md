@@ -2,7 +2,7 @@
 
 This report goes with [hearsay-tools/cezarion#2729](https://github.com/hearsay-tools/cezarion/issues/2729) (plan `.ai/specs/2026-11-06-cockpit-performance-plan.md`, slice S5). Before the change, the cockpit refetched the whole `GET /workspace/runs-index` (808 rows, about 200 KB in this fixture) 400 ms after any run event. After the change, the workspace stream's `run-summary`, `run-deleted` and `usage` frames patch the cached rows. A full read runs only as a fenced reconciliation (bootstrap, reconnect, visibility restore, a `seq` gap, an unknown project, a truncated window move, a new project) and as the 60 s visible-only backstop (D2). The global Tasks page keeps its own 15 s poll.
 
-Main result, 5 updates per second for 60 s: index requests fell from 111–124 per minute to 1–4 per minute in every view. Index bytes fell from 22.3–25.2 MB to 0.2–0.8 MB per minute. All bytes the page received in that minute fell by 96–98%. The workspace SSE bytes did not change (about 0.2 MB per minute on both sides), because S1 already sends summary frames. Server CPU in the sustained minute fell by 18–27%. A title change in another project reaches the global Tasks page in 138 ms instead of 587 ms. One cost remains: the global Tasks page spends about 22% more React commit time under sustained updates (see Remaining limits).
+Main result, 5 updates per second for 60 s: index requests fell from 111–124 per minute to 1–4 per minute in every view. Index bytes fell from 22.3–25.2 MB to 0.2–0.8 MB per minute. All bytes the page received in that minute fell by 96–98%. The workspace SSE bytes did not change (about 0.2 MB per minute on both sides), because S1 already sends summary frames. Server CPU in the sustained minute fell by 18–27%. A title change in another project reaches the global Tasks page in 138 ms instead of 587 ms. On the S5 branch one cost remained: the global Tasks page spent about 22% more React commit time under sustained updates. S3b (hearsay-tools/cezarion#2815) removed it: on main `33ca204e5` that page spends 69% less React commit time than the baseline (see [After S3b](#after-s3b-main-33ca204e5-measured-2026-11-07)).
 
 **Read the timing numbers with the host load.** Request counts, bytes and frame counts are deterministic: they repeat across runs. Timing numbers (CPU, renderer time, React commit time, latency) carry host noise. The baseline and branch runs were interleaved; both saw a one-minute `loadavg` between 14 and 44 on 24 cores. Use the timing numbers for direction, not for exact ratios.
 
@@ -54,7 +54,7 @@ The remaining index reads are the backstop (60 s) in `closed` and `detail` and t
 | all-tasks | 20,949 → 24,719 | 900 → 879 | 13,079 → 15,945 | 93.8 → 99.7 | 10.5 / 148.4 → 9.6 / 129.9 | 33.3 → 47.2 |
 | detail | 13,272 → 12,774 | 1,363 → 1,419 | 4,592 → 5,080 | 10.9 → 11.9 | 13.0 / 54.7 → 12.6 / 34.2 | 42.1 → 26.1 |
 
-On the project list (`closed`) the branch spends less render time. With the detail open it is level within noise. On the global Tasks page it spends about 22% more commit time and 18% more renderer time: rows change when frames arrive, at most every 250 ms, instead of when a refetch lands, and every change re-renders about 408 unmemoized rows (Remaining limits).
+On the project list (`closed`) the branch spends less render time. With the detail open it is level within noise. On the global Tasks page it spends about 22% more commit time and 18% more renderer time: rows change when frames arrive, at most every 250 ms, instead of when a refetch lands, and every change re-renders about 408 unmemoized rows. [After S3b](#after-s3b-main-33ca204e5-measured-2026-11-07) shows this cost gone on main.
 
 ## Cold bootstrap, one update and reconnect
 
@@ -88,14 +88,66 @@ A controlled experiment on the per-frame build (closed view, cold) replaced the 
 
 The coordinator and the planner accepted the correction on 2026-11-06, and the plan line is amended: the first patch after a quiet period lands in the next animation frame; later patches wait for the end of a 250 ms interval, and that wait never restarts. A single update therefore still lands in the next frame; sustained updates stay visible without a quiet period (at most 250 ms behind), which is still fresher than the baseline's 400 ms plus a full read. Usage ticks share the bound. Unit tests in `runs-index-sync.test.ts` cover each of these rules.
 
+## After S3b (main 33ca204e5), measured 2026-11-07
+
+S3b (hearsay-tools/cezarion#2815, merged as `33ca204e5`) virtualizes task groups above 100 rows and memoizes rows. This section measures current main, which holds S5 and S3b, against the same baseline `0320d57fb`. It answers the Phase 2 acceptance condition of epic hearsay-tools/cezarion#2728: the global Tasks page must not spend more React commit time than the baseline.
+
+**Verdict: at or below the baseline.** Under sustained updates, the global Tasks page (`all-tasks`) spends 2,968 ms of React commit time per minute on main and 9,723 ms on the baseline (median, −69%). Every main run (2,472–3,116 ms) is below every baseline run (8,730–11,762 ms). The commit p95 fell from 69.0 ms to 8.4 ms, and the renderer time from 15,529 ms to 5,410 ms (−65%). No row-memoization follow-up is needed.
+
+Method, and what changed since the S5 runs:
+
+- **Sides.** Baseline: `0320d57fb` in a separate detached checkout, with `vite.profiling.config.ts` copied in, so its tree is marked dirty. Main: `33ca204e5` in a separate clean detached checkout (not dirty). Each side ran `npm run build:server` and the profiling web build. Main CI on `33ca204e5`: the merge-queue CI run [42323146063](https://github.com/hearsay-tools/cezarion/actions/runs/42323146063) passed on that exact commit; the push run on `main` was cancelled because the next merge superseded it.
+- **Harness.** Both sides ran the harness of `33ca204e5`, from one checkout, with `--build-root` set to each side. Since S3b, the `all-tasks` update phase renames the first other-project root in display order. It reads that row from the last completed cold index response, and it asserts that the row is mounted, with no scroll and no extra request. The baseline mounts every row, so both sides rename the same logical row. The `closed` and `detail` update targets and the sustained tick targets did not change.
+- **Rounds.** 5 rounds, interleaved (baseline 1, main 1, baseline 2, …), one benchmark at a time, cockpit server pinned with `taskset -c 11`. Every run passed on its first try. Each cell is the median of that one field over the five runs. Squeal kept running in the worktree.
+- **Host load.** The 1-minute `loadavg` was 8–20 on 24 cores in every case, lower than in the S5 rounds (14–44). This is why the baseline's timing numbers here are lower than in the earlier tables. Compare timing numbers within one round only.
+
+Evidence: [raw runs and medians](runs-index-patching/after-s3b/) (`baseline-1..5.json`, `main-1..5.json`, `summary.json`). The raw files record each side's revision, built-content SHA256, dirty flag and `loadavg` per case. They are the harness output as written, unedited. Their header fields `warmupMs`, `sampleMs` and `streamRatePerRun` are defaults of the tab workloads of `benchmark-tabs.ts`; the index workload does not read them. Its windows are the phases that [Method and evidence](#method-and-evidence) describes: `cold` 8 s plus settle, `update` 3 s, `sustained` 60 s at 5 ticks per second, `reconnect` 8 s plus settle. Each phase's `elapsedMs` records its real length. The S5 raw files carry the same fields.
+
+### Sustained: 5 updates per second for 60 s
+
+Each cell is **baseline → main**. Load is the median 1-minute `loadavg` before / after the case.
+
+| View | Commit ms total | Commit p95 ms | Commits | Renderer ms | Index requests/min | Index bytes | Probe p50 / p95 ms | Load |
+|---|---|---|---|---|---|---|---|---|
+| closed | 13,830 → 2,878 | 72.5 → 7.1 | 678 → 1,109 | 22,867 → 5,555 | 119.3 → 2.0 | 24,422,015 → 404,958 | 6.5 / 108.1 → 6.1 / 16.9 | 14.1 / 14.1 → 13.6 / 15.2 |
+| all-tasks | 9,723 → 2,968 | 69.0 → 8.4 | 937 → 1,112 | 15,529 → 5,410 | 125.4 → 4.0 | 25,444,820 → 805,852 | 6.1 / 14.5 → 6.4 / 14.5 | 14.1 / 12.5 → 15.3 / 14.6 |
+| detail | 3,407 → 3,332 | 7.8 → 7.0 | 1,354 → 1,437 | 9,661 → 8,912 | 121.8 → 1.0 | 24,624,149 → 204,706 | 6.1 / 18.8 → 6.9 / 24.4 | 12.7 / 13.6 → 14.4 / 14.1 |
+
+Main commits more often (S5 writes the index when frames arrive), but each commit is small: the memoized rows skip unchanged objects, and a virtualized group mounts only its visible rows. The project list (`closed`) gains even more (−79% commit time), because its groups are virtualized too. With the detail open, the numbers are level within noise. The index request and byte counts repeat the S5 result. Server CPU in the sustained minute fell from 3,380 / 3,150 / 4,070 ms to 2,670 / 2,500 / 3,270 ms (closed / all-tasks / detail).
+
+### Cold bootstrap
+
+The cold phase has no probe; probe columns apply to the sustained phase only.
+
+| View | Commit ms total | Commit p95 ms | Commits | Renderer ms | Index requests | Index bytes | Load before |
+|---|---|---|---|---|---|---|---|
+| closed | 292 → 167 | 113.9 → 28.8 | 20 → 33 | 1,171 → 797 | 5 → 2 | 971,712 → 378,904 | 14.1 → 13.6 |
+| all-tasks | 572 → 223 | 138.8 → 22.8 | 19 → 32 | 1,616 → 891 | 5 → 2 | 973,098 → 190,757 | 14.1 → 15.3 |
+| detail | 201 → 311 | 45.8 → 30.3 | 37 → 46 | 1,205 → 1,516 | 7 → 3 | 1,165,480 → 571,460 | 12.7 → 14.4 |
+
+In the `detail` cold phase, main's median commit time is higher, but the per-run values overlap: baseline 186–396 ms, main 210–485 ms. The added commits (37 → 46) are the bounded index writes that S5 introduced; the S5 round showed the same direction (312 → 344 ms).
+
+### One update and reconnect
+
+| View / phase | Commit ms total | Commits | Renderer ms | Index requests |
+|---|---|---|---|---|
+| closed / update | 8.2 → 5.5 | 2 → 2 | 180 → 73 | 1 → 0 |
+| all-tasks / update | 79.7 → 12.6 | 2 → 2 | 187 → 58 | 1 → 0 |
+| detail / update | 6.5 → 6.9 | 2 → 2 | 219 → 236 | 1 → 0 |
+| closed / reconnect | 64.0 → 23.8 | 6 → 12 | 211 → 190 | 2 → 1 |
+| all-tasks / reconnect | 141.3 → 47.4 | 8 → 12 | 321 → 255 | 3 → 2 |
+| detail / reconnect | 24.0 → 35.3 | 16 → 21 | 527 → 533 | 2 → 1 |
+
+The renamed title of another project shows on the global Tasks page in 64 ms on main and 555 ms on the baseline (median).
+
 ## Remaining limits
 
-- **Global Tasks page row renders (owner: S3, hearsay-tools/cezarion#2732).** On both sides, every index change re-renders about 408 row components of the global Tasks page: the rows are not memoized. Unchanged rows keep their object identity through the patch and through TanStack's `replaceEqualDeep`, so a memoized row would skip them. The branch changes the index when frames arrive, so under sustained updates the page spends about 22% more React commit time (13.1 s → 15.9 s per minute) and 18% more renderer time (20.9 s → 24.7 s) than the baseline, with the 250 ms bound. With one write per frame it was worse (19.3 s commit time in the earlier round). The page's own 15 s poll also remains.
+- **Global Tasks page row renders (resolved by S3b, hearsay-tools/cezarion#2815).** On the S5 branch, every index change re-rendered about 408 unmemoized rows, and the page spent about 22% more React commit time than the baseline (13.1 s → 15.9 s per minute in that round). On main `33ca204e5` the rows are memoized and large groups are virtualized: the page spends 69% less commit time than the baseline (9.7 s → 3.0 s per minute) and 65% less renderer time ([After S3b](#after-s3b-main-33ca204e5-measured-2026-11-07)). The page's own 15 s poll remains (4 index reads per minute).
 - **App shell re-render per index write.** Each write re-renders `AppShellContainer`, also when no project's signal count changed. A `select` on the index query could stop that; it was not part of this slice.
 - **Truncated `truncated` flag after an unplaced delete.** A `run-deleted` for a row the index does not hold cannot be placed (it may be a worker or a row past the window). A `truncated` entry it made stale heals at the next reconciliation or the backstop read.
 - **Foreign-process projects (D2).** Rows of projects that another cezar process runs refresh through the 60 s visible-only backstop, or the global Tasks page's 15 s poll while it is open.
 - **Remote mode (D9).** Without the stream, the 5 s full reconciliation of the index remains; its snapshots pass the fence without extra reads (`runs-index-live.test.tsx`).
-- **Measurement.** One tab per case, one fixture shape, and a shared host whose load differed between the baseline and the final branch runs. The per-frame and the final branch builds were measured in different rounds; compare their commit counts, not their times.
+- **Measurement.** One tab per case, one fixture shape, and a shared host whose load differed between the baseline and the final branch runs. The per-frame and the final branch builds were measured in different rounds; compare their commit counts, not their times. The After S3b round ran on a less loaded host than the S5 rounds; compare its numbers only with each other.
 
 ## Reproduce
 
@@ -108,4 +160,4 @@ npm run build:server
 TMPDIR=/tmp node --import tsx packages/web/scripts/benchmark-tabs.ts --workload index --cpu 11 --output docs/performance/runs-index-patching/branch-1.json
 ```
 
-For the baseline, check out `0320d57fb` in a separate directory, install, run `npm run build:server`, copy `packages/web/scripts/vite.profiling.config.ts` into it and build its web the same way. Run the current harness from this checkout with `--build-root /absolute/path/to/baseline`. `--views closed,all-tasks,detail` selects views, `--sustained-ms` shortens the sustained phase for a smoke run, and `--profile-out PREFIX` writes a renderer CPU profile of the sustained phase; the report's runs use none of them.
+For the baseline, check out `0320d57fb` in a separate directory, install, run `npm run build:server`, copy `packages/web/scripts/vite.profiling.config.ts` into it and build its web the same way. Run the current harness from this checkout with `--build-root /absolute/path/to/baseline`. `--views closed,all-tasks,detail` selects views, `--sustained-ms` shortens the sustained phase for a smoke run, and `--profile-out PREFIX` writes a renderer CPU profile of the sustained phase; the report's runs use none of them. The After S3b round built main the same way, in its own clean detached checkout, and passed it with `--build-root` too, and wrote the result files outside both checkouts, so only the baseline tree is marked dirty (by the copied config).
