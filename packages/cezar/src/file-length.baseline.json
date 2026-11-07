@@ -6,7 +6,7 @@
     "packages/cezar/src/core/opencode-server-runner.ts": 1720,
     "packages/cezar/src/runs/run-database.ts": 1161,
     "packages/cezar/src/runs/store.ts": 3456,
-    "packages/cezar/src/server-install/platforms/ubuntu-vps.ts": 1146,
+    "packages/cezar/src/server-install/platforms/ubuntu-vps.ts": 1056,
     "packages/cezar/src/server/forge/github.ts": 3425,
     "packages/cezar/src/server/server.ts": 5530,
     "packages/web/e2e/agent-browser.ts": 1233,
