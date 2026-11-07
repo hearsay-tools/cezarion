@@ -40,6 +40,155 @@ export function LabelChip({ label, color, plain = false }: { label: string; colo
   )
 }
 
+function itemKindWord(kind: GithubItem['kind']): 'pull request' | 'issue' {
+  return kind === 'pr' ? 'pull request' : 'issue'
+}
+
+function itemHasDiffStat(kind: GithubItem['kind'], additions: number | undefined, deletions: number | undefined): boolean {
+  return kind === 'pr' && Boolean(additions || deletions)
+}
+
+function GithubItemBackLink({ backLink }: { backLink: { to: string } | null }) {
+  if (!backLink) return null
+  return (
+    <Link
+      to={backLink.to}
+      data-slot="gh-back"
+      className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground md:hidden"
+    >
+      <ArrowLeftIcon size={16} aria-hidden="true" className="size-3.5" />
+      Back to the list
+    </Link>
+  )
+}
+
+function GithubItemMeta({
+  item,
+  kindWord,
+  commentCount,
+  hasDiffStat,
+  additions,
+  deletions,
+}: {
+  item: GithubItem
+  kindWord: string
+  commentCount: number | undefined
+  hasDiffStat: boolean
+  additions: number | undefined
+  deletions: number | undefined
+}) {
+  return (
+    <p data-slot="gh-meta" className="flex flex-wrap items-center gap-x-1.5 font-mono text-[11px] text-soft-foreground">
+      <span>#{item.number}</span>·<span>{kindWord}</span>·<span>opened by {item.author}</span>·
+      <span>{shortAge(item.createdAt)} ago</span>
+      {commentCount ? (
+        <>
+          ·<CommentCount count={commentCount} />
+        </>
+      ) : null}
+      {hasDiffStat ? (
+        <>
+          ·
+          <span data-slot="gh-diffstat">
+            <span className="text-success">+{additions ?? 0}</span>{' '}
+            <span className="text-danger">−{deletions ?? 0}</span>
+          </span>
+        </>
+      ) : null}
+      ·
+      {/* href protocol guard (#431): link only for http(s) URLs. */}
+      {isHttpUrl(item.url) ? (
+        <a
+          href={item.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-slot="gh-open-link"
+          className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground hover:underline"
+        >
+          open on GitHub
+          <ExternalLinkIcon aria-hidden="true" className="size-2.5" />
+        </a>
+      ) : (
+        <span data-slot="gh-open-link" className="text-muted-foreground">
+          open on GitHub
+        </span>
+      )}
+    </p>
+  )
+}
+
+function GithubItemSubNav({
+  item,
+  subNav,
+  changes,
+}: {
+  item: GithubItem
+  subNav: { filter: GithubFilter | null; changes: boolean } | null
+  changes: boolean
+}) {
+  if (item.kind !== 'pr') return null
+  if (subNav) {
+    return (
+      <nav aria-label="Pull request detail" className="mt-4 flex border-b border-border">
+        <TabLink to={githubFilterPath('prs', subNav.filter, item.number)} active={!changes}>Conversation</TabLink>
+        <TabLink to={githubFilterPath('prs', subNav.filter, item.number, '/changes')} active={changes}>Changes</TabLink>
+      </nav>
+    )
+  }
+  return (
+    <Link
+      to={githubFilterPath('prs', null, item.number, '/changes')}
+      data-slot="gh-files-changed"
+      className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+    >
+      Files changed
+    </Link>
+  )
+}
+
+function GithubItemLabels({
+  item,
+  colors,
+  checks,
+}: {
+  item: GithubItem
+  colors: Record<string, string>
+  checks: GithubItem['checks']
+}) {
+  if (!(item.labels.length > 0 || checks)) return null
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      {item.labels.map((label) => (
+        <LabelChip key={label} label={label} color={colors[label]} />
+      ))}
+      {checks ? <ChecksBadge checks={checks} url={item.url} /> : null}
+    </div>
+  )
+}
+
+function GithubItemConversation({
+  item,
+  colors,
+  body,
+}: {
+  item: GithubItem
+  colors: Record<string, string>
+  body: string | undefined
+}) {
+  return (
+    <>
+      <div data-slot="gh-body" className="mt-5 text-sm">
+        {body ? (
+          <Markdown>{body}</Markdown>
+        ) : (
+          <p className="text-soft-foreground">(no description)</p>
+        )}
+      </div>
+      <GithubThread item={item} colors={colors} />
+    </>
+  )
+}
+
 /**
  * One issue or PR in full — description, labels, checks, thread, merge box — shared by the GitHub
  * view and the task page's item tabs (#692). The GitHub view passes its list as `backLink` and its
@@ -77,7 +226,7 @@ export function GithubItemDetail({
   children?: ReactNode
 }) {
   const changes = subNav?.changes ?? false
-  const kindWord = item.kind === 'pr' ? 'pull request' : 'issue'
+  const kindWord = itemKindWord(item.kind)
   // The detail tier (hearsay-tools/cezarion#1183): the thread request also carries the item's own
   // body and diffstat, so the pane no longer depends on the list row having shipped them. The same
   // query `GithubThread` reads; on the Changes tab it serves only what is already cached.
@@ -85,100 +234,34 @@ export function GithubItemDetail({
   const body = detail?.body ?? item.body
   const additions = detail?.additions ?? item.additions
   const deletions = detail?.deletions ?? item.deletions
-  const hasDiffStat = item.kind === 'pr' && Boolean(additions || deletions)
+  const hasDiffStat = itemHasDiffStat(item.kind, additions, deletions)
   const commentCount = comments ?? item.comments
   return (
     <article data-slot="gh-detail-inner" className="min-w-0 px-4 py-4 md:px-7 md:py-5">
-      {backLink ? (
-        <Link
-          to={backLink.to}
-          data-slot="gh-back"
-          className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground md:hidden"
-        >
-          <ArrowLeftIcon size={16} aria-hidden="true" className="size-3.5" />
-          Back to the list
-        </Link>
-      ) : null}
+      <GithubItemBackLink backLink={backLink} />
 
       <div data-slot="gh-description-card" className={item.kind === 'pr' ? 'rounded-xl border border-border bg-card p-6' : undefined}>
       {item.kind === 'pr' ? <h2 className="mb-4 text-[22px] leading-snug font-normal">#{item.number} {item.title}</h2> : null}
-      <p data-slot="gh-meta" className="flex flex-wrap items-center gap-x-1.5 font-mono text-[11px] text-soft-foreground">
-        <span>#{item.number}</span>·<span>{kindWord}</span>·<span>opened by {item.author}</span>·
-        <span>{shortAge(item.createdAt)} ago</span>
-        {commentCount ? (
-          <>
-            ·<CommentCount count={commentCount} />
-          </>
-        ) : null}
-        {hasDiffStat ? (
-          <>
-            ·
-            <span data-slot="gh-diffstat">
-              <span className="text-success">+{additions ?? 0}</span>{' '}
-              <span className="text-danger">−{deletions ?? 0}</span>
-            </span>
-          </>
-        ) : null}
-        ·
-        {/* href protocol guard (#431): link only for http(s) URLs. */}
-        {isHttpUrl(item.url) ? (
-          <a
-            href={item.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            data-slot="gh-open-link"
-            className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground hover:underline"
-          >
-            open on GitHub
-            <ExternalLinkIcon aria-hidden="true" className="size-2.5" />
-          </a>
-        ) : (
-          <span data-slot="gh-open-link" className="text-muted-foreground">
-            open on GitHub
-          </span>
-        )}
-      </p>
+      <GithubItemMeta
+        item={item}
+        kindWord={kindWord}
+        commentCount={commentCount}
+        hasDiffStat={hasDiffStat}
+        additions={additions}
+        deletions={deletions}
+      />
 
       {item.kind !== 'pr' ? <h2 className="mt-2 text-[22px] leading-snug font-normal">{item.title}</h2> : null}
 
       {afterHeading}
 
-      {item.kind === 'pr' && subNav ? (
-        <nav aria-label="Pull request detail" className="mt-4 flex border-b border-border">
-          <TabLink to={githubFilterPath('prs', subNav.filter, item.number)} active={!changes}>Conversation</TabLink>
-          <TabLink to={githubFilterPath('prs', subNav.filter, item.number, '/changes')} active={changes}>Changes</TabLink>
-        </nav>
-      ) : item.kind === 'pr' ? (
-        <Link
-          to={githubFilterPath('prs', null, item.number, '/changes')}
-          data-slot="gh-files-changed"
-          className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
-        >
-          Files changed
-        </Link>
-      ) : null}
+      <GithubItemSubNav item={item} subNav={subNav} changes={changes} />
 
-      {item.labels.length > 0 || checks ? (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {item.labels.map((label) => (
-            <LabelChip key={label} label={label} color={colors[label]} />
-          ))}
-          {checks ? <ChecksBadge checks={checks} url={item.url} /> : null}
-        </div>
-      ) : null}
+      <GithubItemLabels item={item} colors={colors} checks={checks} />
 
-      {changes && item.kind === 'pr' ? <GithubPrChanges item={item} /> : <>
-      <div data-slot="gh-body" className="mt-5 text-sm">
-        {body ? (
-          <Markdown>{body}</Markdown>
-        ) : (
-          <p className="text-soft-foreground">(no description)</p>
-        )}
-      </div>
-
-      <GithubThread item={item} colors={colors} />
-
-      </>}
+      {changes && item.kind === 'pr' ? <GithubPrChanges item={item} /> : (
+        <GithubItemConversation item={item} colors={colors} body={body} />
+      )}
       </div>
       {item.kind === 'pr' ? <GithubMergeBox number={item.number} onRunAgent={onRunAgent} /> : null}
       {children}
@@ -525,63 +608,72 @@ function EventRow({ event, colors }: { event: GithubTimelineEvent; colors: Recor
   )
 }
 
+function CommittedPhrase({ event }: { event: GithubTimelineEvent }) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="shrink-0">committed</span>
+      {event.sha ? <span className="shrink-0 text-muted-foreground">{event.sha.slice(0, 7)}</span> : null}
+      {event.message ? (
+        <span className="truncate font-sans text-foreground">{event.message}</span>
+      ) : null}
+      <CommitChecks checks={event.checks} />
+    </span>
+  )
+}
+
+function LabeledPhrase({ event, colors }: { event: GithubTimelineEvent; colors: Record<string, string> }) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="shrink-0">{event.kind === 'labeled' ? 'added the' : 'removed the'}</span>
+      {event.label ? (
+        <span
+          data-slot="gh-event-label"
+          style={labelChipStyle(event.label.color ?? colors[event.label.name])}
+          className="max-w-[12rem] truncate rounded-full border px-1.5 py-px font-sans text-[12px]"
+        >
+          {event.label.name}
+        </span>
+      ) : null}
+      <span className="shrink-0">label</span>
+    </span>
+  )
+}
+
+function AssignedPhrase({ event }: { event: GithubTimelineEvent }) {
+  return (
+    <span className="truncate">
+      {event.kind === 'assigned' ? 'assigned' : 'unassigned'} {event.subject ?? 'someone'}
+    </span>
+  )
+}
+
+function CrossReferencedPhrase({ event }: { event: GithubTimelineEvent }) {
+  return (
+    <span className="truncate">
+      referenced this in {event.refNumber ? `#${event.refNumber}` : 'another thread'}
+      {event.refTitle ? ` ${event.refTitle}` : ''}
+    </span>
+  )
+}
+
+const EVENT_PHRASE: Record<GithubTimelineEventKind, (event: GithubTimelineEvent, colors: Record<string, string>) => ReactNode> = {
+  committed: (event) => <CommittedPhrase event={event} />,
+  labeled: (event, colors) => <LabeledPhrase event={event} colors={colors} />,
+  unlabeled: (event, colors) => <LabeledPhrase event={event} colors={colors} />,
+  assigned: (event) => <AssignedPhrase event={event} />,
+  unassigned: (event) => <AssignedPhrase event={event} />,
+  merged: () => <span>merged this</span>,
+  closed: () => <span>closed this</span>,
+  reopened: () => <span>reopened this</span>,
+  head_ref_force_pushed: () => <span>force-pushed</span>,
+  renamed: (event) => <span className="truncate">renamed this to {event.subject ?? '—'}</span>,
+  'cross-referenced': (event) => <CrossReferencedPhrase event={event} />,
+}
+
 /** The kind-specific middle of an event row. Split out so `EventRow` stays a layout shell and
  *  each phrase can be asserted on its own in tests. */
 function EventPhrase({ event, colors }: { event: GithubTimelineEvent; colors: Record<string, string> }) {
-  switch (event.kind) {
-    case 'committed':
-      return (
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="shrink-0">committed</span>
-          {event.sha ? <span className="shrink-0 text-muted-foreground">{event.sha.slice(0, 7)}</span> : null}
-          {event.message ? (
-            <span className="truncate font-sans text-foreground">{event.message}</span>
-          ) : null}
-          <CommitChecks checks={event.checks} />
-        </span>
-      )
-    case 'labeled':
-    case 'unlabeled':
-      return (
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="shrink-0">{event.kind === 'labeled' ? 'added the' : 'removed the'}</span>
-          {event.label ? (
-            <span
-              data-slot="gh-event-label"
-              style={labelChipStyle(event.label.color ?? colors[event.label.name])}
-              className="max-w-[12rem] truncate rounded-full border px-1.5 py-px font-sans text-[12px]"
-            >
-              {event.label.name}
-            </span>
-          ) : null}
-          <span className="shrink-0">label</span>
-        </span>
-      )
-    case 'assigned':
-    case 'unassigned':
-      return (
-        <span className="truncate">
-          {event.kind === 'assigned' ? 'assigned' : 'unassigned'} {event.subject ?? 'someone'}
-        </span>
-      )
-    case 'merged':
-      return <span>merged this</span>
-    case 'closed':
-      return <span>closed this</span>
-    case 'reopened':
-      return <span>reopened this</span>
-    case 'head_ref_force_pushed':
-      return <span>force-pushed</span>
-    case 'renamed':
-      return <span className="truncate">renamed this to {event.subject ?? '—'}</span>
-    case 'cross-referenced':
-      return (
-        <span className="truncate">
-          referenced this in {event.refNumber ? `#${event.refNumber}` : 'another thread'}
-          {event.refTitle ? ` ${event.refTitle}` : ''}
-        </span>
-      )
-  }
+  return EVENT_PHRASE[event.kind](event, colors)
 }
 
 /** The rolled-up CI glyph on a commit row (#525) — reuses `CHECKS_GLYPH`/`CHECKS_TONE`, the same
