@@ -9,7 +9,7 @@ import { assertHomeMetadata } from './boundary.ts';
 
 export const installMarkerSchema = z.object({
   installId: z.uuid(), kind: z.enum(['live', 'dev', 'test']), createdAt: z.iso.datetime(),
-  migratedFrom: z.string().optional(), state: z.unknown().optional(),
+  migratedFrom: z.string().optional(), state: z.enum(['pending', 'committed']).optional(),
 }).passthrough();
 export type InstallMarker = z.infer<typeof installMarkerSchema>;
 
@@ -25,12 +25,31 @@ export function readInstallMarker(root: string): InstallMarker | undefined {
   }
 }
 
-export function assertHomeWritable(root: string): InstallMarker {
+export function assertHomeReadable(root: string): InstallMarker {
   const marker = readInstallMarker(root);
   if (marker?.kind === 'live' && underTestRunner()) throw new Error(`[cez] refusing to write live home ${root} from a test runner`);
   assertCezarHomeWriteIsSandboxed(root);
   if (!marker) throw new Error(`[cez] refusing to write home ${root} without an install marker; start it through a CLI entry point`);
   return marker;
+}
+
+export function assertHomeWritable(root: string): InstallMarker {
+  const marker = assertHomeReadable(root);
+  if (marker.state === 'pending') throw new Error(`[cez] refusing to write pending migration home ${root}; finish or roll back the migration first`);
+  return marker;
+}
+
+/** The migration alone replaces marker state. Normal entry preparation never overwrites it. */
+export function writeMigrationMarker(root: string, migratedFrom: string, state: 'pending' | 'committed'): InstallMarker {
+  const existing = readInstallMarker(root);
+  if (existing) assertHomeReadable(root);
+  assertHomeMetadata(root);
+  return withHomeLock(root, () => {
+    const marker = readInstallMarker(root) ?? { installId: randomUUID(), kind: underTestRunner() ? 'test' : 'live', createdAt: new Date().toISOString() };
+    const next = installMarkerSchema.parse({ ...marker, kind: marker.kind === 'test' ? 'test' : 'live', migratedFrom, state });
+    replacePrivate(join(root, 'install.json'), `${JSON.stringify(next, null, 2)}\n`, { layout: 'split' });
+    return next;
+  });
 }
 
 /** Only sandbox construction and marker-creating entry points call this. Never downgrades live. */

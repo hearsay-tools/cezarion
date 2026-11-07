@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import type { Home } from './home.ts';
 import { recordedProcessLive } from '../delegation/process-liveness.ts';
-import { assertHomeWritable } from './install-marker.ts';
+import { assertHomeReadable } from './install-marker.ts';
 import { privateDirectory, replacePrivate } from './private-files.ts';
 import { withHomeLock } from './write-lock.ts';
 import { ownProcessStartToken } from './process-identity.ts';
@@ -15,7 +15,7 @@ export type CockpitLease = z.infer<typeof leaseSchema>;
 
 /** Presence is advisory. It never excludes another cockpit or a CLI writer. */
 export function readCockpitLeases(home: Home): CockpitLease[] {
-  assertHomeWritable(home.root);
+  assertHomeReadable(home.root);
   assertHomePath(home.root, join(home.root, '.locks', 'cockpits'));
   return withHomeLock(home.root, () => {
     const directory = join(home.root, '.locks', 'cockpits');
@@ -36,7 +36,7 @@ export function readCockpitLeases(home: Home): CockpitLease[] {
 }
 
 export function holdCockpitLease(home: Home, port: number, instance = 'default'): () => void {
-  const marker = assertHomeWritable(home.root);
+  const marker = assertHomeReadable(home.root);
   const path = join(home.root, '.locks', 'cockpits', `${process.pid}.lease`);
   assertHomePath(home.root, path);
   const lease = { pid: process.pid, startToken: ownProcessStartToken(), installId: marker.installId, port, instance };
@@ -46,7 +46,7 @@ export function holdCockpitLease(home: Home, port: number, instance = 'default')
     replacePrivate(path, JSON.stringify(lease));
   });
   return () => {
-    assertHomeWritable(home.root);
+    assertHomeReadable(home.root);
     assertHomePath(home.root, path);
     withHomeLock(home.root, () => { rmSync(path, { force: true }); });
   };

@@ -90,6 +90,21 @@ const agentAccountSchema = z
 
 export type AgentAccount = z.infer<typeof agentAccountSchema>;
 
+/** Shared salvage and first-wins policy; migration also needs the discarded duplicate rows. */
+export function parseAgentAccountEntries(entries: unknown[]): { accounts: AgentAccount[]; duplicates: AgentAccount[]; selectedIndices: number[] } {
+  const accounts: AgentAccount[] = [], duplicates: AgentAccount[] = [], selectedIndices: number[] = [];
+  const seen = new Set<string>();
+  entries.forEach((entry, index) => {
+    const parsed = agentAccountSchema.safeParse(entry);
+    if (!parsed.success) return;
+    if (seen.has(parsed.data.id)) { duplicates.push(parsed.data); return; }
+    seen.add(parsed.data.id);
+    accounts.push(parsed.data);
+    selectedIndices.push(index);
+  });
+  return { accounts, duplicates, selectedIndices };
+}
+
 /** One project's choice, per provider. Explicit keys so `PROVIDER_IDS` stays the one source of
  *  truth and the value is bounded. An absent key means the discovered default. */
 const selectionSchema = z
@@ -105,25 +120,18 @@ const selectionSchema = z
 
 export type AgentAccountSelection = z.infer<typeof selectionSchema>;
 
+/** The raw rows the salvage reads: anything that is not an array names no account. */
+const accountRowsSchema = z
+  .array(z.unknown())
+  .default(() => [])
+  .catch(() => []);
+
 export const storeSchema = z
   .object({
     /** Format cursor for THIS file, independent of `config.json`'s `schemaVersion`. Nothing reads
      *  it yet; it exists so a future shape change has somewhere to say so. */
     version: z.number().int().min(0).default(1).catch(1),
-    accounts: z
-      .array(z.unknown())
-      .default(() => [])
-      .catch(() => [])
-      .transform((entries) => {
-        const seen = new Set<string>();
-        return entries.flatMap((entry) => {
-          const parsed = agentAccountSchema.safeParse(entry);
-          // First-wins on a duplicated id, so two consumers never resolve the same id differently.
-          if (!parsed.success || seen.has(parsed.data.id)) return [];
-          seen.add(parsed.data.id);
-          return [parsed.data];
-        });
-      }),
+    accounts: accountRowsSchema.transform((entries) => parseAgentAccountEntries(entries).accounts),
     /**
      * The per-provider account a repo with no selection of its own uses.
      *
@@ -237,14 +245,15 @@ function importLegacyAccounts(home: Home): AgentAccountStore {
   }
 }
 
-function readLegacyAccounts(home: Home, persist: boolean): AgentAccountStore {
+/** The raw `config.json` keys the one-time import reads; undefined when there is nothing to read. */
+function legacyAccountInput(home: Home, read: (path: string) => string): { accounts: unknown; selections: Record<string, unknown> } | undefined {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readHomeFile(home.workspaceConfig));
+    parsed = JSON.parse(read(home.workspaceConfig));
   } catch {
-    return defaultAgentAccountStore();
+    return undefined;
   }
-  if (!parsed || typeof parsed !== 'object') return defaultAgentAccountStore();
+  if (!parsed || typeof parsed !== 'object') return undefined;
   const legacy = parsed as { agentProfiles?: unknown; projects?: unknown };
   const selections: Record<string, unknown> = {};
   if (Array.isArray(legacy.projects)) {
@@ -256,7 +265,37 @@ function readLegacyAccounts(home: Home, persist: boolean): AgentAccountStore {
       }
     }
   }
-  const imported = storeSchema.safeParse({ accounts: legacy.agentProfiles, selections });
+  return { accounts: legacy.agentProfiles, selections };
+}
+
+/**
+ * What a load reads, without the import's write: the raw account rows its salvage selects from,
+ * and the store value a rewrite starts from (the file as written, or the store an import would
+ * persist). `value` is undefined for a corrupt file, which a load ignores and never overwrites.
+ * The legacy-home migration inventories and relocates accounts through this.
+ */
+export function readAgentAccountSource(home: Home, read: (path: string) => string = readHomeFile): { rows: unknown[]; value: Record<string, unknown> | undefined } {
+  let raw: string;
+  try {
+    raw = read(home.agentAccounts);
+  } catch {
+    const input = legacyAccountInput(home, read);
+    const imported = input ? storeSchema.safeParse(input) : undefined;
+    return input && imported?.success ? { rows: accountRowsSchema.parse(input.accounts), value: imported.data } : { rows: [], value: undefined };
+  }
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (storeSchema.safeParse(value).success) return { rows: accountRowsSchema.parse((value as { accounts?: unknown }).accounts), value: value as Record<string, unknown> };
+  } catch {
+    // malformed JSON names no account, as in the loader
+  }
+  return { rows: [], value: undefined };
+}
+
+function readLegacyAccounts(home: Home, persist: boolean): AgentAccountStore {
+  const input = legacyAccountInput(home, readHomeFile);
+  if (!input) return defaultAgentAccountStore();
+  const imported = storeSchema.safeParse(input);
   if (!imported.success) return defaultAgentAccountStore();
   // Only worth persisting when there was something to carry over; an empty import must not create
   // a file, or the zero-config promise ("delete any of them and cezar rebuilds") gains a file that

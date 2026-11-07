@@ -6,12 +6,13 @@ import { flagResetFromBackup, flagResetOnWrite } from './reset-detection.ts';
 import { basename, dirname, join } from 'node:path';
 import { backupBeforeWrite } from '../workspace/backups.ts';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
-import { assertHomeWritable, createInstallMarker, readInstallMarker, underTestRunner } from './install-marker.ts';
+import { assertHomeReadable, assertHomeWritable, createInstallMarker, readInstallMarker, underTestRunner } from './install-marker.ts';
 import { digest, OUTSIDE_WRITE_ENFORCEMENT, readBytes, VersionLog, type OutsideWrite } from './version-log.ts';
 import { withHomeLock } from './write-lock.ts';
 import { assertHomePaths } from './boundary.ts';
 import { homeEntryAuthorization, registryFiles, seedHomeRegistry } from './entry-authorization.ts';
 import { homePathLocation } from './file-location.ts';
+import { assertNoMigration } from './migration-guard.ts';
 
 /** A path-derived reader preserves APIs that already accept a resolved Home path (ADR 0059). */
 export function homeFileRoot(path: string): string {
@@ -24,11 +25,12 @@ export function homeFileRoot(path: string): string {
 /** Registry files only. No ambient paths, no user settings, no layout selection. */
 export class HomeStore {
   readonly root: string;
+  private writeDepth = 0;
   constructor(private readonly home: Home | string) { this.root = typeof home === 'string' ? home : home.root; }
 
-  private journal(path: string): VersionLog {
+  private journal(path: string, reportOnly = false): VersionLog {
     const { root, file } = homePathLocation(this.home, path);
-    return new VersionLog(root, file);
+    return new VersionLog(root, file, {}, reportOnly);
   }
 
   private lockRoot(path: string): string {
@@ -40,11 +42,13 @@ export class HomeStore {
   }
 
   /** Synchronous transactions never retain the filesystem lock over an event-loop yield. */
-  transaction<T>(operation: () => T, writePaths: readonly string[] = []): T {
+  transaction<T>(operation: (reportOnly?: boolean) => T, writePaths: readonly string[] = [], readOnly = false): T {
+    if (!readOnly && this.writeDepth === 0) assertNoMigration(this.root);
     const marker = readInstallMarker(this.root);
     const authorization = homeEntryAuthorization(this.root);
     const entry = authorization && (!marker || !authorization.seeded) ? authorization : undefined;
-    if (marker || !entry) assertHomeWritable(this.root);
+    if (readOnly) assertHomeReadable(this.root);
+    if (!readOnly && (marker || !entry)) assertHomeWritable(this.root);
     const files = entry ? registryFiles(entry.home) : [];
     this.assertBoundary(writePaths, true);
     // Seeding is auxiliary. Check every path before the first mutation, but skip unsafe ones.
@@ -56,10 +60,13 @@ export class HomeStore {
     // Entry seeding takes config before state too; keep that order for multi-file callers.
     roots.sort((a, b) => Number(b === this.root) - Number(a === this.root));
     const operationWithEntry = () => {
-      if (entry) createInstallMarker(this.root, underTestRunner() ? 'test' : entry.kind);
-      assertHomeWritable(this.root);
-      if (entry) entry.seeded = seedHomeRegistry(this, seedable, entry.home) && seedable.length === files.length;
-      return operation();
+      if (!readOnly) assertNoMigration(this.root, true);
+      const reportOnly = readOnly && (existsSync(join(this.root, '.migrating')) || readInstallMarker(this.root)?.state === 'pending');
+      if (entry && !reportOnly) createInstallMarker(this.root, underTestRunner() ? 'test' : entry.kind);
+      if (!readOnly) assertHomeWritable(this.root);
+      if (entry && !reportOnly) entry.seeded = seedHomeRegistry(this, seedable, entry.home) && seedable.length === files.length;
+      if (!readOnly) this.writeDepth++;
+      try { return operation(reportOnly); } finally { if (!readOnly) this.writeDepth--; }
     };
     return roots.reduceRight<() => T>((next, root) => () => withHomeLock(root, next), operationWithEntry)();
   }
@@ -90,7 +97,9 @@ export class HomeStore {
       this.assertBoundary([path]);
       return withHomeLock(log.root, () => {
         const bytes = readBytes(path);
-        log.inspect(bytes);
+        // A pending transition can happen while waiting. Ordinary reads do not probe .migrating:
+        // their legacy journal is excluded from copied files and the legacy hash comparison.
+        if (this.canJournal()) log.inspect(bytes);
         return this.requiredBytes(path, bytes).toString('utf8');
       });
     } catch {
@@ -102,7 +111,7 @@ export class HomeStore {
   private canJournal(): boolean {
     try {
       const marker = readInstallMarker(this.root);
-      if (!marker || (marker.kind === 'live' && underTestRunner())) return false;
+      if (!marker || marker.state === 'pending' || (marker.kind === 'live' && underTestRunner())) return false;
       assertCezarHomeWriteIsSandboxed(this.root);
       return true;
     } catch {
@@ -151,11 +160,12 @@ export class HomeStore {
   }
 
   outsideWrite(path: string): OutsideWrite | undefined {
+    if (readInstallMarker(this.root)?.state === 'pending') return;
     this.assertBoundary([path]);
-    return this.transaction(() => {
-      const log = this.journal(path);
+    return this.transaction(reportOnly => {
+      const log = this.journal(path, reportOnly);
       return log.inspect(readBytes(path));
-    }, [path]);
+    }, [path], true);
   }
 
   createExclusive(path: string, bytes: Buffer): void {
@@ -180,8 +190,8 @@ export class HomeStore {
     this.assertBoundary([path]);
     // Observing a never-created optional file must not create its first journal.
     if (!existsSync(path) && !existsSync(this.journal(path).directory)) return;
-    return this.transaction(() => {
-      const log = this.journal(path);
+    return this.transaction(reportOnly => {
+      const log = this.journal(path, reportOnly);
       const bytes = readBytes(path);
       const outside = log.inspect(bytes);
       if (!outside) flagResetFromBackup(log, bytes, this.home);
@@ -189,7 +199,7 @@ export class HomeStore {
       let canRestore = true;
       if (flag) try { log.recoveryBytes(flag); } catch { canRestore = false; }
       return flag ? { reason: outside ? 'outside-write' as const : 'reset' as const, detectedAt: flag.detectedAt, canRestore, restoreHash: flag.restoreHash } : undefined;
-    }, [path]);
+    }, [path], true);
   }
 
   /** Explicit restore resolves any incident; normal writes only self-heal a proven registry deletion. */

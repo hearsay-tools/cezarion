@@ -95,20 +95,24 @@ export interface PathHookResult {
   alreadyPresent: boolean;
 }
 
+/** The POSIX rc file and its marked PATH line. The home migration replaces exactly this line. */
+export function pathHook(dir: string, env: NodeJS.ProcessEnv = process.env): { file: string; line: string; marker: string } {
+  // The user's home comes from `env`, like every other path in this module: a caller (or a
+  // test) that points HOME elsewhere must never reach the real shell profile.
+  const home = env.HOME || homedir();
+  const shell = env.SHELL ?? '';
+  const rc = shell.endsWith('/zsh') ? '.zshrc' : shell.endsWith('/bash') ? '.bashrc' : '.profile';
+  return { file: join(home, rc), line: `export PATH=${shellQuote(dir)}:"$PATH" ${PATH_MARKER}`, marker: PATH_MARKER };
+}
+
 /**
  * Add `~/.cezar/bin` to PATH for future shells by appending one marked line to the shell's rc
  * file (`.zshrc`, `.bashrc`, or `.profile` for anything else). Idempotent: the marker is what a
  * second run looks for. Windows users are told the line; the PoC does not touch the registry.
  */
 export function ensurePathHook(dir: string, env: NodeJS.ProcessEnv = process.env): PathHookResult {
-  // The user's home comes from `env`, like every other path in this module: a caller (or a
-  // test) that points HOME elsewhere must never reach the real shell profile.
-  const home = env.HOME || homedir();
-  const line = `export PATH=${shellQuote(dir)}:"$PATH" ${PATH_MARKER}`;
   if (process.platform === 'win32') return { file: null, line: `setx PATH "%PATH%;${dir}"`, alreadyPresent: false };
-  const shell = env.SHELL ?? '';
-  const rc = shell.endsWith('/zsh') ? '.zshrc' : shell.endsWith('/bash') ? '.bashrc' : '.profile';
-  const file = join(home, rc);
+  const { file, line } = pathHook(dir, env);
   let current = '';
   try {
     current = readFileSync(file, 'utf8');
