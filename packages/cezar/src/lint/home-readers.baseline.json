@@ -27,7 +27,7 @@
     {
       "file": "packages/cezar/src/server-install/platforms/macosx-ngrok.ts",
       "kind": "homedir",
-      "calls": 4,
+      "calls": 1,
       "reason": "Locate OS-user LaunchAgents files."
     },
     {

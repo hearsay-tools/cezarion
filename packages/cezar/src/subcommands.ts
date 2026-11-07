@@ -6,12 +6,14 @@
 
 import type { Home } from './home/home.ts';
 import { resolveHome } from './home/resolve.ts';
+import { REBRAND_SWITCH } from './home/switch.ts';
 export type SubcommandRunner = (argv: string[], env: NodeJS.ProcessEnv) => Promise<number>;
 
-export const SUBCOMMAND_NAMES = ['backup', 'discover', 'artifact', 'task', 'automation', 'webhook', 'worker', 'message', 'remote-settings'] as const;
+export const SUBCOMMAND_NAMES = ['backup', 'discover', 'artifact', 'task', 'automation', 'webhook', 'worker', 'message', 'remote-settings', ...(REBRAND_SWITCH ? ['migrate'] : [])] as const;
 
 /** The runner for `name`, or nothing when `name` is not a subcommand. */
-export async function loadSubcommand(name: string | undefined, home: (env: NodeJS.ProcessEnv) => Home = env => resolveHome({ purpose: 'cli', env })): Promise<SubcommandRunner | undefined> {
+export async function loadSubcommand(name: string | undefined, home: (env: NodeJS.ProcessEnv) => Home = env => resolveHome({ purpose: 'cli', env }), rebrand = REBRAND_SWITCH): Promise<SubcommandRunner | undefined> {
+  if (rebrand && name === 'migrate') return (await import('./home/migration-cli.ts')).runMigrationCommand;
   switch (name) {
     case 'backup': return async (argv, env) => {
       return (await import('./workspace/backup-cli.ts')).runBackupCommand(argv, env, home(env));

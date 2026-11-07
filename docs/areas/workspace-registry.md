@@ -126,3 +126,119 @@ legacy-default `CEZ_HOME` counts as unset in split layout. Both names belong to
 `HOME_LAYOUT_ENV` list contains platform layout values, which still reach agents.
 The resolver has no filesystem access. New roots and the Windows current-user
 private ACL stay behind the disabled release switch.
+
+## Legacy migration (staged)
+
+`home/migrate.ts` exports synchronous `migrateLegacyHome(legacy, target,
+{ commit = true, env?, onStep? })`. Entry points call it only while
+`REBRAND_SWITCH` is enabled; tests inject a split Home. It returns
+`{ status: 'fresh' | 'migrated' | 'unchanged' | 'pending', record? }`.
+`home/migration-plan.ts` exports the shared read-only `planLegacyMigration`
+used by `cez migrate --dry-run`. The command is absent with the switch off.
+
+The legacy `.migrating` claim contains `{ pid, startToken? }`, uses exclusive
+creation, and reclaims proven-dead holders under the legacy write lock.
+Steps 2–8 run synchronously under that lock, then target config and state
+locks, without extending the short-lock protocol. HomeStore checks for the
+claim before waiting and inside its transaction. This one safety change is
+unconditional; ordinary reads do not probe `.migrating`.
+Boot refuses live migration holders and lets migration reclaim dead holders,
+including a pending copy left by a hard crash. Only a finished
+`commit: false` copy is a staged server group: its record has `stagedAt` and
+boot serves it read-only. A pending home without `stagedAt` is a failed or
+crashed run, and boot restarts it at step 4. Step 5's recovery refusal runs
+before the first target write, so a refused run leaves no pending home.
+Recovery inspections recheck the claim and pending marker under their lock.
+They then run the normal journal interpretation on a report-only VersionLog,
+which keeps every record change in memory: a reset interrupted after its
+replacement (PENDING, stale HEAD) still reports, and no journal file changes.
+
+An empty or absent legacy home returns `fresh` and commits an explicit
+decision: a v1 record with `files: []` and `backup: ''`, then the marker with
+`migratedFrom` and `state: 'committed'`. A fresh home therefore carries
+`migratedFrom` and `committed` too. `MOVED.json` is written only when the
+legacy directory exists; a new install never creates `~/.cezar`. A later
+older-binary write to the legacy home then never re-runs migration: step 3
+returns `unchanged`, and P2b-2 treats a legacy file absent from `files` as a
+legacy change. The fresh branch refuses while the target holds a pending or
+rolled-back copy (`install.json.failed`): that copy may be the only one left,
+so its record and backup reference stay for recovery.
+
+`installMarkerSchema.state` is `pending | committed | undefined`.
+`writeMigrationMarker` is the migration's only marker writer; ordinary marker
+creation never overwrites one. A pending home refuses HomeStore writes and
+permits reads and cockpit leases. Boot detects `install.json.state ===
+'pending'` with a staged record and skips migration and seeding so P2c can
+check the group read-only.
+`prepareHomeLifecycle(home, instance?)` passes the instance into its lease.
+
+For P2c, `migrateLegacyHome(..., { commit: false })` leaves a pending copy.
+`commitLegacyMigration(target, env?)` rechecks the legacy hashes, commits the
+marker and writes `MOVED.json`. After the marker commits, a retry only finishes
+publication and PATH updates; later legacy changes belong to the canary.
+Profile symlinks stay intact; a profile inside the legacy home stays unchanged
+with a warning. `rollbackLegacyMigration(target)` renames a
+pending marker to `install.json.failed`; the next explicit migration overwrites
+the recorded pending destinations. Rollback never rewrites legacy registry data.
+
+`home/migration-record.ts` owns `migrationRecordSchema` (version 1) and the
+private `readMigrationRecord(home)` / `writeMigrationRecord(home, record)` pair.
+Writers hold config then state locks. A record contains `legacyRoot`, all five
+`roots`, `createdAt`, `backup`, `files`, `deferredAccounts`, `notMoved`, and
+the optional `stagedAt`.
+Each file has its legacy-relative `path`, SHA-256 `hash`, `mtimeMs`, and a
+nullable `target: { kind: config | state | data, path }`. Unmapped legacy files
+are observed but not imported. `movedHomeSchema` is
+`{ version: 1, roots, migratedAt }`.
+
+Step 7 uses VersionLog under the migration locks to rewrite target account
+paths while pending. It preserves the legacy bytes and publishes HEAD; it
+does not add a HomeStore bypass. Deferred accounts finish at a later boot
+through ordinary HomeStore writes once no live run registered in either the
+target or the legacy registry can use them.
+The read-only run-store probe uses live run rows and a live family owner's PID
+and start token. It defers unknown selections or unreadable stores too; dry-run
+lists the same deferrals. A non-cockpit owner can keep a closed session's account
+deferred until its claim ends. Live legacy cockpit leases already stop step 2.
+An internal omp account stays in place and records `notMoved` with reason
+`omp-profile-root-inside-legacy-home`; the warning asks to move `PI_CONFIG_DIR`
+outside the legacy home (planner decision for hearsay-tools/cezarion#2933).
+Account inventory reads accounts through the loader's own source,
+`readAgentAccountSource`: `agent-accounts.json` with the loader's salvage
+(a non-array `accounts` names no account), or, when that file is absent, the
+one-time `config.json` `agentProfiles` import. An imported account relocates
+like a stored one; the rewrite publishes the store that import would persist.
+Account inventory uses the loader's first-wins ID rule. Later duplicate IDs
+stay in place and record `notMoved` with reason `duplicate-account-id`.
+Each pending account or managed tree is rebuilt in a fresh staging directory.
+Every accounts pass rebuilds all targets derived from the account sources: it
+drops account trees the pass no longer copies, and it rebuilds the target
+`agent-accounts.json` from the legacy source. A step-6 recopy of
+`agent-accounts.json` or `config.json` therefore never leaves stale accounts.
+Deferred retries first check the target registry: an already rewritten
+configDir repairs the migration record without copying over live credentials.
+
+`isCezarMigrationJson` defines the strict JSON set. It covers cezar's live registry,
+state, grants, connections and update JSON. Historical backups and version
+snapshots are opaque bytes, even when their filenames end in `.json`.
+An exact legacy `ACCEPTED` journal record follows its copied registry bytes;
+other journal records do not migrate. A recopy drops acceptance if its hash
+no longer matches, so an unrelated later state cannot inherit it.
+Opaque vendor account
+trees and managed `versions/` are verified byte for byte, since their `.json`
+files can be JSONC. Copies, archives, records and journals use private files
+and split-layout Windows ACLs. Every tree copy keeps the owner-execute bit:
+a file is 0700 when its owner could execute the source (managed executables,
+launchers, account profile hooks) and 0600 otherwise. The old launchers remain
+unchanged. Archive entries record the same 0700 or 0600 mode. Launchers come from `writeLaunchers`, and the PATH line update
+replaces the line `pathHook` defines for `cez install`.
+The managed package link at `versions/<id>/node_modules/@wjarka/cezarion`
+keeps an external checkout only when its version manifest records that same
+checkout with `source: 'link'`. Other escaping links refuse migration.
+A dangling link is copied as written when its lexical target stays inside
+the source tree, and refuses migration otherwise.
+Staged tree copies compute link targets against the final destination;
+absolute links and Windows junctions never retain staging paths.
+The archive writes one gzip member per tar entry, followed by tar end blocks.
+This standard concatenated gzip stream bounds buffers by the largest file,
+while retaining legacy journal history and backups in the archive.

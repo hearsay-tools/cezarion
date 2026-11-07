@@ -27,6 +27,7 @@ import { RunStoreOpenError } from './runs/store-open-error.ts';
 import { ensureDataGitignore } from './data-gitignore.ts';
 import { TaskWebhooks } from './runs/webhook.ts';
 import { warnLegacyHome } from './home/deprecation.ts';
+import { REBRAND_SWITCH } from './home/switch.ts';
 import { resolveHome } from './home/resolve.ts';
 import { operatorHomeEntry, prepareOperatorHome } from './home/entry.ts';
 import { DEFAULT_SERVER_INSTANCE } from './paths.ts';
@@ -76,7 +77,7 @@ Usage:
   cez server-install        interactive wizard to host cezar on a server
   cez server-deploy         redeploy a new version (reload the service) + verify
   cez server-uninstall      reverse a server-install
-  cez remote-settings       enable|status|disable remote edits of agent config and worktree setup
+${REBRAND_SWITCH ? '  cez migrate [--dry-run]  migrate the legacy home into the split layout\n' : ''}  cez remote-settings       enable|status|disable remote edits of agent config and worktree setup
   cez install | update      manage the desktop installation under ~/.cezar/versions
   cez versions | use <id>   list or switch managed versions
   cez link [dir] [--use]    link a built development checkout (unlink <id> removes it)

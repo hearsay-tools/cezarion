@@ -38,8 +38,16 @@ npx cezarion server-install --platform macosx-ngrok
 |------|--------------|
 | **Dependencies** | Detects the agent CLIs / `gh` / `git`; offers to `brew install` the missing ones. |
 | **ngrok tunnel** | Installs ngrok if needed, saves your **authtoken** (passed via the environment, never on a command line `ps` could read), and configures the tunnel to the cockpit port with **`--basic-auth`** (username + password) and, if provided, your **reserved domain**. The agent plist embeds those credentials, so it is written `0600`. |
-| **Autostart** | Installs a **launchd** agent (`~/Library/LaunchAgents/ai.cezar.ngrok.plist`) with `RunAtLoad` + `KeepAlive` so the authenticated tunnel comes back automatically. |
+| **Autostart** | Installs the cockpit and tunnel **launchd** agents (`~/Library/LaunchAgents/ai.cezar.cockpit.plist` and `ai.cezar.ngrok.plist`) with `RunAtLoad` + `KeepAlive`. |
 | **Verify** | Confirms the ngrok basic-auth gate is active. |
+
+The staged rebrand keeps these labels until the release switch is enabled. New
+installs then use `tools.hearsay.squawk.cockpit` and `tools.hearsay.squawk.ngrok`.
+Migration replaces only owned old agents and keeps private `*.plist.migrated`
+backups for rollback. A successful rollback removes its backup. Migration,
+reconfigure and rollback refuse foreign destination plists. Migration reports
+foreign old agents and leaves them alone. Uninstall
+and deploy use the recorded label and path, including for pre-switch installs.
 
 The **username + password** you set become the ngrok `--basic-auth`
 credentials — what you type in the browser to reach the cockpit over the public
