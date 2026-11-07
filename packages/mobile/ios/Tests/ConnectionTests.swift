@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import Cezarion
 
 final class ConnectionTests: XCTestCase {
@@ -23,4 +24,30 @@ final class ConnectionTests: XCTestCase {
         XCTAssertNotEqual(c, try Connection(endpoint: "https://example.com", signInOrigin: ""))
         XCTAssertFalse(try Connection(endpoint: "https://example.com", signInOrigin: "").allows(URL(string: "https://auth.example.com")!))
     }
+}
+
+final class MoveControllerTests: XCTestCase {
+    @MainActor func testButtonOpensSuppliedStorePageWithoutChangingSavedConnection() throws {
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey: "connection")
+        defer { defaults.set(previous, forKey: "connection") }
+        defaults.set(Data("old connection".utf8), forKey: "connection")
+        let url = try XCTUnwrap(URL(string: "https://apps.apple.com/app/example?id=123&campaign=test"))
+        var opened: URL?
+        let controller = MoveController(storeURL: url, openStore: { opened = $0 })
+        controller.loadViewIfNeeded()
+        controller.storeButton.sendActions(for: .touchUpInside)
+        XCTAssertEqual(opened, url)
+        XCTAssertEqual(defaults.data(forKey: "connection"), Data("old connection".utf8))
+    }
+    #if FINAL_OLD_APP
+    @MainActor func testFinalBuildButtonUsesReleaseInput() throws {
+        let expected = try XCTUnwrap(MobileBuild.storeURL)
+        var opened: URL?
+        let controller = MoveController(openStore: { opened = $0 })
+        controller.loadViewIfNeeded()
+        controller.storeButton.sendActions(for: .touchUpInside)
+        XCTAssertEqual(opened, expected)
+    }
+    #endif
 }

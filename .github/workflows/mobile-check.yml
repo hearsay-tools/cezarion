@@ -2,10 +2,10 @@ name: Mobile apps
 
 on:
   pull_request:
-    paths: ['packages/mobile/**', 'docs/mobile.md', '.github/workflows/mobile-check.yml']
+    paths: ['packages/mobile/**', 'packages/cezar/src/home/switch.ts', 'packages/cezar/src/home/identity.ts', 'packages/cezar/scripts/product-identity.mjs', 'docs/mobile.md', '.github/workflows/mobile-check.yml']
   push:
     branches: [main]
-    paths: ['packages/mobile/**', '.github/workflows/mobile-check.yml']
+    paths: ['packages/mobile/**', 'packages/cezar/src/home/switch.ts', 'packages/cezar/src/home/identity.ts', 'packages/cezar/scripts/product-identity.mjs', '.github/workflows/mobile-check.yml']
   workflow_dispatch:
 
 permissions:
@@ -19,15 +19,47 @@ jobs:
   android:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: legacy
+            artifact_suffix: ''
+            args: -Prebrand=off
+            metadata: --rebrand off
+          - mode: rebrand
+            artifact_suffix: -rebrand
+            args: -Prebrand=on
+            metadata: --rebrand on
+          - mode: final-old-app
+            artifact_suffix: -final-old-app
+            args: -Prebrand=on -PfinalOldApp -PstoreUrl=https://play.google.com/store/apps/details?id=ci.fixture
+            metadata: --rebrand on --final-old-app --store-url https://play.google.com/store/apps/details?id=ci.fixture
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.22.1'
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: '17'
       - name: Unit tests, lint and installable APK
         working-directory: packages/mobile/android
-        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+        run: ./gradlew --no-daemon ${{ matrix.args }} testDebugUnitTest lintDebug assembleDebug assembleRelease
+      - name: Check built application IDs and launcher name
+        id: identity
+        run: |
+          metadata=$(node packages/mobile/scripts/build-metadata.mjs ${{ matrix.metadata }})
+          echo "alias=$(echo "$metadata" | jq -r .npmAlias)" >> "$GITHUB_OUTPUT"
+          expected=$(echo "$metadata" | jq -r .mobileAppId)
+          display_name=$(echo "$metadata" | jq -r .displayName)
+          aapt="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          "$aapt" dump badging packages/mobile/android/app/build/outputs/apk/debug/app-debug.apk > /tmp/mobile-debug.txt
+          "$aapt" dump badging packages/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk > /tmp/mobile-release.txt
+          grep -F "package: name='$expected.debug'" /tmp/mobile-debug.txt
+          grep -F "package: name='$expected'" /tmp/mobile-release.txt
+          grep -F "application-label:'$display_name'" /tmp/mobile-debug.txt
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -40,11 +72,11 @@ jobs:
           arch: x86_64
           target: google_apis
           working-directory: packages/mobile/android
-          script: ./gradlew --no-daemon connectedDebugAndroidTest
+          script: ./gradlew --no-daemon ${{ matrix.args }} connectedDebugAndroidTest
       - name: Personal-install APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: cezarion-android-personal
+          name: ${{ steps.identity.outputs.alias }}-android-personal${{ matrix.artifact_suffix }}
           path: packages/mobile/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
@@ -52,15 +84,36 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: android-test-reports
+          name: android-test-reports${{ matrix.artifact_suffix }}
           path: packages/mobile/android/app/build/reports/
           retention-days: 14
 
   ios:
     runs-on: macos-15
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: legacy
+            artifact_suffix: ''
+            metadata: --rebrand off
+          - mode: rebrand
+            artifact_suffix: -rebrand
+            metadata: --rebrand on
+          - mode: final-old-app
+            artifact_suffix: -final-old-app
+            metadata: --rebrand on --final-old-app --store-url https://example.com/mobile-store-test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.22.1'
+      - name: Generate native build metadata
+        id: identity
+        run: |
+          node packages/mobile/scripts/build-metadata.mjs ${{ matrix.metadata }} --write-ios > /tmp/mobile-identity.json
+          echo "alias=$(jq -r .npmAlias /tmp/mobile-identity.json)" >> "$GITHUB_OUTPUT"
       - name: Choose an installed iPhone simulator
         timeout-minutes: 5
         run: |
@@ -75,8 +128,20 @@ jobs:
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -parallel-testing-enabled NO \
             -derivedDataPath packages/mobile/build/ios CODE_SIGNING_ALLOWED=NO test
-      - name: Compile unsigned device archive
+      - name: Check built bundle IDs, display name and test prefixes
         run: |
+          products=packages/mobile/build/ios/Build/Products/Debug-iphonesimulator
+          expected=$(jq -r .mobileAppId /tmp/mobile-identity.json)
+          prefix=$(jq -r .desktopAppId /tmp/mobile-identity.json)
+          display_name=$(jq -r .displayName /tmp/mobile-identity.json)
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$products/Cezarion.app/Info.plist")" = "$expected"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleDisplayName' "$products/Cezarion.app/Info.plist")" = "$display_name"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$products/Cezarion.app/PlugIns/CezarionTests.xctest/Info.plist")" = "$prefix.CezarionTests"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$products/CezarionUITests-Runner.app/PlugIns/CezarionUITests.xctest/Info.plist")" = "$prefix.CezarionUITests"
+      - name: Regenerate Xcode project and compile unsigned device archive
+        run: |
+          brew install xcodegen
+          xcodegen generate --spec packages/mobile/ios/project.yml
           xcodebuild -project packages/mobile/ios/Cezarion.xcodeproj -scheme Cezarion \
             -destination 'generic/platform=iOS' -configuration Release \
             -archivePath packages/mobile/build/Cezarion.xcarchive CODE_SIGNING_ALLOWED=NO archive
@@ -84,7 +149,7 @@ jobs:
       - name: Unsigned archive (requires personal signing, not directly installable)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: cezarion-ios-unsigned-archive
+          name: ${{ steps.identity.outputs.alias }}-ios-unsigned-archive${{ matrix.artifact_suffix }}
           path: packages/mobile/build/Cezarion-unsigned.xcarchive.zip
           if-no-files-found: error
           retention-days: 14
@@ -92,6 +157,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ios-test-results
+          name: ios-test-results${{ matrix.artifact_suffix }}
           path: packages/mobile/build/ios/Logs/Test/*.xcresult
           retention-days: 14

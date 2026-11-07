@@ -66,6 +66,11 @@
       </CommandLineArguments>
       <EnvironmentVariables>
          <EnvironmentVariable
+            key = "MOBILE_TEST_DISPLAY_NAME"
+            value = "$(MOBILE_DISPLAY_NAME)"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
             key = "MOBILE_TEST_AUTH_ORIGIN"
             value = "$(MOBILE_TEST_AUTH_ORIGIN)"
             isEnabled = "YES">

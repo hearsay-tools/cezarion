@@ -36,6 +36,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		C56B04F22D5530A534DF29A9 /* ProductIdentity.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ProductIdentity.xcconfig; sourceTree = "<group>"; };
 		18CDE5B5F4CAA68FFA94DA0C /* ConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionTests.swift; sourceTree = "<group>"; };
 		1980DB12193DB3FB87F47976 /* BrowserSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserSession.swift; sourceTree = "<group>"; };
 		2921ADDA28F9B5CD8860F123 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
@@ -55,6 +56,7 @@
 		358B481CBBA26A3C8BFE4248 = {
 			isa = PBXGroup;
 			children = (
+				C56B04F22D5530A534DF29A9 /* ProductIdentity.xcconfig */,
 				48DD1BB0258FA029EEDA8AED /* Cezarion */,
 				ADEF162BD1C19BF161208066 /* Tests */,
 				FE1A4933B8D01E9F25048B9D /* UITests */,
@@ -269,7 +271,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = tools.hearsay.cezarion.CezarionUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MOBILE_TEST_ID_PREFIX).CezarionUITests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = Cezarion;
@@ -278,6 +280,7 @@
 		};
 		09272D58769CD8F043FAD9B8 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = C56B04F22D5530A534DF29A9 /* ProductIdentity.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -336,7 +339,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG $(MOBILE_SWIFT_CONDITIONS)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -353,7 +356,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = tools.hearsay.cezarion.CezarionUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MOBILE_TEST_ID_PREFIX).CezarionUITests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = Cezarion;
@@ -370,7 +373,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = tools.hearsay.cezarion.CezarionTests;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MOBILE_TEST_ID_PREFIX).CezarionTests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cezarion.app/Cezarion";
@@ -387,7 +390,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = tools.hearsay.cezarion.mobile;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MOBILE_APP_ID)";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -403,7 +406,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = tools.hearsay.cezarion.CezarionTests;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MOBILE_TEST_ID_PREFIX).CezarionTests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cezarion.app/Cezarion";
@@ -420,7 +423,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = tools.hearsay.cezarion.mobile;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MOBILE_APP_ID)";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -428,6 +431,7 @@
 		};
 		8C9E488BC7A494F821BA0577 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = C56B04F22D5530A534DF29A9 /* ProductIdentity.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -479,6 +483,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) $(MOBILE_SWIFT_CONDITIONS)";
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;

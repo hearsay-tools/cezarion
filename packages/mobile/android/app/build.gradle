@@ -1,16 +1,30 @@
 plugins { id 'com.android.application' }
 
+// Read the shared TypeScript identity through Node's native type stripping.
+def metadataArgs = ['node', file('../../scripts/build-metadata.mjs').absolutePath]
+if (project.hasProperty('rebrand')) metadataArgs += ['--rebrand', project.property('rebrand').toString()]
+if (project.hasProperty('finalOldApp')) metadataArgs += ['--final-old-app']
+if (project.hasProperty('storeUrl')) metadataArgs += ['--store-url', project.property('storeUrl').toString()]
+def metadataJson = providers.exec { commandLine metadataArgs }.standardOutput.asText.get()
+def identity = new groovy.json.JsonSlurper().parseText(metadataJson)
+
 android {
     namespace 'tools.hearsay.cezarion'
     compileSdk 35
     defaultConfig {
-        applicationId 'tools.hearsay.cezarion.mobile'
+        applicationId identity.mobileAppId
+        resValue 'string', 'app_name', identity.displayName
+        buildConfigField 'String', 'DISPLAY_NAME', groovy.json.JsonOutput.toJson(identity.displayName)
+        buildConfigField 'String', 'MOVE_DISPLAY_NAME', groovy.json.JsonOutput.toJson(identity.moveDisplayName)
+        buildConfigField 'boolean', 'FINAL_OLD_APP', identity.finalOldApp.toString()
+        buildConfigField 'String', 'STORE_URL', groovy.json.JsonOutput.toJson(identity.storeUrl)
         minSdk 26
         targetSdk 35
         versionCode 1
         versionName '0.1.0'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
+    buildFeatures { buildConfig true }
     buildTypes {
         debug { applicationIdSuffix '.debug'; versionNameSuffix '-personal' }
         release { minifyEnabled false }

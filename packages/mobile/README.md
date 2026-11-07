@@ -12,3 +12,86 @@ are checked in so a new checkout builds with the standard platform SDKs.
 
 The app icons reuse the Cezarion parrot artwork from
 [hearsay-tools/cezarion#847](https://github.com/hearsay-tools/cezarion/pull/847).
+
+## Build identity and final old-app release
+
+Native IDs and display names come from `packages/cezar/src/home/identity.ts`.
+`node packages/cezar/scripts/product-identity.mjs` prints that identity as JSON.
+The default follows `REBRAND_SWITCH`; this change leaves the switch off.
+Android needs Node 24.21.0 or later on PATH and reads JSON during Gradle configuration.
+Its Java namespace stays unchanged; the install ID and launcher name change together.
+
+Xcode cannot import TypeScript. It reads the checked-in `ios/ProductIdentity.xcconfig`
+snapshot. `home/mobile-metadata.test.ts` rejects a snapshot that differs from the
+shared identity. Regenerate it when the release switch changes:
+
+```sh
+node packages/mobile/scripts/build-metadata.mjs --write-ios
+```
+
+For a local switch-on build (without changing the release switch):
+
+```sh
+cd packages/mobile/android
+./gradlew -Prebrand=on assembleDebug
+```
+
+For iOS, run from the repository root, then build the usual Cezarion scheme:
+
+```sh
+node packages/mobile/scripts/build-metadata.mjs --rebrand on --write-ios
+xcodegen generate --spec packages/mobile/ios/project.yml
+```
+
+Use `--rebrand off` / `-Prebrand=off` to test the old identity. Restore the default
+snapshot with `--write-ios` before committing. The Xcode target, scheme and Swift
+module names stay stable; bundle IDs, display names and permission text use the metadata.
+CI builds and tests switch off, switch on and the final old-app mode on each platform.
+It also checks IDs and names in the built APKs and iOS bundles.
+
+The **final old-app** mode is a separate release input. It forces the old IDs even
+with `--rebrand on`. It shows only a move screen. It does not read the saved connection,
+create a WebView or clear the old app's data. Ordinary switch-off builds keep the
+connection flow. The owner must supply each platform's actual HTTPS store URL:
+
+```sh
+# Set android_store_url to the owner-supplied Play Store URL first.
+cd packages/mobile/android
+./gradlew -PfinalOldApp "-PstoreUrl=$android_store_url" assembleRelease
+```
+
+```sh
+# From the repository root. Set ios_store_url to the owner-supplied App Store URL first.
+node packages/mobile/scripts/build-metadata.mjs --final-old-app --store-url "$ios_store_url" --write-ios
+# Build/archive the Cezarion scheme with the existing signing procedure.
+```
+
+A missing URL, a non-HTTPS URL or embedded credentials fail the build metadata step.
+The CI URLs are test fixtures, not release destinations. These commands prepare builds;
+they do not publish or submit them. Signing settings are unchanged.
+
+## Side-by-side isolation check
+
+The new install ID gets a separate OS sandbox. No app group, shared preferences import,
+keychain import or browser-data copy is added. Android keeps `allowBackup=false` and
+the cloud/device-transfer exclusions in `data_extraction_rules.xml`. iOS keeps
+app-local defaults and WKWebView's app-local website data store.
+
+On an Android device and an iPhone, check the following before store submission:
+
+1. Install an ordinary switch-off build. Connect to an HTTPS cockpit and complete sign-in.
+2. Install a switch-on build beside it. On Android, use the same build type for both
+   (debug adds `.debug` to each ID). Confirm both app icons remain installed.
+3. Open the new app. Confirm both connection fields are empty. Enter the same server
+   and confirm that sign-in is required. A system browser or identity provider can
+   still offer its own SSO; this app does not import a WebView session.
+4. Reopen the old app. Confirm its connection and website session remain unchanged.
+5. Update only the old app to the final old-app build, with the same signing identity
+   and a higher version. Confirm only the move screen appears and the button opens
+   the exact supplied store page. Confirm the new app still works.
+
+This manual check has not been run on this Linux development host. CI covers each
+build mode separately, the move screen, button URL dispatch and preservation of a
+seeded old connection. It does not prove real store installation, signing, side-by-side
+device behavior or a real remote sign-in. The optional remote sign-in test still
+needs its existing endpoint inputs.

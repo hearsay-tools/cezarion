@@ -140,7 +140,7 @@ final class CockpitController: UIViewController, WKNavigationDelegate, WKUIDeleg
     @objc private func showControls() {
         guard presentedViewController == nil else { return }
         view.endEditing(true)
-        let sheet = UIAlertController(title: "Cezarion", message: Connection.origin(web.url ?? URL(string: connection.endpoint)!), preferredStyle: .actionSheet)
+        let sheet = UIAlertController(title: MobileBuild.displayName, message: Connection.origin(web.url ?? URL(string: connection.endpoint)!), preferredStyle: .actionSheet)
         let back = UIAlertAction(title: "Back", style: .default) { [weak self] _ in self?.web?.goBack() }
         back.isEnabled = web.canGoBack
         sheet.addAction(back)

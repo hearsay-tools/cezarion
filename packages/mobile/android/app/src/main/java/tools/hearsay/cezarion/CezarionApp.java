@@ -6,6 +6,7 @@ import android.app.Application;
 public final class CezarionApp extends Application {
     @Override public void onCreate() {
         super.onCreate();
+        if (BuildConfig.FINAL_OLD_APP) return;
         SiteDataReset.wipeIfRequested(getSharedPreferences("connection", MODE_PRIVATE), getDataDir(), getCacheDir());
     }
 }
