@@ -438,13 +438,12 @@ function writeStripedPng(path) {
   return colors[0][0] === 255 ? 'RED_BLUE' : 'BLUE_RED';
 }
 
-async function probeFields(version) {
+async function fieldsModelChecks() {
   const modelListing = await runAgent(['--list-models'], checkout, 15_000);
-  const advertisedModel = modelListing.code === 0
-    && modelListing.stdout.split('\n').some(line => line.startsWith(`${values.model} - `));
+  const modelLines = modelListing.stdout.split('\n');
+  const advertisedModel = modelListing.code === 0 && modelLines.some(line => line.startsWith(`${values.model} - `));
   const lowEffortModel = values.model.replace(/-medium$/, '-low');
-  const lowEffortAdvertised = lowEffortModel !== values.model && modelListing.stdout.split('\n')
-    .some(line => line.startsWith(`${lowEffortModel} - `));
+  const lowEffortAdvertised = lowEffortModel !== values.model && modelLines.some(line => line.startsWith(`${lowEffortModel} - `));
   const lowEffort = lowEffortAdvertised ? await runAgent([
     '-p', '--force', '--trust', '--output-format', 'stream-json',
     '--model', lowEffortModel, '--allowed-tools', 'read_todos_tool_call', 'Reply OK.',
@@ -455,7 +454,14 @@ async function probeFields(version) {
   ], checkout, 15_000);
   const invalidRejectedBeforeInference = invalid.code !== 0
     && !framesOf(invalid.stdout).some(frame => frame.type === 'assistant' || frame.type === 'result');
+  return { advertisedModel, lowEffortAdvertised, lowEffort, invalidRejectedBeforeInference };
+}
 
+function effortVariantAdmitted(lowEffort) {
+  return lowEffort?.code === 0 && resultOf(framesOf(lowEffort.stdout))?.subtype === 'success';
+}
+
+async function fieldsExtraRootTurns() {
   const extraRoot = join(scratch, 'extra-root');
   mkdirSync(extraRoot);
   const canary = randomBytes(12).toString('hex');
@@ -471,39 +477,66 @@ async function probeFields(version) {
     `Read ${join(extraRoot, 'root-canary.txt')} with the native Read tool. Then describe the image's colors from left to right as RED_BLUE or BLUE_RED. Reply with the file contents and that code only.`,
   ], checkout, 45_000);
   const firstFrames = framesOf(first.stdout);
-  const firstResult = resultOf(firstFrames);
-  const firstId = firstResult?.session_id;
+  const firstId = resultOf(firstFrames)?.session_id;
   const second = firstId ? await runAgent([
     '-p', '--force', '--trust', '--output-format', 'stream-json', '--model', values.model,
     '--resume', firstId, '--allowed-tools', 'read_todos_tool_call',
     'What was the image color-order code from the previous turn? Reply with just that code.',
   ], checkout, 45_000) : undefined;
   const secondResult = second ? resultOf(framesOf(second.stdout)) : undefined;
+  return { canary, colorOrder, first, firstFrames, firstId, second, secondResult };
+}
+
+function fieldsReadOf(firstFrames) {
   const rootRead = firstFrames.some(frame => frame.type === 'tool_call' && frame.tool_call?.readToolCall);
   const readCall = firstFrames.find(frame => frame.type === 'tool_call' && frame.subtype === 'completed'
     && frame.tool_call?.readToolCall)?.tool_call.readToolCall;
-  const text = String(firstResult?.result ?? '');
+  const text = String(resultOf(firstFrames)?.result ?? '');
+  return { rootRead, readCall, text };
+}
+
+function readCallKeys(readCall) {
+  return {
+    readArgKeys: readCall?.args && typeof readCall.args === 'object' ? Object.keys(readCall.args).sort() : [],
+    readResultKeys: readCall?.result && typeof readCall.result === 'object' ? Object.keys(readCall.result).sort() : [],
+  };
+}
+
+function fieldsFreshVerified(invalidRejectedBeforeInference, first, rootRead, text, canary, colorOrder) {
+  return invalidRejectedBeforeInference && first.code === 0 && rootRead
+    && text.includes(canary) && text.includes(colorOrder);
+}
+
+function fieldsResumedVerified(firstId, second, secondResult, colorOrder) {
+  return second?.code === 0 && secondResult?.session_id === firstId
+    && String(secondResult?.result ?? '').trim() === colorOrder;
+}
+
+function fieldsOutcome(checks, first, second, rootRead, text, canary, colorOrder, firstId, secondResult) {
+  return checks.advertisedModel && checks.lowEffortAdvertised && effortVariantAdmitted(checks.lowEffort)
+    && fieldsFreshVerified(checks.invalidRejectedBeforeInference, first, rootRead, text, canary, colorOrder)
+    && fieldsResumedVerified(firstId, second, secondResult, colorOrder) ? 'pass' : 'blocked';
+}
+
+async function probeFields(version) {
+  const checks = await fieldsModelChecks();
+  const turns = await fieldsExtraRootTurns();
+  const { rootRead, readCall, text } = fieldsReadOf(turns.firstFrames);
   return {
     schema: 1, case: 'fields', cliVersion: version, model: values.model,
     invocation: ['-p', '--force', '--trust', '--output-format stream-json', '--model <advertised ID>', '--allowed-tools read_tool_call', '--add-dir <disposable root>', '--image <disposable PNG>', '--resume <exact native ID>'],
-    advertisedModel, invalidRejectedBeforeInference,
-    advertisedEffortVariant: lowEffortAdvertised,
-    advertisedEffortVariantAdmitted: lowEffort?.code === 0 && resultOf(framesOf(lowEffort.stdout))?.subtype === 'success',
-    extraRootToolRead: rootRead, extraRootCanarySeen: text.includes(canary),
-    readArgKeys: readCall?.args && typeof readCall.args === 'object' ? Object.keys(readCall.args).sort() : [],
-    readResultKeys: readCall?.result && typeof readCall.result === 'object' ? Object.keys(readCall.result).sort() : [],
-    imageOrderSeen: text.includes(colorOrder),
-    sameNativeSession: Boolean(firstId && secondResult?.session_id === firstId),
-    currentInstructionFollowedOnResume: String(secondResult?.result ?? '').trim() === colorOrder,
-    freshExitCode: first.code, resumedExitCode: second?.code ?? null,
-    timedOut: first.timedOut || Boolean(second?.timedOut),
-    outputTruncated: first.truncated || Boolean(second?.truncated),
-    outcome: advertisedModel && lowEffortAdvertised && lowEffort?.code === 0
-      && resultOf(framesOf(lowEffort.stdout))?.subtype === 'success'
-      && invalidRejectedBeforeInference && first.code === 0
-      && second?.code === 0 && rootRead && text.includes(canary)
-      && text.includes(colorOrder) && secondResult?.session_id === firstId
-      && String(secondResult?.result ?? '').trim() === colorOrder ? 'pass' : 'blocked',
+    advertisedModel: checks.advertisedModel, invalidRejectedBeforeInference: checks.invalidRejectedBeforeInference,
+    advertisedEffortVariant: checks.lowEffortAdvertised,
+    advertisedEffortVariantAdmitted: effortVariantAdmitted(checks.lowEffort),
+    extraRootToolRead: rootRead, extraRootCanarySeen: text.includes(turns.canary),
+    ...readCallKeys(readCall),
+    imageOrderSeen: text.includes(turns.colorOrder),
+    sameNativeSession: Boolean(turns.firstId && turns.secondResult?.session_id === turns.firstId),
+    currentInstructionFollowedOnResume: String(turns.secondResult?.result ?? '').trim() === turns.colorOrder,
+    freshExitCode: turns.first.code, resumedExitCode: turns.second?.code ?? null,
+    timedOut: turns.first.timedOut || Boolean(turns.second?.timedOut),
+    outputTruncated: turns.first.truncated || Boolean(turns.second?.truncated),
+    outcome: fieldsOutcome(checks, turns.first, turns.second, rootRead, text, turns.canary, turns.colorOrder, turns.firstId, turns.secondResult),
   };
 }
 
@@ -535,9 +568,7 @@ async function probeErrors(version) {
   };
 }
 
-async function probePluginLifecycle(version) {
-  const { catalogRun, names, safeAllowedTools } = await discoverSafeAllowedTools();
-  const pluginDir = join(checkout, 'cez-print-qualification-plugin');
+function writeLifecyclePlugin(pluginDir) {
   const manifestDir = join(pluginDir, '.cursor-plugin');
   const hooksDir = join(pluginDir, 'hooks');
   const skillDir = join(pluginDir, 'skills', 'print-qualification');
@@ -557,7 +588,37 @@ async function probePluginLifecycle(version) {
   writeFileSync(join(hooksDir, 'hooks.json'), JSON.stringify({
     version: 1, hooks: { sessionStart: [{ command: `node ${join(hooksDir, 'start.mjs')}` }] },
   }));
-  const hookCount = () => existsSync(hookOutput) ? readFileSync(hookOutput, 'utf8').split('\n').filter(Boolean).length : 0;
+  return { heading, hookPhrase, hookOutput };
+}
+
+function lifecycleHookCount(hookOutput) {
+  return existsSync(hookOutput) ? readFileSync(hookOutput, 'utf8').split('\n').filter(Boolean).length : 0;
+}
+
+function lifecycleReadOf(frames, isTargetRead) {
+  return frames.some(frame => frame.type === 'tool_call'
+    && frame.tool_call?.readToolCall && isTargetRead(JSON.stringify(frame.tool_call.readToolCall)));
+}
+
+function lifecycleResultIncludes(frames, needle) {
+  return String(resultOf(frames)?.result ?? '').includes(needle);
+}
+
+function lifecycleRunsVerified(catalogRun, first, second, absent) {
+  return catalogRun.code === 1 && first.code === 0 && second?.code === 0 && absent.code === 0;
+}
+
+function lifecycleOutcome(runsVerified, evidence) {
+  return runsVerified && evidence.localSkillRead && evidence.localHeadingSeen
+    && evidence.marketplaceSkillRead && evidence.firstIdEqualsSecondId && evidence.freshHookRan
+    && evidence.hookContextRecalledOnResume && !evidence.absentLocalRead
+    && evidence.absentModelReportedMissing ? 'pass' : 'blocked';
+}
+
+async function probePluginLifecycle(version) {
+  const { catalogRun, names, safeAllowedTools } = await discoverSafeAllowedTools();
+  const pluginDir = join(checkout, 'cez-print-qualification-plugin');
+  const { heading, hookPhrase, hookOutput } = writeLifecyclePlugin(pluginDir);
   const base = ['-p', '--force', '--trust', '--output-format', 'stream-json',
     '--model', values.model, '--allowed-tools', safeAllowedTools.join(',')];
   const first = await runAgent([...base, '--plugin-dir', pluginDir,
@@ -565,42 +626,44 @@ async function probePluginLifecycle(version) {
   ], checkout, 45_000);
   const firstFrames = framesOf(first.stdout);
   const firstId = resultOf(firstFrames)?.session_id;
-  const firstHookCount = hookCount();
-  const localSkillRead = firstFrames.some(frame => frame.type === 'tool_call'
-    && frame.tool_call?.readToolCall && JSON.stringify(frame.tool_call.readToolCall).includes('print-qualification/SKILL.md'));
+  const firstHookCount = lifecycleHookCount(hookOutput);
+  const localSkillRead = lifecycleReadOf(firstFrames, text => text.includes('print-qualification/SKILL.md'));
   const second = firstId ? await runAgent([...base, '--resume', firstId, '--plugin-dir', pluginDir,
     'From your enabled marketplace plugins, read the Superpowers brainstorming SKILL.md with the native Read tool. Then report its first heading and the hook phrase injected at the start of this session.',
   ], checkout, 45_000) : undefined;
   const secondFrames = second ? framesOf(second.stdout) : [];
   const secondId = resultOf(secondFrames)?.session_id;
-  const secondHookCount = hookCount();
-  const marketplaceSkillRead = secondFrames.some(frame => frame.type === 'tool_call'
-    && frame.tool_call?.readToolCall
-    && /\.cursor\/plugins\/cache\/.*superpowers.*SKILL\.md/i.test(JSON.stringify(frame.tool_call.readToolCall)));
+  const secondHookCount = lifecycleHookCount(hookOutput);
+  const marketplaceSkillRead = lifecycleReadOf(secondFrames,
+    text => /\.cursor\/plugins\/cache\/.*superpowers.*SKILL\.md/i.test(text));
   rmSync(pluginDir, { recursive: true, force: true });
   const absent = await runAgent([...base,
     'If a loaded skill named print-qualification is available, read its SKILL.md. Otherwise reply ABSENT. Do not search the filesystem.',
   ], checkout, 45_000);
   const absentFrames = framesOf(absent.stdout);
-  const absentLocalRead = absentFrames.some(frame => frame.type === 'tool_call'
-    && frame.tool_call?.readToolCall && JSON.stringify(frame.tool_call.readToolCall).includes('print-qualification/SKILL.md'));
+  const absentLocalRead = lifecycleReadOf(absentFrames, text => text.includes('print-qualification/SKILL.md'));
+  const evidence = {
+    localSkillRead,
+    localHeadingSeen: lifecycleResultIncludes(firstFrames, heading),
+    marketplaceSkillRead,
+    firstIdEqualsSecondId: firstId === secondId,
+    freshHookRan: firstHookCount > 0,
+    hookContextRecalledOnResume: lifecycleResultIncludes(secondFrames, hookPhrase),
+    absentLocalRead,
+    absentModelReportedMissing: lifecycleResultIncludes(absentFrames, 'ABSENT'),
+  };
   return {
     schema: 1, case: 'plugin-lifecycle', cliVersion: version, model: values.model,
     invocation: ['-p', '--force', '--trust', '--output-format stream-json', '--allowed-tools <non-agent catalog>', '--plugin-dir <disposable local plugin>', '--resume <exact native ID>'],
     catalogValidatedBeforeInference: catalogRun.code === 1 && names.includes('read_tool_call'),
-    localSkillRead, localHeadingSeen: String(resultOf(firstFrames)?.result ?? '').includes(heading),
+    localSkillRead, localHeadingSeen: evidence.localHeadingSeen,
     marketplaceSkillRead, sameNativeSession: Boolean(firstId && secondId === firstId),
-    freshHookRan: firstHookCount > 0, resumedHookRan: secondHookCount > firstHookCount,
-    hookContextRecalledOnResume: String(resultOf(secondFrames)?.result ?? '').includes(hookPhrase),
+    freshHookRan: evidence.freshHookRan, resumedHookRan: secondHookCount > firstHookCount,
+    hookContextRecalledOnResume: evidence.hookContextRecalledOnResume,
     absentLocalSkillRead: absentLocalRead,
-    absentModelReportedMissing: String(resultOf(absentFrames)?.result ?? '').includes('ABSENT'),
+    absentModelReportedMissing: evidence.absentModelReportedMissing,
     globalConfigurationWritten: false,
-    outcome: catalogRun.code === 1 && first.code === 0 && second?.code === 0 && absent.code === 0
-      && localSkillRead && String(resultOf(firstFrames)?.result ?? '').includes(heading)
-      && marketplaceSkillRead && firstId === secondId && firstHookCount > 0
-      && String(resultOf(secondFrames)?.result ?? '').includes(hookPhrase)
-      && !absentLocalRead
-      && String(resultOf(absentFrames)?.result ?? '').includes('ABSENT') ? 'pass' : 'blocked',
+    outcome: lifecycleOutcome(lifecycleRunsVerified(catalogRun, first, second, absent), evidence),
   };
 }
 
