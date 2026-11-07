@@ -163,6 +163,52 @@ function FieldLabel({ field, children }: { field: string; children: ReactNode })
   )
 }
 
+/** The pill's accessible name: `Field · resolved value` for engine-control pills, the field
+ *  name alone otherwise. A non-string label resolves through the options. */
+function pillFullLabel({ fieldLabel, ariaLabel, label, options, value }: {
+  fieldLabel?: boolean | undefined
+  ariaLabel: string
+  label: ReactNode
+  options: ReadonlyArray<{ value: string; label: string; desc?: string }>
+  value: string
+}): string {
+  return fieldLabel
+    ? `${ariaLabel} · ${typeof label === 'string' ? label : options.find(option => option.value === value)?.label ?? value}`
+    : ariaLabel
+}
+
+/** The pill's hover explanation: what the setting does, or why it cannot be picked now. */
+function pillExplanation({ readOnly, disabled, hint, disabledHint }: {
+  readOnly: boolean
+  disabled: boolean
+  hint: string | undefined
+  disabledHint: string | undefined
+}): string | undefined {
+  return readOnly ? disabledHint ?? hint : disabled ? disabledHint : hint
+}
+
+/** `Field · value — explanation` for engine-control pills; the explanation alone otherwise. */
+function pillTitle({ fieldLabel, fullLabel, explanation }: {
+  fieldLabel?: boolean | undefined
+  fullLabel: string
+  explanation: string | undefined
+}): string | undefined {
+  return fieldLabel ? [fullLabel, explanation].filter(Boolean).join(' — ') : explanation
+}
+
+/** The pill's visible label: the two-line field layout for engine-control pills, a truncated
+ *  value otherwise. */
+function pillContents({ icon, fieldLabel, ariaLabel, label }: {
+  icon?: ReactNode | undefined
+  fieldLabel?: boolean | undefined
+  ariaLabel: string
+  label: ReactNode
+}): ReactNode {
+  return <>{icon}{fieldLabel
+    ? <FieldLabel field={ariaLabel}>{label}</FieldLabel>
+    : <span className="min-w-0 truncate" title={typeof label === 'string' ? label : undefined}>{label}</span>}</>
+}
+
 /** A generic single-choice pill (runner / model): DropdownMenu radio semantics,
  *  two-line items (label + quiet description), disabled state carries its reason as `title`. */
 export function PickerPill({
@@ -220,14 +266,10 @@ export function PickerPill({
   }
 
   const presentation = icon ? ' h-11 gap-2 rounded-lg border-border px-3 text-foreground' : ''
-  const fullLabel = fieldLabel
-    ? `${ariaLabel} · ${typeof label === 'string' ? label : options.find(option => option.value === value)?.label ?? value}`
-    : ariaLabel
-  const explanation = readOnly ? disabledHint ?? hint : disabled ? disabledHint : hint
-  const title = fieldLabel ? [fullLabel, explanation].filter(Boolean).join(' — ') : explanation
-  const contents = <>{icon}{fieldLabel
-    ? <FieldLabel field={ariaLabel}>{label}</FieldLabel>
-    : <span className="min-w-0 truncate" title={typeof label === 'string' ? label : undefined}>{label}</span>}</>
+  const fullLabel = pillFullLabel({ fieldLabel, ariaLabel, label, options, value })
+  const explanation = pillExplanation({ readOnly, disabled, hint, disabledHint })
+  const title = pillTitle({ fieldLabel, fullLabel, explanation })
+  const contents = pillContents({ icon, fieldLabel, ariaLabel, label })
   if (readOnly) {
     return (
       <span

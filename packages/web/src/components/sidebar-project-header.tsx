@@ -7,6 +7,7 @@ import type * as React from 'react'
 
 import { openProjectIn } from '@/api/client'
 import { useHealth, useMarkRunSeen, useOpenTargets, useProjects, useProjectRuns } from '@/api/queries'
+import type { RunSummary } from '@open-mercato/cezar-api-client'
 import { useSidebarNavigate } from '@/components/app-shell'
 import { cliTargetRunner, openInIcon } from '@/components/open-in-menu'
 import {
@@ -80,6 +81,42 @@ export function SidebarProjectHeader({ onNavigate }: { onNavigate?: (() => void)
   )
 }
 
+/** This project's registry entry and root, as the menu's Copy path and Open in need them: the
+ *  registry first, then the boot project's own repo (a task worktree is never registered). */
+function menuProjectIdentity(registry: ReturnType<typeof useProjects>, health: ReturnType<typeof useHealth>, projectId: string | null) {
+  const bootId = registry.data?.bootProject ?? health.data?.bootProject
+  const project = registry.data?.projects.find((entry) => entry.id === projectId)
+  const bootRepo = projectId === bootId ? health.data?.repo : undefined
+  const root = project?.root ?? bootRepo?.root
+  return { bootId, project, root }
+}
+
+/** Mark all read works on the runs the list already shows: never while a batch is in flight,
+ *  never without an answer, never with nothing unread, and never without a project. */
+function markAllReadDisabled({ marking, runs, unread, projectId }: {
+  marking: boolean
+  runs: ReturnType<typeof useProjectRuns>
+  unread: RunSummary[]
+  projectId: string | null
+}): boolean {
+  return marking || runs.isError || runs.data === undefined || unread.length === 0 || projectId === null
+}
+
+/** The Mark all read line: the batch state first, then a state word while the runs answer,
+ *  else how many are unread. */
+function markAllReadLabel({ marking, runs, unread }: {
+  marking: boolean
+  runs: ReturnType<typeof useProjectRuns>
+  unread: RunSummary[]
+}): string {
+  return marking ? 'Marking…' : runs.isError ? 'Unavailable' : runs.data === undefined ? 'Loading…' : `${unread.length} unread`
+}
+
+/** Nothing to open or copy: the project's folder is gone or its root is unknown. */
+function openInDisabled(root: string | undefined, project: ReturnType<typeof menuProjectIdentity>['project']): boolean {
+  return !root || project?.status === 'missing'
+}
+
 /**
  * The project's `…` menu: Mark all read, Open in / Copy path (local handoff only) and Project
  * settings. One component for two homes, the desktop header above and the mobile drawer's
@@ -105,17 +142,13 @@ export function ProjectMenu({ projectId, onNavigate, triggerRef, triggerClassNam
   const health = useHealth()
   const registry = useProjects()
   const [marking, setMarking] = useState(false)
-  const bootId = registry.data?.bootProject ?? health.data?.bootProject
+  const { bootId, project, root } = menuProjectIdentity(registry, health, projectId)
   const runs = useProjectRuns(projectId ?? 'default', projectId !== null, projectId === bootId)
   const seen = useMarkRunSeen(projectAddress({ projectId: projectId ?? 'default', boot: projectId === bootId }))
   const currentProject = useRef(projectId)
   currentProject.current = projectId
-  const project = registry.data?.projects.find((entry) => entry.id === projectId)
-  const bootRepo = projectId === bootId ? health.data?.repo : undefined
-  const root = project?.root ?? bootRepo?.root
   const local = health.data?.capabilities.localHandoff === true
   const unread = (runs.data ?? []).filter((run) => !isOwnedWorker(run) && isUnread(run))
-  const count = runs.isError ? 'Unavailable' : runs.data === undefined ? 'Loading…' : `${unread.length} unread`
 
   async function markAllRead() {
     setMarking(true)
@@ -149,13 +182,13 @@ export function ProjectMenu({ projectId, onNavigate, triggerRef, triggerClassNam
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align} {...defined({ alignOffset, side })} sideOffset={4} className={menuClass}>
-        <DropdownMenuItem className={itemClass} disabled={marking || runs.isError || runs.data === undefined || unread.length === 0 || projectId === null} onSelect={() => { void markAllRead() }}>
+        <DropdownMenuItem className={itemClass} disabled={markAllReadDisabled({ marking, runs, unread, projectId })} onSelect={() => { void markAllRead() }}>
           <CheckCheckIcon aria-hidden="true" /> Mark all read
-          <span className="ml-auto text-[11.5px] text-soft-foreground">{marking ? 'Marking…' : count}</span>
+          <span className="ml-auto text-[11.5px] text-soft-foreground">{markAllReadLabel({ marking, runs, unread })}</span>
         </DropdownMenuItem>
         <DropdownMenuSeparator className="mx-0" />
         {local && <>
-          <ProjectOpenSubmenu projectId={projectId ?? 'default'} disabled={!root || project?.status === 'missing'} />
+          <ProjectOpenSubmenu projectId={projectId ?? 'default'} disabled={openInDisabled(root, project)} />
           <DropdownMenuItem className={itemClass} disabled={!root} onSelect={() => { void copyPath() }}>
             <CopyIcon aria-hidden="true" /> Copy path
           </DropdownMenuItem>

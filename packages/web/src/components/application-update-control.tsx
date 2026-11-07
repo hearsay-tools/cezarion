@@ -86,17 +86,38 @@ export function ApplicationUpdateControl({ version, latestVersion, state, onAppl
   </AlertDialog>
 }
 
-export function ApplicationUpdateFeedback({ version, latestVersion, state, error, offline = false, busy = false }: Pick<ApplicationUpdateControlProps, 'state' | 'error' | 'offline' | 'busy'> & Partial<Pick<ApplicationUpdateControlProps, 'version' | 'latestVersion'>>) {
-  const failure = error ?? (state?.status === 'error' ? state.message ?? 'Update failed.' : null)
+/** The error line: an explicit `error` prop first, then a failed update state's message. */
+function updateFailure({ state, error }: Pick<ApplicationUpdateControlProps, 'state' | 'error'>): string | null {
+  return error ?? (state?.status === 'error' ? state.message ?? 'Update failed.' : null)
+}
+
+/** Why in-app updates are off for this installation, and how to update by hand instead.
+ *  Null whenever an in-app update or a status line applies. */
+function manualUpdateMessage({ state, version, latestVersion }: {
+  state?: ApplicationUpdateState | undefined
+  version?: string | null | undefined
+  latestVersion?: string | null | undefined
+}): string | null {
   const manualUpdate = state && !state.supported && version && latestVersion && isNewerVersion(latestVersion, version)
   const manualInstructions = state?.message && state.message !== 'Update this installation manually.'
     ? state.message : 'Install the newer release using your original installation method, then restart Cezarion.'
+  return manualUpdate ? `In-app updates are unavailable for this installation. ${manualInstructions}` : null
+}
+
+/** The status line for an update in flight, in the order the control reports it: preparing,
+ *  restarting, checking, then the manual fallback. */
+function updateStatusMessage({ state, busy, manualMessage }: Pick<ApplicationUpdateControlProps, 'state' | 'busy'> & { manualMessage: string | null }): string | null {
+  return state?.status === 'preparing' || busy && state?.status !== 'ready' ? 'Preparing update.'
+    : state?.status === 'restarting' ? 'Restarting. Reconnecting to the cockpit.'
+      : busy && state?.status === 'ready' ? 'Checking update status.'
+      : manualMessage
+}
+
+export function ApplicationUpdateFeedback({ version, latestVersion, state, error, offline = false, busy = false }: Pick<ApplicationUpdateControlProps, 'state' | 'error' | 'offline' | 'busy'> & Partial<Pick<ApplicationUpdateControlProps, 'version' | 'latestVersion'>>) {
+  const failure = updateFailure({ state, error })
   const message = failure ? null
     : offline ? 'Connection lost. Reconnect to continue.'
-        : state?.status === 'preparing' || busy && state?.status !== 'ready' ? 'Preparing update.'
-          : state?.status === 'restarting' ? 'Restarting. Reconnecting to the cockpit.'
-            : busy && state?.status === 'ready' ? 'Checking update status.'
-            : manualUpdate ? `In-app updates are unavailable for this installation. ${manualInstructions}` : null
+      : updateStatusMessage({ state, busy, manualMessage: manualUpdateMessage({ state, version, latestVersion }) })
   if (!failure && !message) return null
   return <div data-slot="application-update-feedback" className="px-4 pb-2 text-[11px] leading-4 text-muted-foreground">
     {failure ? <p role="status"><span className="block truncate" title={failure}>{failure}</span><span className="block">Retry or update manually.</span></p> : message ? <p role="status" title={message}>{message}</p> : null}
