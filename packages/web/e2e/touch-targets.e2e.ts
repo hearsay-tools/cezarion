@@ -360,7 +360,7 @@ describe('density-independent mobile action targets (#166)', () => {
 
 // The state these journeys protect does not depend on the density or theme a case starts in:
 // each journey cycles density itself. The variant matrix above keeps the edge taps.
-describe('keyboard, draft and choice journeys across appearance changes (#166)', () => {
+describe('keyboard, draft and choice journeys across appearance changes (hearsay-tools/cezarion#166)', () => {
   for (const [width, height] of [[360, 640], [1440, 900]] as const) {
     it(`${width}: keyboard activation, drafts, model choice and pending state survive appearance changes`, () => {
       const mobile = width === 360
