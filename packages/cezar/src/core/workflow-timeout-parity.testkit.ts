@@ -1,7 +1,8 @@
 import { partitionParity, type ParityPart, type ParityCollector } from './parity-partition.testkit.ts';
 import { expect, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { driveSeam, waitFor, withOwnedInputRun, WORKFLOW_TIMEOUT_CRITERIA } from './harness-parity.testkit.ts';
+import { driveSeam, waitFor, WORKFLOW_TIMEOUT_CRITERIA } from './harness-parity.testkit.ts';
+import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
 
 // Compress only the deadline, not the runner, manager, clock or native wire.

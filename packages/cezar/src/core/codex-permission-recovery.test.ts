@@ -1,7 +1,8 @@
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { exemptionFor, HARNESS_ADAPTERS, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { exemptionFor, HARNESS_ADAPTERS, waitFor } from './harness-parity.testkit.ts';
+import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 
 /** P1 restart extension: native permission waits are unfinished turns, including owned workers. */
 describe('native permission recovery (hearsay-tools/cezarion#1049)', () => {

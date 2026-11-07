@@ -14,7 +14,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { driveRun, exemptionFor, FOLLOWUP_CRITERIA, promptFor, waitFor } from './harness-parity.testkit.ts';
+import { exemptionFor, FOLLOWUP_CRITERIA, promptFor, waitFor } from './harness-parity.testkit.ts';
+import { driveRun } from './workflow-parity.testkit.ts';
 import type { RunStore } from '../runs/store.ts';
 
 const KEEP = 'followup-486-keep';

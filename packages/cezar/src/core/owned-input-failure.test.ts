@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import type { AgentSession } from './agent-runner.ts';
 import { OpencodeServerRunner } from './opencode-server-runner.ts';
-import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { waitFor } from './harness-parity.testkit.ts';
+import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 import { blockRunWrites, muteLockedDatabaseLogs } from '../runs/run-store.testkit.ts';
 
 type Fixture = Parameters<Parameters<typeof withOwnedInputRun>[2]>[0];

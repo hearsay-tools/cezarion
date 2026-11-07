@@ -2,7 +2,8 @@ import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentInput } from '@open-mercato/cezar-contract';
-import { HARNESS_ADAPTERS, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { HARNESS_ADAPTERS, waitFor } from './harness-parity.testkit.ts';
+import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 
 // #505: accepted input a finished turn never read goes back to the queue and is
 // submitted again; DONE and park never finish over it.

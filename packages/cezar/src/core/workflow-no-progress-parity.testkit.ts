@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { afterEach, expect, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import * as sessionProcess from './session-process.ts';
-import { NO_PROGRESS_CRITERIA, driveSeam, exemptionFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { NO_PROGRESS_CRITERIA, driveSeam, exemptionFor, waitFor } from './harness-parity.testkit.ts';
+import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
 
 vi.mock('./runner-runtime.ts', async importOriginal => ({

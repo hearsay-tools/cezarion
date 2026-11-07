@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { WORKTREE_SETUP_CRITERIA, driveRun } from './harness-parity.testkit.ts';
+import { WORKTREE_SETUP_CRITERIA } from './harness-parity.testkit.ts';
+import { driveRun } from './workflow-parity.testkit.ts';
 
 /**
  * R58 (hearsay-tools/cezarion#917, spec `.ai/specs/2026-10-07-worktree-setup.md`): a task
