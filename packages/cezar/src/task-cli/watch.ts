@@ -8,7 +8,7 @@ import {
   type RunStatus,
 } from '@open-mercato/cezar-contract/runs';
 import { runHistoryPageSchema, type RunHistoryEvent } from '@open-mercato/cezar-contract/events';
-import { invalidResponse, refuse, request, TaskCliError, type Cockpit } from './http.ts';
+import { invalidResponse, refuse, request, TaskCliError, type Cockpit, type HttpResult } from './http.ts';
 import { attentionFields, TERMINAL_STATUSES, type AttentionFields } from './projections.ts';
 
 /**
@@ -300,39 +300,6 @@ export async function readLog(
   let readOwed = false;
   let decided: WaitEntry | undefined;
 
-  /** One budget-bounded read; undefined once the deadline has passed. */
-  const bounded = async (path: string) => {
-    const budget = remaining();
-    if (budget <= 0) return undefined;
-    const startedAt = Date.now();
-    try {
-      return await request(cockpit, path, { timeoutMs: budget });
-    } catch (error) {
-      if (remaining() <= 0) return undefined;
-      if (abortedPoll(error) && pollHitDeadline(startedAt, budget)) return undefined;
-      throw error;
-    }
-  };
-
-  /** The event file's high-water mark, or undefined once the deadline has passed. */
-  const highWater = async (): Promise<number | undefined> => {
-    const history = await bounded(`/runs/${encodeURIComponent(id)}/history`);
-    if (history === undefined) return undefined;
-    if (history.status !== 200) refuse(history);
-    const page = runHistoryPageSchema.safeParse(history.data);
-    return page.success ? page.data.asOfSeq : invalidResponse('history');
-  };
-
-  /** The run as `wait` sees it (a 404 is `missing`), or undefined once the deadline has passed. */
-  const readRun = async (): Promise<WaitEntry | undefined> => {
-    const result = await bounded(`/runs/${encodeURIComponent(id)}`);
-    if (result === undefined) return undefined;
-    if (result.status === 404) return entryFor(id, undefined);
-    if (result.status !== 200) refuse(result);
-    const run = apiRunSchema.safeParse(result.data);
-    return run.success ? entryFor(id, toRunSummary(run.data)) : invalidResponse('run');
-  };
-
   const boundarySeq = await highWater();
   if (boundarySeq === undefined) return timedOut();
   let replaying = boundarySeq > options.afterSeq;
@@ -351,55 +318,12 @@ export async function readLog(
       if (controller.signal.aborted) return timedOut();
       throw new TaskCliError(2, { code: 'unavailable', error: `cockpit request failed: ${error instanceof Error ? error.message : String(error)}` });
     }
-    if (!response.ok || !response.body) {
-      const text = await response.text().catch(() => '');
-      let data: unknown = text;
-      try { data = JSON.parse(text); } catch { /* not JSON */ }
-      // The run can be deleted between the history read and this connect; the route then 404s.
-      if (response.status === 404) {
-        const exit = await endIfMissing();
-        if (exit !== undefined) return exit;
-      }
-      refuse({ status: response.status, data });
-    }
+    if (!response.ok || !response.body) return await refusedOrMissing(response);
     try {
       for await (const frame of sseFrames(response.body)) {
-        if (frame.event === 'run-event' || frame.event === 'ui-event') {
-          const event = JSON.parse(frame.data) as RunHistoryEvent;
-          if (typeof event.seq !== 'number') continue;
-          // Both streams share the file's seq space, so either one can reach a boundary;
-          // only v1 lines are printed, deduped by seq.
-          seenSeq = Math.max(seenSeq, event.seq);
-          if (frame.event === 'run-event' && event.seq > lastSeq) {
-            lastSeq = event.seq;
-            const line = logLine(event);
-            if (line) {
-              if (replaying) tail.push(JSON.stringify(line));
-              else options.print(JSON.stringify(line));
-            }
-          }
-        } else if (frame.event === 'run') {
-          const run = runRecordSchema.safeParse(JSON.parse(frame.data));
-          if (run.success) {
-            status = run.data.status;
-            // Only a change in what attention reads owes a run read; a repeated frame does not.
-            const framed = entryFor(id, toRunSummary(run.data));
-            const key = attentionKey(framed);
-            if (key !== frameKey) { frameKey = key; readOwed = true; latest = framed; }
-          }
-        }
+        if (!applyFrame(frame)) continue;
         let exit = step();
-        if (exit === 'judge') {
-          const entry = await readRun();
-          if (entry === undefined) return timedOut();
-          latest = entry;
-          readOwed = false;
-          // Every judgement replaces the last one, so a run that resumed while the drain caught up
-          // is followed again rather than reported in the state it already left.
-          decided = endsWait(entry, options.until) ? entry : undefined;
-          drainSeq = undefined;
-          exit = step();
-        }
+        if (exit === 'judge') exit = await judge();
         if (exit === 'drain') {
           drainSeq = await highWater();
           if (drainSeq === undefined) return timedOut();
@@ -475,5 +399,100 @@ export async function readLog(
     // Without --follow the line is unchanged (#931 changes only the follow loop).
     options.print(JSON.stringify(options.follow ? finalLine(latest, true) : { id, ...(status === undefined ? {} : { status }), timedOut: true }));
     return 3;
+  }
+
+  /** Route one frame: an event line is printed, a `run` frame refreshes what attention reads. False: skip the step. */
+  function applyFrame(frame: SseFrame): boolean {
+    if (frame.event === 'run-event' || frame.event === 'ui-event') return applyEventLine(frame);
+    if (frame.event === 'run') applyRunFrame(frame);
+    return true;
+  }
+
+  /** A failed connect: a 404 can still end a follow as `missing`; any other status is refused. */
+  async function refusedOrMissing(response: Response): Promise<number> {
+    const text = await response.text().catch(() => '');
+    let data: unknown = text;
+    try { data = JSON.parse(text); } catch { /* not JSON */ }
+    // The run can be deleted between the history read and this connect; the route then 404s.
+    if (response.status === 404) {
+      const exit = await endIfMissing();
+      if (exit !== undefined) return exit;
+    }
+    refuse({ status: response.status, data });
+  }
+
+  /** A `run-event`/`ui-event` frame: dedupe by seq, and print only v1 run-event lines. False: a seq-less frame, skipped whole. */
+  function applyEventLine(frame: SseFrame): boolean {
+    const event = JSON.parse(frame.data) as RunHistoryEvent;
+    if (typeof event.seq !== 'number') return false;
+    // Both streams share the file's seq space, so either one can reach a boundary;
+    // only v1 lines are printed, deduped by seq.
+    seenSeq = Math.max(seenSeq, event.seq);
+    if (frame.event === 'run-event' && event.seq > lastSeq) {
+      lastSeq = event.seq;
+      const line = logLine(event);
+      if (line) {
+        if (replaying) tail.push(JSON.stringify(line));
+        else options.print(JSON.stringify(line));
+      }
+    }
+    return true;
+  }
+
+  /** A `run` frame: remember the status and, when what attention reads changed, owe a run read. */
+  function applyRunFrame(frame: SseFrame): void {
+    const run = runRecordSchema.safeParse(JSON.parse(frame.data));
+    if (!run.success) return;
+    status = run.data.status;
+    // Only a change in what attention reads owes a run read; a repeated frame does not.
+    const framed = entryFor(id, toRunSummary(run.data));
+    const key = attentionKey(framed);
+    if (key !== frameKey) { frameKey = key; readOwed = true; latest = framed; }
+  }
+
+  /** The owed run read: judge it against `--until`, then let `step` ask for the drain or the end. */
+  async function judge(): Promise<number | 'judge' | 'drain' | undefined> {
+    const entry = await readRun();
+    if (entry === undefined) return timedOut();
+    latest = entry;
+    readOwed = false;
+    // Every judgement replaces the last one, so a run that resumed while the drain caught up
+    // is followed again rather than reported in the state it already left.
+    decided = endsWait(entry, options.until) ? entry : undefined;
+    drainSeq = undefined;
+    return step();
+  }
+
+  /** One budget-bounded read; undefined once the deadline has passed. */
+  async function bounded(path: string): Promise<HttpResult | undefined> {
+    const budget = remaining();
+    if (budget <= 0) return undefined;
+    const startedAt = Date.now();
+    try {
+      return await request(cockpit, path, { timeoutMs: budget });
+    } catch (error) {
+      if (remaining() <= 0) return undefined;
+      if (abortedPoll(error) && pollHitDeadline(startedAt, budget)) return undefined;
+      throw error;
+    }
+  }
+
+  /** The event file's high-water mark, or undefined once the deadline has passed. */
+  async function highWater(): Promise<number | undefined> {
+    const history = await bounded(`/runs/${encodeURIComponent(id)}/history`);
+    if (history === undefined) return undefined;
+    if (history.status !== 200) refuse(history);
+    const page = runHistoryPageSchema.safeParse(history.data);
+    return page.success ? page.data.asOfSeq : invalidResponse('history');
+  }
+
+  /** The run as `wait` sees it (a 404 is `missing`), or undefined once the deadline has passed. */
+  async function readRun(): Promise<WaitEntry | undefined> {
+    const result = await bounded(`/runs/${encodeURIComponent(id)}`);
+    if (result === undefined) return undefined;
+    if (result.status === 404) return entryFor(id, undefined);
+    if (result.status !== 200) refuse(result);
+    const run = apiRunSchema.safeParse(result.data);
+    return run.success ? entryFor(id, toRunSummary(run.data)) : invalidResponse('run');
   }
 }

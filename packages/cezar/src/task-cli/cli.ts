@@ -293,7 +293,8 @@ async function textArgument(io: TaskIo, operation: string, positional: string | 
   return text;
 }
 
-function parseOperation(argv: string[]) {
+/** Every `--flag` before the operation must be COMMON; a value is `--flag=value` or the next token. */
+function leadingOptions(argv: string[]): { leading: Values; index: number } {
   // Only COMMON belongs before the operation. Keep the operation's existing strict
   // parseArgs path below, including its handling of positionals and repeated flags.
   const leading: Values = {};
@@ -317,24 +318,38 @@ function parseOperation(argv: string[]) {
     }
     index += 1;
   }
-  const name = argv[index];
-  if (name === undefined) usageError('missing operation');
-  const operation = OPERATIONS[name];
-  if (!operation) usageError(`unknown operation '${name}'`);
+  return { leading, index };
+}
+
+/** The operation's strict parseArgs path: only its flags plus COMMON, positionals allowed. */
+function strictParse(name: string, argv: string[], index: number, operation: Operation): ReturnType<typeof parseArgs> {
   const options = Object.fromEntries(
     Object.entries({ ...operation.flags, ...COMMON }).map(([flag, spec]) => [flag, { type: spec.type, ...(spec.multiple ? { multiple: true } : {}) }]),
   ) as Record<string, { type: 'string' | 'boolean' }>;
-  let parsed;
   try {
-    parsed = parseArgs({ args: argv.slice(index + 1), options, allowPositionals: true, strict: true });
+    return parseArgs({ args: argv.slice(index + 1), options, allowPositionals: true, strict: true });
   } catch (error) {
     usageError(`${name}: ${error instanceof Error ? error.message : 'invalid arguments'}`);
   }
-  const values = parsed.values as Record<string, string | boolean | undefined>;
+}
+
+/** Leading COMMON options fill gaps only: a same-named operation flag already present is a duplicate. */
+function applyLeading(values: Values, leading: Values): void {
   for (const [flag, value] of Object.entries(leading)) {
     if (values[flag] !== undefined) usageError(`duplicate option '--${flag}'`);
     values[flag] = value;
   }
+}
+
+function parseOperation(argv: string[]) {
+  const { leading, index } = leadingOptions(argv);
+  const name = argv[index];
+  if (name === undefined) usageError('missing operation');
+  const operation = OPERATIONS[name];
+  if (!operation) usageError(`unknown operation '${name}'`);
+  const parsed = strictParse(name, argv, index, operation);
+  const values = parsed.values as Record<string, string | boolean | undefined>;
+  applyLeading(values, leading);
   if (!values.help) {
     const [min, max] = operation.positionals;
     if (parsed.positionals.length < min) usageError(`${name} is missing a positional`);
@@ -571,6 +586,117 @@ async function send(cockpit: Cockpit, values: Values, id: string, text: string, 
   return EXIT.ok;
 }
 
+async function notify(cockpit: Cockpit, id: string, values: Values, text: string | undefined, print: Printer): Promise<number> {
+  // --off stays open so a subscription made before this guard can still be undone.
+  if (!values.off) await refuseWorkerNotify(cockpit, id);
+  const run = await setNotify(cockpit, id, !values.off, text);
+  print({ id, notify: run.notify === true, ...(text === undefined ? {} : { message: true }) });
+  return EXIT.ok;
+}
+
+async function wait(cockpit: Cockpit, io: TaskIo, values: Values, positionals: string[], print: Printer): Promise<number> {
+  const mode = waitMode(values);
+  const waited = await waitForRuns(cockpit, positionals, { mode, until: waitUntil(values), timeoutMs: timeoutMs(values), pollMs: io.pollMs });
+  print({ until: waited.until, runs: waited.runs, timedOut: waited.timedOut });
+  return waited.exitCode;
+}
+
+async function log(cockpit: Cockpit, id: string, io: TaskIo, values: Values): Promise<number> {
+  const since = logSince(values);
+  const maxChars = logMaxChars(values);
+  // An unknown run is the history route's 404, passed through. Without --follow the replay
+  // ends at its boundary; the deadline is only a backstop there.
+  return readLog(cockpit, id, {
+    afterSeq: since, maxChars, follow: values.follow === true, until: waitUntil(values),
+    deadline: Date.now() + (values.follow ? timeoutMs(values) : 45_000),
+    print: (line) => io.stdout(line),
+  });
+}
+
+async function status(cockpit: Cockpit, id: string, values: Values, print: Printer): Promise<number> {
+  const run = await getRun(cockpit, id);
+  if (values.full) { print(run); return EXIT.ok; }
+  const question = asksQuestion(run) ? await pendingQuestion(cockpit, id) : undefined;
+  print({ ...projectStatus(run, threadUrl(cockpit, id), question), handoffUrl: handoffUrl(cockpit, id) });
+  return EXIT.ok;
+}
+
+async function list(cockpit: Cockpit, values: Values, print: Printer): Promise<number> {
+  const wanted = statuses(values.status);
+  const limit = listLimit(values);
+  const listed = <T extends RunSummary | ApiRun>(runs: T[]): T[] => runs
+    .filter((run) => workerParent(run) === undefined)
+    .filter((run) => values.all || !run.archived)
+    .filter((run) => !wanted || wanted.has(run.status))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // Without --all, archived runs are dropped above, so the windowed list (#864) has every row
+  // this prints; --all needs every archived run there is.
+  const summaries = () => requestRunSummaries(cockpit, undefined, values.all ? {} : { archived: 'recent' });
+  const runs = values.full ? listed(await listRuns(cockpit)) : listed(await summaries());
+  print({ runs: runs.slice(0, limit).map((run) => (values.full ? run : projectListRow(run))), total: runs.length });
+  return EXIT.ok;
+}
+
+async function stop(cockpit: Cockpit, path: string, id: string, print: Printer): Promise<number> {
+  const result = await request(cockpit, `${path}/cancel`, { body: {} });
+  const answer = cancelResponseSchema.safeParse(result.data);
+  if (result.status !== 200) refuse(result);
+  if (!answer.success) invalidResponse('cancel');
+  print({ id, cancelled: answer.data.cancelled });
+  return EXIT.ok;
+}
+
+async function finish(cockpit: Cockpit, path: string, id: string, print: Printer): Promise<number> {
+  const result = await request(cockpit, `${path}/finish`, { body: {} });
+  if (result.status !== 200) refuse(result);
+  if (!finishResponseSchema.safeParse(result.data).success) invalidResponse('finish');
+  print({ id, finished: true });
+  return EXIT.ok;
+}
+
+async function archive(cockpit: Cockpit, path: string, name: string, id: string, print: Printer): Promise<number> {
+  const archived = name === 'archive';
+  const result = await request(cockpit, `${path}/archive`, { body: { archived } });
+  if (result.status !== 200) refuse(result);
+  const run = runRecordSchema.safeParse(result.data);
+  if (!run.success) invalidResponse('archive');
+  print({ id: run.data.id, archived: run.data.archived === true });
+  return EXIT.ok;
+}
+
+async function archiveFinished(cockpit: Cockpit, print: Printer): Promise<number> {
+  const result = await request(cockpit, '/runs/archive-finished', { method: 'POST' });
+  if (result.status !== 200) refuse(result);
+  const answer = archiveFinishedResponseSchema.safeParse(result.data);
+  if (!answer.success) invalidResponse('archive-finished');
+  print(answer.data);
+  return EXIT.ok;
+}
+
+async function diff(cockpit: Cockpit, path: string, id: string, values: Values, print: Printer): Promise<number> {
+  if (values.stat) {
+    const result = await request(cockpit, `${path}/changes`);
+    if (result.status !== 200) refuse(result);
+    const changes = changesPayloadSchema.safeParse(result.data);
+    if (!changes.success) invalidResponse('changes');
+    print({ id, stat: changes.data.stat, files: changes.data.files.map((file) => ({ path: file.path, status: file.status, adds: file.adds, dels: file.dels })) });
+    return EXIT.ok;
+  }
+  const result = await request(cockpit, `${path}/diff`);
+  if (result.status !== 200) refuse(result);
+  print({ id, diff: typeof result.data === 'string' ? result.data : invalidResponse('diff') });
+  return EXIT.ok;
+}
+
+async function open(cockpit: Cockpit, io: TaskIo, id: string, values: Values, print: Printer): Promise<number> {
+  const run = await getRun(cockpit, id);
+  const url = threadUrl(cockpit, run.id);
+  if (!values['no-open']) (io.open ?? openUrl)(url);
+  print({ id: run.id, url, opened: !values['no-open'] });
+  return EXIT.ok;
+}
+
+/** One helper per operation, so this switch stays a dispatcher under the complexity limit. */
 async function execute(
   name: string, cockpit: Cockpit, io: TaskIo, values: Values, positionals: string[], text: string | undefined, print: Printer,
 ): Promise<number> {
@@ -581,106 +707,29 @@ async function execute(
       return start(cockpit, io, values, text!, print);
     case 'send':
       return send(cockpit, values, id, text!, print);
-    case 'notify': {
-      // --off stays open so a subscription made before this guard can still be undone.
-      if (!values.off) await refuseWorkerNotify(cockpit, id);
-      const run = await setNotify(cockpit, id, !values.off, text);
-      print({ id, notify: run.notify === true, ...(text === undefined ? {} : { message: true }) });
-      return EXIT.ok;
-    }
-    case 'wait': {
-      const mode = waitMode(values);
-      const waited = await waitForRuns(cockpit, positionals, { mode, until: waitUntil(values), timeoutMs: timeoutMs(values), pollMs: io.pollMs });
-      print({ until: waited.until, runs: waited.runs, timedOut: waited.timedOut });
-      return waited.exitCode;
-    }
-    case 'log': {
-      const since = logSince(values);
-      const maxChars = logMaxChars(values);
-      // An unknown run is the history route's 404, passed through. Without --follow the replay
-      // ends at its boundary; the deadline is only a backstop there.
-      return readLog(cockpit, id, {
-        afterSeq: since, maxChars, follow: values.follow === true, until: waitUntil(values),
-        deadline: Date.now() + (values.follow ? timeoutMs(values) : 45_000),
-        print: (line) => io.stdout(line),
-      });
-    }
-    case 'status': {
-      const run = await getRun(cockpit, id);
-      if (values.full) { print(run); return EXIT.ok; }
-      const question = asksQuestion(run) ? await pendingQuestion(cockpit, id) : undefined;
-      print({ ...projectStatus(run, threadUrl(cockpit, id), question), handoffUrl: handoffUrl(cockpit, id) });
-      return EXIT.ok;
-    }
-    case 'list': {
-      const wanted = statuses(values.status);
-      const limit = listLimit(values);
-      const listed = <T extends RunSummary | ApiRun>(runs: T[]): T[] => runs
-        .filter((run) => workerParent(run) === undefined)
-        .filter((run) => values.all || !run.archived)
-        .filter((run) => !wanted || wanted.has(run.status))
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      // Without --all, archived runs are dropped above, so the windowed list (#864) has every row
-      // this prints; --all needs every archived run there is.
-      const summaries = () => requestRunSummaries(cockpit, undefined, values.all ? {} : { archived: 'recent' });
-      const runs = values.full ? listed(await listRuns(cockpit)) : listed(await summaries());
-      print({ runs: runs.slice(0, limit).map((run) => (values.full ? run : projectListRow(run))), total: runs.length });
-      return EXIT.ok;
-    }
-    case 'stop': {
-      const result = await request(cockpit, `${path}/cancel`, { body: {} });
-      const answer = cancelResponseSchema.safeParse(result.data);
-      if (result.status !== 200) refuse(result);
-      if (!answer.success) invalidResponse('cancel');
-      print({ id, cancelled: answer.data.cancelled });
-      return EXIT.ok;
-    }
-    case 'finish': {
-      const result = await request(cockpit, `${path}/finish`, { body: {} });
-      if (result.status !== 200) refuse(result);
-      if (!finishResponseSchema.safeParse(result.data).success) invalidResponse('finish');
-      print({ id, finished: true });
-      return EXIT.ok;
-    }
+    case 'notify':
+      return notify(cockpit, id, values, text, print);
+    case 'wait':
+      return wait(cockpit, io, values, positionals, print);
+    case 'log':
+      return log(cockpit, id, io, values);
+    case 'status':
+      return status(cockpit, id, values, print);
+    case 'list':
+      return list(cockpit, values, print);
+    case 'stop':
+      return stop(cockpit, path, id, print);
+    case 'finish':
+      return finish(cockpit, path, id, print);
     case 'archive':
-    case 'unarchive': {
-      const archived = name === 'archive';
-      const result = await request(cockpit, `${path}/archive`, { body: { archived } });
-      if (result.status !== 200) refuse(result);
-      const run = runRecordSchema.safeParse(result.data);
-      if (!run.success) invalidResponse('archive');
-      print({ id: run.data.id, archived: run.data.archived === true });
-      return EXIT.ok;
-    }
-    case 'archive-finished': {
-      const result = await request(cockpit, '/runs/archive-finished', { method: 'POST' });
-      if (result.status !== 200) refuse(result);
-      const answer = archiveFinishedResponseSchema.safeParse(result.data);
-      if (!answer.success) invalidResponse('archive-finished');
-      print(answer.data);
-      return EXIT.ok;
-    }
-    case 'diff': {
-      if (values.stat) {
-        const result = await request(cockpit, `${path}/changes`);
-        if (result.status !== 200) refuse(result);
-        const changes = changesPayloadSchema.safeParse(result.data);
-        if (!changes.success) invalidResponse('changes');
-        print({ id, stat: changes.data.stat, files: changes.data.files.map((file) => ({ path: file.path, status: file.status, adds: file.adds, dels: file.dels })) });
-        return EXIT.ok;
-      }
-      const result = await request(cockpit, `${path}/diff`);
-      if (result.status !== 200) refuse(result);
-      print({ id, diff: typeof result.data === 'string' ? result.data : invalidResponse('diff') });
-      return EXIT.ok;
-    }
-    case 'open': {
-      const run = await getRun(cockpit, id);
-      const url = threadUrl(cockpit, run.id);
-      if (!values['no-open']) (io.open ?? openUrl)(url);
-      print({ id: run.id, url, opened: !values['no-open'] });
-      return EXIT.ok;
-    }
+    case 'unarchive':
+      return archive(cockpit, path, name, id, print);
+    case 'archive-finished':
+      return archiveFinished(cockpit, print);
+    case 'diff':
+      return diff(cockpit, path, id, values, print);
+    case 'open':
+      return open(cockpit, io, id, values, print);
     default:
       return usageError(`unknown operation '${name}'`);
   }
