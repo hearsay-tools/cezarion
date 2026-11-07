@@ -290,9 +290,47 @@ export function worktreeSizeBytes(path: string): Promise<number | null> {
   });
 }
 
-/** Remove a task worktree and optionally its branch. Best effort — never throws.
- *  Owned worker paths are refused unless `reclaimOwnedDirectory` is set and no
- *  branch is passed (retention #575: directory only, receipts and branch kept). */
+type OwnedCleanupSets = { paths: Set<string>; branches: Set<string> };
+
+async function collectOwnedReceipts(receipts: string, sets: OwnedCleanupSets): Promise<boolean> {
+  const entries = await readdir(receipts).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return []; throw error;
+  });
+  for (const entry of entries) {
+    if (!entry.endsWith('.json')) continue;
+    const path = join(receipts, entry); const info = await lstat(path);
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 16_384) return true;
+    const receipt: unknown = JSON.parse(await readFile(path, 'utf8'));
+    if (!receipt || typeof receipt !== 'object' || !('workspace' in receipt)) return true;
+    const parsed = workerWorkspaceSchema.safeParse(receipt.workspace);
+    if (!parsed.success) return true;
+    const workspace = parsed.data;
+    if (workspace.branch !== branchFor(workspace.ownerRunId) ||
+        !workspace.path.endsWith(join(WORKTREES_DIR, workspace.ownerRunId)) ||
+        entry.replace(/(?:\.cleanup)?\.json$/, '') !== workspace.resourceId) return true;
+    sets.paths.add(workspace.path); sets.branches.add(workspace.branch);
+  }
+  return false;
+}
+
+/** A provisioning crash can leave the administrative marker before its receipt. */
+async function collectOwnedAdminMarkers(root: string, sets: OwnedCleanupSets): Promise<void> {
+  const admins = await readdir(join(root, 'worktrees')).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return []; throw error;
+  });
+  for (const admin of admins) {
+    const dir = join(root, 'worktrees', admin);
+    const marker = await lstat(join(dir, 'cezar-owned-resource')).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined; throw error;
+    });
+    if (marker) {
+      sets.paths.add(dirname((await readFile(join(dir, 'gitdir'), 'utf8')).trim()));
+      const head = (await readFile(join(dir, 'HEAD'), 'utf8')).trim();
+      if (head.startsWith('ref: refs/heads/')) sets.branches.add(head.slice('ref: refs/heads/'.length));
+    }
+  }
+}
+
 /** Ownership receipts survive a missing run index and a replaced directory.
  * Unreadable/malformed evidence disables generic deletion instead of granting it. */
 export async function ownedCleanupProtection(repoRoot: string): Promise<{ paths: Set<string>; branches: Set<string>; uncertain: boolean }> {
@@ -306,42 +344,15 @@ export async function ownedCleanupProtection(repoRoot: string): Promise<{ paths:
       if (error.code === 'ENOENT') return undefined; throw error;
     });
     if (directory && (!directory.isDirectory() || directory.isSymbolicLink())) return { paths, branches, uncertain: true };
-    const entries = await readdir(receipts).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return []; throw error;
-    });
-    for (const entry of entries) {
-      if (!entry.endsWith('.json')) continue;
-      const path = join(receipts, entry); const info = await lstat(path);
-      if (!info.isFile() || info.isSymbolicLink() || info.size > 16_384) return { paths, branches, uncertain: true };
-      const receipt: unknown = JSON.parse(await readFile(path, 'utf8'));
-      if (!receipt || typeof receipt !== 'object' || !('workspace' in receipt)) return { paths, branches, uncertain: true };
-      const parsed = workerWorkspaceSchema.safeParse(receipt.workspace);
-      if (!parsed.success) return { paths, branches, uncertain: true };
-      const workspace = parsed.data;
-      if (workspace.branch !== branchFor(workspace.ownerRunId) ||
-          !workspace.path.endsWith(join(WORKTREES_DIR, workspace.ownerRunId)) ||
-          entry.replace(/(?:\.cleanup)?\.json$/, '') !== workspace.resourceId) return { paths, branches, uncertain: true };
-      paths.add(workspace.path); branches.add(workspace.branch);
-    }
-    // A provisioning crash can leave the administrative marker before its receipt.
-    const admins = await readdir(join(root, 'worktrees')).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return []; throw error;
-    });
-    for (const admin of admins) {
-      const dir = join(root, 'worktrees', admin);
-      const marker = await lstat(join(dir, 'cezar-owned-resource')).catch((error: NodeJS.ErrnoException) => {
-        if (error.code === 'ENOENT') return undefined; throw error;
-      });
-      if (marker) {
-        paths.add(dirname((await readFile(join(dir, 'gitdir'), 'utf8')).trim()));
-        const head = (await readFile(join(dir, 'HEAD'), 'utf8')).trim();
-        if (head.startsWith('ref: refs/heads/')) branches.add(head.slice('ref: refs/heads/'.length));
-      }
-    }
+    if (await collectOwnedReceipts(receipts, { paths, branches })) return { paths, branches, uncertain: true };
+    await collectOwnedAdminMarkers(root, { paths, branches });
     return { paths, branches, uncertain: false };
   } catch { return { paths, branches, uncertain: true }; }
 }
 
+/** Remove a task worktree and optionally its branch. Best effort — never throws.
+ *  Owned worker paths are refused unless `reclaimOwnedDirectory` is set and no
+ *  branch is passed (retention #575: directory only, receipts and branch kept). */
 export type RemoveWorktreeOptions = {
   reclaimOwnedDirectory?: boolean;
   onlyClean?: boolean;
@@ -361,55 +372,54 @@ export async function removeWorktree(
   await withWorktreeMutation(repoRoot, git => removeWorktreeLocked(repoRoot, worktreePath, branch, opts, git)).catch(() => undefined);
 }
 
-async function removeWorktreeLocked(
-  repoRoot: string, worktreePath: string, branch: string | undefined,
-  opts: RemoveWorktreeOptions | undefined, git: WorktreeGit,
+type OwnedCleanupProtection = { paths: Set<string>; branches: Set<string>; uncertain: boolean };
+
+async function runBeforeWorktreeRemove(
+  opts: RemoveWorktreeOptions | undefined,
+  protection: OwnedCleanupProtection,
+  worktreePath: string,
 ): Promise<void> {
-  const beforeRemove = async () => {
-    await opts?.beforeRemove?.().catch(() => undefined);
-    opts?.assertCurrent?.();
-    if (protection.paths.has(worktreePath) && inspectGeneration({ paths: [worktreePath] }).liveness !== 'gone') {
-      throw new Error('Owned worktree may still be held by a process');
-    }
-  };
-  const protection = await ownedCleanupProtection(repoRoot);
-  // Directory-only retention (#575) may reclaim a finished owned-worker checkout
-  // while keeping its branch and receipts. Unowned deletion still refuses owned
-  // paths, and a branch argument never deletes an owned ref.
-  const reclaimOwnedDirectory = opts?.reclaimOwnedDirectory === true && branch === undefined;
-  if (protection.uncertain) return;
-  if (protection.paths.has(worktreePath) && !reclaimOwnedDirectory) return;
-  if (branch !== undefined && protection.branches.has(branch)) return;
-  if (reclaimOwnedDirectory && protection.paths.has(worktreePath)) {
-    const listed = await git(repoRoot, ['worktree', 'list', '--porcelain', '-z']);
-    if (!listed.ok) return;
-    const registered = listed.stdout.split(' ').some(
-      (entry) => entry.startsWith('worktree ') && canonicalPath(entry.slice(9)) === canonicalPath(worktreePath),
-    );
-    if (!registered) return;
+  await opts?.beforeRemove?.().catch(() => undefined);
+  opts?.assertCurrent?.();
+  if (protection.paths.has(worktreePath) && inspectGeneration({ paths: [worktreePath] }).liveness !== 'gone') {
+    throw new Error('Owned worktree may still be held by a process');
   }
-  // Reclaim keeps the branch and calls the work recoverable, which holds only for what a REF keeps:
-  // staged, unstaged and untracked files, and commits made on a detached HEAD, exist in this
-  // checkout alone. So the HEAD must be reachable from a branch or remote-tracking ref, and the
-  // removal is git's own unforced one — git refuses a dirty tree at the moment it removes, which a
-  // status read beforehand cannot promise against an editor saving in between. Any refusal keeps
-  // the directory: no forced fallback, no `rm`. Ignored files (build output) never block it.
-  if (opts?.onlyClean) {
-    const head = await git(worktreePath, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
-    const sha = head.stdout.trim();
-    if (!head.ok || !sha) return;
-    const kept = await git(repoRoot, ['for-each-ref', '--contains', sha, '--count=1', '--format=%(refname)', 'refs/heads', 'refs/remotes']);
-    if (!kept.ok || kept.stdout.trim() === '') return;
-    // The refusal git would give a dirty tree, read first so a declined removal costs nothing
-    // (`beforeRemove` stops the run's preview). git still has the last word at removal time.
-    const status = await git(worktreePath, ['status', '--porcelain']);
-    if (!status.ok || status.stdout.trim() !== '') return;
-    await beforeRemove();
-    const removed = await git(repoRoot, ['worktree', 'remove', worktreePath]);
-    if (!removed.ok) return;
-    if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
-    return;
-  }
+}
+
+async function ownedDirectoryStillRegistered(
+  repoRoot: string, worktreePath: string, git: WorktreeGit,
+): Promise<boolean> {
+  const listed = await git(repoRoot, ['worktree', 'list', '--porcelain', '-z']);
+  if (!listed.ok) return false;
+  return listed.stdout.split('\0').some(
+    (entry) => entry.startsWith('worktree ') && canonicalPath(entry.slice(9)) === canonicalPath(worktreePath),
+  );
+}
+
+async function removeCleanWorktree(
+  repoRoot: string, worktreePath: string, protection: OwnedCleanupProtection,
+  git: WorktreeGit, beforeRemove: () => Promise<void>,
+): Promise<void> {
+  const head = await git(worktreePath, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
+  const sha = head.stdout.trim();
+  if (!head.ok || !sha) return;
+  const kept = await git(repoRoot, ['for-each-ref', '--contains', sha, '--count=1', '--format=%(refname)', 'refs/heads', 'refs/remotes']);
+  if (!kept.ok || kept.stdout.trim() === '') return;
+  // The refusal git would give a dirty tree, read first so a declined removal costs nothing
+  // (`beforeRemove` stops the run's preview). git still has the last word at removal time.
+  const status = await git(worktreePath, ['status', '--porcelain']);
+  if (!status.ok || status.stdout.trim() !== '') return;
+  await beforeRemove();
+  const removed = await git(repoRoot, ['worktree', 'remove', worktreePath]);
+  if (!removed.ok) return;
+  if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
+}
+
+async function forceRemoveWorktree(
+  repoRoot: string, worktreePath: string, branch: string | undefined,
+  reclaimOwnedDirectory: boolean, protection: OwnedCleanupProtection,
+  git: WorktreeGit, beforeRemove: () => Promise<void>,
+): Promise<void> {
   await beforeRemove();
   await git(repoRoot, ['worktree', 'remove', '--force', worktreePath]);
   // Owned-path reclaim must not `rm` a receipt path that is no longer a git
@@ -420,6 +430,31 @@ async function removeWorktreeLocked(
   await rm(worktreePath, { recursive: true, force: true }).catch(() => undefined);
   if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
   if (branch) await git(repoRoot, ['branch', '-D', branch]);
+}
+
+async function removeWorktreeLocked(
+  repoRoot: string, worktreePath: string, branch: string | undefined,
+  opts: RemoveWorktreeOptions | undefined, git: WorktreeGit,
+): Promise<void> {
+  const beforeRemove = async () => runBeforeWorktreeRemove(opts, protection, worktreePath);
+  const protection = await ownedCleanupProtection(repoRoot);
+  // Directory-only retention (#575) may reclaim a finished owned-worker checkout
+  // while keeping its branch and receipts. Unowned deletion still refuses owned
+  // paths, and a branch argument never deletes an owned ref.
+  const reclaimOwnedDirectory = opts?.reclaimOwnedDirectory === true && branch === undefined;
+  if (protection.uncertain) return;
+  if (protection.paths.has(worktreePath) && !reclaimOwnedDirectory) return;
+  if (branch !== undefined && protection.branches.has(branch)) return;
+  if (reclaimOwnedDirectory && protection.paths.has(worktreePath) &&
+      !await ownedDirectoryStillRegistered(repoRoot, worktreePath, git)) return;
+  // Reclaim keeps the branch and calls the work recoverable, which holds only for what a REF keeps:
+  // staged, unstaged and untracked files, and commits made on a detached HEAD, exist in this
+  // checkout alone. So the HEAD must be reachable from a branch or remote-tracking ref, and the
+  // removal is git's own unforced one — git refuses a dirty tree at the moment it removes, which a
+  // status read beforehand cannot promise against an editor saving in between. Any refusal keeps
+  // the directory: no forced fallback, no `rm`. Ignored files (build output) never block it.
+  if (opts?.onlyClean) return removeCleanWorktree(repoRoot, worktreePath, protection, git, beforeRemove);
+  return forceRemoveWorktree(repoRoot, worktreePath, branch, reclaimOwnedDirectory, protection, git, beforeRemove);
 }
 
 /**
