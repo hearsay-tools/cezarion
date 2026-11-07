@@ -8,6 +8,50 @@ const { pickPullRequestRun } = require('./fetch-ci-results.cjs');
 const positive = n => Number.isSafeInteger(n) && n > 0;
 const successful = job => job?.status === 'completed' && job.conclusion === 'success';
 
+const SNAPSHOT_JOBS = ['Unit, build, E2E, and package', 'Prepare PR snapshot archives'];
+
+function validTrigger(trigger) {
+  return positive(trigger?.id) && positive(trigger?.run_attempt);
+}
+
+function triggeredCiRun(run, trigger, repository) {
+  return run.id === trigger.id && run.run_attempt === trigger.run_attempt && run.head_sha === trigger.head_sha
+    && run.path === '.github/workflows/ci.yml' && run.event === 'pull_request_target'
+    && run.status === 'completed' && ['success', 'failure'].includes(run.conclusion)
+    && positive(run.run_number) && /^[a-f0-9]{40}$/.test(run.head_sha || '')
+    && run.head_repository?.full_name === repository;
+}
+
+function openHeadPull(pull, run, repository) {
+  return pull.head?.sha === run.head_sha && pull.head?.ref === run.head_branch
+    && pull.head?.repo?.full_name === repository && pull.base?.repo?.full_name === repository
+    && ['main', 'develop'].includes(pull.base?.ref) && pull.state === 'open';
+}
+
+function verifiedPull(pull, number, run, repository) {
+  return pull.number === number && pull.state === 'open' && pull.head?.sha === run.head_sha
+    && pull.head?.repo?.full_name === repository && pull.base?.repo?.full_name === repository
+    && ['main', 'develop'].includes(pull.base?.ref);
+}
+
+// The workflow run to trust is the one pickPullRequestRun picks for this head.
+function selectedSnapshotRun(runs, run) {
+  const selected = pickPullRequestRun(runs.map(r => ({ ...r, databaseId: r.id, headSha: r.head_sha })), run.head_sha);
+  return selected?.id === run.id && selected.run_attempt === run.run_attempt;
+}
+
+function snapshotJobsGreen(jobs) {
+  return SNAPSHOT_JOBS.every(name => {
+    const matching = jobs.filter(j => j.name === name);
+    return matching.length === 1 && successful(matching[0]);
+  });
+}
+
+function snapshotArtifact(artifacts, attempt) {
+  const matching = artifacts.filter(a => a.name === `pr-snapshot-${attempt}`);
+  return matching.length === 1 && !matching[0].expired && positive(matching[0].id) ? matching[0] : null;
+}
+
 // Resolve every publishing decision from GitHub, never from artifact metadata.
 // Return null for old-base runs without preparation: the introducing PR still
 // verifies using the installed target workflow, before the publisher is installed.
@@ -15,37 +59,24 @@ async function resolveSnapshot({ github, owner, repo, trigger }) {
   const repository = `${owner}/${repo}`;
   const get = async (route, args = {}) => (await github.request(`GET /repos/{owner}/{repo}/${route}`, { owner, repo, ...args })).data;
   const list = (route, args = {}) => github.paginate(`GET /repos/{owner}/{repo}/${route}`, { owner, repo, per_page: 100, ...args });
-  if (!positive(trigger?.id) || !positive(trigger?.run_attempt)) return null;
+  if (!validTrigger(trigger)) return null;
   const run = await get('actions/runs/{run_id}', { run_id: trigger.id });
   // The automated review runs inside this CI run, so open findings fail the run
   // with verification and preparation green. Those two jobs, checked below,
   // decide; a cancelled or otherwise unfinished run never publishes.
-  if (run.id !== trigger.id || run.run_attempt !== trigger.run_attempt || run.head_sha !== trigger.head_sha ||
-      run.path !== '.github/workflows/ci.yml' || run.event !== 'pull_request_target' ||
-      run.status !== 'completed' || !['success', 'failure'].includes(run.conclusion) ||
-      !positive(run.run_number) || !/^[a-f0-9]{40}$/.test(run.head_sha || '') ||
-      run.head_repository?.full_name !== repository) return null;
+  if (!triggeredCiRun(run, trigger, repository)) return null;
   const pulls = await list('pulls', { state: 'open', head: `${owner}:${run.head_branch}` });
-  const matches = pulls.filter(p => p.head?.sha === run.head_sha && p.head?.ref === run.head_branch &&
-    p.head?.repo?.full_name === repository && p.base?.repo?.full_name === repository &&
-    ['main', 'develop'].includes(p.base?.ref) && p.state === 'open');
+  const matches = pulls.filter(p => openHeadPull(p, run, repository));
   if (matches.length !== 1 || !positive(matches[0].number)) return null;
   const pull = await get('pulls/{pull_number}', { pull_number: matches[0].number });
-  if (pull.number !== matches[0].number || pull.state !== 'open' || pull.head?.sha !== run.head_sha ||
-      pull.head?.repo?.full_name !== repository || pull.base?.repo?.full_name !== repository ||
-      !['main', 'develop'].includes(pull.base?.ref)) return null;
+  if (!verifiedPull(pull, matches[0].number, run, repository)) return null;
   const runs = await list('actions/workflows/{workflow_id}/runs', { workflow_id: 'ci.yml', head_sha: run.head_sha });
-  const selected = pickPullRequestRun(runs.map(r => ({ ...r, databaseId: r.id, headSha: r.head_sha })), run.head_sha);
-  if (selected?.id !== run.id || selected.run_attempt !== run.run_attempt) return null;
+  if (!selectedSnapshotRun(runs, run)) return null;
   const jobs = await list('actions/runs/{run_id}/attempts/{attempt_number}/jobs', { run_id: run.id, attempt_number: run.run_attempt });
-  for (const name of ['Unit, build, E2E, and package', 'Prepare PR snapshot archives']) {
-    const matching = jobs.filter(j => j.name === name);
-    if (matching.length !== 1 || !successful(matching[0])) return null;
-  }
-  const artifacts = (await list('actions/runs/{run_id}/artifacts', { run_id: run.id }))
-    .filter(a => a.name === `pr-snapshot-${run.run_attempt}`);
-  if (artifacts.length !== 1 || artifacts[0].expired || !positive(artifacts[0].id)) return null;
-  return { pr: pull.number, head: run.head_sha, runId: run.id, runNumber: run.run_number, attempt: run.run_attempt, artifactId: artifacts[0].id };
+  if (!snapshotJobsGreen(jobs)) return null;
+  const artifact = snapshotArtifact(await list('actions/runs/{run_id}/artifacts', { run_id: run.id }), run.run_attempt);
+  if (!artifact) return null;
+  return { pr: pull.number, head: run.head_sha, runId: run.id, runNumber: run.run_number, attempt: run.run_attempt, artifactId: artifact.id };
 }
 
 // #371: inspect the entire stream, including data after zero blocks. GNU tar
