@@ -31,14 +31,13 @@ function agentCandidates(ctx: InstallContext, step: string, rebrand: boolean, cr
   const agent = step === 'ngrok' ? 'ngrok' : 'cockpit';
   const selected = labelFor(agent, rebrand);
   const artifact = (name: string): LaunchAgent => ({ kind: 'owned', type: 'launchd', name, path: join(launchAgentsDir(ctx), `${name}.plist`) });
-  const candidates = [artifact(selected)];
-  if (rebrand) candidates.push(artifact(labelFor(agent, false)));
   const recorded = created?.artifacts.find((a) => a.kind === 'owned' && a.type === 'launchd');
+  // A ledger is authoritative: static fallback must not claim an unrelated old agent.
   if (recorded) {
     const fallback = artifact(recorded.name ?? selected);
-    candidates.unshift({ ...recorded, ...fallback, path: recorded.path ?? fallback.path });
+    return [{ ...recorded, ...fallback, path: recorded.path ?? fallback.path }];
   }
-  return candidates.filter((a, i) => candidates.findIndex((b) => b.name === a.name && b.path === a.path) === i);
+  return rebrand ? [artifact(selected), artifact(labelFor(agent, false))] : [artifact(selected)];
 }
 
 function agentArtifact(ctx: InstallContext, step: string, rebrand: boolean): LaunchAgent {

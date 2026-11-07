@@ -237,6 +237,29 @@ describe('macOS launchd migration', () => {
     expect(loaded.size).toBe(0);
   });
 
+  it.each(['cockpit', 'ngrok'] as const)('undo keeps a foreign legacy %s plist when the new agent is recorded', async (agent) => {
+    const foreign = plant(agent, false, ['/n/npx', '--yes', 'cezar-cli']);
+    const original = readFileSync(foreign.path!, 'utf8');
+    expect((await strategy.migrate!(ctx)).leftAloneForeign).toEqual([{ ...foreign, kind: 'shared' }]);
+    const name = `tools.hearsay.squawk.${agent}`;
+    const path = join(dir, `${name}.plist`);
+    writeFileSync(path, agent === 'cockpit'
+      ? cezarLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true)
+      : launchdPlist(4321, 'ops:secret', undefined, '/n/ngrok', true));
+    loaded.add(name);
+    const stepId = agent === 'cockpit' ? 'autostart' : 'ngrok';
+    const created = { artifacts: [{ kind: 'owned' as const, type: 'launchd', name, path }] };
+    ctx.state.steps[stepId] = { status: STEP_STATUSES[1], created };
+    const step = strategy.steps(ctx).find((s) => s.id === stepId)!;
+    await step.check(ctx);
+    expect(commands.at(-1)).toEqual(['test', '-f', path]);
+    await step.undo(ctx, created);
+    expect(existsSync(path)).toBe(false);
+    expect(readFileSync(foreign.path!, 'utf8')).toBe(original);
+    expect(loaded).toEqual(new Set([foreign.name!]));
+    expect(commands.filter((c) => c[1] === 'bootout').map((c) => c[2])).toEqual([`gui/${process.getuid?.() ?? 0}/${name}`]);
+  });
+
   it('creates fresh switch-on plists with only the new labels', async () => {
     ctx.ui = { ...ctx.ui, password: async () => 'secret', text: async (opts) => opts.message.includes('domain') ? '' : 'ops' };
     const capture = ctx.runner.capture;
