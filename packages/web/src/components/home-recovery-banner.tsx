@@ -4,7 +4,9 @@ import { Button } from '@/components/ui/button'
 import { useHealth } from '@/api/queries'
 
 function recoveryMessage(file: HomeRecoveryFile): string {
-  if (file.reason === 'legacy-change') return `${file.file} changed in the old home. Import keeps live-only changes. Old-home changes win when both homes changed the same key or entry.`
+  if (file.reason === 'legacy-change') return file.canImport
+    ? `${file.file} changed in the old home. Import keeps live-only changes. Old-home changes win when both homes changed the same key or entry.`
+    : `${file.file} changed in the old home. Import is unavailable. Ignore keeps the live file and skips these old-home changes.`
   if (file.reason === 'outside-write') return `${file.file} changed outside Cezar. Restore the previous version or accept the file as found.`
   return file.file === 'config.json'
     ? 'The project registry was reset. Restore the previous projects?'
@@ -32,7 +34,7 @@ function HomeRecoveryRow({ file, editable }: { file: HomeRecoveryFile; editable:
       className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-muted/50 p-3 text-sm text-foreground">
       <span className="flex-[1_1_24rem] [min-inline-size:0] [overflow-wrap:break-word]">{recoveryMessage(file)}</span>
       {editable ? <div className="flex flex-wrap gap-2">
-        {legacy ? <Button type="button" data-action="import" disabled={busy || !file.canImport}
+        {legacy ? file.canImport && <Button type="button" data-action="import" disabled={busy}
           onClick={() => run('import')}>Import changes from the old home</Button>
           : <Button type="button" data-action="restore" disabled={busy || !file.canRestore} onClick={() => run('restore')}>Restore</Button>}
         <Button type="button" variant="outline" data-action="accept" disabled={busy} onClick={() => run('accept')}>{legacy ? 'Ignore' : 'Accept as found'}</Button>
