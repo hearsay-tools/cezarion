@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query'
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 
 import { ApiError, connectProvider, setProviderEnabled } from '@/api/client'
@@ -9,7 +9,7 @@ import {
   useRetryProviderAuth,
   workspaceQueryKeys,
 } from '@/api/queries'
-import { runnerDiscoversModels, type ProviderId, type ProviderStatusResponse } from '@open-mercato/cezar-api-client/contract/workspace'
+import { runnerDiscoversModels, type ProviderId, type ProviderStatus, type ProviderStatusResponse } from '@open-mercato/cezar-api-client/contract/workspace'
 import { StatusDot, type StatusDotTone } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -58,6 +58,180 @@ function withProviderEnabled(
       row.provider === provider ? { ...row, enabled } : row,
     ),
   }
+}
+
+type ProviderState = ProviderStatus['status']
+
+/** What the status dot and its label say for a provider card: the row's own presentation when the
+ *  row exists, "Checking…" while the first status fetch is in flight, "Could not verify" otherwise.
+ *  Extracted from the per-provider card map (hearsay-tools/cezarion#2862). */
+function presentationFor(
+  state: ProviderState | undefined,
+  statusPending: boolean,
+): { label: string; tone: StatusDotTone } {
+  if (state) return STATUS_PRESENTATION[state]
+  return statusPending ? { label: 'Checking…', tone: 'neutral' as const } : STATUS_PRESENTATION.unknown
+}
+
+/** The "Verification failed." note covers an unknown row AND a failed fetch with no row at all. */
+function verificationFailed(state: ProviderState | undefined, statusIsError: boolean): boolean {
+  return state === 'unknown' || (statusIsError && !state)
+}
+
+/** The explanation line under a provider card's status: install instructions for a missing
+ *  provider, the verification-failure note, or the row's own hint. Extracted from the
+ *  per-provider card map (hearsay-tools/cezarion#2862). */
+function ProviderHint({
+  provider,
+  state,
+  current,
+  statusIsError,
+}: {
+  provider: (typeof PROVIDERS)[number]
+  state: ProviderState | undefined
+  current: ProviderStatus | undefined
+  statusIsError: boolean
+}) {
+  if (state === 'not-installed') {
+    return (
+      <p className="mt-1.5 text-xs text-soft-foreground">
+        Install {provider.label}, then run <code>{provider.login}</code>.
+      </p>
+    )
+  }
+  if (verificationFailed(state, statusIsError)) {
+    return (
+      <p className="mt-1.5 text-xs text-soft-foreground">
+        Verification failed. Check again when the provider is available.
+      </p>
+    )
+  }
+  if (current?.hint) {
+    return <p className="mt-1.5 text-xs text-soft-foreground">{current.hint}</p>
+  }
+  return null
+}
+
+/** The card's action column: the enable switch (hidden until the provider is installed), the
+ *  explicit re-check, Connect, and the post-failure "Try again". Extracted from the
+ *  per-provider card map (hearsay-tools/cezarion#2862). */
+function ProviderActions({
+  provider,
+  state,
+  current,
+  isConnecting,
+  incidentId,
+  status,
+  refresh,
+  connect,
+  retry,
+  queueToggle,
+}: {
+  provider: (typeof PROVIDERS)[number]
+  state: ProviderState | undefined
+  current: ProviderStatus | undefined
+  isConnecting: boolean
+  incidentId: string | undefined
+  status: ReturnType<typeof useProviderStatus>
+  refresh: ReturnType<typeof useRefreshProviderStatus>
+  connect: UseMutationResult<Awaited<ReturnType<typeof connectProvider>>, Error, ProviderId>
+  retry: ReturnType<typeof useRetryProviderAuth>
+  queueToggle: (provider: ProviderId, enabled: boolean) => void
+}) {
+  const canRefresh = state === 'disconnected' || state === 'unknown'
+  return (
+    <div className="flex items-center gap-2">
+      {state !== 'not-installed' ? (
+        <Switch
+          checked={current?.enabled ?? true}
+          aria-label={`Use ${provider.label}`}
+          onCheckedChange={(enabled) => queueToggle(provider.id, enabled)}
+        />
+      ) : null}
+      {canRefresh ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={refresh.isPending}
+          onClick={() => refresh.mutate(undefined, {
+            onError: (error) => toast(error.message, { tone: 'danger' }),
+          })}
+        >
+          Check again
+        </Button>
+      ) : null}
+      {state === 'disconnected' ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={connect.isPending}
+          onClick={() => connect.mutate(provider.id)}
+        >
+          {isConnecting ? 'Opening…' : 'Connect'}
+        </Button>
+      ) : null}
+      {incidentId !== undefined ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={retry.isPending}
+          onClick={() =>
+            retry.mutate(
+              { provider: provider.id, authFailureId: incidentId },
+              {
+                onSuccess: () => toast(`${provider.label} can be tried again.`),
+                onError: (error) => toast(error.message, { tone: 'danger' }),
+              },
+            )
+          }
+        >
+          Try again
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+/** The manual sign-in card that appears under a provider whose Connect failed with a terminal
+ *  command, until that provider verifies as connected. Extracted from the per-provider card map
+ *  (hearsay-tools/cezarion#2862). */
+function ManualSignIn({
+  manual,
+  provider,
+  connected,
+  onCopy,
+}: {
+  manual: ManualCommand | null
+  provider: ProviderId
+  connected: boolean
+  onCopy: (command: string) => Promise<void>
+}) {
+  if (manual === null || manual.provider !== provider || connected) return null
+  return (
+    <div
+      role="region"
+      aria-label={`${manual.label} manual sign-in`}
+      className="rounded-md border border-pending/40 bg-pending/5 px-3.5 py-3"
+    >
+      <p className="text-[13px] text-foreground">{manual.message}</p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <code className="min-w-0 flex-1 overflow-x-auto rounded-sm bg-muted px-2 py-1.5 text-xs">
+          {manual.command}
+        </code>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => void onCopy(manual.command)}
+        >
+          Copy command
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 export function ProviderSettings() {
@@ -214,13 +388,8 @@ export function ProviderSettings() {
         {PROVIDERS.map((provider) => {
           const current = providerStatusFor(status.data, provider.id)
           const state = current?.status
-          const presentation = state
-            ? STATUS_PRESENTATION[state]
-            : status.isPending
-              ? { label: 'Checking…', tone: 'neutral' as const }
-              : STATUS_PRESENTATION.unknown
+          const presentation = presentationFor(state, status.isPending)
           const isConnecting = connect.isPending && connect.variables === provider.id
-          const canRefresh = state === 'disconnected' || state === 'unknown'
           const incidentId = current?.authFailureId
 
           return (
@@ -238,71 +407,26 @@ export function ProviderSettings() {
                       <span>{presentation.label}</span>
                       {current?.enabled === false ? <span>Disabled</span> : null}
                     </div>
-                    {state === 'not-installed' ? (
-                      <p className="mt-1.5 text-xs text-soft-foreground">
-                        Install {provider.label}, then run <code>{provider.login}</code>.
-                      </p>
-                    ) : state === 'unknown' || (status.isError && !state) ? (
-                      <p className="mt-1.5 text-xs text-soft-foreground">
-                        Verification failed. Check again when the provider is available.
-                      </p>
-                    ) : current?.hint ? (
-                      <p className="mt-1.5 text-xs text-soft-foreground">{current.hint}</p>
-                    ) : null}
+                    <ProviderHint
+                      provider={provider}
+                      state={state}
+                      current={current}
+                      statusIsError={status.isError}
+                    />
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    {state !== 'not-installed' ? (
-                      <Switch
-                        checked={current?.enabled ?? true}
-                        aria-label={`Use ${provider.label}`}
-                        onCheckedChange={(enabled) => queueToggle(provider.id, enabled)}
-                      />
-                    ) : null}
-                    {canRefresh ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={refresh.isPending}
-                        onClick={() => refresh.mutate(undefined, {
-                          onError: (error) => toast(error.message, { tone: 'danger' }),
-                        })}
-                      >
-                        Check again
-                      </Button>
-                    ) : null}
-                    {state === 'disconnected' ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={connect.isPending}
-                        onClick={() => connect.mutate(provider.id)}
-                      >
-                        {isConnecting ? 'Opening…' : 'Connect'}
-                      </Button>
-                    ) : null}
-                    {incidentId !== undefined ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={retry.isPending}
-                        onClick={() =>
-                          retry.mutate(
-                            { provider: provider.id, authFailureId: incidentId },
-                            {
-                              onSuccess: () => toast(`${provider.label} can be tried again.`),
-                              onError: (error) => toast(error.message, { tone: 'danger' }),
-                            },
-                          )
-                        }
-                      >
-                        Try again
-                      </Button>
-                    ) : null}
-                  </div>
+                  <ProviderActions
+                    provider={provider}
+                    state={state}
+                    current={current}
+                    isConnecting={isConnecting}
+                    incidentId={incidentId}
+                    status={status}
+                    refresh={refresh}
+                    connect={connect}
+                    retry={retry}
+                    queueToggle={queueToggle}
+                  />
                 </div>
                 {incidentId !== undefined ? (
                   <p className="mt-2 text-xs text-soft-foreground">
@@ -312,28 +436,12 @@ export function ProviderSettings() {
                 ) : null}
               </div>
 
-              {manual?.provider === provider.id && state !== 'connected' ? (
-                <div
-                  role="region"
-                  aria-label={`${manual.label} manual sign-in`}
-                  className="rounded-md border border-pending/40 bg-pending/5 px-3.5 py-3"
-                >
-                  <p className="text-[13px] text-foreground">{manual.message}</p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <code className="min-w-0 flex-1 overflow-x-auto rounded-sm bg-muted px-2 py-1.5 text-xs">
-                      {manual.command}
-                    </code>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void copyCommand(manual.command)}
-                    >
-                      Copy command
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
+              <ManualSignIn
+                manual={manual}
+                provider={provider.id}
+                connected={state === 'connected'}
+                onCopy={copyCommand}
+              />
             </Fragment>
           )
         })}
