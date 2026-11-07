@@ -164,10 +164,6 @@ function onceFromFlags(values: AddFlags, timeZone: string, now: number): Automat
   return schedule;
 }
 
-/**
- * The `add` flags as the `create` body they stand for. Anything they cannot say is exit 64.
- * `timeZone` is the zone `--at`/`--in` resolve in when `--tz` is absent (the cockpit's own).
- */
 /** The launched task's keys; an absent flag leaves the key out, so the task default applies. */
 function taskFromAddFlags(values: AddFlags, prompt: string): CreateAutomationInput['task'] {
   const task: CreateAutomationInput['task'] = { prompt, worktree: true, autonomous: !values['no-autonomous'] };
@@ -181,45 +177,60 @@ function taskFromAddFlags(values: AddFlags, prompt: string): CreateAutomationInp
   return task;
 }
 
-export function bodyFromAddFlags(values: AddFlags, prompt: string, once: { timeZone?: string; now?: number } = {}): CreateAutomationInput {
+/** Every flag combination `add` refuses, judged together in one place before a trigger is built; each is exit 64. Returns the trimmed `--name`. */
+function addFlagCombinationChecks(values: AddFlags, prompt: string, isOnce: boolean): string {
   if (!values.name?.trim()) usageError('--name is required');
   if (!prompt.trim()) usageError('--prompt (or --prompt-file) is required');
-  const isOnce = values.at !== undefined || values.in !== undefined;
   if (!isOnce && (values.tz !== undefined || values['latest-start'] !== undefined)) usageError('--tz and --latest-start apply only to a one-time schedule (--at or --in)');
   if (values.cron && values.on) usageError('give --cron (a schedule) OR --on (a GitHub poll), not both');
   if (values.cron && values['include-existing']) usageError('--include-existing applies only to a GitHub poll');
   if (!isOnce && !values.cron && !values.on) usageError('give --cron "<M H * * *>" for a schedule, --at or --in for a one-time schedule, or --on <event> for a GitHub poll');
   if (values.autonomous && values['no-autonomous']) usageError('give --autonomous OR --no-autonomous, not both');
-  const task = taskFromAddFlags(values, prompt);
-  let body: CreateAutomationInput;
-  if (isOnce) {
-    const schedule = onceFromFlags(values, values.tz ?? once.timeZone ?? 'UTC', once.now ?? Date.now());
-    body = { name: values.name.trim(), kind: 'schedule', schedule, task };
-  } else if (values.cron) {
-    const schedule: AutomationSchedule | null = parseCron(values.cron);
-    if (!schedule) {
-      usageError(`--cron "${values.cron}" is not one of the shapes a schedule can take (${SCHEDULE_TYPES.join(', ')}): "M H * * *", "M H * * 1-5", "M H * * D" (0 or 7 = Sunday) or "0 */N * * *" (N in 1,2,3,4,6,8,12). For anything else use the JSON form: create --json with a definition shaped as the schema command prints`);
-    }
-    body = { name: values.name.trim(), kind: 'schedule', schedule, task };
-  } else {
-    const filters: NonNullable<CreateAutomationInput['filters']> = { lookbackDays: 7, maxRecords: 25 };
-    if (values['include-existing']) filters.includeExisting = true;
-    if (values.label?.length) filters.anyLabels = values.label;
-    if (values.author?.length) filters.authors = values.author;
-    if (values['changed-label']?.length) filters.changedLabels = values['changed-label'];
-    const events = values.on!.split(',').map((event) => event.trim()).filter(Boolean) as AutomationEvent[];
-    if (!filters.changedLabels && events.some((event) => event === 'issue.labeled' || event === 'issue.unlabeled')) {
-      usageError('--on issue.labeled and issue.unlabeled need --changed-label <label>: the label whose change fires it');
-    }
-    body = {
-      name: values.name.trim(),
-      kind: 'github',
-      events,
-      intervalSeconds: values.every ? parseEvery(values.every) : 300,
-      filters,
-      task,
-    };
+  return values.name.trim();
+}
+
+/** The one-time `add` flags (`--at`/`--in`) as a schedule body; every rule they break is exit 64. */
+function onceBodyFromAddFlags(values: AddFlags, name: string, task: CreateAutomationInput['task'], once: { timeZone?: string; now?: number }): CreateAutomationInput {
+  const schedule = onceFromFlags(values, values.tz ?? once.timeZone ?? 'UTC', once.now ?? Date.now());
+  return { name, kind: 'schedule', schedule, task };
+}
+
+/** The `--cron` `add` flags as a schedule body; a cron outside the supported shapes is exit 64. */
+function cronBodyFromAddFlags(cron: string, name: string, task: CreateAutomationInput['task']): CreateAutomationInput {
+  const schedule: AutomationSchedule | null = parseCron(cron);
+  if (!schedule) {
+    usageError(`--cron "${cron}" is not one of the shapes a schedule can take (${SCHEDULE_TYPES.join(', ')}): "M H * * *", "M H * * 1-5", "M H * * D" (0 or 7 = Sunday) or "0 */N * * *" (N in 1,2,3,4,6,8,12). For anything else use the JSON form: create --json with a definition shaped as the schema command prints`);
   }
+  return { name, kind: 'schedule', schedule, task };
+}
+
+/** The GitHub-poll `add` flags (`--on`) as a poll body; `--every` defaults to 300 s. */
+function githubBodyFromAddFlags(values: AddFlags, name: string, task: CreateAutomationInput['task']): CreateAutomationInput {
+  const filters: NonNullable<CreateAutomationInput['filters']> = { lookbackDays: 7, maxRecords: 25 };
+  if (values['include-existing']) filters.includeExisting = true;
+  if (values.label?.length) filters.anyLabels = values.label;
+  if (values.author?.length) filters.authors = values.author;
+  if (values['changed-label']?.length) filters.changedLabels = values['changed-label'];
+  const events = values.on!.split(',').map((event) => event.trim()).filter(Boolean) as AutomationEvent[];
+  if (!filters.changedLabels && events.some((event) => event === 'issue.labeled' || event === 'issue.unlabeled')) {
+    usageError('--on issue.labeled and issue.unlabeled need --changed-label <label>: the label whose change fires it');
+  }
+  return { name, kind: 'github', events, intervalSeconds: values.every ? parseEvery(values.every) : 300, filters, task };
+}
+
+/**
+ * The `add` flags as the `create` body they stand for. Anything they cannot say is exit 64.
+ * `timeZone` is the zone `--at`/`--in` resolve in when `--tz` is absent (the cockpit's own).
+ */
+export function bodyFromAddFlags(values: AddFlags, prompt: string, once: { timeZone?: string; now?: number } = {}): CreateAutomationInput {
+  const isOnce = values.at !== undefined || values.in !== undefined;
+  const name = addFlagCombinationChecks(values, prompt, isOnce);
+  const task = taskFromAddFlags(values, prompt);
+  const body = isOnce
+    ? onceBodyFromAddFlags(values, name, task, once)
+    : values.cron
+      ? cronBodyFromAddFlags(values.cron, name, task)
+      : githubBodyFromAddFlags(values, name, task);
   if (values.enable) body.enable = true;
   return body;
 }
@@ -298,24 +309,14 @@ export async function runAutomationCommand(
     // Input is judged before any cockpit is looked for: a usage error is 64 with or without one.
     const { command, id, values } = parse(argv);
     let body: Record<string, unknown> | undefined;
-    if (command === 'add') {
-      const flags = values as AddFlags & { prompt?: string; 'prompt-file'?: string };
-      if (flags.prompt !== undefined && flags['prompt-file'] !== undefined) usageError('give the prompt as --prompt OR --prompt-file, not both');
-      const prompt = flags['prompt-file'] !== undefined ? await readText(io, flags['prompt-file']) : (flags.prompt ?? '');
-      const now = (io.now ?? Date.now)();
-      body = bodyFromAddFlags(flags, prompt, { now }) as Record<string, unknown>;
-      // A one-time schedule without --tz resolves in the cockpit's zone, which only the cockpit knows.
-      if ((flags.at !== undefined || flags.in !== undefined) && flags.tz === undefined) {
-        const cockpit = await resolveCockpit(env, values as { url?: string; repo?: string }, io.discover, NO_COCKPIT, { removeDiscoveryHint: true });
-        const timeZone = await cockpitTimeZone(cockpit, io);
-        body = bodyFromAddFlags(flags, prompt, { timeZone, now }) as Record<string, unknown>;
-        return await execute(command, id, values, body, cockpit, io, print);
-      }
-    } else if (command === 'create' || command === 'update') {
-      body = await readDefinition(values as { file?: string; json?: string }, io);
-    }
-    const cockpit = await resolveCockpit(env, values as { url?: string; repo?: string }, io.discover, NO_COCKPIT, { removeDiscoveryHint: true });
-    return await execute(command, id, values, body, cockpit, io, print);
+    let cockpit: Cockpit | undefined;
+    if (command === 'add') ({ body, cockpit } = await addCommandBody(values, env, io));
+    else if (command === 'create' || command === 'update') body = await readDefinition(values as { file?: string; json?: string }, io);
+    return await execute(
+      command, id, values, body,
+      cockpit ?? await resolveCockpit(env, values as { url?: string; repo?: string }, io.discover, NO_COCKPIT, { removeDiscoveryHint: true }),
+      io, print,
+    );
   } catch (error) {
     if (error instanceof TaskCliError) {
       print(error.body);
@@ -324,6 +325,26 @@ export async function runAutomationCommand(
     print({ code: 'internal', error: error instanceof Error ? error.message : String(error) });
     return EXIT.refused;
   }
+}
+
+/**
+ * The `add` command's body from its flags. When the body is a one-time schedule without `--tz` it
+ * resolves in the cockpit's zone, so that path looks the cockpit up early and returns it; every
+ * other path leaves the cockpit to the caller's single lookup before `execute`.
+ */
+async function addCommandBody(values: Record<string, unknown>, env: NodeJS.ProcessEnv, io: AutomationIo): Promise<{ body: Record<string, unknown>; cockpit?: Cockpit }> {
+  const flags = values as AddFlags & { prompt?: string; 'prompt-file'?: string };
+  if (flags.prompt !== undefined && flags['prompt-file'] !== undefined) usageError('give the prompt as --prompt OR --prompt-file, not both');
+  const prompt = flags['prompt-file'] !== undefined ? await readText(io, flags['prompt-file']) : (flags.prompt ?? '');
+  const now = (io.now ?? Date.now)();
+  const body = bodyFromAddFlags(flags, prompt, { now }) as Record<string, unknown>;
+  // A one-time schedule without --tz resolves in the cockpit's zone, which only the cockpit knows.
+  if ((flags.at !== undefined || flags.in !== undefined) && flags.tz === undefined) {
+    const cockpit = await resolveCockpit(env, values as { url?: string; repo?: string }, io.discover, NO_COCKPIT, { removeDiscoveryHint: true });
+    const timeZone = await cockpitTimeZone(cockpit, io);
+    return { body: bodyFromAddFlags(flags, prompt, { timeZone, now }) as Record<string, unknown>, cockpit };
+  }
+  return { body };
 }
 
 type SendInit = { method?: string; body?: unknown; responseLimitBytes?: number };
@@ -362,6 +383,156 @@ function onceFields(schedule: AutomationSchedule | undefined): { dueAt: string; 
   return instant === null ? {} : { dueAt: new Date(instant).toISOString(), timeZone: schedule.timeZone ?? '' };
 }
 
+/** What one command's execution reads and answers through: the parsed call with its shared request helpers. */
+interface ExecuteContext {
+  command: Command;
+  id: string;
+  values: Record<string, unknown>;
+  body: Record<string, unknown> | undefined;
+  cockpit: Cockpit;
+  io: AutomationIo;
+  print: (value: unknown) => void;
+  path(suffix?: string): string;
+  send(url: string, init?: SendInit): Promise<HttpResult>;
+  call(url: string, init?: SendInit, ok?: number): Promise<unknown>;
+  summary(automation: Definition, onceStatus?: string): Record<string, unknown>;
+  statusOf(automation: Definition): Promise<string | undefined>;
+}
+
+/** `create` and `add`: POST the definition, defaulted as the schema reference documents. */
+async function executeCreate(ctx: ExecuteContext): Promise<number> {
+  // `enabled` is not a POST key: a definition is created paused, and `enable: true` asks the
+  // route to enable it from a current-time baseline. A definition copied from `show` carries
+  // `enabled`, which the route would refuse, so it is lifted into `enable`.
+  const { enabled, ...definition } = ctx.body!;
+  const enable = ctx.values.enable === true || enabled === true;
+  // The schema reference documents a poll's `intervalSeconds` (300) and `filters` ({}) as
+  // defaults; the route requires both, so the CLI materializes what the reference promised.
+  const defaults = definition.kind === 'schedule' ? {} : { intervalSeconds: 300, filters: {} };
+  const sent = { ...defaults, ...definition, ...(enable ? { enable: true } : {}) };
+  const { automation } = await ctx.call(ctx.path(), { method: 'POST', body: sent }, 201) as { automation: Definition };
+  const once = automation.schedule?.type === 'once';
+  ctx.print({ ...ctx.summary(automation, await ctx.statusOf(automation)), ...(once ? { note: SCHEDULED_TASK_NOTE } : {}) });
+  return EXIT.ok;
+}
+
+/** `update`: read the stored definition, apply the editable keys, PUT with the revision echoed. */
+async function executeUpdate(ctx: ExecuteContext): Promise<number> {
+  const { automation: current } = await ctx.call(ctx.path()) as { automation: Definition };
+  const next: Record<string, unknown> = {};
+  for (const key of EDITABLE_KEYS) {
+    const value = key in ctx.body! ? ctx.body![key] : current[key];
+    if (value !== undefined) next[key] = value;
+  }
+  // `task` merges key by key, so a prompt-only update keeps the workflow, runner, model and
+  // the rest; `null` removes a key. Every other key replaces what is stored.
+  if (isRecord(ctx.body!.task) && isRecord(current.task)) {
+    const task: Record<string, unknown> = { ...current.task, ...ctx.body!.task };
+    for (const [key, value] of Object.entries(task)) if (value === null) delete task[key];
+    next.task = task;
+  }
+  // A PUT restates `enabled` (an edit may not silently pause a running automation) and echoes
+  // the revision it read, so a concurrent cockpit edit is a 409, not a clobber.
+  next.enabled = 'enabled' in ctx.body! ? ctx.body!.enabled : current.enabled;
+  next.expectedRevision = current.revision;
+  const { automation } = await ctx.call(ctx.path(), { method: 'PUT', body: next }) as { automation: Definition };
+  ctx.print(ctx.summary(automation, await ctx.statusOf(automation)));
+  return EXIT.ok;
+}
+
+/** `run`: launch the automation once now. */
+async function executeRun(ctx: ExecuteContext): Promise<number> {
+  const { runId } = await ctx.call(ctx.path('/run'), { method: 'POST' }, 202) as { runId: string };
+  ctx.print({ id: ctx.id, runId, url: automationPageUrl(ctx.cockpit, ctx.id) });
+  return EXIT.ok;
+}
+
+/** `check`: start a preview or execute poll, then follow its check record to an outcome. */
+async function executeCheck(ctx: ExecuteContext): Promise<number> {
+  const mode = ctx.values.execute === true ? 'execute' : 'preview';
+  const { checkId } = await ctx.call(ctx.path('/check'), { method: 'POST', body: { mode } }, 202) as { checkId: string };
+  const url = automationPageUrl(ctx.cockpit, ctx.id);
+  const now = ctx.io.now ?? Date.now;
+  const deadline = now() + (ctx.io.timeoutMs ?? CHECK_TIMEOUT_MS);
+  const sleep = ctx.io.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+  // The check record is workspace-level, keyed by the unguessable id the project route returned.
+  for (;;) {
+    const check = await ctx.call(`${ctx.cockpit.origin}/api/v1/automation-checks/${encodeURIComponent(checkId)}`) as { status: string; matches?: number; truncated?: boolean; error?: string };
+    if (check.status === 'complete') {
+      ctx.print({ id: ctx.id, checkId, mode, status: check.status, matches: check.matches ?? 0, truncated: check.truncated === true, url });
+      return EXIT.ok;
+    }
+    if (check.status === 'error') {
+      ctx.print({ code: 'failed', id: ctx.id, checkId, mode, error: check.error ?? 'the check failed', url });
+      return EXIT.failed;
+    }
+    if (now() >= deadline) {
+      ctx.print({ code: 'timeout', id: ctx.id, checkId, mode, error: 'the check did not finish in time; it may still be running — its result shows in the automation log', url });
+      return EXIT.timeout;
+    }
+    await sleep(CHECK_POLL_MS);
+  }
+}
+
+/** `list`: every automation of the project with its trigger, counts and next wake. */
+async function executeList(ctx: ExecuteContext): Promise<number> {
+  // `GET /automations` is unpaginated and carries every full prompt, so it reads like
+  // `cez task list` reads `/runs`: no success-size cap, the deadline and error caps kept.
+  const archived = typeof ctx.values.archived === 'string' ? `?archived=${ctx.values.archived}` : '';
+  const data = await ctx.call(`${ctx.path()}${archived}`, { responseLimitBytes: Infinity }) as {
+    available: boolean;
+    reason?: string;
+    automations: Array<Definition & {
+      events?: string[]; intervalSeconds?: number; nextRunAt?: string;
+      counts: Record<string, number>; state?: { nextCheckAt?: string }; onceStatus?: string;
+    }>;
+  };
+  ctx.print({
+    available: data.available,
+    ...(data.reason ? { reason: data.reason } : {}),
+    automations: data.automations.map((item) => {
+      const next = item.enabled ? item.nextRunAt ?? item.state?.nextCheckAt : undefined;
+      return {
+        id: item.id,
+        name: item.name,
+        enabled: item.enabled,
+        kind: item.kind,
+        trigger: item.kind === 'schedule' && item.schedule
+          ? scheduleLabel(item.schedule)
+          : `every ${item.intervalSeconds ?? 300}s on ${(item.events ?? []).join(',')}`,
+        counts: item.counts,
+        ...(next ? { next } : {}),
+        ...onceFields(item.schedule),
+        ...(item.onceStatus ? { onceStatus: item.onceStatus } : {}),
+        url: automationPageUrl(ctx.cockpit, item.id),
+      };
+    }),
+  });
+  return EXIT.ok;
+}
+
+/** `show`: the stored definition with the one-time fields the CLI adds. */
+async function executeShow(ctx: ExecuteContext): Promise<number> {
+  const data = await ctx.call(ctx.path()) as Record<string, unknown> & { automation?: Definition };
+  ctx.print({ ...data, ...onceFields(data.automation?.schedule), url: automationPageUrl(ctx.cockpit, ctx.id) });
+  return EXIT.ok;
+}
+
+/** `enable`, `pause` and `cancel`: POST the verb, answer the summary. */
+async function executeSetEnabled(ctx: ExecuteContext): Promise<number> {
+  const { automation } = await ctx.call(ctx.path(`/${ctx.command}`), { method: 'POST' }) as { automation: Definition };
+  ctx.print(ctx.summary(automation, await ctx.statusOf(automation)));
+  return EXIT.ok;
+}
+
+/** `delete`: DELETE and answer a bare receipt. */
+async function executeDelete(ctx: ExecuteContext): Promise<number> {
+  const result = await ctx.send(ctx.path(), { method: 'DELETE' });
+  if (result.status < 200 || result.status >= 300) refuse(result);
+  ctx.print({ id: ctx.id, deleted: true });
+  return EXIT.ok;
+}
+
 async function execute(
   command: Command,
   id: string,
@@ -373,7 +544,6 @@ async function execute(
 ): Promise<number> {
   const path = (suffix = '') => `${cockpit.api}/automations${id ? `/${encodeURIComponent(id)}` : ''}${suffix}`;
   const send = startupAwareSend(io);
-  const sleep = io.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
   const call = async (url: string, init?: SendInit, ok = 200): Promise<unknown> => {
     const result = await send(url, init);
     if (result.status !== ok) refuse(result);
@@ -395,127 +565,18 @@ async function execute(
   const statusOf = async (automation: Definition) => automation.schedule?.type === 'once'
     ? ((await call(`${cockpit.api}/automations/${encodeURIComponent(automation.id)}`)) as { onceStatus?: string }).onceStatus
     : undefined;
-
+  const ctx: ExecuteContext = { command, id, values, body, cockpit, io, print, path, send, call, summary, statusOf };
   switch (command) {
     case 'create':
-    case 'add': {
-      // `enabled` is not a POST key: a definition is created paused, and `enable: true` asks the
-      // route to enable it from a current-time baseline. A definition copied from `show` carries
-      // `enabled`, which the route would refuse, so it is lifted into `enable`.
-      const { enabled, ...definition } = body!;
-      const enable = values.enable === true || enabled === true;
-      // The schema reference documents a poll's `intervalSeconds` (300) and `filters` ({}) as
-      // defaults; the route requires both, so the CLI materializes what the reference promised.
-      const defaults = definition.kind === 'schedule' ? {} : { intervalSeconds: 300, filters: {} };
-      const sent = { ...defaults, ...definition, ...(enable ? { enable: true } : {}) };
-      const { automation } = await call(path(), { method: 'POST', body: sent }, 201) as { automation: Definition };
-      const once = automation.schedule?.type === 'once';
-      print({ ...summary(automation, await statusOf(automation)), ...(once ? { note: SCHEDULED_TASK_NOTE } : {}) });
-      return EXIT.ok;
-    }
-    case 'update': {
-      const { automation: current } = await call(path()) as { automation: Definition };
-      const next: Record<string, unknown> = {};
-      for (const key of EDITABLE_KEYS) {
-        const value = key in body! ? body![key] : current[key];
-        if (value !== undefined) next[key] = value;
-      }
-      // `task` merges key by key, so a prompt-only update keeps the workflow, runner, model and
-      // the rest; `null` removes a key. Every other key replaces what is stored.
-      if (isRecord(body!.task) && isRecord(current.task)) {
-        const task: Record<string, unknown> = { ...current.task, ...body!.task };
-        for (const [key, value] of Object.entries(task)) if (value === null) delete task[key];
-        next.task = task;
-      }
-      // A PUT restates `enabled` (an edit may not silently pause a running automation) and echoes
-      // the revision it read, so a concurrent cockpit edit is a 409, not a clobber.
-      next.enabled = 'enabled' in body! ? body!.enabled : current.enabled;
-      next.expectedRevision = current.revision;
-      const { automation } = await call(path(), { method: 'PUT', body: next }) as { automation: Definition };
-      print(summary(automation, await statusOf(automation)));
-      return EXIT.ok;
-    }
-    case 'run': {
-      const { runId } = await call(path('/run'), { method: 'POST' }, 202) as { runId: string };
-      print({ id, runId, url: automationPageUrl(cockpit, id) });
-      return EXIT.ok;
-    }
-    case 'check': {
-      const mode = values.execute === true ? 'execute' : 'preview';
-      const { checkId } = await call(path('/check'), { method: 'POST', body: { mode } }, 202) as { checkId: string };
-      const url = automationPageUrl(cockpit, id);
-      const now = io.now ?? Date.now;
-      const deadline = now() + (io.timeoutMs ?? CHECK_TIMEOUT_MS);
-      // The check record is workspace-level, keyed by the unguessable id the project route returned.
-      for (;;) {
-        const check = await call(`${cockpit.origin}/api/v1/automation-checks/${encodeURIComponent(checkId)}`) as { status: string; matches?: number; truncated?: boolean; error?: string };
-        if (check.status === 'complete') {
-          print({ id, checkId, mode, status: check.status, matches: check.matches ?? 0, truncated: check.truncated === true, url });
-          return EXIT.ok;
-        }
-        if (check.status === 'error') {
-          print({ code: 'failed', id, checkId, mode, error: check.error ?? 'the check failed', url });
-          return EXIT.failed;
-        }
-        if (now() >= deadline) {
-          print({ code: 'timeout', id, checkId, mode, error: 'the check did not finish in time; it may still be running — its result shows in the automation log', url });
-          return EXIT.timeout;
-        }
-        await sleep(CHECK_POLL_MS);
-      }
-    }
-    case 'list': {
-      // `GET /automations` is unpaginated and carries every full prompt, so it reads like
-      // `cez task list` reads `/runs`: no success-size cap, the deadline and error caps kept.
-      const archived = typeof values.archived === 'string' ? `?archived=${values.archived}` : '';
-      const data = await call(`${path()}${archived}`, { responseLimitBytes: Infinity }) as {
-        available: boolean;
-        reason?: string;
-        automations: Array<Definition & {
-          events?: string[]; intervalSeconds?: number; nextRunAt?: string;
-          counts: Record<string, number>; state?: { nextCheckAt?: string }; onceStatus?: string;
-        }>;
-      };
-      print({
-        available: data.available,
-        ...(data.reason ? { reason: data.reason } : {}),
-        automations: data.automations.map((item) => {
-          const next = item.enabled ? item.nextRunAt ?? item.state?.nextCheckAt : undefined;
-          return {
-            id: item.id,
-            name: item.name,
-            enabled: item.enabled,
-            kind: item.kind,
-            trigger: item.kind === 'schedule' && item.schedule
-              ? scheduleLabel(item.schedule)
-              : `every ${item.intervalSeconds ?? 300}s on ${(item.events ?? []).join(',')}`,
-            counts: item.counts,
-            ...(next ? { next } : {}),
-            ...onceFields(item.schedule),
-            ...(item.onceStatus ? { onceStatus: item.onceStatus } : {}),
-            url: automationPageUrl(cockpit, item.id),
-          };
-        }),
-      });
-      return EXIT.ok;
-    }
-    case 'show': {
-      const data = await call(path()) as Record<string, unknown> & { automation?: Definition };
-      print({ ...data, ...onceFields(data.automation?.schedule), url: automationPageUrl(cockpit, id) });
-      return EXIT.ok;
-    }
+    case 'add': return executeCreate(ctx);
+    case 'update': return executeUpdate(ctx);
+    case 'run': return executeRun(ctx);
+    case 'check': return executeCheck(ctx);
+    case 'list': return executeList(ctx);
+    case 'show': return executeShow(ctx);
     case 'enable':
     case 'pause':
-    case 'cancel': {
-      const { automation } = await call(path(`/${command}`), { method: 'POST' }) as { automation: Definition };
-      print(summary(automation, await statusOf(automation)));
-      return EXIT.ok;
-    }
-    case 'delete': {
-      const result = await send(path(), { method: 'DELETE' });
-      if (result.status < 200 || result.status >= 300) refuse(result);
-      print({ id, deleted: true });
-      return EXIT.ok;
-    }
+    case 'cancel': return executeSetEnabled(ctx);
+    case 'delete': return executeDelete(ctx);
   }
 }
