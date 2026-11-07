@@ -673,7 +673,7 @@ const EVENT_PHRASE: Record<GithubTimelineEventKind, (event: GithubTimelineEvent,
 /** The kind-specific middle of an event row. Split out so `EventRow` stays a layout shell and
  *  each phrase can be asserted on its own in tests. */
 function EventPhrase({ event, colors }: { event: GithubTimelineEvent; colors: Record<string, string> }) {
-  return EVENT_PHRASE[event.kind](event, colors)
+  return EVENT_PHRASE[event.kind]?.(event, colors) ?? null
 }
 
 /** The rolled-up CI glyph on a commit row (#525) — reuses `CHECKS_GLYPH`/`CHECKS_TONE`, the same
