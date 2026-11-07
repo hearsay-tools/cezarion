@@ -1,3 +1,4 @@
+import type { ModelDiscoveryOptions } from './model-discovery-options.ts';
 import { productEnv } from './product-env.ts';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { effortLevelSchema, type EffortLevel } from '@open-mercato/cezar-contract/effort';
@@ -5,12 +6,7 @@ import { trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
 
-export interface PiModelDiscoveryOptions {
-  cwd: string;
-  bin?: string;
-  timeoutMs?: number;
-  spawn?: (bin: string, args: readonly string[], cwd: string) => ChildProcessWithoutNullStreams;
-}
+export type PiModelDiscoveryOptions = ModelDiscoveryOptions;
 
 const DEFAULT_DISCOVERY_TIMEOUT_MS = 10_000;
 /** Grace between the probe's SIGTERM and the SIGKILL that follows it. */

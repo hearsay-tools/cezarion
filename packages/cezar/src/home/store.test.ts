@@ -9,7 +9,7 @@ import { readInstallMarker } from './install-marker.ts';
 import { prepareHome } from './entry.ts';
 import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { enableRemoteSettings } from '../remote-settings.ts';
-import { benchmarkHome } from '../../scripts/benchmark-home.ts';
+import { benchmarkHome, setBenchmarkEnv } from '../../scripts/benchmark-home.ts';
 import { childEnv, cleanStoreRoots, storeChild, storeFixture, storeRoot } from './store.testkit.ts';
 
 afterEach(cleanStoreRoots);
@@ -137,4 +137,10 @@ it('serializes two independent writers without losing either update', async () =
   });
   await Promise.all([run(), run()]);
   expect(JSON.parse(new HomeStore(home).read(home.workspaceConfig)).count).toBe(20);
+});
+
+it('benchmark controls override conflicting preferred values and preserve unrelated env', () => {
+  const env = { HSQ_DRY_RUN: '0', CEZ_DRY_RUN: '', HSQ_AUTONAME: '1', CEZ_HOME: '/chosen', KEEP: '' };
+  setBenchmarkEnv(env);
+  expect(env).toEqual({ HSQ_DRY_RUN: '1', CEZ_DRY_RUN: '1', HSQ_AUTONAME: '0', CEZ_AUTONAME: '0', CEZ_HOME: '/chosen', KEEP: '' });
 });
