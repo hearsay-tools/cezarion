@@ -293,7 +293,8 @@ async function textArgument(io: TaskIo, operation: string, positional: string | 
   return text;
 }
 
-function parseOperation(argv: string[]) {
+/** Every `--flag` before the operation must be COMMON; a value is `--flag=value` or the next token. */
+function leadingOptions(argv: string[]): { leading: Values; index: number } {
   // Only COMMON belongs before the operation. Keep the operation's existing strict
   // parseArgs path below, including its handling of positionals and repeated flags.
   const leading: Values = {};
@@ -317,24 +318,38 @@ function parseOperation(argv: string[]) {
     }
     index += 1;
   }
-  const name = argv[index];
-  if (name === undefined) usageError('missing operation');
-  const operation = OPERATIONS[name];
-  if (!operation) usageError(`unknown operation '${name}'`);
+  return { leading, index };
+}
+
+/** The operation's strict parseArgs path: only its flags plus COMMON, positionals allowed. */
+function strictParse(name: string, argv: string[], index: number, operation: Operation): ReturnType<typeof parseArgs> {
   const options = Object.fromEntries(
     Object.entries({ ...operation.flags, ...COMMON }).map(([flag, spec]) => [flag, { type: spec.type, ...(spec.multiple ? { multiple: true } : {}) }]),
   ) as Record<string, { type: 'string' | 'boolean' }>;
-  let parsed;
   try {
-    parsed = parseArgs({ args: argv.slice(index + 1), options, allowPositionals: true, strict: true });
+    return parseArgs({ args: argv.slice(index + 1), options, allowPositionals: true, strict: true });
   } catch (error) {
     usageError(`${name}: ${error instanceof Error ? error.message : 'invalid arguments'}`);
   }
-  const values = parsed.values as Record<string, string | boolean | undefined>;
+}
+
+/** Leading COMMON options fill gaps only: a same-named operation flag already present is a duplicate. */
+function applyLeading(values: Values, leading: Values): void {
   for (const [flag, value] of Object.entries(leading)) {
     if (values[flag] !== undefined) usageError(`duplicate option '--${flag}'`);
     values[flag] = value;
   }
+}
+
+function parseOperation(argv: string[]) {
+  const { leading, index } = leadingOptions(argv);
+  const name = argv[index];
+  if (name === undefined) usageError('missing operation');
+  const operation = OPERATIONS[name];
+  if (!operation) usageError(`unknown operation '${name}'`);
+  const parsed = strictParse(name, argv, index, operation);
+  const values = parsed.values as Record<string, string | boolean | undefined>;
+  applyLeading(values, leading);
   if (!values.help) {
     const [min, max] = operation.positionals;
     if (parsed.positionals.length < min) usageError(`${name} is missing a positional`);
