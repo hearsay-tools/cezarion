@@ -26,7 +26,7 @@ export function homeFileRoot(path: string): string {
 export class HomeStore {
   readonly root: string;
   private writeDepth = 0;
-  constructor(private readonly home: Home | string) { this.root = typeof home === 'string' ? home : home.root; }
+  constructor(private readonly home: Home | string, private readonly options: { requireBackup?: boolean } = {}) { this.root = typeof home === 'string' ? home : home.root; }
 
   private journal(path: string, reportOnly = false): VersionLog {
     const { root, file } = homePathLocation(this.home, path);
@@ -135,7 +135,7 @@ export class HomeStore {
       const log = this.journal(path);
       const previous = readBytes(path);
       const restoredDeletion = this.checkOutside(path, log, previous, recoveredBase);
-      backupBeforeWrite(path, bytes, { home: this.home, unavailable });
+      backupBeforeWrite(path, bytes, { home: this.home, unavailable, required: this.options.requireBackup });
       const reset = log.reset(); // Finish any reset whose primary committed before a crash.
       const keepAcceptance = !reset && registryCount(log.relativePath, previous) === 0 && log.accepted(previous);
       flagResetOnWrite(log, previous, bytes);
@@ -208,7 +208,7 @@ export class HomeStore {
     this.transaction(() => {
       const log = this.journal(path);
       log.inspect(readBytes(path));
-      backupBeforeWrite(path, bytes, { home: this.home, unavailable });
+      backupBeforeWrite(path, bytes, { home: this.home, unavailable, required: this.options.requireBackup });
       log.replace(path, bytes);
       log.clearRecovery(bytes, keepReset);
       homeChanged(this.root);
