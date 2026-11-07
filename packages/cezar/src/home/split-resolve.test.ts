@@ -120,3 +120,20 @@ describe('split Home resolution', () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
+
+it('keeps sandbox filesystem paths native when process.platform is mocked', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cez-native-sandbox-'));
+  const platform = process.platform;
+  Object.defineProperty(process, 'platform', { value: platform === 'win32' ? 'linux' : 'win32', configurable: true });
+  try {
+    const legacy = Home.sandbox(join(dir, 'legacy'));
+    const split = Home.sandbox(join(dir, 'split'), { layout: 'split' });
+    expect(legacy.workspaceConfig).toBe(join(dir, 'legacy', 'config.json'));
+    expect(split.workspaceConfig).toBe(join(dir, 'split', 'config', 'config.json'));
+    expect(JSON.parse(readFileSync(join(dir, 'legacy', 'install.json'), 'utf8')).kind).toBe('test');
+    expect(JSON.parse(readFileSync(join(dir, 'split', 'config', 'install.json'), 'utf8')).kind).toBe('test');
+  } finally {
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

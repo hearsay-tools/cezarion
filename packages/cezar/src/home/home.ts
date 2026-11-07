@@ -1,4 +1,4 @@
-import { join, posix, win32 } from 'node:path';
+import { join, posix, sep, win32 } from 'node:path';
 import { oneRootKinds, type HomeLayout, type HomeRoots } from './kind-roots.ts';
 import { REBRAND_SWITCH } from './switch.ts';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
@@ -33,9 +33,12 @@ export interface Home {
   serverLock(instance?: string): string;
 }
 
+/** Filesystem factories keep Node's native spelling even when a caller mocks process.platform. */
+const nativePathPlatform: NodeJS.Platform = sep === '\\' ? 'win32' : 'linux';
+
 /** Build the legacy path names from explicit roots. No environment or filesystem access. */
 export function homePaths(root: string, cache: string, override: string | undefined): Home {
-  return kindHomePaths({ config: root, state: root, data: root, runtime: root, cache }, 'legacy', process.platform, override);
+  return kindHomePaths({ config: root, state: root, data: root, runtime: root, cache }, 'legacy', nativePathPlatform, override);
 }
 
 /** The only constructor for named paths. Legacy dry directories deliberately stay at root. */
@@ -78,7 +81,7 @@ export const Home = Object.freeze({
   sandbox(dir: string, { layout = REBRAND_SWITCH ? 'split' : 'legacy' }: { layout?: HomeLayout } = {}): Home {
     assertCezarHomeWriteIsSandboxed(dir);
     const home = layout === 'split'
-      ? kindHomePaths(oneRootKinds(dir, process.platform), layout, process.platform, dir)
+      ? kindHomePaths(oneRootKinds(dir, nativePathPlatform), layout, nativePathPlatform, dir)
       : homePaths(dir, join(dir, '.cache', 'cez'), dir);
     createInstallMarker(home.root, 'test');
     return home;
