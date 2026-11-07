@@ -40,6 +40,8 @@ export class FakeUbuntuHost implements Runner {
   readonly commands: string[] = [];
   /** Units whose process starts but never answers. */
   readonly unhealthy = new Set<string>();
+  /** Units whose `systemctl disable` fails and leaves them as they are. */
+  readonly failDisable = new Set<string>();
   nginxTestFailures = 0;
   tlsBroken = false;
   hang?: (command: string) => boolean;
@@ -198,13 +200,14 @@ export class FakeUbuntuHost implements Runner {
 
   private systemctl(args: string[]): CommandResult {
     const scope: Scope = args[0] === '--user' ? 'user' : 'system';
-    const rest = args.filter((a) => a !== '--user' && a !== '--quiet');
-    const [verb, name] = rest as [string, string | undefined];
+    const options = args.filter((a) => a.startsWith('--'));
+    const [verb, name] = args.filter((a) => !a.startsWith('--')) as [string, string | undefined];
     if (verb === 'daemon-reload') return ok();
     if (verb === 'reload' && name === 'nginx') { this.reloadNginx(); return ok(); }
     const run = name ? this.verbs[verb] : undefined;
     if (!run) return fail();
-    return run(this.unit(scope, name!), existsSync(this.unitFile(scope, name!)), rest.includes('--now'));
+    if (verb === 'disable' && this.failDisable.has(name!)) return fail(1, 'fake: disable failed');
+    return run(this.unit(scope, name!), existsSync(this.unitFile(scope, name!)), options.includes('--now'));
   }
 
   private readonly verbs: Record<string, (unit: Unit, present: boolean, now: boolean) => CommandResult> = {
@@ -241,15 +244,29 @@ export class FakeUbuntuHost implements Runner {
     return false;
   }
 
+  /** nginx answers a name only on the address and port one of its sites listens on. */
   private curl(args: string[], stdin: string): string {
     const url = new URL(args.at(-1)!);
-    const header = args.indexOf('-H');
-    const host = header >= 0 ? args[header + 1]!.replace(/^Host: /, '') : undefined;
-    if (url.port) { this.onUpstreamProbe?.(); return this.upstream(Number(url.port)) ? '200' : '000'; }
-    const site = this.loaded.find((text) => new RegExp(`server_name ${host ?? '_'};`).test(text)) ?? (host ? undefined : this.loaded[0]);
+    const at = (flag: string) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1]! : undefined; };
+    const resolve = at('--resolve')?.match(/^([^:]+):(\d+):(.+)$/);
+    if (url.port && !resolve) { this.onUpstreamProbe?.(); return this.upstream(Number(url.port)) ? '200' : '000'; }
+    if (resolve ? resolve[1] !== url.hostname : url.hostname !== '127.0.0.1') return '000'; // The fake has no DNS.
+    return this.nginxAnswer(url, resolve?.[3], at('-H')?.replace(/^Host: /, '') ?? (resolve ? url.hostname : undefined), stdin);
+  }
+
+  private nginxAnswer(url: URL, resolved: string | undefined, host: string | undefined, stdin: string): string {
+    const https = url.protocol === 'https:';
+    const port = Number(url.port || (https ? 443 : 80));
+    const address = resolved ?? '127.0.0.1';
+    const listening = this.loaded.filter((text) => listens(text, address, port, https));
+    if (!listening.length || (https && this.tlsBroken)) return '000';
+    const site = listening.find((text) => text.includes(`server_name ${host ?? '_'};`));
     if (!site) return '404';
-    if (url.protocol === 'https:' && (this.tlsBroken || !/listen 443 ssl/.test(site))) return '000';
-    if (url.protocol === 'http:' && /return 301 https:/.test(site)) return '301';
+    if (!https && /return 301 https:/.test(site)) return '301';
+    return this.authorized(site, stdin);
+  }
+
+  private authorized(site: string, stdin: string): string {
     const file = /auth_basic_user_file (\S+);/.exec(site)?.[1];
     const login = /user = "([^:]*):(.*)"/.exec(stdin);
     const lines = file && this.exists(file) ? this.read(file).split('\n') : [];
@@ -257,4 +274,13 @@ export class FakeUbuntuHost implements Runner {
     const port = Number(/proxy_pass http:\/\/127\.0\.0\.1:(\d+);/.exec(site)?.[1]);
     return this.upstream(port) ? '200' : '502';
   }
+}
+
+function listens(site: string, address: string, port: number, ssl: boolean): boolean {
+  return [...site.matchAll(/^\s*listen\s+([^;\s]+)([^;]*);/gm)].some(([, where, rest]) => {
+    const match = /^(?:(.+):)?(\d+)$/.exec(where!);
+    if (!match || Number(match[2]) !== port) return false;
+    const bound = match[1];
+    return (!bound || bound === '[::]' || bound === address) && (!ssl || /\bssl\b/.test(rest!));
+  });
 }

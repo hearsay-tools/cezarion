@@ -26,12 +26,15 @@ const journalSchema = z.object({
   version: z.literal(1),
   /** `migrating` and `rolling-back` recover by rollback; `committing` recovers by finishing. */
   phase: z.enum(['migrating', 'committing', 'rolling-back']),
+  /** This run staged the home. Its committed marker then means every check passed. */
+  stagedHome: z.boolean(),
   instances: z.array(z.object({ instance: z.string().min(1), planned: reportSchema, moved: reportSchema.optional() })),
 });
 
 export interface ServerMigrateJournal {
   version: 1;
   phase: 'migrating' | 'committing' | 'rolling-back';
+  stagedHome: boolean;
   instances: Array<{ instance: string; planned: PlatformMigrationReport; moved?: PlatformMigrationReport }>;
 }
 

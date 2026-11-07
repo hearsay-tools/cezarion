@@ -178,10 +178,20 @@ function assertRollbackEntry(ctx: InstallContext, moves: Move[]): void {
   }
 }
 
+/** True while a unit is active or enabled. A rollback must not leave a new unit running. */
+async function unitRuns(ctx: InstallContext, scope: 'user' | 'system', name: string): Promise<boolean> {
+  const user = scope === 'user' ? ['--user'] : [];
+  for (const verb of ['is-active', 'is-enabled']) {
+    if ((await ctx.runner.capture('systemctl', [...user, verb, '--quiet', name])).code === 0) return true;
+  }
+  return false;
+}
+
 async function restoreUnit(ctx: InstallContext, { from, to, backup }: Move): Promise<void> {
   if (from.scope === 'user') {
     if (existsSync(to.path!)) {
       await ctx.runner.interactive('systemctl', ['--user', 'disable', '--now', to.name!]);
+      if (await unitRuns(ctx, 'user', to.name!)) throw new Error(`Could not stop and disable ${to.name}`);
       rmSync(to.path!);
     }
     if (existsSync(backup!.path!)) {
@@ -199,7 +209,8 @@ async function restoreUnit(ctx: InstallContext, { from, to, backup }: Move): Pro
       `{ test -e ${shquote(from.path!)} || mv ${shquote(backup!.path!)} ${shquote(from.path!)}; } && systemctl daemon-reload && systemctl enable ${shquote(from.name!)}`,
     verify: async (c, code) => {
       if (code !== undefined && code !== 0) return false;
-      return await verifyCommand(c, 'systemctl', ['is-enabled', from.name!]) && verifyCommand(c, 'sh', ['-c', `! test -e ${shquote(to.path!)}`]);
+      return await verifyCommand(c, 'systemctl', ['is-enabled', from.name!]) && !(await unitRuns(c, 'system', to.name!))
+        && verifyCommand(c, 'sh', ['-c', `! test -e ${shquote(to.path!)}`]);
     },
   });
 }
@@ -271,7 +282,7 @@ export interface UbuntuHealth {
 
 /** Prove nginx reads the recorded htpasswd: a probe login added there must pass the public site.
  *  `finally` removes it; after a crash, journal recovery removes the whole new htpasswd copy. */
-async function withProbeLogin(ctx: InstallContext, htpasswd: string, run: () => Promise<unknown>): Promise<void> {
+async function withProbeLogin(ctx: InstallContext, htpasswd: string, run: (login: Login) => Promise<void>): Promise<void> {
   const user = `cez-migrate-probe-${randomBytes(6).toString('hex')}`;
   // 192 random bits, sent only on stdin to openssl and curl; never printed or saved.
   const password = randomBytes(24).toString('base64url');
@@ -285,12 +296,53 @@ async function withProbeLogin(ctx: InstallContext, htpasswd: string, run: () => 
   const previous = ctx.prefs.cockpit;
   try {
     ctx.prefs.cockpit = { user, password };
-    await run();
+    await run({ user, password });
   } finally {
     if (previous) ctx.prefs.cockpit = previous;
     else delete ctx.prefs.cockpit;
     await sudoStep(ctx, { description: `Remove the probe login from ${htpasswd}.`, command: `sed -i ${shquote(`/^${user}:/d`)} ${shquote(htpasswd)}`, verify: present });
   }
+}
+
+interface Login { user: string; password: string }
+interface PublicTarget { url: string; resolve?: string }
+
+/** The address a site listens on for `port`; all addresses (or none parsed) connect over loopback. */
+export function listenAddress(site: string, port: number): string {
+  for (const [, where] of site.matchAll(/^\s*listen\s+([^;\s]+)[^;]*;/gm)) {
+    const match = /^(?:(.+):)?(\d+)$/.exec(where!);
+    if (!match || Number(match[2]) !== port) continue;
+    const address = match[1];
+    if (address && !['*', '0.0.0.0', '[::]'].includes(address)) return address;
+  }
+  return '127.0.0.1';
+}
+
+/** The recorded public URL: HTTPS when the site has TLS. curl --resolve keeps SNI and Host public. */
+export function publicTarget(ctx: InstallContext, site: string): PublicTarget {
+  const domain = ctx.state.domain;
+  if (!domain) return { url: 'http://127.0.0.1/' };
+  const tls = /^\s*ssl_certificate\s/m.test(site);
+  const port = tls ? 443 : 80;
+  return { url: `${tls ? 'https' : 'http'}://${domain}/`, resolve: `${domain}:${port}:${listenAddress(site, port)}` };
+}
+
+const curlConfig = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+async function publicStatus(ctx: InstallContext, target: PublicTarget, login?: Login): Promise<string> {
+  const args = ['-s', '-o', '/dev/null', '-w', '%{http_code}', ...(target.resolve ? ['--resolve', target.resolve] : []), ...(login ? ['-K', '-'] : []), target.url];
+  const input = login ? `user = "${curlConfig(login.user)}:${curlConfig(login.password)}"\n` : undefined;
+  return (await ctx.runner.capture('curl', args, input ? { input } : undefined)).stdout.trim() || '000';
+}
+
+/** Through the public URL: an anonymous request must be challenged, and the login must reach cezar. */
+async function checkPublicSite(ctx: InstallContext, vhostAvailable: string, login?: Login): Promise<void> {
+  const target = publicTarget(ctx, await readText(ctx, vhostAvailable));
+  const anonymous = await publicStatus(ctx, target);
+  if (anonymous !== '401') throw new StepAborted(`${target.url} did not ask for a login (got ${anonymous})`);
+  if (!login) return;
+  const code = await publicStatus(ctx, target, login);
+  if (!/^[23]\d\d$/.test(code)) throw new StepAborted(`${target.url} refused the probe login (got ${code})`);
 }
 
 /** Start the recorded unit and check health: the bind address for an external proxy, else the public site. */
@@ -301,9 +353,6 @@ export async function startUbuntuService(ctx: InstallContext, health: UbuntuHeal
   const unit = recordedUnit(ctx, rebrand).name;
   if (!(await health.waitForCezar(ctx, ctx.state.primaryPort))) throw new StepAborted(`${unit} did not answer on port ${ctx.state.primaryPort}`);
   const { vhostAvailable, htpasswd } = recordedSite(ctx, rebrand);
-  // HTTPS when the site has TLS, whatever the record's public URL says.
-  const tls = ctx.state.domain && await verifyCommand(ctx, 'sh', ['-c', `grep -qs ssl_certificate ${shquote(vhostAvailable)}`]);
-  const check: InstallContext = tls ? { ...ctx, state: { ...ctx.state, publicUrl: `https://${ctx.state.domain}` } } : ctx;
-  if (opts.probeAuth) await withProbeLogin(check, htpasswd, () => health.identity.run(check));
-  else await health.identity.run(check);
+  if (opts.probeAuth) await withProbeLogin(ctx, htpasswd, (login) => checkPublicSite(ctx, vhostAvailable, login));
+  else await checkPublicSite(ctx, vhostAvailable);
 }

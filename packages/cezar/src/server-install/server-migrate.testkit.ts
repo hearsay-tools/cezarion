@@ -19,6 +19,10 @@ export interface InstanceSpec {
   tls?: boolean;
   externalProxy?: boolean;
   environment?: string[];
+  /** The address the TLS listener binds, as in `listen 203.0.113.5:443 ssl`. */
+  listen?: string;
+  /** A server_name other than the recorded domain. */
+  serverName?: string;
 }
 
 export function serverFixture() {
@@ -29,8 +33,8 @@ export function serverFixture() {
 export type ServerFixture = ReturnType<typeof serverFixture>;
 
 /** What certbot --nginx leaves behind: a TLS listener, its certificate and an HTTP redirect block. */
-export function certbotSite(site: string, domain: string): string {
-  const tls = `    listen 443 ssl; # managed by Certbot\n    ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem; # managed by Certbot\n` +
+export function certbotSite(site: string, domain: string, address?: string): string {
+  const tls = `    listen ${address ? `${address}:` : ''}443 ssl; # managed by Certbot\n    ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem; # managed by Certbot\n` +
     `    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem; # managed by Certbot\n`;
   const at = site.lastIndexOf('}');
   return `${site.slice(0, at).replace(/ {4}listen 80;\n {4}listen \[::\]:80;\n/, '')}${tls}}\n` +
@@ -53,8 +57,8 @@ export function installInstance({ host, legacy }: ServerFixture, spec: InstanceS
     identity: { status: done, created: { artifacts: [] } },
   };
   if (!spec.externalProxy) {
-    const site = nginxVhost(spec.port, spec.domain ?? '_', names.htpasswd);
-    host.write(names.vhostAvailable, spec.tls ? certbotSite(site, spec.domain!) : site);
+    const site = nginxVhost(spec.port, spec.serverName ?? spec.domain ?? '_', names.htpasswd);
+    host.write(names.vhostAvailable, spec.tls ? certbotSite(site, spec.serverName ?? spec.domain!, spec.listen) : site);
     host.link(names.vhostAvailable, names.vhostEnabled);
     host.write(names.htpasswd, `ops:${fakeHash('old-secret')}\n`);
     const artifacts: StepArtifact[] = [

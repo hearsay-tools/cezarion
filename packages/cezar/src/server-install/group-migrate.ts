@@ -46,6 +46,8 @@ const committed = (target: Home) => readInstallMarker(target.config)?.state === 
 
 class Group {
   readonly lines: string[] = [];
+  /** True once this run staged the home; its commit is then this run's to finish. */
+  staged = false;
   private readonly prefs: InstallContext['prefs'] = {};
   constructor(readonly opts: ServerMigrateOptions, readonly records: Home) {}
 
@@ -101,14 +103,15 @@ function describePlan(group: Group, members: Member[]): void {
   }
 }
 
-function journalFor(members: Member[], phase: ServerMigrateJournal['phase']): ServerMigrateJournal {
-  return { version: 1, phase, instances: members.map(({ instance, planned, moved }) => ({ instance, planned, ...(moved ? { moved } : {}) })) };
+function journalFor(group: Group, members: Member[], phase: ServerMigrateJournal['phase']): ServerMigrateJournal {
+  return { version: 1, phase, stagedHome: group.staged, instances: members.map(({ instance, planned, moved }) => ({ instance, planned, ...(moved ? { moved } : {}) })) };
 }
 
-/** Commit the home first, then the ledgers. A crash in between finishes from the journal. */
-function commitGroup(group: Group, members: Array<Pick<Member, 'instance' | 'state' | 'moved'>>): void {
+/** The home marker is committed by now; apply the ledgers. Recovery also finishes the home's
+ *  publication (MOVED.json, PATH), which commitLegacyMigration repeats safely. */
+function commitGroup(group: Group, members: Array<Pick<Member, 'instance' | 'state' | 'moved'>>, finishHome: boolean): void {
   const { target, env, now } = group.opts;
-  if (pending(target)) commitLegacyMigration(target, env);
+  if (finishHome) commitLegacyMigration(target, env);
   for (const { instance, state, moved } of members) {
     if (moved) saveServerState({ ...applyMigrationReport(state, moved), updatedAt: now }, instance, target);
   }
@@ -118,7 +121,7 @@ function commitGroup(group: Group, members: Array<Pick<Member, 'instance' | 'sta
 /** Reverse every planned move from disk state, then the home. Start only fully restored instances. */
 async function rollbackGroup(group: Group, members: Member[]): Promise<boolean> {
   const { target } = group.opts;
-  if (readServerMigrateJournal(target) && readInstallMarker(target.config)) writeServerMigrateJournal(target, journalFor(members, 'rolling-back'));
+  if (readServerMigrateJournal(target) && readInstallMarker(target.config)) writeServerMigrateJournal(target, journalFor(group, members, 'rolling-back'));
   const restored: Member[] = [];
   for (const member of [...members].reverse()) {
     const report = await member.strategy.rollbackMigration(group.context(member.instance, member.state, false), member.planned);
@@ -141,9 +144,10 @@ async function rollbackGroup(group: Group, members: Member[]): Promise<boolean> 
 async function recover(group: Group, journal: ServerMigrateJournal): Promise<'committed' | 'rolled-back' | 'failed'> {
   const { target } = group.opts;
   const loaded = journal.instances.map(({ instance, planned, moved }) => ({ instance, planned, moved, state: loadServerState(instance, group.records) }));
-  if (journal.phase === 'committing') {
+  // A staged home whose marker committed belongs to a group that passed every check.
+  if (journal.phase === 'committing' || (journal.stagedHome && committed(target))) {
     group.say('Finishing an interrupted server-migrate commit.');
-    commitGroup(group, loaded);
+    commitGroup(group, loaded, journal.stagedHome);
     return 'committed';
   }
   group.say('Rolling back an interrupted server-migrate run.');
@@ -166,11 +170,12 @@ async function moveAndCheck(group: Group, members: Member[]): Promise<void> {
   if (!committed(target)) {
     const staged = migrateLegacyHome(legacy, target, { commit: false, ...(env ? { env } : {}) });
     if (staged.status !== 'pending') throw new Error(`Expected a staged home, got ${staged.status}`);
+    group.staged = true;
   }
-  writeServerMigrateJournal(target, journalFor(members, 'migrating'));
+  writeServerMigrateJournal(target, journalFor(group, members, 'migrating'));
   for (const member of members) {
     member.moved = await member.strategy.migrate(group.context(member.instance, member.state, false));
-    writeServerMigrateJournal(target, journalFor(members, 'migrating'));
+    writeServerMigrateJournal(target, journalFor(group, members, 'migrating'));
     const [error] = member.moved.errors;
     if (error) throw new Error(`${member.instance}: ${error.artifact.path ?? error.artifact.name}: ${error.message}`);
   }
@@ -178,7 +183,9 @@ async function moveAndCheck(group: Group, members: Member[]): Promise<void> {
     group.say(`${member.instance}: checking health`);
     await member.strategy.startService(group.migratedContext(member), { probeAuth: true });
   }
-  writeServerMigrateJournal(target, journalFor(members, 'committing'));
+  // The last refusal point: a legacy write during the checks refuses here and rolls the group back.
+  if (pending(target)) commitLegacyMigration(target, env);
+  writeServerMigrateJournal(target, journalFor(group, members, 'committing'));
 }
 
 async function migrateGroup(group: Group): Promise<ServerMigrateStatus> {
@@ -201,10 +208,16 @@ async function migrateGroup(group: Group): Promise<ServerMigrateStatus> {
     await stopAll(group, members);
     await moveAndCheck(group, members);
   } catch (error) {
-    group.say(`server-migrate failed: ${message(error)}. Rolling back every instance.`, 'error');
-    return await rollbackGroup(group, members) ? 'rolled-back' : 'failed';
+    if (!(group.staged && committed(group.opts.target))) {
+      group.say(`server-migrate failed: ${message(error)}. Rolling back every instance.`, 'error');
+      return await rollbackGroup(group, members) ? 'rolled-back' : 'failed';
+    }
+    // The home committed after every check passed: finish forward, never roll a committed home back.
+    group.say(`server-migrate committed the home, then failed: ${message(error)}. Finishing the commit.`, 'warn');
+    commitGroup(group, members, true);
+    return 'migrated';
   }
-  commitGroup(group, members);
+  commitGroup(group, members, false);
   group.say(`Migrated ${members.length} server install${members.length === 1 ? '' : 's'}.`, 'info');
   return 'migrated';
 }

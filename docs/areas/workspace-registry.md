@@ -187,12 +187,16 @@ the recorded pending destinations. Rollback never rewrites legacy registry data.
 `cez server-migrate` (`server-install/group-migrate.ts`, registered only with
 the switch on) is that caller. It holds every instance's install lock in the
 records home, sorted, for the whole run. Before the first platform move it
-writes `<state>/server-migrate.json` (version 1: `phase`, and per instance the
-dry-run `planned` report and the returned `moved` report). Like
+writes `<state>/server-migrate.json` (version 1: `phase`, `stagedHome`, and per
+instance the dry-run `planned` report and the returned `moved` report). The
+home commits after every health check passes and before the journal says
+`committing`, so a commit refusal (a legacy file changed during the checks)
+rolls the whole group back. Like
 `migration.json`, it is a migration-owned private write that a pending home
 permits. A `migrating` or `rolling-back` journal is recovered by rolling back
-every planned move from disk state, then the pending home; a `committing`
-journal finishes the commit, then applies each `moved` report to the copied
+every planned move from disk state, then the pending home. A `committing`
+journal, or a `migrating` one over a home it staged and whose marker
+committed, finishes the commit, then applies each `moved` report to the copied
 server records. The journal is removed when the group commits or rolls back
 completely. A failed compensation keeps it and the pending home for the next
 run.
