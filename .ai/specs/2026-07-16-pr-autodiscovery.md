@@ -1,12 +1,12 @@
 # PR auto-discovery from the conversation (open-mercato/cezar#407)
 
-Status: IMPLEMENTED 2026-07-16 · Fixes: open-mercato/cezar#407 · Extends: the `#fake-pr` janitor guard in `src/runs/store.ts`, spec 009 (review gate / draft PR)
+Status: IMPLEMENTED 2026-07-16 · Fixes: open-mercato/cezar#407 · Extends: the `#fake-pr` janitor guard `scanEventReferences` in `src/runs/run-references.ts`, spec 009 (review gate / draft PR)
 
 ## Problem
 
 The task list's PR chip is driven by one field, `RunRecord.pullRequestUrl`,
 with exactly two writers: the cockpit's own Draft-PR flow (authoritative) and
-the transcript janitor in `RunStore.appendEvent`. The janitor has two gaps:
+the transcript janitor `scanEventReferences` in `src/runs/run-references.ts` (called from `RunStore.appendEvent`). The janitor has two gaps:
 
 1. **It never sees protocol-v2 (ACP-style) events.** It scans only the
    top-level v1 fields `text` / `result` / `message`; v2 events carry all

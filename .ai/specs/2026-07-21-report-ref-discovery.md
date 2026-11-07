@@ -45,7 +45,7 @@ silences the namer for that kind).
 `stripTaskMarkers` is unchanged: only `CEZ:*` control lines are stripped from
 display — the report lines are human-readable by design and stay visible.
 
-### 2. Referenced-issue janitor (`src/runs/store.ts`)
+### 2. Referenced-issue janitor (`src/runs/run-references.ts`)
 
 A mirror of the referenced-PR tier for `github.com/…/issues/N` links spotted
 in event text (issue links in conversation are unambiguous URLs — "links are
