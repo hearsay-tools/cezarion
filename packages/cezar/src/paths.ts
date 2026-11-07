@@ -27,7 +27,7 @@ export function assertCezarHomeWriteIsSandboxed(path: string, _env: NodeJS.Proce
       'Pin it to a test sandbox so the suite never touches the real cezar home.',
   );
   // Resolve existing ancestors too: the destination itself may not exist yet.
-  function canonicalTarget(target: string): string {
+  function canonicalTarget(target: string, rejectDangling = true): string {
     let ancestor = resolve(target);
     const remaining: string[] = [];
     for (;;) {
@@ -35,7 +35,12 @@ export function assertCezarHomeWriteIsSandboxed(path: string, _env: NodeJS.Proce
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw refusal();
       }
       // A dangling link has no canonical target; fail closed instead of treating it as a missing directory.
-      try { if (lstatSync(ancestor).isSymbolicLink()) throw refusal(); } catch (error) {
+      try {
+        if (lstatSync(ancestor).isSymbolicLink()) {
+          if (!rejectDangling) return resolve(target);
+          throw refusal();
+        }
+      } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw refusal();
       }
       const parent = dirname(ancestor);
@@ -44,10 +49,7 @@ export function assertCezarHomeWriteIsSandboxed(path: string, _env: NodeJS.Proce
       ancestor = parent;
     }
   }
-  let protectedHome = realHome;
-  try { protectedHome = realpathSync(realHome); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw refusal();
-  }
+  const protectedHome = canonicalTarget(realHome, false);
   const destination = canonicalTarget(path);
   if (destination === protectedHome || destination.startsWith(protectedHome + sep)) throw refusal();
 }

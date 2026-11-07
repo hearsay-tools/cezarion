@@ -79,6 +79,41 @@ describe('home write guard with HOME pinned to a sandbox', () => {
     }
   });
 
+  it('blocks the first real-home write when the passwd-home parent is a symlink', async () => {
+    vi.resetModules();
+    const { Home } = await import('./home/home.ts');
+    const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const fixture = fs.mkdtempSync(join(tmpdir(), 'cez-guard-passwd-symlink-'));
+    const account = join(fixture, 'account');
+    try {
+      fs.mkdirSync(account);
+      fs.symlinkSync(fixture, join(fixture, 'alias'), 'dir');
+      vi.mocked(userInfo).mockReturnValue({ ...userInfo(), homedir: join(fixture, 'alias', 'account') });
+      expect(() => Home.sandbox(join(account, '.cezar', 'first-write'))).toThrow('refusing to write');
+      for (const mutation of [mkdirSync, writeFileSync]) expect(mutation).not.toHaveBeenCalled();
+      expect(fs.existsSync(join(account, '.cezar'))).toBe(false);
+    } finally {
+      fs.rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it('allows unrelated sandbox writes when the protected home has a dangling ancestor', async () => {
+    vi.resetModules();
+    const { Home } = await import('./home/home.ts');
+    const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const fixture = fs.mkdtempSync(join(tmpdir(), 'cez-guard-passwd-dangling-'));
+    try {
+      fs.symlinkSync(join(fixture, 'missing'), join(fixture, 'account'), 'dir');
+      vi.mocked(userInfo).mockReturnValue({ ...userInfo(), homedir: join(fixture, 'account') });
+      const destination = join(fixture, 'sandbox');
+      expect(Home.sandbox(destination).root).toBe(destination);
+      expect(mkdirSync).toHaveBeenCalledWith(destination, { recursive: true, mode: 0o700 });
+      expect(() => Home.sandbox(join(fixture, 'account', '.cezar'))).toThrow('refusing to write');
+    } finally {
+      fs.rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
   it.each(['write', 'delete', 'lock'])('blocks a symlinked server-state %s before any filesystem mutation', async (operation) => {
     vi.resetModules();
     const state = await import('./server-install/state.ts');
