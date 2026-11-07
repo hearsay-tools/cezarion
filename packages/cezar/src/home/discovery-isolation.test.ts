@@ -3,10 +3,9 @@ import { useTestHome } from './test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { resolveHome } from './resolve.ts';
-import { atomicWriteJsonSync } from '../workspace/config.ts';
 import { currentEntry, linkCheckout, readManifest, writeManifest } from '../self-update/layout.ts';
 import { SelfUpdateService } from '../self-update/service.ts';
 import { RegistryCache } from '../self-update/registry.ts';
@@ -20,7 +19,7 @@ afterEach(() => {
 function checkout(root: string, branch: string): string {
   mkdirSync(join(root, 'dist'), { recursive: true });
   mkdirSync(join(root, 'web', 'dist'), { recursive: true });
-  atomicWriteJsonSync(join(root, 'package.json'), { name: '@wjarka/cezarion', version: '1.2.3' });
+  writeProjectJson(join(root, 'package.json'), { name: '@wjarka/cezarion', version: '1.2.3' });
   writeFileSync(join(root, 'dist', 'index.js'), root);
   writeFileSync(join(root, 'web', 'dist', 'index.html'), '<!doctype html>');
   execFileSync('git', ['init', '-q', '-b', branch], { cwd: root });
@@ -40,8 +39,8 @@ function fixture() {
   const selectedLink = checkout(join(root, 'selected-link'), 'main');
   const ambientRegistry = checkout(join(root, 'ambient-registry'), 'registry');
   const ambientLink = checkout(join(root, 'ambient-link'), 'main');
-  atomicWriteJsonSync(selected.workspaceConfig, { projects: [{ id: 'selected', root: selectedRegistry }] });
-  atomicWriteJsonSync(ambient.workspaceConfig, { projects: [{ id: 'ambient', root: ambientRegistry }] });
+  Home.seed(Home.sandbox(selected.root), selected.workspaceConfig, { projects: [{ id: 'selected', root: selectedRegistry }] });
+  Home.seed(Home.sandbox(ambient.root), ambient.workspaceConfig, { projects: [{ id: 'ambient', root: ambientRegistry }] });
   linkCheckout(selectedLink, 'main', process.env, undefined, selected);
   linkCheckout(ambientLink, 'main', process.env, undefined, ambient);
   // This ambient install must not force a suffix on the selected registry checkout's id.
@@ -79,3 +78,8 @@ it('applies a same-id linked checkout from the injected Home', async () => {
   expect(readManifest('1.2.3+main', process.env, ambient)?.checkout).toBe(ambientLink);
   expect(readFileSync(ambient.workspaceConfig, 'utf8')).toBe(before);
 });
+
+function writeProjectJson(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(value));
+}

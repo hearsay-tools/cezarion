@@ -24,5 +24,32 @@ the shrink-only OS-user reader list (hearsay-tools/cezarion#2810).
 
 Tests select `Home.sandbox(dir)` and use the shared setup's selector for process
 entry tests. The factory contains cache and config paths under that directory and
-creates a test `install.json` marker without replacing an existing one. Marker
-validation and HomeStore remain deferred to P1b.
+creates a test `install.json` marker without replacing an existing one. Seed fixtures
+with `Home.seed` or `Home.seedBytes`; both use HomeStore. A direct file write belongs
+only in a test that deliberately simulates an outside writer.
+
+### HomeStore
+
+`home/store.ts` owns registry file reads and writes, including `config.json.bak`,
+remote grants, server instance state and install locks. Existing tolerant readers
+keep their schema and error behavior. Merge writers hold one short per-root lock
+across the read, mutation and replacement. The lock lives in `<home>/.locks/write.lock/`.
+It uses unique process claims; stale claims use the process identity checks in
+`delegation/process-liveness.ts`. Serving cockpits hold independent
+`<home>/.locks/cockpits/<pid>.lease` files. A lease does not block a CLI writer.
+
+Operator entry points create an install marker before calling library writers.
+Library writes require a marker. The marker check uses the actual process to refuse
+a `live` home under Vitest, node:test, Jest or Stryker. An env argument cannot bypass
+it. The passwd-home guard remains a separate check. Read-only homes stay readable,
+even when their auxiliary lock or version directory cannot be written.
+
+The first entry seeds each existing registry file's committed version without
+changing its bytes or mode. Each later write stores content by hash, writes `PENDING`,
+replaces the live file, advances `HEAD`, then clears `PENDING`. A read finishes an
+interrupted commit or records an outside write and pins its original restore target.
+Outside-write enforcement stays **off** in P1b (hearsay-tools/cezarion#2811). Later
+writes still work and cannot change the pinned target. P1c
+(hearsay-tools/cezarion#2812) owns blocking, the banner, and restore/accept routes.
+See [ADR 0060](../adr/0060-serialize-home-files-through-homestore.md) for the caller
+audit, write ordering and remaining limits.

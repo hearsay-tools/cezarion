@@ -1,6 +1,7 @@
+import { Home } from '../../src/home/home.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -14,7 +15,7 @@ test('backup list and restore work without a cockpit', () => {
     const call = (...args: string[]) => execFileSync(process.execPath, [cli, 'backup', ...args], { env, encoding: 'utf8' });
     assert.deepEqual(JSON.parse(call('list')), []);
     const accounts = join(home, 'agent-accounts.json');
-    writeFileSync(accounts, '{"version":1,"accounts":[],"legacy":"before"}');
+    Home.seed(Home.sandbox(home), accounts, { version: 1, accounts: [], legacy: 'before' });
     execFileSync(process.execPath, ['--input-type=module', '-e', `
       import { mergeWriteAgentAccounts } from './dist/workspace/agent-accounts.js';
       import { resolveHome } from './dist/home/resolve.js';

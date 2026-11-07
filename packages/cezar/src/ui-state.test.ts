@@ -27,7 +27,7 @@ it('does not merge a legacy workspace importedSkills into the project state', as
   const home = await mkdtemp(join(tmpdir(), 'ui-state-home-')); roots.push(home);
   useTestHome(home ? Home.sandbox(home) : undefined);
   try {
-    await writeFile(workspaceUiStatePath(testHome()), JSON.stringify({ importedSkills: ['a'] }));
+    await Home.seedBytes(testHome(), workspaceUiStatePath(testHome()), Buffer.from(JSON.stringify({ importedSkills: ['a'] })));
     const root = await mkdtemp(join(tmpdir(), 'sidebar-state-')); roots.push(root);
     await mkdir(join(root, '.ai/cezar'), { recursive: true });
     expect(await readUiState(root)).not.toHaveProperty('importedSkills');

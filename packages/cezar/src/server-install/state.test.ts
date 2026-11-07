@@ -2,7 +2,7 @@ import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serverStatePath } from '../paths.ts';
@@ -45,7 +45,7 @@ describe('server state', () => {
   });
 
   it('degrades to fresh on corrupt JSON', () => {
-    writeFileSync(serverStatePath(undefined, testHome()), 'not json{{{');
+    Home.seedBytes(testHome(), serverStatePath(undefined, testHome()), Buffer.from('not json{{{'));
     expect(loadServerState(undefined, testHome()).installed).toBe(false);
   });
 
@@ -75,11 +75,11 @@ describe('server state', () => {
   it('lock is exclusive against a live foreign pid and reclaims stale', () => {
     const release = acquireLock(undefined, testHome());
     // simulate a live foreign holder
-    writeFileSync(join(home, 'server.install.lock'), `${process.pid === 1 ? 2 : 1}\n`);
+    Home.seedBytes(testHome(), join(home, 'server.install.lock'), Buffer.from(`${process.pid === 1 ? 2 : 1}\n`));
     // pid 1 is alive on posix; expect the lock to be held
     expect(() => acquireLock(undefined, testHome())).toThrow(LockHeldError);
     // a dead pid is reclaimed
-    writeFileSync(join(home, 'server.install.lock'), '999999999\n');
+    Home.seedBytes(testHome(), join(home, 'server.install.lock'), Buffer.from('999999999\n'));
     const release2 = acquireLock(undefined, testHome());
     release2();
     release();
@@ -87,7 +87,7 @@ describe('server state', () => {
 
   it('lock acquisition is atomic (wx) — a pre-existing live lock file always wins', () => {
     // Simulate the race loser: the file appears (live pid) before our write.
-    writeFileSync(join(home, 'server.install.lock'), `${process.pid === 1 ? 2 : 1}\n`, { flag: 'wx' });
+    Home.seedBytes(testHome(), join(home, 'server.install.lock'), Buffer.from(`${process.pid === 1 ? 2 : 1}\n`));
     expect(() => acquireLock(undefined, testHome())).toThrow(LockHeldError);
   });
 
@@ -146,18 +146,13 @@ describe('server state', () => {
     const releaseOther = acquireLock('blog-example-com', testHome());
     releaseOther();
     // but the SAME instance is exclusive against a live foreign pid
-    writeFileSync(
-      join(home, 'server-instances', 'shop-example-com.install.lock'),
-      `${process.pid === 1 ? 2 : 1}\n`,
-    );
+    Home.seedBytes(testHome(), join(home, 'server-instances', 'shop-example-com.install.lock'), Buffer.from(`${process.pid === 1 ? 2 : 1}\n`));
     expect(() => acquireLock('shop-example-com', testHome())).toThrow(LockHeldError);
     release();
   });
 
   it('a newer-version server.json degrades per-field, never to a fresh record', () => {
-    writeFileSync(
-      serverStatePath(undefined, testHome()),
-      JSON.stringify({
+    Home.seed(testHome(), serverStatePath(undefined, testHome()), {
         schema: 1,
         platform: 'ubuntu-vps-caddy', // platform this version does not ship
         installed: true,
@@ -167,8 +162,7 @@ describe('server state', () => {
           deps: { status: STEP_STATUS.done, created: { artifacts: [] } },
           'future-step': { status: UNKNOWN_FUTURE_INSTALLER_STATUS, created: null }, // unknown status
         },
-      }),
-    );
+      });
     const s = loadServerState(undefined, testHome());
     expect(s.platform).toBe('ubuntu-vps-caddy'); // ledger intact
     expect(s.installed).toBe(true);

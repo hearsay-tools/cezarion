@@ -1,0 +1,60 @@
+import { randomUUID } from 'node:crypto';
+import { readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { recordedProcessLive, processStartToken } from '../delegation/process-liveness.ts';
+import { privateDirectory, replacePrivate } from './private-files.ts';
+
+interface Claim { pid: number; startToken?: string; ticket: number }
+const held = new Set<string>();
+const pause = new Int32Array(new SharedArrayBuffer(4));
+
+function readClaim(path: string): Claim | undefined {
+  let value: Claim;
+  try { value = JSON.parse(readFileSync(path, 'utf8')) as Claim; } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  if (!Number.isSafeInteger(value.pid) || value.pid <= 0 || !Number.isSafeInteger(value.ticket) || value.ticket < 0) {
+    throw new Error(`Invalid HomeStore lock claim: ${path}`);
+  }
+  if (recordedProcessLive(value)) return value;
+  // A unique claim name cannot be reused by a later owner. Recovery never unlinks its lock.
+  rmSync(path, { force: true });
+  return;
+}
+
+/**
+ * Short per-root lock, using atomic Lamport bakery claims in write.lock/. Unlike a shared
+ * stale pid file, unique claims cannot be stolen by two simultaneous stale-lock reclaimers.
+ * The callback is synchronous: no task in this process can wait on a lock across an await.
+ */
+export function withHomeLock<T>(root: string, operation: () => T): T {
+  privateDirectory(root);
+  const canonical = realpathSync(root);
+  if (held.has(canonical)) return operation();
+  const directory = join(canonical, '.locks', 'write.lock');
+  privateDirectory(directory);
+  const name = `${process.pid}-${randomUUID()}.json`;
+  const path = join(directory, name);
+  const claim = { pid: process.pid, startToken: processStartToken(process.pid), ticket: 0 };
+  const peers = () => readdirSync(directory).filter(entry => entry.endsWith('.json') && entry !== name);
+  try {
+    replacePrivate(path, JSON.stringify(claim));
+    let ticket = 1;
+    for (const entry of peers()) ticket = Math.max(ticket, (readClaim(join(directory, entry))?.ticket ?? 0) + 1);
+    claim.ticket = ticket;
+    replacePrivate(path, JSON.stringify(claim));
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const blocked = peers().some(entry => {
+        const peer = readClaim(join(directory, entry));
+        return peer && (peer.ticket === 0 || peer.ticket < ticket || (peer.ticket === ticket && entry < name));
+      });
+      if (!blocked) break;
+      if (Date.now() >= deadline) throw new Error(`Timed out waiting for HomeStore write.lock in ${root}`);
+      Atomics.wait(pause, 0, 0, 10);
+    }
+    held.add(canonical);
+    try { return operation(); } finally { held.delete(canonical); }
+  } finally { rmSync(path, { force: true }); }
+}

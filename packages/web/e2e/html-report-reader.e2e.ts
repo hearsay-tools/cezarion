@@ -1,3 +1,4 @@
+import { Home } from '../../cezar/src/home/home.ts';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -212,7 +213,7 @@ beforeAll(async () => {
   mkdirSync(join(project, '.ai/cezar/runs'), { recursive: true })
   const env = fixtureServeEnv(project)
   mkdirSync(env.CEZ_HOME!, { recursive: true })
-  writeFileSync(join(env.CEZ_HOME!, 'config.json'), JSON.stringify({ projects: [{ id: 'reader', root: project }] }))
+  Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'reader', root: project }] })))
   const publish = (name: string, html: string) => {
     const source = join(root, name)
     writeFileSync(source, html)

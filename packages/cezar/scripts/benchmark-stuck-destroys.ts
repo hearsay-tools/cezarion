@@ -51,6 +51,10 @@ if (!Number.isInteger(workers) || workers < 0 || !(minutes > 0)) throw new Error
 const { RunStore } = await import('../src/runs/store.ts');
 const { RunManager } = await import('../src/workflows/run.ts');
 const home = (await import('../src/home/resolve.ts')).resolveHome({ purpose: 'cli' });
+const { Home } = await import('../src/home/home.ts');
+const { readInstallMarker } = await import('../src/home/install-marker.ts');
+if (readInstallMarker(home.root)?.kind === 'live') throw new Error('Benchmark refuses a live install marker');
+Home.sandbox(home.root);
 const { DelegationService } = await import('../src/delegation/service.ts');
 const { planOwnedWorkspace, ensureOwnedWorkspace } = await import('../src/delegation/workspace.ts');
 const { WorkspaceSemaphore } = await import('../src/workspace/semaphore.ts');

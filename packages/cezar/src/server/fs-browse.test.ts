@@ -202,11 +202,7 @@ describe('GET /api/v1/fs/browse (step 4.1)', () => {
       // Stored with a literal `~`, exactly as PUT /api/v1/workspace/config keeps
       // it — so this also proves the hosted root expands the tilde.
       mkdirSync(join(home, '.cezar'), { recursive: true });
-      writeFileSync(
-        workspaceConfigPath(undefined, testHome()),
-        JSON.stringify({ browseRoot: '~/projects', projectsDir: '~/checkouts' }),
-        'utf8',
-      );
+      Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({ browseRoot: '~/projects', projectsDir: '~/checkouts' })));
       process.env.CEZ_REMOTE = '1';
     });
 
@@ -226,7 +222,7 @@ describe('GET /api/v1/fs/browse (step 4.1)', () => {
     });
 
     it('404s when browseRoot does not exist yet', async () => {
-      writeFileSync(workspaceConfigPath(undefined, testHome()), JSON.stringify({ browseRoot: '~/not-created' }), 'utf8');
+      Home.seedBytes(testHome(), workspaceConfigPath(undefined, testHome()), Buffer.from(JSON.stringify({ browseRoot: '~/not-created' })));
       const res = await browse();
       expect(res.status).toBe(404);
       expect(await error(res)).toBe('browse root is not available');

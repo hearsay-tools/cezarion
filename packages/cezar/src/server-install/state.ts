@@ -1,17 +1,9 @@
 import type { Home } from '../home/home.ts';
+import { existsSync, readdirSync } from 'node:fs';
+import { HomeStore, readHomeFile } from '../home/store.ts';
+import { assertHomeWritable } from '../home/install-marker.ts';
+import { basename } from 'node:path';
 import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { basename, dirname } from 'node:path';
-import {
-  assertCezarHomeWriteIsSandboxed,
   DEFAULT_SERVER_INSTANCE,
   serverInstancesDir,
   serverLockPath,
@@ -29,7 +21,7 @@ export function loadServerState(instance: string = DEFAULT_SERVER_INSTANCE, home
   const path = serverStatePath(instance, home);
   let raw: string;
   try {
-    raw = readFileSync(path, 'utf8');
+    raw = readHomeFile(path);
   } catch {
     return freshServerState();
   }
@@ -84,17 +76,7 @@ export function nextFreeInstancePort(startAt = 4321, home: Home): number {
 /** Atomically persist state as `0600`, creating its dir (`0700`) if needed. */
 export function saveServerState(state: ServerState, instance: string = DEFAULT_SERVER_INSTANCE, home: Home): void {
   const path = serverStatePath(instance, home);
-  assertCezarHomeWriteIsSandboxed(path);
-  const dir = dirname(path);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-  renameSync(tmp, path);
-  try {
-    chmodSync(path, 0o600); // best-effort — ignored on some filesystems
-  } catch {
-    // non-fatal
-  }
+  new HomeStore(home).writeJson(path, state);
 }
 
 /**
@@ -106,9 +88,9 @@ export function saveServerState(state: ServerState, instance: string = DEFAULT_S
  */
 export function deleteServerState(instance: string, home: Home): void {
   if (instance === DEFAULT_SERVER_INSTANCE) return;
-  assertCezarHomeWriteIsSandboxed(serverStatePath(instance, home));
+  assertHomeWritable(home.root);
   try {
-    rmSync(serverStatePath(instance, home), { force: true });
+    new HomeStore(home).replace(serverStatePath(instance, home), null);
   } catch {
     // non-fatal — an empty record left behind is harmless
   }
@@ -136,51 +118,27 @@ export class LockHeldError extends Error {}
  */
 export function acquireLock(instance: string = DEFAULT_SERVER_INSTANCE, home: Home): () => void {
   const path = serverLockPath(instance, home);
-  assertCezarHomeWriteIsSandboxed(path);
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-
-  // `wx` makes creation atomic — a plain exists-then-write check would let two
-  // concurrent wizards both "acquire". One reclaim retry handles a stale lock;
-  // if the second attempt still collides, someone live beat us to it.
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      writeFileSync(path, `${process.pid}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-      let released = false;
-      return () => {
-        if (released) return;
-        assertCezarHomeWriteIsSandboxed(path);
-        released = true;
-        try {
-          if (existsSync(path) && readLockPid(path) === process.pid) rmSync(path);
-        } catch {
-          // non-fatal
-        }
-      };
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      const holder = readLockPid(path);
-      if (holder !== null && holder !== process.pid && isProcessAlive(holder)) {
-        throw new LockHeldError(
-          `another server-install/uninstall is already running (pid ${holder}). ` +
-            `If that is wrong, remove ${path} and retry.`,
-        );
-      }
-      // stale (dead pid, unreadable, or our own) — reclaim and retry the wx write
-      try {
-        rmSync(path);
-      } catch {
-        // raced with another reclaimer; the retry below decides
-      }
+  const store = new HomeStore(home);
+  return store.transaction(() => {
+    const holder = readLockPid(path);
+    if (holder !== null && holder !== process.pid && isProcessAlive(holder)) {
+      throw new LockHeldError(`another server-install/uninstall is already running (pid ${holder}). If that is wrong, remove ${path} and retry.`);
     }
-  }
-  throw new LockHeldError(
-    `could not acquire ${path} — another server-install/uninstall grabbed it first; retry in a moment.`,
-  );
+    store.replace(path, Buffer.from(`${process.pid}\n`));
+    let released = false;
+    return () => {
+      if (released) return;
+      store.transaction(() => {
+        if (readLockPid(path) === process.pid) store.replace(path, null);
+        released = true;
+      }, [path]);
+    };
+  }, [path]);
 }
 
 function readLockPid(path: string): number | null {
   try {
-    const pid = Number.parseInt(readFileSync(path, 'utf8').trim(), 10);
+    const pid = Number.parseInt(readHomeFile(path).trim(), 10);
     return Number.isInteger(pid) && pid > 0 ? pid : null;
   } catch {
     return null;

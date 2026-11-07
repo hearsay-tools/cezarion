@@ -1,3 +1,4 @@
+import { Home } from '../home/home.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -41,7 +42,7 @@ describe('agentModelsLocked', () => {
     const repoRoot = mkdtempSync(join(tmpdir(), 'cez-model-policy-'));
     const home = mkdtempSync(join(tmpdir(), 'cez-model-policy-home-'));
     roots.push(repoRoot, home);
-    writeFileSync(join(home, 'config.json'), '{"modelsLocked":true}\n');
+    Home.seedBytes(Home.sandbox(home), join(home, 'config.json'), Buffer.from('{"modelsLocked":true}\n'));
 
     expect(agentModelsLocked(repoRoot, { CEZ_HOME: home }, testHome({ CEZ_HOME: home }))).toBe(true);
     expect(agentModelsLocked(undefined, { CEZ_HOME: home }, testHome({ CEZ_HOME: home }))).toBe(true);

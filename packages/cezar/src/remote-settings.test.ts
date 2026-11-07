@@ -1,3 +1,4 @@
+import { Home } from './home/home.ts';
 import { testHome } from './home/test-home.testkit.ts';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -57,7 +58,7 @@ describe('remote settings grants', () => {
   it('fails closed on a grant file that does not parse', async () => {
     await mkdir(remoteSettingsPath(env, testHome(env)), { recursive: true });
     for (const content of ['not json', '[]', '{"enabledAt": 5}', '{}', '{"enabledAt": "not-a-time"}', '{"enabledAt": "2026-11-01"}']) {
-      await writeFile(join(remoteSettingsPath(env, testHome(env)), '4321.json'), content);
+      Home.seedBytes(testHome(env), join(remoteSettingsPath(env, testHome(env)), '4321.json'), Buffer.from(content));
       const state = readRemoteSettings(env, testHome(env));
       expect(state.grants, content).toEqual([]);
       expect(state.issue, content).toBeDefined();

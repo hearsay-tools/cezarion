@@ -41,7 +41,7 @@ describe('agent profile resolution', () => {
   });
 
   const env = { HOME: '/home/u' } as NodeJS.ProcessEnv;
-  const write = (value: unknown) => writeFileSync(agentAccountsPath(testHome()), JSON.stringify(value), 'utf8');
+  const write = (value: unknown) => Home.seedBytes(testHome(), agentAccountsPath(testHome()), Buffer.from(JSON.stringify(value)));
   const klaudiuszProfile = {
     id: 'klaudiusz',
     provider: 'claude' as const,
@@ -190,7 +190,7 @@ describe('agent profile resolution', () => {
     });
 
     it('degrades to the default when the accounts file is unreadable', async () => {
-      writeFileSync(agentAccountsPath(testHome()), '{ not json', 'utf8');
+      Home.seedBytes(testHome(), agentAccountsPath(testHome()), Buffer.from('{ not json'));
       const resolved = await resolveProfileEnvForRoot('/tmp/projects/a', 'claude', undefined, undefined, testHome());
       expect(resolved.env).toEqual({});
     });

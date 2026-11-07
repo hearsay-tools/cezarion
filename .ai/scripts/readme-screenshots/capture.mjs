@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { ensureTestInstallMarker } from '../../../scripts/test-install-marker.mjs';
 // Recapture the README gallery (hearsay-tools/cezarion#1456). See docs/screenshots/README.md.
 //
 // Two cockpits boot from this checkout's build, each with a scratch HOME and CEZ_HOME under a
@@ -130,6 +131,7 @@ export async function waitUntil(probe, what, timeoutMs, interval = 500) {
 /** A cockpit server this command started, in its own process group. */
 export class Cockpit {
   static async start({ repo, env, logFile, cli = join(REPO_ROOT, 'packages/cezar/dist/index.js') }) {
+    ensureTestInstallMarker(env.CEZ_HOME);
     const child = spawn(process.execPath, [cli, 'serve', '--repo', repo, '--port', '0', '--no-open'], { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const cockpit = new Cockpit(child);
     open.add(cockpit);

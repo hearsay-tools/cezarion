@@ -130,6 +130,7 @@ export CEZ_DRY_RUN=1
 # developer's real ~/.cezar. Kept stable (not per-boot) so the reuse path
 # attaches to the same workspace the running instance was booted with.
 export CEZ_HOME="$QA_DIR/cez-home"
+node "$REPO_ROOT/scripts/test-install-marker.mjs" "$CEZ_HOME"
 
 FORCE=0
 FORCE_REBUILD=0

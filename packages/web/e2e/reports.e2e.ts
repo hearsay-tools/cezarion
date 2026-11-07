@@ -1,3 +1,4 @@
+import { Home } from '../../cezar/src/home/home.ts';
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -28,7 +29,7 @@ beforeAll(async () => {
   for (const folder of [project, empty]) execFileSync('git', ['init', '-q', '-b', 'main', folder])
   const env = fixtureServeEnv(project)
   mkdirSync(env.CEZ_HOME!, { recursive: true })
-  writeFileSync(join(env.CEZ_HOME!, 'config.json'), JSON.stringify({ projects: [{ id: 'shelf', root: project }, { id: 'empty', root: empty }] }))
+  Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'shelf', root: project }, { id: 'empty', root: empty }] })))
   const source = join(root, 'quarterly.html')
   writeFileSync(source, '<title>Quarterly report</title><h1>Published results</h1>')
   const dir = join(project, '.ai/cezar/runs')
@@ -164,7 +165,7 @@ it('shows a deleted snapshot as missing and drops reports after snapshot or task
     }
     const env = fixtureServeEnv(project)
     mkdirSync(env.CEZ_HOME!, { recursive: true })
-    writeFileSync(join(env.CEZ_HOME!, 'config.json'), JSON.stringify({ projects: [{ id: 'shelf', root: project }] }))
+    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'shelf', root: project }] })))
     deletionServer = spawnFixtureServer([cezarCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
     const browser = deletionBrowser = AgentBrowser.open(`report-deletion-${process.pid}`)
     const baseUrl = await waitForFixtureServer(deletionServer)

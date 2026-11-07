@@ -126,11 +126,7 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
   });
 
   it('inherits the workspace default when the repo sets no retention of its own', async () => {
-    writeFileSync(
-      join(cezHome, 'config.json'),
-      JSON.stringify({ resources: { worktreeRetentionDefault: 4 } }),
-      'utf8',
-    );
+    Home.seed(testHome(), testHome().workspaceConfig, { resources: { worktreeRetentionDefault: 4 } });
     expect((await getWorktrees()).keep).toBe(4);
     // A repo that sets its own still wins — the workspace value only seeds.
     writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({ worktreeRetention: 2 }), 'utf8');

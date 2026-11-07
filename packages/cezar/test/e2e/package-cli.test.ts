@@ -1,3 +1,4 @@
+import { Home } from '../../src/home/home.ts';
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -219,7 +220,7 @@ try {
     );
 
     workspace.disabledProviders = ['claude'];
-    await writeFile(join(cezHome, 'config.json'), `${JSON.stringify(workspace, null, 2)}\n`, 'utf8');
+    Home.seed(Home.sandbox(cezHome), join(cezHome, 'config.json'), workspace);
     await assert.rejects(
       execFile(process.execPath, [cliPath, 'run', 'mock:cezar-done must stay blocked', '--repo', fixtureRepo], {
         cwd: consumerDir,
@@ -237,7 +238,7 @@ try {
     const runsAfterDisabledAttempt = readPersistedRuns(join(fixtureRepo, '.ai', 'cezar'));
     assert.equal(runsAfterDisabledAttempt.length, 1, 'a disabled provider must not create a run');
     workspace.disabledProviders = [];
-    await writeFile(join(cezHome, 'config.json'), `${JSON.stringify(workspace, null, 2)}\n`, 'utf8');
+    Home.seed(Home.sandbox(cezHome), join(cezHome, 'config.json'), workspace);
 
     const claudeShim = join(root, 'claude-shim.mjs');
     await writeFile(

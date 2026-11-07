@@ -284,7 +284,8 @@ test('Cockpit.start stops the server it spawned when the start fails', async (t)
   t.after(() => {
     if (pid && alive(pid)) process.kill(-pid, 'SIGKILL');
   });
-  await assert.rejects(Cockpit.start({ repo: dir, env: { ...process.env, PID_FILE: pidFile }, logFile: join(dir, 'cockpit.log'), cli }), /GET \/projects answered 500: boom/);
+  await assert.rejects(Cockpit.start({ repo: dir, env: { ...process.env, CEZ_HOME: join(dir, 'home'), PID_FILE: pidFile }, logFile: join(dir, 'cockpit.log'), cli }), /GET \/projects answered 500: boom/);
+  assert.equal(JSON.parse(readFileSync(join(dir, 'home/install.json'), 'utf8')).kind, 'test');
   pid = Number(readFileSync(pidFile, 'utf8'));
   assert.equal(alive(pid), false);
 });

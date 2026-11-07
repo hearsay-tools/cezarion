@@ -44,6 +44,8 @@ async function serveFixture() {
   const { mergeWriteWorkspaceConfig } = await import('../src/workspace/config.ts');
   const { resolveHome } = await import('../src/home/resolve.ts');
   const home = resolveHome({ purpose: 'cli' });
+  const { Home } = await import('../src/home/home.ts');
+  Home.sandbox(home.root);
   const hz = Number(childProcess.execFileSync('getconf', ['CLK_TCK'], { encoding: 'utf8' }).trim());
   const gitCpuMs = () => {
     const fields = readFileSync('/proc/self/stat', 'utf8').split(') ')[1].split(' ');

@@ -1,5 +1,6 @@
 import type { Home } from '../home/home.ts';
 import { readFileSync } from 'node:fs';
+import { readHomeFile } from '../home/store.ts';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { workspaceConfigPath } from '../paths.ts';
@@ -30,7 +31,7 @@ export function agentModelsLocked(
   for (const path of paths) {
     try {
       const parsed = modelPolicyConfigSchema.safeParse(
-        JSON.parse(readFileSync(path, 'utf8')),
+        JSON.parse(path === home.workspaceConfig ? readHomeFile(path) : readFileSync(path, 'utf8')),
       );
       if (parsed.success && parsed.data.modelsLocked === true) return true;
     } catch {

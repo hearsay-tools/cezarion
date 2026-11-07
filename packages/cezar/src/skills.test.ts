@@ -117,7 +117,7 @@ describe('discoverSkills team-skill off-list', () => {
 
   it('ignores the legacy importedSkills keys, project and workspace', async () => {
     await mkdir(dirname(workspaceUiStatePath(testHome())), { recursive: true });
-    await writeFile(workspaceUiStatePath(testHome()), JSON.stringify({ importedSkills: ['nothing'] }));
+    await Home.seedBytes(testHome(), workspaceUiStatePath(testHome()), Buffer.from(JSON.stringify({ importedSkills: ['nothing'] })));
     expect(await teamNames(await project({ importedSkills: [] }))).toEqual(['x', 'y']);
   });
 

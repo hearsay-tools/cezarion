@@ -52,7 +52,7 @@ it('links, lists and unlinks a managed checkout in the injected home after CEZ_H
 
 it('reports an unavailable registry without changing the injected managed home', async () => {
   const root = mkdtempSync(join(tmpdir(), 'cez-managed-offline-')); roots.push(root);
-  const home = resolveHome({ purpose: 'cli', env: { CEZ_HOME: root } });
+  const home = Home.sandbox(root);
   vi.spyOn(console, 'error').mockImplementation(() => {});
   const registry = new RegistryCache('@wjarka/cezarion', async () => new Response('', { status: 503 }));
   const service = new SelfUpdateService({ pkgName: '@wjarka/cezarion', version: '1.2.3', entry: '/entry', home, registry, restart: () => {} });

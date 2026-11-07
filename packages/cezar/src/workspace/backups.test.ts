@@ -1,7 +1,8 @@
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
-import * as fs from 'node:fs';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -12,7 +13,6 @@ import { mergeWriteAgentAccounts, loadAgentAccounts } from './agent-accounts.ts'
 import { backupBeforeWrite, listBackups } from './backups.ts';
 import { runBackupCommand } from './backup-cli.ts';
 
-vi.mock('node:fs', async (importOriginal) => ({ ...await importOriginal<typeof import('node:fs')>() }));
 
 let home: string;
 const originalHome = process.env.CEZ_HOME;
@@ -25,6 +25,7 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
   vi.useRealTimers();
   vi.restoreAllMocks();
+  syncBuiltinESMExports();
 });
 
 it.each(['config.json', 'agent-accounts.json'] as const)('backs up changed %s once, and skips unchanged writes', async (file) => {
@@ -53,7 +54,7 @@ it('prunes in the write: last 20 plus the newest per day within 30 days', () => 
     for (let hour = 0; hour < 3; hour++) {
       vi.setSystemTime(new Date(Date.UTC(2026, 0, day + 1, hour)));
       backupBeforeWrite(path, { day, hour });
-      atomicWriteJsonSync(path, { day, hour });
+      Home.seedBytes(testHome(), path, Buffer.from(`${JSON.stringify({ day, hour }, null, 2)}\n`));
     }
   }
   const retained = listBackups('config.json', testHome());
@@ -70,7 +71,7 @@ it('restores pre-change account JSON through the CLI and backs up the replaced v
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-01T00:00:00Z'));
   const old = { version: 1, accounts: [{ id: 'work', provider: 'claude', configDir: '/old/account' }], future: { token: 'fixture' } };
-  writeFileSync(join(home, 'agent-accounts.json'), JSON.stringify(old));
+  Home.seedBytes(Home.sandbox(home), join(home, 'agent-accounts.json'), Buffer.from(JSON.stringify(old)));
   await mergeWriteAgentAccounts((store) => { store.accounts = []; }, testHome());
   vi.setSystemTime(new Date('2026-11-02T00:00:00Z'));
   const replaced = readFileSync(join(home, 'agent-accounts.json'));
@@ -85,7 +86,7 @@ it('restores pre-change account JSON through the CLI and backs up the replaced v
 });
 
 it('keeps config.json.bak recovery and restores an older registry without losing unknown fields', async () => {
-  writeFileSync(join(home, 'config.json'), JSON.stringify({ projects: [], future: 'old' }));
+  Home.seedBytes(Home.sandbox(home), join(home, 'config.json'), Buffer.from(JSON.stringify({ projects: [], future: 'old' })));
   await mergeWriteWorkspaceConfig((config) => { config.future = 'new'; }, testHome());
   vi.spyOn(console, 'log').mockImplementation(() => {});
   expect(await runBackupCommand(['restore', 'config.json'], process.env, testHome())).toBe(0);
@@ -148,7 +149,7 @@ it('rejects a zone-less restore time without changing live JSON', async () => {
 
 it.each(['config.json', 'agent-accounts.json'] as const)('warns when restoring %s drops invalid snapshot rows', async (file) => {
   const key = file === 'config.json' ? 'projects' : 'accounts';
-  writeFileSync(join(home, file), JSON.stringify({ [key]: [{ broken: true }], future: 'preserved' }));
+  Home.seedBytes(Home.sandbox(home), join(home, file), Buffer.from(JSON.stringify({ [key]: [{ broken: true }], future: 'preserved' })));
   const write = file === 'config.json' ? mergeWriteWorkspaceConfig : mergeWriteAgentAccounts;
   await write((value) => { value.future = 'new'; }, testHome());
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -183,6 +184,7 @@ it('cleans a failed partial staging write without publishing it or blocking the 
     }
     original(path, data, options);
   });
+  syncBuiltinESMExports();
   await mergeWriteWorkspaceConfig((config) => { config.marker = 'saved'; }, testHome());
   expect((await loadWorkspaceConfig(testHome().workspaceConfig)).marker).toBe('saved');
   expect(listBackups('config.json', testHome())).toEqual([]);
@@ -201,6 +203,7 @@ it('publishes only completed staging bytes and retries an exclusive publication 
     if (attempts++ === 0) throw Object.assign(new Error('collision'), { code: 'EEXIST' });
     link(stage, target);
   });
+  syncBuiltinESMExports();
   await mergeWriteWorkspaceConfig((config) => { config.marker = 'changed'; }, testHome());
   expect(attempts).toBe(2);
   const snapshots = listBackups('config.json', testHome());

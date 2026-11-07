@@ -1,3 +1,4 @@
+import { Home } from '../../cezar/src/home/home.ts';
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -34,9 +35,9 @@ beforeAll(async () => {
   }
   const env = fixtureServeEnv(boot)
   mkdirSync(env.CEZ_HOME!, { recursive: true })
-  writeFileSync(join(env.CEZ_HOME!, 'config.json'), JSON.stringify({ projects: [
+  Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [
     { id: 'boot', root: boot }, { id: 'owner', root: owner },
-  ] }))
+  ] })))
   const source = join(root, 'owned-report.md')
   writeFileSync(source, '# Owning project snapshot\n\nPublished outside both project roots.\n')
   const publish = (project: string, runId: string) => JSON.parse(execFileSync(process.execPath,

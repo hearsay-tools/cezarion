@@ -1,5 +1,6 @@
+import { Home } from '../home/home.ts';
 import { testHome } from '../home/test-home.testkit.ts';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -201,7 +202,7 @@ describe('resolveCapabilities — settings administration (hearsay-tools/cezario
   it('a malformed host file grants nothing', () => {
     mkdirSync(join(home, 'remote-settings'), { recursive: true });
     for (const content of ['not json', '{}', '{"enabledAt":"not-a-time"}']) {
-      writeFileSync(join(home, 'remote-settings', '4321.json'), content);
+      Home.seedBytes(Home.sandbox(home), join(home, 'remote-settings', '4321.json'), Buffer.from(content));
       expect(admin({ CEZ_REMOTE: '1' }).settingsAdmin, content).toBe(false);
     }
   });

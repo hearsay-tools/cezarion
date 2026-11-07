@@ -1,5 +1,6 @@
 import type { Home } from '../home/home.ts';
 import { readFile } from 'node:fs/promises';
+import { readHomeFile } from '../home/store.ts';
 import { join } from 'node:path';
 import { workspaceUiStateSchema } from '@open-mercato/cezar-contract/workspace';
 import { readUiState } from '../ui-state.ts';
@@ -27,9 +28,9 @@ export interface WorkspaceMigration {
 }
 
 /** Tolerant raw-JSON read: missing/unreadable/malformed/non-object → null. */
-async function readRawObject(path: string): Promise<Record<string, unknown> | null> {
+async function readRawObject(path: string, homeFile = false): Promise<Record<string, unknown> | null> {
   try {
-    return asObject(JSON.parse(await readFile(path, 'utf8')));
+    return asObject(JSON.parse(homeFile ? readHomeFile(path) : await readFile(path, 'utf8')));
   } catch {
     return null;
   }
@@ -92,7 +93,7 @@ const migration001: WorkspaceMigration = {
     // Raw presence check BEFORE the first write: after any merge-write the
     // global file contains every defaulted key, so "already set globally"
     // must be decided against what the user's file held coming in.
-    const rawGlobal = await readRawObject(paths.workspaceConfig);
+    const rawGlobal = await readRawObject(paths.workspaceConfig, true);
     const rawResources = asObject(rawGlobal?.resources);
     const imported = bootRepoRoot ? await readRepoResourceKeys(bootRepoRoot) : {};
     await mergeWriteWorkspaceConfig((config) => {

@@ -1,10 +1,10 @@
 import { Home } from './home.ts';
 import { useTestHome } from './test-home.testkit.ts';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { atomicWriteJsonSync, mergeWriteWorkspaceConfig } from '../workspace/config.ts';
+import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { loadAgentAccounts, mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import { restoreBackup } from '../workspace/backup-cli.ts';
 import { runMigrations } from '../workspace/migrations.ts';
@@ -27,8 +27,8 @@ it.each(['config.json', 'agent-accounts.json'] as const)('restores %s only in th
   const selectedPath = join(selected.root, file);
   const ambientPath = join(ambient.root, file);
   const snapshot = file === 'config.json' ? { extra: 'snapshot' } : { accounts: [], selections: {}, extra: 'snapshot' };
-  atomicWriteJsonSync(selectedPath, snapshot);
-  atomicWriteJsonSync(ambientPath, { ...snapshot, extra: 'ambient' });
+  Home.seed(Home.sandbox(selected.root), selectedPath, snapshot);
+  Home.seed(Home.sandbox(ambient.root), ambientPath, { ...snapshot, extra: 'ambient' });
   const before = readFileSync(ambientPath, 'utf8');
   const ambientFiles = readdirSync(ambient.root);
   useTestHome(ambient.root ? Home.sandbox(ambient.root) : undefined);
@@ -44,16 +44,16 @@ it.each(['config.json', 'agent-accounts.json'] as const)('restores %s only in th
 
 it('keeps migration reads, imports, UI state and schemaVersion in the injected Home', async () => {
   const { selected, ambient, root } = homes();
-  atomicWriteJsonSync(selected.workspaceConfig, { schemaVersion: 0, resources: { maxParallel: 3 } });
-  atomicWriteJsonSync(selected.workspaceUiState, { appearance: { accent: 'amber' }, keep: 'selected' });
-  atomicWriteJsonSync(ambient.workspaceConfig, { schemaVersion: 0, resources: { maxParallel: 8, memoryLimitMb: 999 }, keep: 'ambient' });
-  atomicWriteJsonSync(ambient.workspaceUiState, { appearance: { accent: 'blue' }, keep: 'ambient' });
+  Home.seed(Home.sandbox(selected.root), selected.workspaceConfig, { schemaVersion: 0, resources: { maxParallel: 3 } });
+  Home.seed(Home.sandbox(selected.root), selected.workspaceUiState, { appearance: { accent: 'amber' }, keep: 'selected' });
+  Home.seed(Home.sandbox(ambient.root), ambient.workspaceConfig, { schemaVersion: 0, resources: { maxParallel: 8, memoryLimitMb: 999 }, keep: 'ambient' });
+  Home.seed(Home.sandbox(ambient.root), ambient.workspaceUiState, { appearance: { accent: 'blue' }, keep: 'ambient' });
   const configBefore = readFileSync(ambient.workspaceConfig, 'utf8');
   const uiBefore = readFileSync(ambient.workspaceUiState, 'utf8');
   const ambientFiles = readdirSync(ambient.root);
   const repo = join(root, 'repo');
-  atomicWriteJsonSync(join(repo, '.ai/cezar/config.json'), { maxParallel: 5, memoryLimitMb: 1024 });
-  atomicWriteJsonSync(join(repo, '.ai/cezar/ui-state.json'), { appearance: { accent: 'violet' }, notifications: { enabled: false } });
+  writeProjectJson(join(repo, '.ai/cezar/config.json'), { maxParallel: 5, memoryLimitMb: 1024 });
+  writeProjectJson(join(repo, '.ai/cezar/ui-state.json'), { appearance: { accent: 'violet' }, notifications: { enabled: false } });
   useTestHome(ambient.root ? Home.sandbox(ambient.root) : undefined);
 
   await runMigrations({ bootRepoRoot: repo, home: selected });
@@ -69,8 +69,8 @@ it('keeps migration reads, imports, UI state and schemaVersion in the injected H
 it('imports legacy accounts from the injected Home without writing to the ambient home', async () => {
   const { selected, ambient } = homes();
   const account = { id: 'selected', provider: 'claude', configDir: '~/.claude-selected', label: '', addedAt: '' };
-  atomicWriteJsonSync(selected.workspaceConfig, { agentProfiles: [account] });
-  atomicWriteJsonSync(ambient.workspaceConfig, { agentProfiles: [{ ...account, id: 'ambient' }] });
+  Home.seed(Home.sandbox(selected.root), selected.workspaceConfig, { agentProfiles: [account] });
+  Home.seed(Home.sandbox(ambient.root), ambient.workspaceConfig, { agentProfiles: [{ ...account, id: 'ambient' }] });
   const before = readFileSync(ambient.workspaceConfig, 'utf8');
   const ambientFiles = readdirSync(ambient.root);
   useTestHome(ambient.root ? Home.sandbox(ambient.root) : undefined);
@@ -83,8 +83,8 @@ it('imports legacy accounts from the injected Home without writing to the ambien
 
 it('reads and writes the update channel in the injected Home', async () => {
   const { selected, ambient } = homes();
-  atomicWriteJsonSync(selected.workspaceConfig, { updateChannel: 'nightly' });
-  atomicWriteJsonSync(ambient.workspaceConfig, { updateChannel: 'stable' });
+  Home.seed(Home.sandbox(selected.root), selected.workspaceConfig, { updateChannel: 'nightly' });
+  Home.seed(Home.sandbox(ambient.root), ambient.workspaceConfig, { updateChannel: 'stable' });
   const before = readFileSync(ambient.workspaceConfig, 'utf8');
   const ambientFiles = readdirSync(ambient.root);
   useTestHome(ambient.root ? Home.sandbox(ambient.root) : undefined);
@@ -96,3 +96,8 @@ it('reads and writes the update channel in the injected Home', async () => {
   expect(readFileSync(ambient.workspaceConfig, 'utf8')).toBe(before);
   expect(readdirSync(ambient.root)).toEqual(ambientFiles);
 });
+
+function writeProjectJson(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(value));
+}

@@ -1,7 +1,7 @@
-import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
+import { createInstallMarker, readInstallMarker } from './install-marker.ts';
+import { HomeStore } from './store.ts';
 
 /** Resolved cockpit paths. Legacy cache paths deliberately have a different root. */
 export interface Home {
@@ -58,14 +58,17 @@ export const Home = Object.freeze({
   sandbox(dir: string): Home {
     assertCezarHomeWriteIsSandboxed(dir);
     const home = homePaths(dir, join(dir, '.cache', 'cez'), dir);
-    const marker = join(dir, 'install.json');
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    try {
-      // Exclusive creation keeps the install identity stable across repeated fixture calls.
-      writeFileSync(marker, JSON.stringify({ installId: randomUUID(), kind: 'test', createdAt: new Date().toISOString() }), { flag: 'wx', mode: 0o600 });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
+    createInstallMarker(dir, 'test');
     return home;
+  },
+  /** Seed through the same journal and write lock as product writes. Never relabel a live home. */
+  seed(home: Home, path: string, value: unknown): void {
+    if (readInstallMarker(home.root)?.kind !== 'test') throw new Error('Home.seed requires a test install marker');
+    new HomeStore(home).writeJson(path, value);
+  },
+  /** Preserve malformed fixtures and byte-for-byte snapshot restores without an outside write. */
+  seedBytes(home: Home, path: string, bytes: Buffer | null): void {
+    if (readInstallMarker(home.root)?.kind !== 'test') throw new Error('Home.seedBytes requires a test install marker');
+    new HomeStore(home).replace(path, bytes);
   },
 });

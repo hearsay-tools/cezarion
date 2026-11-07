@@ -25,6 +25,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
 import { leaderRunning, startOwnedGroup, stopGroup, watchGroup } from '../../packages/cezar/src/detached-process.ts';
+import { ensureTestInstallMarker } from '../../scripts/test-install-marker.mjs';
 import { identity } from './test-env-lease.mjs';
 
 const DESCRIPTOR = '.ai/qa/qa-fixture.json';
@@ -59,6 +60,7 @@ export function parseUpArgs(args) {
 /** No ambient CEZ_* or GIT_* reaches the server (hearsay-tools/cezarion#1045): an agent's shell
  *  carries the live cockpit's opt-ins and its per-task plumbing. */
 function serverEnv(ambient, root, optIns) {
+  ensureTestInstallMarker(join(root, 'home'));
   const env = Object.fromEntries(Object.entries(ambient).filter(([key]) => !/^(CEZ|GIT)_/i.test(key)));
   return {
     ...env,

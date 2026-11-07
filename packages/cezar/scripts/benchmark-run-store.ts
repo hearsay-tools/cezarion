@@ -204,6 +204,8 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
   process.env.CEZ_HOME = join(root, 'home');
   const { resolveHome } = await import('../src/home/resolve.ts');
   const home = resolveHome({ purpose: 'cli' });
+  const { Home } = await import('../src/home/home.ts');
+  Home.sandbox(home.root);
   process.env.CEZ_DRY_RUN = '1';
   try {
     const { RunStore } = await import('../src/runs/store.ts');
