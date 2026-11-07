@@ -52,11 +52,28 @@ async function sessionDiscovery(env: NodeJS.ProcessEnv, request: z.infer<typeof 
   }
 }
 
-/** Argument parsing and request validation for `cez discover`. `--help` wins over validation. */
+/** Discover through an existing cockpit; never starts one. Fetches and decodes the catalog for one request kind. */
+async function cockpitDiscovery(io: DiscoveryIo, env: NodeJS.ProcessEnv, values: { url?: string; repo?: string }, request: z.infer<typeof discoveryRequestSchema>, print: (value: unknown) => void): Promise<number> {
+  const cockpit = await (io.discover ?? discoverCockpit)({ repoDir: values.repo ?? process.cwd(), ...(values.url ?? env.CEZ_URL ? { url: values.url ?? env.CEZ_URL } : {}) });
+  const response = await fetchJson(`${cockpit.origin}/api/v1/${request.kind === 'runners' ? 'providers/status' : `models?runner=${encodeURIComponent(request.runner)}`}`);
+  if (response.status !== 200) refuse(response);
+  if (request.kind === 'runners') {
+    const parsed = providerStatusResponseSchema.safeParse(response.data);
+    if (!parsed.success) invalidResponse('runners');
+    print(discoveredRunners(parsed.data));
+    return 0;
+  }
+  const parsed = runnerModelCatalogResponseSchema.safeParse(response.data);
+  if (!parsed.success) invalidResponse('models');
+  print(parsed.data);
+  return 0;
+}
+
 type ParsedDiscovery =
   | { help: true }
   | { help: false; values: ReturnType<typeof parseDiscoveryArgs>['values']; request: z.infer<typeof discoveryRequestSchema>; schema: z.ZodType };
 
+/** Argument parsing and request validation for `cez discover`. `--help` wins over validation. */
 function parseDiscoveryRequest(argv: string[]): ParsedDiscovery {
   let parsed: ReturnType<typeof parseDiscoveryArgs>;
   try { parsed = parseDiscoveryArgs(argv); }
@@ -83,19 +100,7 @@ export async function runDiscoverCommand(argv: string[], env: NodeJS.ProcessEnv 
       if (values.url !== undefined || values.repo !== undefined) throw new TaskCliError(64, { code: 'invalid_input', error: 'A delegation session uses its own controller; --url and --repo are unavailable.' });
       return await sessionDiscovery(env, request, schema, print);
     }
-    const cockpit = await (io.discover ?? discoverCockpit)({ repoDir: values.repo ?? process.cwd(), ...(values.url ?? env.CEZ_URL ? { url: values.url ?? env.CEZ_URL } : {}) });
-    const response = await fetchJson(`${cockpit.origin}/api/v1/${request.kind === 'runners' ? 'providers/status' : `models?runner=${encodeURIComponent(request.runner)}`}`);
-    if (response.status !== 200) refuse(response);
-    if (request.kind === 'runners') {
-      const parsed = providerStatusResponseSchema.safeParse(response.data);
-      if (!parsed.success) invalidResponse('runners');
-      print(discoveredRunners(parsed.data));
-    } else {
-      const parsed = runnerModelCatalogResponseSchema.safeParse(response.data);
-      if (!parsed.success) invalidResponse('models');
-      print(parsed.data);
-    }
-    return 0;
+    return await cockpitDiscovery(io, env, values, request, print);
   } catch (error) {
     if (error instanceof TaskCliError) { print(error.body); return error.exitCode; }
     print({ code: 'unavailable', error: 'Discovery is unavailable.' }); return 2;
