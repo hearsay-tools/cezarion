@@ -101,7 +101,7 @@ Method, and what changed since the S5 runs:
 - **Rounds.** 5 rounds, interleaved (baseline 1, main 1, baseline 2, …), one benchmark at a time, cockpit server pinned with `taskset -c 11`. Every run passed on its first try. Each cell is the median of that one field over the five runs. Squeal kept running in the worktree.
 - **Host load.** The 1-minute `loadavg` was 8–20 on 24 cores in every case, lower than in the S5 rounds (14–44). This is why the baseline's timing numbers here are lower than in the earlier tables. Compare timing numbers within one round only.
 
-Evidence: [raw runs and medians](runs-index-patching/after-s3b/) (`baseline-1..5.json`, `main-1..5.json`, `summary.json`). The raw files record each side's revision, built-content SHA256, dirty flag and `loadavg` per case.
+Evidence: [raw runs and medians](runs-index-patching/after-s3b/) (`baseline-1..5.json`, `main-1..5.json`, `summary.json`). The raw files record each side's revision, built-content SHA256, dirty flag and `loadavg` per case. They are the harness output as written, unedited. Their header fields `warmupMs`, `sampleMs` and `streamRatePerRun` are defaults of the tab workloads of `benchmark-tabs.ts`; the index workload does not read them. Its windows are the phases above: `cold` 8 s plus settle, `update` 3 s, `sustained` 60 s at 5 ticks per second, `reconnect` 8 s plus settle. Each phase's `elapsedMs` records its real length. The S5 raw files carry the same fields.
 
 ### Sustained: 5 updates per second for 60 s
 
