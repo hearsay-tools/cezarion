@@ -73,7 +73,8 @@ scrubs both prefixes and pins both locators, APPDATA and LOCALAPPDATA as well as
 XDG values. The passwd-home write guard rejects native split default roots too.
 Windows private directories replace the DACL with one inheritable current-user
 full-control rule under the split gate. A successful grant on an existing canonical
-directory is cached once per process; a recreated directory gets a fresh grant.
+directory is cached once per process with its device and inode identity; an
+external replacement or unreadable identity gets a fresh grant.
 New files inherit that ACL, so atomic replacement starts no ACL subprocess.
 Unix private modes stay unchanged.
 

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -8,7 +8,7 @@ import { privateDirectory, protectPrivatePath, replacePrivate } from './private-
 vi.mock('node:child_process', () => ({ execFileSync: vi.fn() }));
 vi.mock('node:fs', async original => {
   const fs = await original<typeof import('node:fs')>();
-  return { ...fs, renameSync: vi.fn(fs.renameSync) };
+  return { ...fs, renameSync: vi.fn(fs.renameSync), statSync: vi.fn(fs.statSync) };
 });
 afterEach(() => { vi.resetAllMocks(); });
 
@@ -80,5 +80,34 @@ it('removes its staging file when publication fails after directory protection',
     expect(execFileSync).toHaveBeenCalledTimes(1);
     expect(existsSync(path)).toBe(false);
     expect(readdirSync(root)).toEqual([]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+it('re-grants when an external replacement changes the directory identity', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cez-private-replaced-'));
+  const options = { platform: 'win32', layout: 'split' } as const;
+  try {
+    privateDirectory(root, options);
+    const identity = statSync(root, { bigint: true });
+    vi.mocked(statSync).mockReturnValue(Object.assign(Object.create(Object.getPrototypeOf(identity)), identity, { ino: identity.ino + 1n }));
+    privateDirectory(root, options);
+    privateDirectory(root + '/.', options);
+    expect(execFileSync).toHaveBeenCalledTimes(2);
+    replacePrivate(join(root, 'secret.json'), 'secret', options);
+    expect(execFileSync).toHaveBeenCalledTimes(2);
+    expect(readFileSync(join(root, 'secret.json'), 'utf8')).toBe('secret');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+it('re-grants after an identity lookup fails and never caches the unknown identity', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cez-private-unknown-'));
+  const options = { platform: 'win32', layout: 'split' } as const;
+  try {
+    privateDirectory(root, options);
+    vi.mocked(statSync).mockImplementationOnce(() => { throw new Error('Identity unavailable'); });
+    privateDirectory(root, options);
+    privateDirectory(root, options);
+    privateDirectory(root, options);
+    expect(execFileSync).toHaveBeenCalledTimes(3);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

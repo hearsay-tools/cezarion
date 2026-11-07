@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { REBRAND_SWITCH } from './switch.ts';
 import type { HomeLayout } from './kind-roots.ts';
 import { randomBytes } from 'node:crypto';
-import { closeSync, fsyncSync, mkdirSync, openSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, fsyncSync, mkdirSync, openSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 
 export interface PrivateFileOptions {
@@ -29,17 +29,27 @@ Set-Acl -LiteralPath ${literal} -AclObject $acl;`;
   execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, stdio: 'pipe' });
 }
 
-const protectedDirectories = new Set<string>();
+const protectedDirectories = new Map<string, { dev: bigint; ino: bigint }>();
 
-/** Cache only successful grants; a directory recreated by this call needs a fresh grant. */
+function directoryIdentity(path: string): { dev: bigint; ino: bigint } | undefined {
+  try {
+    const { dev, ino } = statSync(path, { bigint: true });
+    return { dev, ino };
+  } catch { return undefined; }
+}
+
+/** Cache only successful grants for one directory identity; replacements need a fresh grant. */
 function protectDirectoryOnce(path: string, options: PrivateFileOptions, created: boolean): void {
   const platform = options.platform ?? process.platform;
   const layout = options.layout ?? (REBRAND_SWITCH ? 'split' : 'legacy');
   if (platform !== 'win32' || layout !== 'split') return;
   const canonical = realpathSync(path).toLowerCase();
-  if (!created && protectedDirectories.has(canonical)) return;
+  const identity = directoryIdentity(path);
+  const previous = protectedDirectories.get(canonical);
+  if (!created && identity && previous?.dev === identity.dev && previous.ino === identity.ino) return;
+  protectedDirectories.delete(canonical);
   protectPrivatePath(path, true, options);
-  protectedDirectories.add(canonical);
+  if (identity) protectedDirectories.set(canonical, identity);
 }
 
 export function privateDirectory(path: string, options: PrivateFileOptions = {}): void {
