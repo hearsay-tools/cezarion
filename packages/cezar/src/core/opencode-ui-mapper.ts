@@ -218,39 +218,73 @@ function mapMessageInfo(props: Record<string, unknown>, state: OpencodeUiMapperS
   const info = isRecord(props.info) ? props.info : props;
   const id = str(info.id);
   const role = str(info.role);
-  let next = state;
-  const messageSession = str(info.sessionID);
-  const foreign = messageSession !== undefined && state.sessionId !== null && messageSession !== state.sessionId;
-  if (foreign && messageSession !== undefined) {
-    next = resolveSubtask(messageSession, next).state;
-  }
-  if (id !== undefined && role !== undefined && state.msgRoles.get(id) !== role) {
-    const msgRoles = new Map(state.msgRoles);
-    msgRoles.set(id, role);
-    next = { ...next, msgRoles };
-  }
-  if (id !== undefined && role === 'assistant' && next.currentTurnId !== null && !next.currentTurnMessageIds.has(id)) {
-    next = { ...next, currentTurnMessageIds: new Set(next.currentTurnMessageIds).add(id) };
-  }
+  let next = resolveForeignMessage(str(info.sessionID), state);
+  next = withMessageRole(next, id, role);
+  next = withTurnMessage(next, id, role);
   // Telemetry rides only on assistant messages (cumulative per message).
   if (id !== undefined && role === 'assistant') {
-    const usage = tokensToUsage(info.tokens);
-    const cost = num(info.cost);
-    if (usage || cost !== undefined) {
-      const prev = next.usageByMessage.get(id) ?? EMPTY_MESSAGE_USAGE;
-      const merged: MessageUsage = {
-        // Monotonic guard: a stale/zero snapshot never shrinks the record.
-        info: usage && (prev.info === null || usage.total >= prev.info.total) ? usage : prev.info,
-        infoCost: maxCost(prev.infoCost, cost),
-        steps: prev.steps,
-        stepsCost: prev.stepsCost,
-      };
-      const usageByMessage = new Map(next.usageByMessage);
-      usageByMessage.set(id, merged);
-      return emitUsage({ ...next, usageByMessage });
-    }
+    return mergeMessageUsage(next, id, info);
   }
   return { events: [], state: next };
+}
+
+/** A message whose session id is not ours belongs to a subtask's child
+ *  session; hearing from it binds the oldest pending scope. */
+function resolveForeignMessage(
+  messageSession: string | undefined,
+  state: OpencodeUiMapperState,
+): OpencodeUiMapperState {
+  const foreign = messageSession !== undefined && state.sessionId !== null && messageSession !== state.sessionId;
+  return foreign && messageSession !== undefined ? resolveSubtask(messageSession, state).state : state;
+}
+
+/** Remember a message's role when it changed — parts carry no role, so this
+ *  map is the only way later parts know whose they are. */
+function withMessageRole(
+  state: OpencodeUiMapperState,
+  id: string | undefined,
+  role: string | undefined,
+): OpencodeUiMapperState {
+  if (id === undefined || role === undefined || state.msgRoles.get(id) === role) return state;
+  const msgRoles = new Map(state.msgRoles);
+  msgRoles.set(id, role);
+  return { ...state, msgRoles };
+}
+
+/** Track assistant messages seen during the active turn; their latest
+ *  snapshots are summed once when `session.idle` closes the turn. */
+function withTurnMessage(
+  state: OpencodeUiMapperState,
+  id: string | undefined,
+  role: string | undefined,
+): OpencodeUiMapperState {
+  if (id === undefined || role !== 'assistant' || state.currentTurnId === null || state.currentTurnMessageIds.has(id)) {
+    return state;
+  }
+  return { ...state, currentTurnMessageIds: new Set(state.currentTurnMessageIds).add(id) };
+}
+
+/** Merge an assistant message's `message.updated` telemetry into the per
+ *  message record, then re-emit session totals. Monotonic guard: a stale or
+ *  zero snapshot never shrinks the record. */
+function mergeMessageUsage(
+  state: OpencodeUiMapperState,
+  id: string,
+  info: Record<string, unknown>,
+): OpencodeUiMapping {
+  const usage = tokensToUsage(info.tokens);
+  const cost = num(info.cost);
+  if (usage === undefined && cost === undefined) return { events: [], state };
+  const prev = state.usageByMessage.get(id) ?? EMPTY_MESSAGE_USAGE;
+  const merged: MessageUsage = {
+    info: usage && (prev.info === null || usage.total >= prev.info.total) ? usage : prev.info,
+    infoCost: maxCost(prev.infoCost, cost),
+    steps: prev.steps,
+    stepsCost: prev.stepsCost,
+  };
+  const usageByMessage = new Map(state.usageByMessage);
+  usageByMessage.set(id, merged);
+  return emitUsage({ ...state, usageByMessage });
 }
 
 // ---- parts -------------------------------------------------------------------
@@ -262,15 +296,10 @@ function mapPart(props: Record<string, unknown>, state: OpencodeUiMapperState): 
   const id = str(part.id) ?? messageID;
   if (type === undefined || id === undefined) return { events: [], state };
 
-  // Foreign-session parts nest only under the subtask bound to that child
-  // session. A newly seen child claims the oldest pending subtask; with none
-  // pending the part has no home, so the event is dropped.
-  const partSession = str(part.sessionID);
-  const foreign = partSession !== undefined && state.sessionId !== null && partSession !== state.sessionId;
-  const resolved = foreign && partSession !== undefined ? resolveSubtask(partSession, state) : undefined;
-  if (foreign && resolved?.subtask === undefined) return { events: [], state };
-  state = resolved?.state ?? state;
-  const parentItemId = resolved?.subtask?.id;
+  const nested = nestForeignPart(str(part.sessionID), state);
+  if (nested === undefined) return { events: [], state };
+  state = nested.state;
+  const parentItemId = nested.parentItemId;
 
   // Only assistant parts surface — the user's own prompt streams as parts
   // over the same feed. Role is known early (message.updated precedes its
@@ -297,6 +326,19 @@ function mapPart(props: Record<string, unknown>, state: OpencodeUiMapperState): 
       // render yet.
       return { events: [], state };
   }
+}
+
+/** Foreign-session parts nest only under the subtask bound to that child
+ *  session. A newly seen child claims the oldest pending subtask; with none
+ *  pending the part has no home, so the event is dropped (undefined). */
+function nestForeignPart(
+  partSession: string | undefined,
+  state: OpencodeUiMapperState,
+): { state: OpencodeUiMapperState; parentItemId: string | undefined } | undefined {
+  const foreign = partSession !== undefined && state.sessionId !== null && partSession !== state.sessionId;
+  const resolved = foreign && partSession !== undefined ? resolveSubtask(partSession, state) : undefined;
+  if (foreign && resolved?.subtask === undefined) return undefined;
+  return { state: resolved?.state ?? state, parentItemId: resolved?.subtask?.id };
 }
 
 /** Text/reasoning parts carry the FULL accumulated text each update — the
@@ -369,6 +411,8 @@ export const STATUS_MAP: Readonly<Record<string, ToolStatus>> = {
   error: 'failed',
 };
 
+type TrackedTool = { status: ToolStatus; title: string; live: boolean };
+
 function mapTool(
   part: Record<string, unknown>,
   id: string,
@@ -377,21 +421,58 @@ function mapTool(
 ): OpencodeUiMapping {
   const name = str(part.tool) ?? str(part.name) ?? 'tool';
   const toolState = isRecord(part.state) ? part.state : {};
-  const prev = state.tools.get(id);
+  const prev: TrackedTool | undefined = state.tools.get(id);
   const mapped = typeof toolState.status === 'string' ? STATUS_MAP[toolState.status] : undefined;
   const status: ToolStatus = mapped ?? prev?.status ?? 'pending';
 
   const display = toolDisplay(name, toolState.input);
-  // The running/completed states carry a live human title ("npm test") — the
-  // wire word wins over the derived one (§7.1). The error state has no title
-  // field (§4.2), so the last LIVE title carries over instead of regressing.
-  // A derived title is re-derived: the pending snapshot's input is often `{}`
-  // (arguments still parsing), and "Task" must become "Task: Dig in" once
-  // the running snapshot brings the description.
+  const { title, live } = toolTitle(toolState, prev, display);
+  const metadata = isRecord(toolState.metadata) ? toolState.metadata : undefined;
+  const item = toolUiItem(id, name, display, title, status, toolState, metadata, parentItemId);
+  const { events, settled } = toolLifecycleEvents(item, prev, status, title);
+
+  let next = state;
+  if (events.length > 0) {
+    const tools = new Map(state.tools);
+    tools.set(id, { status, title, live });
+    next = { ...next, tools };
+  }
+  next = applySubtaskScope(name, item, metadata, settled, events.length > 0, parentItemId, next, prev);
+  next = applyTodoWrite(name, toolState, events, next);
+
+  if (events.length === 0 && next === state) return { events, state };
+  return { events, state: next };
+}
+
+/** The running/completed states carry a live human title ("npm test") — the
+ *  wire word wins over the derived one (§7.1). The error state has no title
+ *  field (§4.2), so the last LIVE title carries over instead of regressing.
+ *  A derived title is re-derived: the pending snapshot's input is often `{}`
+ *  (arguments still parsing), and "Task" must become "Task: Dig in" once
+ *  the running snapshot brings the description. */
+function toolTitle(
+  toolState: Record<string, unknown>,
+  prev: TrackedTool | undefined,
+  display: ReturnType<typeof toolDisplay>,
+): { title: string; live: boolean } {
   const wireTitle = str(toolState.title);
   const title = wireTitle ?? (prev?.live ? prev.title : display.title);
   const live = wireTitle !== undefined || (prev?.live ?? false);
+  return { title, live };
+}
 
+/** Assemble the tool item: input, output on completion, error on failure,
+ *  exit code from state metadata, and subagent nesting. */
+function toolUiItem(
+  id: string,
+  name: string,
+  display: ReturnType<typeof toolDisplay>,
+  title: string,
+  status: ToolStatus,
+  toolState: Record<string, unknown>,
+  metadata: Record<string, unknown> | undefined,
+  parentItemId: string | undefined,
+): UiToolItem {
   const item: UiToolItem = { kind: 'tool', id, name, toolKind: display.toolKind, title, status };
   if (toolState.input !== undefined) item.input = toolState.input;
   if (status === 'completed') {
@@ -402,13 +483,23 @@ function mapTool(
     const error = errorText(toolState.error);
     if (error !== undefined) item.error = error;
   }
-  const metadata = isRecord(toolState.metadata) ? toolState.metadata : undefined;
   const exitCode = metadata ? num(metadata.exit) : undefined;
   if (exitCode !== undefined) item.exitCode = exitCode;
   if (parentItemId !== undefined) item.parentItemId = parentItemId;
+  return item;
+}
 
-  const events: UiEvent[] = [];
+/** Which event (if any) this snapshot emits: started on first sight, completed
+ *  once settled, updated on a status flip, and updated on a live-title change
+ *  while still running. */
+function toolLifecycleEvents(
+  item: UiToolItem,
+  prev: TrackedTool | undefined,
+  status: ToolStatus,
+  title: string,
+): { events: UiEvent[]; settled: boolean } {
   const settled = status === 'completed' || status === 'failed';
+  const events: UiEvent[] = [];
   if (prev === undefined) {
     // First sight — a part already settled is a lone final snapshot
     // (consumers upsert by id, so it renders fine).
@@ -419,61 +510,68 @@ function mapTool(
     // Same state, new live title (running-state metadata updates).
     events.push({ type: 'item.updated', item });
   }
+  return { events, settled };
+}
 
+/** A task tool call spawns a child session exactly like a `subtask` part
+ *  does (hearsay-tools/cezarion#5). When the snapshot names that child (`metadata.sessionId`,
+ *  published as soon as the child exists) the scope binds to it outright;
+ *  otherwise it queues for the next child session heard from. A task issued
+ *  from inside a child session opens a scope of its own, nested under the
+ *  outer one, so its grandchild's output has a home too. */
+function applySubtaskScope(
+  name: string,
+  item: UiToolItem,
+  metadata: Record<string, unknown> | undefined,
+  settled: boolean,
+  hasEvents: boolean,
+  parentItemId: string | undefined,
+  state: OpencodeUiMapperState,
+  prev: TrackedTool | undefined,
+): OpencodeUiMapperState {
+  if (!isSubtaskTool(name)) return state;
+  const childSession = metadata ? (str(metadata.sessionId) ?? str(metadata.sessionID)) : undefined;
+  const scope: SubtaskScope = {
+    id: item.id,
+    name,
+    title: item.title,
+    ...(item.input !== undefined ? { input: item.input } : {}),
+    ...(childSession !== undefined ? { childSession } : {}),
+    ...(parentItemId !== undefined ? { parentItemId } : {}),
+  };
   let next = state;
-  if (events.length > 0) {
-    const tools = new Map(state.tools);
-    tools.set(id, { status, title, live });
-    next = { ...next, tools };
+  if (!settled) {
+    // OpenCode publishes the part before its arguments finish parsing, so
+    // the first snapshot is often `{}` and later ones fill the input in —
+    // sometimes without moving the status or the derived title, i.e. with
+    // no item event. The scope follows every snapshot regardless, or the
+    // child's idle would complete it with stale metadata.
+    next = prev === undefined ? { ...next, unboundSubtasks: [...next.unboundSubtasks, scope] } : refreshScope(scope, next);
+    if (childSession !== undefined) next = bindScope(scope, childSession, next);
+  } else if (hasEvents) {
+    // The tool's own settlement is authoritative (it carries the output), so
+    // its scope is released: a later child idle must not re-complete it. A
+    // child the wire named is closed too, even one that never spoke —
+    // otherwise its late first event would take a sibling's scope.
+    next = releaseScope(item.id, childSession, next);
   }
+  return next;
+}
 
-  // A task tool call spawns a child session exactly like a `subtask` part
-  // does (#5). When the snapshot names that child (`metadata.sessionId`,
-  // published as soon as the child exists) the scope binds to it outright;
-  // otherwise it queues for the next child session heard from. A task issued
-  // from inside a child session opens a scope of its own, nested under the
-  // outer one, so its grandchild's output has a home too.
-  if (isSubtaskTool(name)) {
-    const childSession = metadata ? (str(metadata.sessionId) ?? str(metadata.sessionID)) : undefined;
-    const scope: SubtaskScope = {
-      id,
-      name,
-      title,
-      ...(item.input !== undefined ? { input: item.input } : {}),
-      ...(childSession !== undefined ? { childSession } : {}),
-      ...(parentItemId !== undefined ? { parentItemId } : {}),
-    };
-    if (!settled) {
-      // OpenCode publishes the part before its arguments finish parsing, so
-      // the first snapshot is often `{}` and later ones fill the input in —
-      // sometimes without moving the status or the derived title, i.e. with
-      // no item event. The scope follows every snapshot regardless, or the
-      // child's idle would complete it with stale metadata.
-      next = prev === undefined ? { ...next, unboundSubtasks: [...next.unboundSubtasks, scope] } : refreshScope(scope, next);
-      if (childSession !== undefined) next = bindScope(scope, childSession, next);
-    } else if (events.length > 0) {
-      // The tool's own settlement is authoritative (it carries the output), so
-      // its scope is released: a later child idle must not re-complete it. A
-      // child the wire named is closed too, even one that never spoke —
-      // otherwise its late first event would take a sibling's scope.
-      next = releaseScope(id, childSession, next);
-    }
-  }
-
-  // todowrite IS the plan (full-replacement semantics, deduplicated).
-  if (name.toLowerCase() === 'todowrite') {
-    const entries = planEntriesOf(toolState.input);
-    if (entries) {
-      const json = JSON.stringify(entries);
-      if (json !== next.lastPlanJson) {
-        events.push({ type: 'plan.updated', entries });
-        next = { ...next, lastPlanJson: json };
-      }
-    }
-  }
-
-  if (events.length === 0 && next === state) return { events, state };
-  return { events, state: next };
+/** todowrite IS the plan (full-replacement semantics, deduplicated). */
+function applyTodoWrite(
+  name: string,
+  toolState: Record<string, unknown>,
+  events: UiEvent[],
+  state: OpencodeUiMapperState,
+): OpencodeUiMapperState {
+  if (name.toLowerCase() !== 'todowrite') return state;
+  const entries = planEntriesOf(toolState.input);
+  if (entries === undefined) return state;
+  const json = JSON.stringify(entries);
+  if (json === state.lastPlanJson) return state;
+  events.push({ type: 'plan.updated', entries });
+  return { ...state, lastPlanJson: json };
 }
 
 /**

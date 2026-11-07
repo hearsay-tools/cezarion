@@ -178,9 +178,7 @@ type CodexNotificationMapper = (
   state: CodexUiMapperState,
 ) => CodexUiMapping;
 
-/** Method → mapper for the notification arms of the §7.1 mapping. Method
- *  strings are unique, so first-match semantics are the same as the switch
- *  this table replaced. */
+/** Method → mapper for the notification arms of the §7.1 mapping. */
 const CODEX_NOTIFICATION_MAPPERS: ReadonlyMap<string, CodexNotificationMapper> = new Map([
   ['error', mapErrorNotification],
   ['warning', mapWarningNotification],
